@@ -1,0 +1,120 @@
+// Licensed under the MIT License.
+// GhosttySharp.Avalonia - Avalonia composition presenter for terminal rendering.
+
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Rendering.Composition;
+using GhosttySharp.Avalonia.Rendering;
+
+namespace GhosttySharp.Avalonia;
+
+/// <summary>
+/// Avalonia control that hosts the terminal rendering surface using
+/// Composition API with a custom visual handler.
+/// Provides the bridge between Avalonia's visual tree and SkiaSharp rendering.
+/// </summary>
+public class GhosttyTerminalPresenter : Control
+{
+    private CompositionCustomVisual? _compositionVisual;
+    private SkiaTerminalRenderer? _renderer;
+    private TerminalScreen? _screen;
+
+    /// <summary>
+    /// Gets the composition visual used for rendering.
+    /// </summary>
+    public CompositionCustomVisual? CompositionVisual => _compositionVisual;
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        InitializeComposition();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        _compositionVisual = null;
+    }
+
+    private void InitializeComposition()
+    {
+        var compositionVisual = ElementComposition.GetElementVisual(this);
+        if (compositionVisual is null) return;
+
+        var compositor = compositionVisual.Compositor;
+        _compositionVisual = compositor.CreateCustomVisual(new TerminalDrawHandler());
+        ElementComposition.SetElementChildVisual(this, _compositionVisual);
+
+        UpdateVisualSize();
+
+        if (_renderer is not null && _screen is not null)
+            SendUpdate();
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        if (_compositionVisual is null)
+            InitializeComposition();
+        UpdateVisualSize();
+        return base.ArrangeOverride(finalSize);
+    }
+
+    private void UpdateVisualSize()
+    {
+        if (_compositionVisual is null) return;
+        _compositionVisual.Size = new Vector(Bounds.Width, Bounds.Height);
+    }
+
+    /// <summary>
+    /// Sets the renderer and screen to use for drawing.
+    /// </summary>
+    public void SetRenderState(SkiaTerminalRenderer renderer, TerminalScreen screen)
+    {
+        _renderer = renderer;
+        _screen = screen;
+        SendUpdate();
+    }
+
+    /// <summary>
+    /// Sends an update message to the composition handler.
+    /// Retries composition initialization if the visual isn't ready yet.
+    /// </summary>
+    public void SendUpdate()
+    {
+        if (_compositionVisual is null)
+        {
+            InitializeComposition();
+            if (_compositionVisual is null) return;
+        }
+
+        if (_renderer is null || _screen is null) return;
+        _compositionVisual.SendHandlerMessage(
+            new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
+    }
+
+    /// <summary>
+    /// Requests a re-render of dirty rows.
+    /// Retries composition initialization if the visual isn't ready yet.
+    /// </summary>
+    public void Invalidate(bool fullRedraw = false)
+    {
+        if (_compositionVisual is null)
+        {
+            InitializeComposition();
+            if (_compositionVisual is null) return;
+        }
+
+        _compositionVisual.SendHandlerMessage(
+            new TerminalDrawHandler.InvalidateMessage());
+    }
+
+    /// <summary>
+    /// Notifies the handler about a size change.
+    /// </summary>
+    public void NotifyResize(Size newSize)
+    {
+        _compositionVisual?.SendHandlerMessage(
+            new TerminalDrawHandler.ResizeMessage(newSize));
+        UpdateVisualSize();
+    }
+}

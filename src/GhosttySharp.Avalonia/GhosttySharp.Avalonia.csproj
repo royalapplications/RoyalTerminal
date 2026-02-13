@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>GhosttySharp.Avalonia</PackageId>
+    <Version>0.1.0</Version>
+    <Description>Avalonia UI terminal control for GhosttySharp with SkiaSharp rendering, CustomVisual composition, and virtualized scrolling.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GhosttySharp\GhosttySharp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Skia" Version="11.3.0" />
+    <PackageReference Include="SkiaSharp" Version="3.119.0" />
+  </ItemGroup>
+
+</Project>
