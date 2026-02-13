@@ -1,3 +1,4 @@
 [submodule "external/ghostty"]
 	path = external/ghostty
-	url = https://github.com/ghostty-org/ghostty.git
+	url = https://github.com/wieslawsoltes/ghostty.git
+	branch = ghosttysharp/screen-api
