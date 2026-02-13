@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GhosttySharp\GhosttySharp.csproj" />
+    <ProjectReference Include="..\..\src\GhosttySharp.Avalonia\GhosttySharp.Avalonia.csproj" />
+    <ProjectReference Include="..\..\src\GhosttySharp.Native.OSX\GhosttySharp.Native.OSX.csproj" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
+    <ProjectReference Include="..\..\src\GhosttySharp.Native.Win64\GhosttySharp.Native.Win64.csproj" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
+    <ProjectReference Include="..\..\src\GhosttySharp.Native.Linux64\GhosttySharp.Native.Linux64.csproj" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Headless" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Headless.XUnit" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Skia" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- Import native asset targets for file copying (same mechanism as NuGet package) -->
+  <Import Project="..\..\src\GhosttySharp.Native.OSX\build\GhosttySharp.Native.OSX.targets" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
+  <Import Project="..\..\src\GhosttySharp.Native.Win64\build\GhosttySharp.Native.Win64.targets" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
+  <Import Project="..\..\src\GhosttySharp.Native.Linux64\build\GhosttySharp.Native.Linux64.targets" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
+
+</Project>
