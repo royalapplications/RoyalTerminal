@@ -1,0 +1,99 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ghostty="using:GhosttySharp.Avalonia"
+        x:Class="GhosttySharp.Demo.MainWindow"
+        Title="GhosttySharp Terminal"
+        Width="1024" Height="768"
+        MinWidth="400" MinHeight="300"
+        WindowStartupLocation="CenterScreen"
+        Background="#1E1E1E">
+
+    <Window.Styles>
+        <!-- Tab strip button styling -->
+        <Style Selector="Button.tabHeader">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Background" Value="#2D2D2D" />
+            <Setter Property="Foreground" Value="#969696" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="4,4,0,0" />
+        </Style>
+        <Style Selector="Button.tabHeader.active">
+            <Setter Property="Background" Value="#1E1E1E" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+        </Style>
+    </Window.Styles>
+
+    <DockPanel>
+        <!-- Top toolbar -->
+        <Border DockPanel.Dock="Top" Background="#333333" Padding="4,2">
+            <DockPanel>
+                <!-- Right side controls -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4"
+                            VerticalAlignment="Center">
+                    <Button Name="FontDecreaseButton" Content="A-" Width="28" Height="24"
+                            FontSize="10" Padding="2"
+                            ToolTip.Tip="Decrease font size (Ctrl+-)" />
+                    <TextBlock Name="FontSizeDisplay" Text="14" VerticalAlignment="Center"
+                               Foreground="#CCCCCC" FontSize="11" Width="24"
+                               TextAlignment="Center" />
+                    <Button Name="FontIncreaseButton" Content="A+" Width="28" Height="24"
+                            FontSize="10" Padding="2"
+                            ToolTip.Tip="Increase font size (Ctrl++)" />
+                    <Border Width="1" Background="#555555" Margin="4,2" />
+                    <Button Name="ThemeToggleButton" Content="&#x2600;" Width="28" Height="24"
+                            FontSize="12" Padding="2"
+                            ToolTip.Tip="Toggle light/dark theme" />
+                    <Border Width="1" Background="#555555" Margin="4,2" />
+                    <Button Name="ModeToggleButton" Content="Rendered" Height="24"
+                            FontSize="10" Padding="8,2"
+                            ToolTip.Tip="Switch rendering mode (Ghostty Rendered / Ghostty Native / Native VT / Rendered)" />
+                </StackPanel>
+
+                <!-- Left side: New tab button -->
+                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <Button Name="NewTabButton" Content="+ New Tab" Height="24"
+                            FontSize="11" Padding="8,2"
+                            ToolTip.Tip="New terminal tab (Ctrl+T)" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Tab strip (headers only — no content swapping) -->
+        <Border DockPanel.Dock="Top" Background="#252526" Padding="4,2,4,0">
+            <StackPanel Name="TabStrip" Orientation="Horizontal" Spacing="2" />
+        </Border>
+
+        <!-- Status bar -->
+        <Border DockPanel.Dock="Bottom" Background="#007ACC" Padding="8,2" Height="24">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Right" Name="DimensionsDisplay"
+                           Text="80x24" Foreground="White" FontSize="11"
+                           VerticalAlignment="Center" />
+                <TextBlock Name="StatusText" Text="Ready" Foreground="White"
+                           FontSize="11" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+
+        <!-- Terminal content panel — all terminals live here, visibility-toggled -->
+        <Panel>
+            <Grid Name="TerminalHost" />
+            <Button HorizontalAlignment="Center" VerticalAlignment="Center" Content="Some random button." Padding="20" />
+        </Panel>
+    </DockPanel>
+
+    <!-- Context menu for right-click -->
+    <Window.ContextMenu>
+        <ContextMenu>
+            <MenuItem Name="CopyMenuItem" Header="_Copy" InputGesture="Ctrl+Shift+C" />
+            <MenuItem Name="PasteMenuItem" Header="_Paste" InputGesture="Ctrl+Shift+V" />
+            <Separator />
+            <MenuItem Name="SelectAllMenuItem" Header="Select _All" InputGesture="Ctrl+Shift+A" />
+            <Separator />
+            <MenuItem Name="NewTabMenuItem" Header="_New Tab" InputGesture="Ctrl+T" />
+            <MenuItem Name="CloseTabMenuItem" Header="C_lose Tab" InputGesture="Ctrl+W" />
+        </ContextMenu>
+    </Window.ContextMenu>
+
+</Window>
