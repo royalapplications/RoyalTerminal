@@ -405,3 +405,4 @@ FodyWeavers.xsd
 *.dylib
 /native/include
 /plan
+/.codex
