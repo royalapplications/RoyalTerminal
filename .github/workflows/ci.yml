@@ -1,0 +1,268 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Test (Unit)
+        run: dotnet test tests/GhosttySharp.Tests/GhosttySharp.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory ./test-results
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}
+          path: test-results/
+          retention-days: 7
+
+  native-build-macos:
+    name: Native Build (macOS)
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [arm64, x64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build libghostty-vt
+        working-directory: external/ghostty
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            zig build lib-vt -Doptimize=ReleaseFast
+          else
+            zig build lib-vt -Doptimize=ReleaseFast -Dtarget=x86_64-macos
+          fi
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts/osx-${{ matrix.arch }}/native
+          find external/ghostty/zig-out -name "*.dylib" -exec cp {} artifacts/osx-${{ matrix.arch }}/native/ \;
+          ls -la artifacts/osx-${{ matrix.arch }}/native/
+
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-osx-${{ matrix.arch }}
+          path: artifacts/osx-${{ matrix.arch }}/native/
+          retention-days: 7
+
+  native-build-linux:
+    name: Native Build (Linux)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build libghostty-vt
+        working-directory: external/ghostty
+        run: |
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            zig build lib-vt -Doptimize=ReleaseFast
+          else
+            zig build lib-vt -Doptimize=ReleaseFast -Dtarget=aarch64-linux
+          fi
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts/linux-${{ matrix.arch }}/native
+          find external/ghostty/zig-out -name "*.so" -exec cp {} artifacts/linux-${{ matrix.arch }}/native/ \;
+          ls -la artifacts/linux-${{ matrix.arch }}/native/
+
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-linux-${{ matrix.arch }}
+          path: artifacts/linux-${{ matrix.arch }}/native/
+          retention-days: 7
+
+  native-build-windows:
+    name: Native Build (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build libghostty-vt
+        working-directory: external/ghostty
+        run: zig build lib-vt -Doptimize=ReleaseFast
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts/win-x64/native
+          find external/ghostty/zig-out -name "*.dll" -exec cp {} artifacts/win-x64/native/ \;
+          find external/ghostty/zig-out -name "*.lib" -exec cp {} artifacts/win-x64/native/ \;
+          ls -la artifacts/win-x64/native/
+
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-win-x64
+          path: artifacts/win-x64/native/
+          retention-days: 7
+
+  integration-tests:
+    name: Integration Tests (macOS)
+    runs-on: macos-latest
+    needs: native-build-macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Download native library
+        uses: actions/download-artifact@v4
+        with:
+          name: native-osx-arm64
+          path: src/GhosttySharp.Native.OSX/runtimes/osx-arm64/native/
+
+      - name: Run integration tests
+        run: dotnet test tests/GhosttySharp.IntegrationTests/GhosttySharp.IntegrationTests.csproj -c Release --logger "trx;LogFileName=integration-results.trx" --results-directory ./test-results
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: test-results/
+          retention-days: 7
+
+  pack:
+    name: Pack NuGet
+    runs-on: ubuntu-latest
+    needs: [build, native-build-macos, native-build-linux, native-build-windows]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Download all native artifacts
+      - name: Download macOS arm64 native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-osx-arm64
+          path: src/GhosttySharp.Native.OSX/runtimes/osx-arm64/native/
+
+      - name: Download macOS x64 native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-osx-x64
+          path: src/GhosttySharp.Native.OSX/runtimes/osx-x64/native/
+
+      - name: Download Linux x64 native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x64
+          path: src/GhosttySharp.Native.Linux64/runtimes/linux-x64/native/
+
+      - name: Download Linux arm64 native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-arm64
+          path: src/GhosttySharp.Native.Linux64/runtimes/linux-arm64/native/
+
+      - name: Download Windows x64 native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-win-x64
+          path: src/GhosttySharp.Native.Win64/runtimes/win-x64/native/
+
+      # Pack managed packages
+      - name: Pack GhosttySharp
+        run: dotnet pack src/GhosttySharp/GhosttySharp.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Avalonia
+        run: dotnet pack src/GhosttySharp.Avalonia/GhosttySharp.Avalonia.csproj -c Release -o artifacts/
+
+      # Pack native packages
+      - name: Pack GhosttySharp.Native.OSX
+        run: dotnet pack src/GhosttySharp.Native.OSX/GhosttySharp.Native.OSX.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Native.Win64
+        run: dotnet pack src/GhosttySharp.Native.Win64/GhosttySharp.Native.Win64.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Native.Linux64
+        run: dotnet pack src/GhosttySharp.Native.Linux64/GhosttySharp.Native.Linux64.csproj -c Release -o artifacts/
+
+      - name: List packages
+        run: ls -la artifacts/*.nupkg
+
+      - name: Upload NuGet packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts/*.nupkg
+          retention-days: 30
