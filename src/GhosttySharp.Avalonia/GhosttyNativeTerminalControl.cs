@@ -10,7 +10,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Controls.Platform;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using GhosttySharp.Native;
@@ -119,9 +118,11 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
     protected override void DestroyNativeControlCore(IPlatformHandle control)
     {
         DestroyGhosttySurface();
-
-        if (control is INativeControlHostDestroyableControlHandle destroyable)
-            destroyable.Destroy();
+        if (_nsView != nint.Zero)
+        {
+            ObjCRuntime.ReleaseNSView(_nsView);
+            _nsView = nint.Zero;
+        }
     }
 
     #endregion
