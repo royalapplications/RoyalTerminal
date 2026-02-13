@@ -1,0 +1,23 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest</AnalysisLevel>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Authors>GhosttySharp Contributors</Authors>
+    <Company>GhosttySharp</Company>
+    <Copyright>Copyright © 2026 GhosttySharp Contributors</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ghostty-org/ghostty</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ghostty-org/ghostty</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>ghostty;terminal;vte;pty;bindings;interop</PackageTags>
+  </PropertyGroup>
+</Project>

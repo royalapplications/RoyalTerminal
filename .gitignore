@@ -399,3 +399,9 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+/.idea
+/native/ghostty-terminal/.zig-cache
+/native/ghostty-terminal/zig-out
+*.dylib
+/native/include
+/plan
