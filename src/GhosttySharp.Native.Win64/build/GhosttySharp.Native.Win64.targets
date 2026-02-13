@@ -1,0 +1,9 @@
+<Project>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <NativeLibrary Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/*" />
+    <None Include="@(NativeLibrary)"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="%(Filename)%(Extension)"
+          Visible="false" />
+  </ItemGroup>
+</Project>
