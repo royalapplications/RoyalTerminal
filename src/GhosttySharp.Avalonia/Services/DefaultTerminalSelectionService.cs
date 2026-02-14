@@ -3,6 +3,7 @@
 
 using System.Text;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using GhosttySharp.Avalonia.Controls;
 using GhosttySharp.Avalonia.Rendering;
 using GhosttySharp.Terminal.Services;
@@ -53,7 +54,7 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
             return;
         }
 
-        string? text = await clipboard.GetTextAsync();
+        string? text = await clipboard.TryGetTextAsync();
         if (!string.IsNullOrEmpty(text))
         {
             sendInput(text);

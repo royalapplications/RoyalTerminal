@@ -60,21 +60,28 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
     public override void OnRender(ImmediateDrawingContext context)
     {
-        var renderer = _renderer;
-        var screen = _screen;
-        if (renderer is null || screen is null) return;
-
-        var leaseFeature = context.TryGetFeature<ISkiaSharpApiLeaseFeature>();
-        if (leaseFeature is null) return;
-
-        using var lease = leaseFeature.Lease();
-        var canvas = lease.SkCanvas;
-        if (canvas is null) return;
-
-        _pendingRender = false;
-
         try
         {
+            var renderer = _renderer;
+            var screen = _screen;
+            if (renderer is null || screen is null)
+            {
+                return;
+            }
+
+            var leaseFeature = context.TryGetFeature<ISkiaSharpApiLeaseFeature>();
+            if (leaseFeature is null)
+            {
+                return;
+            }
+
+            using var lease = leaseFeature.Lease();
+            var canvas = lease.SkCanvas;
+            if (canvas is null)
+            {
+                return;
+            }
+
             lock (screen.SyncRoot)
             {
                 canvas.Save();
@@ -86,6 +93,10 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         catch
         {
             // Swallow render errors during shutdown/teardown
+        }
+        finally
+        {
+            _pendingRender = false;
         }
     }
 }

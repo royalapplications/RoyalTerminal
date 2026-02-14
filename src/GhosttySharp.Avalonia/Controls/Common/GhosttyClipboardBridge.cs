@@ -3,6 +3,7 @@
 
 using System.Runtime.InteropServices;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Threading;
 using GhosttySharp.Avalonia.Diagnostics;
 using GhosttySharp.Native;
@@ -25,7 +26,7 @@ internal static class GhosttyClipboardBridge
                 var avClipboard = topLevel?.Clipboard;
                 if (avClipboard is null || surface is null) return;
 
-                var text = await avClipboard.GetTextAsync();
+                var text = await avClipboard.TryGetTextAsync();
                 if (text is not null)
                     surface.CompleteClipboardRequest(text, state, true);
             }
@@ -85,7 +86,7 @@ internal static class GhosttyClipboardBridge
         var clipboard = TopLevel.GetTopLevel(owner)?.Clipboard;
         if (clipboard is null) return;
 
-        var text = await clipboard.GetTextAsync();
+        var text = await clipboard.TryGetTextAsync();
         if (!string.IsNullOrEmpty(text))
             surface.SendText(text);
     }

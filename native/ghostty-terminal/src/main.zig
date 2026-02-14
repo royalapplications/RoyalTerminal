@@ -438,6 +438,9 @@ export fn ghostty_terminal_get_row_cells(
 
         // Extract codepoint
         info.codepoint = cell.codepoint();
+        // Default colors for unstyled cells.
+        info.fg_color = h.default_fg;
+        info.bg_color = h.default_bg;
 
         // Extract style (colors + attributes)
         // style_id 0 is the default style (no custom colors/attributes)

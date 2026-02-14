@@ -119,6 +119,41 @@ public class TerminalAbstractionsTests
         Assert.Equal("world"u8.ToArray(), fakePty.LastWrittenBytes);
     }
 
+    [Fact]
+    public void TerminalSessionService_StartPty_ReceivesEarlyDataEmittedDuringStart()
+    {
+        TerminalSessionService service = new();
+        EarlyEmitFakePty fakePty = new("zsh% ");
+        FakePtyFactory factory = new(fakePty);
+
+        int receivedLength = 0;
+        string? receivedText = null;
+
+        void OnData(byte[] data, int length)
+        {
+            receivedLength = length;
+            receivedText = System.Text.Encoding.UTF8.GetString(data, 0, length);
+        }
+
+        service.StartPty(
+            factory,
+            shell: "sh",
+            columns: 80,
+            rows: 24,
+            workingDirectory: "/tmp",
+            vtProcessor: null,
+            onPtyDataReceived: OnData,
+            onPtyProcessExited: _ => { },
+            onVtResponse: _ => { },
+            onVtBell: () => { },
+            onVtTitleChanged: _ => { });
+
+        Assert.True(service.HasPty);
+        Assert.Equal(fakePty, service.Pty);
+        Assert.Equal(fakePty.InitialPayload.Length, receivedLength);
+        Assert.Equal(fakePty.InitialPayload, receivedText);
+    }
+
     private sealed class FakePtyFactory : IPtyFactory
     {
         private readonly IPty _pty;
@@ -196,6 +231,74 @@ public class TerminalAbstractionsTests
         public void Dispose()
         {
             DisposeCalled = true;
+            ProcessExited?.Invoke(0);
+        }
+    }
+
+    private sealed class EarlyEmitFakePty : IPty
+    {
+        public event Action<byte[], int>? DataReceived;
+        public event Action<int>? ProcessExited;
+
+        public EarlyEmitFakePty(string initialPayload)
+        {
+            InitialPayload = initialPayload;
+        }
+
+        public string InitialPayload { get; }
+        public bool IsRunning { get; private set; }
+        public int ChildPid => 42;
+
+        public void Start(
+            string? shell = null,
+            int columns = 80,
+            int rows = 24,
+            string? workingDirectory = null,
+            Dictionary<string, string>? environment = null)
+        {
+            _ = shell;
+            _ = columns;
+            _ = rows;
+            _ = workingDirectory;
+            _ = environment;
+
+            IsRunning = true;
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(InitialPayload);
+            DataReceived?.Invoke(bytes, bytes.Length);
+        }
+
+        public void Write(string text)
+        {
+        }
+
+        public void Write(byte[] data, int offset, int count)
+        {
+            _ = data;
+            _ = offset;
+            _ = count;
+        }
+
+        public void Resize(int columns, int rows)
+        {
+        }
+
+        public void Resize(int columns, int rows, int widthPixels, int heightPixels)
+        {
+        }
+
+        public void Stop()
+        {
+            Dispose();
+        }
+
+        public void Dispose()
+        {
+            if (!IsRunning)
+            {
+                return;
+            }
+
+            IsRunning = false;
             ProcessExited?.Invoke(0);
         }
     }

@@ -16,6 +16,10 @@ using Avalonia.Threading;
 using GhosttySharp.Avalonia.Diagnostics;
 using GhosttySharp.Avalonia.Input;
 using GhosttySharp.Avalonia.Rendering;
+using GhosttySharp.Avalonia.Rendering.Interop;
+using GhosttySharp.Rendering.Contracts;
+using GhosttySharp.Rendering.Interop;
+using GhosttySharp.Rendering.Interop.Skia;
 using GhosttySharp.Native;
 
 namespace GhosttySharp.Avalonia.Controls;
@@ -29,7 +33,8 @@ namespace GhosttySharp.Avalonia.Controls;
 /// Architecture:
 /// - Ghostty handles: VT parsing, screen state, PTY, input encoding
 /// - This control handles: Reading screen state via C API, rendering via SkiaSharp
-/// - A hidden NSView backs the Ghostty surface (required by the embedding API)
+/// - In <see cref="GhosttyRenderedTerminalRenderingMode.CpuCellRenderer"/>, a hidden NSView backs the Ghostty surface.
+/// - In <see cref="GhosttyRenderedTerminalRenderingMode.TextureInterop"/>, rendering runs through renderer interop APIs.
 /// </summary>
 [SupportedOSPlatform("macos")]
 public class GhosttyRenderedTerminalControl : Control, IDisposable
@@ -40,6 +45,9 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     private GhosttySurface? _surface;
     private nint _nsView;
     private nint _nsWindow;
+    private GhosttyRenderContext? _interopContext;
+    private GhosttyRenderSurface? _interopSurface;
+    private SkiaInteropRenderer? _interopRenderer;
     private bool _disposed;
 
     // Rendering
@@ -59,6 +67,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     // Set to true after a fatal error in SyncScreenFromGhostty to stop retrying.
     private bool _syncFailed;
     private IGhosttyLogger _logger = NullGhosttyLogger.Instance;
+    private IAvaloniaSkiaRenderTargetProvider _interopRenderTargetProvider = new AvaloniaSkiaRenderTargetProvider();
 
     #endregion
 
@@ -92,6 +101,11 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     public static readonly StyledProperty<string?> CommandProperty =
         AvaloniaProperty.Register<GhosttyRenderedTerminalControl, string?>(nameof(Command));
 
+    public static readonly StyledProperty<GhosttyRenderedTerminalRenderingMode> RenderingModeProperty =
+        AvaloniaProperty.Register<GhosttyRenderedTerminalControl, GhosttyRenderedTerminalRenderingMode>(
+            nameof(RenderingMode),
+            GhosttyRenderedTerminalRenderingMode.CpuCellRenderer);
+
     public float TerminalFontSize
     {
         get => GetValue(TerminalFontSizeProperty);
@@ -117,6 +131,15 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     }
 
     /// <summary>
+    /// Gets or sets the rendering mode used by this control.
+    /// </summary>
+    public GhosttyRenderedTerminalRenderingMode RenderingMode
+    {
+        get => GetValue(RenderingModeProperty);
+        set => SetValue(RenderingModeProperty, value);
+    }
+
+    /// <summary>
     /// Gets or sets the logger used for control diagnostics.
     /// Defaults to a no-op logger.
     /// </summary>
@@ -129,11 +152,39 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     /// <summary>Gets the underlying Ghostty surface.</summary>
     public GhosttySurface? Surface => _surface;
 
+    /// <summary>
+    /// Gets or sets the render-target adapter used in <see cref="GhosttyRenderedTerminalRenderingMode.TextureInterop"/> mode.
+    /// </summary>
+    public IAvaloniaSkiaRenderTargetProvider InteropRenderTargetProvider
+    {
+        get => _interopRenderTargetProvider;
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+
+            if (ReferenceEquals(_interopRenderTargetProvider, value))
+            {
+                return;
+            }
+
+            _interopRenderTargetProvider.DiagnosticReported -= OnInteropRenderTargetProviderDiagnosticReported;
+            _interopRenderTargetProvider = value;
+            _interopRenderTargetProvider.DiagnosticReported += OnInteropRenderTargetProviderDiagnosticReported;
+        }
+    }
+
     #endregion
+
+    public GhosttyRenderedTerminalControl()
+    {
+        _interopRenderTargetProvider.DiagnosticReported += OnInteropRenderTargetProviderDiagnosticReported;
+    }
 
     static GhosttyRenderedTerminalControl()
     {
         FocusableProperty.OverrideDefaultValue<GhosttyRenderedTerminalControl>(true);
+        RenderingModeProperty.Changed.AddClassHandler<GhosttyRenderedTerminalControl>(
+            static (control, _) => control.OnRenderingModeChanged());
     }
 
     /// <summary>
@@ -167,7 +218,23 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     {
         base.OnDetachedFromVisualTree(e);
         DestroyGhosttySurface();
+        ElementComposition.SetElementChildVisual(this, null);
         _compositionVisual = null;
+    }
+
+    private void OnRenderingModeChanged()
+    {
+        if (VisualRoot is null)
+        {
+            return;
+        }
+
+        DestroyGhosttySurface();
+        ElementComposition.SetElementChildVisual(this, null);
+        _compositionVisual = null;
+        _syncFailed = false;
+        CreateGhosttySurface();
+        TryInitializeComposition();
     }
 
     #endregion
@@ -223,15 +290,25 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             _surface.SetContentScale(scale, scale);
             _surface.SetFocus(IsFocused);
 
-            // Start polling timer — the embedded renderer thread draws directly
-            // without dispatching the Render action to our callback, so we poll
-            // Ghostty's screen state on a timer (~60 fps).
-            _renderTimer = new DispatcherTimer(DispatcherPriority.Render)
+            if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
             {
-                Interval = TimeSpan.FromMilliseconds(16)
-            };
-            _renderTimer.Tick += (_, _) => SyncScreenFromGhostty();
-            _renderTimer.Start();
+                // Keep the embedded Ghostty surface active in interop mode so screen state,
+                // input, title, clipboard, and process events remain wired.
+                CreateTextureInteropSurface();
+            }
+
+            if (_renderTimer is null)
+            {
+                // Start polling timer — the embedded renderer thread draws directly
+                // without dispatching the Render action to our callback, so we poll
+                // Ghostty's screen state on a timer (~60 fps).
+                _renderTimer = new DispatcherTimer(DispatcherPriority.Render)
+                {
+                    Interval = TimeSpan.FromMilliseconds(16)
+                };
+                _renderTimer.Tick += OnRenderTimerTick;
+                _renderTimer.Start();
+            }
 
             Logger.Debug(
                 $"[GhosttyRendered] Surface created: NSView=0x{_nsView:X}, NSWindow=0x{_nsWindow:X}, " +
@@ -240,15 +317,110 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         catch (Exception ex)
         {
             Logger.Error("[GhosttyRendered] Failed to create Ghostty surface.", ex);
+            DestroyGhosttySurface();
         }
+    }
+
+    private void CreateTextureInteropSurface()
+    {
+        try
+        {
+            _interopContext = new GhosttyRenderContext();
+            _interopSurface = CreateTextureInteropSurfaceWithBackendFallback(
+                _interopContext,
+                out RenderBackendKind backendKind);
+            _interopRenderer = new SkiaInteropRenderer(
+                _interopSurface,
+                new GhosttyRenderSurfaceRgbaFallbackRenderer(_interopSurface));
+
+            UpdateSurfaceSize(Bounds.Width > 0 ? Bounds : new Rect(0, 0, 640, 480));
+
+            double scale = VisualRoot?.RenderScaling ?? 1.0;
+            _interopSurface.SetScale(scale, scale);
+            _interopSurface.SetFocus(IsFocused);
+
+            Logger.Debug(
+                $"[GhosttyRendered] TextureInterop initialized: backend={backendKind}, " +
+                $"scale={scale:F2}, bounds={Bounds}");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("[GhosttyRendered] Failed to initialize texture interop renderer.", ex);
+            DestroyGhosttySurface();
+        }
+    }
+
+    private GhosttyRenderSurface CreateTextureInteropSurfaceWithBackendFallback(
+        GhosttyRenderContext context,
+        out RenderBackendKind backendKind)
+    {
+        Exception? lastException = null;
+
+        RenderBackendKind[] candidates = GetTextureInteropBackendCandidates();
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            RenderBackendKind candidate = candidates[i];
+            try
+            {
+                GhosttyRenderSurface surface = context.CreateSurface(candidate);
+                backendKind = candidate;
+                return surface;
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+                Logger.Debug(
+                    $"[GhosttyRendered] TextureInterop backend candidate '{candidate}' unavailable: {ex.Message}");
+            }
+        }
+
+        backendKind = RenderBackendKind.Unknown;
+        throw new InvalidOperationException(
+            "Failed to create a texture-interop render surface for any backend candidate.",
+            lastException);
+    }
+
+    private static RenderBackendKind[] GetTextureInteropBackendCandidates()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return [RenderBackendKind.Metal, RenderBackendKind.Software];
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            return [RenderBackendKind.Vulkan, RenderBackendKind.Software];
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return [RenderBackendKind.D3D11, RenderBackendKind.D3D12, RenderBackendKind.Software];
+        }
+
+        return [RenderBackendKind.Software];
     }
 
     private void DestroyGhosttySurface()
     {
         if (_renderTimer is not null)
         {
+            _renderTimer.Tick -= OnRenderTimerTick;
             _renderTimer.Stop();
             _renderTimer = null;
+        }
+
+        _interopRenderer = null;
+
+        if (_interopSurface is not null)
+        {
+            _interopSurface.Dispose();
+            _interopSurface = null;
+        }
+
+        if (_interopContext is not null)
+        {
+            _interopContext.Dispose();
+            _interopContext = null;
         }
 
         if (_surface is not null)
@@ -270,14 +442,56 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         }
     }
 
+    private void OnRenderTimerTick(object? sender, EventArgs e)
+    {
+        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
+        {
+            SyncScreenFromGhostty();
+            SyncTextureInteropFrame();
+            return;
+        }
+
+        SyncScreenFromGhostty();
+    }
+
     private void UpdateSurfaceSize(Rect bounds)
     {
-        if (_surface is null || _renderer is null || bounds.Width <= 0 || bounds.Height <= 0) return;
+        if (bounds.Width <= 0 || bounds.Height <= 0) return;
 
-        var scale = VisualRoot?.RenderScaling ?? 1.0;
-        _surface.SetSize(
-            (uint)(bounds.Width * scale),
-            (uint)(bounds.Height * scale));
+        double scale = VisualRoot?.RenderScaling ?? 1.0;
+        PixelSize pixelSize = GetPixelSize(bounds, scale);
+        double pointWidth = Math.Max(1.0, bounds.Width);
+        double pointHeight = Math.Max(1.0, bounds.Height);
+
+        if (_nsView != nint.Zero)
+        {
+            ObjCRuntime.SetNSViewSize(_nsView, pointWidth, pointHeight);
+        }
+
+        if (_nsWindow != nint.Zero)
+        {
+            ObjCRuntime.SetNSWindowContentSize(_nsWindow, pointWidth, pointHeight);
+        }
+
+        if (_surface is not null && _renderer is not null)
+        {
+            _surface.SetContentScale(scale, scale);
+            _surface.SetSize((uint)pixelSize.Width, (uint)pixelSize.Height);
+        }
+
+        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
+        {
+            _interopSurface?.SetSize(pixelSize.Width, pixelSize.Height);
+            _compositionVisual?.SendHandlerMessage(new TerminalTextureInteropDrawHandler.ResizeMessage(pixelSize));
+            return;
+        }
+    }
+
+    private static PixelSize GetPixelSize(Rect bounds, double scale)
+    {
+        int width = Math.Max(1, (int)Math.Ceiling(bounds.Width * scale));
+        int height = Math.Max(1, (int)Math.Ceiling(bounds.Height * scale));
+        return new PixelSize(width, height);
     }
 
     #endregion
@@ -300,6 +514,9 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
         UpdateSurfaceSize(new Rect(0, 0, finalSize.Width, finalSize.Height));
 
+        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
+            SyncTextureInteropFrame();
+
         return finalSize;
     }
 
@@ -315,7 +532,9 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         if (elementVisual is null) return;
 
         var compositor = elementVisual.Compositor;
-        _compositionVisual = compositor.CreateCustomVisual(new TerminalDrawHandler());
+        _compositionVisual = RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop
+            ? compositor.CreateCustomVisual(new TerminalTextureInteropDrawHandler())
+            : compositor.CreateCustomVisual(new TerminalDrawHandler());
         ElementComposition.SetElementChildVisual(this, _compositionVisual);
         _compositionVisual.Size = new Vector(Bounds.Width, Bounds.Height);
 
@@ -323,7 +542,11 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             $"[GhosttyRendered] Composition initialized: bounds={Bounds.Width:F0}x{Bounds.Height:F0}");
 
         // Send initial render state
-        if (_renderer is not null && _screen is not null)
+        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
+        {
+            SyncTextureInteropFrame();
+        }
+        else if (_renderer is not null && _screen is not null)
         {
             _compositionVisual.SendHandlerMessage(
                 new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
@@ -333,6 +556,47 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     #endregion
 
     #region Screen State Reading
+
+    private void SyncTextureInteropFrame()
+    {
+        if (RenderingMode != GhosttyRenderedTerminalRenderingMode.TextureInterop ||
+            _interopRenderer is null)
+        {
+            return;
+        }
+
+        if (_compositionVisual is null)
+        {
+            TryInitializeComposition();
+            if (_compositionVisual is null)
+            {
+                return;
+            }
+        }
+
+        Rect bounds = Bounds.Width > 0 && Bounds.Height > 0
+            ? Bounds
+            : new Rect(0, 0, 1, 1);
+
+        double scale = VisualRoot?.RenderScaling ?? 1.0;
+        PixelSize pixelSize = GetPixelSize(bounds, scale);
+
+        _interopSurface?.SetScale(scale, scale);
+        _interopSurface?.SetSize(pixelSize.Width, pixelSize.Height);
+
+        _compositionVisual.SendHandlerMessage(
+            new TerminalTextureInteropDrawHandler.UpdateMessage(
+                _interopRenderer,
+                _interopRenderTargetProvider,
+                pixelSize,
+                _renderer,
+                _screen));
+    }
+
+    private void OnInteropRenderTargetProviderDiagnosticReported(object? sender, string diagnostic)
+    {
+        Logger.Debug($"[GhosttyRendered] TextureInterop target provider diagnostic: {diagnostic}");
+    }
 
     /// <summary>
     /// Reads the current screen state from Ghostty and updates the TerminalScreen.
@@ -350,6 +614,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             var size = _surface.Size;
             var cols = (int)size.Columns;
             var rows = (int)size.Rows;
+            UpdateRendererCellMetrics(size, cols, rows);
 
             // Periodic diagnostics
             if (++_syncLogCounter % 300 == 1) // ~every 5 seconds at 60fps
@@ -468,6 +733,41 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         }
     }
 
+    private void UpdateRendererCellMetrics(GhosttySurfaceSize size, int cols, int rows)
+    {
+        if (_renderer is null || cols <= 0 || rows <= 0)
+        {
+            return;
+        }
+
+        double scale = VisualRoot?.RenderScaling ?? 1.0;
+        if (scale <= 0 || double.IsNaN(scale) || double.IsInfinity(scale))
+        {
+            scale = 1.0;
+        }
+
+        float cellWidth;
+        float cellHeight;
+
+        if (size.CellWidthPx > 0 && size.CellHeightPx > 0)
+        {
+            cellWidth = (float)(size.CellWidthPx / scale);
+            cellHeight = (float)(size.CellHeightPx / scale);
+        }
+        else
+        {
+            cellWidth = (float)(Bounds.Width / cols);
+            cellHeight = (float)(Bounds.Height / rows);
+        }
+
+        if (cellWidth <= 0 || cellHeight <= 0 || float.IsNaN(cellWidth) || float.IsNaN(cellHeight))
+        {
+            return;
+        }
+
+        _renderer.SetCellSize(cellWidth, cellHeight);
+    }
+
     private static uint PackArgb(byte r, byte g, byte b) => 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | b;
 
     private static CellAttributes ConvertAttributes(ushort attrs)
@@ -475,13 +775,13 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         var result = CellAttributes.None;
         if ((attrs & (1 << 0)) != 0) result |= CellAttributes.Bold;
         if ((attrs & (1 << 1)) != 0) result |= CellAttributes.Italic;
-        if ((attrs & (1 << 2)) != 0) result |= CellAttributes.Dim;       // faint
-        if ((attrs & (1 << 3)) != 0) result |= CellAttributes.Blink;
-        if ((attrs & (1 << 4)) != 0) result |= CellAttributes.Inverse;
-        if ((attrs & (1 << 5)) != 0) result |= CellAttributes.Hidden;    // invisible
-        if ((attrs & (1 << 6)) != 0) result |= CellAttributes.Strikethrough;
-        // bit 7: overline (no mapping in CellAttributes)
-        if ((attrs & 0xFF00) != 0) result |= CellAttributes.Underline;   // underline enum in upper bits
+        if ((attrs & (1 << 2)) != 0) result |= CellAttributes.Dim;
+        if ((attrs & (1 << 3)) != 0) result |= CellAttributes.Inverse;
+        if ((attrs & (1 << 4)) != 0) result |= CellAttributes.Hidden;
+        if ((attrs & (1 << 5)) != 0) result |= CellAttributes.Strikethrough;
+        // bit 6: overline (no mapping in CellAttributes)
+        if (((attrs >> 8) & 0x7) != 0) result |= CellAttributes.Underline;
+        if ((attrs & (1 << 7)) != 0) result |= CellAttributes.Blink;
         return result;
     }
 
@@ -654,6 +954,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         base.OnGotFocus(e);
         Logger.Debug("[GhosttyRendered] GotFocus");
         _surface?.SetFocus(true);
+        _interopSurface?.SetFocus(true);
     }
 
     protected override void OnLostFocus(RoutedEventArgs e)
@@ -661,6 +962,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         base.OnLostFocus(e);
         Logger.Debug("[GhosttyRendered] LostFocus");
         _surface?.SetFocus(false);
+        _interopSurface?.SetFocus(false);
     }
 
     #endregion
@@ -700,8 +1002,16 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
                 case GhosttyActionTag.Render:
                     // Instead of calling _surface.Draw() (Metal), we read screen state
-                    // and render with SkiaSharp
-                    SyncScreenFromGhostty();
+                    // and render with SkiaSharp or texture interop mode.
+                    if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
+                    {
+                        SyncScreenFromGhostty();
+                        SyncTextureInteropFrame();
+                    }
+                    else
+                    {
+                        SyncScreenFromGhostty();
+                    }
                     break;
 
                 case GhosttyActionTag.ShowChildExited:
@@ -738,7 +1048,11 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     #region Public API
 
     /// <summary>Sets the color scheme.</summary>
-    public void SetColorScheme(GhosttyColorScheme scheme) => _surface?.SetColorScheme(scheme);
+    public void SetColorScheme(GhosttyColorScheme scheme)
+    {
+        _surface?.SetColorScheme(scheme);
+        _interopSurface?.SetColorScheme((uint)scheme);
+    }
 
     /// <summary>Checks if the terminal has a selection.</summary>
     public bool HasSelection => _surface?.HasSelection ?? false;
@@ -771,6 +1085,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         _disposed = true;
 
         DestroyGhosttySurface();
+        _interopRenderTargetProvider.DiagnosticReported -= OnInteropRenderTargetProviderDiagnosticReported;
 
         if (_app is not null)
         {

@@ -311,8 +311,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor
                 var native = cellBuffer[col];
 
                 cell.Codepoint = (int)native.Codepoint;
-                cell.Foreground = native.FgColor;
-                cell.Background = native.BgColor;
+                // Native default-style cells may not carry explicit colors.
+                // Fall back to terminal defaults instead of rendering transparent text.
+                cell.Foreground = native.FgColor != 0 ? native.FgColor : _screen.DefaultForeground;
+                cell.Background = native.BgColor != 0 ? native.BgColor : _screen.DefaultBackground;
                 cell.Attributes = MapAttributes(native.Attrs);
 
                 // Wide char handling

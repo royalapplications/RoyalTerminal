@@ -1,6 +1,7 @@
 // Licensed under the MIT License.
 // GhosttySharp.Avalonia.Controls - ObjC runtime helpers for macOS native view/window hosting.
 
+using System;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
@@ -27,8 +28,20 @@ internal static class ObjCRuntime
         public double X, Y, Width, Height;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CGSize
+    {
+        public double Width, Height;
+    }
+
     [DllImport("/usr/lib/libobjc.dylib", EntryPoint = "objc_msgSend")]
     private static extern nint objc_msgSend_CGRect(nint receiver, nint selector, CGRect rect);
+
+    [DllImport("/usr/lib/libobjc.dylib", EntryPoint = "objc_msgSend")]
+    private static extern void objc_msgSend_void_CGRect(nint receiver, nint selector, CGRect rect);
+
+    [DllImport("/usr/lib/libobjc.dylib", EntryPoint = "objc_msgSend")]
+    private static extern void objc_msgSend_void_CGSize(nint receiver, nint selector, CGSize size);
 
     [DllImport("/usr/lib/libobjc.dylib", EntryPoint = "objc_msgSend")]
     private static extern void objc_msgSend_bool(nint receiver, nint selector, byte value);
@@ -94,6 +107,36 @@ internal static class ObjCRuntime
         objc_msgSend_nint_arg(window, orderOutSel, nint.Zero);
 
         return window;
+    }
+
+    /// <summary>
+    /// Updates the frame size of an NSView in logical (point) units.
+    /// </summary>
+    public static void SetNSViewSize(nint view, double width, double height)
+    {
+        if (view == nint.Zero) return;
+
+        double clampedWidth = Math.Max(1.0, width);
+        double clampedHeight = Math.Max(1.0, height);
+
+        var setFrameSel = sel_registerName("setFrame:");
+        var frame = new CGRect { X = 0, Y = 0, Width = clampedWidth, Height = clampedHeight };
+        objc_msgSend_void_CGRect(view, setFrameSel, frame);
+    }
+
+    /// <summary>
+    /// Updates the content size of an NSWindow in logical (point) units.
+    /// </summary>
+    public static void SetNSWindowContentSize(nint window, double width, double height)
+    {
+        if (window == nint.Zero) return;
+
+        double clampedWidth = Math.Max(1.0, width);
+        double clampedHeight = Math.Max(1.0, height);
+
+        var setContentSizeSel = sel_registerName("setContentSize:");
+        var size = new CGSize { Width = clampedWidth, Height = clampedHeight };
+        objc_msgSend_void_CGSize(window, setContentSizeSel, size);
     }
 
     /// <summary>Releases an NSWindow.</summary>

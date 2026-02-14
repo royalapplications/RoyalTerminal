@@ -83,10 +83,21 @@ public sealed class TerminalSessionService : ITerminalSessionService
         }
 
         IPty pty = ptyFactory.Create();
-        pty.Start(shell, columns, rows, workingDirectory);
         pty.DataReceived += onPtyDataReceived;
         pty.ProcessExited += onPtyProcessExited;
-        Pty = pty;
+
+        try
+        {
+            pty.Start(shell, columns, rows, workingDirectory);
+            Pty = pty;
+        }
+        catch
+        {
+            pty.DataReceived -= onPtyDataReceived;
+            pty.ProcessExited -= onPtyProcessExited;
+            pty.Dispose();
+            throw;
+        }
 
         if (vtProcessor is not null)
         {
