@@ -1,0 +1,15 @@
+<Styles xmlns="https://github.com/avaloniaui">
+    <Style Selector="Button.tabHeader">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Padding" Value="8,4" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="Background" Value="{DynamicResource TabHeaderBackgroundBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TabHeaderForegroundBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="4,4,0,0" />
+    </Style>
+    <Style Selector="Button.tabHeader.active">
+        <Setter Property="Background" Value="{DynamicResource TabHeaderActiveBackgroundBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TabHeaderActiveForegroundBrush}" />
+    </Style>
+</Styles>
