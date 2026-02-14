@@ -2,7 +2,6 @@
 
   <PropertyGroup>
     <PackageId>GhosttySharp.Native.OSX</PackageId>
-    <Version>0.1.0</Version>
     <Description>Native Ghostty libraries for macOS (arm64 and x64). Provides libghostty, libghostty-vt, and libghostty-terminal shared libraries required by GhosttySharp on macOS.</Description>
     <PackageTags>ghostty;terminal;native;macos;osx;arm64;x64</PackageTags>
 

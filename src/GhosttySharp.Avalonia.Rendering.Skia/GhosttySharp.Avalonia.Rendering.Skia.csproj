@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>GhosttySharp.Avalonia.Rendering.Skia</PackageId>
+    <Description>SkiaSharp terminal rendering core independent of Avalonia controls.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" />
+  </ItemGroup>
+
+</Project>

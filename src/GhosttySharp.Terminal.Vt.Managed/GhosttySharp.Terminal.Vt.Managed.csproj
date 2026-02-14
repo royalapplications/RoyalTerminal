@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>GhosttySharp.Terminal.Vt.Managed</PackageId>
+    <Description>Managed VT processor implementation for GhosttySharp terminal contracts.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
+  </ItemGroup>
+
+</Project>

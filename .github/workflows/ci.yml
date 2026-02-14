@@ -244,6 +244,36 @@ jobs:
       - name: Pack GhosttySharp
         run: dotnet pack src/GhosttySharp/GhosttySharp.csproj -c Release -o artifacts/
 
+      - name: Pack GhosttySharp.Terminal
+        run: dotnet pack src/GhosttySharp.Terminal/GhosttySharp.Terminal.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Terminal.Services.Contracts
+        run: dotnet pack src/GhosttySharp.Terminal.Services.Contracts/GhosttySharp.Terminal.Services.Contracts.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Terminal.Services
+        run: dotnet pack src/GhosttySharp.Terminal.Services/GhosttySharp.Terminal.Services.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Avalonia.Rendering.Skia
+        run: dotnet pack src/GhosttySharp.Avalonia.Rendering.Skia/GhosttySharp.Avalonia.Rendering.Skia.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Terminal.Vt.Managed
+        run: dotnet pack src/GhosttySharp.Terminal.Vt.Managed/GhosttySharp.Terminal.Vt.Managed.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Terminal.Vt.Ghostty
+        run: dotnet pack src/GhosttySharp.Terminal.Vt.Ghostty/GhosttySharp.Terminal.Vt.Ghostty.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Terminal.Vt.Default
+        run: dotnet pack src/GhosttySharp.Terminal.Vt.Default/GhosttySharp.Terminal.Vt.Default.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Terminal.Pty.Unix
+        run: dotnet pack src/GhosttySharp.Terminal.Pty.Unix/GhosttySharp.Terminal.Pty.Unix.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Terminal.Pty.Windows
+        run: dotnet pack src/GhosttySharp.Terminal.Pty.Windows/GhosttySharp.Terminal.Pty.Windows.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Terminal.Pty.Platform
+        run: dotnet pack src/GhosttySharp.Terminal.Pty.Platform/GhosttySharp.Terminal.Pty.Platform.csproj -c Release -o artifacts/
+
       - name: Pack GhosttySharp.Avalonia
         run: dotnet pack src/GhosttySharp.Avalonia/GhosttySharp.Avalonia.csproj -c Release -o artifacts/
 

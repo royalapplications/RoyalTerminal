@@ -1,8 +1,6 @@
 // Licensed under the MIT License.
 // GhosttySharp.Avalonia - Terminal cell model.
 
-using SkiaSharp;
-
 namespace GhosttySharp.Avalonia.Rendering;
 
 /// <summary>
@@ -28,12 +26,6 @@ public struct TerminalCell
 
     /// <summary>Returns true if this cell has content.</summary>
     public readonly bool HasContent => Codepoint != 0;
-
-    /// <summary>Returns the foreground as an SKColor.</summary>
-    public readonly SKColor ForegroundColor => new(Foreground);
-
-    /// <summary>Returns the background as an SKColor.</summary>
-    public readonly SKColor BackgroundColor => new(Background);
 
     /// <summary>Creates a default empty cell with the given colors.</summary>
     public static TerminalCell Empty(uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E) => new()

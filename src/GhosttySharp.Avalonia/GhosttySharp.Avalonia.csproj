@@ -2,19 +2,24 @@
 
   <PropertyGroup>
     <PackageId>GhosttySharp.Avalonia</PackageId>
-    <Version>0.1.0</Version>
     <Description>Avalonia UI terminal control for GhosttySharp with SkiaSharp rendering, CustomVisual composition, and virtualized scrolling.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\GhosttySharp\GhosttySharp.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Terminal.Services.Contracts\GhosttySharp.Terminal.Services.Contracts.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Terminal.Services\GhosttySharp.Terminal.Services.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Avalonia.Rendering.Skia\GhosttySharp.Avalonia.Rendering.Skia.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Terminal.Vt.Default\GhosttySharp.Terminal.Vt.Default.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Terminal.Pty.Platform\GhosttySharp.Terminal.Pty.Platform.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Skia" Version="11.3.0" />
-    <PackageReference Include="SkiaSharp" Version="3.119.0" />
+    <PackageReference Include="Avalonia" VersionOverride="11.3.0" />
+    <PackageReference Include="Avalonia.Skia" VersionOverride="11.3.0" />
+    <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 
 </Project>

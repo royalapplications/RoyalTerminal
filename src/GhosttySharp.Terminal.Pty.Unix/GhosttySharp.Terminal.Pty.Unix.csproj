@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>GhosttySharp.Terminal.Pty.Unix</PackageId>
+    <Description>Unix PTY implementation for GhosttySharp terminal contracts.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
+  </ItemGroup>
+
+</Project>

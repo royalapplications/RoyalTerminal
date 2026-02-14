@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>GhosttySharp.Terminal.Vt.Default</PackageId>
+    <Description>Default VT processor factory that selects between managed and native VT implementations.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Terminal.Vt.Managed\GhosttySharp.Terminal.Vt.Managed.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Terminal.Vt.Ghostty\GhosttySharp.Terminal.Vt.Ghostty.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -202,7 +202,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             var strikethrough = (cell.Attributes & CellAttributes.Strikethrough) != 0;
             var inverse = (cell.Attributes & CellAttributes.Inverse) != 0;
 
-            var fg = inverse ? cell.BackgroundColor : cell.ForegroundColor;
+            var fg = new SKColor(inverse ? cell.Background : cell.Foreground);
 
             _fgPaint.Color = fg;
 

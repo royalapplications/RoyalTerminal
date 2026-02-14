@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>GhosttySharp.Terminal</PackageId>
+    <Description>Terminal contracts and screen model for GhosttySharp.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+</Project>

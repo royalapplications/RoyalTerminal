@@ -2,7 +2,6 @@
 
   <PropertyGroup>
     <PackageId>GhosttySharp.Native.Linux64</PackageId>
-    <Version>0.1.0</Version>
     <Description>Native Ghostty libraries for Linux (x64 and arm64). Provides libghostty.so, libghostty-vt.so, and libghostty-terminal.so shared libraries required by GhosttySharp on Linux.</Description>
     <PackageTags>ghostty;terminal;native;linux;x64;arm64</PackageTags>
 
