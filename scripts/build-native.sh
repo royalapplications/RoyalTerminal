@@ -10,7 +10,7 @@
 #   - Zig 0.15.2+ (https://ziglang.org/download/)
 #   - Git submodule initialized: git submodule update --init
 #
-# The script builds libghostty and libghostty-terminal as shared libraries
+# The script builds libghostty, libghostty-terminal, and libghostty-renderer-capi
 # and copies them to the correct NuGet runtime package location.
 
 set -euo pipefail
@@ -33,7 +33,7 @@ error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
-    echo "Build Ghostty native shared library from the git submodule."
+    echo "Build Ghostty native shared libraries from source."
     echo ""
     echo "Options:"
     echo "  --clean       Clean before building"
@@ -165,7 +165,6 @@ fi
 info "Built library: $BUILT_LIB"
 
 # Copy to NuGet native package directory
-NATIVE_RUNTIME_DIR="$ROOT_DIR/src/GhosttySharp.Native.${PLATFORM^^}64/runtimes/$RID/native"
 case "$PLATFORM" in
     osx) NATIVE_RUNTIME_DIR="$ROOT_DIR/src/GhosttySharp.Native.OSX/runtimes/$RID/native" ;;
     linux) NATIVE_RUNTIME_DIR="$ROOT_DIR/src/GhosttySharp.Native.Linux64/runtimes/$RID/native" ;;
@@ -260,6 +259,62 @@ if [ -f "$TERMINAL_DIR/build.zig" ]; then
     cd "$GHOSTTY_DIR"
 else
     warn "native/ghostty-terminal not found — skipping libghostty-terminal build."
+fi
+
+# ═══════════════════════════════════════════════════════════════════════
+# Build libghostty-renderer-capi (renderer interop C API)
+# ═══════════════════════════════════════════════════════════════════════
+
+RENDERER_DIR="$ROOT_DIR/native/ghostty-renderer-capi"
+
+if [ -f "$RENDERER_DIR/build.zig" ]; then
+    info ""
+    info "Building libghostty-renderer-capi..."
+
+    cd "$RENDERER_DIR"
+
+    if [ "$CLEAN" = true ]; then
+        rm -rf zig-out .zig-cache
+    fi
+
+    case "$PLATFORM" in
+        osx) RENDERER_LIB_NAME="libghostty-renderer-capi.dylib" ;;
+        linux) RENDERER_LIB_NAME="libghostty-renderer-capi.so" ;;
+    esac
+
+    zig build $OPTIMIZE 2>&1 || {
+        warn "libghostty-renderer-capi build failed — skipping."
+        warn "Texture interop managed APIs will require manual native library setup."
+        RENDERER_LIB_NAME=""
+    }
+
+    if [ -n "$RENDERER_LIB_NAME" ]; then
+        RENDERER_LIB=""
+        if [ -e "zig-out/lib/$RENDERER_LIB_NAME" ]; then
+            RENDERER_LIB="zig-out/lib/$RENDERER_LIB_NAME"
+        fi
+
+        if [ -n "$RENDERER_LIB" ]; then
+            info "Built: $RENDERER_LIB"
+
+            cp -L "$RENDERER_LIB" "$NATIVE_RUNTIME_DIR/"
+            info "Copied to: $NATIVE_RUNTIME_DIR/$RENDERER_LIB_NAME"
+
+            cp -L "$RENDERER_LIB" "$NATIVE_OUT_DIR/$RID/"
+            info "Copied to: $NATIVE_OUT_DIR/$RID/$RENDERER_LIB_NAME"
+
+            if [ -f "include/ghostty_renderer.h" ]; then
+                cp "include/ghostty_renderer.h" "$HEADER_DEST/"
+                info "Copied header: $HEADER_DEST/ghostty_renderer.h"
+            fi
+        else
+            warn "libghostty-renderer-capi not found in zig-out/lib/"
+        fi
+    fi
+
+    cd "$GHOSTTY_DIR"
+else
+    warn "native/ghostty-renderer-capi not found — skipping renderer-capi build."
 fi
 
 # Print library info

@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>GhosttySharp.Native.Win64</PackageId>
-    <Description>Native Ghostty libraries for Windows x64. Provides ghostty.dll, ghostty-vt.dll, and ghostty-terminal.dll shared libraries required by GhosttySharp on Windows.</Description>
+    <Description>Native Ghostty libraries for Windows x64. Provides ghostty.dll, ghostty-vt.dll, ghostty-terminal.dll, and ghostty-renderer-capi.dll shared libraries required by GhosttySharp on Windows.</Description>
     <PackageTags>ghostty;terminal;native;windows;x64</PackageTags>
 
     <!-- This is a native-only package, no managed assembly -->

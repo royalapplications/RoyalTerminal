@@ -9,7 +9,7 @@
 #   - Zig 0.15.2+ (https://ziglang.org/download/)
 #   - Git submodule initialized: git submodule update --init
 #
-# The script builds libghostty and libghostty-terminal as shared libraries
+# The script builds libghostty, libghostty-terminal, and ghostty-renderer-capi as shared libraries
 # and copies them to the correct NuGet runtime package location.
 #
 # NOTE: Ghostty currently does not officially support Windows builds.
@@ -197,6 +197,58 @@ try {
         }
     } else {
         Write-Warn "native\ghostty-terminal not found - skipping libghostty-terminal build."
+    }
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Build ghostty-renderer-capi (renderer interop C API library)
+    # ═══════════════════════════════════════════════════════════════════
+
+    $rendererDir = Join-Path $RootDir "native\ghostty-renderer-capi"
+
+    if (Test-Path (Join-Path $rendererDir "build.zig")) {
+        Write-Info ""
+        Write-Info "Building ghostty-renderer-capi..."
+
+        Push-Location $rendererDir
+        try {
+            if ($Clean) {
+                if (Test-Path "zig-out") { Remove-Item -Recurse -Force "zig-out" }
+                if (Test-Path ".zig-cache") { Remove-Item -Recurse -Force ".zig-cache" }
+            }
+
+            $rendererBuildArgs = @("build")
+            if (-not $Debug) { $rendererBuildArgs += "-Doptimize=ReleaseFast" }
+
+            & zig @rendererBuildArgs
+            if ($LASTEXITCODE -eq 0) {
+                $rendererLibName = "ghostty-renderer-capi.dll"
+                $rendererLib = Join-Path "zig-out\lib" $rendererLibName
+                if (Test-Path $rendererLib) {
+                    Write-Info "Built: $rendererLib"
+
+                    Copy-Item $rendererLib $nativeRuntimeDir
+                    Write-Info "Copied to: $nativeRuntimeDir\$rendererLibName"
+
+                    Copy-Item $rendererLib $outputDir
+                    Write-Info "Copied to: $outputDir\$rendererLibName"
+
+                    $rendererHeaderSrc = Join-Path $rendererDir "include\ghostty_renderer.h"
+                    if (Test-Path $rendererHeaderSrc) {
+                        Copy-Item $rendererHeaderSrc $headerDest
+                        Write-Info "Copied header: $headerDest\ghostty_renderer.h"
+                    }
+                } else {
+                    Write-Warn "ghostty-renderer-capi.dll not found in zig-out\lib\"
+                }
+            } else {
+                Write-Warn "ghostty-renderer-capi build failed - skipping."
+                Write-Warn "Texture interop managed APIs will require manual native library setup."
+            }
+        } finally {
+            Pop-Location
+        }
+    } else {
+        Write-Warn "native\ghostty-renderer-capi not found - skipping ghostty-renderer-capi build."
     }
 
     Write-Info ""

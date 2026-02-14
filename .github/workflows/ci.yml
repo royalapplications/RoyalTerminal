@@ -70,6 +70,50 @@ jobs:
           name: native-win-x64
           path: src/GhosttySharp.Native.Win64/runtimes/win-x64/native/
 
+      - name: Stage native artifacts for managed interop (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for rid in osx-arm64 osx-x64; do
+            src="src/GhosttySharp.Native.OSX/runtimes/${rid}/native"
+            dst_interop="src/GhosttySharp.Rendering.Interop/runtimes/${rid}/native"
+            dst_fixture="native/${rid}"
+            mkdir -p "${dst_interop}" "${dst_fixture}"
+            cp -f "${src}"/* "${dst_interop}/"
+            cp -f "${src}"/* "${dst_fixture}/"
+          done
+          ls -la src/GhosttySharp.Rendering.Interop/runtimes/osx-arm64/native/
+
+      - name: Stage native artifacts for managed interop (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for rid in linux-x64 linux-arm64; do
+            src="src/GhosttySharp.Native.Linux64/runtimes/${rid}/native"
+            dst_interop="src/GhosttySharp.Rendering.Interop/runtimes/${rid}/native"
+            dst_fixture="native/${rid}"
+            mkdir -p "${dst_interop}" "${dst_fixture}"
+            cp -f "${src}"/* "${dst_interop}/"
+            cp -f "${src}"/* "${dst_fixture}/"
+          done
+          ls -la src/GhosttySharp.Rendering.Interop/runtimes/linux-x64/native/
+
+      - name: Stage native artifacts for managed interop (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $rid = "win-x64"
+          $src = "src/GhosttySharp.Native.Win64/runtimes/$rid/native"
+          $dstInterop = "src/GhosttySharp.Rendering.Interop/runtimes/$rid/native"
+          $dstFixture = "native/$rid"
+          New-Item -Path $dstInterop -ItemType Directory -Force | Out-Null
+          New-Item -Path $dstFixture -ItemType Directory -Force | Out-Null
+          Copy-Item "$src/*" $dstInterop -Recurse -Force
+          Copy-Item "$src/*" $dstFixture -Recurse -Force
+          Get-ChildItem $dstInterop | Format-Table Name, Length -AutoSize
+
       - name: Restore
         run: dotnet restore
 
@@ -113,10 +157,22 @@ jobs:
             zig build lib-vt -Doptimize=ReleaseFast -Dtarget=x86_64-macos
           fi
 
+      - name: Build ghostty-renderer-capi
+        working-directory: native/ghostty-renderer-capi
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            zig build -Doptimize=ReleaseFast
+          else
+            zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos
+          fi
+
       - name: Collect artifacts
         run: |
           mkdir -p artifacts/osx-${{ matrix.arch }}/native
-          find external/ghostty/zig-out -name "*.dylib" -exec cp {} artifacts/osx-${{ matrix.arch }}/native/ \;
+          find external/ghostty/zig-out -name "*.dylib" -exec cp -L {} artifacts/osx-${{ matrix.arch }}/native/ \;
+          if [ -f native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib ]; then
+            cp -L native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib artifacts/osx-${{ matrix.arch }}/native/
+          fi
           ls -la artifacts/osx-${{ matrix.arch }}/native/
 
       - name: Upload native library
@@ -152,10 +208,22 @@ jobs:
             zig build lib-vt -Doptimize=ReleaseFast -Dtarget=aarch64-linux
           fi
 
+      - name: Build ghostty-renderer-capi
+        working-directory: native/ghostty-renderer-capi
+        run: |
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            zig build -Doptimize=ReleaseFast
+          else
+            zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux
+          fi
+
       - name: Collect artifacts
         run: |
           mkdir -p artifacts/linux-${{ matrix.arch }}/native
-          find external/ghostty/zig-out -name "*.so" -exec cp {} artifacts/linux-${{ matrix.arch }}/native/ \;
+          find external/ghostty/zig-out -name "*.so" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \;
+          if [ -f native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.so ]; then
+            cp -L native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.so artifacts/linux-${{ matrix.arch }}/native/
+          fi
           ls -la artifacts/linux-${{ matrix.arch }}/native/
 
       - name: Upload native library
@@ -183,12 +251,18 @@ jobs:
         working-directory: external/ghostty
         run: zig build lib-vt -Doptimize=ReleaseFast
 
+      - name: Build ghostty-renderer-capi
+        working-directory: native/ghostty-renderer-capi
+        run: zig build -Doptimize=ReleaseFast
+
       - name: Collect artifacts
         shell: bash
         run: |
           mkdir -p artifacts/win-x64/native
-          find external/ghostty/zig-out -name "*.dll" -exec cp {} artifacts/win-x64/native/ \;
-          find external/ghostty/zig-out -name "*.lib" -exec cp {} artifacts/win-x64/native/ \;
+          find external/ghostty/zig-out -name "*.dll" -exec cp -L {} artifacts/win-x64/native/ \;
+          find external/ghostty/zig-out -name "*.lib" -exec cp -L {} artifacts/win-x64/native/ \;
+          find native/ghostty-renderer-capi/zig-out -name "ghostty-renderer-capi*.dll" -exec cp -L {} artifacts/win-x64/native/ \; || true
+          find native/ghostty-renderer-capi/zig-out -name "ghostty-renderer-capi*.lib" -exec cp -L {} artifacts/win-x64/native/ \; || true
           ls -la artifacts/win-x64/native/
 
       - name: Upload native library
@@ -218,6 +292,19 @@ jobs:
         with:
           name: native-osx-arm64
           path: src/GhosttySharp.Native.OSX/runtimes/osx-arm64/native/
+
+      - name: Stage native artifacts for managed interop (macOS)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rid="osx-arm64"
+          src="src/GhosttySharp.Native.OSX/runtimes/${rid}/native"
+          dst_interop="src/GhosttySharp.Rendering.Interop/runtimes/${rid}/native"
+          dst_fixture="native/${rid}"
+          mkdir -p "${dst_interop}" "${dst_fixture}"
+          cp -f "${src}"/* "${dst_interop}/"
+          cp -f "${src}"/* "${dst_fixture}/"
+          ls -la "${dst_interop}"
 
       - name: Run integration tests
         run: dotnet test tests/GhosttySharp.IntegrationTests/GhosttySharp.IntegrationTests.csproj -c Release --logger "trx;LogFileName=integration-results.trx" --results-directory ./test-results
@@ -289,8 +376,8 @@ jobs:
       - name: Pack GhosttySharp.Terminal.Services
         run: dotnet pack src/GhosttySharp.Terminal.Services/GhosttySharp.Terminal.Services.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Avalonia.Rendering.Skia
-        run: dotnet pack src/GhosttySharp.Avalonia.Rendering.Skia/GhosttySharp.Avalonia.Rendering.Skia.csproj -c Release -o artifacts/
+      - name: Pack GhosttySharp.Rendering.Skia
+        run: dotnet pack src/GhosttySharp.Rendering.Skia/GhosttySharp.Rendering.Skia.csproj -c Release -o artifacts/
 
       - name: Pack GhosttySharp.Terminal.Vt.Managed
         run: dotnet pack src/GhosttySharp.Terminal.Vt.Managed/GhosttySharp.Terminal.Vt.Managed.csproj -c Release -o artifacts/
