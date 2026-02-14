@@ -116,6 +116,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             pkg-config \
+            libbz2-dev \
             libfreetype6-dev \
             libharfbuzz-dev \
             libfontconfig1-dev \
@@ -124,6 +125,13 @@ jobs:
             libonig-dev \
             glslang-dev \
             libspirv-cross-c-shared-dev
+          multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
+          if [ -f "/usr/lib/${multiarch}/libbz2.so" ] && [ ! -e "/usr/lib/${multiarch}/libbzip2.so" ]; then
+            sudo ln -s "/usr/lib/${multiarch}/libbz2.so" "/usr/lib/${multiarch}/libbzip2.so"
+          fi
+          if [ -f "/usr/lib/${multiarch}/libbz2.a" ] && [ ! -e "/usr/lib/${multiarch}/libbzip2.a" ]; then
+            sudo ln -s "/usr/lib/${multiarch}/libbz2.a" "/usr/lib/${multiarch}/libbzip2.a"
+          fi
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
