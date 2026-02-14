@@ -19,7 +19,7 @@ public static class Ghostty
     /// Initializes the Ghostty library. Must be called before any other Ghostty operations.
     /// Safe to call multiple times.
     /// </summary>
-    /// <returns>True if initialization succeeded.</returns>
+    /// <returns>True if initialization succeeded; false when the native library is unavailable or incompatible.</returns>
     public static unsafe bool Initialize()
     {
         if (s_initialized) return true;
@@ -28,10 +28,25 @@ public static class Ghostty
         {
             if (s_initialized) return true;
 
-            NativeLibraryLoader.Initialize();
-            var result = GhosttyNative.Init(0, null);
-            s_initialized = result == 0;
-            return s_initialized;
+            try
+            {
+                NativeLibraryLoader.Initialize();
+                var result = GhosttyNative.Init(0, null);
+                s_initialized = result == 0;
+                return s_initialized;
+            }
+            catch (DllNotFoundException)
+            {
+                return false;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                return false;
+            }
+            catch (BadImageFormatException)
+            {
+                return false;
+            }
         }
     }
 
