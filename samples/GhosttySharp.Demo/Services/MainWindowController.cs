@@ -94,7 +94,7 @@ internal sealed class MainWindowController
 
         CreateNewTab();
         UpdateStatus(_viewModel.UseRenderedControl
-            ? "Ghostty VT + SkiaSharp rendering"
+            ? $"Ghostty VT + {GetRenderedBackendLabel()} rendering"
             : _viewModel.UseNativeControl
                 ? "Ghostty native terminal ready"
                 : _viewModel.UseNativeVtControl
@@ -166,6 +166,12 @@ internal sealed class MainWindowController
             ApplyTheme(context.Input);
             context.SetOutput(Unit.Default);
         }));
+
+        disposables.Add(_viewModel.ApplyRenderedBackendInteraction.RegisterHandler(context =>
+        {
+            ApplyRenderedBackend(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
     }
 
     private bool TryInitializeGhostty()
@@ -227,6 +233,7 @@ internal sealed class MainWindowController
                 TerminalFontSize = (float)_viewModel.FontSize,
                 FontFamilyName = MonoFont,
                 WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                RenderingMode = GetRenderedRenderingMode(_viewModel.UseTextureInterop),
             };
             renderedControl.Initialize(_ghosttyApp);
 
@@ -365,11 +372,14 @@ internal sealed class MainWindowController
 
     private TabVisualMode ResolveTabMode(Control terminal)
     {
-        if (_viewModel.UseRenderedControl && _ghosttyApp is not null)
+        if (terminal is GhosttyRenderedTerminalControl rendered)
         {
+            bool isTextureInterop = rendered.RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop;
             return new TabVisualMode(
-                "Rendered (Ghostty VT + SkiaSharp)",
-                "\u25CF",
+                isTextureInterop
+                    ? "Rendered (Ghostty VT + TextureInterop)"
+                    : "Rendered (Ghostty VT + CPU Cell Renderer)",
+                isTextureInterop ? "\u25CF" : "\u25CB",
                 new SolidColorBrush(Color.FromRgb(0x56, 0x9C, 0xD6)));
         }
 
@@ -397,6 +407,14 @@ internal sealed class MainWindowController
             "\u25A0",
             new SolidColorBrush(Color.FromRgb(0x6A, 0x99, 0x55)));
     }
+
+    private static GhosttyRenderedTerminalRenderingMode GetRenderedRenderingMode(bool useTextureInterop)
+        => useTextureInterop
+            ? GhosttyRenderedTerminalRenderingMode.TextureInterop
+            : GhosttyRenderedTerminalRenderingMode.CpuCellRenderer;
+
+    private string GetRenderedBackendLabel()
+        => _viewModel.UseTextureInterop ? "TextureInterop (Preview)" : "CPU Cell Renderer";
 
     private static Button CreateTabHeader(string title, TabVisualMode mode)
     {
@@ -632,6 +650,30 @@ internal sealed class MainWindowController
         }
 
         ApplyThemeResources(isDarkTheme);
+    }
+
+    private void ApplyRenderedBackend(bool useTextureInterop)
+    {
+        GhosttyRenderedTerminalRenderingMode renderingMode = GetRenderedRenderingMode(useTextureInterop);
+        foreach (TerminalTab tab in _tabs)
+        {
+            if (tab.Control is not GhosttyRenderedTerminalControl rendered)
+            {
+                continue;
+            }
+
+            rendered.RenderingMode = renderingMode;
+
+            TabVisualMode tabMode = ResolveTabMode(rendered);
+            ToolTip.SetTip(tab.HeaderButton, tabMode.Name);
+            if (tab.HeaderButton.Content is StackPanel headerContent
+                && headerContent.Children.Count > 0
+                && headerContent.Children[0] is TextBlock modeIndicator)
+            {
+                modeIndicator.Text = tabMode.Glyph;
+                modeIndicator.Foreground = tabMode.GlyphBrush;
+            }
+        }
     }
 
     private static ThemePalette GetPalette(bool isDarkTheme)

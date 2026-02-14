@@ -18,6 +18,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _useNativeControl;
     private bool _useRenderedControl;
     private bool _useNativeVtControl;
+    private bool _useTextureInterop;
     private string _statusText = "Ready";
     private string _dimensionsText = "80x24";
     private string _modeButtonText = "Rendered";
@@ -34,6 +35,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         PasteClipboardInteraction = new Interaction<Unit, Unit>();
         ApplyFontSizeInteraction = new Interaction<double, Unit>();
         ApplyThemeInteraction = new Interaction<bool, Unit>();
+        ApplyRenderedBackendInteraction = new Interaction<bool, Unit>();
 
         NewTabCommand = ReactiveCommand.CreateFromObservable(() => CreateNewTabInteraction.Handle(Unit.Default));
         CloseCurrentTabCommand = ReactiveCommand.CreateFromObservable(() => CloseCurrentTabInteraction.Handle(Unit.Default));
@@ -48,6 +50,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         DecreaseFontSizeCommand = ReactiveCommand.CreateFromObservable(() => ChangeFontSize(-1));
         ResetFontSizeCommand = ReactiveCommand.CreateFromObservable(ResetFontSize);
         ToggleThemeCommand = ReactiveCommand.CreateFromObservable(ToggleTheme);
+        ToggleRenderedBackendCommand = ReactiveCommand.CreateFromObservable(ToggleRenderedBackend);
         CycleRenderModeCommand = ReactiveCommand.Create(CycleRenderMode);
     }
 
@@ -61,6 +64,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<Unit, Unit> PasteClipboardInteraction { get; }
     public Interaction<double, Unit> ApplyFontSizeInteraction { get; }
     public Interaction<bool, Unit> ApplyThemeInteraction { get; }
+    public Interaction<bool, Unit> ApplyRenderedBackendInteraction { get; }
 
     public ReactiveCommand<Unit, Unit> NewTabCommand { get; }
     public ReactiveCommand<Unit, Unit> CloseCurrentTabCommand { get; }
@@ -75,6 +79,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> DecreaseFontSizeCommand { get; }
     public ReactiveCommand<Unit, Unit> ResetFontSizeCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleThemeCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleRenderedBackendCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleRenderModeCommand { get; }
 
     public double FontSize
@@ -141,6 +146,21 @@ public sealed class MainWindowViewModel : ReactiveObject
         private set => this.RaiseAndSetIfChanged(ref _useNativeVtControl, value);
     }
 
+    public bool UseTextureInterop
+    {
+        get => _useTextureInterop;
+        private set
+        {
+            if (_useTextureInterop == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _useTextureInterop, value);
+            this.RaisePropertyChanged(nameof(RenderedBackendButtonText));
+        }
+    }
+
     public string StatusText
     {
         get => _statusText;
@@ -158,6 +178,9 @@ public sealed class MainWindowViewModel : ReactiveObject
         get => _modeButtonText;
         private set => this.RaiseAndSetIfChanged(ref _modeButtonText, value);
     }
+
+    public string RenderedBackendButtonText
+        => UseTextureInterop ? "Backend: Interop (Preview)" : "Backend: CPU";
 
     public void SetTerminalCapabilities(bool ghosttyAvailable, bool nativeVtAvailable)
     {
@@ -178,7 +201,9 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         if (UseRenderedControl)
         {
-            return "Rendered (Ghostty VT + SkiaSharp)";
+            return UseTextureInterop
+                ? "Rendered (Ghostty VT + TextureInterop)"
+                : "Rendered (Ghostty VT + CPU Cell Renderer)";
         }
 
         if (UseNativeControl)
@@ -270,6 +295,15 @@ public sealed class MainWindowViewModel : ReactiveObject
         return ApplyThemeInteraction
             .Handle(IsDarkTheme)
             .Do(_ => SetStatus(IsDarkTheme ? "Dark theme" : "Light theme"));
+    }
+
+    private IObservable<Unit> ToggleRenderedBackend()
+    {
+        UseTextureInterop = !UseTextureInterop;
+        return ApplyRenderedBackendInteraction
+            .Handle(UseTextureInterop)
+            .Do(_ => SetStatus(
+                $"Rendered backend: {(UseTextureInterop ? "TextureInterop (Preview)" : "CPU Cell Renderer")}"));
     }
 
     private void CycleRenderMode()

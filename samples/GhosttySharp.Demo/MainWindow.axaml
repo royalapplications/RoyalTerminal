@@ -20,6 +20,7 @@
         <KeyBinding Gesture="Ctrl+Subtract" Command="{Binding DecreaseFontSizeCommand}" />
         <KeyBinding Gesture="Ctrl+OemMinus" Command="{Binding DecreaseFontSizeCommand}" />
         <KeyBinding Gesture="Ctrl+D0" Command="{Binding ResetFontSizeCommand}" />
+        <KeyBinding Gesture="Ctrl+Shift+R" Command="{Binding ToggleRenderedBackendCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+C" Command="{Binding CopySelectionCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+V" Command="{Binding PasteClipboardCommand}" />
         <KeyBinding Gesture="Ctrl+D1" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="0" />
@@ -59,6 +60,10 @@
                             FontSize="10" Padding="8,2"
                             Command="{Binding CycleRenderModeCommand}"
                             ToolTip.Tip="Switch rendering mode (Ghostty Rendered / Ghostty Native / Native VT / Rendered)" />
+                    <Button Content="{Binding RenderedBackendButtonText}" Height="24"
+                            FontSize="10" Padding="8,2"
+                            Command="{Binding ToggleRenderedBackendCommand}"
+                            ToolTip.Tip="Toggle Ghostty rendered backend (TextureInterop / CPU Cell Renderer)" />
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
@@ -85,13 +90,7 @@
             </DockPanel>
         </Border>
 
-        <Panel>
-            <Grid Name="TerminalHost" />
-            <Button HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Content="Some random button."
-                    Padding="20" />
-        </Panel>
+        <Grid Name="TerminalHost" />
     </DockPanel>
 
     <Window.ContextMenu>
