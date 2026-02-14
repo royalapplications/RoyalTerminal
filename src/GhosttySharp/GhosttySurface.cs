@@ -327,7 +327,7 @@ public sealed class GhosttySurface : IDisposable
         {
             if (text.TextPtr == null || text.TextLen == 0)
                 return null;
-            return Encoding.UTF8.GetString(new ReadOnlySpan<byte>(text.TextPtr, (int)text.TextLen));
+            return Encoding.UTF8.GetString(new ReadOnlySpan<byte>(text.TextPtr, checked((int)text.TextLen)));
         }
         finally
         {
@@ -347,7 +347,7 @@ public sealed class GhosttySurface : IDisposable
         {
             if (text.TextPtr == null || text.TextLen == 0)
                 return null;
-            return Encoding.UTF8.GetString(new ReadOnlySpan<byte>(text.TextPtr, (int)text.TextLen));
+            return Encoding.UTF8.GetString(new ReadOnlySpan<byte>(text.TextPtr, checked((int)text.TextLen)));
         }
         finally
         {
@@ -355,25 +355,49 @@ public sealed class GhosttySurface : IDisposable
         }
     }
 
-    /// <summary>Reads text as a Span without allocating a string. Caller must use data before next call.</summary>
-    public unsafe bool TryReadSelectionUtf8(out ReadOnlySpan<byte> utf8Text)
+    /// <summary>
+    /// Reads selection text as UTF-8 bytes using copy-on-read semantics.
+    /// The returned span points to managed memory and is safe to use after this method returns.
+    /// </summary>
+    public bool TryReadSelectionUtf8(out ReadOnlySpan<byte> utf8Text)
+    {
+        if (TryReadSelectionUtf8Copy(out byte[]? utf8Bytes))
+        {
+            utf8Text = utf8Bytes;
+            return true;
+        }
+
+        utf8Text = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Reads selection text as a copied UTF-8 byte array.
+    /// Native memory is always released before returning.
+    /// </summary>
+    public unsafe bool TryReadSelectionUtf8Copy(out byte[]? utf8Text)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        utf8Text = default;
+        utf8Text = null;
+
         GhosttyText text = default;
         if (GhosttyNative.SurfaceReadSelection(_handle, &text) == 0)
             return false;
 
-        if (text.TextPtr == null || text.TextLen == 0)
+        try
+        {
+            if (text.TextPtr == null || text.TextLen == 0)
+                return false;
+
+            int length = checked((int)text.TextLen);
+            utf8Text = new byte[length];
+            new ReadOnlySpan<byte>(text.TextPtr, length).CopyTo(utf8Text);
+            return true;
+        }
+        finally
         {
             GhosttyNative.SurfaceFreeText(_handle, &text);
-            return false;
         }
-
-        utf8Text = new ReadOnlySpan<byte>(text.TextPtr, (int)text.TextLen);
-        // NOTE: Caller must copy data before next native call as we free immediately
-        // For true zero-copy, use ReadSelectionRaw which returns a disposable handle
-        return true;
     }
 
     /// <summary>Updates the surface configuration.</summary>

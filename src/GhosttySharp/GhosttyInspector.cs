@@ -13,6 +13,7 @@ public sealed class GhosttyInspector : IDisposable
 {
     private nint _handle;
     private readonly nint _surfaceHandle;
+    private readonly bool _ownsHandle;
     private bool _disposed;
 
     /// <summary>Gets the native inspector handle.</summary>
@@ -35,6 +36,18 @@ public sealed class GhosttyInspector : IDisposable
         _handle = GhosttyNative.SurfaceInspector(_surfaceHandle);
         if (_handle == nint.Zero)
             throw new InvalidOperationException("Failed to create Ghostty inspector.");
+        _ownsHandle = true;
+    }
+
+    /// <summary>
+    /// Creates a managed wrapper for an existing inspector handle.
+    /// Intended for testing and advanced interop scenarios.
+    /// </summary>
+    internal GhosttyInspector(nint handle, nint surfaceHandle, bool ownsHandle = false)
+    {
+        _handle = handle;
+        _surfaceHandle = surfaceHandle;
+        _ownsHandle = ownsHandle;
     }
 
     /// <summary>Sets the focus state of the inspector.</summary>
@@ -104,7 +117,10 @@ public sealed class GhosttyInspector : IDisposable
 
         if (_handle != nint.Zero)
         {
-            GhosttyNative.InspectorFree(_surfaceHandle);
+            if (_ownsHandle)
+            {
+                GhosttyNative.InspectorFree(_surfaceHandle);
+            }
             _handle = nint.Zero;
         }
     }

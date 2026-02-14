@@ -15,6 +15,7 @@ public sealed class GhosttyApp : IDisposable
 {
     private nint _handle;
     private bool _disposed;
+    private readonly bool _ownsHandle;
     private GCHandle _gcHandle;
     private GhosttyRuntimeConfig _runtimeConfig;
 
@@ -67,6 +68,7 @@ public sealed class GhosttyApp : IDisposable
     public unsafe GhosttyApp(GhosttyConfig config, bool supportsSelectionClipboard = false)
     {
         NativeLibraryLoader.Initialize();
+        _ownsHandle = true;
 
         _gcHandle = GCHandle.Alloc(this);
 
@@ -89,6 +91,16 @@ public sealed class GhosttyApp : IDisposable
 
         if (_handle == nint.Zero)
             throw new InvalidOperationException("Failed to create Ghostty application.");
+    }
+
+    /// <summary>
+    /// Creates a managed wrapper for an existing app handle.
+    /// Intended for testing and advanced interop scenarios.
+    /// </summary>
+    internal GhosttyApp(nint handle, bool ownsHandle = false)
+    {
+        _handle = handle;
+        _ownsHandle = ownsHandle;
     }
 
     /// <summary>Ticks the event loop. Should be called when the wakeup callback fires.</summary>
@@ -234,7 +246,10 @@ public sealed class GhosttyApp : IDisposable
 
         if (_handle != nint.Zero)
         {
-            GhosttyNative.AppFree(_handle);
+            if (_ownsHandle)
+            {
+                GhosttyNative.AppFree(_handle);
+            }
             _handle = nint.Zero;
         }
 

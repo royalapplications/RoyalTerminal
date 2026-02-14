@@ -16,6 +16,7 @@ public sealed class GhosttyConfig : IDisposable
 {
     private nint _handle;
     private bool _disposed;
+    private readonly bool _ownsHandle;
 
     /// <summary>Gets the native handle. Throws if disposed.</summary>
     public nint Handle
@@ -37,14 +38,14 @@ public sealed class GhosttyConfig : IDisposable
         _handle = GhosttyNative.ConfigNew();
         if (_handle == nint.Zero)
             throw new InvalidOperationException("Failed to create Ghostty configuration.");
+        _ownsHandle = true;
     }
 
-    /// <summary>Creates a managed wrapper from an existing native config handle. Does NOT take ownership.</summary>
+    /// <summary>Creates a managed wrapper from an existing native config handle.</summary>
     internal GhosttyConfig(nint handle, bool ownsHandle = true)
     {
         _handle = handle;
-        // If we don't own the handle, mark as disposed so we don't free it
-        _disposed = !ownsHandle;
+        _ownsHandle = ownsHandle;
     }
 
     /// <summary>Clones this configuration into a new independent instance.</summary>
@@ -194,7 +195,10 @@ public sealed class GhosttyConfig : IDisposable
 
         if (_handle != nint.Zero)
         {
-            GhosttyNative.ConfigFree(_handle);
+            if (_ownsHandle)
+            {
+                GhosttyNative.ConfigFree(_handle);
+            }
             _handle = nint.Zero;
         }
     }
