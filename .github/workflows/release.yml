@@ -97,58 +97,64 @@ jobs:
 
   native-linux:
     name: Native (Linux ${{ matrix.arch }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        arch: [x64, arm64]
+        include:
+          - arch: x64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libfontconfig1-dev \
+            libpng-dev \
+            zlib1g-dev \
+            libonig-dev \
+            glslang-dev \
+            libspirv-cross-c-shared-dev
+
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2
 
-      - name: Build libghostty (fallback to libghostty-vt)
+      - name: Build libghostty and libghostty-vt
         working-directory: external/ghostty
         run: |
-          if [ "${{ matrix.arch }}" = "x64" ]; then
-            if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none; then
-              echo "libghostty build failed; falling back to lib-vt"
-              zig build lib-vt -Doptimize=ReleaseFast
-            fi
-          else
-            if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=aarch64-linux; then
-              echo "libghostty build failed; falling back to lib-vt"
-              zig build lib-vt -Doptimize=ReleaseFast -Dtarget=aarch64-linux
-            fi
-          fi
+          zig build -Doptimize=ReleaseFast -Dapp-runtime=none \
+            -fsys=freetype \
+            -fsys=harfbuzz \
+            -fsys=fontconfig \
+            -fsys=libpng \
+            -fsys=zlib \
+            -fsys=oniguruma \
+            -fsys=glslang \
+            -fsys=spirv-cross
 
       - name: Build ghostty-terminal
         working-directory: native/ghostty-terminal
-        run: |
-          if [ "${{ matrix.arch }}" = "x64" ]; then
-            zig build -Doptimize=ReleaseFast
-          else
-            zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux
-          fi
+        run: zig build -Doptimize=ReleaseFast
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
-        run: |
-          if [ "${{ matrix.arch }}" = "x64" ]; then
-            zig build -Doptimize=ReleaseFast
-          else
-            zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux
-          fi
+        run: zig build -Doptimize=ReleaseFast
 
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          find external/ghostty/zig-out -name "*.so*" -exec cp -L {} artifacts/ \;
+          find external/ghostty/zig-out -name "libghostty*.so*" -exec cp -L {} artifacts/ \;
           find native/ghostty-terminal/zig-out -name "libghostty-terminal.so*" -exec cp -L {} artifacts/ \; || true
           find native/ghostty-renderer-capi/zig-out -name "libghostty-renderer-capi.so*" -exec cp -L {} artifacts/ \; || true
           for base in libghostty libghostty-vt libghostty-terminal libghostty-renderer-capi; do
@@ -165,6 +171,7 @@ jobs:
         run: |
           set -euo pipefail
           required=(
+            "libghostty.so"
             "libghostty-vt.so"
             "libghostty-terminal.so"
             "libghostty-renderer-capi.so"
@@ -175,9 +182,6 @@ jobs:
               exit 1
             fi
           done
-          if [ ! -f "artifacts/libghostty.so" ]; then
-            echo "::warning::Optional Linux native artifact missing: libghostty.so"
-          fi
 
       - name: Upload
         uses: actions/upload-artifact@v4
@@ -199,13 +203,9 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build libghostty (fallback to libghostty-vt)
+      - name: Build libghostty and libghostty-vt
         working-directory: external/ghostty
-        run: |
-          if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none; then
-            echo "libghostty build failed; falling back to lib-vt"
-            zig build lib-vt -Doptimize=ReleaseFast
-          fi
+        run: zig build -Doptimize=ReleaseFast -Dapp-runtime=none
 
       - name: Build ghostty-terminal
         working-directory: native/ghostty-terminal
@@ -221,6 +221,7 @@ jobs:
           mkdir -p artifacts
           find external/ghostty/zig-out -name "*.dll" -exec cp -L {} artifacts/ \;
           find external/ghostty/zig-out -name "*.lib" -exec cp -L {} artifacts/ \;
+          find external/ghostty/zig-out -name "libghostty.so" -exec cp -L {} artifacts/ \; || true
           find native/ghostty-terminal/zig-out -name "*ghostty-terminal*.dll" -exec cp -L {} artifacts/ \; || true
           find native/ghostty-terminal/zig-out -name "*ghostty-terminal*.lib" -exec cp -L {} artifacts/ \; || true
           find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.dll" -exec cp -L {} artifacts/ \; || true
@@ -230,6 +231,9 @@ jobs:
               cp -f "artifacts/lib${base}.dll" "artifacts/${base}.dll"
             fi
           done
+          if [ ! -f "artifacts/ghostty.dll" ] && [ -f "artifacts/libghostty.so" ]; then
+            cp -f "artifacts/libghostty.so" "artifacts/ghostty.dll"
+          fi
           ls -la artifacts/
 
       - name: Verify required native artifacts (Windows)
@@ -237,6 +241,7 @@ jobs:
         run: |
           set -euo pipefail
           required=(
+            "ghostty.dll"
             "ghostty-vt.dll"
             "ghostty-terminal.dll"
             "ghostty-renderer-capi.dll"
@@ -247,9 +252,6 @@ jobs:
               exit 1
             fi
           done
-          if [ ! -f "artifacts/ghostty.dll" ]; then
-            echo "::warning::Optional Windows native artifact missing: ghostty.dll"
-          fi
 
       - name: Upload
         uses: actions/upload-artifact@v4
@@ -373,21 +375,11 @@ jobs:
           check_files "src/GhosttySharp.Native.OSX/runtimes/osx-x64/native" \
             "libghostty.dylib" "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
           check_files "src/GhosttySharp.Native.Linux64/runtimes/linux-x64/native" \
-            "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
+            "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
           check_files "src/GhosttySharp.Native.Linux64/runtimes/linux-arm64/native" \
-            "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
+            "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
           check_files "src/GhosttySharp.Native.Win64/runtimes/win-x64/native" \
-            "ghostty-vt.dll" "ghostty-terminal.dll" "ghostty-renderer-capi.dll"
-
-          if [ ! -f "src/GhosttySharp.Native.Linux64/runtimes/linux-x64/native/libghostty.so" ]; then
-            echo "::warning::Optional Linux x64 artifact missing: libghostty.so"
-          fi
-          if [ ! -f "src/GhosttySharp.Native.Linux64/runtimes/linux-arm64/native/libghostty.so" ]; then
-            echo "::warning::Optional Linux arm64 artifact missing: libghostty.so"
-          fi
-          if [ ! -f "src/GhosttySharp.Native.Win64/runtimes/win-x64/native/ghostty.dll" ]; then
-            echo "::warning::Optional Windows artifact missing: ghostty.dll"
-          fi
+            "ghostty.dll" "ghostty-vt.dll" "ghostty-terminal.dll" "ghostty-renderer-capi.dll"
 
       # Pack managed packages with version from tag
       - name: Pack GhosttySharp
