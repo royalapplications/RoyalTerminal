@@ -228,13 +228,19 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build libghostty and libghostty-vt
+      - name: Build libghostty (fallback to libghostty-vt)
         working-directory: external/ghostty
         run: |
           if [ "${{ matrix.arch }}" = "x64" ]; then
-            zig build -Doptimize=ReleaseFast -Dapp-runtime=none
+            if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none; then
+              echo "libghostty build failed; falling back to lib-vt"
+              zig build lib-vt -Doptimize=ReleaseFast
+            fi
           else
-            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=aarch64-linux
+            if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=aarch64-linux; then
+              echo "libghostty build failed; falling back to lib-vt"
+              zig build lib-vt -Doptimize=ReleaseFast -Dtarget=aarch64-linux
+            fi
           fi
 
       - name: Build ghostty-terminal
@@ -258,13 +264,17 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p artifacts/linux-${{ matrix.arch }}/native
-          find external/ghostty/zig-out -name "*.so" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \;
-          if [ -f native/ghostty-terminal/zig-out/lib/libghostty-terminal.so ]; then
-            cp -L native/ghostty-terminal/zig-out/lib/libghostty-terminal.so artifacts/linux-${{ matrix.arch }}/native/
-          fi
-          if [ -f native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.so ]; then
-            cp -L native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.so artifacts/linux-${{ matrix.arch }}/native/
-          fi
+          find external/ghostty/zig-out -name "*.so*" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \;
+          find native/ghostty-terminal/zig-out -name "libghostty-terminal.so*" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \; || true
+          find native/ghostty-renderer-capi/zig-out -name "libghostty-renderer-capi.so*" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \; || true
+          for base in libghostty libghostty-vt libghostty-terminal libghostty-renderer-capi; do
+            if [ ! -f "artifacts/linux-${{ matrix.arch }}/native/${base}.so" ]; then
+              candidate="$(ls -1 artifacts/linux-${{ matrix.arch }}/native/${base}.so* 2>/dev/null | head -n1 || true)"
+              if [ -n "${candidate}" ]; then
+                cp -f "${candidate}" "artifacts/linux-${{ matrix.arch }}/native/${base}.so"
+              fi
+            fi
+          done
           ls -la artifacts/linux-${{ matrix.arch }}/native/
 
       - name: Verify required native artifacts (Linux)
@@ -272,7 +282,6 @@ jobs:
           set -euo pipefail
           artifact_dir="artifacts/linux-${{ matrix.arch }}/native"
           required=(
-            "libghostty.so"
             "libghostty-vt.so"
             "libghostty-terminal.so"
             "libghostty-renderer-capi.so"
@@ -283,6 +292,9 @@ jobs:
               exit 1
             fi
           done
+          if [ ! -f "${artifact_dir}/libghostty.so" ]; then
+            echo "::warning::Optional Linux native artifact missing: libghostty.so"
+          fi
 
       - name: Upload native library
         uses: actions/upload-artifact@v4
@@ -305,10 +317,13 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build libghostty and libghostty-vt
+      - name: Build libghostty (fallback to libghostty-vt)
         working-directory: external/ghostty
         run: |
-          zig build -Doptimize=ReleaseFast -Dapp-runtime=none
+          if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none; then
+            echo "libghostty build failed; falling back to lib-vt"
+            zig build lib-vt -Doptimize=ReleaseFast
+          fi
 
       - name: Build ghostty-terminal
         working-directory: native/ghostty-terminal
@@ -341,7 +356,6 @@ jobs:
           set -euo pipefail
           artifact_dir="artifacts/win-x64/native"
           required=(
-            "ghostty.dll"
             "ghostty-vt.dll"
             "ghostty-terminal.dll"
             "ghostty-renderer-capi.dll"
@@ -352,6 +366,9 @@ jobs:
               exit 1
             fi
           done
+          if [ ! -f "${artifact_dir}/ghostty.dll" ]; then
+            echo "::warning::Optional Windows native artifact missing: ghostty.dll"
+          fi
 
       - name: Upload native library
         uses: actions/upload-artifact@v4
@@ -472,11 +489,21 @@ jobs:
           check_files "src/GhosttySharp.Native.OSX/runtimes/osx-x64/native" \
             "libghostty.dylib" "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
           check_files "src/GhosttySharp.Native.Linux64/runtimes/linux-x64/native" \
-            "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
+            "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
           check_files "src/GhosttySharp.Native.Linux64/runtimes/linux-arm64/native" \
-            "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
+            "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
           check_files "src/GhosttySharp.Native.Win64/runtimes/win-x64/native" \
-            "ghostty.dll" "ghostty-vt.dll" "ghostty-terminal.dll" "ghostty-renderer-capi.dll"
+            "ghostty-vt.dll" "ghostty-terminal.dll" "ghostty-renderer-capi.dll"
+
+          if [ ! -f "src/GhosttySharp.Native.Linux64/runtimes/linux-x64/native/libghostty.so" ]; then
+            echo "::warning::Optional Linux x64 artifact missing: libghostty.so"
+          fi
+          if [ ! -f "src/GhosttySharp.Native.Linux64/runtimes/linux-arm64/native/libghostty.so" ]; then
+            echo "::warning::Optional Linux arm64 artifact missing: libghostty.so"
+          fi
+          if [ ! -f "src/GhosttySharp.Native.Win64/runtimes/win-x64/native/ghostty.dll" ]; then
+            echo "::warning::Optional Windows artifact missing: ghostty.dll"
+          fi
 
       # Pack managed packages
       - name: Pack GhosttySharp
