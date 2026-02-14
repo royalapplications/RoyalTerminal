@@ -25,6 +25,10 @@ pub fn build(b: *std.Build) void {
     const ghostty = b.dependency("ghostty", .{
         .target = target,
         .optimize = optimize,
+        // This project only consumes the VT Zig module; avoid building
+        // Ghostty macOS artifacts (xcframework/app) in dependency builds.
+        .@"emit-xcframework" = false,
+        .@"emit-macos-app" = false,
     });
 
     // Get the Zig-only VT module. We use "ghostty-vt" (not "ghostty-vt-c")
