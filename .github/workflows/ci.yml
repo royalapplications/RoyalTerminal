@@ -148,13 +148,22 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build libghostty-vt
+      - name: Build libghostty and libghostty-vt
         working-directory: external/ghostty
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            zig build lib-vt -Doptimize=ReleaseFast
+            zig build -Doptimize=ReleaseFast -Dapp-runtime=none
           else
-            zig build lib-vt -Doptimize=ReleaseFast -Dtarget=x86_64-macos
+            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=x86_64-macos
+          fi
+
+      - name: Build ghostty-terminal
+        working-directory: native/ghostty-terminal
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            zig build -Doptimize=ReleaseFast
+          else
+            zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos
           fi
 
       - name: Build ghostty-renderer-capi
@@ -170,6 +179,9 @@ jobs:
         run: |
           mkdir -p artifacts/osx-${{ matrix.arch }}/native
           find external/ghostty/zig-out -name "*.dylib" -exec cp -L {} artifacts/osx-${{ matrix.arch }}/native/ \;
+          if [ -f native/ghostty-terminal/zig-out/lib/libghostty-terminal.dylib ]; then
+            cp -L native/ghostty-terminal/zig-out/lib/libghostty-terminal.dylib artifacts/osx-${{ matrix.arch }}/native/
+          fi
           if [ -f native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib ]; then
             cp -L native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib artifacts/osx-${{ matrix.arch }}/native/
           fi
