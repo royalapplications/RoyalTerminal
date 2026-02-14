@@ -6,6 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\GhosttySharp.Rendering.Contracts\GhosttySharp.Rendering.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\GhosttySharp.Rendering.Interop\GhosttySharp.Rendering.Interop.csproj" />
+    <ProjectReference Include="..\..\src\GhosttySharp.Rendering.Interop.Skia\GhosttySharp.Rendering.Interop.Skia.csproj" />
+    <ProjectReference Include="..\..\src\GhosttySharp.Avalonia.Rendering\GhosttySharp.Avalonia.Rendering.csproj" />
     <ProjectReference Include="..\..\src\GhosttySharp\GhosttySharp.csproj" />
     <ProjectReference Include="..\..\src\GhosttySharp.Avalonia\GhosttySharp.Avalonia.csproj" />
     <ProjectReference Include="..\..\samples\GhosttySharp.Demo\GhosttySharp.Demo.csproj" />

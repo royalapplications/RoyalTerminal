@@ -224,6 +224,50 @@ public class HeadlessSkiaRenderingTests
     }
 
     [Fact]
+    public void Renderer_InvalidCodepoint_DoesNotAbortFrameAndStillDrawsValidCells()
+    {
+        var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        var screen = new TerminalScreen(80, 24);
+
+        var row = screen.GetViewportRow(0);
+        row[0].Codepoint = 0x110000; // Invalid Unicode scalar value
+        row[0].Foreground = 0xFFFFFFFF;
+        row[1].Codepoint = 'A';
+        row[1].Foreground = 0xFFFFFFFF;
+        row[1].Background = 0xFF000000;
+
+        var width = (int)(80 * renderer.CellWidth);
+        var height = (int)(24 * renderer.CellHeight);
+        using var surface = SKSurface.Create(new SKImageInfo(width, height));
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using var snapshot = surface.Snapshot();
+        using var pixmap = snapshot.PeekPixels();
+
+        int cellWidth = Math.Max(1, (int)Math.Ceiling(renderer.CellWidth));
+        int cellHeight = Math.Max(1, (int)Math.Ceiling(renderer.CellHeight));
+        int startX = cellWidth;
+        int endX = Math.Min(pixmap.Width, cellWidth * 2);
+        bool hasNonBlackPixel = false;
+
+        for (int y = 0; y < cellHeight && !hasNonBlackPixel; y++)
+        {
+            for (int x = startX; x < endX && !hasNonBlackPixel; x++)
+            {
+                SKColor pixel = pixmap.GetPixelColor(x, y);
+                if (pixel.Red > 10 || pixel.Green > 10 || pixel.Blue > 10)
+                {
+                    hasNonBlackPixel = true;
+                }
+            }
+        }
+
+        Assert.True(hasNonBlackPixel, "Valid neighboring cells should still be rendered when one codepoint is invalid.");
+    }
+
+    [Fact]
     public void Renderer_FontSizeChange_UpdatesCellDimensions()
     {
         var renderer = new SkiaTerminalRenderer("Consolas", 14f);

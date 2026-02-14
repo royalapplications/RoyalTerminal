@@ -11,14 +11,15 @@
     <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
     <ProjectReference Include="..\GhosttySharp.Terminal.Services.Contracts\GhosttySharp.Terminal.Services.Contracts.csproj" />
     <ProjectReference Include="..\GhosttySharp.Terminal.Services\GhosttySharp.Terminal.Services.csproj" />
-    <ProjectReference Include="..\GhosttySharp.Avalonia.Rendering.Skia\GhosttySharp.Avalonia.Rendering.Skia.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Rendering.Skia\GhosttySharp.Rendering.Skia.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Avalonia.Rendering\GhosttySharp.Avalonia.Rendering.csproj" />
     <ProjectReference Include="..\GhosttySharp.Terminal.Vt.Default\GhosttySharp.Terminal.Vt.Default.csproj" />
     <ProjectReference Include="..\GhosttySharp.Terminal.Pty.Platform\GhosttySharp.Terminal.Pty.Platform.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" VersionOverride="11.3.0" />
-    <PackageReference Include="Avalonia.Skia" VersionOverride="11.3.0" />
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Skia" />
     <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 

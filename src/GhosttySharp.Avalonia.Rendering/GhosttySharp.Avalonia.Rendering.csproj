@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>GhosttySharp.Avalonia.Rendering</PackageId>
+    <Description>Avalonia-specific render target acquisition and draw-loop adapters for Ghostty renderer interop.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GhosttySharp.Rendering.Contracts\GhosttySharp.Rendering.Contracts.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Rendering.Interop.Skia\GhosttySharp.Rendering.Interop.Skia.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Rendering.Skia\GhosttySharp.Rendering.Skia.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Skia" />
+  </ItemGroup>
+
+</Project>

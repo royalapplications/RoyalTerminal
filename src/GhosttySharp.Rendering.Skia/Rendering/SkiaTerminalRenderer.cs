@@ -4,6 +4,7 @@
 using SkiaSharp;
 using System.Buffers;
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace GhosttySharp.Avalonia.Rendering;
 
@@ -19,6 +20,7 @@ namespace GhosttySharp.Avalonia.Rendering;
 public sealed class SkiaTerminalRenderer : IDisposable
 {
     private readonly GlyphCache _glyphCache;
+    private const float CellMetricEpsilon = 0.01f;
     private float _cellWidth;
     private float _cellHeight;
     private float _fontSize;
@@ -101,9 +103,36 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _cellHeight = h;
 
         using var font = _glyphCache.CreateFont(fontSize);
-        _baseline = -font.Metrics.Ascent;
+        _baseline = ComputeBaseline(font.Metrics, _cellHeight);
 
         _glyphCache.Clear();
+    }
+
+    /// <summary>
+    /// Overrides the logical cell width/height used for layout.
+    /// This is useful when external terminal engines (e.g. Ghostty surfaces)
+    /// report exact grid metrics that differ from local font measurement.
+    /// </summary>
+    public void SetCellSize(float cellWidth, float cellHeight)
+    {
+        if (cellWidth <= 0 || cellHeight <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(cellWidth),
+                "Cell dimensions must be greater than zero.");
+        }
+
+        if (Math.Abs(_cellWidth - cellWidth) < CellMetricEpsilon &&
+            Math.Abs(_cellHeight - cellHeight) < CellMetricEpsilon)
+        {
+            return;
+        }
+
+        _cellWidth = cellWidth;
+        _cellHeight = cellHeight;
+
+        using var font = _glyphCache.CreateFont(_fontSize);
+        _baseline = ComputeBaseline(font.Metrics, _cellHeight);
     }
 
     /// <summary>
@@ -194,7 +223,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         for (var col = 0; col < cells.Length; col++)
         {
             ref readonly var cell = ref cells[col];
-            if (!cell.HasContent) continue;
+            if (!cell.HasContent || !Rune.IsValid(cell.Codepoint)) continue;
 
             var bold = (cell.Attributes & CellAttributes.Bold) != 0;
             var italic = (cell.Attributes & CellAttributes.Italic) != 0;
@@ -304,6 +333,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _cursorPaint.Dispose();
         _selectionPaint.Dispose();
         _glyphCache.Dispose();
+    }
+
+    private static float ComputeBaseline(SKFontMetrics metrics, float cellHeight)
+    {
+        float textHeight = metrics.Descent - metrics.Ascent;
+        float topInset = Math.Max(0f, (cellHeight - textHeight) * 0.5f);
+        return topInset - metrics.Ascent;
     }
 }
 

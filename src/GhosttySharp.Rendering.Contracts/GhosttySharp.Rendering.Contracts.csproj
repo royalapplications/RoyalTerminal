@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>GhosttySharp.Rendering.Contracts</PackageId>
+    <Description>Backend-agnostic contracts for GPU terminal rendering integration.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+</Project>
