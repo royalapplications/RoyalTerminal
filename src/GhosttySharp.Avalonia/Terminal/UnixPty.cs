@@ -87,9 +87,10 @@ public sealed class UnixPty : IPty
             }
         }
 
-        // Resolve raw function pointers from libc
-        var libcName = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "libSystem.dylib" : "libc";
-        var libc = NativeLibrary.Load(libcName);
+        // Resolve raw function pointers from libc.
+        // On Linux, soname availability can vary by distro/container image,
+        // so probe a small set of common candidates.
+        var libc = LoadLibcHandle();
         var pChdir = (delegate* unmanaged[Cdecl]<byte*, int>)
             NativeLibrary.GetExport(libc, "chdir");
         var pSetenv = (delegate* unmanaged[Cdecl]<byte*, byte*, int, int>)
@@ -314,6 +315,30 @@ public sealed class UnixPty : IPty
     }
 
     #region Helpers
+
+    private static nint LoadLibcHandle()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return NativeLibrary.Load("libSystem.dylib");
+        }
+
+        // Linux fallback order:
+        // - libc.so.6: glibc soname
+        // - libc.so: common linker name
+        // - libc: generic probe used by DllImport
+        string[] candidates = ["libc.so.6", "libc.so", "libc"];
+        foreach (string candidate in candidates)
+        {
+            if (NativeLibrary.TryLoad(candidate, out nint handle))
+            {
+                return handle;
+            }
+        }
+
+        throw new DllNotFoundException(
+            "Unable to load libc for UnixPty. Tried: libc.so.6, libc.so, libc.");
+    }
 
     private static string DetectShell()
     {
