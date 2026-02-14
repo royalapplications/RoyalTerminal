@@ -2,6 +2,9 @@
 // GhosttySharp.Tests — Cross-platform PTY contract tests.
 
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Diagnostics;
+using System.Reflection;
 using GhosttySharp.Avalonia.Terminal;
 using Xunit;
 
@@ -109,5 +112,84 @@ public class PtyContractTests
             $"Did not observe PTY marker in output. Current output: {output}");
         pty.Stop();
         Assert.False(pty.IsRunning);
+    }
+
+    [Fact]
+    public void UnixPty_Resize_UpdatesTerminalSize()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        using UnixPty pty = new();
+        pty.Start(shell: "/bin/sh", columns: 80, rows: 24, workingDirectory: Environment.CurrentDirectory);
+
+        string? slavePath = (string?)typeof(UnixPty)
+            .GetField("_slavePtyPath", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(pty);
+        Assert.False(string.IsNullOrWhiteSpace(slavePath));
+
+        static bool TryParseSize(string text, out (int Rows, int Cols) size)
+        {
+            MatchCollection matches = Regex.Matches(text, @"(?<rows>\d+)\s+(?<cols>\d+)");
+            if (matches.Count == 0)
+            {
+                size = default;
+                return false;
+            }
+
+            Match match = matches[^1];
+            size = (
+                int.Parse(match.Groups["rows"].Value),
+                int.Parse(match.Groups["cols"].Value));
+            return true;
+        }
+
+        (int Rows, int Cols) QueryPtySize(string path)
+        {
+            string sttyPath = File.Exists("/bin/stty") ? "/bin/stty" : "stty";
+            ProcessStartInfo startInfo = new(sttyPath)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+
+            startInfo.ArgumentList.Add(OperatingSystem.IsMacOS() ? "-f" : "-F");
+            startInfo.ArgumentList.Add(path);
+            startInfo.ArgumentList.Add("size");
+
+            using Process? process = Process.Start(startInfo);
+            Assert.NotNull(process);
+            Assert.True(process.WaitForExit(5000), "stty size command timed out.");
+
+            string stdOut = process.StandardOutput.ReadToEnd();
+            string stdErr = process.StandardError.ReadToEnd();
+            Assert.Equal(0, process.ExitCode);
+            Assert.True(
+                TryParseSize(stdOut, out (int Rows, int Cols) parsed),
+                $"Could not parse stty size output. stdout: {stdOut} stderr: {stdErr}");
+
+            return parsed;
+        }
+
+        // Give the shell process a brief moment to settle and claim the slave PTY.
+        Thread.Sleep(150);
+
+        (int initialRows, int initialCols) = QueryPtySize(slavePath!);
+        Assert.Equal(24, initialRows);
+        Assert.Equal(80, initialCols);
+
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            pty.Resize(140, 45);
+            Thread.Sleep(150);
+
+            (int resizedRows, int resizedCols) = QueryPtySize(slavePath!);
+            Assert.Equal(45, resizedRows);
+            Assert.Equal(140, resizedCols);
+        }
     }
 }

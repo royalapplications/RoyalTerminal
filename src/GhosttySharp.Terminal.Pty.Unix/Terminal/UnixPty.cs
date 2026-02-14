@@ -7,6 +7,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
+using System.Diagnostics;
 
 namespace GhosttySharp.Avalonia.Terminal;
 
@@ -21,6 +22,7 @@ public sealed class UnixPty : IPty
 {
     private int _masterFd = -1;
     private int _childPid = -1;
+    private string? _slavePtyPath;
     private bool _disposed;
     private Thread? _readThread;
     private readonly CancellationTokenSource _cts = new();
@@ -141,6 +143,7 @@ public sealed class UnixPty : IPty
         // ---- PARENT PROCESS ----
         // Free the native memory (child has its own copy after fork)
         FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, envPairs);
+        _slavePtyPath = TryGetSlavePtyPath(_masterFd);
 
         // Start reading from the master FD
         _readThread = new Thread(ReadLoop)
@@ -196,15 +199,46 @@ public sealed class UnixPty : IPty
     {
         if (_masterFd < 0 || _disposed) return;
 
-        var winSize = new WinSize
-        {
-            ws_col = (ushort)columns,
-            ws_row = (ushort)rows,
-            ws_xpixel = (ushort)widthPixels,
-            ws_ypixel = (ushort)heightPixels,
-        };
+        // macOS: P/Invoking variadic ioctl for TIOCSWINSZ can produce corrupted
+        // winsize values. Using stty against the slave PTY path is stable.
+        var resized = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) &&
+            TryResizeWithStty(columns, rows);
 
-        Ioctl(_masterFd, TIOCSWINSZ, ref winSize);
+        if (!resized)
+        {
+            var winSize = new WinSize
+            {
+                ws_col = (ushort)columns,
+                ws_row = (ushort)rows,
+                ws_xpixel = (ushort)widthPixels,
+                ws_ypixel = (ushort)heightPixels,
+            };
+
+            unsafe
+            {
+                _ = Ioctl(_masterFd, TIOCSWINSZ, (nint)(&winSize));
+            }
+        }
+
+        // Some full-screen TUI apps only redraw after SIGWINCH reaches the
+        // foreground process group; proactively signal it after window-size update.
+        try
+        {
+            int foregroundPgrp = Tcgetpgrp(_masterFd);
+            if (foregroundPgrp > 0)
+            {
+                // Negative PID targets the entire process group.
+                _ = Kill(-foregroundPgrp, SIGWINCH);
+            }
+            else if (_childPid > 0)
+            {
+                _ = Kill(_childPid, SIGWINCH);
+            }
+        }
+        catch
+        {
+            // Best effort only.
+        }
     }
 
     private void ReadLoop()
@@ -291,6 +325,7 @@ public sealed class UnixPty : IPty
         {
             try { PosixClose(fd); } catch { }
         }
+        _slavePtyPath = null;
 
         // Wait for read thread (don't block too long)
         _readThread?.Join(TimeSpan.FromMilliseconds(500));
@@ -376,15 +411,89 @@ public sealed class UnixPty : IPty
         }
     }
 
+    private bool TryResizeWithStty(int columns, int rows)
+    {
+        string? slavePath = _slavePtyPath;
+        if (string.IsNullOrWhiteSpace(slavePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            string sttyPath = File.Exists("/bin/stty") ? "/bin/stty" : "stty";
+            ProcessStartInfo startInfo = new(sttyPath)
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+
+            // macOS uses -f <device>; Linux uses -F <device>.
+            startInfo.ArgumentList.Add(RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "-f" : "-F");
+            startInfo.ArgumentList.Add(slavePath);
+            startInfo.ArgumentList.Add("rows");
+            startInfo.ArgumentList.Add(rows.ToString());
+            startInfo.ArgumentList.Add("cols");
+            startInfo.ArgumentList.Add(columns.ToString());
+
+            using Process? process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return false;
+            }
+
+            if (!process.WaitForExit(500))
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // Best effort cleanup only.
+                }
+
+                return false;
+            }
+
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string? TryGetSlavePtyPath(int masterFd)
+    {
+        if (masterFd < 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            nint ptr = PtsName(masterFd);
+            return ptr == nint.Zero ? null : Marshal.PtrToStringAnsi(ptr);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     #endregion
 
     #region Native Interop
 
-    private static readonly nuint TIOCSWINSZ = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-        ? 0x80087467u
-        : 0x5414u;
+    private static readonly ulong TIOCSWINSZ = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+        ? 0x80087467UL
+        : 0x5414UL;
 
     private const int WNOHANG = 1;
+    private const int SIGWINCH = 28;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WinSize
@@ -429,14 +538,20 @@ public sealed class UnixPty : IPty
     [DllImport("libc", EntryPoint = "close")]
     private static extern int PosixClose(int fd);
 
-    [DllImport("libc", EntryPoint = "ioctl")]
-    private static extern int Ioctl(int fd, nuint request, ref WinSize winSize);
+    [DllImport("libc", EntryPoint = "ioctl", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int Ioctl(int fd, ulong request, nint arg);
+
+    [DllImport("libc", EntryPoint = "ptsname")]
+    private static extern nint PtsName(int fd);
 
     [DllImport("libc", EntryPoint = "waitpid")]
     private static extern int Waitpid(int pid, out int status, int options);
 
     [DllImport("libc", EntryPoint = "kill")]
     private static extern int Kill(int pid, int sig);
+
+    [DllImport("libc", EntryPoint = "tcgetpgrp")]
+    private static extern int Tcgetpgrp(int fd);
 
     #endregion
 }
