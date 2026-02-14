@@ -80,16 +80,11 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     #region Styled Properties
 
-    private static readonly string DefaultMonoFont =
-        RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "Menlo" :
-        RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "DejaVu Sans Mono" :
-        "Consolas";
-
     public static readonly StyledProperty<float> TerminalFontSizeProperty =
         AvaloniaProperty.Register<GhosttyRenderedTerminalControl, float>(nameof(TerminalFontSize), 14.0f);
 
     public static readonly StyledProperty<string> FontFamilyNameProperty =
-        AvaloniaProperty.Register<GhosttyRenderedTerminalControl, string>(nameof(FontFamilyName), DefaultMonoFont);
+        AvaloniaProperty.Register<GhosttyRenderedTerminalControl, string>(nameof(FontFamilyName), TerminalDefaults.DefaultMonoFont);
 
     public static readonly StyledProperty<string?> WorkingDirectoryProperty =
         AvaloniaProperty.Register<GhosttyRenderedTerminalControl, string?>(nameof(WorkingDirectory));
@@ -725,57 +720,12 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     private void OnClipboardReadRequested(GhosttyClipboard clipboard, nint state)
     {
-        Dispatcher.UIThread.Post(async () =>
-        {
-            try
-            {
-                var topLevel = TopLevel.GetTopLevel(this);
-                var avClipboard = topLevel?.Clipboard;
-                if (avClipboard is null || _surface is null) return;
-
-                var text = await avClipboard.GetTextAsync();
-                if (text is not null)
-                    _surface.CompleteClipboardRequest(text, state, true);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"Clipboard read error: {ex.Message}", ex);
-            }
-        });
+        GhosttyClipboardBridge.HandleReadRequest(this, _surface, state, Logger);
     }
 
     private void OnClipboardWriteRequested(GhosttyClipboard clipboard, nint contentPtr, nuint len, bool confirm)
     {
-        string? clipText = null;
-        unsafe
-        {
-            for (nuint i = 0; i < len; i++)
-            {
-                var content = (GhosttyClipboardContent*)((byte*)contentPtr +
-                    (nint)(i * (nuint)sizeof(GhosttyClipboardContent)));
-                if (content->Data != null)
-                    clipText = Marshal.PtrToStringUTF8((nint)content->Data);
-            }
-        }
-
-        if (clipText is null) return;
-
-        var textToWrite = clipText;
-        Dispatcher.UIThread.Post(async () =>
-        {
-            try
-            {
-                var topLevel = TopLevel.GetTopLevel(this);
-                var avClipboard = topLevel?.Clipboard;
-                if (avClipboard is null) return;
-
-                await avClipboard.SetTextAsync(textToWrite);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"Clipboard write error: {ex.Message}", ex);
-            }
-        });
+        GhosttyClipboardBridge.HandleWriteRequest(this, contentPtr, len, Logger);
     }
 
     private void OnSurfaceCloseRequested(bool processAlive)
@@ -796,26 +746,13 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     /// <summary>Copies the selection to clipboard.</summary>
     public async Task CopySelectionAsync()
     {
-        if (_surface is null) return;
-        var text = _surface.ReadSelection();
-        if (string.IsNullOrEmpty(text)) return;
-
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-        if (clipboard is not null)
-            await clipboard.SetTextAsync(text);
+        await GhosttyClipboardBridge.CopySelectionAsync(this, _surface);
     }
 
     /// <summary>Pastes from clipboard.</summary>
     public async Task PasteAsync()
     {
-        if (_surface is null) return;
-
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-        if (clipboard is null) return;
-
-        var text = await clipboard.GetTextAsync();
-        if (!string.IsNullOrEmpty(text))
-            _surface.SendText(text);
+        await GhosttyClipboardBridge.PasteAsync(this, _surface);
     }
 
     /// <summary>Sends text to the terminal.</summary>

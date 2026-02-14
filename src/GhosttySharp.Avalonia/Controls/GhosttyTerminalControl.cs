@@ -1,7 +1,6 @@
 // Licensed under the MIT License.
 // GhosttySharp.Avalonia - Main terminal control.
 
-using System.Runtime.InteropServices;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -34,15 +33,9 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
 {
     #region Styled Properties
 
-    /// <summary>Platform-appropriate default monospace font.</summary>
-    private static readonly string DefaultMonoFont =
-        RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "Menlo" :
-        RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "DejaVu Sans Mono" :
-        "Consolas";
-
     /// <summary>The font family used for terminal text.</summary>
     public static readonly StyledProperty<string> FontFamilyNameProperty =
-        AvaloniaProperty.Register<GhosttyTerminalControl, string>(nameof(FontFamilyName), DefaultMonoFont);
+        AvaloniaProperty.Register<GhosttyTerminalControl, string>(nameof(FontFamilyName), TerminalDefaults.DefaultMonoFont);
 
     /// <summary>The font size for terminal text.</summary>
     public static readonly StyledProperty<double> TerminalFontSizeProperty =
@@ -864,37 +857,5 @@ internal static class RendererExtensions
     internal static void SetCursorVisible(this SkiaTerminalRenderer renderer, bool visible)
     {
         renderer.CursorVisible = visible;
-    }
-}
-
-/// <summary>
-/// Event args for terminal data events.
-/// </summary>
-public class TerminalDataEventArgs : EventArgs
-{
-    /// <summary>The raw terminal data.</summary>
-    public ReadOnlyMemory<byte> Data { get; }
-
-    /// <summary>The raw terminal data as a span.</summary>
-    public ReadOnlySpan<byte> DataSpan => Data.Span;
-
-    public TerminalDataEventArgs(ReadOnlyMemory<byte> data) => Data = data;
-}
-
-/// <summary>
-/// Event args for terminal resize events.
-/// </summary>
-public class TerminalSizeEventArgs : EventArgs
-{
-    /// <summary>New column count.</summary>
-    public int Columns { get; }
-
-    /// <summary>New row count.</summary>
-    public int Rows { get; }
-
-    public TerminalSizeEventArgs(int columns, int rows)
-    {
-        Columns = columns;
-        Rows = rows;
     }
 }
