@@ -12,6 +12,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using GhosttySharp.Avalonia.Diagnostics;
 using GhosttySharp.Native;
 
 namespace GhosttySharp.Avalonia;
@@ -28,6 +29,7 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
     private GhosttySurface? _surface;
     private nint _nsView;
     private bool _disposed;
+    private IGhosttyLogger _logger = NullGhosttyLogger.Instance;
 
     /// <summary>Fired when the surface title changes.</summary>
     public event EventHandler<string>? TitleChanged;
@@ -73,6 +75,16 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
     {
         get => GetValue(CommandProperty);
         set => SetValue(CommandProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the logger used for control diagnostics.
+    /// Defaults to a no-op logger.
+    /// </summary>
+    public IGhosttyLogger Logger
+    {
+        get => _logger;
+        set => _logger = value ?? NullGhosttyLogger.Instance;
     }
 
     static GhosttyNativeTerminalControl()
@@ -175,12 +187,12 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
             _surface.SetContentScale(scale, scale);
             _surface.SetFocus(IsFocused);
 
-            System.Diagnostics.Debug.WriteLine(
+            Logger.Debug(
                 $"Ghostty surface created: NSView=0x{_nsView:X}, size={bounds.Width:F0}x{bounds.Height:F0}");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Failed to create Ghostty surface: {ex}");
+            Logger.Error("Failed to create Ghostty surface.", ex);
         }
     }
 
@@ -453,7 +465,7 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Clipboard read error: {ex.Message}");
+                Logger.Error($"Clipboard read error: {ex.Message}", ex);
             }
         });
     }
@@ -490,7 +502,7 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Clipboard write error: {ex.Message}");
+                Logger.Error($"Clipboard write error: {ex.Message}", ex);
             }
         });
     }

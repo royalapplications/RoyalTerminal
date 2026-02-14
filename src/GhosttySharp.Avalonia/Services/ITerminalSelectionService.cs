@@ -1,0 +1,35 @@
+// Licensed under the MIT License.
+// GhosttySharp.Avalonia — Terminal selection service abstraction.
+
+using Avalonia.Controls;
+using GhosttySharp.Avalonia.Rendering;
+
+namespace GhosttySharp.Avalonia.Services;
+
+/// <summary>
+/// Handles selection operations such as copy, paste, and clearing selection state.
+/// </summary>
+public interface ITerminalSelectionService
+{
+    /// <summary>
+    /// Copies selected text to the clipboard.
+    /// </summary>
+    Task CopySelectionAsync(
+        Control owner,
+        ITerminalSessionService sessionService,
+        TerminalScreen? screen,
+        SkiaTerminalRenderer? renderer);
+
+    /// <summary>
+    /// Pastes clipboard text using the provided send-input callback.
+    /// </summary>
+    Task PasteAsync(Control owner, Action<string> sendInput);
+
+    /// <summary>
+    /// Clears current selection and invalidates rendering.
+    /// </summary>
+    void ClearSelection(
+        TerminalScreen? screen,
+        SkiaTerminalRenderer? renderer,
+        GhosttyTerminalPresenter? presenter);
+}

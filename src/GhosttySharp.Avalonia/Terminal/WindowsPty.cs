@@ -22,10 +22,12 @@ public sealed class WindowsPty : IPty
     private nint _ptyHandle;
     private SafeFileHandle? _pipeIn;   // write to child stdin
     private SafeFileHandle? _pipeOut;  // read from child stdout
+    private FileStream? _inputStream;
     private Process? _process;
     private Thread? _readThread;
     private bool _disposed;
     private readonly CancellationTokenSource _cts = new();
+    private readonly object _writeSync = new();
 
     /// <summary>Raised when data is received from the PTY.</summary>
     public event Action<byte[], int>? DataReceived;
@@ -84,6 +86,7 @@ public sealed class WindowsPty : IPty
 
         _pipeIn = pipeInWrite;
         _pipeOut = pipeOutRead;
+        _inputStream = new FileStream(_pipeIn, FileAccess.Write, bufferSize: 0, isAsync: false);
 
         // Launch the shell process attached to the ConPTY
         _process = LaunchProcess(shell, workingDirectory, environment);
@@ -112,10 +115,12 @@ public sealed class WindowsPty : IPty
     /// </summary>
     public void Write(byte[] data, int offset, int count)
     {
-        if (_disposed || _pipeIn is null) return;
-        using var stream = new FileStream(_pipeIn, FileAccess.Write, bufferSize: 0, isAsync: false);
-        stream.Write(data, offset, count);
-        stream.Flush();
+        if (_disposed || _inputStream is null) return;
+        lock (_writeSync)
+        {
+            _inputStream.Write(data, offset, count);
+            _inputStream.Flush();
+        }
     }
 
     /// <summary>
@@ -138,6 +143,9 @@ public sealed class WindowsPty : IPty
         _cts.Cancel();
 
         try { _process?.Kill(entireProcessTree: true); } catch { /* best effort */ }
+
+        _inputStream?.Dispose();
+        _inputStream = null;
 
         _pipeIn?.Dispose();
         _pipeIn = null;

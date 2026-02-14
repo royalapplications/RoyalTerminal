@@ -13,6 +13,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
+using GhosttySharp.Avalonia.Diagnostics;
 using GhosttySharp.Avalonia.Rendering;
 using GhosttySharp.Native;
 
@@ -56,6 +57,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     // Set to true after a fatal error in SyncScreenFromGhostty to stop retrying.
     private bool _syncFailed;
+    private IGhosttyLogger _logger = NullGhosttyLogger.Instance;
 
     #endregion
 
@@ -116,6 +118,16 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     {
         get => GetValue(CommandProperty);
         set => SetValue(CommandProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the logger used for control diagnostics.
+    /// Defaults to a no-op logger.
+    /// </summary>
+    public IGhosttyLogger Logger
+    {
+        get => _logger;
+        set => _logger = value ?? NullGhosttyLogger.Instance;
     }
 
     /// <summary>Gets the underlying Ghostty surface.</summary>
@@ -225,13 +237,13 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             _renderTimer.Tick += (_, _) => SyncScreenFromGhostty();
             _renderTimer.Start();
 
-            Console.WriteLine(
+            Logger.Debug(
                 $"[GhosttyRendered] Surface created: NSView=0x{_nsView:X}, NSWindow=0x{_nsWindow:X}, " +
                 $"scale={scale:F2}, fontSize={TerminalFontSize}, bounds={Bounds}");
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[GhosttyRendered] Failed to create Ghostty surface: {ex}");
+            Logger.Error("[GhosttyRendered] Failed to create Ghostty surface.", ex);
         }
     }
 
@@ -311,7 +323,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         ElementComposition.SetElementChildVisual(this, _compositionVisual);
         _compositionVisual.Size = new Vector(Bounds.Width, Bounds.Height);
 
-        Console.WriteLine(
+        Logger.Debug(
             $"[GhosttyRendered] Composition initialized: bounds={Bounds.Width:F0}x{Bounds.Height:F0}");
 
         // Send initial render state
@@ -346,7 +358,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             // Periodic diagnostics
             if (++_syncLogCounter % 300 == 1) // ~every 5 seconds at 60fps
             {
-                Console.WriteLine(
+                Logger.Debug(
                     $"[GhosttyRendered] SyncScreen: grid={cols}x{rows}, px={size.WidthPx}x{size.HeightPx}, cell={size.CellWidthPx}x{size.CellHeightPx}");
             }
 
@@ -454,8 +466,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         }
         catch (Exception ex)
         {
-            // Log to Console so it's visible in terminal (Debug.WriteLine only shows in debugger)
-            Console.Error.WriteLine($"[GhosttyRendered] SyncScreenFromGhostty FATAL: {ex.GetType().Name}: {ex.Message}");
+            Logger.Error($"[GhosttyRendered] SyncScreenFromGhostty FATAL: {ex.GetType().Name}: {ex.Message}", ex);
             // Stop retrying — the error is likely permanent (e.g. missing native symbol)
             _syncFailed = true;
         }
@@ -515,7 +526,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             };
 
             var accepted = _surface.SendKey(inputKey);
-            Console.WriteLine(
+            Logger.Debug(
                 $"[GhosttyRendered] KeyDown: key={e.Key}, keySymbol={keySymbol ?? "(null)"}, " +
                 $"macKeycode=0x{macKeycode:X2}, text={(textBytes is not null ? keySymbol : "(none)")}, " +
                 $"accepted={accepted}");
@@ -645,14 +656,14 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     protected override void OnGotFocus(GotFocusEventArgs e)
     {
         base.OnGotFocus(e);
-        Console.WriteLine("[GhosttyRendered] GotFocus");
+        Logger.Debug("[GhosttyRendered] GotFocus");
         _surface?.SetFocus(true);
     }
 
     protected override void OnLostFocus(RoutedEventArgs e)
     {
         base.OnLostFocus(e);
-        Console.WriteLine("[GhosttyRendered] LostFocus");
+        Logger.Debug("[GhosttyRendered] LostFocus");
         _surface?.SetFocus(false);
     }
 
@@ -727,7 +738,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Clipboard read error: {ex.Message}");
+                Logger.Error($"Clipboard read error: {ex.Message}", ex);
             }
         });
     }
@@ -761,7 +772,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Clipboard write error: {ex.Message}");
+                Logger.Error($"Clipboard write error: {ex.Message}", ex);
             }
         });
     }
