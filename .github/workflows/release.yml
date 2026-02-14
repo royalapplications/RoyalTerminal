@@ -38,9 +38,9 @@ jobs:
         working-directory: external/ghostty
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            zig build -Doptimize=ReleaseFast -Dapp-runtime=none
+            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-xcframework=false -Demit-macos-app=false
           else
-            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=x86_64-macos
+            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-xcframework=false -Demit-macos-app=false -Dtarget=x86_64-macos
           fi
 
       - name: Build ghostty-terminal
@@ -96,13 +96,28 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build libghostty-vt
+      - name: Build libghostty (fallback to libghostty-vt)
         working-directory: external/ghostty
         run: |
           if [ "${{ matrix.arch }}" = "x64" ]; then
-            zig build lib-vt -Doptimize=ReleaseFast
+            if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none; then
+              echo "libghostty build failed; falling back to lib-vt"
+              zig build lib-vt -Doptimize=ReleaseFast
+            fi
           else
-            zig build lib-vt -Doptimize=ReleaseFast -Dtarget=aarch64-linux
+            if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=aarch64-linux; then
+              echo "libghostty build failed; falling back to lib-vt"
+              zig build lib-vt -Doptimize=ReleaseFast -Dtarget=aarch64-linux
+            fi
+          fi
+
+      - name: Build ghostty-terminal
+        working-directory: native/ghostty-terminal
+        run: |
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            zig build -Doptimize=ReleaseFast
+          else
+            zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux
           fi
 
       - name: Build ghostty-renderer-capi
@@ -118,6 +133,9 @@ jobs:
         run: |
           mkdir -p artifacts
           find external/ghostty/zig-out -name "*.so" -exec cp -L {} artifacts/ \;
+          if [ -f native/ghostty-terminal/zig-out/lib/libghostty-terminal.so ]; then
+            cp -L native/ghostty-terminal/zig-out/lib/libghostty-terminal.so artifacts/
+          fi
           if [ -f native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.so ]; then
             cp -L native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.so artifacts/
           fi
@@ -143,9 +161,17 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build libghostty-vt
+      - name: Build libghostty (fallback to libghostty-vt)
         working-directory: external/ghostty
-        run: zig build lib-vt -Doptimize=ReleaseFast
+        run: |
+          if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none; then
+            echo "libghostty build failed; falling back to lib-vt"
+            zig build lib-vt -Doptimize=ReleaseFast
+          fi
+
+      - name: Build ghostty-terminal
+        working-directory: native/ghostty-terminal
+        run: zig build -Doptimize=ReleaseFast
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
@@ -157,6 +183,8 @@ jobs:
           mkdir -p artifacts
           find external/ghostty/zig-out -name "*.dll" -exec cp -L {} artifacts/ \;
           find external/ghostty/zig-out -name "*.lib" -exec cp -L {} artifacts/ \;
+          find native/ghostty-terminal/zig-out -name "ghostty-terminal*.dll" -exec cp -L {} artifacts/ \; || true
+          find native/ghostty-terminal/zig-out -name "ghostty-terminal*.lib" -exec cp -L {} artifacts/ \; || true
           find native/ghostty-renderer-capi/zig-out -name "ghostty-renderer-capi*.dll" -exec cp -L {} artifacts/ \; || true
           find native/ghostty-renderer-capi/zig-out -name "ghostty-renderer-capi*.lib" -exec cp -L {} artifacts/ \; || true
           ls -la artifacts/
