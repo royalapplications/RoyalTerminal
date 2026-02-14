@@ -4,6 +4,7 @@
 using Avalonia.Input;
 using Avalonia.Input.TextInput;
 using GhosttySharp.Avalonia.Terminal;
+using GhosttySharp.Terminal.Services;
 using GhosttySharp.Native;
 
 namespace GhosttySharp.Avalonia.Services;

@@ -2,8 +2,10 @@
 // GhosttySharp.Avalonia — Terminal scrolling coordination abstraction.
 
 using Avalonia.Input;
+using GhosttySharp.Avalonia.Controls;
 using GhosttySharp.Avalonia.Rendering;
 using GhosttySharp.Avalonia.Scrolling;
+using GhosttySharp.Terminal.Services;
 
 namespace GhosttySharp.Avalonia.Services;
 

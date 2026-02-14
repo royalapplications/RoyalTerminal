@@ -3,7 +3,7 @@
 
 using Avalonia.Headless.XUnit;
 using GhosttySharp;
-using GhosttySharp.Avalonia;
+using GhosttySharp.Avalonia.Controls;
 using GhosttySharp.Avalonia.Diagnostics;
 using GhosttySharp.Native;
 using System.Runtime.Versioning;

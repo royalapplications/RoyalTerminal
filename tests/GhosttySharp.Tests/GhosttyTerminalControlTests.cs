@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media;
-using GhosttySharp.Avalonia;
+using GhosttySharp.Avalonia.Controls;
 using Xunit;
 
 namespace GhosttySharp.Tests;

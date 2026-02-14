@@ -14,10 +14,11 @@ using Avalonia.Media;
 using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
 using GhosttySharp.Avalonia.Diagnostics;
+using GhosttySharp.Avalonia.Input;
 using GhosttySharp.Avalonia.Rendering;
 using GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia;
+namespace GhosttySharp.Avalonia.Controls;
 
 /// <summary>
 /// Terminal control that uses Ghostty's full VT processing and PTY management

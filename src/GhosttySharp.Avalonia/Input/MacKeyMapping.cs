@@ -5,7 +5,7 @@ using System.Runtime.Versioning;
 using Avalonia.Input;
 using GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia;
+namespace GhosttySharp.Avalonia.Input;
 
 /// <summary>
 /// Maps Avalonia keys to macOS native virtual keycodes as expected by

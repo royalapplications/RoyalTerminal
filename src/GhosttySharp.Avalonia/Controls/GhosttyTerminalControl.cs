@@ -15,9 +15,10 @@ using GhosttySharp.Avalonia.Rendering;
 using GhosttySharp.Avalonia.Services;
 using GhosttySharp.Avalonia.Scrolling;
 using GhosttySharp.Avalonia.Terminal;
+using GhosttySharp.Terminal.Services;
 using GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia;
+namespace GhosttySharp.Avalonia.Controls;
 
 /// <summary>
 /// Full-featured Avalonia terminal control backed by Ghostty.

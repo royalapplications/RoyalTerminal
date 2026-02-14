@@ -2,8 +2,8 @@
 // GhosttySharp.Tests — Tests for terminal abstractions introduced for decomposition.
 
 using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Avalonia.Services;
 using GhosttySharp.Avalonia.Terminal;
+using GhosttySharp.Terminal.Services;
 using Xunit;
 
 namespace GhosttySharp.Tests;

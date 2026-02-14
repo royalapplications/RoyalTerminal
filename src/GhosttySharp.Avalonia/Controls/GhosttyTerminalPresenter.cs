@@ -6,7 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Rendering.Composition;
 using GhosttySharp.Avalonia.Rendering;
 
-namespace GhosttySharp.Avalonia;
+namespace GhosttySharp.Avalonia.Controls;
 
 /// <summary>
 /// Avalonia control that hosts the terminal rendering surface using

@@ -12,7 +12,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
-using GhosttySharp.Avalonia;
+using GhosttySharp.Avalonia.Controls;
 using GhosttySharp.Demo.ViewModels;
 using GhosttySharp.Native;
 using ReactiveUI;

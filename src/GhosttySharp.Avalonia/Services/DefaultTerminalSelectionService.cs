@@ -3,7 +3,9 @@
 
 using System.Text;
 using Avalonia.Controls;
+using GhosttySharp.Avalonia.Controls;
 using GhosttySharp.Avalonia.Rendering;
+using GhosttySharp.Terminal.Services;
 
 namespace GhosttySharp.Avalonia.Services;
 

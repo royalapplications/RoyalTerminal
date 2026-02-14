@@ -12,10 +12,11 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using GhosttySharp.Avalonia.Input;
 using GhosttySharp.Avalonia.Diagnostics;
 using GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia;
+namespace GhosttySharp.Avalonia.Controls;
 
 /// <summary>
 /// Avalonia terminal control that uses the full libghostty embedding API.
