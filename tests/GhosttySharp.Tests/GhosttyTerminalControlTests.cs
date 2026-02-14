@@ -211,7 +211,6 @@ public class GhosttyTerminalControlTests
         control.DataReceived += (_, args) =>
         {
             eventFired = true;
-            Assert.NotNull(args.Data);
             Assert.True(args.Data.Length > 0);
         };
 

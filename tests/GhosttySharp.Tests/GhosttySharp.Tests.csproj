@@ -8,17 +8,18 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\GhosttySharp\GhosttySharp.csproj" />
     <ProjectReference Include="..\..\src\GhosttySharp.Avalonia\GhosttySharp.Avalonia.csproj" />
+    <ProjectReference Include="..\..\samples\GhosttySharp.Demo\GhosttySharp.Demo.csproj" />
     <ProjectReference Include="..\..\src\GhosttySharp.Native.OSX\GhosttySharp.Native.OSX.csproj" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
     <ProjectReference Include="..\..\src\GhosttySharp.Native.Win64\GhosttySharp.Native.Win64.csproj" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
     <ProjectReference Include="..\..\src\GhosttySharp.Native.Linux64\GhosttySharp.Native.Linux64.csproj" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Headless" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Headless.XUnit" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Skia" Version="11.3.0" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
+    <PackageReference Include="Avalonia" Version="11.3.8" />
+    <PackageReference Include="Avalonia.Headless" Version="11.3.8" />
+    <PackageReference Include="Avalonia.Headless.XUnit" Version="11.3.8" />
+    <PackageReference Include="Avalonia.Skia" Version="11.3.8" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.8" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">

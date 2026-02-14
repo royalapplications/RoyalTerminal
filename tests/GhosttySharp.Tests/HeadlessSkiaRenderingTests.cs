@@ -413,7 +413,7 @@ public class HeadlessSkiaRenderingTests
         var control = new GhosttyTerminalControl();
         byte[]? receivedData = null;
 
-        control.DataReceived += (_, args) => receivedData = args.Data;
+        control.DataReceived += (_, args) => receivedData = args.Data.ToArray();
         control.WriteOutput("Hello, Terminal!"u8);
 
         Assert.NotNull(receivedData);
