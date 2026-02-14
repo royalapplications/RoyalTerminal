@@ -187,6 +187,23 @@ jobs:
           fi
           ls -la artifacts/osx-${{ matrix.arch }}/native/
 
+      - name: Verify required native artifacts (macOS)
+        run: |
+          set -euo pipefail
+          artifact_dir="artifacts/osx-${{ matrix.arch }}/native"
+          required=(
+            "libghostty.dylib"
+            "libghostty-vt.dylib"
+            "libghostty-terminal.dylib"
+            "libghostty-renderer-capi.dylib"
+          )
+          for file in "${required[@]}"; do
+            if [ ! -f "${artifact_dir}/${file}" ]; then
+              echo "::error::Missing required macOS native artifact: ${file}"
+              exit 1
+            fi
+          done
+
       - name: Upload native library
         uses: actions/upload-artifact@v4
         with:
@@ -211,19 +228,13 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build libghostty (fallback to libghostty-vt)
+      - name: Build libghostty and libghostty-vt
         working-directory: external/ghostty
         run: |
           if [ "${{ matrix.arch }}" = "x64" ]; then
-            if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none; then
-              echo "libghostty build failed; falling back to lib-vt"
-              zig build lib-vt -Doptimize=ReleaseFast
-            fi
+            zig build -Doptimize=ReleaseFast -Dapp-runtime=none
           else
-            if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=aarch64-linux; then
-              echo "libghostty build failed; falling back to lib-vt"
-              zig build lib-vt -Doptimize=ReleaseFast -Dtarget=aarch64-linux
-            fi
+            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=aarch64-linux
           fi
 
       - name: Build ghostty-terminal
@@ -256,6 +267,23 @@ jobs:
           fi
           ls -la artifacts/linux-${{ matrix.arch }}/native/
 
+      - name: Verify required native artifacts (Linux)
+        run: |
+          set -euo pipefail
+          artifact_dir="artifacts/linux-${{ matrix.arch }}/native"
+          required=(
+            "libghostty.so"
+            "libghostty-vt.so"
+            "libghostty-terminal.so"
+            "libghostty-renderer-capi.so"
+          )
+          for file in "${required[@]}"; do
+            if [ ! -f "${artifact_dir}/${file}" ]; then
+              echo "::error::Missing required Linux native artifact: ${file}"
+              exit 1
+            fi
+          done
+
       - name: Upload native library
         uses: actions/upload-artifact@v4
         with:
@@ -277,13 +305,10 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build libghostty (fallback to libghostty-vt)
+      - name: Build libghostty and libghostty-vt
         working-directory: external/ghostty
         run: |
-          if ! zig build -Doptimize=ReleaseFast -Dapp-runtime=none; then
-            echo "libghostty build failed; falling back to lib-vt"
-            zig build lib-vt -Doptimize=ReleaseFast
-          fi
+          zig build -Doptimize=ReleaseFast -Dapp-runtime=none
 
       - name: Build ghostty-terminal
         working-directory: native/ghostty-terminal
@@ -299,11 +324,34 @@ jobs:
           mkdir -p artifacts/win-x64/native
           find external/ghostty/zig-out -name "*.dll" -exec cp -L {} artifacts/win-x64/native/ \;
           find external/ghostty/zig-out -name "*.lib" -exec cp -L {} artifacts/win-x64/native/ \;
-          find native/ghostty-terminal/zig-out -name "ghostty-terminal*.dll" -exec cp -L {} artifacts/win-x64/native/ \; || true
-          find native/ghostty-terminal/zig-out -name "ghostty-terminal*.lib" -exec cp -L {} artifacts/win-x64/native/ \; || true
-          find native/ghostty-renderer-capi/zig-out -name "ghostty-renderer-capi*.dll" -exec cp -L {} artifacts/win-x64/native/ \; || true
-          find native/ghostty-renderer-capi/zig-out -name "ghostty-renderer-capi*.lib" -exec cp -L {} artifacts/win-x64/native/ \; || true
+          find native/ghostty-terminal/zig-out -name "*ghostty-terminal*.dll" -exec cp -L {} artifacts/win-x64/native/ \; || true
+          find native/ghostty-terminal/zig-out -name "*ghostty-terminal*.lib" -exec cp -L {} artifacts/win-x64/native/ \; || true
+          find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.dll" -exec cp -L {} artifacts/win-x64/native/ \; || true
+          find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.lib" -exec cp -L {} artifacts/win-x64/native/ \; || true
+          for base in ghostty ghostty-vt ghostty-terminal ghostty-renderer-capi; do
+            if [ ! -f "artifacts/win-x64/native/${base}.dll" ] && [ -f "artifacts/win-x64/native/lib${base}.dll" ]; then
+              cp -f "artifacts/win-x64/native/lib${base}.dll" "artifacts/win-x64/native/${base}.dll"
+            fi
+          done
           ls -la artifacts/win-x64/native/
+
+      - name: Verify required native artifacts (Windows)
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="artifacts/win-x64/native"
+          required=(
+            "ghostty.dll"
+            "ghostty-vt.dll"
+            "ghostty-terminal.dll"
+            "ghostty-renderer-capi.dll"
+          )
+          for file in "${required[@]}"; do
+            if [ ! -f "${artifact_dir}/${file}" ]; then
+              echo "::error::Missing required Windows native artifact: ${file}"
+              exit 1
+            fi
+          done
 
       - name: Upload native library
         uses: actions/upload-artifact@v4
@@ -360,7 +408,7 @@ jobs:
   pack:
     name: Pack NuGet
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, integration-tests]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -403,6 +451,33 @@ jobs:
           name: native-win-x64
           path: src/GhosttySharp.Native.Win64/runtimes/win-x64/native/
 
+      - name: Verify downloaded native artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_files() {
+            local dir="$1"
+            shift
+            for file in "$@"; do
+              if [ ! -f "${dir}/${file}" ]; then
+                echo "::error::Missing required native artifact ${file} in ${dir}"
+                exit 1
+              fi
+            done
+          }
+
+          check_files "src/GhosttySharp.Native.OSX/runtimes/osx-arm64/native" \
+            "libghostty.dylib" "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
+          check_files "src/GhosttySharp.Native.OSX/runtimes/osx-x64/native" \
+            "libghostty.dylib" "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
+          check_files "src/GhosttySharp.Native.Linux64/runtimes/linux-x64/native" \
+            "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
+          check_files "src/GhosttySharp.Native.Linux64/runtimes/linux-arm64/native" \
+            "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
+          check_files "src/GhosttySharp.Native.Win64/runtimes/win-x64/native" \
+            "ghostty.dll" "ghostty-vt.dll" "ghostty-terminal.dll" "ghostty-renderer-capi.dll"
+
       # Pack managed packages
       - name: Pack GhosttySharp
         run: dotnet pack src/GhosttySharp/GhosttySharp.csproj -c Release -o artifacts/
@@ -415,6 +490,15 @@ jobs:
 
       - name: Pack GhosttySharp.Terminal.Services
         run: dotnet pack src/GhosttySharp.Terminal.Services/GhosttySharp.Terminal.Services.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Rendering.Contracts
+        run: dotnet pack src/GhosttySharp.Rendering.Contracts/GhosttySharp.Rendering.Contracts.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Rendering.Interop
+        run: dotnet pack src/GhosttySharp.Rendering.Interop/GhosttySharp.Rendering.Interop.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Rendering.Interop.Skia
+        run: dotnet pack src/GhosttySharp.Rendering.Interop.Skia/GhosttySharp.Rendering.Interop.Skia.csproj -c Release -o artifacts/
 
       - name: Pack GhosttySharp.Rendering.Skia
         run: dotnet pack src/GhosttySharp.Rendering.Skia/GhosttySharp.Rendering.Skia.csproj -c Release -o artifacts/
@@ -439,6 +523,9 @@ jobs:
 
       - name: Pack GhosttySharp.Avalonia
         run: dotnet pack src/GhosttySharp.Avalonia/GhosttySharp.Avalonia.csproj -c Release -o artifacts/
+
+      - name: Pack GhosttySharp.Avalonia.Rendering
+        run: dotnet pack src/GhosttySharp.Avalonia.Rendering/GhosttySharp.Avalonia.Rendering.csproj -c Release -o artifacts/
 
       # Pack native packages
       - name: Pack GhosttySharp.Native.OSX
