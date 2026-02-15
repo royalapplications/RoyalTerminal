@@ -62,6 +62,15 @@ public sealed class GlyphCache : IDisposable
     public SKFont CreateFont(float size, bool bold = false, bool italic = false)
     {
         var typeface = GetTypeface(bold, italic);
+        return CreateFont(typeface, size);
+    }
+
+    /// <summary>
+    /// Creates a configured <see cref="SKFont"/> for a specific typeface.
+    /// </summary>
+    public static SKFont CreateFont(SKTypeface typeface, float size)
+    {
+        ArgumentNullException.ThrowIfNull(typeface);
         return new SKFont(typeface, size)
         {
             Subpixel = true,

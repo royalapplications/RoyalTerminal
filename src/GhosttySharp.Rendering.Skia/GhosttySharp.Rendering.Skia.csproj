@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\GhosttySharp.Rendering.Text\GhosttySharp.Rendering.Text.csproj" />
     <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
   </ItemGroup>
 
