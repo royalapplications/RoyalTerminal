@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>GhosttySharp.Unicode</PackageId>
+    <Description>Deterministic Unicode data and terminal width helpers for GhosttySharp.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+</Project>
