@@ -57,6 +57,20 @@ pub const GhosttyTerminalCellInfo = extern struct {
     attrs: u32 = 0,
 };
 
+/// Grapheme span for a single cell.
+/// The span indexes into a flattened UTF-32 codepoint buffer emitted by
+/// `ghostty_terminal_get_row_cells_with_graphemes`.
+///
+/// The flattened buffer contains only trailing codepoints that come after
+/// `GhosttyTerminalCellInfo.codepoint` for each grapheme cluster.
+/// Therefore:
+///   - length == 0 means no trailing grapheme codepoints for this cell.
+///   - full grapheme = cell.codepoint + grapheme_codepoints[offset..offset+length].
+pub const GhosttyTerminalGraphemeSpan = extern struct {
+    offset: u32 = 0,
+    length: u32 = 0,
+};
+
 /// Cursor position and style information.
 pub const GhosttyTerminalCursorInfo = extern struct {
     /// Cursor column (0-based).
@@ -407,13 +421,72 @@ export fn ghostty_terminal_get_row_cells(
     cells_out: ?[*]GhosttyTerminalCellInfo,
     max_cells: u32,
 ) u32 {
+    return fillRowCells(
+        handle,
+        row_idx,
+        cells_out,
+        max_cells,
+        null,
+        0,
+        null,
+        0,
+        null,
+    );
+}
+
+/// Fills cell info for a viewport row and optionally exports grapheme spans
+/// plus flattened trailing grapheme codepoints.
+///
+/// Trailing grapheme codepoints are those after the first codepoint in the
+/// cell's grapheme cluster. The first codepoint is always in
+/// `GhosttyTerminalCellInfo.codepoint`.
+export fn ghostty_terminal_get_row_cells_with_graphemes(
+    handle: ?*TerminalHandle,
+    row_idx: u32,
+    cells_out: ?[*]GhosttyTerminalCellInfo,
+    max_cells: u32,
+    grapheme_spans_out: ?[*]GhosttyTerminalGraphemeSpan,
+    max_spans: u32,
+    grapheme_codepoints_out: ?[*]u32,
+    max_grapheme_codepoints: u32,
+    grapheme_codepoints_written: ?*u32,
+) u32 {
+    return fillRowCells(
+        handle,
+        row_idx,
+        cells_out,
+        max_cells,
+        grapheme_spans_out,
+        max_spans,
+        grapheme_codepoints_out,
+        max_grapheme_codepoints,
+        grapheme_codepoints_written,
+    );
+}
+
+fn fillRowCells(
+    handle: ?*TerminalHandle,
+    row_idx: u32,
+    cells_out: ?[*]GhosttyTerminalCellInfo,
+    max_cells: u32,
+    grapheme_spans_out: ?[*]GhosttyTerminalGraphemeSpan,
+    max_spans: u32,
+    grapheme_codepoints_out: ?[*]u32,
+    max_grapheme_codepoints: u32,
+    grapheme_codepoints_written: ?*u32,
+) u32 {
     const h = handle orelse return 0;
     const out = cells_out orelse return 0;
     if (max_cells == 0) return 0;
 
+    if (grapheme_codepoints_written) |written| {
+        written.* = 0;
+    }
+
     const screen = h.terminal.screens.active;
     const cols: u32 = h.terminal.cols;
     const fill_count = @min(max_cells, cols);
+    const span_count = @min(max_spans, fill_count);
 
     // Get the pin for this row in the viewport
     const pin = screen.pages.pin(.{ .viewport = .{
@@ -424,6 +497,11 @@ export fn ghostty_terminal_get_row_cells(
         for (0..fill_count) |i| {
             out[i] = .{};
         }
+        if (grapheme_spans_out) |span_out| {
+            for (0..span_count) |i| {
+                span_out[i] = .{};
+            }
+        }
         return fill_count;
     };
 
@@ -431,10 +509,15 @@ export fn ghostty_terminal_get_row_cells(
     const row = pin.rowAndCell().row;
     const cells = page_data.getCells(row);
     const palette = &h.terminal.colors.palette.current;
+    var grapheme_write_idx: u32 = 0;
 
     for (0..fill_count) |col| {
-        const cell = cells[col];
+        const cell = &cells[col];
         var info: GhosttyTerminalCellInfo = .{};
+        var span: GhosttyTerminalGraphemeSpan = .{
+            .offset = grapheme_write_idx,
+            .length = 0,
+        };
 
         // Extract codepoint
         info.codepoint = cell.codepoint();
@@ -451,6 +534,24 @@ export fn ghostty_terminal_get_row_cells(
             info.bg_color = packColor(s.bg_color, false, palette, false, h.default_fg, h.default_bg);
         }
 
+        // Optional grapheme export: write trailing grapheme codepoints
+        // (excluding the first codepoint in `info.codepoint`).
+        if (cell.hasGrapheme() and grapheme_codepoints_out != null) {
+            if (page_data.lookupGrapheme(cell)) |trailing| {
+                const trailing_len_u32: u32 = @intCast(trailing.len);
+                if (trailing_len_u32 > 0 and
+                    trailing_len_u32 <= max_grapheme_codepoints -| grapheme_write_idx)
+                {
+                    const dst = grapheme_codepoints_out.?[grapheme_write_idx .. grapheme_write_idx + trailing_len_u32];
+                    for (trailing, 0..) |cp, i| {
+                        dst[i] = @intCast(cp);
+                    }
+                    span.length = trailing_len_u32;
+                    grapheme_write_idx += trailing_len_u32;
+                }
+            }
+        }
+
         // Wide char flags
         if (cell.wide == .wide) {
             info.attrs |= (1 << 16);
@@ -459,6 +560,13 @@ export fn ghostty_terminal_get_row_cells(
         }
 
         out[col] = info;
+        if (grapheme_spans_out != null and col < span_count) {
+            grapheme_spans_out.?[col] = span;
+        }
+    }
+
+    if (grapheme_codepoints_written) |written| {
+        written.* = grapheme_write_idx;
     }
 
     return fill_count;

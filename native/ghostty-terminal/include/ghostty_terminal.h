@@ -57,6 +57,21 @@ typedef struct {
     uint32_t attrs;      /**< Packed attribute flags. */
 } ghostty_terminal_cell_info_t;
 
+/**
+ * Grapheme span for a single cell.
+ *
+ * The span indexes into a flattened UTF-32 codepoint buffer returned by
+ * `ghostty_terminal_get_row_cells_with_graphemes`. The flattened buffer
+ * contains trailing codepoints only, i.e. codepoints that follow
+ * `ghostty_terminal_cell_info_t.codepoint` in a grapheme cluster.
+ *
+ * If `length == 0`, the cell has no trailing grapheme codepoints.
+ */
+typedef struct {
+    uint32_t offset;  /**< Start index in flattened grapheme codepoint buffer. */
+    uint32_t length;  /**< Number of trailing grapheme codepoints. */
+} ghostty_terminal_grapheme_span_t;
+
 /* ═══════════════════════════════════════════════════════════════════════ */
 /* Cursor information                                                     */
 /* ═══════════════════════════════════════════════════════════════════════ */
@@ -193,6 +208,36 @@ uint32_t ghostty_terminal_get_row_cells(
     uint32_t row_idx,
     ghostty_terminal_cell_info_t* cells_out,
     uint32_t max_cells);
+
+/**
+ * Fills cell information for a viewport row and optionally exports grapheme
+ * spans plus flattened trailing grapheme codepoints.
+ *
+ * The first codepoint of each grapheme is always in `cells_out[i].codepoint`.
+ * Additional grapheme codepoints are emitted to `grapheme_codepoints_out` and
+ * indexed by `grapheme_spans_out[i]`.
+ *
+ * @param terminal                     Terminal handle.
+ * @param row_idx                      Viewport row (0-based from top).
+ * @param cells_out                    Array of cell info structs to fill.
+ * @param max_cells                    Maximum number of cells to fill.
+ * @param grapheme_spans_out           Array of grapheme spans, one per cell.
+ * @param max_spans                    Maximum number of spans to fill.
+ * @param grapheme_codepoints_out      Flattened UTF-32 trailing grapheme codepoints.
+ * @param max_grapheme_codepoints      Capacity of `grapheme_codepoints_out`.
+ * @param grapheme_codepoints_written  Optional out count of flattened codepoints written.
+ * @return Number of cells filled.
+ */
+uint32_t ghostty_terminal_get_row_cells_with_graphemes(
+    ghostty_terminal_t terminal,
+    uint32_t row_idx,
+    ghostty_terminal_cell_info_t* cells_out,
+    uint32_t max_cells,
+    ghostty_terminal_grapheme_span_t* grapheme_spans_out,
+    uint32_t max_spans,
+    uint32_t* grapheme_codepoints_out,
+    uint32_t max_grapheme_codepoints,
+    uint32_t* grapheme_codepoints_written);
 
 /* ═══════════════════════════════════════════════════════════════════════ */
 /* Notification callback                                                  */
