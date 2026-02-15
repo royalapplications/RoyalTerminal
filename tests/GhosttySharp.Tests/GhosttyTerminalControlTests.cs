@@ -4,8 +4,10 @@
 using System.Runtime.InteropServices;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using GhosttySharp.Avalonia.Controls;
+using GhosttySharp.Avalonia.Rendering;
 using Xunit;
 
 namespace GhosttySharp.Tests;
@@ -231,5 +233,73 @@ public class GhosttyTerminalControlTests
 
         Assert.NotSame(control1.Screen, control2.Screen);
         Assert.NotSame(control1.Renderer, control2.Renderer);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_CopySelection_PrefersGrapheme_AndSkipsSpacerCells()
+    {
+        const string familyEmoji = "\U0001F468\u200D\U0001F469\u200D\U0001F467\u200D\U0001F466";
+
+        GhosttyTerminalControl control = new();
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            TerminalScreen? screen = control.Screen;
+            SkiaTerminalRenderer? renderer = control.Renderer;
+            Assert.NotNull(screen);
+            Assert.NotNull(renderer);
+
+            TerminalRow row = screen!.GetViewportRow(0);
+            row[0].Codepoint = 0x1F468;
+            row[0].Grapheme = familyEmoji;
+            row[0].Width = 1;
+            row[1].Codepoint = 0;
+            row[1].Width = 0; // spacer cell should not contribute selection text
+
+            renderer!.SelectionStart = (0, 0);
+            renderer.SelectionEnd = (1, 0);
+
+            await control.CopySelectionAsync();
+
+            string? copied = await window.Clipboard!.TryGetTextAsync();
+            Assert.Equal(familyEmoji, copied);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_CopySelection_WithNegativeStartColumn_IsClamped()
+    {
+        GhosttyTerminalControl control = new();
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            TerminalScreen? screen = control.Screen;
+            SkiaTerminalRenderer? renderer = control.Renderer;
+            Assert.NotNull(screen);
+            Assert.NotNull(renderer);
+
+            TerminalRow row = screen!.GetViewportRow(0);
+            row[0].Codepoint = 'A';
+
+            renderer!.SelectionStart = (-5, 0);
+            renderer.SelectionEnd = (0, 0);
+
+            await control.CopySelectionAsync();
+
+            string? copied = await window.Clipboard!.TryGetTextAsync();
+            Assert.Equal("A", copied);
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 }

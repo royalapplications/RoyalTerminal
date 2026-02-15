@@ -131,6 +131,167 @@ public class HeadlessSkiaRenderingTests
     }
 
     [Fact]
+    public void Renderer_HiddenAttribute_DoesNotDrawGlyph()
+    {
+        var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+
+        int width = (int)Math.Ceiling(2 * renderer.CellWidth);
+        int height = (int)Math.Ceiling(renderer.CellHeight);
+        int cellWidth = Math.Max(1, (int)Math.Ceiling(renderer.CellWidth));
+        int cellHeight = Math.Max(1, (int)Math.Ceiling(renderer.CellHeight));
+
+        using var hiddenSurface = SKSurface.Create(new SKImageInfo(width, height));
+        hiddenSurface.Canvas.Clear(SKColors.Black);
+        var hiddenScreen = new TerminalScreen(2, 1);
+        var hiddenRow = hiddenScreen.GetViewportRow(0);
+        hiddenRow[0].Codepoint = 'A';
+        hiddenRow[0].Foreground = 0xFFFFFFFF;
+        hiddenRow[0].Background = 0xFF000000;
+        hiddenRow[0].Attributes = CellAttributes.Hidden;
+        hiddenRow.IsDirty = true;
+        renderer.RenderFull(hiddenSurface.Canvas, hiddenScreen);
+
+        using var controlSurface = SKSurface.Create(new SKImageInfo(width, height));
+        controlSurface.Canvas.Clear(SKColors.Black);
+        var controlScreen = new TerminalScreen(2, 1);
+        var controlRow = controlScreen.GetViewportRow(0);
+        controlRow[0].Codepoint = 0;
+        controlRow[0].Foreground = 0xFFFFFFFF;
+        controlRow[0].Background = 0xFF000000;
+        controlRow.IsDirty = true;
+        renderer.RenderFull(controlSurface.Canvas, controlScreen);
+
+        using var hiddenSnapshot = hiddenSurface.Snapshot();
+        using var hiddenPixels = hiddenSnapshot.PeekPixels();
+        using var controlSnapshot = controlSurface.Snapshot();
+        using var controlPixels = controlSnapshot.PeekPixels();
+        Assert.NotNull(hiddenPixels);
+        Assert.NotNull(controlPixels);
+
+        bool differsFromControl = false;
+        for (int y = 0; y < cellHeight && !differsFromControl; y++)
+        {
+            for (int x = 0; x < cellWidth && !differsFromControl; x++)
+            {
+                if (hiddenPixels.GetPixelColor(x, y) != controlPixels.GetPixelColor(x, y))
+                {
+                    differsFromControl = true;
+                }
+            }
+        }
+
+        Assert.False(differsFromControl, "Hidden attribute should suppress glyph output.");
+    }
+
+    [Fact]
+    public void Renderer_DimAttribute_ReducesGlyphIntensity()
+    {
+        var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+
+        int width = (int)Math.Ceiling(2 * renderer.CellWidth);
+        int height = (int)Math.Ceiling(renderer.CellHeight);
+        int cellWidth = Math.Max(1, (int)Math.Ceiling(renderer.CellWidth));
+        int cellHeight = Math.Max(1, (int)Math.Ceiling(renderer.CellHeight));
+
+        using var normalSurface = SKSurface.Create(new SKImageInfo(width, height));
+        normalSurface.Canvas.Clear(SKColors.Black);
+        var normalScreen = new TerminalScreen(2, 1);
+        var normalRow = normalScreen.GetViewportRow(0);
+        normalRow[0].Codepoint = 'A';
+        normalRow[0].Foreground = 0xFFFFFFFF;
+        normalRow[0].Background = 0xFF000000;
+        normalRow.IsDirty = true;
+        renderer.RenderFull(normalSurface.Canvas, normalScreen);
+
+        using var dimSurface = SKSurface.Create(new SKImageInfo(width, height));
+        dimSurface.Canvas.Clear(SKColors.Black);
+        var dimScreen = new TerminalScreen(2, 1);
+        var dimRow = dimScreen.GetViewportRow(0);
+        dimRow[0].Codepoint = 'A';
+        dimRow[0].Foreground = 0xFFFFFFFF;
+        dimRow[0].Background = 0xFF000000;
+        dimRow[0].Attributes = CellAttributes.Dim;
+        dimRow.IsDirty = true;
+        renderer.RenderFull(dimSurface.Canvas, dimScreen);
+
+        using var normalSnapshot = normalSurface.Snapshot();
+        using var normalPixels = normalSnapshot.PeekPixels();
+        using var dimSnapshot = dimSurface.Snapshot();
+        using var dimPixels = dimSnapshot.PeekPixels();
+        Assert.NotNull(normalPixels);
+        Assert.NotNull(dimPixels);
+
+        long normalLuma = 0;
+        long dimLuma = 0;
+        for (int y = 0; y < cellHeight; y++)
+        {
+            for (int x = 0; x < cellWidth; x++)
+            {
+                SKColor normalPixel = normalPixels.GetPixelColor(x, y);
+                SKColor dimPixel = dimPixels.GetPixelColor(x, y);
+                normalLuma += normalPixel.Red + normalPixel.Green + normalPixel.Blue;
+                dimLuma += dimPixel.Red + dimPixel.Green + dimPixel.Blue;
+            }
+        }
+
+        Assert.True(normalLuma > 0, "Baseline glyph should render visible pixels.");
+        Assert.True(dimLuma < normalLuma, "Dim attribute should reduce glyph intensity.");
+    }
+
+    [Fact]
+    public void Renderer_MixedScriptLine_RendersWithoutExceptionAndProducesPixels()
+    {
+        var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        var screen = new TerminalScreen(8, 1);
+        var row = screen.GetViewportRow(0);
+
+        int[] codepoints = ['A', 0x0645, 0x4E2D, 0x1F642];
+        for (int i = 0; i < codepoints.Length; i++)
+        {
+            row[i].Codepoint = codepoints[i];
+            row[i].Foreground = 0xFFFFFFFF;
+            row[i].Background = 0xFF000000;
+        }
+
+        int width = (int)Math.Ceiling(8 * renderer.CellWidth);
+        int height = (int)Math.Ceiling(renderer.CellHeight);
+        using var surface = SKSurface.Create(new SKImageInfo(width, height));
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using var snapshot = surface.Snapshot();
+        using var pixmap = snapshot.PeekPixels();
+        Assert.NotNull(pixmap);
+
+        int scanWidth = Math.Min(pixmap.Width, Math.Max(1, (int)Math.Ceiling(renderer.CellWidth * codepoints.Length)));
+        int scanHeight = Math.Min(pixmap.Height, Math.Max(1, (int)Math.Ceiling(renderer.CellHeight)));
+        bool hasNonBlackPixel = false;
+        for (int y = 0; y < scanHeight && !hasNonBlackPixel; y++)
+        {
+            for (int x = 0; x < scanWidth && !hasNonBlackPixel; x++)
+            {
+                SKColor pixel = pixmap.GetPixelColor(x, y);
+                if (pixel.Red > 10 || pixel.Green > 10 || pixel.Blue > 10)
+                {
+                    hasNonBlackPixel = true;
+                }
+            }
+        }
+
+        Assert.True(hasNonBlackPixel, "Mixed script rendering should draw visible pixels.");
+    }
+
+    [Fact]
     public void Renderer_DirtyTracking_OnlyRendersChangedRows()
     {
         var renderer = new SkiaTerminalRenderer("Consolas", 14f);
@@ -156,6 +317,163 @@ public class HeadlessSkiaRenderingTests
         renderer.Render(canvas, screen);
 
         Assert.False(screen.GetViewportRow(5).IsDirty);
+    }
+
+    [Fact]
+    public void Renderer_SpacerCellWidthZero_IsNotRendered()
+    {
+        var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        renderer.CursorVisible = false;
+        var width = (int)(4 * renderer.CellWidth);
+        var height = (int)Math.Ceiling(renderer.CellHeight);
+
+        using var surfaceWithSpacer = SKSurface.Create(new SKImageInfo(width, height));
+        surfaceWithSpacer.Canvas.Clear(SKColors.Black);
+        var screenWithSpacer = new TerminalScreen(4, 1);
+        var rowWithSpacer = screenWithSpacer.GetViewportRow(0);
+        for (var i = 0; i < rowWithSpacer.Columns; i++)
+        {
+            rowWithSpacer[i].Foreground = 0xFFFFFFFF;
+            rowWithSpacer[i].Background = 0xFF000000;
+        }
+
+        rowWithSpacer[0].Codepoint = 'X';
+        rowWithSpacer[0].Width = 0;
+        rowWithSpacer[1].Codepoint = 'A';
+        rowWithSpacer[1].Width = 1;
+        rowWithSpacer.IsDirty = true;
+        renderer.RenderFull(surfaceWithSpacer.Canvas, screenWithSpacer);
+
+        using var surfaceControl = SKSurface.Create(new SKImageInfo(width, height));
+        surfaceControl.Canvas.Clear(SKColors.Black);
+        var controlScreen = new TerminalScreen(4, 1);
+        var controlRow = controlScreen.GetViewportRow(0);
+        for (var i = 0; i < controlRow.Columns; i++)
+        {
+            controlRow[i].Foreground = 0xFFFFFFFF;
+            controlRow[i].Background = 0xFF000000;
+        }
+
+        controlRow[0].Codepoint = 0;
+        controlRow[0].Width = 0;
+        controlRow[1].Codepoint = 'A';
+        controlRow[1].Width = 1;
+        controlRow.IsDirty = true;
+        renderer.RenderFull(surfaceControl.Canvas, controlScreen);
+
+        using var spacerSnapshot = surfaceWithSpacer.Snapshot();
+        using var spacerPixmap = spacerSnapshot.PeekPixels();
+        Assert.NotNull(spacerPixmap);
+
+        using var controlSnapshot = surfaceControl.Snapshot();
+        using var controlPixmap = controlSnapshot.PeekPixels();
+        Assert.NotNull(controlPixmap);
+
+        int cellWidth = Math.Max(1, (int)Math.Ceiling(renderer.CellWidth));
+        int cellHeight = Math.Max(1, (int)Math.Ceiling(renderer.CellHeight));
+
+        bool hasGlyphPixelInNextCell = false;
+        int nextCellStart = Math.Min(spacerPixmap.Width, cellWidth);
+        int nextCellEnd = Math.Min(spacerPixmap.Width, cellWidth * 2);
+        for (int y = 0; y < cellHeight && !hasGlyphPixelInNextCell; y++)
+        {
+            for (int x = nextCellStart; x < nextCellEnd && !hasGlyphPixelInNextCell; x++)
+            {
+                SKColor px = spacerPixmap.GetPixelColor(x, y);
+                if (px.Red > 10 || px.Green > 10 || px.Blue > 10)
+                {
+                    hasGlyphPixelInNextCell = true;
+                }
+            }
+        }
+
+        bool spacerCellChangedComparedToControl = false;
+        int spacerCellEndX = Math.Min(Math.Min(spacerPixmap.Width, controlPixmap.Width), cellWidth);
+        int compareHeight = Math.Min(Math.Min(spacerPixmap.Height, controlPixmap.Height), cellHeight);
+        for (int y = 0; y < compareHeight && !spacerCellChangedComparedToControl; y++)
+        {
+            for (int x = 0; x < spacerCellEndX && !spacerCellChangedComparedToControl; x++)
+            {
+                if (spacerPixmap.GetPixelColor(x, y) != controlPixmap.GetPixelColor(x, y))
+                {
+                    spacerCellChangedComparedToControl = true;
+                }
+            }
+        }
+
+        Assert.False(
+            spacerCellChangedComparedToControl,
+            "Spacer cell should not alter rendered output compared to control content.");
+        Assert.True(hasGlyphPixelInNextCell, "Renderable cell following spacer should still draw.");
+    }
+
+    [Fact]
+    public void Renderer_Render_UsesDirtyRowsForPixelOutput()
+    {
+        var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        renderer.CursorVisible = false;
+        var screen = new TerminalScreen(8, 2);
+        var row0 = screen.GetViewportRow(0);
+        var row1 = screen.GetViewportRow(1);
+
+        for (var i = 0; i < row0.Columns; i++)
+        {
+            row0[i].Foreground = 0xFFFFFFFF;
+            row0[i].Background = 0xFF000000;
+            row1[i].Foreground = 0xFFFFFFFF;
+            row1[i].Background = 0xFF000000;
+        }
+
+        row0[0].Codepoint = 'A';
+        row1[0].Codepoint = 'B';
+        row0.IsDirty = true;
+        row1.IsDirty = false;
+
+        var width = (int)(8 * renderer.CellWidth);
+        var height = (int)(2 * renderer.CellHeight);
+        using var surface = SKSurface.Create(new SKImageInfo(width, height));
+        var canvas = surface.Canvas;
+        canvas.Clear(SKColors.Black);
+
+        renderer.Render(canvas, screen);
+
+        using var snapshot = surface.Snapshot();
+        using var pixmap = snapshot.PeekPixels();
+        Assert.NotNull(pixmap);
+
+        int cellWidth = Math.Max(1, (int)Math.Ceiling(renderer.CellWidth));
+        int cellHeight = Math.Max(1, (int)Math.Ceiling(renderer.CellHeight));
+
+        bool row0HasRenderedPixels = false;
+        for (int y = 0; y < cellHeight && !row0HasRenderedPixels; y++)
+        {
+            for (int x = 0; x < cellWidth && !row0HasRenderedPixels; x++)
+            {
+                SKColor px = pixmap.GetPixelColor(x, y);
+                if (px.Red > 10 || px.Green > 10 || px.Blue > 10)
+                {
+                    row0HasRenderedPixels = true;
+                }
+            }
+        }
+
+        bool row1HasRenderedPixels = false;
+        int row1StartY = Math.Min(pixmap.Height, cellHeight);
+        int row1EndY = Math.Min(pixmap.Height, cellHeight * 2);
+        for (int y = row1StartY; y < row1EndY && !row1HasRenderedPixels; y++)
+        {
+            for (int x = 0; x < cellWidth && !row1HasRenderedPixels; x++)
+            {
+                SKColor px = pixmap.GetPixelColor(x, y);
+                if (px.Red > 10 || px.Green > 10 || px.Blue > 10)
+                {
+                    row1HasRenderedPixels = true;
+                }
+            }
+        }
+
+        Assert.True(row0HasRenderedPixels, "Dirty row should be rendered.");
+        Assert.False(row1HasRenderedPixels, "Clean row should not be rendered by incremental draw.");
     }
 
     [Fact]

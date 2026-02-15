@@ -263,5 +263,39 @@ public class TerminalQueryTests
         Assert.Equal("\x1b[1;1R", System.Text.Encoding.ASCII.GetString(response));
     }
 
+    [Fact]
+    public void BasicVtProcessor_CombiningMark_AppendsToPreviousCellGrapheme()
+    {
+        var screen = new TerminalScreen(16, 4, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("e\u0301"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(1, processor.CursorCol);
+        Assert.Equal(0, processor.CursorRow);
+        Assert.Equal('e', row[0].Codepoint);
+        Assert.Equal("e\u0301", row[0].Grapheme);
+        Assert.Equal(0, row[1].Codepoint);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ZwjSequence_AppendsToSingleCellGrapheme()
+    {
+        const string familyEmoji = "\U0001F468\u200D\U0001F469\u200D\U0001F467\u200D\U0001F466";
+
+        var screen = new TerminalScreen(16, 4, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process(System.Text.Encoding.UTF8.GetBytes(familyEmoji));
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(1, processor.CursorCol);
+        Assert.Equal(0, processor.CursorRow);
+        Assert.Equal(0x1F468, row[0].Codepoint);
+        Assert.Equal(familyEmoji, row[0].Grapheme);
+        Assert.Equal(0, row[1].Codepoint);
+    }
+
     #endregion
 }

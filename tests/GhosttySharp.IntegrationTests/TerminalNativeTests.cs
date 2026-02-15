@@ -225,4 +225,94 @@ public class TerminalNativeTests
 
         GhosttyTerminalNative.TerminalFree(handle);
     }
+
+    [Fact]
+    public unsafe void Terminal_GetRowCellsWithGraphemes_BasicFallbackSafe()
+    {
+        if (!GhosttyTerminalNative.IsAvailable())
+            return;
+
+        var handle = GhosttyTerminalNative.TerminalNew(80, 24, 0);
+        Assert.NotEqual(nint.Zero, handle);
+
+        try
+        {
+            var data = "ABC"u8;
+            fixed (byte* ptr = data)
+            {
+                GhosttyTerminalNative.TerminalProcess(handle, ptr, (nuint)data.Length);
+            }
+
+            var cells = stackalloc GhosttyTerminalNative.CellInfo[80];
+            var spans = stackalloc GhosttyTerminalNative.GraphemeSpan[80];
+            var graphemeCodepoints = stackalloc uint[320];
+            uint graphemeWritten = 0;
+
+            uint filled = GhosttyTerminalNative.TerminalGetRowCellsWithGraphemes(
+                handle,
+                0,
+                cells,
+                80,
+                spans,
+                80,
+                graphemeCodepoints,
+                320,
+                &graphemeWritten);
+
+            Assert.True(filled >= 3);
+            Assert.Equal((uint)'A', cells[0].Codepoint);
+            Assert.Equal((uint)'B', cells[1].Codepoint);
+            Assert.Equal((uint)'C', cells[2].Codepoint);
+        }
+        finally
+        {
+            GhosttyTerminalNative.TerminalFree(handle);
+        }
+    }
+
+    [Fact]
+    public unsafe void Terminal_GetRowCellsWithGraphemes_CombiningSequence_WhenSupported()
+    {
+        if (!GhosttyTerminalNative.IsAvailable() || !GhosttyTerminalNative.SupportsRowCellGraphemes)
+            return;
+
+        var handle = GhosttyTerminalNative.TerminalNew(80, 24, 0);
+        Assert.NotEqual(nint.Zero, handle);
+
+        try
+        {
+            byte[] data = System.Text.Encoding.UTF8.GetBytes("e\u0301");
+            fixed (byte* ptr = data)
+            {
+                GhosttyTerminalNative.TerminalProcess(handle, ptr, (nuint)data.Length);
+            }
+
+            var cells = stackalloc GhosttyTerminalNative.CellInfo[80];
+            var spans = stackalloc GhosttyTerminalNative.GraphemeSpan[80];
+            var graphemeCodepoints = stackalloc uint[320];
+            uint graphemeWritten = 0;
+
+            uint filled = GhosttyTerminalNative.TerminalGetRowCellsWithGraphemes(
+                handle,
+                0,
+                cells,
+                80,
+                spans,
+                80,
+                graphemeCodepoints,
+                320,
+                &graphemeWritten);
+
+            Assert.True(filled >= 1);
+            Assert.Equal((uint)'e', cells[0].Codepoint);
+            Assert.Equal(1u, spans[0].Length);
+
+            uint trailing = graphemeCodepoints[spans[0].Offset];
+            Assert.Equal(0x0301u, trailing);
+        }
+        finally
+        {
+            GhosttyTerminalNative.TerminalFree(handle);
+        }
+    }
 }
