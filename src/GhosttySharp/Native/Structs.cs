@@ -701,6 +701,22 @@ public struct GhosttyCellInfo
     public byte Wide;
 }
 
+/// <summary>
+/// Grapheme span for a terminal cell.
+/// The span indexes into a flattened UTF-32 trailing-codepoint buffer.
+/// Full grapheme text is reconstructed as:
+/// primary cell codepoint + trailing codepoints span.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct GhosttyCellGraphemeSpan
+{
+    /// <summary>Start index into the flattened trailing-codepoint buffer.</summary>
+    public uint Offset;
+
+    /// <summary>Number of trailing codepoints for this cell grapheme.</summary>
+    public uint Length;
+}
+
 /// <summary>Cursor position and style information.</summary>
 [StructLayout(LayoutKind.Sequential)]
 public struct GhosttyCursorInfo

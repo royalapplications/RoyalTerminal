@@ -18,6 +18,16 @@ namespace GhosttySharp.Native;
 public static partial class GhosttyTerminalNative
 {
     private const string LibName = "ghostty-terminal";
+    private const string TerminalGetRowCellsWithGraphemesSymbol = "ghostty_terminal_get_row_cells_with_graphemes";
+
+    private static readonly nint s_nativeLibraryHandle = LoadNativeLibraryHandle();
+    private static readonly nint s_terminalGetRowCellsWithGraphemesExport =
+        ResolveOptionalExport(TerminalGetRowCellsWithGraphemesSymbol);
+
+    /// <summary>
+    /// Returns true when the loaded libghostty-terminal exposes grapheme-aware row-cell reading.
+    /// </summary>
+    public static bool SupportsRowCellGraphemes => s_terminalGetRowCellsWithGraphemesExport != nint.Zero;
 
     // ──────────────────────── Structs ────────────────────────────────
 
@@ -42,6 +52,21 @@ public static partial class GhosttyTerminalNative
         /// bit 16: wide char, bit 17: wide spacer.
         /// </summary>
         public uint Attrs;
+    }
+
+    /// <summary>
+    /// Grapheme span for a cell. The span indexes into a flattened UTF-32
+    /// trailing-codepoint buffer returned by
+    /// <see cref="TerminalGetRowCellsWithGraphemes"/>.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphemeSpan
+    {
+        /// <summary>Start index into the flattened trailing-codepoint buffer.</summary>
+        public uint Offset;
+
+        /// <summary>Number of trailing codepoints for this cell.</summary>
+        public uint Length;
     }
 
     /// <summary>Cursor position and style information.</summary>
@@ -162,6 +187,67 @@ public static partial class GhosttyTerminalNative
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_get_row_cells")]
     public static unsafe partial uint TerminalGetRowCells(nint terminal, uint rowIdx, CellInfo* cells, uint maxCells);
 
+    /// <summary>
+    /// Reads row cells with optional grapheme payload.
+    /// Falls back to <see cref="TerminalGetRowCells"/> when the native symbol
+    /// is unavailable in the loaded library.
+    /// </summary>
+    public static unsafe uint TerminalGetRowCellsWithGraphemes(
+        nint terminal,
+        uint rowIdx,
+        CellInfo* cells,
+        uint maxCells,
+        GraphemeSpan* graphemeSpans,
+        uint maxSpans,
+        uint* graphemeCodepoints,
+        uint maxGraphemeCodepoints,
+        uint* graphemeCodepointsWritten)
+    {
+        if (s_terminalGetRowCellsWithGraphemesExport == nint.Zero)
+        {
+            uint filled = TerminalGetRowCells(terminal, rowIdx, cells, maxCells);
+
+            if (graphemeSpans != null)
+            {
+                uint spanCount = filled < maxSpans ? filled : maxSpans;
+                for (uint i = 0; i < spanCount; i++)
+                {
+                    graphemeSpans[i] = default;
+                }
+            }
+
+            if (graphemeCodepointsWritten != null)
+            {
+                *graphemeCodepointsWritten = 0;
+            }
+
+            return filled;
+        }
+
+        var fn = (delegate* unmanaged[Cdecl]<
+            nint,
+            uint,
+            CellInfo*,
+            uint,
+            GraphemeSpan*,
+            uint,
+            uint*,
+            uint,
+            uint*,
+            uint>)s_terminalGetRowCellsWithGraphemesExport;
+
+        return fn(
+            terminal,
+            rowIdx,
+            cells,
+            maxCells,
+            graphemeSpans,
+            maxSpans,
+            graphemeCodepoints,
+            maxGraphemeCodepoints,
+            graphemeCodepointsWritten);
+    }
+
     // ──────────────────────── Resize ─────────────────────────────────
 
     /// <summary>Resizes the terminal grid.</summary>
@@ -245,4 +331,28 @@ public static partial class GhosttyTerminalNative
             return true;
         }
     }
+
+    private static nint LoadNativeLibraryHandle()
+    {
+        return NativeLibrary.TryLoad(
+            LibName,
+            typeof(GhosttyTerminalNative).Assembly,
+            null,
+            out nint handle)
+            ? handle
+            : nint.Zero;
+    }
+
+    private static nint ResolveOptionalExport(string symbol)
+    {
+        if (s_nativeLibraryHandle == nint.Zero)
+        {
+            return nint.Zero;
+        }
+
+        return NativeLibrary.TryGetExport(s_nativeLibraryHandle, symbol, out nint export)
+            ? export
+            : nint.Zero;
+    }
+
 }

@@ -462,6 +462,41 @@ public sealed class GhosttySurface : IDisposable
         }
     }
 
+    /// <summary>
+    /// Gets resolved cell data plus optional grapheme spans for a viewport row.
+    /// Must be called while screen is locked.
+    /// Returns the number of cells actually written to the buffer.
+    /// </summary>
+    public unsafe uint GetRowCellsWithGraphemes(
+        uint row,
+        Span<GhosttyCellInfo> cells,
+        Span<GhosttyCellGraphemeSpan> graphemeSpans,
+        Span<uint> graphemeCodepoints,
+        out uint graphemeCodepointsWritten)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        fixed (GhosttyCellInfo* cellsPtr = cells)
+        fixed (GhosttyCellGraphemeSpan* spansPtr = graphemeSpans)
+        fixed (uint* codepointsPtr = graphemeCodepoints)
+        {
+            uint written = 0;
+            uint filled = GhosttyNative.SurfaceGetRowCellsWithGraphemes(
+                _handle,
+                row,
+                cellsPtr,
+                (uint)cells.Length,
+                spansPtr,
+                (uint)graphemeSpans.Length,
+                codepointsPtr,
+                (uint)graphemeCodepoints.Length,
+                &written);
+
+            graphemeCodepointsWritten = written;
+            return filled;
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
