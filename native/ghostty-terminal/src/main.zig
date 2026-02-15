@@ -333,6 +333,10 @@ export fn ghostty_terminal_new(cols: u32, rows: u32, max_scrollback: u32) ?*Term
             .cols = @intCast(safe_cols),
             .rows = @intCast(safe_rows),
             .max_scrollback = max_scrollback,
+            // Enable terminal Unicode grapheme clustering (mode 2027)
+            // by default so regional-indicator flags and other emoji
+            // sequences are represented as a single grapheme cluster.
+            .default_modes = .{ .grapheme_cluster = true },
         }) catch {
             alloc.destroy(handle);
             return null;
@@ -668,6 +672,7 @@ export fn ghostty_terminal_self_test() u32 {
             .cols = 80,
             .rows = 24,
             .max_scrollback = 0,
+            .default_modes = .{ .grapheme_cluster = true },
         }) catch {
             alloc.destroy(handle);
             return 1;

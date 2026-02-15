@@ -315,4 +315,50 @@ public class TerminalNativeTests
             GhosttyTerminalNative.TerminalFree(handle);
         }
     }
+
+    [Fact]
+    public unsafe void Terminal_GetRowCellsWithGraphemes_RegionalIndicatorPair_WhenSupported()
+    {
+        if (!GhosttyTerminalNative.IsAvailable() || !GhosttyTerminalNative.SupportsRowCellGraphemes)
+            return;
+
+        var handle = GhosttyTerminalNative.TerminalNew(80, 24, 0);
+        Assert.NotEqual(nint.Zero, handle);
+
+        try
+        {
+            byte[] data = System.Text.Encoding.UTF8.GetBytes("\U0001F1E8\U0001F1E6");
+            fixed (byte* ptr = data)
+            {
+                GhosttyTerminalNative.TerminalProcess(handle, ptr, (nuint)data.Length);
+            }
+
+            var cells = stackalloc GhosttyTerminalNative.CellInfo[80];
+            var spans = stackalloc GhosttyTerminalNative.GraphemeSpan[80];
+            var graphemeCodepoints = stackalloc uint[320];
+            uint graphemeWritten = 0;
+
+            uint filled = GhosttyTerminalNative.TerminalGetRowCellsWithGraphemes(
+                handle,
+                0,
+                cells,
+                80,
+                spans,
+                80,
+                graphemeCodepoints,
+                320,
+                &graphemeWritten);
+
+            Assert.True(filled >= 2);
+            Assert.Equal(0x1F1E8u, cells[0].Codepoint);
+            Assert.True(
+                spans[0].Length == 1 && graphemeWritten >= 1 && graphemeCodepoints[spans[0].Offset] == 0x1F1E6u,
+                $"filled={filled}, span0=({spans[0].Offset},{spans[0].Length}), graphemeWritten={graphemeWritten}, " +
+                $"cp0=0x{cells[0].Codepoint:X}, cp1=0x{cells[1].Codepoint:X}, attrs0=0x{cells[0].Attrs:X8}, attrs1=0x{cells[1].Attrs:X8}");
+        }
+        finally
+        {
+            GhosttyTerminalNative.TerminalFree(handle);
+        }
+    }
 }
