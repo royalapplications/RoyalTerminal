@@ -292,6 +292,58 @@ public class HeadlessSkiaRenderingTests
     }
 
     [Fact]
+    public void Renderer_FlagGrapheme_RendersVisiblePixels()
+    {
+        const string canadaFlag = "\U0001F1E8\U0001F1E6";
+
+        var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        var screen = new TerminalScreen(4, 1);
+        var row = screen.GetViewportRow(0);
+        row[0].Codepoint = 0x1F1E8;
+        row[0].Grapheme = canadaFlag;
+        row[0].Width = 2;
+        row[0].Foreground = 0xFFFFFFFF;
+        row[0].Background = 0xFF000000;
+        row[1].Codepoint = 0;
+        row[1].Grapheme = null;
+        row[1].Width = 0;
+        row[1].Foreground = 0xFFFFFFFF;
+        row[1].Background = 0xFF000000;
+        row.IsDirty = true;
+
+        int width = (int)Math.Ceiling(4 * renderer.CellWidth);
+        int height = (int)Math.Ceiling(renderer.CellHeight);
+        using var surface = SKSurface.Create(new SKImageInfo(width, height));
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using var snapshot = surface.Snapshot();
+        using var pixmap = snapshot.PeekPixels();
+        Assert.NotNull(pixmap);
+
+        int scanWidth = Math.Min(pixmap.Width, Math.Max(1, (int)Math.Ceiling(renderer.CellWidth * 2)));
+        int scanHeight = Math.Min(pixmap.Height, Math.Max(1, (int)Math.Ceiling(renderer.CellHeight)));
+        bool hasNonBlackPixel = false;
+        for (int y = 0; y < scanHeight && !hasNonBlackPixel; y++)
+        {
+            for (int x = 0; x < scanWidth && !hasNonBlackPixel; x++)
+            {
+                SKColor px = pixmap.GetPixelColor(x, y);
+                if (px.Red > 10 || px.Green > 10 || px.Blue > 10)
+                {
+                    hasNonBlackPixel = true;
+                }
+            }
+        }
+
+        Assert.True(hasNonBlackPixel, "Flag grapheme should produce visible pixels in the first two cells.");
+    }
+
+    [Fact]
     public void Renderer_DirtyTracking_OnlyRendersChangedRows()
     {
         var renderer = new SkiaTerminalRenderer("Consolas", 14f);

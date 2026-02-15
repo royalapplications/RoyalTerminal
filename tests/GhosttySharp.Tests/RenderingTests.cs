@@ -156,6 +156,99 @@ public class RenderingTests
     }
 
     [Fact]
+    public void TerminalFontResolver_RegionalIndicator_PrefersEmojiLanguageTag_WhenAvailable()
+    {
+        const int regionalIndicatorCodepoint = 0x1F1E8; // 🇨
+        using var resolver = new TerminalFontResolver();
+        using var baseTypeface = CreateMonospaceTypeface();
+        using var manager = SKFontManager.CreateDefault();
+
+        TerminalFontResolution resolution = resolver.ResolveTypeface(
+            baseTypeface,
+            regionalIndicatorCodepoint,
+            CultureInfo.InvariantCulture);
+
+        using var expectedEmojiTypeface = manager.MatchCharacter(
+            null,
+            baseTypeface.FontStyle,
+            ["und-Zsye"],
+            regionalIndicatorCodepoint);
+
+        if (expectedEmojiTypeface is not null && expectedEmojiTypeface.Handle != baseTypeface.Handle)
+        {
+            Assert.True(resolution.UsedFallback);
+            Assert.Equal(expectedEmojiTypeface.Handle, resolution.Typeface.Handle);
+            return;
+        }
+
+        Assert.True(
+            resolution.Typeface.Handle == baseTypeface.Handle ||
+            resolution.Typeface.ContainsGlyph(regionalIndicatorCodepoint),
+            "Resolution should keep base typeface or return a typeface containing the regional indicator glyph.");
+    }
+
+    [Fact]
+    public void TerminalFontResolver_FlagSequenceText_UsesRegionalIndicatorResolutionPath()
+    {
+        const string canadaFlag = "\U0001F1E8\U0001F1E6";
+
+        using var resolver = new TerminalFontResolver();
+        using var baseTypeface = CreateMonospaceTypeface();
+
+        TerminalFontResolution fromText = resolver.ResolveTypeface(
+            baseTypeface,
+            canadaFlag,
+            CultureInfo.InvariantCulture);
+
+        TerminalFontResolution fromCodepoint = resolver.ResolveTypeface(
+            baseTypeface,
+            0x1F1E8,
+            CultureInfo.InvariantCulture);
+
+        Assert.Equal(fromCodepoint.UsedFallback, fromText.UsedFallback);
+        Assert.Equal(fromCodepoint.Typeface.Handle, fromText.Typeface.Handle);
+    }
+
+    [Fact]
+    public void TerminalFontResolver_KeycapSequence_ForcesEmojiResolutionAttempt()
+    {
+        const string keycap = "#\uFE0F\u20E3";
+
+        using var resolver = new TerminalFontResolver();
+        using var baseTypeface = CreateMonospaceTypeface();
+
+        Assert.True(baseTypeface.ContainsGlyph('#'));
+
+        _ = resolver.ResolveTypeface(
+            baseTypeface,
+            keycap,
+            CultureInfo.InvariantCulture);
+
+        Assert.True(
+            resolver.CachedFallbackCount >= 1,
+            "Keycap sequence should trigger the emoji-resolution path even when the base font has '#'.");
+    }
+
+    [Fact]
+    public void TerminalFontResolver_NonEmojiZwjText_DoesNotForceEmojiLookup()
+    {
+        const string nonEmojiZwj = "a\u200D";
+
+        using var resolver = new TerminalFontResolver();
+        using var baseTypeface = CreateMonospaceTypeface();
+        Assert.True(baseTypeface.ContainsGlyph('a'));
+
+        TerminalFontResolution resolution = resolver.ResolveTypeface(
+            baseTypeface,
+            nonEmojiZwj,
+            CultureInfo.InvariantCulture);
+
+        Assert.False(resolution.UsedFallback);
+        Assert.Equal(baseTypeface.Handle, resolution.Typeface.Handle);
+        Assert.Equal(0, resolver.CachedFallbackCount);
+    }
+
+    [Fact]
     public void TerminalFontResolver_CjkFallback_ResolvesConsistentlyWithSkiaMatchCharacter()
     {
         const int cjkCodepoint = 0x4E2D; // 中
@@ -467,6 +560,34 @@ public class RenderingTests
                             ?? SKTypeface.FromFamilyName(null, SKFontStyle.Normal)
                             ?? throw new InvalidOperationException("Unable to create fallback typeface.");
         return fallback;
+    }
+
+    private static SKTypeface CreateMonospaceTypeface()
+    {
+        string[] candidates =
+        [
+            "Consolas",
+            "Cascadia Mono",
+            "Menlo",
+            "Monaco",
+            "Courier New",
+            "DejaVu Sans Mono",
+            "Liberation Mono",
+            "Noto Sans Mono",
+        ];
+
+        foreach (string family in candidates)
+        {
+            SKTypeface? candidate = SKTypeface.FromFamilyName(family, SKFontStyle.Normal);
+            if (candidate is not null)
+            {
+                return candidate;
+            }
+        }
+
+        return SKTypeface.FromFamilyName("Monospace", SKFontStyle.Normal)
+            ?? SKTypeface.FromFamilyName(null, SKFontStyle.Normal)
+            ?? throw new InvalidOperationException("Unable to create monospace typeface.");
     }
 
     private static SKSurface CreateRenderSurface(SkiaTerminalRenderer renderer, int columns, int rows)

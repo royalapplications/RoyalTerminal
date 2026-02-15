@@ -312,7 +312,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             bool italic = (firstCell.Attributes & CellAttributes.Italic) != 0;
             SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
             SKColor runColor = GetEffectiveForeground(in firstCell);
-            SKTypeface runTypeface = ResolveTypefaceForCodepoint(primaryTypeface, GetCellPrimaryCodepoint(in firstCell));
+            SKTypeface runTypeface = ResolveTypefaceForCell(primaryTypeface, in firstCell);
 
             int runEnd = col + 1;
             while (runEnd < cells.Length)
@@ -336,7 +336,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     break;
                 }
 
-                SKTypeface nextTypeface = ResolveTypefaceForCodepoint(primaryTypeface, GetCellPrimaryCodepoint(in nextCell));
+                SKTypeface nextTypeface = ResolveTypefaceForCell(primaryTypeface, in nextCell);
 
                 if (nextTypeface.Handle != runTypeface.Handle)
                 {
@@ -688,12 +688,17 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
     }
 
-    private SKTypeface ResolveTypefaceForCodepoint(SKTypeface primaryTypeface, int codepoint)
+    private SKTypeface ResolveTypefaceForCell(SKTypeface primaryTypeface, ref readonly TerminalCell cell)
     {
-        TerminalFontResolution resolution = _fontResolver.ResolveTypeface(
-            primaryTypeface,
-            codepoint,
-            s_renderCulture);
+        TerminalFontResolution resolution = string.IsNullOrEmpty(cell.Grapheme)
+            ? _fontResolver.ResolveTypeface(
+                primaryTypeface,
+                GetCellPrimaryCodepoint(in cell),
+                s_renderCulture)
+            : _fontResolver.ResolveTypeface(
+                primaryTypeface,
+                cell.Grapheme.AsSpan(),
+                s_renderCulture);
 
         if (resolution.UsedFallback)
         {
