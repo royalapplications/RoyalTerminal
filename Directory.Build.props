@@ -13,9 +13,9 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <Authors>GhosttySharp Contributors</Authors>
-    <Company>GhosttySharp</Company>
-    <Copyright>Copyright © 2026 GhosttySharp Contributors</Copyright>
+    <Authors>RoyalTerminal.GhosttySharp Contributors</Authors>
+    <Company>RoyalTerminal.GhosttySharp</Company>
+    <Copyright>Copyright © 2026 RoyalTerminal.GhosttySharp Contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ghostty-org/ghostty</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ghostty-org/ghostty</RepositoryUrl>

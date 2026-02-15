@@ -1,4 +1,4 @@
-# GhosttySharp
+# RoyalTerminal
 
 High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-org/ghostty) terminal emulator with four integration modes, modular terminal/PTY/VT packages, and a split rendering stack (contracts, native interop, Skia bridge, and Avalonia adapters).
 
@@ -12,38 +12,38 @@ High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-o
 
 | Package | NuGet | Description |
 |---------|-------|-------------|
-| **GhosttySharp** | [![NuGet](https://img.shields.io/nuget/v/GhosttySharp.svg)](https://www.nuget.org/packages/GhosttySharp) | Core Ghostty bindings (`libghostty`, `libghostty-vt`, `libghostty-terminal`) |
-| **GhosttySharp.Avalonia** | [![NuGet](https://img.shields.io/nuget/v/GhosttySharp.Avalonia.svg)](https://www.nuget.org/packages/GhosttySharp.Avalonia) | Avalonia controls (`GhosttyNativeTerminalControl`, `GhosttyRenderedTerminalControl`, `GhosttyTerminalControl`) |
-| **GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/GhosttySharp.Native.OSX) | Native runtime assets for macOS (`libghostty`, `libghostty-vt`, `libghostty-terminal`, `libghostty-renderer-capi`) |
-| **GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/GhosttySharp.Native.Win64) | Native runtime assets for Windows x64 (`ghostty.dll`, `ghostty-vt.dll`, `ghostty-terminal.dll`, `ghostty-renderer-capi.dll`) |
-| **GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/GhosttySharp.Native.Linux64) | Native runtime assets for Linux (`libghostty.so`, `libghostty-vt.so`, `libghostty-terminal.so`, `libghostty-renderer-capi.so`) |
+| **RoyalTerminal.GhosttySharp** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp) | Core Ghostty bindings (`libghostty`, `libghostty-vt`, `libghostty-terminal`) |
+| **RoyalTerminal.Avalonia** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.Avalonia.svg)](https://www.nuget.org/packages/RoyalTerminal.Avalonia) | Avalonia controls (`GhosttyNativeTerminalControl`, `GhosttyRenderedTerminalControl`, `GhosttyTerminalControl`) |
+| **RoyalTerminal.GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.OSX) | Native runtime assets for macOS (`libghostty`, `libghostty-vt`, `libghostty-terminal`, `libghostty-renderer-capi`) |
+| **RoyalTerminal.GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Win64) | Native runtime assets for Windows x64 (`ghostty.dll`, `ghostty-vt.dll`, `ghostty-terminal.dll`, `ghostty-renderer-capi.dll`) |
+| **RoyalTerminal.GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Linux64) | Native runtime assets for Linux (`libghostty.so`, `libghostty-vt.so`, `libghostty-terminal.so`, `libghostty-renderer-capi.so`) |
 
 ### Modular Managed Packages (Packable Composition Units)
 
 | Package | Responsibility |
 |---------|----------------|
-| `GhosttySharp.Terminal` | Core terminal contracts and screen model |
-| `GhosttySharp.Terminal.Vt.Managed` | Managed VT processor (`BasicVtProcessor`) |
-| `GhosttySharp.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over `libghostty-terminal`) |
-| `GhosttySharp.Terminal.Vt.Default` | Auto-selection VT processor factory |
-| `GhosttySharp.Terminal.Pty.Unix` | Unix PTY implementation (`forkpty`) |
-| `GhosttySharp.Terminal.Pty.Windows` | Windows PTY implementation (ConPTY) |
-| `GhosttySharp.Terminal.Pty.Platform` | Platform PTY factory (`DefaultPtyFactory`) |
-| `GhosttySharp.Terminal.Services.Contracts` | Terminal session service contracts |
-| `GhosttySharp.Terminal.Services` | Terminal session service implementations |
-| `GhosttySharp.Rendering.Text` | Reusable text shaping/fallback subsystem (`HarfBuzzTextShaper`, `TerminalFontResolver`) |
-| `GhosttySharp.Rendering.Skia` | CPU cell renderer core (`SkiaTerminalRenderer`, `GlyphCache`) with HarfBuzz shaping + fallback font resolution |
-| `GhosttySharp.Rendering.Contracts` | Backend-agnostic render contracts (`RenderTargetDescriptor`, capabilities) |
-| `GhosttySharp.Rendering.Interop` | Managed wrapper for `ghostty-renderer-capi` |
-| `GhosttySharp.Rendering.Interop.Skia` | Skia bridge (`SkiaInteropRenderer`) with CPU fallback |
-| `GhosttySharp.Avalonia.Rendering` | Avalonia render-target acquisition and texture interop draw handler |
+| `RoyalTerminal.GhosttySharp.Terminal` | Core terminal contracts and screen model |
+| `RoyalTerminal.GhosttySharp.Terminal.Vt.Managed` | Managed VT processor (`BasicVtProcessor`) |
+| `RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over `libghostty-terminal`) |
+| `RoyalTerminal.GhosttySharp.Terminal.Vt.Default` | Auto-selection VT processor factory |
+| `RoyalTerminal.GhosttySharp.Terminal.Pty.Unix` | Unix PTY implementation (`forkpty`) |
+| `RoyalTerminal.GhosttySharp.Terminal.Pty.Windows` | Windows PTY implementation (ConPTY) |
+| `RoyalTerminal.GhosttySharp.Terminal.Pty.Platform` | Platform PTY factory (`DefaultPtyFactory`) |
+| `RoyalTerminal.GhosttySharp.Terminal.Services.Contracts` | Terminal session service contracts |
+| `RoyalTerminal.GhosttySharp.Terminal.Services` | Terminal session service implementations |
+| `RoyalTerminal.Rendering.Text` | Reusable text shaping/fallback subsystem (`HarfBuzzTextShaper`, `TerminalFontResolver`) |
+| `RoyalTerminal.Rendering.Skia` | CPU cell renderer core (`SkiaTerminalRenderer`, `GlyphCache`) with HarfBuzz shaping + fallback font resolution |
+| `RoyalTerminal.Rendering.Contracts` | Backend-agnostic render contracts (`RenderTargetDescriptor`, capabilities) |
+| `RoyalTerminal.Rendering.Interop` | Managed wrapper for `ghostty-renderer-capi` |
+| `RoyalTerminal.Rendering.Interop.Skia` | Skia bridge (`SkiaInteropRenderer`) with CPU fallback |
+| `RoyalTerminal.Avalonia.Rendering` | Avalonia render-target acquisition and texture interop draw handler |
 
 ## Features
 
 - **Four integration modes** with explicit trade-offs between fidelity, portability, and native dependencies.
 - **Split rendering architecture**:
-  - CPU cell rendering path (`GhosttySharp.Rendering.Skia`)
-  - GPU interop path (`GhosttySharp.Rendering.*` + `ghostty-renderer-capi`)
+  - CPU cell rendering path (`RoyalTerminal.Rendering.Skia`)
+  - GPU interop path (`RoyalTerminal.Rendering.*` + `ghostty-renderer-capi`)
 - **Ghostty Rendered TextureInterop mode** in `GhosttyRenderedTerminalControl`.
 - **Standalone VT engine** via `libghostty-terminal` on all platforms.
 - **Modular PTY and VT packages** (`Terminal.Pty.*`, `Terminal.Vt.*`).
@@ -52,7 +52,7 @@ High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-o
 - **Terminal session service split** (`Terminal.Services.Contracts` and `Terminal.Services`).
 - **Native artifact pipeline** for macOS/Linux/Windows, consumed by managed build/test/pack stages.
 - **Central NuGet package management** via `Directory.Packages.props`.
-- **ReactiveUI only in sample app** (`samples/GhosttySharp.Demo`); library projects are not ReactiveUI-dependent.
+- **ReactiveUI only in sample app** (`samples/RoyalTerminal.Demo`); library projects are not ReactiveUI-dependent.
 
 ## Integration Modes
 
@@ -78,7 +78,7 @@ High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-o
 flowchart TD
     App[Application / Avalonia Host]
 
-    subgraph UI[GhosttySharp.Avalonia]
+    subgraph UI[RoyalTerminal.Avalonia]
       C1[GhosttyNativeTerminalControl]
       C2[GhosttyRenderedTerminalControl]
       C3[GhosttyTerminalControl]
@@ -86,7 +86,7 @@ flowchart TD
     end
 
     subgraph Terminal[Terminal Modules]
-      T0[GhosttySharp.Terminal]
+      T0[RoyalTerminal.GhosttySharp.Terminal]
       T1[Terminal.Vt.Managed]
       T2[Terminal.Vt.Ghostty]
       T3[Terminal.Vt.Default]
@@ -124,8 +124,8 @@ flowchart TD
 ### 1. Ghostty Native (macOS)
 
 ```csharp
-using GhosttySharp;
-using GhosttySharp.Avalonia.Controls;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.Avalonia.Controls;
 
 Ghostty.Initialize();
 using var config = new GhosttyConfig();
@@ -145,8 +145,8 @@ terminal.Initialize(app);
 ### 2. Ghostty Rendered (CPU Cell Renderer)
 
 ```csharp
-using GhosttySharp;
-using GhosttySharp.Avalonia.Controls;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.Avalonia.Controls;
 
 Ghostty.Initialize();
 using var config = new GhosttyConfig();
@@ -167,9 +167,9 @@ terminal.Initialize(app);
 ### 3. Ghostty Rendered (TextureInterop)
 
 ```csharp
-using GhosttySharp;
-using GhosttySharp.Avalonia.Controls;
-using GhosttySharp.Avalonia.Rendering.Interop;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering.Interop;
 
 Ghostty.Initialize();
 using var config = new GhosttyConfig();
@@ -191,7 +191,7 @@ terminal.Initialize(app);
 ### 4. Cross-Platform Terminal Control (`GhosttyTerminalControl`)
 
 ```csharp
-using GhosttySharp.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Controls;
 
 var terminal = new GhosttyTerminalControl
 {
@@ -212,8 +212,8 @@ terminal.StartPty(
 ### 5. Renderer Shaping Controls and Diagnostics
 
 ```csharp
-using GhosttySharp.Avalonia.Controls;
-using GhosttySharp.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
 
 var terminal = new GhosttyTerminalControl();
 terminal.StartPty();
@@ -233,8 +233,8 @@ if (terminal.Renderer is { } renderer)
 ### 6. Direct Renderer Interop (No Avalonia Adapter)
 
 ```csharp
-using GhosttySharp.Rendering.Contracts;
-using GhosttySharp.Rendering.Interop;
+using RoyalTerminal.Rendering.Contracts;
+using RoyalTerminal.Rendering.Interop;
 
 using var context = new GhosttyRenderContext();
 using var surface = context.CreateSurface(RenderBackendKind.Software);
@@ -254,15 +254,15 @@ surface.EndFrame(frameToken);
 
 ```bash
 # Core bindings
-dotnet add package GhosttySharp
+dotnet add package RoyalTerminal.GhosttySharp
 
 # Avalonia controls
-dotnet add package GhosttySharp.Avalonia
+dotnet add package RoyalTerminal.Avalonia
 
 # Native runtime assets (pick your target platforms)
-dotnet add package GhosttySharp.Native.OSX
-dotnet add package GhosttySharp.Native.Linux64
-dotnet add package GhosttySharp.Native.Win64
+dotnet add package RoyalTerminal.GhosttySharp.Native.OSX
+dotnet add package RoyalTerminal.GhosttySharp.Native.Linux64
+dotnet add package RoyalTerminal.GhosttySharp.Native.Win64
 ```
 
 ### Modular Rendering Interop Setup
@@ -270,11 +270,11 @@ dotnet add package GhosttySharp.Native.Win64
 Use this when embedding the renderer interop pipeline directly:
 
 ```bash
-dotnet add package GhosttySharp.Rendering.Contracts
-dotnet add package GhosttySharp.Rendering.Interop
-dotnet add package GhosttySharp.Rendering.Skia
-dotnet add package GhosttySharp.Rendering.Interop.Skia
-dotnet add package GhosttySharp.Avalonia.Rendering
+dotnet add package RoyalTerminal.Rendering.Contracts
+dotnet add package RoyalTerminal.Rendering.Interop
+dotnet add package RoyalTerminal.Rendering.Skia
+dotnet add package RoyalTerminal.Rendering.Interop.Skia
+dotnet add package RoyalTerminal.Avalonia.Rendering
 ```
 
 If your feed does not yet publish these composition packages, create them from source with `dotnet pack -c Release` and consume from your local/internal feed.
@@ -295,14 +295,14 @@ If your feed does not yet publish these composition packages, create them from s
 
 ## Rendering Interop Contract
 
-`GhosttySharp.Rendering.Contracts` defines the backend-neutral model:
+`RoyalTerminal.Rendering.Contracts` defines the backend-neutral model:
 
 - `RenderBackendKind`: `Software`, `Metal`, `Vulkan`, `D3D11`, `D3D12`, `OpenGL`
 - `RenderTargetDescriptor`: native handle carrier for one render target submission
 - `RenderBackendCapabilities`: supported features/sample counts/pixel formats
 - `RenderFeatureFlags`: `ExternalTextureTargets`, `CpuRgbaFallback`, `ExplicitFrameLifecycle`, etc.
 
-`GhosttySharp.Rendering.Interop.Skia` (`SkiaInteropRenderer`) behavior:
+`RoyalTerminal.Rendering.Interop.Skia` (`SkiaInteropRenderer`) behavior:
 
 1. Validate descriptor.
 2. Attempt direct interop only when surface capabilities advertise `ExternalTextureTargets`.
@@ -343,12 +343,12 @@ bash build.sh test
 
 ## Ghostty Submodule Patch Log
 
-GhosttySharp currently tracks a patched Ghostty fork in `external/ghostty`
+RoyalTerminal currently tracks a patched Ghostty fork in `external/ghostty`
 (`wieslawsoltes/ghostty`, branch `ghosttysharp/screen-api`). The commits below
 are required for Unicode-correct terminal cell readback and rendering.
 
 1. [`455bc6d86`](https://github.com/wieslawsoltes/ghostty/commit/455bc6d86) `screen: add grapheme-aware row cell export`
-   Added `ghostty_surface_get_row_cells_with_graphemes` and supporting grapheme-span payloads so managed code can reconstruct full per-cell graphemes (primary codepoint + trailing UTF-32 sequence). This was needed because `codepoint`-only row reads lose combining/emoji cluster data and break HarfBuzz shaping and fallback selection in GhosttySharp.
+   Added `ghostty_surface_get_row_cells_with_graphemes` and supporting grapheme-span payloads so managed code can reconstruct full per-cell graphemes (primary codepoint + trailing UTF-32 sequence). This was needed because `codepoint`-only row reads lose combining/emoji cluster data and break HarfBuzz shaping and fallback selection in RoyalTerminal.GhosttySharp.
 2. [`523554136`](https://github.com/wieslawsoltes/ghostty/commit/523554136) `Force unicode grapheme width method for embedded surfaces`
    Forced embedded surfaces to use `grapheme-width-method=unicode`. This was needed to avoid legacy-width behavior that could split regional-indicator flag pairs and other emoji sequences into non-clustered cells, causing incorrect native VT/rendered output despite shaping support in managed code.
 
@@ -356,13 +356,13 @@ are required for Unicode-correct terminal cell readback and rendering.
 
 | Package | Implementation |
 |---------|----------------|
-| `GhosttySharp.Terminal.Pty.Unix` | `UnixPty` (`forkpty`, `TIOCSWINSZ`) |
-| `GhosttySharp.Terminal.Pty.Windows` | `WindowsPty` (ConPTY) |
-| `GhosttySharp.Terminal.Pty.Platform` | `DefaultPtyFactory` selector |
+| `RoyalTerminal.GhosttySharp.Terminal.Pty.Unix` | `UnixPty` (`forkpty`, `TIOCSWINSZ`) |
+| `RoyalTerminal.GhosttySharp.Terminal.Pty.Windows` | `WindowsPty` (ConPTY) |
+| `RoyalTerminal.GhosttySharp.Terminal.Pty.Platform` | `DefaultPtyFactory` selector |
 
 ## Native Library Resolution
 
-Renderer interop (`GhosttySharp.Rendering.Interop`) supports:
+Renderer interop (`RoyalTerminal.Rendering.Interop`) supports:
 
 - `GHOSTTY_RENDERER_CAPI_LIBRARY_PATH` (absolute file path)
 - `GHOSTTY_RENDERER_CAPI_LIBRARY_DIR` (directory containing the library)
@@ -384,46 +384,46 @@ Probe order includes:
 
 Primary runtime package locations:
 
-- `src/GhosttySharp.Native.OSX/runtimes/<rid>/native/`
-- `src/GhosttySharp.Native.Linux64/runtimes/<rid>/native/`
-- `src/GhosttySharp.Native.Win64/runtimes/<rid>/native/`
+- `src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/<rid>/native/`
+- `src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/<rid>/native/`
+- `src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/<rid>/native/`
 
 ## Project Structure
 
 ```text
-GhosttySharp/
+RoyalTerminal/
 ├── Directory.Build.props
 ├── Directory.Packages.props
-├── GhosttySharp.sln
+├── RoyalTerminal.sln
 ├── native/
 │   ├── ghostty-terminal/
 │   └── ghostty-renderer-capi/
 ├── src/
-│   ├── GhosttySharp/
-│   ├── GhosttySharp.Avalonia/
-│   ├── GhosttySharp.Avalonia.Rendering/
-│   ├── GhosttySharp.Terminal/
-│   ├── GhosttySharp.Terminal.Vt.Managed/
-│   ├── GhosttySharp.Terminal.Vt.Ghostty/
-│   ├── GhosttySharp.Terminal.Vt.Default/
-│   ├── GhosttySharp.Terminal.Pty.Unix/
-│   ├── GhosttySharp.Terminal.Pty.Windows/
-│   ├── GhosttySharp.Terminal.Pty.Platform/
-│   ├── GhosttySharp.Terminal.Services.Contracts/
-│   ├── GhosttySharp.Terminal.Services/
-│   ├── GhosttySharp.Rendering.Text/
-│   ├── GhosttySharp.Rendering.Contracts/
-│   ├── GhosttySharp.Rendering.Interop/
-│   ├── GhosttySharp.Rendering.Skia/
-│   ├── GhosttySharp.Rendering.Interop.Skia/
-│   ├── GhosttySharp.Native.OSX/
-│   ├── GhosttySharp.Native.Linux64/
-│   └── GhosttySharp.Native.Win64/
-├── samples/GhosttySharp.Demo/
+│   ├── RoyalTerminal.GhosttySharp/
+│   ├── RoyalTerminal.Avalonia/
+│   ├── RoyalTerminal.Avalonia.Rendering/
+│   ├── RoyalTerminal.GhosttySharp.Terminal/
+│   ├── RoyalTerminal.GhosttySharp.Terminal.Vt.Managed/
+│   ├── RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty/
+│   ├── RoyalTerminal.GhosttySharp.Terminal.Vt.Default/
+│   ├── RoyalTerminal.GhosttySharp.Terminal.Pty.Unix/
+│   ├── RoyalTerminal.GhosttySharp.Terminal.Pty.Windows/
+│   ├── RoyalTerminal.GhosttySharp.Terminal.Pty.Platform/
+│   ├── RoyalTerminal.GhosttySharp.Terminal.Services.Contracts/
+│   ├── RoyalTerminal.GhosttySharp.Terminal.Services/
+│   ├── RoyalTerminal.Rendering.Text/
+│   ├── RoyalTerminal.Rendering.Contracts/
+│   ├── RoyalTerminal.Rendering.Interop/
+│   ├── RoyalTerminal.Rendering.Skia/
+│   ├── RoyalTerminal.Rendering.Interop.Skia/
+│   ├── RoyalTerminal.GhosttySharp.Native.OSX/
+│   ├── RoyalTerminal.GhosttySharp.Native.Linux64/
+│   └── RoyalTerminal.GhosttySharp.Native.Win64/
+├── samples/RoyalTerminal.Demo/
 ├── tests/
-│   ├── GhosttySharp.Benchmarks/
-│   ├── GhosttySharp.Tests/
-│   └── GhosttySharp.IntegrationTests/
+│   ├── RoyalTerminal.Benchmarks/
+│   ├── RoyalTerminal.Tests/
+│   └── RoyalTerminal.IntegrationTests/
 └── scripts/
     ├── build-native.sh
     └── build-native.ps1
@@ -451,31 +451,31 @@ bash scripts/build-native.sh --release
 pwsh scripts/build-native.ps1 -Release
 
 # Managed build
-dotnet build GhosttySharp.sln -c Release
+dotnet build RoyalTerminal.sln -c Release
 ```
 
 ### Run Demo
 
 ```bash
-dotnet run --project samples/GhosttySharp.Demo
+dotnet run --project samples/RoyalTerminal.Demo
 ```
 
 Optional demo toggles:
 
 ```bash
-GHOSTTYSHARP_DISABLE_TEXT_SHAPING=1 \
-GHOSTTYSHARP_ENABLE_RENDER_DIAGNOSTICS=1 \
-dotnet run --project samples/GhosttySharp.Demo
+ROYALTERMINAL_DISABLE_TEXT_SHAPING=1 \
+ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS=1 \
+dotnet run --project samples/RoyalTerminal.Demo
 ```
 
 ## Testing
 
 ```bash
 # Full test pass
-dotnet test GhosttySharp.sln -c Release
+dotnet test RoyalTerminal.sln -c Release
 
 # Rendering-focused tests
-dotnet test tests/GhosttySharp.Tests/GhosttySharp.Tests.csproj -c Release --filter "RenderingInteropTests|RenderingSkiaInteropTests|RenderingAvaloniaAdapterTests|RenderingContractsTests"
+dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|RenderingSkiaInteropTests|RenderingAvaloniaAdapterTests|RenderingContractsTests"
 ```
 
 Current baseline in this repository:
@@ -486,7 +486,7 @@ Current baseline in this repository:
 Performance baseline harness:
 
 ```bash
-dotnet run --project tests/GhosttySharp.Benchmarks/GhosttySharp.Benchmarks.csproj -c Release -- --output /tmp/ghosttysharp-render-baseline.md
+dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --output /tmp/royalterminal-render-baseline.md
 ```
 
 ## API Coverage
