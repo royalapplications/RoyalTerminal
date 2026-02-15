@@ -1,14 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>GhosttySharp.Rendering.Skia</PackageId>
+    <PackageId>RoyalTerminal.Rendering.Skia</PackageId>
     <Description>SkiaSharp terminal rendering core independent of Avalonia controls.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\GhosttySharp.Rendering.Text\GhosttySharp.Rendering.Text.csproj" />
-    <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Rendering.Text\RoyalTerminal.Rendering.Text.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp.Terminal\RoyalTerminal.GhosttySharp.Terminal.csproj" />
   </ItemGroup>
 
   <ItemGroup>

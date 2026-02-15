@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop.Skia - Request model for Skia interop rendering.
+// RoyalTerminal.Rendering.Interop.Skia - Request model for Skia interop rendering.
 
-using GhosttySharp.Rendering.Contracts;
+using RoyalTerminal.Rendering.Contracts;
 using SkiaSharp;
 
-namespace GhosttySharp.Rendering.Interop.Skia;
+namespace RoyalTerminal.Rendering.Interop.Skia;
 
 /// <summary>
 /// Describes one Skia bridge render request.

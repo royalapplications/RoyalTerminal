@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp - .NET bindings for the Ghostty terminal emulator.
+// RoyalTerminal.GhosttySharp - .NET bindings for the Ghostty terminal emulator.
 
 using System.Runtime.InteropServices;
 
-namespace GhosttySharp.Native;
+namespace RoyalTerminal.GhosttySharp.Native;
 
 /// <summary>Callback invoked to wake up the application event loop.</summary>
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]

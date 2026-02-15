@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>GhosttySharp.Native.Linux64</PackageId>
-    <Description>Native Ghostty libraries for Linux (x64 and arm64). Provides libghostty.so, libghostty-vt.so, libghostty-terminal.so, and libghostty-renderer-capi.so shared libraries required by GhosttySharp on Linux.</Description>
+    <PackageId>RoyalTerminal.GhosttySharp.Native.Linux64</PackageId>
+    <Description>Native Ghostty libraries for Linux (x64 and arm64). Provides libghostty.so, libghostty-vt.so, libghostty-terminal.so, and libghostty-renderer-capi.so shared libraries required by RoyalTerminal.GhosttySharp on Linux.</Description>
     <PackageTags>ghostty;terminal;native;linux;x64;arm64</PackageTags>
 
     <!-- This is a native-only package, no managed assembly -->
@@ -19,8 +19,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="build/GhosttySharp.Native.Linux64.targets" Pack="true" PackagePath="build" />
-    <None Include="buildTransitive/GhosttySharp.Native.Linux64.targets" Pack="true" PackagePath="buildTransitive" />
+    <None Include="build/RoyalTerminal.GhosttySharp.Native.Linux64.targets" Pack="true" PackagePath="build" />
+    <None Include="buildTransitive/RoyalTerminal.GhosttySharp.Native.Linux64.targets" Pack="true" PackagePath="buildTransitive" />
   </ItemGroup>
 
 </Project>

@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop - Native renderer result code mapping.
+// RoyalTerminal.Rendering.Interop - Native renderer result code mapping.
 
-namespace GhosttySharp.Rendering.Interop;
+namespace RoyalTerminal.Rendering.Interop;
 
 /// <summary>
 /// Represents renderer C API result codes projected into managed code.

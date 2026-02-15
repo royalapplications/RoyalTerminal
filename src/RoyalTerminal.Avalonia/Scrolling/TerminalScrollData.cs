@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Terminal scroll data for virtualized scrolling.
+// RoyalTerminal.Avalonia - Terminal scroll data for virtualized scrolling.
 
 using Avalonia;
 
-namespace GhosttySharp.Avalonia.Scrolling;
+namespace RoyalTerminal.Avalonia.Scrolling;
 
 /// <summary>
 /// Tracks scroll state for the terminal, supporting large scroll buffers

@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Contracts - Backend capability model.
+// RoyalTerminal.Rendering.Contracts - Backend capability model.
 
-namespace GhosttySharp.Rendering.Contracts;
+namespace RoyalTerminal.Rendering.Contracts;
 
 /// <summary>
 /// Describes capabilities advertised by a rendering backend.

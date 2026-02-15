@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Convenience extensions for IGhosttyLogger.
+// RoyalTerminal.Avalonia — Convenience extensions for IGhosttyLogger.
 
-namespace GhosttySharp.Avalonia.Diagnostics;
+namespace RoyalTerminal.Avalonia.Diagnostics;
 
 /// <summary>
 /// Extension helpers for <see cref="IGhosttyLogger"/>.

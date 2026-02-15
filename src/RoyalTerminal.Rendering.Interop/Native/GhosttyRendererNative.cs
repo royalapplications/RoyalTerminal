@@ -1,11 +1,11 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop - P/Invoke declarations for ghostty-renderer-capi.
+// RoyalTerminal.Rendering.Interop - P/Invoke declarations for ghostty-renderer-capi.
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using GhosttySharp.Rendering.Contracts;
+using RoyalTerminal.Rendering.Contracts;
 
-namespace GhosttySharp.Rendering.Interop.Native;
+namespace RoyalTerminal.Rendering.Interop.Native;
 
 internal static unsafe partial class GhosttyRendererNative
 {

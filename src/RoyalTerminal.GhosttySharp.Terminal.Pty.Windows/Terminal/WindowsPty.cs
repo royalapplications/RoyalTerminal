@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Windows pseudo-terminal using the ConPTY API.
+// RoyalTerminal.Avalonia — Windows pseudo-terminal using the ConPTY API.
 // Spawns a shell process with a real PTY so terminal features work on Windows.
 
 using System.ComponentModel;
@@ -9,7 +9,7 @@ using System.Runtime.Versioning;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
-namespace GhosttySharp.Avalonia.Terminal;
+namespace RoyalTerminal.Avalonia.Terminal;
 
 /// <summary>
 /// Managed PTY for Windows using the ConPTY API (Windows 10 1809+).

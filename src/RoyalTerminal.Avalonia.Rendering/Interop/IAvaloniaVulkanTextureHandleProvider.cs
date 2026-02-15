@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Rendering - Vulkan texture handle abstraction for Avalonia interop.
+// RoyalTerminal.Avalonia.Rendering - Vulkan texture handle abstraction for Avalonia interop.
 
 using Avalonia.Platform;
 using Avalonia.Skia;
 
-namespace GhosttySharp.Avalonia.Rendering.Interop;
+namespace RoyalTerminal.Avalonia.Rendering.Interop;
 
 /// <summary>
 /// Resolves active Vulkan interop handles for the current Avalonia Skia lease.

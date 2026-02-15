@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Contracts - Render target kinds.
+// RoyalTerminal.Rendering.Contracts - Render target kinds.
 
-namespace GhosttySharp.Rendering.Contracts;
+namespace RoyalTerminal.Rendering.Contracts;
 
 /// <summary>
 /// Describes the destination target type used for a render pass.

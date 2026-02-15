@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Terminal cell model.
+// RoyalTerminal.Avalonia - Terminal cell model.
 
-namespace GhosttySharp.Avalonia.Rendering;
+namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
 /// Represents a single cell in the terminal grid.

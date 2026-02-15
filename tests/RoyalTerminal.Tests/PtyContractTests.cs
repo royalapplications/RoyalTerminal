@@ -1,14 +1,14 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — Cross-platform PTY contract tests.
+// RoyalTerminal.Tests — Cross-platform PTY contract tests.
 
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Diagnostics;
 using System.Reflection;
-using GhosttySharp.Avalonia.Terminal;
+using RoyalTerminal.Avalonia.Terminal;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 public class PtyContractTests
 {
@@ -53,7 +53,7 @@ public class PtyContractTests
         using UnixPty pty = new();
         using ManualResetEventSlim sawMarker = new(false);
         StringBuilder output = new();
-        string marker = "__GHOSTTYSHARP_UNIX_PTY_CONTRACT__";
+        string marker = "__ROYALTERMINAL_UNIX_PTY_CONTRACT__";
 
         pty.DataReceived += (data, length) =>
         {
@@ -89,7 +89,7 @@ public class PtyContractTests
         using WindowsPty pty = new();
         using ManualResetEventSlim sawMarker = new(false);
         StringBuilder output = new();
-        string marker = "__GHOSTTYSHARP_WINDOWS_PTY_CONTRACT__";
+        string marker = "__ROYALTERMINAL_WINDOWS_PTY_CONTRACT__";
 
         pty.DataReceived += (data, length) =>
         {

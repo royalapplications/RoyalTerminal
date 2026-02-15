@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — SIMD UTF-8 data processing tests.
+// RoyalTerminal.Tests — SIMD UTF-8 data processing tests.
 
-using GhosttySharp.Terminal;
+using RoyalTerminal.GhosttySharp.Terminal;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 /// <summary>
 /// Tests for TerminalDataProcessor — SIMD-accelerated UTF-8 processing.

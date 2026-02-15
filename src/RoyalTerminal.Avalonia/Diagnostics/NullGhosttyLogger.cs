@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Default no-op logger for library consumers.
+// RoyalTerminal.Avalonia — Default no-op logger for library consumers.
 
-namespace GhosttySharp.Avalonia.Diagnostics;
+namespace RoyalTerminal.Avalonia.Diagnostics;
 
 /// <summary>
 /// No-op logger used as the default for controls.

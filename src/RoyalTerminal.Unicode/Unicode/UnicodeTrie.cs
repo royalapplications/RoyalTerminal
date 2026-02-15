@@ -19,7 +19,7 @@ using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace GhosttySharp.Unicode
+namespace RoyalTerminal.Unicode
 {
     internal ref struct UnicodeTrie
     {

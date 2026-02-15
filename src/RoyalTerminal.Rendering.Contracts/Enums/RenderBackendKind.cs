@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Contracts - Rendering backend identifiers.
+// RoyalTerminal.Rendering.Contracts - Rendering backend identifiers.
 
-namespace GhosttySharp.Rendering.Contracts;
+namespace RoyalTerminal.Rendering.Contracts;
 
 /// <summary>
 /// Identifies the GPU backend used by a renderer.

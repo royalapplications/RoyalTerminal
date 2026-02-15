@@ -1,11 +1,11 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — Wrapper lifecycle and guard tests.
+// RoyalTerminal.Tests — Wrapper lifecycle and guard tests.
 
-using GhosttySharp;
-using GhosttySharp.Native;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Native;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 public class CoreWrapperTests
 {

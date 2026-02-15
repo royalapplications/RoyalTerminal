@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop - Native result translation helpers.
+// RoyalTerminal.Rendering.Interop - Native result translation helpers.
 
 using System.Runtime.InteropServices;
-using GhosttySharp.Rendering.Interop.Native;
+using RoyalTerminal.Rendering.Interop.Native;
 
-namespace GhosttySharp.Rendering.Interop;
+namespace RoyalTerminal.Rendering.Interop;
 
 /// <summary>
 /// Converts native renderer status codes to managed result enums and messages.

@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Contracts - Render surface abstraction.
+// RoyalTerminal.Rendering.Contracts - Render surface abstraction.
 
-namespace GhosttySharp.Rendering.Contracts;
+namespace RoyalTerminal.Rendering.Contracts;
 
 /// <summary>
 /// Represents a backend render surface that can render into external targets.

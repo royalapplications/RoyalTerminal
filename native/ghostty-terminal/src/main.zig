@@ -1,4 +1,4 @@
-// GhosttySharp Terminal C API Library
+// RoyalTerminal.GhosttySharp Terminal C API Library
 //
 // A standalone shared library that wraps Ghostty's VT terminal processing
 // into a simple C API. Built by referencing libghostty-vt's Zig modules from

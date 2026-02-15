@@ -1,13 +1,13 @@
 // Licensed under the MIT License.
-// GhosttySharp.Demo — Main window view activation.
+// RoyalTerminal.Demo — Main window view activation.
 
 using Avalonia.Markup.Xaml;
-using GhosttySharp.Demo.Services;
-using GhosttySharp.Demo.ViewModels;
+using RoyalTerminal.Demo.Services;
+using RoyalTerminal.Demo.ViewModels;
 using ReactiveUI;
 using ReactiveUI.Avalonia;
 
-namespace GhosttySharp.Demo;
+namespace RoyalTerminal.Demo;
 
 public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
 {

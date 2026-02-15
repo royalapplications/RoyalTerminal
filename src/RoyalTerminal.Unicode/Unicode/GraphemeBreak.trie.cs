@@ -8,7 +8,7 @@
 using System;
 using System.Runtime.CompilerServices;
 
-namespace GhosttySharp.Unicode;
+namespace RoyalTerminal.Unicode;
 
 internal static class GraphemeBreakTrie
 {

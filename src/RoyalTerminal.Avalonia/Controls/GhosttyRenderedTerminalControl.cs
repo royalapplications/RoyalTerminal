@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Terminal control using Ghostty VT processing + custom SkiaSharp rendering.
+// RoyalTerminal.Avalonia - Terminal control using Ghostty VT processing + custom SkiaSharp rendering.
 
 using System;
 using System.Runtime.InteropServices;
@@ -13,16 +13,17 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
-using GhosttySharp.Avalonia.Diagnostics;
-using GhosttySharp.Avalonia.Input;
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Avalonia.Rendering.Interop;
-using GhosttySharp.Rendering.Contracts;
-using GhosttySharp.Rendering.Interop;
-using GhosttySharp.Rendering.Interop.Skia;
-using GhosttySharp.Native;
+using RoyalTerminal.Avalonia.Diagnostics;
+using RoyalTerminal.Avalonia.Input;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Rendering.Interop;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.Rendering.Contracts;
+using RoyalTerminal.Rendering.Interop;
+using RoyalTerminal.Rendering.Interop.Skia;
+using RoyalTerminal.GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia.Controls;
+namespace RoyalTerminal.Avalonia.Controls;
 
 /// <summary>
 /// Terminal control that uses Ghostty's full VT processing and PTY management

@@ -1,15 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>GhosttySharp.Terminal.Pty.Platform</PackageId>
+    <PackageId>RoyalTerminal.GhosttySharp.Terminal.Pty.Platform</PackageId>
     <Description>Platform-selecting PTY factory over Unix/Windows implementations.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
-    <ProjectReference Include="..\GhosttySharp.Terminal.Pty.Unix\GhosttySharp.Terminal.Pty.Unix.csproj" />
-    <ProjectReference Include="..\GhosttySharp.Terminal.Pty.Windows\GhosttySharp.Terminal.Pty.Windows.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp.Terminal\RoyalTerminal.GhosttySharp.Terminal.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp.Terminal.Pty.Unix\RoyalTerminal.GhosttySharp.Terminal.Pty.Unix.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp.Terminal.Pty.Windows\RoyalTerminal.GhosttySharp.Terminal.Pty.Windows.csproj" />
   </ItemGroup>
 
 </Project>

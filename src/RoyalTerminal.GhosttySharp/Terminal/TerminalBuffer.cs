@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp - .NET bindings for the Ghostty terminal emulator.
+// RoyalTerminal.GhosttySharp - .NET bindings for the Ghostty terminal emulator.
 
 using System.Buffers;
 using System.Runtime.CompilerServices;
 
-namespace GhosttySharp.Terminal;
+namespace RoyalTerminal.GhosttySharp.Terminal;
 
 /// <summary>
 /// High-performance ring buffer for terminal data.

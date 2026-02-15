@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Default VT processor factory.
+// RoyalTerminal.Avalonia — Default VT processor factory.
 
-using GhosttySharp.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Rendering;
 
-namespace GhosttySharp.Avalonia.Terminal;
+namespace RoyalTerminal.Avalonia.Terminal;
 
 /// <summary>
 /// Default factory that creates the best available VT processor implementation.

@@ -1,11 +1,11 @@
 // Licensed under the MIT License.
-// GhosttySharp - .NET bindings for the Ghostty terminal emulator.
+// RoyalTerminal.GhosttySharp - .NET bindings for the Ghostty terminal emulator.
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using GhosttySharp.Native;
+using RoyalTerminal.GhosttySharp.Native;
 
-namespace GhosttySharp;
+namespace RoyalTerminal.GhosttySharp;
 
 /// <summary>
 /// Represents the Ghostty application lifecycle.

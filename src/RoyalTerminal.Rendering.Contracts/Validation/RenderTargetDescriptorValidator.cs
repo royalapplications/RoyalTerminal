@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Contracts - Descriptor validation helpers.
+// RoyalTerminal.Rendering.Contracts - Descriptor validation helpers.
 
-namespace GhosttySharp.Rendering.Contracts;
+namespace RoyalTerminal.Rendering.Contracts;
 
 /// <summary>
 /// Provides invariant validation for <see cref="RenderTargetDescriptor"/> values.

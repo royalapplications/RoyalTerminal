@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Text rendering diagnostics counters.
+// RoyalTerminal.Avalonia - Text rendering diagnostics counters.
 
-namespace GhosttySharp.Avalonia.Rendering;
+namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
 /// Snapshot of text-render diagnostics collected by <see cref="SkiaTerminalRenderer"/>.

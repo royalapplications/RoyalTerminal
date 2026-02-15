@@ -3,7 +3,7 @@
 
 using System.Runtime.CompilerServices;
 
-namespace GhosttySharp.Unicode;
+namespace RoyalTerminal.Unicode;
 
 public readonly record struct Codepoint
 {

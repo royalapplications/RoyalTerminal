@@ -1,3 +1,3 @@
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("GhosttySharp.Rendering.Skia")]
+[assembly: InternalsVisibleTo("RoyalTerminal.Rendering.Skia")]

@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.IntegrationTests — libghostty-terminal native integration tests.
+// RoyalTerminal.IntegrationTests — libghostty-terminal native integration tests.
 
-using GhosttySharp.Native;
+using RoyalTerminal.GhosttySharp.Native;
 using Xunit;
 
-namespace GhosttySharp.IntegrationTests;
+namespace RoyalTerminal.IntegrationTests;
 
 /// <summary>
 /// Integration tests for the native terminal library (libghostty-terminal).

@@ -1,12 +1,12 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop.Skia - Skia bridge for renderer interop.
+// RoyalTerminal.Rendering.Interop.Skia - Skia bridge for renderer interop.
 
 using System.Buffers;
 using System.Runtime.InteropServices;
-using GhosttySharp.Rendering.Contracts;
+using RoyalTerminal.Rendering.Contracts;
 using SkiaSharp;
 
-namespace GhosttySharp.Rendering.Interop.Skia;
+namespace RoyalTerminal.Rendering.Interop.Skia;
 
 /// <summary>
 /// Bridges renderer interop surfaces to Skia rendering targets.

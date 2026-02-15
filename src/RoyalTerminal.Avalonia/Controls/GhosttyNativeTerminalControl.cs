@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Native terminal control using full libghostty Metal rendering.
+// RoyalTerminal.Avalonia - Native terminal control using full libghostty Metal rendering.
 
 using System;
 using System.Runtime.InteropServices;
@@ -12,11 +12,12 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform;
 using Avalonia.Threading;
-using GhosttySharp.Avalonia.Input;
-using GhosttySharp.Avalonia.Diagnostics;
-using GhosttySharp.Native;
+using RoyalTerminal.Avalonia.Input;
+using RoyalTerminal.Avalonia.Diagnostics;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia.Controls;
+namespace RoyalTerminal.Avalonia.Controls;
 
 /// <summary>
 /// Avalonia terminal control that uses the full libghostty embedding API.

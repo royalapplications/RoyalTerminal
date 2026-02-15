@@ -1,4 +1,4 @@
-namespace GhosttySharp.Unicode
+namespace RoyalTerminal.Unicode
 {
     public enum GraphemeBreakClass
     {

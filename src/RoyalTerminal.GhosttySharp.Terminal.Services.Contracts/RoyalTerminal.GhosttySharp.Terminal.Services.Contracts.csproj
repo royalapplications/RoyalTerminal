@@ -1,14 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>GhosttySharp.Terminal.Services.Contracts</PackageId>
+    <PackageId>RoyalTerminal.GhosttySharp.Terminal.Services.Contracts</PackageId>
     <Description>Contracts for terminal session lifecycle services.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
-    <ProjectReference Include="..\GhosttySharp\GhosttySharp.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp.Terminal\RoyalTerminal.GhosttySharp.Terminal.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp\RoyalTerminal.GhosttySharp.csproj" />
   </ItemGroup>
 
 </Project>

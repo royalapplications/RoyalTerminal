@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Main terminal control.
+// RoyalTerminal.Avalonia - Main terminal control.
 
 using System.Text;
 using Avalonia;
@@ -10,14 +10,15 @@ using Avalonia.Input.TextInput;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Avalonia.Services;
-using GhosttySharp.Avalonia.Scrolling;
-using GhosttySharp.Avalonia.Terminal;
-using GhosttySharp.Terminal.Services;
-using GhosttySharp.Native;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Services;
+using RoyalTerminal.Avalonia.Scrolling;
+using RoyalTerminal.Avalonia.Terminal;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Terminal.Services;
+using RoyalTerminal.GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia.Controls;
+namespace RoyalTerminal.Avalonia.Controls;
 
 /// <summary>
 /// Full-featured Avalonia terminal control backed by Ghostty.

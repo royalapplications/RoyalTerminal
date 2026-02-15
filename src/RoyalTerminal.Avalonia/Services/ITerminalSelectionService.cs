@@ -1,12 +1,12 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Terminal selection service abstraction.
+// RoyalTerminal.Avalonia — Terminal selection service abstraction.
 
 using Avalonia.Controls;
-using GhosttySharp.Avalonia.Controls;
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Terminal.Services;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.GhosttySharp.Terminal.Services;
 
-namespace GhosttySharp.Avalonia.Services;
+namespace RoyalTerminal.Avalonia.Services;
 
 /// <summary>
 /// Handles selection operations such as copy, paste, and clearing selection state.

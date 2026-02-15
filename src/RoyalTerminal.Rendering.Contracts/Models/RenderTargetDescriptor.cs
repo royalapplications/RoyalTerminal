@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Contracts - Render target descriptor model.
+// RoyalTerminal.Rendering.Contracts - Render target descriptor model.
 
-namespace GhosttySharp.Rendering.Contracts;
+namespace RoyalTerminal.Rendering.Contracts;
 
 /// <summary>
 /// Describes an external render target submission for a single frame.

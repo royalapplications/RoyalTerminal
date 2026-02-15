@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
 
-using GhosttySharp.Unicode;
+using RoyalTerminal.Unicode;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 public class UnicodeWidthTests
 {

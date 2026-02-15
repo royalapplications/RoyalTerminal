@@ -15,7 +15,7 @@
 // Ported from: https://github.com/foliojs/unicode-trie
 // Copied from: https://github.com/toptensoftware/RichTextKit
 
-namespace GhosttySharp.Unicode
+namespace RoyalTerminal.Unicode
 {
     internal partial class UnicodeTrieBuilder
     {

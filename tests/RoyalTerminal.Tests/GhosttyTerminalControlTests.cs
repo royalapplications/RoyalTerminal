@@ -1,16 +1,16 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — Avalonia headless tests for GhosttyTerminalControl.
+// RoyalTerminal.Tests — Avalonia headless tests for GhosttyTerminalControl.
 
 using System.Runtime.InteropServices;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
-using GhosttySharp.Avalonia.Controls;
-using GhosttySharp.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 /// <summary>
 /// Headless Avalonia tests for the terminal control.

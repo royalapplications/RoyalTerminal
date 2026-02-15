@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop.Skia - Result model for Skia interop rendering.
+// RoyalTerminal.Rendering.Interop.Skia - Result model for Skia interop rendering.
 
-using GhosttySharp.Rendering.Contracts;
+using RoyalTerminal.Rendering.Contracts;
 
-namespace GhosttySharp.Rendering.Interop.Skia;
+namespace RoyalTerminal.Rendering.Interop.Skia;
 
 /// <summary>
 /// Represents one Skia interop render pass outcome.

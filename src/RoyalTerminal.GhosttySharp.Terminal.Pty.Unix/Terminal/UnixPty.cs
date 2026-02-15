@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Unix pseudo-terminal (PTY) for macOS/Linux.
+// RoyalTerminal.Avalonia — Unix pseudo-terminal (PTY) for macOS/Linux.
 // Spawns a shell process with a real PTY via POSIX interop so terminal features
 // work properly. Fork-safe: all native memory is pre-allocated before fork, and
 // only raw function-pointer calls are made in the child process (no .NET runtime usage).
@@ -9,7 +9,7 @@ using System.Runtime.Versioning;
 using System.Text;
 using System.Diagnostics;
 
-namespace GhosttySharp.Avalonia.Terminal;
+namespace RoyalTerminal.Avalonia.Terminal;
 
 /// <summary>
 /// Unix PTY that spawns a child shell process (e.g., /bin/zsh, /bin/bash)

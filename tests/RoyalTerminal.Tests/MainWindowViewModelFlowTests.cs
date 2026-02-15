@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — UI flow tests for demo ViewModel command surface.
+// RoyalTerminal.Tests — UI flow tests for demo ViewModel command surface.
 
 using System.Reactive;
 using System.Reactive.Linq;
@@ -7,11 +7,11 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
-using GhosttySharp.Demo.ViewModels;
+using RoyalTerminal.Demo.ViewModels;
 using ReactiveUI;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 public class MainWindowViewModelFlowTests
 {

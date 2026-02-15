@@ -1,11 +1,11 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Rendering - Avalonia render target provider for Skia interop rendering.
+// RoyalTerminal.Avalonia.Rendering - Avalonia render target provider for Skia interop rendering.
 
 using Avalonia;
 using Avalonia.Skia;
-using GhosttySharp.Rendering.Interop.Skia;
+using RoyalTerminal.Rendering.Interop.Skia;
 
-namespace GhosttySharp.Avalonia.Rendering.Interop;
+namespace RoyalTerminal.Avalonia.Rendering.Interop;
 
 /// <summary>
 /// Produces interop render requests from the current Avalonia Skia render state.

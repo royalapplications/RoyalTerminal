@@ -1,14 +1,15 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Controls - Shared clipboard bridge helpers for GhosttySurface controls.
+// RoyalTerminal.Avalonia.Controls - Shared clipboard bridge helpers for GhosttySurface controls.
 
 using System.Runtime.InteropServices;
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using Avalonia.Threading;
-using GhosttySharp.Avalonia.Diagnostics;
-using GhosttySharp.Native;
+using RoyalTerminal.Avalonia.Diagnostics;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia.Controls;
+namespace RoyalTerminal.Avalonia.Controls;
 
 internal static class GhosttyClipboardBridge
 {

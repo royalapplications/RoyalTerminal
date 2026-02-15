@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - HarfBuzz typeface cache for Skia typefaces.
+// RoyalTerminal.Avalonia - HarfBuzz typeface cache for Skia typefaces.
 
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
@@ -7,7 +7,7 @@ using System.Threading;
 using HarfBuzzSharp;
 using SkiaSharp;
 
-namespace GhosttySharp.Avalonia.Rendering;
+namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
 /// Caches HarfBuzz face/font objects for <see cref="SKTypeface"/> instances.

@@ -1,11 +1,11 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Controls - ObjC runtime helpers for macOS native view/window hosting.
+// RoyalTerminal.Avalonia.Controls - ObjC runtime helpers for macOS native view/window hosting.
 
 using System;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
-namespace GhosttySharp.Avalonia.Controls;
+namespace RoyalTerminal.Avalonia.Controls;
 
 /// <summary>
 /// ObjC runtime interop for creating NSView instances on macOS.

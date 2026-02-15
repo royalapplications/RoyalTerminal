@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Diagnostic log levels for library logging.
+// RoyalTerminal.Avalonia — Diagnostic log levels for library logging.
 
-namespace GhosttySharp.Avalonia.Diagnostics;
+namespace RoyalTerminal.Avalonia.Diagnostics;
 
 /// <summary>
-/// Log severity for GhosttySharp diagnostics.
+/// Log severity for RoyalTerminal.GhosttySharp diagnostics.
 /// </summary>
 public enum GhosttyLogLevel
 {

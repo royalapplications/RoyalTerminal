@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp - .NET bindings for the Ghostty terminal emulator.
+// RoyalTerminal.GhosttySharp - .NET bindings for the Ghostty terminal emulator.
 
 using System.Runtime.InteropServices;
 
-namespace GhosttySharp.Native;
+namespace RoyalTerminal.GhosttySharp.Native;
 
 /// <summary>Clipboard content with MIME type and data.</summary>
 [StructLayout(LayoutKind.Sequential)]

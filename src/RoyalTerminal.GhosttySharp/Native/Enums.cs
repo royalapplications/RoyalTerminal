@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp - .NET bindings for the Ghostty terminal emulator.
+// RoyalTerminal.GhosttySharp - .NET bindings for the Ghostty terminal emulator.
 
-namespace GhosttySharp.Native;
+namespace RoyalTerminal.GhosttySharp.Native;
 
 /// <summary>Platform identifier for surface creation.</summary>
 public enum GhosttyPlatform

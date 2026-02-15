@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop - Managed render context wrapper.
+// RoyalTerminal.Rendering.Interop - Managed render context wrapper.
 
-using GhosttySharp.Rendering.Contracts;
-using GhosttySharp.Rendering.Interop.Native;
+using RoyalTerminal.Rendering.Contracts;
+using RoyalTerminal.Rendering.Interop.Native;
 
-namespace GhosttySharp.Rendering.Interop;
+namespace RoyalTerminal.Rendering.Interop;
 
 /// <summary>
 /// Owns a native renderer context used to create render surfaces.

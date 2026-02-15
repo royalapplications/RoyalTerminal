@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>GhosttySharp</PackageId>
+    <PackageId>RoyalTerminal.GhosttySharp</PackageId>
     <Description>High-performance .NET 10 bindings for the Ghostty terminal emulator C API. Provides zero-alloc P/Invoke via LibraryImport, Span&lt;T&gt; data access, and SIMD-accelerated processing.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <IsPackable>true</IsPackable>

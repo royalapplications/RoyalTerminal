@@ -1,4 +1,4 @@
-// GhosttySharp Renderer C API Library
+// RoyalTerminal.GhosttySharp Renderer C API Library
 //
 // Phase 2 prototype:
 //   - API surface for external render targets

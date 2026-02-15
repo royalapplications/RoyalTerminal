@@ -1,17 +1,17 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests - Avalonia render-target adapter tests for texture interop mode.
+// RoyalTerminal.Tests - Avalonia render-target adapter tests for texture interop mode.
 
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.OpenGL;
 using Avalonia.Platform;
 using Avalonia.Skia;
-using GhosttySharp.Avalonia.Rendering.Interop;
-using GhosttySharp.Rendering.Contracts;
+using RoyalTerminal.Avalonia.Rendering.Interop;
+using RoyalTerminal.Rendering.Contracts;
 using SkiaSharp;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 public sealed class RenderingAvaloniaAdapterTests
 {

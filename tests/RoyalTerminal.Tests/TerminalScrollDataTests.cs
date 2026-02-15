@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — Scroll data state management tests.
+// RoyalTerminal.Tests — Scroll data state management tests.
 
-using GhosttySharp.Avalonia.Scrolling;
+using RoyalTerminal.Avalonia.Scrolling;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 /// <summary>
 /// Tests for TerminalScrollData — scroll state management.

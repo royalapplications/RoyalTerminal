@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Rendering - Metal texture handle abstraction for Avalonia interop.
+// RoyalTerminal.Avalonia.Rendering - Metal texture handle abstraction for Avalonia interop.
 
 using Avalonia.Platform;
 using Avalonia.Skia;
 
-namespace GhosttySharp.Avalonia.Rendering.Interop;
+namespace RoyalTerminal.Avalonia.Rendering.Interop;
 
 /// <summary>
 /// Resolves active Metal interop handles for the current Avalonia Skia lease.

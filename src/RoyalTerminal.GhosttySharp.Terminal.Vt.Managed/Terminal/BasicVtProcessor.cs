@@ -1,15 +1,15 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — VT sequence processor for standalone/demo mode.
+// RoyalTerminal.Avalonia — VT sequence processor for standalone/demo mode.
 // Processes raw terminal output bytes into the TerminalScreen cell grid.
 // Supports: printable characters, cursor movement, SGR colors (256 + truecolor),
 // scrolling, scroll regions (DECSTBM), alternate screen buffer, DEC private modes,
 // DEC line-drawing character set, erase, insert/delete lines & characters, and tabs.
 
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Unicode;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Unicode;
 using System.Text;
 
-namespace GhosttySharp.Avalonia.Terminal;
+namespace RoyalTerminal.Avalonia.Terminal;
 
 /// <summary>
 /// VT100/xterm escape sequence processor that writes terminal data directly

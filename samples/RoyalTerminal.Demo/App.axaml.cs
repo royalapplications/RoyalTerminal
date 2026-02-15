@@ -1,11 +1,11 @@
 // Licensed under the MIT License.
-// GhosttySharp.Demo — Avalonia Application setup.
+// RoyalTerminal.Demo — Avalonia Application setup.
 
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 
-namespace GhosttySharp.Demo;
+namespace RoyalTerminal.Demo;
 
 public class App : Application
 {

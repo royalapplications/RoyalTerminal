@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp — P/Invoke bindings for libghostty-vt (VT parsing library).
+// RoyalTerminal.GhosttySharp — P/Invoke bindings for libghostty-vt (VT parsing library).
 
 using System.Runtime.InteropServices;
 
-namespace GhosttySharp.Native;
+namespace RoyalTerminal.GhosttySharp.Native;
 
 /// <summary>
 /// P/Invoke declarations for libghostty-vt — the Ghostty virtual terminal parsing library.

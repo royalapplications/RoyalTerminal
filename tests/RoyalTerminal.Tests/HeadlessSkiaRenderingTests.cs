@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — Headless Avalonia + Skia rendering integration tests.
+// RoyalTerminal.Tests — Headless Avalonia + Skia rendering integration tests.
 // Validates terminal control rendering, input processing, and Skia drawing.
 
 using Avalonia;
@@ -8,12 +8,12 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Media;
-using GhosttySharp.Avalonia.Controls;
-using GhosttySharp.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
 using SkiaSharp;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 /// <summary>
 /// Integration tests that validate the terminal control renders correctly
@@ -1003,8 +1003,8 @@ public class HeadlessSkiaRenderingTests
         // Fill screen line by line
         string[] lines =
         [
-            "$ echo 'Hello from GhosttySharp!'",
-            "Hello from GhosttySharp!",
+            "$ echo 'Hello from RoyalTerminal.GhosttySharp!'",
+            "Hello from RoyalTerminal.GhosttySharp!",
             "$ ls -la",
             "total 42",
             "drwxr-xr-x  10 user  staff   320 Jan  1 00:00 .",

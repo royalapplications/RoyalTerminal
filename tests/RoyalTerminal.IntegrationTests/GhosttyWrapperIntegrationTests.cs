@@ -1,12 +1,12 @@
 // Licensed under the MIT License.
-// GhosttySharp.IntegrationTests — Integration tests for core Ghostty wrappers.
+// RoyalTerminal.IntegrationTests — Integration tests for core Ghostty wrappers.
 
 using System.Runtime.InteropServices;
-using GhosttySharp;
-using GhosttySharp.Native;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Native;
 using Xunit;
 
-namespace GhosttySharp.IntegrationTests;
+namespace RoyalTerminal.IntegrationTests;
 
 public class GhosttyWrapperIntegrationTests
 {

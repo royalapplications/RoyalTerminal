@@ -5,7 +5,7 @@
 
 using System;
 
-namespace GhosttySharp.Unicode
+namespace RoyalTerminal.Unicode
 {
     public ref struct GraphemeEnumerator
     {

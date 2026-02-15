@@ -1,13 +1,13 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — VT processor using Ghostty's native terminal via libghostty-terminal.
+// RoyalTerminal.Avalonia — VT processor using Ghostty's native terminal via libghostty-terminal.
 
 using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Text;
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Native;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia.Terminal;
+namespace RoyalTerminal.Avalonia.Terminal;
 
 /// <summary>
 /// VT processor that wraps Ghostty's native terminal via the libghostty-terminal C API.

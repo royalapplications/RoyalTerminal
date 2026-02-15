@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - HarfBuzz text shaping infrastructure.
+// RoyalTerminal.Avalonia - HarfBuzz text shaping infrastructure.
 
 using System.Collections.Concurrent;
 using System.Globalization;
@@ -8,7 +8,7 @@ using HarfBuzzSharp;
 using SkiaSharp;
 using HarfBuzzBuffer = HarfBuzzSharp.Buffer;
 
-namespace GhosttySharp.Avalonia.Rendering;
+namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
 /// Direction handling mode used by text shaping.

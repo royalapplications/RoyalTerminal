@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Terminal.Services.Contracts - Terminal session orchestration abstraction.
+// RoyalTerminal.GhosttySharp.Terminal.Services.Contracts - Terminal session orchestration abstraction.
 
-using GhosttySharp.Avalonia.Terminal;
-using GhosttySharp.Native;
+using RoyalTerminal.Avalonia.Terminal;
+using RoyalTerminal.GhosttySharp.Native;
 
-namespace GhosttySharp.Terminal.Services;
+namespace RoyalTerminal.GhosttySharp.Terminal.Services;
 
 /// <summary>
 /// Manages terminal session lifecycle for surface/PTY integration.

@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Common PTY interface for cross-platform terminal I/O.
+// RoyalTerminal.Avalonia — Common PTY interface for cross-platform terminal I/O.
 
-namespace GhosttySharp.Avalonia.Terminal;
+namespace RoyalTerminal.Avalonia.Terminal;
 
 /// <summary>
 /// Common interface for pseudo-terminal implementations across platforms.

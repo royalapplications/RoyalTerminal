@@ -1,13 +1,13 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — GlyphCache and SkiaTerminalRenderer tests.
+// RoyalTerminal.Tests — GlyphCache and SkiaTerminalRenderer tests.
 
-using GhosttySharp.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Rendering;
 using System.Globalization;
 using System.Text;
 using SkiaSharp;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 /// <summary>
 /// Tests for the rendering infrastructure.
@@ -91,8 +91,8 @@ public class RenderingTests
             Direction: TextDirectionMode.LeftToRight,
             EnableLigatures: false);
 
-        ShapedTextRun first = shaper.Shape("GhosttySharp shaping baseline", glyphCache.RegularTypeface, options);
-        ShapedTextRun second = shaper.Shape("GhosttySharp shaping baseline", glyphCache.RegularTypeface, options);
+        ShapedTextRun first = shaper.Shape("RoyalTerminal.GhosttySharp shaping baseline", glyphCache.RegularTypeface, options);
+        ShapedTextRun second = shaper.Shape("RoyalTerminal.GhosttySharp shaping baseline", glyphCache.RegularTypeface, options);
 
         Assert.True(first.GlyphCount > 0);
         Assert.Equal(first.GlyphCount, second.GlyphCount);

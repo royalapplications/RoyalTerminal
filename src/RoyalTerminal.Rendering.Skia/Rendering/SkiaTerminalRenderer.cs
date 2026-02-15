@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - SkiaSharp-based terminal renderer.
+// RoyalTerminal.Avalonia - SkiaSharp-based terminal renderer.
 
 using SkiaSharp;
 using System.Buffers;
@@ -8,7 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 
-namespace GhosttySharp.Avalonia.Rendering;
+namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
 /// High-performance SkiaSharp terminal renderer.

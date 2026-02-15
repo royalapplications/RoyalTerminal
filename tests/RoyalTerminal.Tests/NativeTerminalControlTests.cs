@@ -1,15 +1,15 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — Tests for Ghostty rendered/native controls.
+// RoyalTerminal.Tests — Tests for Ghostty rendered/native controls.
 
 using Avalonia.Headless.XUnit;
-using GhosttySharp;
-using GhosttySharp.Avalonia.Controls;
-using GhosttySharp.Avalonia.Diagnostics;
-using GhosttySharp.Native;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Diagnostics;
+using RoyalTerminal.GhosttySharp.Native;
 using System.Runtime.Versioning;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
  [SupportedOSPlatform("macos")]
 public class NativeTerminalControlTests

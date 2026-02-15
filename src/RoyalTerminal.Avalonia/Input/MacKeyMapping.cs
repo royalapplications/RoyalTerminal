@@ -1,11 +1,11 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - macOS native keycode mapping for Ghostty input.
+// RoyalTerminal.Avalonia - macOS native keycode mapping for Ghostty input.
 
 using System.Runtime.Versioning;
 using Avalonia.Input;
-using GhosttySharp.Native;
+using RoyalTerminal.GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia.Input;
+namespace RoyalTerminal.Avalonia.Input;
 
 /// <summary>
 /// Maps Avalonia keys to macOS native virtual keycodes as expected by

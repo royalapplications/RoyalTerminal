@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Default PTY factory.
+// RoyalTerminal.Avalonia — Default PTY factory.
 
-namespace GhosttySharp.Avalonia.Terminal;
+namespace RoyalTerminal.Avalonia.Terminal;
 
 /// <summary>
 /// Default factory that creates OS-specific PTY implementations.

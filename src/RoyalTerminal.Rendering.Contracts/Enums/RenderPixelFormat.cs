@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Contracts - Common render target pixel formats.
+// RoyalTerminal.Rendering.Contracts - Common render target pixel formats.
 
-namespace GhosttySharp.Rendering.Contracts;
+namespace RoyalTerminal.Rendering.Contracts;
 
 /// <summary>
 /// Common pixel formats for external render targets.

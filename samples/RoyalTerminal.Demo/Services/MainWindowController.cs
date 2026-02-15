@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Demo — Runtime controller for terminal tab orchestration.
+// RoyalTerminal.Demo — Runtime controller for terminal tab orchestration.
 
 using System;
 using System.Collections.Generic;
@@ -12,18 +12,19 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
-using GhosttySharp.Avalonia.Controls;
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Demo.ViewModels;
-using GhosttySharp.Native;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Demo.ViewModels;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Native;
 using ReactiveUI;
 
-namespace GhosttySharp.Demo.Services;
+namespace RoyalTerminal.Demo.Services;
 
 internal sealed class MainWindowController
 {
-    private const string DisableTextShapingEnvVar = "GHOSTTYSHARP_DISABLE_TEXT_SHAPING";
-    private const string EnableRenderDiagnosticsEnvVar = "GHOSTTYSHARP_ENABLE_RENDER_DIAGNOSTICS";
+    private const string DisableTextShapingEnvVar = "ROYALTERMINAL_DISABLE_TEXT_SHAPING";
+    private const string EnableRenderDiagnosticsEnvVar = "ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS";
 
     private static readonly string MonoFont =
         RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "Menlo" :
@@ -88,7 +89,7 @@ internal sealed class MainWindowController
         RegisterInteractionHandlers(lifetime);
 
         bool ghosttyAvailable = TryInitializeGhostty();
-        bool nativeVtAvailable = GhosttySharp.Avalonia.Terminal.GhosttyVtProcessor.IsAvailable();
+        bool nativeVtAvailable = RoyalTerminal.Avalonia.Terminal.GhosttyVtProcessor.IsAvailable();
         _viewModel.SetTerminalCapabilities(ghosttyAvailable, nativeVtAvailable);
 
         if (!ghosttyAvailable)

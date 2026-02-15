@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop.Skia - CPU fallback render contract.
+// RoyalTerminal.Rendering.Interop.Skia - CPU fallback render contract.
 
-using GhosttySharp.Rendering.Contracts;
+using RoyalTerminal.Rendering.Contracts;
 
-namespace GhosttySharp.Rendering.Interop.Skia;
+namespace RoyalTerminal.Rendering.Interop.Skia;
 
 /// <summary>
 /// Provides CPU RGBA fallback rendering for Skia interop adapters.

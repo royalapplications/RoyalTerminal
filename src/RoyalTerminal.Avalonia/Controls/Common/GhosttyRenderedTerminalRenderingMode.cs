@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Rendering mode selection for GhosttyRenderedTerminalControl.
+// RoyalTerminal.Avalonia - Rendering mode selection for GhosttyRenderedTerminalControl.
 
-namespace GhosttySharp.Avalonia.Controls;
+namespace RoyalTerminal.Avalonia.Controls;
 
 /// <summary>
 /// Selects the rendering path used by <see cref="GhosttyRenderedTerminalControl"/>.

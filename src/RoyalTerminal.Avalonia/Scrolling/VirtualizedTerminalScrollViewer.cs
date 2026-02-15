@@ -1,13 +1,13 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Virtualized terminal scroll viewer.
+// RoyalTerminal.Avalonia - Virtualized terminal scroll viewer.
 
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using GhosttySharp.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Rendering;
 
-namespace GhosttySharp.Avalonia.Scrolling;
+namespace RoyalTerminal.Avalonia.Scrolling;
 
 /// <summary>
 /// Implements <see cref="ILogicalScrollable"/> for efficient virtualized scrolling

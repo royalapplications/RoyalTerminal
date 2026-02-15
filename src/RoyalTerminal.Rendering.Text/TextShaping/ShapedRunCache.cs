@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Cache for shaped terminal text runs.
+// RoyalTerminal.Avalonia - Cache for shaped terminal text runs.
 
-namespace GhosttySharp.Avalonia.Rendering;
+namespace RoyalTerminal.Avalonia.Rendering;
 
 internal readonly record struct ShapedRunCacheKey(
     ulong TextHash,

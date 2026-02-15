@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Controls - Shared platform handle wrapper for native views.
+// RoyalTerminal.Avalonia.Controls - Shared platform handle wrapper for native views.
 
 using Avalonia.Platform;
 
-namespace GhosttySharp.Avalonia.Controls;
+namespace RoyalTerminal.Avalonia.Controls;
 
 /// <summary>
 /// Simple IPlatformHandle implementation for native view handles.

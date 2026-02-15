@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop - Native render target descriptor layout.
+// RoyalTerminal.Rendering.Interop - Native render target descriptor layout.
 
 using System.Runtime.InteropServices;
-using GhosttySharp.Rendering.Contracts;
+using RoyalTerminal.Rendering.Contracts;
 
-namespace GhosttySharp.Rendering.Interop.Native;
+namespace RoyalTerminal.Rendering.Interop.Native;
 
 [StructLayout(LayoutKind.Sequential)]
 internal struct GhosttyRenderTargetDescriptorNative

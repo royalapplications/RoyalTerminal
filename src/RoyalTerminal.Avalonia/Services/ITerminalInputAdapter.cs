@@ -1,13 +1,13 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Terminal input adapter abstraction.
+// RoyalTerminal.Avalonia — Terminal input adapter abstraction.
 
 using Avalonia.Input;
 using Avalonia.Input.TextInput;
-using GhosttySharp.Avalonia.Terminal;
-using GhosttySharp.Terminal.Services;
-using GhosttySharp.Native;
+using RoyalTerminal.Avalonia.Terminal;
+using RoyalTerminal.GhosttySharp.Terminal.Services;
+using RoyalTerminal.GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia.Services;
+namespace RoyalTerminal.Avalonia.Services;
 
 /// <summary>
 /// Maps Avalonia input events to terminal input protocol messages.

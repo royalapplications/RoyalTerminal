@@ -1,13 +1,13 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Default terminal scroll service.
+// RoyalTerminal.Avalonia — Default terminal scroll service.
 
 using Avalonia.Input;
-using GhosttySharp.Avalonia.Controls;
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Avalonia.Scrolling;
-using GhosttySharp.Terminal.Services;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Scrolling;
+using RoyalTerminal.GhosttySharp.Terminal.Services;
 
-namespace GhosttySharp.Avalonia.Services;
+namespace RoyalTerminal.Avalonia.Services;
 
 /// <summary>
 /// Default implementation of terminal scroll coordination.
@@ -66,7 +66,7 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
 
         if (sessionService.Surface is not null)
         {
-            GhosttySharp.Native.GhosttyMods mods = inputAdapter.ConvertModifiers(e.KeyModifiers);
+            RoyalTerminal.GhosttySharp.Native.GhosttyMods mods = inputAdapter.ConvertModifiers(e.KeyModifiers);
             sessionService.Surface.SendMouseScroll(e.Delta.X, e.Delta.Y, (int)mods);
         }
 

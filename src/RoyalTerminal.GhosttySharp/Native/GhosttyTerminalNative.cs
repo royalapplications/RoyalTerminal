@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp — P/Invoke bindings for libghostty-terminal.
+// RoyalTerminal.GhosttySharp — P/Invoke bindings for libghostty-terminal.
 //
 // This is a standalone shared library built from Ghostty's VT terminal modules.
 // It provides full terminal emulation (VT parsing, screen state, cursor, modes)
@@ -9,7 +9,7 @@
 
 using System.Runtime.InteropServices;
 
-namespace GhosttySharp.Native;
+namespace RoyalTerminal.GhosttySharp.Native;
 
 /// <summary>
 /// P/Invoke declarations for libghostty-terminal — a standalone shared library

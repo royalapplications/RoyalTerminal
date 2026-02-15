@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop - Native library resolver for ghostty-renderer-capi.
+// RoyalTerminal.Rendering.Interop - Native library resolver for ghostty-renderer-capi.
 
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-namespace GhosttySharp.Rendering.Interop.Native;
+namespace RoyalTerminal.Rendering.Interop.Native;
 
 /// <summary>
 /// Handles cross-platform native library resolution for <c>ghostty-renderer-capi</c>.

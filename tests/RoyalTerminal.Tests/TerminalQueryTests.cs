@@ -1,11 +1,11 @@
 // Licensed under the MIT License.
 // Tests for terminal query detection and response generation.
 
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Avalonia.Terminal;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Terminal;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 public class TerminalQueryTests
 {

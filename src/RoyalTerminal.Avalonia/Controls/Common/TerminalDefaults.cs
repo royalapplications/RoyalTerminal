@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Controls - Shared terminal defaults.
+// RoyalTerminal.Avalonia.Controls - Shared terminal defaults.
 
 using System.Runtime.InteropServices;
 
-namespace GhosttySharp.Avalonia.Controls;
+namespace RoyalTerminal.Avalonia.Controls;
 
 internal static class TerminalDefaults
 {

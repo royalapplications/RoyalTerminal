@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Avalonia composition draw handler.
+// RoyalTerminal.Avalonia - Avalonia composition draw handler.
 
 using Avalonia;
 using Avalonia.Media;
@@ -8,7 +8,7 @@ using Avalonia.Rendering.Composition;
 using Avalonia.Skia;
 using SkiaSharp;
 
-namespace GhosttySharp.Avalonia.Rendering;
+namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
 /// Custom visual draw handler for rendering the terminal using SkiaSharp

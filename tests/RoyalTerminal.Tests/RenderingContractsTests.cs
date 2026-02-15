@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests - Contract and invariant tests for rendering abstractions.
+// RoyalTerminal.Tests - Contract and invariant tests for rendering abstractions.
 
-using GhosttySharp.Rendering.Contracts;
+using RoyalTerminal.Rendering.Contracts;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 public class RenderingContractsTests
 {

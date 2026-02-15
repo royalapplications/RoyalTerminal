@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Logging abstraction for library diagnostics.
+// RoyalTerminal.Avalonia — Logging abstraction for library diagnostics.
 
-namespace GhosttySharp.Avalonia.Diagnostics;
+namespace RoyalTerminal.Avalonia.Diagnostics;
 
 /// <summary>
-/// Abstraction used by GhosttySharp.Avalonia controls for diagnostics.
+/// Abstraction used by RoyalTerminal.Avalonia controls for diagnostics.
 /// </summary>
 public interface IGhosttyLogger
 {

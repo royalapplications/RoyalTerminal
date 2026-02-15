@@ -1,4 +1,4 @@
-namespace GhosttySharp.Unicode
+namespace RoyalTerminal.Unicode
 {
     /// <summary>
     /// Represents the smallest unit of a writing system of any given language.

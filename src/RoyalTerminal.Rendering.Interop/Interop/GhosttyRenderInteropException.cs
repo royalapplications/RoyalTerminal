@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop - Exception type for native renderer interop failures.
+// RoyalTerminal.Rendering.Interop - Exception type for native renderer interop failures.
 
-namespace GhosttySharp.Rendering.Interop;
+namespace RoyalTerminal.Rendering.Interop;
 
 /// <summary>
 /// Represents an error returned from the native renderer C API.

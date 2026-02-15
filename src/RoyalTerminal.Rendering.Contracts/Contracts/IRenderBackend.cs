@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Contracts - Rendering backend abstraction.
+// RoyalTerminal.Rendering.Contracts - Rendering backend abstraction.
 
-namespace GhosttySharp.Rendering.Contracts;
+namespace RoyalTerminal.Rendering.Contracts;
 
 /// <summary>
 /// Represents a rendering backend implementation contract.

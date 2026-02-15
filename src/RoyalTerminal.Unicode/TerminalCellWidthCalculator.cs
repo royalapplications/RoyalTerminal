@@ -4,7 +4,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 
-namespace GhosttySharp.Unicode;
+namespace RoyalTerminal.Unicode;
 
 public static class TerminalCellWidthCalculator
 {

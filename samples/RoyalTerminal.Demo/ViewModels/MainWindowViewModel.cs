@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Demo — Main window view model and command surface.
+// RoyalTerminal.Demo — Main window view model and command surface.
 
 using System;
 using System.Globalization;
@@ -7,7 +7,7 @@ using System.Reactive;
 using System.Reactive.Linq;
 using ReactiveUI;
 
-namespace GhosttySharp.Demo.ViewModels;
+namespace RoyalTerminal.Demo.ViewModels;
 
 public sealed class MainWindowViewModel : ReactiveObject
 {

@@ -1,13 +1,13 @@
 // Licensed under the MIT License.
-// GhosttySharp.IntegrationTests — Key event and encoder native integration tests.
+// RoyalTerminal.IntegrationTests — Key event and encoder native integration tests.
 
 using System.Runtime.InteropServices;
 using System.Text;
-using GhosttySharp.Native;
+using RoyalTerminal.GhosttySharp.Native;
 using Xunit;
-using static GhosttySharp.Native.GhosttyVtNative;
+using static RoyalTerminal.GhosttySharp.Native.GhosttyVtNative;
 
-namespace GhosttySharp.IntegrationTests;
+namespace RoyalTerminal.IntegrationTests;
 
 /// <summary>
 /// Integration tests for the Ghostty VT key event and key encoder APIs.

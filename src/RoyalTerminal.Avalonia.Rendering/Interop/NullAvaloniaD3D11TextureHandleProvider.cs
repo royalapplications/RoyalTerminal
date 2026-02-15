@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Rendering - Default no-op D3D11 texture handle resolver.
+// RoyalTerminal.Avalonia.Rendering - Default no-op D3D11 texture handle resolver.
 
 using Avalonia.Platform;
 using Avalonia.Skia;
 
-namespace GhosttySharp.Avalonia.Rendering.Interop;
+namespace RoyalTerminal.Avalonia.Rendering.Interop;
 
 /// <summary>
 /// Default resolver that reports no available D3D11 texture handles.

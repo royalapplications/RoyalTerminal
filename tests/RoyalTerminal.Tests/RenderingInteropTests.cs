@@ -1,12 +1,12 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests - Interop tests for renderer C API bindings.
+// RoyalTerminal.Tests - Interop tests for renderer C API bindings.
 
 using System.Runtime.InteropServices;
-using GhosttySharp.Rendering.Contracts;
-using GhosttySharp.Rendering.Interop;
+using RoyalTerminal.Rendering.Contracts;
+using RoyalTerminal.Rendering.Interop;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 public sealed class RenderingInteropTests
 {
@@ -167,7 +167,7 @@ public sealed class RenderingInteropTests
         DirectoryInfo? current = new(AppContext.BaseDirectory);
         while (current is not null)
         {
-            string solutionPath = Path.Combine(current.FullName, "GhosttySharp.sln");
+            string solutionPath = Path.Combine(current.FullName, "RoyalTerminal.sln");
             if (File.Exists(solutionPath))
             {
                 return current.FullName;
@@ -225,14 +225,14 @@ public sealed class RenderingInteropTests
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            return "GhosttySharp.Native.Win64";
+            return "RoyalTerminal.GhosttySharp.Native.Win64";
         }
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
-            return "GhosttySharp.Native.OSX";
+            return "RoyalTerminal.GhosttySharp.Native.OSX";
         }
 
-        return "GhosttySharp.Native.Linux64";
+        return "RoyalTerminal.GhosttySharp.Native.Linux64";
     }
 }

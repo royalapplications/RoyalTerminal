@@ -1,12 +1,12 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests - Skia interop bridge tests.
+// RoyalTerminal.Tests - Skia interop bridge tests.
 
-using GhosttySharp.Rendering.Contracts;
-using GhosttySharp.Rendering.Interop.Skia;
+using RoyalTerminal.Rendering.Contracts;
+using RoyalTerminal.Rendering.Interop.Skia;
 using SkiaSharp;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 public sealed class RenderingSkiaInteropTests
 {

@@ -1,14 +1,14 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Default selection and clipboard service.
+// RoyalTerminal.Avalonia — Default selection and clipboard service.
 
 using System.Text;
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
-using GhosttySharp.Avalonia.Controls;
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Terminal.Services;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.GhosttySharp.Terminal.Services;
 
-namespace GhosttySharp.Avalonia.Services;
+namespace RoyalTerminal.Avalonia.Services;
 
 /// <summary>
 /// Default implementation for terminal selection and clipboard operations.

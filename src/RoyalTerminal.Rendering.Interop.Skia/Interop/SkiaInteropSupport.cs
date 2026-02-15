@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop.Skia - Backend-aware interop path selector.
+// RoyalTerminal.Rendering.Interop.Skia - Backend-aware interop path selector.
 
-using GhosttySharp.Rendering.Contracts;
+using RoyalTerminal.Rendering.Contracts;
 
-namespace GhosttySharp.Rendering.Interop.Skia;
+namespace RoyalTerminal.Rendering.Interop.Skia;
 
 /// <summary>
 /// Determines whether a render target can use direct texture interop for a given backend.

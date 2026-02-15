@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Rendering - D3D11 texture handle abstraction for Avalonia interop.
+// RoyalTerminal.Avalonia.Rendering - D3D11 texture handle abstraction for Avalonia interop.
 
 using Avalonia.Platform;
 using Avalonia.Skia;
 
-namespace GhosttySharp.Avalonia.Rendering.Interop;
+namespace RoyalTerminal.Avalonia.Rendering.Interop;
 
 /// <summary>
 /// Resolves active D3D11 interop handles for the current Avalonia Skia lease.

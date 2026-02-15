@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Terminal font fallback resolver.
+// RoyalTerminal.Avalonia - Terminal font fallback resolver.
 
 using System.Collections.Generic;
 using System.Buffers;
@@ -8,7 +8,7 @@ using System.Text;
 using System.Threading;
 using SkiaSharp;
 
-namespace GhosttySharp.Avalonia.Rendering;
+namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
 /// Result of resolving a typeface for a codepoint.

@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Lightweight CSI query sequence detector.
+// RoyalTerminal.Avalonia — Lightweight CSI query sequence detector.
 
-namespace GhosttySharp.Avalonia.Terminal;
+namespace RoyalTerminal.Avalonia.Terminal;
 
 /// <summary>
 /// Terminal query types that require a response written back to the PTY.

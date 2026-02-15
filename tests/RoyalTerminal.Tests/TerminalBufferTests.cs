@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — Core data processing tests (no Avalonia required).
+// RoyalTerminal.Tests — Core data processing tests (no Avalonia required).
 
-using GhosttySharp.Terminal;
+using RoyalTerminal.GhosttySharp.Terminal;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 /// <summary>
 /// Tests for TerminalBuffer — ring buffer with ArrayPool.

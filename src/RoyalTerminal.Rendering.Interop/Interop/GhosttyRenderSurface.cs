@@ -1,12 +1,12 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop - Managed render surface wrapper.
+// RoyalTerminal.Rendering.Interop - Managed render surface wrapper.
 
 using System.Runtime.InteropServices;
 using System.Text;
-using GhosttySharp.Rendering.Contracts;
-using GhosttySharp.Rendering.Interop.Native;
+using RoyalTerminal.Rendering.Contracts;
+using RoyalTerminal.Rendering.Interop.Native;
 
-namespace GhosttySharp.Rendering.Interop;
+namespace RoyalTerminal.Rendering.Interop;
 
 /// <summary>
 /// Managed renderer surface wrapper over <c>ghostty_render_surface_t</c>.

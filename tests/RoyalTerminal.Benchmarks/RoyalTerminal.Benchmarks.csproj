@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\GhosttySharp.Rendering.Skia\GhosttySharp.Rendering.Skia.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Skia\RoyalTerminal.Rendering.Skia.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,12 +1,12 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Avalonia composition presenter for terminal rendering.
+// RoyalTerminal.Avalonia - Avalonia composition presenter for terminal rendering.
 
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Rendering.Composition;
-using GhosttySharp.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Rendering;
 
-namespace GhosttySharp.Avalonia.Controls;
+namespace RoyalTerminal.Avalonia.Controls;
 
 /// <summary>
 /// Avalonia control that hosts the terminal rendering surface using

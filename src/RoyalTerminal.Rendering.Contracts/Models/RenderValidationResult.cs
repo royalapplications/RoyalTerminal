@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Contracts - Validation result model.
+// RoyalTerminal.Rendering.Contracts - Validation result model.
 
-namespace GhosttySharp.Rendering.Contracts;
+namespace RoyalTerminal.Rendering.Contracts;
 
 /// <summary>
 /// Represents the result of validating a rendering descriptor or request.

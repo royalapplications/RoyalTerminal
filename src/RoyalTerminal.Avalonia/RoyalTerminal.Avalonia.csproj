@@ -1,20 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>GhosttySharp.Avalonia</PackageId>
-    <Description>Avalonia UI terminal control for GhosttySharp with SkiaSharp rendering, CustomVisual composition, and virtualized scrolling.</Description>
+    <PackageId>RoyalTerminal.Avalonia</PackageId>
+    <Description>Avalonia UI terminal control for RoyalTerminal.GhosttySharp with SkiaSharp rendering, CustomVisual composition, and virtualized scrolling.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\GhosttySharp\GhosttySharp.csproj" />
-    <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
-    <ProjectReference Include="..\GhosttySharp.Terminal.Services.Contracts\GhosttySharp.Terminal.Services.Contracts.csproj" />
-    <ProjectReference Include="..\GhosttySharp.Terminal.Services\GhosttySharp.Terminal.Services.csproj" />
-    <ProjectReference Include="..\GhosttySharp.Rendering.Skia\GhosttySharp.Rendering.Skia.csproj" />
-    <ProjectReference Include="..\GhosttySharp.Avalonia.Rendering\GhosttySharp.Avalonia.Rendering.csproj" />
-    <ProjectReference Include="..\GhosttySharp.Terminal.Vt.Default\GhosttySharp.Terminal.Vt.Default.csproj" />
-    <ProjectReference Include="..\GhosttySharp.Terminal.Pty.Platform\GhosttySharp.Terminal.Pty.Platform.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp\RoyalTerminal.GhosttySharp.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp.Terminal\RoyalTerminal.GhosttySharp.Terminal.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp.Terminal.Services.Contracts\RoyalTerminal.GhosttySharp.Terminal.Services.Contracts.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp.Terminal.Services\RoyalTerminal.GhosttySharp.Terminal.Services.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Rendering.Skia\RoyalTerminal.Rendering.Skia.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Avalonia.Rendering\RoyalTerminal.Avalonia.Rendering.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp.Terminal.Vt.Default\RoyalTerminal.GhosttySharp.Terminal.Vt.Default.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp.Terminal.Pty.Platform\RoyalTerminal.GhosttySharp.Terminal.Pty.Platform.csproj" />
   </ItemGroup>
 
   <ItemGroup>

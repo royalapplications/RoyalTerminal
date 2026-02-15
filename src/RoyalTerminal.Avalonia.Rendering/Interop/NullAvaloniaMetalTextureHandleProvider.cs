@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Rendering - Default no-op Metal texture handle resolver.
+// RoyalTerminal.Avalonia.Rendering - Default no-op Metal texture handle resolver.
 
 using Avalonia.Platform;
 using Avalonia.Skia;
 
-namespace GhosttySharp.Avalonia.Rendering.Interop;
+namespace RoyalTerminal.Avalonia.Rendering.Interop;
 
 /// <summary>
 /// Default resolver that reports no available Metal texture handle.

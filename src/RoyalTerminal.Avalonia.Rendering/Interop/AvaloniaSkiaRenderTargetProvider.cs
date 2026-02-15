@@ -1,5 +1,5 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Rendering - Avalonia to render-target descriptor adapter.
+// RoyalTerminal.Avalonia.Rendering - Avalonia to render-target descriptor adapter.
 
 using System.Runtime.InteropServices;
 using Avalonia;
@@ -8,11 +8,11 @@ using Avalonia.OpenGL;
 using Avalonia.Platform;
 using Avalonia.Skia;
 using Avalonia.Vulkan;
-using GhosttySharp.Rendering.Contracts;
-using GhosttySharp.Rendering.Interop.Skia;
+using RoyalTerminal.Rendering.Contracts;
+using RoyalTerminal.Rendering.Interop.Skia;
 using SkiaSharp;
 
-namespace GhosttySharp.Avalonia.Rendering.Interop;
+namespace RoyalTerminal.Avalonia.Rendering.Interop;
 
 /// <summary>
 /// Creates <see cref="RenderTargetDescriptor"/> values from Avalonia Skia render leases.

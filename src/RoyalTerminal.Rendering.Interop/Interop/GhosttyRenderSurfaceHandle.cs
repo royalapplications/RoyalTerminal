@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop - SafeHandle for ghostty_render_surface_t.
+// RoyalTerminal.Rendering.Interop - SafeHandle for ghostty_render_surface_t.
 
 using System.Runtime.InteropServices;
-using GhosttySharp.Rendering.Interop.Native;
+using RoyalTerminal.Rendering.Interop.Native;
 
-namespace GhosttySharp.Rendering.Interop;
+namespace RoyalTerminal.Rendering.Interop;
 
 /// <summary>
 /// Safe handle wrapper for a native <c>ghostty_render_surface_t</c>.

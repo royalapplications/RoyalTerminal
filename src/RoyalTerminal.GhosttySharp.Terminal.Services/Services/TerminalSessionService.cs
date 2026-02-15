@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Terminal.Services — Default terminal session service.
+// RoyalTerminal.GhosttySharp.Terminal.Services — Default terminal session service.
 
-using GhosttySharp.Avalonia.Terminal;
-using GhosttySharp.Native;
+using RoyalTerminal.Avalonia.Terminal;
+using RoyalTerminal.GhosttySharp.Native;
 
-namespace GhosttySharp.Terminal.Services;
+namespace RoyalTerminal.GhosttySharp.Terminal.Services;
 
 /// <summary>
 /// Default terminal session manager for Ghostty surface and standalone PTY modes.

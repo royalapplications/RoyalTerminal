@@ -1,12 +1,12 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — Tests for terminal abstractions introduced for decomposition.
+// RoyalTerminal.Tests — Tests for terminal abstractions introduced for decomposition.
 
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Avalonia.Terminal;
-using GhosttySharp.Terminal.Services;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Terminal;
+using RoyalTerminal.GhosttySharp.Terminal.Services;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 public class TerminalAbstractionsTests
 {

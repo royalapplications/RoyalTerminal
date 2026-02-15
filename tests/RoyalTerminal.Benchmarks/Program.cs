@@ -1,11 +1,11 @@
 // Licensed under the MIT License.
-// GhosttySharp.Benchmarks — Render hot-path benchmark harness.
+// RoyalTerminal.Benchmarks — Render hot-path benchmark harness.
 
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
-using GhosttySharp.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Rendering;
 using SkiaSharp;
 
 BenchmarkOptions options = BenchmarkOptions.Parse(args);
@@ -266,7 +266,7 @@ internal static class BenchmarkReportWriter
     public static string CreateReport(ReadOnlySpan<BenchmarkResult> results)
     {
         StringBuilder sb = new();
-        sb.AppendLine("# GhosttySharp Render Hot-Path Baseline");
+        sb.AppendLine("# RoyalTerminal.GhosttySharp Render Hot-Path Baseline");
         sb.AppendLine();
         sb.AppendLine($"Date: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
         sb.AppendLine($"Runtime: {RuntimeInformation.FrameworkDescription}");

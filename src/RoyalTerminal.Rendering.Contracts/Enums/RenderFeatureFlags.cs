@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Contracts - Rendering capability flags.
+// RoyalTerminal.Rendering.Contracts - Rendering capability flags.
 
-namespace GhosttySharp.Rendering.Contracts;
+namespace RoyalTerminal.Rendering.Contracts;
 
 /// <summary>
 /// Feature flags describing renderer backend capabilities.

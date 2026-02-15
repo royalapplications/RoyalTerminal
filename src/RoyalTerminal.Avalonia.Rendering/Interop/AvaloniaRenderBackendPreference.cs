@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Rendering - Preferred backend selector for interop target acquisition.
+// RoyalTerminal.Avalonia.Rendering - Preferred backend selector for interop target acquisition.
 
-namespace GhosttySharp.Avalonia.Rendering.Interop;
+namespace RoyalTerminal.Avalonia.Rendering.Interop;
 
 /// <summary>
 /// Defines preferred backend selection behavior for Avalonia interop rendering.

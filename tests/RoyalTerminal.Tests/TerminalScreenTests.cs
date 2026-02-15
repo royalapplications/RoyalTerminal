@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — Terminal screen and cell model tests.
+// RoyalTerminal.Tests — Terminal screen and cell model tests.
 
-using GhosttySharp.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Rendering;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 /// <summary>
 /// Tests for TerminalCell, TerminalRow, and TerminalScreen.

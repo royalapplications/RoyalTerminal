@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Rendering.Interop.Skia - CPU RGBA fallback adapter for GhosttyRenderSurface.
+// RoyalTerminal.Rendering.Interop.Skia - CPU RGBA fallback adapter for GhosttyRenderSurface.
 
-using GhosttySharp.Rendering.Contracts;
-using GhosttySharp.Rendering.Interop;
+using RoyalTerminal.Rendering.Contracts;
+using RoyalTerminal.Rendering.Interop;
 
-namespace GhosttySharp.Rendering.Interop.Skia;
+namespace RoyalTerminal.Rendering.Interop.Skia;
 
 /// <summary>
 /// Adapts <see cref="GhosttyRenderSurface"/> to <see cref="ISkiaRgbaFallbackRenderer"/>.

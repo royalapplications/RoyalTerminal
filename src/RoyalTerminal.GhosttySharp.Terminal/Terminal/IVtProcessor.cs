@@ -1,7 +1,7 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — VT processor abstraction.
+// RoyalTerminal.Avalonia — VT processor abstraction.
 
-namespace GhosttySharp.Avalonia.Terminal;
+namespace RoyalTerminal.Avalonia.Terminal;
 
 /// <summary>
 /// Abstraction over a VT sequence processor that translates raw terminal output
@@ -38,7 +38,7 @@ public interface IVtProcessor : IDisposable
 
     /// <summary>
     /// Processes a span of raw terminal output bytes, updating internal state
-    /// and the associated <see cref="GhosttySharp.Avalonia.Rendering.TerminalScreen"/>.
+    /// and the associated <see cref="RoyalTerminal.Avalonia.Rendering.TerminalScreen"/>.
     /// </summary>
     void Process(ReadOnlySpan<byte> data);
 

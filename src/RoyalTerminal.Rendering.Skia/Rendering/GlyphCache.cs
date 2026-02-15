@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia - Terminal rendering with SkiaSharp.
+// RoyalTerminal.Avalonia - Terminal rendering with SkiaSharp.
 
 using System.Collections.Concurrent;
 using SkiaSharp;
 
-namespace GhosttySharp.Avalonia.Rendering;
+namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
 /// LRU glyph cache using SkiaSharp for high-performance text rendering.

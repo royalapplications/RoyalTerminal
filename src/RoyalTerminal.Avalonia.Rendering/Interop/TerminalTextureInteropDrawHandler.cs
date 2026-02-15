@@ -1,16 +1,16 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Rendering - Composition draw handler for texture interop mode.
+// RoyalTerminal.Avalonia.Rendering - Composition draw handler for texture interop mode.
 
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Rendering.Composition;
 using Avalonia.Skia;
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Rendering.Interop.Skia;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Rendering.Interop.Skia;
 using SkiaSharp;
 
-namespace GhosttySharp.Avalonia.Rendering.Interop;
+namespace RoyalTerminal.Avalonia.Rendering.Interop;
 
 /// <summary>
 /// Composition draw handler that renders frames via <see cref="SkiaInteropRenderer"/>.

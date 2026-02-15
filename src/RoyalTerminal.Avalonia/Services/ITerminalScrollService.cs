@@ -1,13 +1,13 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Terminal scrolling coordination abstraction.
+// RoyalTerminal.Avalonia — Terminal scrolling coordination abstraction.
 
 using Avalonia.Input;
-using GhosttySharp.Avalonia.Controls;
-using GhosttySharp.Avalonia.Rendering;
-using GhosttySharp.Avalonia.Scrolling;
-using GhosttySharp.Terminal.Services;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Scrolling;
+using RoyalTerminal.GhosttySharp.Terminal.Services;
 
-namespace GhosttySharp.Avalonia.Services;
+namespace RoyalTerminal.Avalonia.Services;
 
 /// <summary>
 /// Coordinates scroll state updates and scroll input handling.

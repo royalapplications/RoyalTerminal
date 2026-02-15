@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Demo — Sample multi-tab terminal application.
+// RoyalTerminal.Demo — Sample multi-tab terminal application.
 
 using Avalonia;
 using ReactiveUI.Avalonia;
 
-namespace GhosttySharp.Demo;
+namespace RoyalTerminal.Demo;
 
 public static class Program
 {

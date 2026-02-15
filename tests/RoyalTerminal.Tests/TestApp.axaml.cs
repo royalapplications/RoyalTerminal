@@ -5,9 +5,9 @@ using Avalonia.Headless;
 using Avalonia.Markup.Xaml;
 using Avalonia.Skia;
 
-[assembly: AvaloniaTestApplication(typeof(GhosttySharp.Tests.TestAppBuilder))]
+[assembly: AvaloniaTestApplication(typeof(RoyalTerminal.Tests.TestAppBuilder))]
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 public class TestApp : Application
 {

@@ -1,10 +1,10 @@
 // Licensed under the MIT License.
-// GhosttySharp.Tests — Enum and type validation tests.
+// RoyalTerminal.Tests — Enum and type validation tests.
 
-using GhosttySharp.Native;
+using RoyalTerminal.GhosttySharp.Native;
 using Xunit;
 
-namespace GhosttySharp.Tests;
+namespace RoyalTerminal.Tests;
 
 /// <summary>
 /// Tests for native enum definitions and type layout.

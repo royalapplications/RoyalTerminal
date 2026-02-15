@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia — Factory abstraction for VT processors.
+// RoyalTerminal.Avalonia — Factory abstraction for VT processors.
 
-using GhosttySharp.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Rendering;
 
-namespace GhosttySharp.Avalonia.Terminal;
+namespace RoyalTerminal.Avalonia.Terminal;
 
 /// <summary>
 /// Factory for creating terminal VT processors.

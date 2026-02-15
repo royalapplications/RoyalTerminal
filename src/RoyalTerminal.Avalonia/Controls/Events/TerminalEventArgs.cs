@@ -1,9 +1,9 @@
 // Licensed under the MIT License.
-// GhosttySharp.Avalonia.Controls - Shared event args for terminal controls.
+// RoyalTerminal.Avalonia.Controls - Shared event args for terminal controls.
 
-using GhosttySharp.Native;
+using RoyalTerminal.GhosttySharp.Native;
 
-namespace GhosttySharp.Avalonia.Controls;
+namespace RoyalTerminal.Avalonia.Controls;
 
 /// <summary>
 /// Event args for terminal data events.
