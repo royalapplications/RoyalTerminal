@@ -40,35 +40,35 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: native-osx-arm64
-          path: src/GhosttySharp.Native.OSX/runtimes/osx-arm64/native/
+          path: src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-arm64/native/
 
       - name: Download macOS x64 native
         if: matrix.os == 'macos-latest'
         uses: actions/download-artifact@v4
         with:
           name: native-osx-x64
-          path: src/GhosttySharp.Native.OSX/runtimes/osx-x64/native/
+          path: src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-x64/native/
 
       - name: Download Linux x64 native
         if: matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@v4
         with:
           name: native-linux-x64
-          path: src/GhosttySharp.Native.Linux64/runtimes/linux-x64/native/
+          path: src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-x64/native/
 
       - name: Download Linux arm64 native
         if: matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@v4
         with:
           name: native-linux-arm64
-          path: src/GhosttySharp.Native.Linux64/runtimes/linux-arm64/native/
+          path: src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-arm64/native/
 
       - name: Download Windows x64 native
         if: matrix.os == 'windows-latest'
         uses: actions/download-artifact@v4
         with:
           name: native-win-x64
-          path: src/GhosttySharp.Native.Win64/runtimes/win-x64/native/
+          path: src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-x64/native/
 
       - name: Stage native artifacts for managed interop (macOS)
         if: matrix.os == 'macos-latest'
@@ -76,14 +76,14 @@ jobs:
         run: |
           set -euo pipefail
           for rid in osx-arm64 osx-x64; do
-            src="src/GhosttySharp.Native.OSX/runtimes/${rid}/native"
-            dst_interop="src/GhosttySharp.Rendering.Interop/runtimes/${rid}/native"
+            src="src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/${rid}/native"
+            dst_interop="src/RoyalTerminal.Rendering.Interop/runtimes/${rid}/native"
             dst_fixture="native/${rid}"
             mkdir -p "${dst_interop}" "${dst_fixture}"
             cp -f "${src}"/* "${dst_interop}/"
             cp -f "${src}"/* "${dst_fixture}/"
           done
-          ls -la src/GhosttySharp.Rendering.Interop/runtimes/osx-arm64/native/
+          ls -la src/RoyalTerminal.Rendering.Interop/runtimes/osx-arm64/native/
 
       - name: Stage native artifacts for managed interop (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -91,22 +91,22 @@ jobs:
         run: |
           set -euo pipefail
           for rid in linux-x64 linux-arm64; do
-            src="src/GhosttySharp.Native.Linux64/runtimes/${rid}/native"
-            dst_interop="src/GhosttySharp.Rendering.Interop/runtimes/${rid}/native"
+            src="src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/${rid}/native"
+            dst_interop="src/RoyalTerminal.Rendering.Interop/runtimes/${rid}/native"
             dst_fixture="native/${rid}"
             mkdir -p "${dst_interop}" "${dst_fixture}"
             cp -f "${src}"/* "${dst_interop}/"
             cp -f "${src}"/* "${dst_fixture}/"
           done
-          ls -la src/GhosttySharp.Rendering.Interop/runtimes/linux-x64/native/
+          ls -la src/RoyalTerminal.Rendering.Interop/runtimes/linux-x64/native/
 
       - name: Stage native artifacts for managed interop (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           $rid = "win-x64"
-          $src = "src/GhosttySharp.Native.Win64/runtimes/$rid/native"
-          $dstInterop = "src/GhosttySharp.Rendering.Interop/runtimes/$rid/native"
+          $src = "src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/$rid/native"
+          $dstInterop = "src/RoyalTerminal.Rendering.Interop/runtimes/$rid/native"
           $dstFixture = "native/$rid"
           New-Item -Path $dstInterop -ItemType Directory -Force | Out-Null
           New-Item -Path $dstFixture -ItemType Directory -Force | Out-Null
@@ -121,7 +121,7 @@ jobs:
         run: dotnet build -c Release --no-restore
 
       - name: Test (Unit)
-        run: dotnet test tests/GhosttySharp.Tests/GhosttySharp.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory ./test-results
+        run: dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory ./test-results
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -405,15 +405,15 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: native-osx-arm64
-          path: src/GhosttySharp.Native.OSX/runtimes/osx-arm64/native/
+          path: src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-arm64/native/
 
       - name: Stage native artifacts for managed interop (macOS)
         shell: bash
         run: |
           set -euo pipefail
           rid="osx-arm64"
-          src="src/GhosttySharp.Native.OSX/runtimes/${rid}/native"
-          dst_interop="src/GhosttySharp.Rendering.Interop/runtimes/${rid}/native"
+          src="src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/${rid}/native"
+          dst_interop="src/RoyalTerminal.Rendering.Interop/runtimes/${rid}/native"
           dst_fixture="native/${rid}"
           mkdir -p "${dst_interop}" "${dst_fixture}"
           cp -f "${src}"/* "${dst_interop}/"
@@ -421,7 +421,7 @@ jobs:
           ls -la "${dst_interop}"
 
       - name: Run integration tests
-        run: dotnet test tests/GhosttySharp.IntegrationTests/GhosttySharp.IntegrationTests.csproj -c Release --logger "trx;LogFileName=integration-results.trx" --results-directory ./test-results
+        run: dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj -c Release --logger "trx;LogFileName=integration-results.trx" --results-directory ./test-results
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -451,31 +451,31 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: native-osx-arm64
-          path: src/GhosttySharp.Native.OSX/runtimes/osx-arm64/native/
+          path: src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-arm64/native/
 
       - name: Download macOS x64 native
         uses: actions/download-artifact@v4
         with:
           name: native-osx-x64
-          path: src/GhosttySharp.Native.OSX/runtimes/osx-x64/native/
+          path: src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-x64/native/
 
       - name: Download Linux x64 native
         uses: actions/download-artifact@v4
         with:
           name: native-linux-x64
-          path: src/GhosttySharp.Native.Linux64/runtimes/linux-x64/native/
+          path: src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-x64/native/
 
       - name: Download Linux arm64 native
         uses: actions/download-artifact@v4
         with:
           name: native-linux-arm64
-          path: src/GhosttySharp.Native.Linux64/runtimes/linux-arm64/native/
+          path: src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-arm64/native/
 
       - name: Download Windows x64 native
         uses: actions/download-artifact@v4
         with:
           name: native-win-x64
-          path: src/GhosttySharp.Native.Win64/runtimes/win-x64/native/
+          path: src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-x64/native/
 
       - name: Verify downloaded native artifacts
         shell: bash
@@ -493,75 +493,75 @@ jobs:
             done
           }
 
-          check_files "src/GhosttySharp.Native.OSX/runtimes/osx-arm64/native" \
+          check_files "src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-arm64/native" \
             "libghostty.dylib" "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
-          check_files "src/GhosttySharp.Native.OSX/runtimes/osx-x64/native" \
+          check_files "src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-x64/native" \
             "libghostty.dylib" "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
-          check_files "src/GhosttySharp.Native.Linux64/runtimes/linux-x64/native" \
+          check_files "src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-x64/native" \
             "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
-          check_files "src/GhosttySharp.Native.Linux64/runtimes/linux-arm64/native" \
+          check_files "src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-arm64/native" \
             "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
-          check_files "src/GhosttySharp.Native.Win64/runtimes/win-x64/native" \
+          check_files "src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-x64/native" \
             "ghostty.dll" "ghostty-vt.dll" "ghostty-terminal.dll" "ghostty-renderer-capi.dll"
 
       # Pack managed packages
-      - name: Pack GhosttySharp
-        run: dotnet pack src/GhosttySharp/GhosttySharp.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp
+        run: dotnet pack src/RoyalTerminal.GhosttySharp/RoyalTerminal.GhosttySharp.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Terminal
-        run: dotnet pack src/GhosttySharp.Terminal/GhosttySharp.Terminal.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Terminal
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal/RoyalTerminal.GhosttySharp.Terminal.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Terminal.Services.Contracts
-        run: dotnet pack src/GhosttySharp.Terminal.Services.Contracts/GhosttySharp.Terminal.Services.Contracts.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Services.Contracts
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Services.Contracts/RoyalTerminal.GhosttySharp.Terminal.Services.Contracts.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Terminal.Services
-        run: dotnet pack src/GhosttySharp.Terminal.Services/GhosttySharp.Terminal.Services.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Services
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Services/RoyalTerminal.GhosttySharp.Terminal.Services.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Rendering.Contracts
-        run: dotnet pack src/GhosttySharp.Rendering.Contracts/GhosttySharp.Rendering.Contracts.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Rendering.Contracts
+        run: dotnet pack src/RoyalTerminal.Rendering.Contracts/RoyalTerminal.Rendering.Contracts.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Rendering.Interop
-        run: dotnet pack src/GhosttySharp.Rendering.Interop/GhosttySharp.Rendering.Interop.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Rendering.Interop
+        run: dotnet pack src/RoyalTerminal.Rendering.Interop/RoyalTerminal.Rendering.Interop.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Rendering.Interop.Skia
-        run: dotnet pack src/GhosttySharp.Rendering.Interop.Skia/GhosttySharp.Rendering.Interop.Skia.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Rendering.Interop.Skia
+        run: dotnet pack src/RoyalTerminal.Rendering.Interop.Skia/RoyalTerminal.Rendering.Interop.Skia.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Rendering.Skia
-        run: dotnet pack src/GhosttySharp.Rendering.Skia/GhosttySharp.Rendering.Skia.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Rendering.Skia
+        run: dotnet pack src/RoyalTerminal.Rendering.Skia/RoyalTerminal.Rendering.Skia.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Terminal.Vt.Managed
-        run: dotnet pack src/GhosttySharp.Terminal.Vt.Managed/GhosttySharp.Terminal.Vt.Managed.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Vt.Managed
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Vt.Managed/RoyalTerminal.GhosttySharp.Terminal.Vt.Managed.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Terminal.Vt.Ghostty
-        run: dotnet pack src/GhosttySharp.Terminal.Vt.Ghostty/GhosttySharp.Terminal.Vt.Ghostty.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty/RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Terminal.Vt.Default
-        run: dotnet pack src/GhosttySharp.Terminal.Vt.Default/GhosttySharp.Terminal.Vt.Default.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Vt.Default
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Vt.Default/RoyalTerminal.GhosttySharp.Terminal.Vt.Default.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Terminal.Pty.Unix
-        run: dotnet pack src/GhosttySharp.Terminal.Pty.Unix/GhosttySharp.Terminal.Pty.Unix.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Pty.Unix
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Pty.Unix/RoyalTerminal.GhosttySharp.Terminal.Pty.Unix.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Terminal.Pty.Windows
-        run: dotnet pack src/GhosttySharp.Terminal.Pty.Windows/GhosttySharp.Terminal.Pty.Windows.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Pty.Windows
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Pty.Windows/RoyalTerminal.GhosttySharp.Terminal.Pty.Windows.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Terminal.Pty.Platform
-        run: dotnet pack src/GhosttySharp.Terminal.Pty.Platform/GhosttySharp.Terminal.Pty.Platform.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Pty.Platform
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Pty.Platform/RoyalTerminal.GhosttySharp.Terminal.Pty.Platform.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Avalonia
-        run: dotnet pack src/GhosttySharp.Avalonia/GhosttySharp.Avalonia.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Avalonia
+        run: dotnet pack src/RoyalTerminal.Avalonia/RoyalTerminal.Avalonia.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Avalonia.Rendering
-        run: dotnet pack src/GhosttySharp.Avalonia.Rendering/GhosttySharp.Avalonia.Rendering.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Avalonia.Rendering
+        run: dotnet pack src/RoyalTerminal.Avalonia.Rendering/RoyalTerminal.Avalonia.Rendering.csproj -c Release -o artifacts/
 
       # Pack native packages
-      - name: Pack GhosttySharp.Native.OSX
-        run: dotnet pack src/GhosttySharp.Native.OSX/GhosttySharp.Native.OSX.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Native.OSX
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Native.OSX/RoyalTerminal.GhosttySharp.Native.OSX.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Native.Win64
-        run: dotnet pack src/GhosttySharp.Native.Win64/GhosttySharp.Native.Win64.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Native.Win64
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Native.Win64/RoyalTerminal.GhosttySharp.Native.Win64.csproj -c Release -o artifacts/
 
-      - name: Pack GhosttySharp.Native.Linux64
-        run: dotnet pack src/GhosttySharp.Native.Linux64/GhosttySharp.Native.Linux64.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.GhosttySharp.Native.Linux64
+        run: dotnet pack src/RoyalTerminal.GhosttySharp.Native.Linux64/RoyalTerminal.GhosttySharp.Native.Linux64.csproj -c Release -o artifacts/
 
       - name: List packages
         run: ls -la artifacts/*.nupkg

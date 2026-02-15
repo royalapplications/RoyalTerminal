@@ -127,7 +127,7 @@ try {
     Write-Info "Built library: $builtLib"
 
     # Copy to NuGet directory
-    $nativeRuntimeDir = Join-Path $RootDir "src\GhosttySharp.Native.Win64\runtimes\$RID\native"
+    $nativeRuntimeDir = Join-Path $RootDir "src\RoyalTerminal.GhosttySharp.Native.Win64\runtimes\$RID\native"
     New-Item -ItemType Directory -Force -Path $nativeRuntimeDir | Out-Null
     Copy-Item $builtLib $nativeRuntimeDir
     Write-Info "Copied to: $nativeRuntimeDir\$LibName"
@@ -257,7 +257,7 @@ try {
     Write-Info ""
     Write-Info "Next steps:"
     Write-Info "  1. Build the .NET solution: dotnet build"
-    Write-Info "  2. Run the demo: dotnet run --project samples\GhosttySharp.Demo"
+    Write-Info "  2. Run the demo: dotnet run --project samples\RoyalTerminal.Demo"
     Write-Info "  3. Pack NuGet packages: dotnet pack -c Release"
 
 } finally {

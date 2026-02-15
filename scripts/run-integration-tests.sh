@@ -150,10 +150,10 @@ info "All expected symbols present ($TOTAL_SYMBOLS total exports)"
 step "3/4 — Building integration test project..."
 
 cd "$ROOT_DIR"
-dotnet build tests/GhosttySharp.IntegrationTests/GhosttySharp.IntegrationTests.csproj -c Debug 2>&1
+dotnet build tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj -c Debug 2>&1
 
 # Verify native lib was copied to output
-OUTPUT_DIR="tests/GhosttySharp.IntegrationTests/bin/Debug/net10.0"
+OUTPUT_DIR="tests/RoyalTerminal.IntegrationTests/bin/Debug/net10.0"
 if [ -f "$OUTPUT_DIR/$LIB_NAME" ]; then
     info "Native library present in test output: $OUTPUT_DIR/$LIB_NAME"
 else
@@ -166,7 +166,7 @@ fi
 
 step "4/4 — Running native integration tests..."
 
-dotnet test tests/GhosttySharp.IntegrationTests/GhosttySharp.IntegrationTests.csproj \
+dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj \
     $VERBOSE \
     --no-build \
     2>&1

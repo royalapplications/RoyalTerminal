@@ -38,7 +38,7 @@ check() {
 
 echo ""
 echo -e "${BOLD}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}  GhosttySharp — macOS Validation Suite${NC}"
+echo -e "${BOLD}  RoyalTerminal — macOS Validation Suite${NC}"
 echo -e "${BOLD}═══════════════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -114,7 +114,7 @@ echo ""
 
 step "4/7 — Building full solution..."
 
-dotnet build GhosttySharp.sln 2>&1
+dotnet build RoyalTerminal.sln 2>&1
 if [ $? -eq 0 ]; then
     pass "Solution build succeeded"
 else
@@ -129,7 +129,7 @@ echo ""
 
 step "5/7 — Running unit tests..."
 
-UNIT_OUTPUT=$(dotnet test tests/GhosttySharp.Tests/GhosttySharp.Tests.csproj --verbosity quiet 2>&1)
+UNIT_OUTPUT=$(dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj --verbosity quiet 2>&1)
 if echo "$UNIT_OUTPUT" | grep -qE 'succeeded|Passed!'; then
     UNIT_COUNT=$(echo "$UNIT_OUTPUT" | grep -oE '(succeeded: |Passed:[ ]+)[0-9]+' | grep -oE '[0-9]+' | tail -1)
     pass "Unit tests passed: $UNIT_COUNT tests"
@@ -147,13 +147,13 @@ echo ""
 step "6/7 — Running native integration tests..."
 
 # Ensure native lib is in test output
-dotnet build tests/GhosttySharp.IntegrationTests/GhosttySharp.IntegrationTests.csproj 2>&1
-INT_OUTPUT_DIR="tests/GhosttySharp.IntegrationTests/bin/Debug/net10.0"
+dotnet build tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj 2>&1
+INT_OUTPUT_DIR="tests/RoyalTerminal.IntegrationTests/bin/Debug/net10.0"
 if [ ! -f "$INT_OUTPUT_DIR/$LIB_NAME" ]; then
     cp "$NATIVE_LIB" "$INT_OUTPUT_DIR/"
 fi
 
-INT_OUTPUT=$(dotnet test tests/GhosttySharp.IntegrationTests/GhosttySharp.IntegrationTests.csproj --no-build --verbosity quiet 2>&1)
+INT_OUTPUT=$(dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj --no-build --verbosity quiet 2>&1)
 if echo "$INT_OUTPUT" | grep -qE 'succeeded|Passed!'; then
     INT_COUNT=$(echo "$INT_OUTPUT" | grep -oE '(succeeded: |Passed:[ ]+)[0-9]+' | grep -oE '[0-9]+' | tail -1)
     pass "Integration tests passed: $INT_COUNT tests"

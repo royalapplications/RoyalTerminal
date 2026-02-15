@@ -166,8 +166,8 @@ info "Built library: $BUILT_LIB"
 
 # Copy to NuGet native package directory
 case "$PLATFORM" in
-    osx) NATIVE_RUNTIME_DIR="$ROOT_DIR/src/GhosttySharp.Native.OSX/runtimes/$RID/native" ;;
-    linux) NATIVE_RUNTIME_DIR="$ROOT_DIR/src/GhosttySharp.Native.Linux64/runtimes/$RID/native" ;;
+    osx) NATIVE_RUNTIME_DIR="$ROOT_DIR/src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/$RID/native" ;;
+    linux) NATIVE_RUNTIME_DIR="$ROOT_DIR/src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/$RID/native" ;;
 esac
 
 mkdir -p "$NATIVE_RUNTIME_DIR"
@@ -333,5 +333,5 @@ fi
 info ""
 info "Next steps:"
 info "  1. Build the .NET solution: dotnet build"
-info "  2. Run the demo: dotnet run --project samples/GhosttySharp.Demo"
+info "  2. Run the demo: dotnet run --project samples/RoyalTerminal.Demo"
 info "  3. Pack NuGet packages: dotnet pack -c Release"

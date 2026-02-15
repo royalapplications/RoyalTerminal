@@ -83,11 +83,11 @@ case "$(uname -s)" in
     Darwin)
         ARCH="$(uname -m)"
         if [ "$ARCH" = "arm64" ]; then RID="osx-arm64"; else RID="osx-x64"; fi
-        DEST="$ROOT_DIR/src/GhosttySharp.Native.OSX/runtimes/$RID/native"
+        DEST="$ROOT_DIR/src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/$RID/native"
         echo "  cp zig-out/lib/libghostty-terminal.dylib $DEST/"
         ;;
     Linux)
-        DEST="$ROOT_DIR/src/GhosttySharp.Native.Linux64/runtimes/linux-x64/native"
+        DEST="$ROOT_DIR/src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-x64/native"
         echo "  cp zig-out/lib/libghostty-terminal.so $DEST/"
         ;;
 esac
