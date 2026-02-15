@@ -341,6 +341,17 @@ bash build.sh release
 bash build.sh test
 ```
 
+## Ghostty Submodule Patch Log
+
+GhosttySharp currently tracks a patched Ghostty fork in `external/ghostty`
+(`wieslawsoltes/ghostty`, branch `ghosttysharp/screen-api`). The commits below
+are required for Unicode-correct terminal cell readback and rendering.
+
+1. [`455bc6d86`](https://github.com/wieslawsoltes/ghostty/commit/455bc6d86) `screen: add grapheme-aware row cell export`
+   Added `ghostty_surface_get_row_cells_with_graphemes` and supporting grapheme-span payloads so managed code can reconstruct full per-cell graphemes (primary codepoint + trailing UTF-32 sequence). This was needed because `codepoint`-only row reads lose combining/emoji cluster data and break HarfBuzz shaping and fallback selection in GhosttySharp.
+2. [`523554136`](https://github.com/wieslawsoltes/ghostty/commit/523554136) `Force unicode grapheme width method for embedded surfaces`
+   Forced embedded surfaces to use `grapheme-width-method=unicode`. This was needed to avoid legacy-width behavior that could split regional-indicator flag pairs and other emoji sequences into non-clustered cells, causing incorrect native VT/rendered output despite shaping support in managed code.
+
 ## PTY Layer
 
 | Package | Implementation |
