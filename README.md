@@ -31,7 +31,8 @@ High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-o
 | `GhosttySharp.Terminal.Pty.Platform` | Platform PTY factory (`DefaultPtyFactory`) |
 | `GhosttySharp.Terminal.Services.Contracts` | Terminal session service contracts |
 | `GhosttySharp.Terminal.Services` | Terminal session service implementations |
-| `GhosttySharp.Rendering.Skia` | CPU cell renderer core (`SkiaTerminalRenderer`, `GlyphCache`) |
+| `GhosttySharp.Rendering.Text` | Reusable text shaping/fallback subsystem (`HarfBuzzTextShaper`, `TerminalFontResolver`) |
+| `GhosttySharp.Rendering.Skia` | CPU cell renderer core (`SkiaTerminalRenderer`, `GlyphCache`) with HarfBuzz shaping + fallback font resolution |
 | `GhosttySharp.Rendering.Contracts` | Backend-agnostic render contracts (`RenderTargetDescriptor`, capabilities) |
 | `GhosttySharp.Rendering.Interop` | Managed wrapper for `ghostty-renderer-capi` |
 | `GhosttySharp.Rendering.Interop.Skia` | Skia bridge (`SkiaInteropRenderer`) with CPU fallback |
@@ -46,6 +47,8 @@ High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-o
 - **Ghostty Rendered TextureInterop mode** in `GhosttyRenderedTerminalControl`.
 - **Standalone VT engine** via `libghostty-terminal` on all platforms.
 - **Modular PTY and VT packages** (`Terminal.Pty.*`, `Terminal.Vt.*`).
+- **HarfBuzz-backed text shaping** with grid-safe fallback behavior and optional diagnostics counters.
+- **Grapheme-aware cell model** in managed VT and native VT/surface readback paths.
 - **Terminal session service split** (`Terminal.Services.Contracts` and `Terminal.Services`).
 - **Native artifact pipeline** for macOS/Linux/Windows, consumed by managed build/test/pack stages.
 - **Central NuGet package management** via `Directory.Packages.props`.
@@ -206,7 +209,28 @@ terminal.StartPty(
     workingDirectory: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 ```
 
-### 5. Direct Renderer Interop (No Avalonia Adapter)
+### 5. Renderer Shaping Controls and Diagnostics
+
+```csharp
+using GhosttySharp.Avalonia.Controls;
+using GhosttySharp.Avalonia.Rendering;
+
+var terminal = new GhosttyTerminalControl();
+terminal.StartPty();
+
+// Available after control initialization.
+if (terminal.Renderer is { } renderer)
+{
+    renderer.EnableTextShaping = true;                 // rollout switch
+    renderer.TextDirectionMode = TextDirectionMode.Auto;
+    renderer.EnableLigatures = false;                  // terminal-safe default
+    renderer.EnableTextRenderDiagnostics = true;
+
+    TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics(reset: true);
+}
+```
+
+### 6. Direct Renderer Interop (No Avalonia Adapter)
 
 ```csharp
 using GhosttySharp.Rendering.Contracts;
@@ -307,6 +331,7 @@ bash build.sh test
 ## Standalone Terminal Library (`libghostty-terminal`)
 
 `native/ghostty-terminal` wraps Ghostty VT processing into a dedicated C API used by `GhosttyVtProcessor`.
+It also exposes grapheme-aware row reads via `ghostty_terminal_get_row_cells_with_graphemes(...)`.
 
 Build directly:
 
@@ -375,6 +400,7 @@ GhosttySharp/
 │   ├── GhosttySharp.Terminal.Pty.Platform/
 │   ├── GhosttySharp.Terminal.Services.Contracts/
 │   ├── GhosttySharp.Terminal.Services/
+│   ├── GhosttySharp.Rendering.Text/
 │   ├── GhosttySharp.Rendering.Contracts/
 │   ├── GhosttySharp.Rendering.Interop/
 │   ├── GhosttySharp.Rendering.Skia/
@@ -384,6 +410,7 @@ GhosttySharp/
 │   └── GhosttySharp.Native.Win64/
 ├── samples/GhosttySharp.Demo/
 ├── tests/
+│   ├── GhosttySharp.Benchmarks/
 │   ├── GhosttySharp.Tests/
 │   └── GhosttySharp.IntegrationTests/
 └── scripts/
@@ -422,6 +449,14 @@ dotnet build GhosttySharp.sln -c Release
 dotnet run --project samples/GhosttySharp.Demo
 ```
 
+Optional demo toggles:
+
+```bash
+GHOSTTYSHARP_DISABLE_TEXT_SHAPING=1 \
+GHOSTTYSHARP_ENABLE_RENDER_DIAGNOSTICS=1 \
+dotnet run --project samples/GhosttySharp.Demo
+```
+
 ## Testing
 
 ```bash
@@ -434,8 +469,14 @@ dotnet test tests/GhosttySharp.Tests/GhosttySharp.Tests.csproj -c Release --filt
 
 Current baseline in this repository:
 
-- Unit tests: 223 passed
-- Integration tests: 42 passed
+- Unit tests: 257 passed
+- Integration tests: 44 passed
+
+Performance baseline harness:
+
+```bash
+dotnet run --project tests/GhosttySharp.Benchmarks/GhosttySharp.Benchmarks.csproj -c Release -- --output /tmp/ghosttysharp-render-baseline.md
+```
 
 ## API Coverage
 
@@ -454,6 +495,7 @@ Current baseline in this repository:
 |----------|--------|
 | Lifecycle/process/resize | Implemented |
 | Screen state and cursor reads | Implemented |
+| Grapheme-aware row reads | Implemented (`ghostty_terminal_get_row_cells_with_graphemes`) |
 | Default/palette color APIs | Implemented |
 | Mode queries and self-test | Implemented |
 

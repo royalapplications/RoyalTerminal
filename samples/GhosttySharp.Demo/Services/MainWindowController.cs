@@ -13,6 +13,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using GhosttySharp.Avalonia.Controls;
+using GhosttySharp.Avalonia.Rendering;
 using GhosttySharp.Demo.ViewModels;
 using GhosttySharp.Native;
 using ReactiveUI;
@@ -21,10 +22,15 @@ namespace GhosttySharp.Demo.Services;
 
 internal sealed class MainWindowController
 {
+    private const string DisableTextShapingEnvVar = "GHOSTTYSHARP_DISABLE_TEXT_SHAPING";
+    private const string EnableRenderDiagnosticsEnvVar = "GHOSTTYSHARP_ENABLE_RENDER_DIAGNOSTICS";
+
     private static readonly string MonoFont =
         RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "Menlo" :
         RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "DejaVu Sans Mono" :
         "Consolas";
+    private static readonly bool s_disableTextShaping = ReadEnvironmentToggle(DisableTextShapingEnvVar);
+    private static readonly bool s_enableRenderDiagnostics = ReadEnvironmentToggle(EnableRenderDiagnosticsEnvVar);
 
     private static readonly ThemePalette DarkPalette = new(
         Color.FromRgb(0x1E, 0x1E, 0x1E),
@@ -236,6 +242,7 @@ internal sealed class MainWindowController
                 RenderingMode = GetRenderedRenderingMode(_viewModel.UseTextureInterop),
             };
             renderedControl.Initialize(_ghosttyApp);
+            ConfigureRenderer(renderedControl.Renderer);
 
             renderedControl.TitleChanged += (_, title) =>
             {
@@ -309,6 +316,7 @@ internal sealed class MainWindowController
                 DefaultForeground = palette.TerminalForeground,
                 DefaultBackground = palette.TerminalBackground,
             };
+            ConfigureRenderer(standaloneControl.Renderer);
 
             standaloneControl.DataReceived += (_, args) =>
             {
@@ -415,6 +423,31 @@ internal sealed class MainWindowController
 
     private string GetRenderedBackendLabel()
         => _viewModel.UseTextureInterop ? "TextureInterop (Preview)" : "CPU Cell Renderer";
+
+    private static void ConfigureRenderer(SkiaTerminalRenderer? renderer)
+    {
+        if (renderer is null)
+        {
+            return;
+        }
+
+        renderer.EnableTextShaping = !s_disableTextShaping;
+        renderer.EnableTextRenderDiagnostics = s_enableRenderDiagnostics;
+    }
+
+    private static bool ReadEnvironmentToggle(string variableName)
+    {
+        string? value = Environment.GetEnvironmentVariable(variableName);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static Button CreateTabHeader(string title, TabVisualMode mode)
     {
