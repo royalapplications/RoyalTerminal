@@ -1,4 +1,5 @@
-// Licensed under the MIT License.
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia — Windows pseudo-terminal using the ConPTY API.
 // Spawns a shell process with a real PTY so terminal features work on Windows.
 

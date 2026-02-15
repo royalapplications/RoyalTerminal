@@ -1,4 +1,5 @@
-// Licensed under the MIT License.
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia — Diagnostic log levels for library logging.
 
 namespace RoyalTerminal.Avalonia.Diagnostics;

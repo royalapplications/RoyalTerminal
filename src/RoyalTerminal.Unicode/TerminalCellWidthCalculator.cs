@@ -1,4 +1,5 @@
-// Licensed under the MIT License.
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
 // Deterministic terminal cell width calculation backed by Unicode trie tables.
 
 using System.Runtime.CompilerServices;

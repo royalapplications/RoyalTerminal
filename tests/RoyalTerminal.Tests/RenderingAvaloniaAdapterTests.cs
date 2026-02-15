@@ -1,4 +1,5 @@
-// Licensed under the MIT License.
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests - Avalonia render-target adapter tests for texture interop mode.
 
 using System.Runtime.InteropServices;

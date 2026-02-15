@@ -1,4 +1,5 @@
-// Licensed under the MIT License.
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia — VT processor using Ghostty's native terminal via libghostty-terminal.
 
 using System.Buffers;

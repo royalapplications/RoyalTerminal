@@ -1,4 +1,5 @@
-// Licensed under the MIT License.
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests — Core data processing tests (no Avalonia required).
 
 using RoyalTerminal.GhosttySharp.Terminal;

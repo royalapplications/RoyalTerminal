@@ -1,4 +1,5 @@
-// Licensed under the MIT License.
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia — Unix pseudo-terminal (PTY) for macOS/Linux.
 // Spawns a shell process with a real PTY via POSIX interop so terminal features
 // work properly. Fork-safe: all native memory is pre-allocated before fork, and

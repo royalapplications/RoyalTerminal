@@ -1,4 +1,5 @@
-// Licensed under the MIT License.
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests — Headless Avalonia + Skia rendering integration tests.
 // Validates terminal control rendering, input processing, and Skia drawing.
 

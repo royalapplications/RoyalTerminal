@@ -1,4 +1,5 @@
-// Licensed under the MIT License.
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.GhosttySharp — P/Invoke bindings for libghostty-terminal.
 //
 // This is a standalone shared library built from Ghostty's VT terminal modules.

@@ -1,4 +1,5 @@
-// Licensed under the MIT License.
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia — VT sequence processor for standalone/demo mode.
 // Processes raw terminal output bytes into the TerminalScreen cell grid.
 // Supports: printable characters, cursor movement, SGR colors (256 + truecolor),
