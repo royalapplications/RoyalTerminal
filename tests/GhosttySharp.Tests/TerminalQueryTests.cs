@@ -276,6 +276,7 @@ public class TerminalQueryTests
         Assert.Equal(0, processor.CursorRow);
         Assert.Equal('e', row[0].Codepoint);
         Assert.Equal("e\u0301", row[0].Grapheme);
+        Assert.Equal(1, row[0].Width);
         Assert.Equal(0, row[1].Codepoint);
     }
 
@@ -290,11 +291,156 @@ public class TerminalQueryTests
         processor.Process(System.Text.Encoding.UTF8.GetBytes(familyEmoji));
 
         TerminalRow row = screen.GetViewportRow(0);
-        Assert.Equal(1, processor.CursorCol);
+        Assert.Equal(2, processor.CursorCol);
         Assert.Equal(0, processor.CursorRow);
         Assert.Equal(0x1F468, row[0].Codepoint);
         Assert.Equal(familyEmoji, row[0].Grapheme);
+        Assert.Equal(2, row[0].Width);
         Assert.Equal(0, row[1].Codepoint);
+        Assert.Equal(0, row[1].Width);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_RegionalIndicatorPair_AppendsToSingleCellGrapheme()
+    {
+        const string canadaFlag = "\U0001F1E8\U0001F1E6";
+
+        var screen = new TerminalScreen(16, 4, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process(System.Text.Encoding.UTF8.GetBytes(canadaFlag));
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(2, processor.CursorCol);
+        Assert.Equal(0, processor.CursorRow);
+        Assert.Equal(0x1F1E8, row[0].Codepoint);
+        Assert.Equal(canadaFlag, row[0].Grapheme);
+        Assert.Equal(2, row[0].Width);
+        Assert.Equal(0, row[1].Codepoint);
+        Assert.Equal(0, row[1].Width);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_RegionalIndicatorTriplet_SplitsAfterFirstPair()
+    {
+        const string triplet = "\U0001F1E8\U0001F1E6\U0001F1FA";
+
+        var screen = new TerminalScreen(16, 4, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process(System.Text.Encoding.UTF8.GetBytes(triplet));
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(4, processor.CursorCol);
+        Assert.Equal(0x1F1E8, row[0].Codepoint);
+        Assert.Equal("\U0001F1E8\U0001F1E6", row[0].Grapheme);
+        Assert.Equal(2, row[0].Width);
+        Assert.Equal(0, row[1].Width);
+        Assert.Equal(0x1F1FA, row[2].Codepoint);
+        Assert.Null(row[2].Grapheme);
+        Assert.Equal(2, row[2].Width);
+        Assert.Equal(0, row[3].Width);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_KeycapSequence_AppendsToSingleCellGrapheme()
+    {
+        const string keycap = "#\uFE0F\u20E3";
+
+        var screen = new TerminalScreen(16, 4, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process(System.Text.Encoding.UTF8.GetBytes(keycap));
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(2, processor.CursorCol);
+        Assert.Equal('#', row[0].Codepoint);
+        Assert.Equal(keycap, row[0].Grapheme);
+        Assert.Equal(2, row[0].Width);
+        Assert.Equal(0, row[1].Codepoint);
+        Assert.Equal(0, row[1].Width);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_OverwriteWideCharSpacer_ClearsLeadingWideCell()
+    {
+        var screen = new TerminalScreen(16, 4, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("中"u8);
+        processor.Process("\bA"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(2, processor.CursorCol);
+        Assert.Equal(0, row[0].Codepoint);
+        Assert.Equal(1, row[0].Width);
+        Assert.Equal('A', row[1].Codepoint);
+        Assert.Equal(1, row[1].Width);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_CombiningMarkAtLineEnd_DoesNotWrapBeforeAppend()
+    {
+        var screen = new TerminalScreen(2, 2, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("AB\u0301"u8);
+
+        TerminalRow row0 = screen.GetViewportRow(0);
+        TerminalRow row1 = screen.GetViewportRow(1);
+        Assert.Equal(2, processor.CursorCol);
+        Assert.Equal(0, processor.CursorRow);
+        Assert.Equal("B\u0301", row0[1].Grapheme);
+        Assert.False(row1[0].HasContent);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DeleteCharacterFromWideLead_NormalizesRow()
+    {
+        var screen = new TerminalScreen(8, 2, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("中A"u8);
+        processor.Process("\r\x1b[P"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        AssertNoBrokenWideCells(row);
+        Assert.Equal('A', row[1].Codepoint);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_EraseFromWideSpacer_NormalizesRow()
+    {
+        var screen = new TerminalScreen(8, 2, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("中A"u8);
+        processor.Process("\x1b[1;2H\x1b[K"u8); // CUP row1,col2 then EL0
+
+        TerminalRow row = screen.GetViewportRow(0);
+        AssertNoBrokenWideCells(row);
+        Assert.False(row[0].HasContent);
+    }
+
+    private static void AssertNoBrokenWideCells(TerminalRow row)
+    {
+        for (int col = 0; col < row.Columns; col++)
+        {
+            TerminalCell current = row[col];
+            if (current.Width == 2)
+            {
+                Assert.True(col + 1 < row.Columns, $"Wide leader at col {col} reaches beyond row.");
+                TerminalCell trailing = row[col + 1];
+                Assert.Equal(0, trailing.Width);
+                Assert.False(trailing.HasContent);
+                continue;
+            }
+
+            if (current.Width == 0)
+            {
+                Assert.True(col > 0 && row[col - 1].Width == 2, $"Orphan spacer at col {col}.");
+            }
+        }
     }
 
     #endregion

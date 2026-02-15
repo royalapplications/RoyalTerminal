@@ -6,7 +6,7 @@
 // DEC line-drawing character set, erase, insert/delete lines & characters, and tabs.
 
 using GhosttySharp.Avalonia.Rendering;
-using System.Globalization;
+using GhosttySharp.Unicode;
 using System.Text;
 
 namespace GhosttySharp.Avalonia.Terminal;
@@ -22,8 +22,6 @@ namespace GhosttySharp.Avalonia.Terminal;
 /// </summary>
 public sealed class BasicVtProcessor : IVtProcessor
 {
-    private const int ZeroWidthJoinerCodepoint = 0x200D;
-
     private readonly TerminalScreen _screen;
     private int _cursorCol;
     private int _cursorRow;
@@ -75,7 +73,6 @@ public sealed class BasicVtProcessor : IVtProcessor
     // UTF-8 multi-byte decoding state
     private int _utf8Codepoint;
     private int _utf8Remaining;
-    private bool _pendingZwjContinuation;
 
     private enum ParserState
     {
@@ -189,7 +186,6 @@ public sealed class BasicVtProcessor : IVtProcessor
             {
                 // Invalid continuation — reset and process this byte normally
                 _utf8Remaining = 0;
-                _pendingZwjContinuation = false;
                 ProcessGround(b);
             }
             return;
@@ -198,44 +194,36 @@ public sealed class BasicVtProcessor : IVtProcessor
         switch (b)
         {
             case 0x1B: // ESC
-                _pendingZwjContinuation = false;
                 _state = ParserState.Escape;
                 break;
 
             case (byte)'\n': // LF
             case 0x0B:       // VT
             case 0x0C:       // FF
-                _pendingZwjContinuation = false;
                 LineFeed();
                 break;
 
             case (byte)'\r': // CR
-                _pendingZwjContinuation = false;
                 _cursorCol = 0;
                 break;
 
             case 0x08: // BS — Backspace
-                _pendingZwjContinuation = false;
                 if (_cursorCol > 0) _cursorCol--;
                 break;
 
             case (byte)'\t': // HT — Horizontal Tab
-                _pendingZwjContinuation = false;
                 TabForward();
                 break;
 
             case 0x07: // BEL
-                _pendingZwjContinuation = false;
                 break;
 
             case 0x0E: // SO — Shift Out (activate G1)
-                _pendingZwjContinuation = false;
                 _shiftOut = true;
                 _useLineDrawing = _g1IsLineDrawing;
                 break;
 
             case 0x0F: // SI — Shift In (activate G0)
-                _pendingZwjContinuation = false;
                 _shiftOut = false;
                 _useLineDrawing = _g0IsLineDrawing;
                 break;
@@ -243,7 +231,6 @@ public sealed class BasicVtProcessor : IVtProcessor
             default:
                 if (b < 0x20)
                 {
-                    _pendingZwjContinuation = false;
                     // Other C0 control characters — ignore
                 }
                 else if (b < 0x80)
@@ -271,7 +258,6 @@ public sealed class BasicVtProcessor : IVtProcessor
                 }
                 else
                 {
-                    _pendingZwjContinuation = false;
                 }
                 break;
         }
@@ -281,18 +267,21 @@ public sealed class BasicVtProcessor : IVtProcessor
     {
         ClampCursor();
 
-        // Auto-wrap at end of line
-        if (_cursorCol >= _screen.Columns)
+        if (!Rune.IsValid(codepoint))
         {
-            if (_autoWrap)
-            {
-                _cursorCol = 0;
-                LineFeed();
-            }
-            else
-            {
-                _cursorCol = _screen.Columns - 1;
-            }
+            return;
+        }
+
+        // If we're sitting at wrapped EOL, a combining/emoji continuation should
+        // still be allowed to merge into the previous cell before forcing a wrap.
+        if (_cursorCol >= _screen.Columns && TryAppendToPreviousCellGrapheme(codepoint))
+        {
+            return;
+        }
+
+        if (WrapAtEndOfLineIfNeeded())
+        {
+            ClampCursor();
         }
 
         if (TryAppendToPreviousCellGrapheme(codepoint))
@@ -303,26 +292,65 @@ public sealed class BasicVtProcessor : IVtProcessor
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
         if (_cursorCol < 0 || _cursorCol >= _screen.Columns) return;
 
-        var row = _screen.GetViewportRow(_cursorRow);
+        TerminalRow row = _screen.GetViewportRow(_cursorRow);
         if (_cursorCol >= row.Columns) return;
+
+        int width = TerminalCellWidthCalculator.GetCellWidth(codepoint);
+        width = width <= 1 ? 1 : 2;
+
+        if (width == 2 && _cursorCol == _screen.Columns - 1)
+        {
+            if (_autoWrap)
+            {
+                _cursorCol = 0;
+                LineFeed();
+                ClampCursor();
+            }
+            else
+            {
+                width = 1;
+            }
+
+            if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
+            if (_cursorCol < 0 || _cursorCol >= _screen.Columns) return;
+            row = _screen.GetViewportRow(_cursorRow);
+            if (_cursorCol >= row.Columns) return;
+        }
+
+        ClearCellAndWideArtifacts(row, _cursorCol);
+        if (width == 2 && _cursorCol + 1 < row.Columns)
+        {
+            ClearCellAndWideArtifacts(row, _cursorCol + 1);
+        }
+
         ref var cell = ref row[_cursorCol];
         cell.Codepoint = codepoint;
         cell.Grapheme = null;
         cell.Foreground = _currentFg;
         cell.Background = _currentBg;
         cell.Attributes = _currentAttrs;
-        cell.Width = 1;
+        cell.Width = (byte)width;
+
+        if (width == 2 && _cursorCol + 1 < row.Columns)
+        {
+            ref TerminalCell spacer = ref row[_cursorCol + 1];
+            spacer.Codepoint = 0;
+            spacer.Grapheme = null;
+            spacer.Foreground = _currentFg;
+            spacer.Background = _currentBg;
+            spacer.Attributes = _currentAttrs;
+            spacer.Width = 0;
+        }
+
         row.IsDirty = true;
 
-        _pendingZwjContinuation = false;
-        _cursorCol++;
+        _cursorCol += width;
     }
 
     private bool TryAppendToPreviousCellGrapheme(int codepoint)
     {
-        if (!ShouldAppendToPreviousCell(codepoint))
+        if (!Rune.IsValid(codepoint))
         {
-            _pendingZwjContinuation = false;
             return false;
         }
 
@@ -337,7 +365,6 @@ public sealed class BasicVtProcessor : IVtProcessor
 
         if (targetRowIndex < 0 || targetRowIndex >= _screen.ViewportRows)
         {
-            _pendingZwjContinuation = false;
             return false;
         }
 
@@ -349,66 +376,120 @@ public sealed class BasicVtProcessor : IVtProcessor
 
         if (targetColIndex < 0 || targetColIndex >= targetRow.Columns)
         {
-            _pendingZwjContinuation = false;
             return false;
         }
 
         ref TerminalCell targetCell = ref targetRow[targetColIndex];
         if (!targetCell.HasContent)
         {
-            _pendingZwjContinuation = false;
             return false;
         }
 
+        string currentText;
         if (string.IsNullOrEmpty(targetCell.Grapheme))
         {
             if (!Rune.IsValid(targetCell.Codepoint))
             {
-                _pendingZwjContinuation = false;
                 return false;
             }
 
-            targetCell.Grapheme = char.ConvertFromUtf32(targetCell.Codepoint);
+            currentText = char.ConvertFromUtf32(targetCell.Codepoint);
+        }
+        else
+        {
+            currentText = targetCell.Grapheme;
         }
 
-        targetCell.Grapheme = string.Concat(targetCell.Grapheme, char.ConvertFromUtf32(codepoint));
-        targetRow.IsDirty = true;
-        _pendingZwjContinuation = codepoint == ZeroWidthJoinerCodepoint;
-        return true;
-    }
-
-    private bool ShouldAppendToPreviousCell(int codepoint)
-    {
-        return _pendingZwjContinuation ||
-               codepoint == ZeroWidthJoinerCodepoint ||
-               IsCombiningMark(codepoint) ||
-               IsVariationSelector(codepoint) ||
-               IsEmojiModifier(codepoint);
-    }
-
-    private static bool IsCombiningMark(int codepoint)
-    {
-        if (!Rune.IsValid(codepoint))
+        string nextText = string.Concat(currentText, char.ConvertFromUtf32(codepoint));
+        if (!TerminalCellWidthCalculator.IsSingleGrapheme(nextText))
         {
             return false;
         }
 
-        Rune rune = new(codepoint);
-        UnicodeCategory category = Rune.GetUnicodeCategory(rune);
-        return category == UnicodeCategory.NonSpacingMark ||
-               category == UnicodeCategory.SpacingCombiningMark ||
-               category == UnicodeCategory.EnclosingMark;
+        int oldWidth = targetCell.Width <= 0 ? 1 : targetCell.Width;
+        int newWidth = TerminalCellWidthCalculator.GetCellWidth(nextText);
+        newWidth = newWidth <= 1 ? 1 : 2;
+
+        if (newWidth == 2 && targetColIndex >= targetRow.Columns - 1)
+        {
+            return false;
+        }
+
+        targetCell.Codepoint = targetCell.Codepoint != 0
+            ? targetCell.Codepoint
+            : codepoint;
+        targetCell.Grapheme = nextText;
+        targetCell.Width = (byte)newWidth;
+
+        if (newWidth == 2)
+        {
+            ref TerminalCell spacer = ref targetRow[targetColIndex + 1];
+            spacer.Codepoint = 0;
+            spacer.Grapheme = null;
+            spacer.Foreground = targetCell.Foreground;
+            spacer.Background = targetCell.Background;
+            spacer.Attributes = targetCell.Attributes;
+            spacer.Width = 0;
+        }
+
+        if (oldWidth == 2 && newWidth == 1 && targetColIndex + 1 < targetRow.Columns)
+        {
+            targetRow[targetColIndex + 1] = TerminalCell.Empty(targetCell.Foreground, targetCell.Background);
+        }
+
+        if (targetRowIndex == _cursorRow && targetColIndex + oldWidth == _cursorCol)
+        {
+            _cursorCol = targetColIndex + newWidth;
+        }
+
+        targetRow.IsDirty = true;
+        return true;
     }
 
-    private static bool IsVariationSelector(int codepoint)
+    private bool WrapAtEndOfLineIfNeeded()
     {
-        return (codepoint >= 0xFE00 && codepoint <= 0xFE0F) ||
-               (codepoint >= 0xE0100 && codepoint <= 0xE01EF);
+        if (_cursorCol < _screen.Columns)
+        {
+            return false;
+        }
+
+        if (_autoWrap)
+        {
+            _cursorCol = 0;
+            LineFeed();
+            return true;
+        }
+
+        _cursorCol = _screen.Columns - 1;
+        return false;
     }
 
-    private static bool IsEmojiModifier(int codepoint)
+    private void ClearCellAndWideArtifacts(TerminalRow row, int column)
     {
-        return codepoint >= 0x1F3FB && codepoint <= 0x1F3FF;
+        if (column < 0 || column >= row.Columns)
+        {
+            return;
+        }
+
+        TerminalCell existing = row[column];
+        if (existing.Width == 0 && column > 0)
+        {
+            ref TerminalCell left = ref row[column - 1];
+            if (left.Width == 2)
+            {
+                left = TerminalCell.Empty(_currentFg, _currentBg);
+            }
+        }
+        else if (existing.Width == 2 && column + 1 < row.Columns)
+        {
+            ref TerminalCell right = ref row[column + 1];
+            if (right.Width == 0)
+            {
+                right = TerminalCell.Empty(_currentFg, _currentBg);
+            }
+        }
+
+        row[column] = TerminalCell.Empty(_currentFg, _currentBg);
     }
 
     private void ClampCursor()
@@ -516,10 +597,11 @@ public sealed class BasicVtProcessor : IVtProcessor
         _screen.InvalidateAll();
     }
 
-    private static void CopyRow(TerminalRow src, TerminalRow dst)
+    private void CopyRow(TerminalRow src, TerminalRow dst)
     {
         var count = Math.Min(src.Columns, dst.Columns);
         src.ReadOnlyCells[..count].CopyTo(dst.Cells);
+        NormalizeRowWideCells(dst);
     }
 
     #endregion
@@ -1272,6 +1354,7 @@ public sealed class BasicVtProcessor : IVtProcessor
                     var rowToCursor = _screen.GetViewportRow(_cursorRow);
                     for (var c = 0; c <= _cursorCol && c < _screen.Columns; c++)
                         rowToCursor[c] = TerminalCell.Empty(_currentFg, _currentBg);
+                    NormalizeRowWideCells(rowToCursor);
                     rowToCursor.IsDirty = true;
                 }
                 break;
@@ -1312,6 +1395,8 @@ public sealed class BasicVtProcessor : IVtProcessor
                 row.Clear(_currentFg, _currentBg);
                 break;
         }
+
+        NormalizeRowWideCells(row);
         row.IsDirty = true;
     }
 
@@ -1365,6 +1450,7 @@ public sealed class BasicVtProcessor : IVtProcessor
             row[c] = row[c - count];
         for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
             row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+        NormalizeRowWideCells(row);
         row.IsDirty = true;
     }
 
@@ -1378,6 +1464,7 @@ public sealed class BasicVtProcessor : IVtProcessor
             row[c] = row[c + count];
         for (var c = Math.Max(_cursorCol, _screen.Columns - count); c < _screen.Columns; c++)
             row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+        NormalizeRowWideCells(row);
         row.IsDirty = true;
     }
 
@@ -1389,7 +1476,56 @@ public sealed class BasicVtProcessor : IVtProcessor
         var row = _screen.GetViewportRow(_cursorRow);
         for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
             row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+        NormalizeRowWideCells(row);
         row.IsDirty = true;
+    }
+
+    private static void NormalizeRowWideCells(TerminalRow row)
+    {
+        for (int col = 0; col < row.Columns; col++)
+        {
+            ref TerminalCell cell = ref row[col];
+            if (cell.Width == 2)
+            {
+                if (col + 1 >= row.Columns)
+                {
+                    row[col] = TerminalCell.Empty(cell.Foreground, cell.Background);
+                    continue;
+                }
+
+                ref TerminalCell trailing = ref row[col + 1];
+                if (trailing.Width != 0 || trailing.HasContent)
+                {
+                    row[col] = TerminalCell.Empty(cell.Foreground, cell.Background);
+                    continue;
+                }
+
+                trailing.Codepoint = 0;
+                trailing.Grapheme = null;
+                trailing.Foreground = cell.Foreground;
+                trailing.Background = cell.Background;
+                trailing.Attributes = cell.Attributes;
+                trailing.Width = 0;
+                col++;
+                continue;
+            }
+
+            if (cell.Width == 0)
+            {
+                bool hasWideLeader = col > 0 && row[col - 1].Width == 2;
+                if (!hasWideLeader)
+                {
+                    row[col] = TerminalCell.Empty(cell.Foreground, cell.Background);
+                }
+
+                continue;
+            }
+
+            if (cell.Width != 1)
+            {
+                cell.Width = 1;
+            }
+        }
     }
 
     #endregion

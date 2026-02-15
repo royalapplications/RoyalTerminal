@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GhosttySharp.Terminal\GhosttySharp.Terminal.csproj" />
+    <ProjectReference Include="..\GhosttySharp.Unicode\GhosttySharp.Unicode.csproj" />
   </ItemGroup>
 
 </Project>
