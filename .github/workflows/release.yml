@@ -143,7 +143,6 @@ jobs:
         run: |
           zig build -Doptimize=ReleaseFast -Dapp-runtime=none \
             -fsys=freetype \
-            -fsys=harfbuzz \
             -fsys=fontconfig \
             -fsys=libpng \
             -fsys=zlib \
