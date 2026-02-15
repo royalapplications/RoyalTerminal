@@ -104,11 +104,27 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
             TerminalRow termRow = screen.GetViewportRow(row);
             int colStart = row == startRow ? startCol : 0;
             int colEnd = row == endRow ? endCol : screen.Columns - 1;
+            if (colEnd < 0 || colStart >= screen.Columns)
+            {
+                continue;
+            }
 
-            for (int col = colStart; col <= colEnd && col < screen.Columns; col++)
+            colStart = Math.Max(0, colStart);
+            colEnd = Math.Min(screen.Columns - 1, colEnd);
+
+            for (int col = colStart; col <= colEnd; col++)
             {
                 ref TerminalCell cell = ref termRow[col];
-                if (cell.Codepoint > 0)
+                if (cell.Width == 0)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(cell.Grapheme))
+                {
+                    sb.Append(cell.Grapheme);
+                }
+                else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
                 {
                     sb.Append(char.ConvertFromUtf32(cell.Codepoint));
                 }

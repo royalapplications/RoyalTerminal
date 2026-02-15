@@ -12,6 +12,12 @@ public struct TerminalCell
     /// <summary>UTF-32 codepoint for this cell. 0 for empty cells.</summary>
     public int Codepoint;
 
+    /// <summary>
+    /// Optional grapheme text for this cell.
+    /// When null, rendering/copy should use <see cref="Codepoint"/>.
+    /// </summary>
+    public string? Grapheme;
+
     /// <summary>Foreground color as packed ARGB.</summary>
     public uint Foreground;
 
@@ -25,12 +31,13 @@ public struct TerminalCell
     public byte Width;
 
     /// <summary>Returns true if this cell has content.</summary>
-    public readonly bool HasContent => Codepoint != 0;
+    public readonly bool HasContent => Codepoint != 0 || !string.IsNullOrEmpty(Grapheme);
 
     /// <summary>Creates a default empty cell with the given colors.</summary>
     public static TerminalCell Empty(uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E) => new()
     {
         Codepoint = 0,
+        Grapheme = null,
         Foreground = fg,
         Background = bg,
         Attributes = CellAttributes.None,

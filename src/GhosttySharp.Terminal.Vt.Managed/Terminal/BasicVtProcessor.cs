@@ -6,6 +6,8 @@
 // DEC line-drawing character set, erase, insert/delete lines & characters, and tabs.
 
 using GhosttySharp.Avalonia.Rendering;
+using System.Globalization;
+using System.Text;
 
 namespace GhosttySharp.Avalonia.Terminal;
 
@@ -20,6 +22,8 @@ namespace GhosttySharp.Avalonia.Terminal;
 /// </summary>
 public sealed class BasicVtProcessor : IVtProcessor
 {
+    private const int ZeroWidthJoinerCodepoint = 0x200D;
+
     private readonly TerminalScreen _screen;
     private int _cursorCol;
     private int _cursorRow;
@@ -71,6 +75,7 @@ public sealed class BasicVtProcessor : IVtProcessor
     // UTF-8 multi-byte decoding state
     private int _utf8Codepoint;
     private int _utf8Remaining;
+    private bool _pendingZwjContinuation;
 
     private enum ParserState
     {
@@ -184,6 +189,7 @@ public sealed class BasicVtProcessor : IVtProcessor
             {
                 // Invalid continuation — reset and process this byte normally
                 _utf8Remaining = 0;
+                _pendingZwjContinuation = false;
                 ProcessGround(b);
             }
             return;
@@ -192,36 +198,44 @@ public sealed class BasicVtProcessor : IVtProcessor
         switch (b)
         {
             case 0x1B: // ESC
+                _pendingZwjContinuation = false;
                 _state = ParserState.Escape;
                 break;
 
             case (byte)'\n': // LF
             case 0x0B:       // VT
             case 0x0C:       // FF
+                _pendingZwjContinuation = false;
                 LineFeed();
                 break;
 
             case (byte)'\r': // CR
+                _pendingZwjContinuation = false;
                 _cursorCol = 0;
                 break;
 
             case 0x08: // BS — Backspace
+                _pendingZwjContinuation = false;
                 if (_cursorCol > 0) _cursorCol--;
                 break;
 
             case (byte)'\t': // HT — Horizontal Tab
+                _pendingZwjContinuation = false;
                 TabForward();
                 break;
 
             case 0x07: // BEL
+                _pendingZwjContinuation = false;
                 break;
 
             case 0x0E: // SO — Shift Out (activate G1)
+                _pendingZwjContinuation = false;
                 _shiftOut = true;
                 _useLineDrawing = _g1IsLineDrawing;
                 break;
 
             case 0x0F: // SI — Shift In (activate G0)
+                _pendingZwjContinuation = false;
                 _shiftOut = false;
                 _useLineDrawing = _g0IsLineDrawing;
                 break;
@@ -229,6 +243,7 @@ public sealed class BasicVtProcessor : IVtProcessor
             default:
                 if (b < 0x20)
                 {
+                    _pendingZwjContinuation = false;
                     // Other C0 control characters — ignore
                 }
                 else if (b < 0x80)
@@ -254,6 +269,10 @@ public sealed class BasicVtProcessor : IVtProcessor
                     _utf8Codepoint = b & 0x07;
                     _utf8Remaining = 3;
                 }
+                else
+                {
+                    _pendingZwjContinuation = false;
+                }
                 break;
         }
     }
@@ -276,6 +295,11 @@ public sealed class BasicVtProcessor : IVtProcessor
             }
         }
 
+        if (TryAppendToPreviousCellGrapheme(codepoint))
+        {
+            return;
+        }
+
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
         if (_cursorCol < 0 || _cursorCol >= _screen.Columns) return;
 
@@ -283,13 +307,108 @@ public sealed class BasicVtProcessor : IVtProcessor
         if (_cursorCol >= row.Columns) return;
         ref var cell = ref row[_cursorCol];
         cell.Codepoint = codepoint;
+        cell.Grapheme = null;
         cell.Foreground = _currentFg;
         cell.Background = _currentBg;
         cell.Attributes = _currentAttrs;
         cell.Width = 1;
         row.IsDirty = true;
 
+        _pendingZwjContinuation = false;
         _cursorCol++;
+    }
+
+    private bool TryAppendToPreviousCellGrapheme(int codepoint)
+    {
+        if (!ShouldAppendToPreviousCell(codepoint))
+        {
+            _pendingZwjContinuation = false;
+            return false;
+        }
+
+        int targetRowIndex = _cursorRow;
+        int targetColIndex = _cursorCol - 1;
+
+        if (targetColIndex < 0)
+        {
+            targetRowIndex--;
+            targetColIndex = _screen.Columns - 1;
+        }
+
+        if (targetRowIndex < 0 || targetRowIndex >= _screen.ViewportRows)
+        {
+            _pendingZwjContinuation = false;
+            return false;
+        }
+
+        TerminalRow targetRow = _screen.GetViewportRow(targetRowIndex);
+        while (targetColIndex >= 0 && targetRow[targetColIndex].Width == 0)
+        {
+            targetColIndex--;
+        }
+
+        if (targetColIndex < 0 || targetColIndex >= targetRow.Columns)
+        {
+            _pendingZwjContinuation = false;
+            return false;
+        }
+
+        ref TerminalCell targetCell = ref targetRow[targetColIndex];
+        if (!targetCell.HasContent)
+        {
+            _pendingZwjContinuation = false;
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(targetCell.Grapheme))
+        {
+            if (!Rune.IsValid(targetCell.Codepoint))
+            {
+                _pendingZwjContinuation = false;
+                return false;
+            }
+
+            targetCell.Grapheme = char.ConvertFromUtf32(targetCell.Codepoint);
+        }
+
+        targetCell.Grapheme = string.Concat(targetCell.Grapheme, char.ConvertFromUtf32(codepoint));
+        targetRow.IsDirty = true;
+        _pendingZwjContinuation = codepoint == ZeroWidthJoinerCodepoint;
+        return true;
+    }
+
+    private bool ShouldAppendToPreviousCell(int codepoint)
+    {
+        return _pendingZwjContinuation ||
+               codepoint == ZeroWidthJoinerCodepoint ||
+               IsCombiningMark(codepoint) ||
+               IsVariationSelector(codepoint) ||
+               IsEmojiModifier(codepoint);
+    }
+
+    private static bool IsCombiningMark(int codepoint)
+    {
+        if (!Rune.IsValid(codepoint))
+        {
+            return false;
+        }
+
+        Rune rune = new(codepoint);
+        UnicodeCategory category = Rune.GetUnicodeCategory(rune);
+        return category == UnicodeCategory.NonSpacingMark ||
+               category == UnicodeCategory.SpacingCombiningMark ||
+               category == UnicodeCategory.EnclosingMark;
+    }
+
+    private static bool IsVariationSelector(int codepoint)
+    {
+        return (codepoint >= 0xFE00 && codepoint <= 0xFE0F) ||
+               (codepoint >= 0xE0100 && codepoint <= 0xE01EF);
+    }
+
+    private static bool IsEmojiModifier(int codepoint)
+    {
+        return codepoint >= 0x1F3FB && codepoint <= 0x1F3FF;
     }
 
     private void ClampCursor()

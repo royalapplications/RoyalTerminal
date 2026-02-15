@@ -1,7 +1,9 @@
 // Licensed under the MIT License.
 // GhosttySharp.Avalonia — VT processor using Ghostty's native terminal via libghostty-terminal.
 
+using System.Buffers;
 using System.Runtime.InteropServices;
+using System.Text;
 using GhosttySharp.Avalonia.Rendering;
 using GhosttySharp.Native;
 
@@ -297,47 +299,117 @@ public sealed class GhosttyVtProcessor : IVtProcessor
 
         // Allocate a buffer for one row of cells
         var cellBuffer = stackalloc GhosttyTerminalNative.CellInfo[cols];
+        bool supportsRowCellGraphemes = GhosttyTerminalNative.SupportsRowCellGraphemes;
 
-        for (var row = 0; row < rows && row < _screen.ViewportRows; row++)
+        GhosttyTerminalNative.GraphemeSpan[]? graphemeSpanBuffer = null;
+        uint[]? graphemeCodepointBuffer = null;
+        if (supportsRowCellGraphemes)
         {
-            var filled = GhosttyTerminalNative.TerminalGetRowCells(
-                _terminal, (uint)row, cellBuffer, (uint)cols);
+            graphemeSpanBuffer = ArrayPool<GhosttyTerminalNative.GraphemeSpan>.Shared.Rent(Math.Max(cols, 1));
+            graphemeCodepointBuffer = ArrayPool<uint>.Shared.Rent(Math.Max(cols * 8, 1));
+        }
 
-            var screenRow = _screen.GetViewportRow(row);
+        GhosttyTerminalNative.GraphemeSpan[] graphemeSpanArray =
+            graphemeSpanBuffer ?? Array.Empty<GhosttyTerminalNative.GraphemeSpan>();
+        uint[] graphemeCodepointArray = graphemeCodepointBuffer ?? Array.Empty<uint>();
 
-            for (var col = 0; col < (int)filled && col < screenRow.Columns; col++)
+        try
+        {
+            fixed (GhosttyTerminalNative.GraphemeSpan* graphemeSpanPtr = graphemeSpanArray)
+            fixed (uint* graphemeCodepointPtr = graphemeCodepointArray)
             {
-                ref var cell = ref screenRow[col];
-                var native = cellBuffer[col];
+                for (var row = 0; row < rows && row < _screen.ViewportRows; row++)
+                {
+                    uint filled;
+                    ReadOnlySpan<uint> graphemeCodepoints = ReadOnlySpan<uint>.Empty;
+                    if (supportsRowCellGraphemes)
+                    {
+                        uint graphemeCodepointsWritten = 0;
+                        filled = GhosttyTerminalNative.TerminalGetRowCellsWithGraphemes(
+                            _terminal,
+                            (uint)row,
+                            cellBuffer,
+                            (uint)cols,
+                            graphemeSpanPtr,
+                            (uint)cols,
+                            graphemeCodepointPtr,
+                            (uint)graphemeCodepointArray.Length,
+                            &graphemeCodepointsWritten);
 
-                cell.Codepoint = (int)native.Codepoint;
-                // Native default-style cells may not carry explicit colors.
-                // Fall back to terminal defaults instead of rendering transparent text.
-                cell.Foreground = native.FgColor != 0 ? native.FgColor : _screen.DefaultForeground;
-                cell.Background = native.BgColor != 0 ? native.BgColor : _screen.DefaultBackground;
-                cell.Attributes = MapAttributes(native.Attrs);
+                        int graphemeLength = (int)Math.Min(graphemeCodepointsWritten, (uint)graphemeCodepointArray.Length);
+                        graphemeCodepoints = graphemeCodepointArray.AsSpan(0, graphemeLength);
+                    }
+                    else
+                    {
+                        filled = GhosttyTerminalNative.TerminalGetRowCells(
+                            _terminal,
+                            (uint)row,
+                            cellBuffer,
+                            (uint)cols);
+                    }
 
-                // Wide char handling
-                if ((native.Attrs & (1 << 16)) != 0)
-                    cell.Width = 2; // wide char
-                else if ((native.Attrs & (1 << 17)) != 0)
-                    cell.Width = 0; // spacer (second cell of wide char)
-                else
-                    cell.Width = 1;
+                    var screenRow = _screen.GetViewportRow(row);
+
+                    for (var col = 0; col < (int)filled && col < screenRow.Columns; col++)
+                    {
+                        ref var cell = ref screenRow[col];
+                        var native = cellBuffer[col];
+
+                        cell.Codepoint = (int)native.Codepoint;
+                        if (supportsRowCellGraphemes)
+                        {
+                            cell.Grapheme = TryBuildCellGrapheme(
+                                native.Codepoint,
+                                graphemeSpanArray[col],
+                                graphemeCodepoints);
+                        }
+                        else
+                        {
+                            cell.Grapheme = null;
+                        }
+
+                        // Native default-style cells may not carry explicit colors.
+                        // Fall back to terminal defaults instead of rendering transparent text.
+                        cell.Foreground = native.FgColor != 0 ? native.FgColor : _screen.DefaultForeground;
+                        cell.Background = native.BgColor != 0 ? native.BgColor : _screen.DefaultBackground;
+                        cell.Attributes = MapAttributes(native.Attrs);
+
+                        // Wide char handling
+                        if ((native.Attrs & (1 << 16)) != 0)
+                            cell.Width = 2; // wide char
+                        else if ((native.Attrs & (1 << 17)) != 0)
+                            cell.Width = 0; // spacer (second cell of wide char)
+                        else
+                            cell.Width = 1;
+                    }
+
+                    // Clear any stale cells beyond the native column count
+                    for (var col = (int)filled; col < screenRow.Columns; col++)
+                    {
+                        ref var cell = ref screenRow[col];
+                        cell.Codepoint = 0;
+                        cell.Grapheme = null;
+                        cell.Foreground = _screen.DefaultForeground;
+                        cell.Background = _screen.DefaultBackground;
+                        cell.Attributes = CellAttributes.None;
+                        cell.Width = 1;
+                    }
+
+                    screenRow.IsDirty = true;
+                }
+            }
+        }
+        finally
+        {
+            if (graphemeSpanBuffer is not null)
+            {
+                ArrayPool<GhosttyTerminalNative.GraphemeSpan>.Shared.Return(graphemeSpanBuffer);
             }
 
-            // Clear any stale cells beyond the native column count
-            for (var col = (int)filled; col < screenRow.Columns; col++)
+            if (graphemeCodepointBuffer is not null)
             {
-                ref var cell = ref screenRow[col];
-                cell.Codepoint = 0;
-                cell.Foreground = _screen.DefaultForeground;
-                cell.Background = _screen.DefaultBackground;
-                cell.Attributes = CellAttributes.None;
-                cell.Width = 1;
+                ArrayPool<uint>.Shared.Return(graphemeCodepointBuffer);
             }
-
-            screenRow.IsDirty = true;
         }
 
         // Clear any stale rows beyond the native row count
@@ -345,6 +417,45 @@ public sealed class GhosttyVtProcessor : IVtProcessor
         {
             _screen.GetViewportRow(row).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
         }
+    }
+
+    private static string? TryBuildCellGrapheme(
+        uint primaryCodepoint,
+        GhosttyTerminalNative.GraphemeSpan span,
+        ReadOnlySpan<uint> graphemeCodepoints)
+    {
+        if (span.Length == 0 || span.Offset > int.MaxValue || span.Length > int.MaxValue)
+        {
+            return null;
+        }
+
+        int offset = (int)span.Offset;
+        int length = (int)span.Length;
+        if (offset < 0 || length < 0 || offset > graphemeCodepoints.Length - length)
+        {
+            return null;
+        }
+
+        if (!Rune.IsValid((int)primaryCodepoint))
+        {
+            return null;
+        }
+
+        StringBuilder sb = new();
+        sb.Append(char.ConvertFromUtf32((int)primaryCodepoint));
+        ReadOnlySpan<uint> trailing = graphemeCodepoints.Slice(offset, length);
+        for (int i = 0; i < trailing.Length; i++)
+        {
+            uint cp = trailing[i];
+            if (!Rune.IsValid((int)cp))
+            {
+                return null;
+            }
+
+            sb.Append(char.ConvertFromUtf32((int)cp));
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>

@@ -57,6 +57,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     // Cell buffer for reading from Ghostty
     private GhosttyCellInfo[]? _cellBuffer;
+    private GhosttyCellGraphemeSpan[]? _graphemeSpanBuffer;
+    private uint[]? _graphemeCodepointBuffer;
     private int _lastCols;
     private int _lastRows;
 
@@ -151,6 +153,12 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     /// <summary>Gets the underlying Ghostty surface.</summary>
     public GhosttySurface? Surface => _surface;
+
+    /// <summary>
+    /// Gets the managed Skia renderer used in <see cref="GhosttyRenderedTerminalRenderingMode.CpuCellRenderer"/>.
+    /// Available after <see cref="Initialize"/> is called.
+    /// </summary>
+    public SkiaTerminalRenderer? Renderer => _renderer;
 
     /// <summary>
     /// Gets or sets the render-target adapter used in <see cref="GhosttyRenderedTerminalRenderingMode.TextureInterop"/> mode.
@@ -640,6 +648,26 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             // Ensure cell buffer is large enough
             if (_cellBuffer is null || _cellBuffer.Length < cols)
                 _cellBuffer = new GhosttyCellInfo[cols];
+            bool supportsSurfaceRowCellGraphemes = GhosttyNative.SupportsSurfaceRowCellGraphemes;
+            if (supportsSurfaceRowCellGraphemes)
+            {
+                if (_graphemeSpanBuffer is null || _graphemeSpanBuffer.Length < cols)
+                    _graphemeSpanBuffer = new GhosttyCellGraphemeSpan[cols];
+
+                int graphemeCapacity = Math.Max(cols * 8, cols);
+                if (_graphemeCodepointBuffer is null || _graphemeCodepointBuffer.Length < graphemeCapacity)
+                    _graphemeCodepointBuffer = new uint[graphemeCapacity];
+            }
+
+            GhosttyCellInfo[] cellBuffer = _cellBuffer;
+            GhosttyCellGraphemeSpan[] graphemeSpanBuffer =
+                supportsSurfaceRowCellGraphemes && _graphemeSpanBuffer is not null
+                    ? _graphemeSpanBuffer
+                    : Array.Empty<GhosttyCellGraphemeSpan>();
+            uint[] graphemeCodepointBuffer =
+                supportsSurfaceRowCellGraphemes && _graphemeCodepointBuffer is not null
+                    ? _graphemeCodepointBuffer
+                    : Array.Empty<uint>();
 
             var defaultBg = _screen.DefaultBackground;
 
@@ -666,12 +694,29 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
                     // Read each viewport row
                     for (var row = 0; row < rows && row < _screen.ViewportRows; row++)
                     {
-                        var cellCount = _surface.GetRowCells((uint)row, _cellBuffer);
+                        uint cellCount;
+                        ReadOnlySpan<uint> graphemeCodepoints = ReadOnlySpan<uint>.Empty;
+                        if (supportsSurfaceRowCellGraphemes)
+                        {
+                            cellCount = _surface.GetRowCellsWithGraphemes(
+                                (uint)row,
+                                cellBuffer,
+                                graphemeSpanBuffer,
+                                graphemeCodepointBuffer,
+                                out uint graphemeCodepointsWritten);
+
+                            int graphemeLength = (int)Math.Min(graphemeCodepointsWritten, (uint)graphemeCodepointBuffer.Length);
+                            graphemeCodepoints = graphemeCodepointBuffer.AsSpan(0, graphemeLength);
+                        }
+                        else
+                        {
+                            cellCount = _surface.GetRowCells((uint)row, cellBuffer);
+                        }
                         var termRow = _screen.GetViewportRow(row);
 
                         for (var col = 0; col < (int)cellCount && col < termRow.Columns; col++)
                         {
-                            ref var src = ref _cellBuffer[col];
+                            ref var src = ref cellBuffer[col];
                             ref var dst = ref termRow.Cells[col];
 
                             // Wide cell mapping:
@@ -689,6 +734,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
                             if (dst.Width == 0)
                             {
                                 dst.Codepoint = 0;
+                                dst.Grapheme = null;
                                 dst.Foreground = PackArgb(src.FgR, src.FgG, src.FgB);
                                 dst.Background = src.HasBg != 0
                                     ? PackArgb(src.BgR, src.BgG, src.BgB)
@@ -698,11 +744,28 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
                             }
 
                             dst.Codepoint = (int)src.Codepoint;
+                            dst.Grapheme = supportsSurfaceRowCellGraphemes
+                                ? TryBuildCellGrapheme(
+                                    src.Codepoint,
+                                    graphemeSpanBuffer[col],
+                                    graphemeCodepoints)
+                                : null;
                             dst.Foreground = PackArgb(src.FgR, src.FgG, src.FgB);
                             dst.Background = src.HasBg != 0
                                 ? PackArgb(src.BgR, src.BgG, src.BgB)
                                 : defaultBg;
                             dst.Attributes = ConvertAttributes(src.Attrs);
+                        }
+
+                        for (var col = (int)cellCount; col < termRow.Columns; col++)
+                        {
+                            ref var dst = ref termRow.Cells[col];
+                            dst.Codepoint = 0;
+                            dst.Grapheme = null;
+                            dst.Foreground = _screen.DefaultForeground;
+                            dst.Background = _screen.DefaultBackground;
+                            dst.Attributes = CellAttributes.None;
+                            dst.Width = 1;
                         }
 
                         termRow.IsDirty = true;
@@ -769,6 +832,45 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     }
 
     private static uint PackArgb(byte r, byte g, byte b) => 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | b;
+
+    private static string? TryBuildCellGrapheme(
+        uint primaryCodepoint,
+        GhosttyCellGraphemeSpan span,
+        ReadOnlySpan<uint> graphemeCodepoints)
+    {
+        if (span.Length == 0 || span.Offset > int.MaxValue || span.Length > int.MaxValue)
+        {
+            return null;
+        }
+
+        int offset = (int)span.Offset;
+        int length = (int)span.Length;
+        if (offset < 0 || length < 0 || offset > graphemeCodepoints.Length - length)
+        {
+            return null;
+        }
+
+        if (!Rune.IsValid((int)primaryCodepoint))
+        {
+            return null;
+        }
+
+        StringBuilder sb = new();
+        sb.Append(char.ConvertFromUtf32((int)primaryCodepoint));
+        ReadOnlySpan<uint> trailing = graphemeCodepoints.Slice(offset, length);
+        for (int i = 0; i < trailing.Length; i++)
+        {
+            uint cp = trailing[i];
+            if (!Rune.IsValid((int)cp))
+            {
+                return null;
+            }
+
+            sb.Append(char.ConvertFromUtf32((int)cp));
+        }
+
+        return sb.ToString();
+    }
 
     private static CellAttributes ConvertAttributes(ushort attrs)
     {
