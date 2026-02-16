@@ -52,7 +52,9 @@ High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-o
 - **Terminal session service split** (`Terminal.Services.Contracts` and `Terminal.Services`).
 - **Native artifact pipeline** for macOS/Linux/Windows, consumed by managed build/test/pack stages.
 - **Central NuGet package management** via `Directory.Packages.props`.
-- **ReactiveUI only in sample app** (`samples/RoyalTerminal.Demo`); library projects are not ReactiveUI-dependent.
+- **Sample applications**:
+  - Avalonia demo (`samples/RoyalTerminal.Demo`)
+  - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`)
 
 ## Integration Modes
 
@@ -420,6 +422,7 @@ RoyalTerminal/
 │   ├── RoyalTerminal.GhosttySharp.Native.Linux64/
 │   └── RoyalTerminal.GhosttySharp.Native.Win64/
 ├── samples/RoyalTerminal.Demo/
+├── samples/RoyalTerminal.MacNativeTabbed/
 ├── tests/
 │   ├── RoyalTerminal.Benchmarks/
 │   ├── RoyalTerminal.Tests/
@@ -466,6 +469,12 @@ Optional demo toggles:
 ROYALTERMINAL_DISABLE_TEXT_SHAPING=1 \
 ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS=1 \
 dotnet run --project samples/RoyalTerminal.Demo
+```
+
+### Run macOS Native SwiftUI Sample
+
+```bash
+swift run --package-path samples/RoyalTerminal.MacNativeTabbed
 ```
 
 ## Testing
