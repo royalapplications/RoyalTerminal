@@ -1,19 +1,18 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.GhosttySharp.Terminal.Services.Contracts - Terminal session orchestration abstraction.
+// RoyalTerminal.Terminal.Services.Contracts - Terminal session orchestration abstraction.
 
 using RoyalTerminal.Avalonia.Terminal;
-using RoyalTerminal.GhosttySharp.Native;
 
-namespace RoyalTerminal.GhosttySharp.Terminal.Services;
+namespace RoyalTerminal.Terminal.Services;
 
 /// <summary>
 /// Manages terminal session lifecycle for surface/PTY integration.
 /// </summary>
 public interface ITerminalSessionService
 {
-    /// <summary>Gets the attached Ghostty surface, if any.</summary>
-    GhosttySurface? Surface { get; }
+    /// <summary>Gets the attached terminal surface endpoint, if any.</summary>
+    ITerminalSurface? Surface { get; }
 
     /// <summary>Gets the active PTY, if any.</summary>
     IPty? Pty { get; }
@@ -22,12 +21,12 @@ public interface ITerminalSessionService
     bool HasPty { get; }
 
     /// <summary>
-    /// Attaches a Ghostty surface, replacing any existing attachment.
+    /// Attaches a terminal surface endpoint, replacing any existing attachment.
     /// </summary>
-    void AttachSurface(GhosttySurface surface);
+    void AttachSurface(ITerminalSurface surface);
 
     /// <summary>
-    /// Detaches the current Ghostty surface.
+    /// Detaches the current terminal surface endpoint.
     /// </summary>
     void DetachSurface();
 

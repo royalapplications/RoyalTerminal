@@ -6,7 +6,9 @@ using Avalonia.Input;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Scrolling;
-using RoyalTerminal.GhosttySharp.Terminal.Services;
+using RoyalTerminal.Terminal.Services;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.Avalonia.Services;
 
@@ -65,10 +67,11 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
     {
         scrollViewer?.HandleWheel(e.Delta.Y);
 
-        if (sessionService.Surface is not null)
+        GhosttySurface? surface = sessionService.Surface?.NativeHandle as GhosttySurface;
+        if (surface is not null)
         {
-            RoyalTerminal.GhosttySharp.Native.GhosttyMods mods = inputAdapter.ConvertModifiers(e.KeyModifiers);
-            sessionService.Surface.SendMouseScroll(e.Delta.X, e.Delta.Y, (int)mods);
+            GhosttyMods mods = inputAdapter.ConvertModifiers(e.KeyModifiers);
+            surface.SendMouseScroll(e.Delta.X, e.Delta.Y, (int)mods);
         }
 
         presenter?.Invalidate();

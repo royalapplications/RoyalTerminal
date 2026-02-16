@@ -16,7 +16,7 @@ using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Scrolling;
 using RoyalTerminal.Avalonia.Terminal;
 using RoyalTerminal.GhosttySharp;
-using RoyalTerminal.GhosttySharp.Terminal.Services;
+using RoyalTerminal.Terminal.Services;
 using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.Avalonia.Controls;
@@ -161,6 +161,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     private TerminalScreen? _screen;
     private TerminalScrollData? _scrollData;
     private VirtualizedTerminalScrollViewer? _scrollViewer;
+    private GhosttySurfaceTerminalEndpoint? _surfaceEndpoint;
 
     private IVtProcessor? _vtProcessor;
     private bool _isMouseSelecting;
@@ -196,7 +197,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     public IPtyFactory PtyFactory { get; }
 
     /// <summary>Gets the underlying Ghostty surface, if connected.</summary>
-    public GhosttySurface? Surface => TerminalSessionService.Surface;
+    public GhosttySurface? Surface => _surfaceEndpoint?.Surface;
 
     /// <summary>Gets the terminal screen model.</summary>
     public TerminalScreen? Screen => _screen;
@@ -297,7 +298,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
             new DefaultTerminalInputAdapter(),
             new DefaultTerminalSelectionService(),
             new DefaultTerminalScrollService(),
-            new DefaultVtProcessorFactory(),
+            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]),
             new DefaultPtyFactory())
     {
     }
@@ -464,7 +465,8 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void AttachSurface(GhosttySurface surface)
     {
-        TerminalSessionService.AttachSurface(surface);
+        _surfaceEndpoint = new GhosttySurfaceTerminalEndpoint(surface);
+        TerminalSessionService.AttachSurface(_surfaceEndpoint);
     }
 
     /// <summary>
@@ -472,6 +474,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void DetachSurface()
     {
+        _surfaceEndpoint = null;
         TerminalSessionService.DetachSurface();
     }
 

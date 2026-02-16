@@ -1,11 +1,10 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.GhosttySharp.Terminal.Services — Default terminal session service.
+// RoyalTerminal.Terminal.Services — Default terminal session service.
 
 using RoyalTerminal.Avalonia.Terminal;
-using RoyalTerminal.GhosttySharp.Native;
 
-namespace RoyalTerminal.GhosttySharp.Terminal.Services;
+namespace RoyalTerminal.Terminal.Services;
 
 /// <summary>
 /// Default terminal session manager for Ghostty surface and standalone PTY modes.
@@ -13,7 +12,7 @@ namespace RoyalTerminal.GhosttySharp.Terminal.Services;
 public sealed class TerminalSessionService : ITerminalSessionService
 {
     /// <inheritdoc />
-    public GhosttySurface? Surface { get; private set; }
+    public ITerminalSurface? Surface { get; private set; }
 
     /// <inheritdoc />
     public IPty? Pty { get; private set; }
@@ -22,8 +21,9 @@ public sealed class TerminalSessionService : ITerminalSessionService
     public bool HasPty => Pty is not null;
 
     /// <inheritdoc />
-    public void AttachSurface(GhosttySurface surface)
+    public void AttachSurface(ITerminalSurface surface)
     {
+        ArgumentNullException.ThrowIfNull(surface);
         DetachSurface();
         Surface = surface;
     }
@@ -39,7 +39,7 @@ public sealed class TerminalSessionService : ITerminalSessionService
     {
         if (Surface is not null)
         {
-            Surface.SendText(text);
+            Surface.SendInput(text);
             return;
         }
 
@@ -51,7 +51,7 @@ public sealed class TerminalSessionService : ITerminalSessionService
     {
         if (Surface is not null)
         {
-            Surface.SendText(data);
+            Surface.SendInput(data);
             return;
         }
 

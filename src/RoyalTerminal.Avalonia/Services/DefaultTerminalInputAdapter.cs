@@ -5,7 +5,8 @@
 using Avalonia.Input;
 using Avalonia.Input.TextInput;
 using RoyalTerminal.Avalonia.Terminal;
-using RoyalTerminal.GhosttySharp.Terminal.Services;
+using RoyalTerminal.Terminal.Services;
+using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.Avalonia.Services;
@@ -18,7 +19,8 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
     /// <inheritdoc />
     public bool HandleKeyDown(KeyEventArgs e, ITerminalSessionService sessionService, IVtProcessor? vtProcessor)
     {
-        if (sessionService.Surface is not null)
+        GhosttySurface? surface = GetGhosttySurface(sessionService);
+        if (surface is not null)
         {
             GhosttyMods mods = ConvertModifiers(e.KeyModifiers);
             GhosttyKey key = ConvertKey(e.Key);
@@ -30,7 +32,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
                 Composing = false,
             };
 
-            sessionService.Surface.SendKey(inputKey);
+            surface.SendKey(inputKey);
             return true;
         }
 
@@ -53,7 +55,8 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
     /// <inheritdoc />
     public bool HandleKeyUp(KeyEventArgs e, ITerminalSessionService sessionService)
     {
-        if (sessionService.Surface is null)
+        GhosttySurface? surface = GetGhosttySurface(sessionService);
+        if (surface is null)
         {
             return false;
         }
@@ -68,7 +71,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
             Composing = false,
         };
 
-        sessionService.Surface.SendKey(inputKey);
+        surface.SendKey(inputKey);
         return true;
     }
 
@@ -80,9 +83,10 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
             return false;
         }
 
-        if (sessionService.Surface is not null)
+        GhosttySurface? surface = GetGhosttySurface(sessionService);
+        if (surface is not null)
         {
-            sessionService.Surface.SendText(e.Text);
+            surface.SendText(e.Text);
             return true;
         }
 
@@ -93,6 +97,11 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         }
 
         return false;
+    }
+
+    private static GhosttySurface? GetGhosttySurface(ITerminalSessionService sessionService)
+    {
+        return sessionService.Surface?.NativeHandle as GhosttySurface;
     }
 
     /// <inheritdoc />

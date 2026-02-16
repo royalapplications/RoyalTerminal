@@ -11,6 +11,25 @@ namespace RoyalTerminal.Avalonia.Terminal;
 /// </summary>
 public sealed class DefaultVtProcessorFactory : IVtProcessorFactory
 {
+    private readonly INativeVtProcessorProvider[] _nativeProviders;
+
+    /// <summary>
+    /// Creates a default factory with no native providers.
+    /// </summary>
+    public DefaultVtProcessorFactory()
+        : this(Array.Empty<INativeVtProcessorProvider>())
+    {
+    }
+
+    /// <summary>
+    /// Creates a default factory with explicit native providers.
+    /// </summary>
+    public DefaultVtProcessorFactory(IEnumerable<INativeVtProcessorProvider> nativeProviders)
+    {
+        ArgumentNullException.ThrowIfNull(nativeProviders);
+        _nativeProviders = nativeProviders.ToArray();
+    }
+
     /// <inheritdoc />
     public IVtProcessor Create(TerminalScreen screen, bool? useNativeVtProcessor)
     {
@@ -19,21 +38,28 @@ public sealed class DefaultVtProcessorFactory : IVtProcessorFactory
             return new BasicVtProcessor(screen);
         }
 
-        if (GhosttyVtProcessor.IsAvailable())
+        for (int i = 0; i < _nativeProviders.Length; i++)
         {
+            INativeVtProcessorProvider provider = _nativeProviders[i];
+            if (!provider.IsAvailable)
+            {
+                continue;
+            }
+
             try
             {
-                return new GhosttyVtProcessor(screen);
+                return provider.Create(screen);
             }
             catch when (useNativeVtProcessor != true)
             {
                 // Fall back to managed VT processor when native is optional.
             }
         }
-        else if (useNativeVtProcessor == true)
+
+        if (useNativeVtProcessor == true)
         {
             throw new InvalidOperationException(
-                "Native VT processor was requested but libghostty-terminal is not available.");
+                "Native VT processor was requested but no native VT provider is available.");
         }
 
         return new BasicVtProcessor(screen);

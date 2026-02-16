@@ -5,7 +5,7 @@
 using Avalonia.Input;
 using Avalonia.Input.TextInput;
 using RoyalTerminal.Avalonia.Terminal;
-using RoyalTerminal.GhosttySharp.Terminal.Services;
+using RoyalTerminal.Terminal.Services;
 using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.Avalonia.Services;

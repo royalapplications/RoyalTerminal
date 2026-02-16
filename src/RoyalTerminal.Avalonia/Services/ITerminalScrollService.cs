@@ -6,7 +6,7 @@ using Avalonia.Input;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Scrolling;
-using RoyalTerminal.GhosttySharp.Terminal.Services;
+using RoyalTerminal.Terminal.Services;
 
 namespace RoyalTerminal.Avalonia.Services;
 

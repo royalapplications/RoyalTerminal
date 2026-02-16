@@ -5,7 +5,7 @@
 using Avalonia.Controls;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
-using RoyalTerminal.GhosttySharp.Terminal.Services;
+using RoyalTerminal.Terminal.Services;
 
 namespace RoyalTerminal.Avalonia.Services;
 
