@@ -1,9 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <PropertyGroup>
-    <PackageId>RoyalTerminal.GhosttySharp.Terminal</PackageId>
-    <Description>Terminal contracts and screen model for RoyalTerminal.GhosttySharp.</Description>
-    <IsPackable>true</IsPackable>
-  </PropertyGroup>
-
-</Project>

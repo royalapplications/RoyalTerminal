@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RoyalTerminal.Rendering.Interop.Ghostty.Skia</PackageId>
+    <Description>SkiaSharp bridge for Ghostty renderer interop with texture and CPU fallback paths.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Rendering.Contracts\RoyalTerminal.Rendering.Contracts.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Rendering.Interop.Ghostty\RoyalTerminal.Rendering.Interop.Ghostty.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" />
+  </ItemGroup>
+
+</Project>

@@ -11,7 +11,7 @@ using System.Runtime.Intrinsics.Arm;
 using System.Text;
 using System.Text.Unicode;
 
-namespace RoyalTerminal.GhosttySharp.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// High-performance terminal data processing utilities.

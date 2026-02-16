@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RoyalTerminal.Terminal</PackageId>
+    <Description>Core terminal contracts and screen model.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+</Project>

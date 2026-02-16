@@ -25,33 +25,33 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.GhosttySharp.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.GhosttySharp.Native.Linux64", "src\RoyalTerminal.GhosttySharp.Native.Linux64\RoyalTerminal.GhosttySharp.Native.Linux64.csproj", "{1CADCFBA-6C97-47DB-9456-D6E45D7DAA1C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.GhosttySharp.Terminal", "src\RoyalTerminal.GhosttySharp.Terminal\RoyalTerminal.GhosttySharp.Terminal.csproj", "{D083DB9E-FD16-4863-A710-4D3D24E44F4D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Terminal", "src\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj", "{D083DB9E-FD16-4863-A710-4D3D24E44F4D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Rendering.Skia", "src\RoyalTerminal.Rendering.Skia\RoyalTerminal.Rendering.Skia.csproj", "{181BC36F-6460-48EC-A3E3-AD7782D6431F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.GhosttySharp.Terminal.Vt.Managed", "src\RoyalTerminal.GhosttySharp.Terminal.Vt.Managed\RoyalTerminal.GhosttySharp.Terminal.Vt.Managed.csproj", "{F771FD03-A915-4393-A63E-AE0E9C9B052F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Terminal.Vt.Managed", "src\RoyalTerminal.Terminal.Vt.Managed\RoyalTerminal.Terminal.Vt.Managed.csproj", "{F771FD03-A915-4393-A63E-AE0E9C9B052F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty", "src\RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty\RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty.csproj", "{0AF18A68-758A-48AA-9AD7-131328EAF621}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Terminal.Vt.Ghostty", "src\RoyalTerminal.Terminal.Vt.Ghostty\RoyalTerminal.Terminal.Vt.Ghostty.csproj", "{0AF18A68-758A-48AA-9AD7-131328EAF621}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.GhosttySharp.Terminal.Vt.Default", "src\RoyalTerminal.GhosttySharp.Terminal.Vt.Default\RoyalTerminal.GhosttySharp.Terminal.Vt.Default.csproj", "{EA7225EB-C724-4BB6-993F-F195591354C2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Terminal.Vt.Default", "src\RoyalTerminal.Terminal.Vt.Default\RoyalTerminal.Terminal.Vt.Default.csproj", "{EA7225EB-C724-4BB6-993F-F195591354C2}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.GhosttySharp.Terminal.Pty.Unix", "src\RoyalTerminal.GhosttySharp.Terminal.Pty.Unix\RoyalTerminal.GhosttySharp.Terminal.Pty.Unix.csproj", "{754ECD03-A6E8-43A8-9C4E-0F2000EACCE4}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Terminal.Pty.Unix", "src\RoyalTerminal.Terminal.Pty.Unix\RoyalTerminal.Terminal.Pty.Unix.csproj", "{754ECD03-A6E8-43A8-9C4E-0F2000EACCE4}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.GhosttySharp.Terminal.Pty.Windows", "src\RoyalTerminal.GhosttySharp.Terminal.Pty.Windows\RoyalTerminal.GhosttySharp.Terminal.Pty.Windows.csproj", "{6369D8B1-B417-4338-A187-C408C01E68A1}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Terminal.Pty.Windows", "src\RoyalTerminal.Terminal.Pty.Windows\RoyalTerminal.Terminal.Pty.Windows.csproj", "{6369D8B1-B417-4338-A187-C408C01E68A1}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.GhosttySharp.Terminal.Pty.Platform", "src\RoyalTerminal.GhosttySharp.Terminal.Pty.Platform\RoyalTerminal.GhosttySharp.Terminal.Pty.Platform.csproj", "{C8D0DCBF-130B-4DDF-A251-B365E60B4C25}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Terminal.Pty.Platform", "src\RoyalTerminal.Terminal.Pty.Platform\RoyalTerminal.Terminal.Pty.Platform.csproj", "{C8D0DCBF-130B-4DDF-A251-B365E60B4C25}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.GhosttySharp.Terminal.Services.Contracts", "src\RoyalTerminal.GhosttySharp.Terminal.Services.Contracts\RoyalTerminal.GhosttySharp.Terminal.Services.Contracts.csproj", "{4F43AF14-1588-4443-B6C1-087F3664DEA6}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Terminal.Services.Contracts", "src\RoyalTerminal.Terminal.Services.Contracts\RoyalTerminal.Terminal.Services.Contracts.csproj", "{4F43AF14-1588-4443-B6C1-087F3664DEA6}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.GhosttySharp.Terminal.Services", "src\RoyalTerminal.GhosttySharp.Terminal.Services\RoyalTerminal.GhosttySharp.Terminal.Services.csproj", "{9379854E-F610-402C-8A79-C830C57E62FC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Terminal.Services", "src\RoyalTerminal.Terminal.Services\RoyalTerminal.Terminal.Services.csproj", "{9379854E-F610-402C-8A79-C830C57E62FC}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Rendering.Contracts", "src\RoyalTerminal.Rendering.Contracts\RoyalTerminal.Rendering.Contracts.csproj", "{2F5449BD-BB68-4806-A959-36E20F3289A2}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Rendering.Interop", "src\RoyalTerminal.Rendering.Interop\RoyalTerminal.Rendering.Interop.csproj", "{1B9FB11C-68EE-4C4F-ADED-7CA0C7109758}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Rendering.Interop.Ghostty", "src\RoyalTerminal.Rendering.Interop.Ghostty\RoyalTerminal.Rendering.Interop.Ghostty.csproj", "{1B9FB11C-68EE-4C4F-ADED-7CA0C7109758}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Rendering.Interop.Skia", "src\RoyalTerminal.Rendering.Interop.Skia\RoyalTerminal.Rendering.Interop.Skia.csproj", "{E9C9C223-0A72-47DB-BB73-84E6F7F9F305}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Rendering.Interop.Ghostty.Skia", "src\RoyalTerminal.Rendering.Interop.Ghostty.Skia\RoyalTerminal.Rendering.Interop.Ghostty.Skia.csproj", "{E9C9C223-0A72-47DB-BB73-84E6F7F9F305}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Avalonia.Rendering", "src\RoyalTerminal.Avalonia.Rendering\RoyalTerminal.Avalonia.Rendering.csproj", "{AC122011-2836-4B56-8EBF-E32F024C65D1}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Avalonia.Rendering.GhosttyInterop", "src\RoyalTerminal.Avalonia.Rendering.GhosttyInterop\RoyalTerminal.Avalonia.Rendering.GhosttyInterop.csproj", "{AC122011-2836-4B56-8EBF-E32F024C65D1}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Benchmarks", "tests\RoyalTerminal.Benchmarks\RoyalTerminal.Benchmarks.csproj", "{2F00DA6E-B412-42CC-B86E-65ED3F6A2161}"
 EndProject

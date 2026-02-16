@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RoyalTerminal.Terminal.Vt.Ghostty</PackageId>
+    <Description>Native Ghostty-backed VT processor implementation for RoyalTerminal terminal contracts.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.GhosttySharp\RoyalTerminal.GhosttySharp.csproj" />
+  </ItemGroup>
+
+</Project>

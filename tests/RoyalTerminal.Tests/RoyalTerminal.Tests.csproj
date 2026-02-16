@@ -7,9 +7,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Contracts\RoyalTerminal.Rendering.Contracts.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Interop\RoyalTerminal.Rendering.Interop.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Interop.Skia\RoyalTerminal.Rendering.Interop.Skia.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia.Rendering\RoyalTerminal.Avalonia.Rendering.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Interop.Ghostty\RoyalTerminal.Rendering.Interop.Ghostty.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Interop.Ghostty.Skia\RoyalTerminal.Rendering.Interop.Ghostty.Skia.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia.Rendering.GhosttyInterop\RoyalTerminal.Avalonia.Rendering.GhosttyInterop.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp\RoyalTerminal.GhosttySharp.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Unicode\RoyalTerminal.Unicode.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia\RoyalTerminal.Avalonia.csproj" />

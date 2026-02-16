@@ -5,7 +5,7 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
 
-namespace RoyalTerminal.GhosttySharp.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// High-performance ring buffer for terminal data.

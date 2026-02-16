@@ -17,11 +17,11 @@ using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Diagnostics;
 using RoyalTerminal.Avalonia.Input;
 using RoyalTerminal.Avalonia.Rendering;
-using RoyalTerminal.Avalonia.Rendering.Interop;
+using RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.Rendering.Contracts;
-using RoyalTerminal.Rendering.Interop;
-using RoyalTerminal.Rendering.Interop.Skia;
+using RoyalTerminal.Rendering.Interop.Ghostty;
+using RoyalTerminal.Rendering.Interop.Ghostty.Skia;
 using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.Avalonia.Controls;

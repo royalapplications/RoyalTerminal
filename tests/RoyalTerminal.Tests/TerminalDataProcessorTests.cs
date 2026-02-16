@@ -2,7 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests — SIMD UTF-8 data processing tests.
 
-using RoyalTerminal.GhosttySharp.Terminal;
+using RoyalTerminal.Terminal;
 using Xunit;
 
 namespace RoyalTerminal.Tests;

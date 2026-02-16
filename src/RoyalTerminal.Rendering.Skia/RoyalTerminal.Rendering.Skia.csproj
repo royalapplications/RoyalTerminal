@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RoyalTerminal.Rendering.Text\RoyalTerminal.Rendering.Text.csproj" />
-    <ProjectReference Include="..\RoyalTerminal.GhosttySharp.Terminal\RoyalTerminal.GhosttySharp.Terminal.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
   </ItemGroup>
 
   <ItemGroup>

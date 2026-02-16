@@ -4,7 +4,7 @@
 
 using System.Runtime.InteropServices;
 using RoyalTerminal.Rendering.Contracts;
-using RoyalTerminal.Rendering.Interop;
+using RoyalTerminal.Rendering.Interop.Ghostty;
 using Xunit;
 
 namespace RoyalTerminal.Tests;

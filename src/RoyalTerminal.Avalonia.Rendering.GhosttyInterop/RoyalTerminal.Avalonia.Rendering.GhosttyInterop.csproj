@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RoyalTerminal.Avalonia.Rendering.GhosttyInterop</PackageId>
+    <Description>Avalonia-specific render target acquisition and draw-loop adapters for Ghostty renderer interop.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Rendering.Contracts\RoyalTerminal.Rendering.Contracts.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Rendering.Interop.Ghostty.Skia\RoyalTerminal.Rendering.Interop.Ghostty.Skia.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Rendering.Skia\RoyalTerminal.Rendering.Skia.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Skia" />
+  </ItemGroup>
+
+</Project>

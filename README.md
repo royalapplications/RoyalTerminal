@@ -22,21 +22,21 @@ High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-o
 
 | Package | Responsibility |
 |---------|----------------|
-| `RoyalTerminal.GhosttySharp.Terminal` | Core terminal contracts and screen model |
-| `RoyalTerminal.GhosttySharp.Terminal.Vt.Managed` | Managed VT processor (`BasicVtProcessor`) |
-| `RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over `libghostty-terminal`) |
-| `RoyalTerminal.GhosttySharp.Terminal.Vt.Default` | Auto-selection VT processor factory |
-| `RoyalTerminal.GhosttySharp.Terminal.Pty.Unix` | Unix PTY implementation (`forkpty`) |
-| `RoyalTerminal.GhosttySharp.Terminal.Pty.Windows` | Windows PTY implementation (ConPTY) |
-| `RoyalTerminal.GhosttySharp.Terminal.Pty.Platform` | Platform PTY factory (`DefaultPtyFactory`) |
-| `RoyalTerminal.GhosttySharp.Terminal.Services.Contracts` | Terminal session service contracts |
-| `RoyalTerminal.GhosttySharp.Terminal.Services` | Terminal session service implementations |
+| `RoyalTerminal.Terminal` | Core terminal contracts and screen model |
+| `RoyalTerminal.Terminal.Vt.Managed` | Managed VT processor (`BasicVtProcessor`) |
+| `RoyalTerminal.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over `libghostty-terminal`) |
+| `RoyalTerminal.Terminal.Vt.Default` | Auto-selection VT processor factory |
+| `RoyalTerminal.Terminal.Pty.Unix` | Unix PTY implementation (`forkpty`) |
+| `RoyalTerminal.Terminal.Pty.Windows` | Windows PTY implementation (ConPTY) |
+| `RoyalTerminal.Terminal.Pty.Platform` | Platform PTY factory (`DefaultPtyFactory`) |
+| `RoyalTerminal.Terminal.Services.Contracts` | Terminal session service contracts |
+| `RoyalTerminal.Terminal.Services` | Terminal session service implementations |
 | `RoyalTerminal.Rendering.Text` | Reusable text shaping/fallback subsystem (`HarfBuzzTextShaper`, `TerminalFontResolver`) |
 | `RoyalTerminal.Rendering.Skia` | CPU cell renderer core (`SkiaTerminalRenderer`, `GlyphCache`) with HarfBuzz shaping + fallback font resolution |
 | `RoyalTerminal.Rendering.Contracts` | Backend-agnostic render contracts (`RenderTargetDescriptor`, capabilities) |
-| `RoyalTerminal.Rendering.Interop` | Managed wrapper for `ghostty-renderer-capi` |
-| `RoyalTerminal.Rendering.Interop.Skia` | Skia bridge (`SkiaInteropRenderer`) with CPU fallback |
-| `RoyalTerminal.Avalonia.Rendering` | Avalonia render-target acquisition and texture interop draw handler |
+| `RoyalTerminal.Rendering.Interop.Ghostty` | Managed wrapper for `ghostty-renderer-capi` |
+| `RoyalTerminal.Rendering.Interop.Ghostty.Skia` | Skia bridge (`SkiaInteropRenderer`) with CPU fallback |
+| `RoyalTerminal.Avalonia.Rendering.GhosttyInterop` | Avalonia render-target acquisition and texture interop draw handler |
 
 ## Features
 
@@ -86,7 +86,7 @@ flowchart TD
     end
 
     subgraph Terminal[Terminal Modules]
-      T0[RoyalTerminal.GhosttySharp.Terminal]
+      T0[RoyalTerminal.Terminal]
       T1[Terminal.Vt.Managed]
       T2[Terminal.Vt.Ghostty]
       T3[Terminal.Vt.Default]
@@ -99,9 +99,9 @@ flowchart TD
 
     subgraph Render[Rendering Interop Modules]
       R0[Rendering.Contracts]
-      R1[Rendering.Interop]
-      R2[Rendering.Interop.Skia]
-      R3[Avalonia.Rendering]
+      R1[Rendering.Interop.Ghostty]
+      R2[Rendering.Interop.Ghostty.Skia]
+      R3[Avalonia.Rendering.GhosttyInterop]
       R4[Rendering.Skia]
     end
 
@@ -169,7 +169,7 @@ terminal.Initialize(app);
 ```csharp
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.Avalonia.Controls;
-using RoyalTerminal.Avalonia.Rendering.Interop;
+using RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
 
 Ghostty.Initialize();
 using var config = new GhosttyConfig();
@@ -234,7 +234,7 @@ if (terminal.Renderer is { } renderer)
 
 ```csharp
 using RoyalTerminal.Rendering.Contracts;
-using RoyalTerminal.Rendering.Interop;
+using RoyalTerminal.Rendering.Interop.Ghostty;
 
 using var context = new GhosttyRenderContext();
 using var surface = context.CreateSurface(RenderBackendKind.Software);
@@ -271,10 +271,10 @@ Use this when embedding the renderer interop pipeline directly:
 
 ```bash
 dotnet add package RoyalTerminal.Rendering.Contracts
-dotnet add package RoyalTerminal.Rendering.Interop
+dotnet add package RoyalTerminal.Rendering.Interop.Ghostty
 dotnet add package RoyalTerminal.Rendering.Skia
-dotnet add package RoyalTerminal.Rendering.Interop.Skia
-dotnet add package RoyalTerminal.Avalonia.Rendering
+dotnet add package RoyalTerminal.Rendering.Interop.Ghostty.Skia
+dotnet add package RoyalTerminal.Avalonia.Rendering.GhosttyInterop
 ```
 
 If your feed does not yet publish these composition packages, create them from source with `dotnet pack -c Release` and consume from your local/internal feed.
@@ -302,7 +302,7 @@ If your feed does not yet publish these composition packages, create them from s
 - `RenderBackendCapabilities`: supported features/sample counts/pixel formats
 - `RenderFeatureFlags`: `ExternalTextureTargets`, `CpuRgbaFallback`, `ExplicitFrameLifecycle`, etc.
 
-`RoyalTerminal.Rendering.Interop.Skia` (`SkiaInteropRenderer`) behavior:
+`RoyalTerminal.Rendering.Interop.Ghostty.Skia` (`SkiaInteropRenderer`) behavior:
 
 1. Validate descriptor.
 2. Attempt direct interop only when surface capabilities advertise `ExternalTextureTargets`.
@@ -356,13 +356,13 @@ are required for Unicode-correct terminal cell readback and rendering.
 
 | Package | Implementation |
 |---------|----------------|
-| `RoyalTerminal.GhosttySharp.Terminal.Pty.Unix` | `UnixPty` (`forkpty`, `TIOCSWINSZ`) |
-| `RoyalTerminal.GhosttySharp.Terminal.Pty.Windows` | `WindowsPty` (ConPTY) |
-| `RoyalTerminal.GhosttySharp.Terminal.Pty.Platform` | `DefaultPtyFactory` selector |
+| `RoyalTerminal.Terminal.Pty.Unix` | `UnixPty` (`forkpty`, `TIOCSWINSZ`) |
+| `RoyalTerminal.Terminal.Pty.Windows` | `WindowsPty` (ConPTY) |
+| `RoyalTerminal.Terminal.Pty.Platform` | `DefaultPtyFactory` selector |
 
 ## Native Library Resolution
 
-Renderer interop (`RoyalTerminal.Rendering.Interop`) supports:
+Renderer interop (`RoyalTerminal.Rendering.Interop.Ghostty`) supports:
 
 - `GHOSTTY_RENDERER_CAPI_LIBRARY_PATH` (absolute file path)
 - `GHOSTTY_RENDERER_CAPI_LIBRARY_DIR` (directory containing the library)
@@ -401,21 +401,21 @@ RoyalTerminal/
 ├── src/
 │   ├── RoyalTerminal.GhosttySharp/
 │   ├── RoyalTerminal.Avalonia/
-│   ├── RoyalTerminal.Avalonia.Rendering/
-│   ├── RoyalTerminal.GhosttySharp.Terminal/
-│   ├── RoyalTerminal.GhosttySharp.Terminal.Vt.Managed/
-│   ├── RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty/
-│   ├── RoyalTerminal.GhosttySharp.Terminal.Vt.Default/
-│   ├── RoyalTerminal.GhosttySharp.Terminal.Pty.Unix/
-│   ├── RoyalTerminal.GhosttySharp.Terminal.Pty.Windows/
-│   ├── RoyalTerminal.GhosttySharp.Terminal.Pty.Platform/
-│   ├── RoyalTerminal.GhosttySharp.Terminal.Services.Contracts/
-│   ├── RoyalTerminal.GhosttySharp.Terminal.Services/
+│   ├── RoyalTerminal.Avalonia.Rendering.GhosttyInterop/
+│   ├── RoyalTerminal.Terminal/
+│   ├── RoyalTerminal.Terminal.Vt.Managed/
+│   ├── RoyalTerminal.Terminal.Vt.Ghostty/
+│   ├── RoyalTerminal.Terminal.Vt.Default/
+│   ├── RoyalTerminal.Terminal.Pty.Unix/
+│   ├── RoyalTerminal.Terminal.Pty.Windows/
+│   ├── RoyalTerminal.Terminal.Pty.Platform/
+│   ├── RoyalTerminal.Terminal.Services.Contracts/
+│   ├── RoyalTerminal.Terminal.Services/
 │   ├── RoyalTerminal.Rendering.Text/
 │   ├── RoyalTerminal.Rendering.Contracts/
-│   ├── RoyalTerminal.Rendering.Interop/
+│   ├── RoyalTerminal.Rendering.Interop.Ghostty/
 │   ├── RoyalTerminal.Rendering.Skia/
-│   ├── RoyalTerminal.Rendering.Interop.Skia/
+│   ├── RoyalTerminal.Rendering.Interop.Ghostty.Skia/
 │   ├── RoyalTerminal.GhosttySharp.Native.OSX/
 │   ├── RoyalTerminal.GhosttySharp.Native.Linux64/
 │   └── RoyalTerminal.GhosttySharp.Native.Win64/

@@ -3,7 +3,7 @@
 // RoyalTerminal.Tests - Skia interop bridge tests.
 
 using RoyalTerminal.Rendering.Contracts;
-using RoyalTerminal.Rendering.Interop.Skia;
+using RoyalTerminal.Rendering.Interop.Ghostty.Skia;
 using SkiaSharp;
 using Xunit;
 

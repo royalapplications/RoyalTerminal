@@ -77,13 +77,13 @@ jobs:
           set -euo pipefail
           for rid in osx-arm64 osx-x64; do
             src="src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/${rid}/native"
-            dst_interop="src/RoyalTerminal.Rendering.Interop/runtimes/${rid}/native"
+            dst_interop="src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/${rid}/native"
             dst_fixture="native/${rid}"
             mkdir -p "${dst_interop}" "${dst_fixture}"
             cp -f "${src}"/* "${dst_interop}/"
             cp -f "${src}"/* "${dst_fixture}/"
           done
-          ls -la src/RoyalTerminal.Rendering.Interop/runtimes/osx-arm64/native/
+          ls -la src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/osx-arm64/native/
 
       - name: Stage native artifacts for managed interop (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -92,13 +92,13 @@ jobs:
           set -euo pipefail
           for rid in linux-x64 linux-arm64; do
             src="src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/${rid}/native"
-            dst_interop="src/RoyalTerminal.Rendering.Interop/runtimes/${rid}/native"
+            dst_interop="src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/${rid}/native"
             dst_fixture="native/${rid}"
             mkdir -p "${dst_interop}" "${dst_fixture}"
             cp -f "${src}"/* "${dst_interop}/"
             cp -f "${src}"/* "${dst_fixture}/"
           done
-          ls -la src/RoyalTerminal.Rendering.Interop/runtimes/linux-x64/native/
+          ls -la src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/linux-x64/native/
 
       - name: Stage native artifacts for managed interop (Windows)
         if: matrix.os == 'windows-latest'
@@ -106,7 +106,7 @@ jobs:
         run: |
           $rid = "win-x64"
           $src = "src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/$rid/native"
-          $dstInterop = "src/RoyalTerminal.Rendering.Interop/runtimes/$rid/native"
+          $dstInterop = "src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/$rid/native"
           $dstFixture = "native/$rid"
           New-Item -Path $dstInterop -ItemType Directory -Force | Out-Null
           New-Item -Path $dstFixture -ItemType Directory -Force | Out-Null
@@ -413,7 +413,7 @@ jobs:
           set -euo pipefail
           rid="osx-arm64"
           src="src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/${rid}/native"
-          dst_interop="src/RoyalTerminal.Rendering.Interop/runtimes/${rid}/native"
+          dst_interop="src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/${rid}/native"
           dst_fixture="native/${rid}"
           mkdir -p "${dst_interop}" "${dst_fixture}"
           cp -f "${src}"/* "${dst_interop}/"
@@ -508,50 +508,50 @@ jobs:
       - name: Pack RoyalTerminal.GhosttySharp
         run: dotnet pack src/RoyalTerminal.GhosttySharp/RoyalTerminal.GhosttySharp.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.GhosttySharp.Terminal
-        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal/RoyalTerminal.GhosttySharp.Terminal.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Terminal
+        run: dotnet pack src/RoyalTerminal.Terminal/RoyalTerminal.Terminal.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Services.Contracts
-        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Services.Contracts/RoyalTerminal.GhosttySharp.Terminal.Services.Contracts.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Terminal.Services.Contracts
+        run: dotnet pack src/RoyalTerminal.Terminal.Services.Contracts/RoyalTerminal.Terminal.Services.Contracts.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Services
-        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Services/RoyalTerminal.GhosttySharp.Terminal.Services.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Terminal.Services
+        run: dotnet pack src/RoyalTerminal.Terminal.Services/RoyalTerminal.Terminal.Services.csproj -c Release -o artifacts/
 
       - name: Pack RoyalTerminal.Rendering.Contracts
         run: dotnet pack src/RoyalTerminal.Rendering.Contracts/RoyalTerminal.Rendering.Contracts.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.Rendering.Interop
-        run: dotnet pack src/RoyalTerminal.Rendering.Interop/RoyalTerminal.Rendering.Interop.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Rendering.Interop.Ghostty
+        run: dotnet pack src/RoyalTerminal.Rendering.Interop.Ghostty/RoyalTerminal.Rendering.Interop.Ghostty.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.Rendering.Interop.Skia
-        run: dotnet pack src/RoyalTerminal.Rendering.Interop.Skia/RoyalTerminal.Rendering.Interop.Skia.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Rendering.Interop.Ghostty.Skia
+        run: dotnet pack src/RoyalTerminal.Rendering.Interop.Ghostty.Skia/RoyalTerminal.Rendering.Interop.Ghostty.Skia.csproj -c Release -o artifacts/
 
       - name: Pack RoyalTerminal.Rendering.Skia
         run: dotnet pack src/RoyalTerminal.Rendering.Skia/RoyalTerminal.Rendering.Skia.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Vt.Managed
-        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Vt.Managed/RoyalTerminal.GhosttySharp.Terminal.Vt.Managed.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Terminal.Vt.Managed
+        run: dotnet pack src/RoyalTerminal.Terminal.Vt.Managed/RoyalTerminal.Terminal.Vt.Managed.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty
-        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty/RoyalTerminal.GhosttySharp.Terminal.Vt.Ghostty.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Terminal.Vt.Ghostty
+        run: dotnet pack src/RoyalTerminal.Terminal.Vt.Ghostty/RoyalTerminal.Terminal.Vt.Ghostty.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Vt.Default
-        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Vt.Default/RoyalTerminal.GhosttySharp.Terminal.Vt.Default.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Terminal.Vt.Default
+        run: dotnet pack src/RoyalTerminal.Terminal.Vt.Default/RoyalTerminal.Terminal.Vt.Default.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Pty.Unix
-        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Pty.Unix/RoyalTerminal.GhosttySharp.Terminal.Pty.Unix.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Terminal.Pty.Unix
+        run: dotnet pack src/RoyalTerminal.Terminal.Pty.Unix/RoyalTerminal.Terminal.Pty.Unix.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Pty.Windows
-        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Pty.Windows/RoyalTerminal.GhosttySharp.Terminal.Pty.Windows.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Terminal.Pty.Windows
+        run: dotnet pack src/RoyalTerminal.Terminal.Pty.Windows/RoyalTerminal.Terminal.Pty.Windows.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.GhosttySharp.Terminal.Pty.Platform
-        run: dotnet pack src/RoyalTerminal.GhosttySharp.Terminal.Pty.Platform/RoyalTerminal.GhosttySharp.Terminal.Pty.Platform.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Terminal.Pty.Platform
+        run: dotnet pack src/RoyalTerminal.Terminal.Pty.Platform/RoyalTerminal.Terminal.Pty.Platform.csproj -c Release -o artifacts/
 
       - name: Pack RoyalTerminal.Avalonia
         run: dotnet pack src/RoyalTerminal.Avalonia/RoyalTerminal.Avalonia.csproj -c Release -o artifacts/
 
-      - name: Pack RoyalTerminal.Avalonia.Rendering
-        run: dotnet pack src/RoyalTerminal.Avalonia.Rendering/RoyalTerminal.Avalonia.Rendering.csproj -c Release -o artifacts/
+      - name: Pack RoyalTerminal.Avalonia.Rendering.GhosttyInterop
+        run: dotnet pack src/RoyalTerminal.Avalonia.Rendering.GhosttyInterop/RoyalTerminal.Avalonia.Rendering.GhosttyInterop.csproj -c Release -o artifacts/
 
       # Pack native packages
       - name: Pack RoyalTerminal.GhosttySharp.Native.OSX

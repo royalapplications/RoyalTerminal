@@ -7,7 +7,7 @@ using Avalonia;
 using Avalonia.OpenGL;
 using Avalonia.Platform;
 using Avalonia.Skia;
-using RoyalTerminal.Avalonia.Rendering.Interop;
+using RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
 using RoyalTerminal.Rendering.Contracts;
 using SkiaSharp;
 using Xunit;

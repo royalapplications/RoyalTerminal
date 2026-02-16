@@ -1,0 +1,30 @@
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
+// RoyalTerminal.Rendering.Interop.Ghostty.Skia - CPU RGBA fallback adapter for GhosttyRenderSurface.
+
+using RoyalTerminal.Rendering.Contracts;
+using RoyalTerminal.Rendering.Interop.Ghostty;
+
+namespace RoyalTerminal.Rendering.Interop.Ghostty.Skia;
+
+/// <summary>
+/// Adapts <see cref="GhosttyRenderSurface"/> to <see cref="ISkiaRgbaFallbackRenderer"/>.
+/// </summary>
+public sealed class GhosttyRenderSurfaceRgbaFallbackRenderer : ISkiaRgbaFallbackRenderer
+{
+    private readonly GhosttyRenderSurface _surface;
+
+    /// <summary>
+    /// Initializes a new fallback adapter.
+    /// </summary>
+    public GhosttyRenderSurfaceRgbaFallbackRenderer(GhosttyRenderSurface surface)
+    {
+        _surface = surface ?? throw new ArgumentNullException(nameof(surface));
+    }
+
+    /// <inheritdoc />
+    public RenderFrameResult RenderToRgba(Span<byte> destination, int width, int height, int stride)
+    {
+        return _surface.RenderToRgba(destination, width, height, stride);
+    }
+}
