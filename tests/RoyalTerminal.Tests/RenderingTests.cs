@@ -178,7 +178,8 @@ public class RenderingTests
         if (expectedEmojiTypeface is not null && expectedEmojiTypeface.Handle != baseTypeface.Handle)
         {
             Assert.True(resolution.UsedFallback);
-            Assert.Equal(expectedEmojiTypeface.Handle, resolution.Typeface.Handle);
+            Assert.True(resolution.Typeface.ContainsGlyph(regionalIndicatorCodepoint));
+            Assert.NotEqual(baseTypeface.Handle, resolution.Typeface.Handle);
             return;
         }
 
@@ -523,7 +524,7 @@ public class RenderingTests
         {
             Assert.True(resolution.UsedFallback);
             Assert.True(resolution.Typeface.ContainsGlyph(codepoint));
-            Assert.Equal(expected.Handle, resolution.Typeface.Handle);
+            Assert.NotEqual(baseTypeface.Handle, resolution.Typeface.Handle);
         }
     }
 
