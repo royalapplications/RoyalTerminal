@@ -4,9 +4,11 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reactive;
 using System.Reactive.Disposables;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -21,6 +23,11 @@ using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
+using RoyalTerminal.Terminal.Transport.Pipe;
+using RoyalTerminal.Terminal.Transport.Pty;
+using RoyalTerminal.Terminal.Transport.Ssh;
+using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
+using RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent;
 using ReactiveUI;
 
 namespace RoyalTerminal.Demo.Services;
@@ -102,6 +109,7 @@ internal sealed class MainWindowController
         }
 
         ApplyThemeResources(_viewModel.IsDarkTheme);
+        InitializeShellProfiles();
 
         CreateNewTab();
         UpdateStatus(_viewModel.UseRenderedControl
@@ -229,6 +237,31 @@ internal sealed class MainWindowController
         }
     }
 
+    private void InitializeShellProfiles()
+    {
+        try
+        {
+            IShellProfileCatalog catalog = new DefaultShellProfileCatalog();
+            IReadOnlyList<ShellProfile> profiles = catalog.GetProfiles();
+            List<ShellProfileOption> options = new(profiles.Count);
+            for (int i = 0; i < profiles.Count; i++)
+            {
+                ShellProfile profile = profiles[i];
+                options.Add(new ShellProfileOption(
+                    profile.Id,
+                    profile.DisplayName,
+                    profile.Command.FileName));
+            }
+
+            _viewModel.SetShellProfiles(options);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetShellProfiles(Array.Empty<ShellProfileOption>());
+            UpdateStatus($"Shell profile discovery failed: {ex.Message}");
+        }
+    }
+
     #region Tab Management
 
     private void CreateNewTab()
@@ -332,27 +365,18 @@ internal sealed class MainWindowController
                 UpdateDimensions(args.Columns, args.Rows);
             };
 
-            bool needsPty = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-                            || RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
-                            || RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-
             terminal = standaloneControl;
-
-            if (needsPty)
+            Dispatcher.UIThread.Post(async () =>
             {
-                Dispatcher.UIThread.Post(() =>
+                try
                 {
-                    try
-                    {
-                        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                        standaloneControl.StartPty(workingDirectory: home);
-                    }
-                    catch (Exception ex)
-                    {
-                        UpdateStatus($"Failed to start PTY: {ex.Message}");
-                    }
-                }, DispatcherPriority.Background);
-            }
+                    await StartStandaloneSessionAsync(standaloneControl);
+                }
+                catch (Exception ex)
+                {
+                    UpdateStatus($"Failed to start session: {ex.Message}");
+                }
+            }, DispatcherPriority.Background);
         }
 
         TabVisualMode tabMode = ResolveTabMode(terminal);
@@ -404,21 +428,35 @@ internal sealed class MainWindowController
                 new SolidColorBrush(Color.FromRgb(0xDC, 0xDC, 0xAA)));
         }
 
-        if (_viewModel.UseNativeVtControl)
-        {
-            return new TabVisualMode(
-                "Native VT (libghostty-terminal)",
-                "\u25B2",
-                new SolidColorBrush(Color.FromRgb(0xCE, 0x91, 0x78)));
-        }
+        bool isPipeTransport = string.Equals(
+            _viewModel.SelectedTransportMode.Id,
+            TerminalTransportIds.Pipe,
+            StringComparison.OrdinalIgnoreCase);
+        bool isSshTransport = string.Equals(
+            _viewModel.SelectedTransportMode.Id,
+            TerminalTransportIds.Ssh,
+            StringComparison.OrdinalIgnoreCase);
 
         string vtLabel = terminal is TerminalControl gtc && gtc.IsUsingNativeVtProcessor
             ? "Ghostty VT"
             : "Basic VT";
+        string prefix = _viewModel.UseNativeVtControl ? "Native VT" : "Rendered";
+        string transportName = _viewModel.SelectedTransportMode.DisplayName;
+        string glyph = isPipeTransport
+            ? "\u25A1"
+            : isSshTransport
+                ? "\u25B3"
+                : "\u25A0";
+        SolidColorBrush glyphBrush = isPipeTransport
+            ? new SolidColorBrush(Color.FromRgb(0x4E, 0xC9, 0xB0))
+            : isSshTransport
+                ? new SolidColorBrush(Color.FromRgb(0xD7, 0xBA, 0x7D))
+                : new SolidColorBrush(Color.FromRgb(0x6A, 0x99, 0x55));
+
         return new TabVisualMode(
-            $"Rendered (Custom PTY - {vtLabel})",
-            "\u25A0",
-            new SolidColorBrush(Color.FromRgb(0x6A, 0x99, 0x55)));
+            $"{prefix} ({transportName} - {vtLabel})",
+            glyph,
+            glyphBrush);
     }
 
     private static GhosttyRenderedTerminalRenderingMode GetRenderedRenderingMode(bool useTextureInterop)
@@ -440,16 +478,236 @@ internal sealed class MainWindowController
         renderer.EnableTextRenderDiagnostics = s_enableRenderDiagnostics;
     }
 
-    private static TerminalControl CreateStandaloneControl()
+    private TerminalControl CreateStandaloneControl()
     {
         INativeVtProcessorProvider[] nativeProviders = [new GhosttyVtProcessorProvider()];
+        DefaultPtyFactory ptyFactory = new();
+        DemoSshCredentialProvider credentialProvider = new(_viewModel);
+        RejectAllSshHostKeyValidator hostKeyValidator = new();
+        CompositeTerminalTransportFactory transportFactory = new(
+            new ITerminalTransportProvider[]
+            {
+                new PtyTerminalTransportProvider(ptyFactory),
+                new PipeTerminalTransportProvider(),
+                new SshNetTerminalTransportProvider(
+                    credentialProvider,
+                    hostKeyValidator,
+                    new ISshNetAuthenticationMethodContributor[]
+                    {
+                        new SshNetAgentAuthenticationMethodContributor(),
+                    }),
+            });
+
         return new TerminalControl(
             new TerminalSessionService(),
             new DefaultTerminalInputAdapter(),
             new DefaultTerminalSelectionService(),
             new DefaultTerminalScrollService(),
             new DefaultVtProcessorFactory(nativeProviders),
-            new DefaultPtyFactory());
+            ptyFactory,
+            credentialProvider,
+            hostKeyValidator,
+            transportFactory);
+    }
+
+    private async Task StartStandaloneSessionAsync(TerminalControl standaloneControl)
+    {
+        string workingDirectory = ResolveWorkingDirectory();
+        string transportId = _viewModel.SelectedTransportMode.Id;
+
+        if (string.Equals(transportId, TerminalTransportIds.Pty, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!IsPtyPlatformSupported())
+            {
+                throw new PlatformNotSupportedException("PTY transport is only supported on macOS, Linux, and Windows.");
+            }
+
+            string? shellPath = _viewModel.SelectedShellProfile?.CommandPath;
+            standaloneControl.StartPty(
+                shell: string.IsNullOrWhiteSpace(shellPath) ? null : shellPath,
+                workingDirectory: workingDirectory);
+
+            string shellDisplay = _viewModel.SelectedShellProfile?.DisplayName ?? "Default shell";
+            UpdateSessionStartedStatus(standaloneControl, $"Started PTY session ({shellDisplay})");
+            return;
+        }
+
+        TerminalSessionDimensions dimensions = BuildSessionDimensions(standaloneControl);
+
+        if (string.Equals(transportId, TerminalTransportIds.Pipe, StringComparison.OrdinalIgnoreCase))
+        {
+            TerminalCommandSpec command = BuildPipeCommand(_viewModel.SelectedShellProfile);
+            PipeTransportOptions options = new(
+                Command: command,
+                WorkingDirectory: workingDirectory,
+                Environment: null,
+                MergeStdErrIntoStdOut: _viewModel.PipeMergeStdErrIntoStdOut,
+                Dimensions: dimensions);
+
+            await standaloneControl.StartPipeAsync(options);
+            UpdateSessionStartedStatus(standaloneControl, $"Started Pipe session ({command.FileName})");
+            return;
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.Ssh, StringComparison.OrdinalIgnoreCase))
+        {
+            SshTransportOptions options = BuildSshOptions(dimensions);
+            await standaloneControl.StartSshAsync(options);
+            UpdateSessionStartedStatus(
+                standaloneControl,
+                $"Started SSH session {_viewModel.SshUsername}@{_viewModel.SshHost}:{_viewModel.SshPort}");
+            return;
+        }
+
+        throw new InvalidOperationException($"Unsupported transport id '{transportId}'.");
+    }
+
+    private SshTransportOptions BuildSshOptions(TerminalSessionDimensions dimensions)
+    {
+        string host = _viewModel.SshHost.Trim();
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            throw new InvalidOperationException("SSH host is required.");
+        }
+
+        string username = _viewModel.SshUsername.Trim();
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            throw new InvalidOperationException("SSH username is required.");
+        }
+
+        if (!int.TryParse(_viewModel.SshPort, out int port) || port < 1 || port > 65535)
+        {
+            throw new InvalidOperationException("SSH port must be a valid number in range 1-65535.");
+        }
+
+        string expectedHostKeyFingerprint = _viewModel.SshExpectedHostKeyFingerprintSha256.Trim();
+        if (string.IsNullOrWhiteSpace(expectedHostKeyFingerprint))
+        {
+            throw new InvalidOperationException(
+                "SSH host key SHA-256 fingerprint is required when strict host-key validation is enabled.");
+        }
+
+        SshAuthenticationOptions authentication = BuildSshAuthenticationOptions();
+        return new SshTransportOptions(
+            Endpoint: new SshEndpointOptions(host, port, username),
+            RequestPty: _viewModel.SshRequestPty,
+            TerminalType: string.IsNullOrWhiteSpace(_viewModel.SshTerminalType)
+                ? "xterm-256color"
+                : _viewModel.SshTerminalType.Trim(),
+            InitialCommand: string.IsNullOrWhiteSpace(_viewModel.SshInitialCommand)
+                ? null
+                : _viewModel.SshInitialCommand.Trim(),
+            Authentication: authentication,
+            Dimensions: dimensions)
+        {
+            ExpectedHostKeyFingerprintSha256 = expectedHostKeyFingerprint,
+        };
+    }
+
+    private SshAuthenticationOptions BuildSshAuthenticationOptions()
+    {
+        string authModeId = _viewModel.SelectedSshAuthMode.Id;
+        bool usePassword = string.Equals(authModeId, SshAuthModeOption.PasswordModeId, StringComparison.Ordinal)
+                           || string.Equals(authModeId, SshAuthModeOption.PasswordAndKeyModeId, StringComparison.Ordinal);
+        bool usePrivateKey = string.Equals(authModeId, SshAuthModeOption.PrivateKeyModeId, StringComparison.Ordinal)
+                             || string.Equals(authModeId, SshAuthModeOption.PasswordAndKeyModeId, StringComparison.Ordinal);
+        bool useAgent = string.Equals(authModeId, SshAuthModeOption.AgentModeId, StringComparison.Ordinal);
+
+        if (usePassword && string.IsNullOrWhiteSpace(_viewModel.SshPassword))
+        {
+            throw new InvalidOperationException("SSH password is required for the selected authentication mode.");
+        }
+
+        if (usePrivateKey && string.IsNullOrWhiteSpace(_viewModel.SshPrivateKeyPath))
+        {
+            throw new InvalidOperationException("SSH private key path is required for the selected authentication mode.");
+        }
+
+        IReadOnlyList<string> privateKeySecretIds = usePrivateKey
+            ?
+            [
+                DemoSshCredentialProvider.PrivateKeySecretId,
+            ]
+            : Array.Empty<string>();
+
+        return new SshAuthenticationOptions(
+            UsePassword: usePassword,
+            PasswordSecretId: usePassword ? DemoSshCredentialProvider.PasswordSecretId : null,
+            PrivateKeySecretIds: privateKeySecretIds,
+            UseAgent: useAgent);
+    }
+
+    private TerminalCommandSpec BuildPipeCommand(ShellProfileOption? shellProfile)
+    {
+        string commandText = string.IsNullOrWhiteSpace(_viewModel.PipeCommandText)
+            ? "echo RoyalTerminal pipe transport"
+            : _viewModel.PipeCommandText.Trim();
+
+        string shellPath = !string.IsNullOrWhiteSpace(shellProfile?.CommandPath)
+            ? shellProfile.CommandPath
+            : OperatingSystem.IsWindows()
+                ? "cmd.exe"
+                : "/bin/sh";
+
+        string shellName = Path.GetFileName(shellPath).ToLowerInvariant();
+        if (OperatingSystem.IsWindows())
+        {
+            if (shellName.Contains("pwsh", StringComparison.Ordinal)
+                || shellName.Contains("powershell", StringComparison.Ordinal))
+            {
+                return new TerminalCommandSpec(
+                    shellPath,
+                    [
+                        "-NoLogo",
+                        "-NoProfile",
+                        "-Command",
+                        commandText,
+                    ]);
+            }
+
+            return new TerminalCommandSpec(shellPath, ["/c", commandText]);
+        }
+
+        return new TerminalCommandSpec(shellPath, ["-lc", commandText]);
+    }
+
+    private string ResolveWorkingDirectory()
+    {
+        if (!string.IsNullOrWhiteSpace(_viewModel.WorkingDirectory))
+        {
+            return _viewModel.WorkingDirectory.Trim();
+        }
+
+        return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    }
+
+    private static TerminalSessionDimensions BuildSessionDimensions(TerminalControl control)
+    {
+        SkiaTerminalRenderer? renderer = control.Renderer;
+        int widthPx = Math.Max(
+            1,
+            (int)Math.Round(control.Bounds.Width > 0
+                ? control.Bounds.Width
+                : control.Columns * (renderer?.CellWidth ?? 1)));
+        int heightPx = Math.Max(
+            1,
+            (int)Math.Round(control.Bounds.Height > 0
+                ? control.Bounds.Height
+                : control.Rows * (renderer?.CellHeight ?? 1)));
+
+        return new TerminalSessionDimensions(
+            Columns: control.Columns,
+            Rows: control.Rows,
+            WidthPixels: widthPx,
+            HeightPixels: heightPx);
+    }
+
+    private static bool IsPtyPlatformSupported()
+    {
+        return RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+               || RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+               || RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
     }
 
     private static bool ReadEnvironmentToggle(string variableName)
@@ -769,6 +1027,13 @@ internal sealed class MainWindowController
         _viewModel.SetDimensions(columns, rows);
     }
 
+    private void UpdateSessionStartedStatus(TerminalControl control, string message)
+    {
+        string activeTransport = control.ActiveTransportId ?? "none";
+        string sessionState = control.HasActiveSession ? "active" : "inactive";
+        UpdateStatus($"{message} [{activeTransport}, {sessionState}]");
+    }
+
     #endregion
 
     private void DisposeResources()
@@ -803,6 +1068,67 @@ internal sealed class MainWindowController
         if (control is GhosttyNativeTerminalControl nativeControl)
         {
             nativeControl.Dispose();
+        }
+    }
+
+    private sealed class DemoSshCredentialProvider : ISshCredentialProvider
+    {
+        public const string PasswordSecretId = "demo-runtime-password";
+        public const string PrivateKeySecretId = "demo-runtime-private-key";
+
+        private readonly MainWindowViewModel _viewModel;
+
+        public DemoSshCredentialProvider(MainWindowViewModel viewModel)
+        {
+            _viewModel = viewModel;
+        }
+
+        public ValueTask<SshResolvedCredentials> ResolveAsync(
+            SshCredentialRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string? password = request.Authentication.UsePassword
+                ? NullIfWhiteSpace(_viewModel.SshPassword)
+                : null;
+
+            IReadOnlyList<string> privateKeys = request.Authentication.PrivateKeySecretIds.Count > 0
+                ? SplitPrivateKeys(_viewModel.SshPrivateKeyPath)
+                : Array.Empty<string>();
+
+            return ValueTask.FromResult(new SshResolvedCredentials(
+                Password: password,
+                PrivateKeyPemOrPath: privateKeys,
+                UseAgent: request.Authentication.UseAgent));
+        }
+
+        private static string? NullIfWhiteSpace(string? value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? null
+                : value.Trim();
+        }
+
+        private static IReadOnlyList<string> SplitPrivateKeys(string? rawValue)
+        {
+            if (string.IsNullOrWhiteSpace(rawValue))
+            {
+                return Array.Empty<string>();
+            }
+
+            string[] parts = rawValue.Split([',', ';', '\n'], StringSplitOptions.RemoveEmptyEntries);
+            List<string> values = new(parts.Length);
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string entry = parts[i].Trim();
+                if (!string.IsNullOrWhiteSpace(entry))
+                {
+                    values.Add(entry);
+                }
+            }
+
+            return values;
         }
     }
 

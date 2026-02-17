@@ -3,9 +3,11 @@
 // RoyalTerminal.Demo — Main window view model and command surface.
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Reactive;
 using System.Reactive.Linq;
+using RoyalTerminal.Terminal;
 using ReactiveUI;
 
 namespace RoyalTerminal.Demo.ViewModels;
@@ -24,8 +26,53 @@ public sealed class MainWindowViewModel : ReactiveObject
     private string _dimensionsText = "80x24";
     private string _modeButtonText = "Rendered";
 
+    private IReadOnlyList<ShellProfileOption> _shellProfiles =
+    [
+        new ShellProfileOption("default", "Default shell", string.Empty),
+    ];
+    private ShellProfileOption? _selectedShellProfile;
+
+    private readonly IReadOnlyList<TransportModeOption> _transportModes;
+    private TransportModeOption _selectedTransportMode;
+
+    private readonly IReadOnlyList<SshAuthModeOption> _sshAuthModes;
+    private SshAuthModeOption _selectedSshAuthMode;
+
+    private string _workingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    private string _pipeCommandText = "echo RoyalTerminal pipe transport";
+    private bool _pipeMergeStdErrIntoStdOut = true;
+
+    private string _sshHost = "localhost";
+    private string _sshPort = "22";
+    private string _sshUsername = Environment.UserName;
+    private string _sshPassword = string.Empty;
+    private string _sshPrivateKeyPath = string.Empty;
+    private string _sshExpectedHostKeyFingerprintSha256 = string.Empty;
+    private string _sshTerminalType = "xterm-256color";
+    private string _sshInitialCommand = string.Empty;
+    private bool _sshRequestPty = true;
+
     public MainWindowViewModel()
     {
+        _transportModes =
+        [
+            new TransportModeOption(TerminalTransportIds.Pty, "PTY"),
+            new TransportModeOption(TerminalTransportIds.Pipe, "Pipe"),
+            new TransportModeOption(TerminalTransportIds.Ssh, "SSH"),
+        ];
+        _selectedTransportMode = _transportModes[0];
+
+        _sshAuthModes =
+        [
+            new SshAuthModeOption(SshAuthModeOption.PasswordModeId, "Password"),
+            new SshAuthModeOption(SshAuthModeOption.PrivateKeyModeId, "Private Key"),
+            new SshAuthModeOption(SshAuthModeOption.AgentModeId, "Agent"),
+            new SshAuthModeOption(SshAuthModeOption.PasswordAndKeyModeId, "Password + Key"),
+        ];
+        _selectedSshAuthMode = _sshAuthModes[0];
+
+        _selectedShellProfile = _shellProfiles[0];
+
         CreateNewTabInteraction = new Interaction<Unit, Unit>();
         CloseCurrentTabInteraction = new Interaction<Unit, Unit>();
         ActivateTabInteraction = new Interaction<int, Unit>();
@@ -132,13 +179,31 @@ public sealed class MainWindowViewModel : ReactiveObject
     public bool UseNativeControl
     {
         get => _useNativeControl;
-        private set => this.RaiseAndSetIfChanged(ref _useNativeControl, value);
+        private set
+        {
+            if (_useNativeControl == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _useNativeControl, value);
+            RaiseSessionConfigurationVisibilityChanged();
+        }
     }
 
     public bool UseRenderedControl
     {
         get => _useRenderedControl;
-        private set => this.RaiseAndSetIfChanged(ref _useRenderedControl, value);
+        private set
+        {
+            if (_useRenderedControl == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _useRenderedControl, value);
+            RaiseSessionConfigurationVisibilityChanged();
+        }
     }
 
     public bool UseNativeVtControl
@@ -183,6 +248,150 @@ public sealed class MainWindowViewModel : ReactiveObject
     public string RenderedBackendButtonText
         => UseTextureInterop ? "Backend: Interop (Preview)" : "Backend: CPU";
 
+    public IReadOnlyList<TransportModeOption> TransportModes => _transportModes;
+
+    public TransportModeOption SelectedTransportMode
+    {
+        get => _selectedTransportMode;
+        set
+        {
+            if (_selectedTransportMode == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _selectedTransportMode, value);
+            RaiseSessionConfigurationVisibilityChanged();
+        }
+    }
+
+    public IReadOnlyList<ShellProfileOption> ShellProfiles => _shellProfiles;
+
+    public ShellProfileOption? SelectedShellProfile
+    {
+        get => _selectedShellProfile;
+        set => this.RaiseAndSetIfChanged(ref _selectedShellProfile, value);
+    }
+
+    public bool ShowSessionTransportPicker => true;
+
+    public bool IsSessionTransportConfigEnabled => !UseRenderedControl && !UseNativeControl;
+
+    public bool ShowSessionTransportHint => !IsSessionTransportConfigEnabled;
+
+    public bool ShowLocalSessionFields => !IsSshTransportSelected;
+
+    public bool ShowSshSessionFields => IsSshTransportSelected;
+
+    public bool IsPipeTransportSelected
+        => string.Equals(SelectedTransportMode.Id, TerminalTransportIds.Pipe, StringComparison.OrdinalIgnoreCase);
+
+    public bool IsSshTransportSelected
+        => string.Equals(SelectedTransportMode.Id, TerminalTransportIds.Ssh, StringComparison.OrdinalIgnoreCase);
+
+    public string WorkingDirectory
+    {
+        get => _workingDirectory;
+        set => this.RaiseAndSetIfChanged(ref _workingDirectory, value);
+    }
+
+    public string PipeCommandText
+    {
+        get => _pipeCommandText;
+        set => this.RaiseAndSetIfChanged(ref _pipeCommandText, value);
+    }
+
+    public bool PipeMergeStdErrIntoStdOut
+    {
+        get => _pipeMergeStdErrIntoStdOut;
+        set => this.RaiseAndSetIfChanged(ref _pipeMergeStdErrIntoStdOut, value);
+    }
+
+    public IReadOnlyList<SshAuthModeOption> SshAuthModes => _sshAuthModes;
+
+    public SshAuthModeOption SelectedSshAuthMode
+    {
+        get => _selectedSshAuthMode;
+        set
+        {
+            if (_selectedSshAuthMode == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _selectedSshAuthMode, value);
+            RaiseSessionConfigurationVisibilityChanged();
+        }
+    }
+
+    public bool ShowSshPasswordField
+        => ShowSshSessionFields && (
+            string.Equals(SelectedSshAuthMode.Id, SshAuthModeOption.PasswordModeId, StringComparison.Ordinal) ||
+            string.Equals(SelectedSshAuthMode.Id, SshAuthModeOption.PasswordAndKeyModeId, StringComparison.Ordinal));
+
+    public bool ShowSshPrivateKeyField
+        => ShowSshSessionFields && (
+            string.Equals(SelectedSshAuthMode.Id, SshAuthModeOption.PrivateKeyModeId, StringComparison.Ordinal) ||
+            string.Equals(SelectedSshAuthMode.Id, SshAuthModeOption.PasswordAndKeyModeId, StringComparison.Ordinal));
+
+    public bool ShowSshAgentHint
+        => ShowSshSessionFields &&
+           string.Equals(SelectedSshAuthMode.Id, SshAuthModeOption.AgentModeId, StringComparison.Ordinal);
+
+    public string SshHost
+    {
+        get => _sshHost;
+        set => this.RaiseAndSetIfChanged(ref _sshHost, value);
+    }
+
+    public string SshPort
+    {
+        get => _sshPort;
+        set => this.RaiseAndSetIfChanged(ref _sshPort, value);
+    }
+
+    public string SshUsername
+    {
+        get => _sshUsername;
+        set => this.RaiseAndSetIfChanged(ref _sshUsername, value);
+    }
+
+    public string SshPassword
+    {
+        get => _sshPassword;
+        set => this.RaiseAndSetIfChanged(ref _sshPassword, value);
+    }
+
+    public string SshPrivateKeyPath
+    {
+        get => _sshPrivateKeyPath;
+        set => this.RaiseAndSetIfChanged(ref _sshPrivateKeyPath, value);
+    }
+
+    public string SshExpectedHostKeyFingerprintSha256
+    {
+        get => _sshExpectedHostKeyFingerprintSha256;
+        set => this.RaiseAndSetIfChanged(ref _sshExpectedHostKeyFingerprintSha256, value);
+    }
+
+    public string SshTerminalType
+    {
+        get => _sshTerminalType;
+        set => this.RaiseAndSetIfChanged(ref _sshTerminalType, value);
+    }
+
+    public string SshInitialCommand
+    {
+        get => _sshInitialCommand;
+        set => this.RaiseAndSetIfChanged(ref _sshInitialCommand, value);
+    }
+
+    public bool SshRequestPty
+    {
+        get => _sshRequestPty;
+        set => this.RaiseAndSetIfChanged(ref _sshRequestPty, value);
+    }
+
     public void SetTerminalCapabilities(bool ghosttyAvailable, bool nativeVtAvailable)
     {
         GhosttyAvailable = ghosttyAvailable;
@@ -196,6 +405,24 @@ public sealed class MainWindowViewModel : ReactiveObject
         UseNativeControl = useNativeControl;
         UseNativeVtControl = useNativeVtControl;
         UpdateModeButtonText();
+    }
+
+    public void SetShellProfiles(IReadOnlyList<ShellProfileOption> profiles)
+    {
+        IReadOnlyList<ShellProfileOption> normalizedProfiles = profiles.Count > 0
+            ? profiles
+            :
+            [
+                new ShellProfileOption("default", "Default shell", string.Empty),
+            ];
+
+        _shellProfiles = normalizedProfiles;
+        this.RaisePropertyChanged(nameof(ShellProfiles));
+
+        if (_selectedShellProfile is null || !ContainsShellProfile(normalizedProfiles, _selectedShellProfile.Id))
+        {
+            SelectedShellProfile = normalizedProfiles[0];
+        }
     }
 
     public string GetNewTabModeName()
@@ -212,12 +439,13 @@ public sealed class MainWindowViewModel : ReactiveObject
             return "Native (Ghostty Metal)";
         }
 
+        string transportName = SelectedTransportMode.DisplayName;
         if (UseNativeVtControl)
         {
-            return "Native VT (libghostty-terminal)";
+            return $"Native VT ({transportName})";
         }
 
-        return "Rendered (Custom PTY)";
+        return $"Rendered ({transportName})";
     }
 
     public void SetStatus(string text)
@@ -339,7 +567,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         }
         else
         {
-            SetStatus("Only Rendered (Custom PTY) mode is available on this platform");
+            SetStatus("Only Rendered mode is available on this platform");
             return;
         }
 
@@ -352,6 +580,33 @@ public sealed class MainWindowViewModel : ReactiveObject
             : UseNativeControl ? "Ghostty Native"
             : UseNativeVtControl ? "Native VT"
             : "Rendered";
+    }
+
+    private void RaiseSessionConfigurationVisibilityChanged()
+    {
+        this.RaisePropertyChanged(nameof(ShowSessionTransportPicker));
+        this.RaisePropertyChanged(nameof(IsSessionTransportConfigEnabled));
+        this.RaisePropertyChanged(nameof(ShowSessionTransportHint));
+        this.RaisePropertyChanged(nameof(ShowLocalSessionFields));
+        this.RaisePropertyChanged(nameof(ShowSshSessionFields));
+        this.RaisePropertyChanged(nameof(IsPipeTransportSelected));
+        this.RaisePropertyChanged(nameof(IsSshTransportSelected));
+        this.RaisePropertyChanged(nameof(ShowSshPasswordField));
+        this.RaisePropertyChanged(nameof(ShowSshPrivateKeyField));
+        this.RaisePropertyChanged(nameof(ShowSshAgentHint));
+    }
+
+    private static bool ContainsShellProfile(IReadOnlyList<ShellProfileOption> profiles, string id)
+    {
+        for (int i = 0; i < profiles.Count; i++)
+        {
+            if (string.Equals(profiles[i].Id, id, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool TryParseInt(object? value, out int result)
@@ -369,4 +624,16 @@ public sealed class MainWindowViewModel : ReactiveObject
                 return false;
         }
     }
+}
+
+public sealed record TransportModeOption(string Id, string DisplayName);
+
+public sealed record ShellProfileOption(string Id, string DisplayName, string CommandPath);
+
+public sealed record SshAuthModeOption(string Id, string DisplayName)
+{
+    public const string PasswordModeId = "password";
+    public const string PrivateKeyModeId = "private-key";
+    public const string AgentModeId = "agent";
+    public const string PasswordAndKeyModeId = "password-key";
 }
