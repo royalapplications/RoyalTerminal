@@ -1,8 +1,8 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Avalonia — VT processor abstraction.
+// RoyalTerminal.Terminal — VT processor abstraction.
 
-namespace RoyalTerminal.Avalonia.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// Abstraction over a VT sequence processor that translates raw terminal output
@@ -31,11 +31,22 @@ public interface IVtProcessor : IDisposable
     /// <summary>Whether application cursor key mode is active (DECCKM mode 1).</summary>
     bool ApplicationCursorKeys { get; }
 
+    /// <summary>Whether application keypad mode is active.</summary>
+    bool ApplicationKeypad { get; }
+
     /// <summary>Whether the alternate screen buffer is active.</summary>
     bool AlternateScreen { get; }
 
     /// <summary>Whether bracketed paste mode is active.</summary>
     bool BracketedPaste { get; }
+
+    /// <summary>Current snapshot of VT mode flags.</summary>
+    TerminalModeState ModeState { get; }
+
+    /// <summary>
+    /// Raised when VT mode flags change.
+    /// </summary>
+    event EventHandler<TerminalModeState>? ModeChanged;
 
     /// <summary>
     /// Processes a span of raw terminal output bytes, updating internal state

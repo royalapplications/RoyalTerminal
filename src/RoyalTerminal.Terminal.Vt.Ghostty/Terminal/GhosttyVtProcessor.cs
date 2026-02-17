@@ -1,6 +1,6 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Avalonia — VT processor using Ghostty's native terminal via libghostty-terminal.
+// RoyalTerminal.Terminal — VT processor using Ghostty's native terminal via libghostty-terminal.
 
 using System.Buffers;
 using System.Runtime.InteropServices;
@@ -8,7 +8,7 @@ using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.GhosttySharp.Native;
 
-namespace RoyalTerminal.Avalonia.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// VT processor that wraps Ghostty's native terminal via the libghostty-terminal C API.
@@ -32,6 +32,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor
     private int _cursorRow;
     private bool _cursorVisible = true;
     private bool _applicationCursorKeys;
+    private bool _applicationKeypad;
+    private bool _alternateScreen;
+    private bool _bracketedPaste;
 
     /// <summary>
     /// Prevent the native callback delegates from being garbage collected.
@@ -52,12 +55,24 @@ public sealed class GhosttyVtProcessor : IVtProcessor
     public bool ApplicationCursorKeys => _applicationCursorKeys;
 
     /// <inheritdoc />
-    public bool AlternateScreen =>
-        _terminal != nint.Zero && GhosttyTerminalNative.TerminalGetModeAltScreen(_terminal) != 0;
+    public bool ApplicationKeypad => _applicationKeypad;
 
     /// <inheritdoc />
-    public bool BracketedPaste =>
-        _terminal != nint.Zero && GhosttyTerminalNative.TerminalGetModeBracketedPaste(_terminal) != 0;
+    public bool AlternateScreen => _alternateScreen;
+
+    /// <inheritdoc />
+    public bool BracketedPaste => _bracketedPaste;
+
+    /// <inheritdoc />
+    public TerminalModeState ModeState => new(
+        CursorVisible,
+        ApplicationCursorKeys,
+        ApplicationKeypad,
+        AlternateScreen,
+        BracketedPaste);
+
+    /// <inheritdoc />
+    public event EventHandler<TerminalModeState>? ModeChanged;
 
     /// <inheritdoc />
     public Action<byte[]>? ResponseCallback { get; set; }
@@ -105,6 +120,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor
 
         // Set up the native notification callback — bell and title change events
         SetupNativeNotificationCallback();
+
+        RefreshStateFromNative();
     }
 
     /// <summary>
@@ -141,6 +158,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor
         if (data.IsEmpty || _terminal == nint.Zero)
             return;
 
+        TerminalModeState before = ModeState;
+
         // Feed raw VT data into the native terminal.
         // The native interactive stream handler will:
         //   1. Process state-modifying sequences (SGR, cursor moves, etc.)
@@ -151,14 +170,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor
             GhosttyTerminalNative.TerminalProcess(_terminal, ptr, (nuint)data.Length);
         }
 
-        // Update cursor state from native terminal
-        GhosttyTerminalNative.TerminalGetCursor(_terminal, out var cursor);
-        _cursorCol = (int)cursor.Col;
-        _cursorRow = (int)cursor.Row;
-        _cursorVisible = cursor.Visible != 0;
-
-        // Update mode flags
-        _applicationCursorKeys = GhosttyTerminalNative.TerminalGetModeAppCursor(_terminal) != 0;
+        RefreshStateFromNative();
+        RaiseModeChangedIfNeeded(before);
 
         // Sync native terminal state back into the TerminalScreen for rendering
         SyncScreenFromNative();
@@ -233,6 +246,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor
 
         // Sync the reflowed native state into the managed screen immediately
         // so the renderer always sees consistent data after resize.
+        RefreshStateFromNative();
         SyncScreenFromNative();
     }
 
@@ -248,6 +262,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor
             _terminal, (uint)columns, (uint)rows, (uint)widthPx, (uint)heightPx);
 
         // Sync the reflowed native state into the managed screen immediately.
+        RefreshStateFromNative();
         SyncScreenFromNative();
     }
 
@@ -255,6 +270,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor
     public void Reset()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        TerminalModeState before = ModeState;
 
         // Recreate the native terminal (no reset API exposed)
         if (_terminal != nint.Zero)
@@ -270,18 +286,52 @@ public sealed class GhosttyVtProcessor : IVtProcessor
         // Re-establish the native callbacks on the new terminal
         if (_terminal != nint.Zero)
         {
+            GhosttyTerminalNative.TerminalSetDefaultColors(
+                _terminal, _screen.DefaultForeground, _screen.DefaultBackground);
+            SetXtermPalette(_terminal);
             SetupNativeResponseCallback();
             SetupNativeNotificationCallback();
         }
 
-        _cursorCol = 0;
-        _cursorRow = 0;
-        _cursorVisible = true;
-        _applicationCursorKeys = false;
-
         // Clear the screen
         for (var r = 0; r < _screen.ViewportRows; r++)
             _screen.GetViewportRow(r).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+
+        RefreshStateFromNative();
+        RaiseModeChangedIfNeeded(before);
+    }
+
+    private void RefreshStateFromNative()
+    {
+        if (_terminal == nint.Zero)
+        {
+            _cursorCol = 0;
+            _cursorRow = 0;
+            _cursorVisible = true;
+            _applicationCursorKeys = false;
+            _applicationKeypad = false;
+            _alternateScreen = false;
+            _bracketedPaste = false;
+            return;
+        }
+
+        GhosttyTerminalNative.TerminalGetCursor(_terminal, out var cursor);
+        _cursorCol = (int)cursor.Col;
+        _cursorRow = (int)cursor.Row;
+        _cursorVisible = cursor.Visible != 0;
+        _applicationCursorKeys = GhosttyTerminalNative.TerminalGetModeAppCursor(_terminal) != 0;
+        _applicationKeypad = GhosttyTerminalNative.TerminalGetModeAppKeypad(_terminal) != 0;
+        _alternateScreen = GhosttyTerminalNative.TerminalGetModeAltScreen(_terminal) != 0;
+        _bracketedPaste = GhosttyTerminalNative.TerminalGetModeBracketedPaste(_terminal) != 0;
+    }
+
+    private void RaiseModeChangedIfNeeded(TerminalModeState before)
+    {
+        TerminalModeState current = ModeState;
+        if (before != current)
+        {
+            ModeChanged?.Invoke(this, current);
+        }
     }
 
     /// <summary>
@@ -508,5 +558,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor
             GhosttyTerminalNative.TerminalFree(_terminal);
             _terminal = nint.Zero;
         }
+
+        RefreshStateFromNative();
     }
 }

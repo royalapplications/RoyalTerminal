@@ -1,6 +1,6 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Avalonia — VT sequence processor for standalone/demo mode.
+// RoyalTerminal.Terminal — VT sequence processor for standalone/demo mode.
 // Processes raw terminal output bytes into the TerminalScreen cell grid.
 // Supports: printable characters, cursor movement, SGR colors (256 + truecolor),
 // scrolling, scroll regions (DECSTBM), alternate screen buffer, DEC private modes,
@@ -10,7 +10,7 @@ using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Unicode;
 using System.Text;
 
-namespace RoyalTerminal.Avalonia.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// VT100/xterm escape sequence processor that writes terminal data directly
@@ -36,6 +36,7 @@ public sealed class BasicVtProcessor : IVtProcessor
     private int _currentParam;
     private bool _hasParam;
     private char _intermediateChar;
+    private readonly List<byte> _oscBuffer = [];
 
     // Saved cursor state (for DECSC/DECRC — ESC 7 / ESC 8)
     private int _savedCursorCol;
@@ -66,6 +67,7 @@ public sealed class BasicVtProcessor : IVtProcessor
     private bool _cursorVisible = true; // DECTCEM (mode 25)
     private bool _originMode;          // DECOM (mode 6)
     private bool _applicationCursorKeys; // DECCKM (mode 1)
+    private bool _applicationKeypad;   // DECKPAM/DECKPNM
     private bool _bracketedPaste;      // Bracketed paste mode (mode 2004)
 
     // Tab stops
@@ -84,6 +86,7 @@ public sealed class BasicVtProcessor : IVtProcessor
         CsiParam,
         CsiIntermediate,
         OscString,
+        OscEscape,
         DcsString,
     }
 
@@ -99,11 +102,25 @@ public sealed class BasicVtProcessor : IVtProcessor
     /// <summary>Whether application cursor key mode is active.</summary>
     public bool ApplicationCursorKeys => _applicationCursorKeys;
 
+    /// <summary>Whether application keypad mode is active.</summary>
+    public bool ApplicationKeypad => _applicationKeypad;
+
     /// <summary>Whether the alternate screen buffer is active.</summary>
     public bool AlternateScreen => _inAltScreen;
 
     /// <summary>Whether bracketed paste mode is active.</summary>
     public bool BracketedPaste => _bracketedPaste;
+
+    /// <inheritdoc />
+    public TerminalModeState ModeState => new(
+        CursorVisible,
+        ApplicationCursorKeys,
+        ApplicationKeypad,
+        AlternateScreen,
+        BracketedPaste);
+
+    /// <inheritdoc />
+    public event EventHandler<TerminalModeState>? ModeChanged;
 
     /// <inheritdoc />
     public Action<byte[]>? ResponseCallback { get; set; }
@@ -135,6 +152,8 @@ public sealed class BasicVtProcessor : IVtProcessor
     /// </summary>
     public void Process(ReadOnlySpan<byte> data)
     {
+        TerminalModeState before = ModeState;
+
         for (var i = 0; i < data.Length; i++)
         {
             var b = data[i];
@@ -162,11 +181,16 @@ public sealed class BasicVtProcessor : IVtProcessor
                 case ParserState.OscString:
                     ProcessOscString(b);
                     break;
+                case ParserState.OscEscape:
+                    ProcessOscEscape(b);
+                    break;
                 case ParserState.DcsString:
                     ProcessDcsString(b);
                     break;
             }
         }
+
+        RaiseModeChangedIfNeeded(before);
     }
 
     #region Ground State
@@ -217,6 +241,7 @@ public sealed class BasicVtProcessor : IVtProcessor
                 break;
 
             case 0x07: // BEL
+                BellCallback?.Invoke();
                 break;
 
             case 0x0E: // SO — Shift Out (activate G1)
@@ -623,6 +648,7 @@ public sealed class BasicVtProcessor : IVtProcessor
 
             case (byte)']': // OSC
                 _state = ParserState.OscString;
+                _oscBuffer.Clear();
                 break;
 
             case (byte)'P': // DCS
@@ -676,12 +702,16 @@ public sealed class BasicVtProcessor : IVtProcessor
                 break;
 
             case (byte)'c': // RIS — Full reset
-                Reset();
+                ResetInternal(raiseModeChanged: false);
                 _state = ParserState.Ground;
                 break;
 
             case (byte)'=': // DECKPAM — Application keypad
+                _applicationKeypad = true;
+                _state = ParserState.Ground;
+                break;
             case (byte)'>': // DECKPNM — Normal keypad
+                _applicationKeypad = false;
                 _state = ParserState.Ground;
                 break;
 
@@ -802,10 +832,82 @@ public sealed class BasicVtProcessor : IVtProcessor
 
     private void ProcessOscString(byte b)
     {
-        if (b == 0x07) // BEL
+        if (b == 0x07) // BEL terminator
+        {
+            HandleOscString();
             _state = ParserState.Ground;
-        else if (b == 0x1B)
-            _state = ParserState.Escape; // Potential ST (ESC \)
+            return;
+        }
+
+        if (b == 0x1B) // Potential ST (ESC \)
+        {
+            _state = ParserState.OscEscape;
+            return;
+        }
+
+        _oscBuffer.Add(b);
+    }
+
+    private void ProcessOscEscape(byte b)
+    {
+        if (b == (byte)'\\')
+        {
+            HandleOscString();
+            _state = ParserState.Ground;
+            return;
+        }
+
+        // False alarm: preserve ESC as payload and continue OSC parsing.
+        _oscBuffer.Add(0x1B);
+
+        if (b == 0x1B)
+        {
+            _state = ParserState.OscEscape;
+            return;
+        }
+
+        if (b == 0x07)
+        {
+            HandleOscString();
+            _state = ParserState.Ground;
+            return;
+        }
+
+        _oscBuffer.Add(b);
+        _state = ParserState.OscString;
+    }
+
+    private void HandleOscString()
+    {
+        if (_oscBuffer.Count == 0)
+        {
+            return;
+        }
+
+        string oscPayload = Encoding.UTF8.GetString(_oscBuffer.ToArray());
+        _oscBuffer.Clear();
+
+        int separator = oscPayload.IndexOf(';');
+        if (separator < 0)
+        {
+            return;
+        }
+
+        ReadOnlySpan<char> selector = oscPayload.AsSpan(0, separator);
+        bool isTitleSelector =
+            selector.SequenceEqual("0".AsSpan()) ||
+            selector.SequenceEqual("1".AsSpan()) ||
+            selector.SequenceEqual("2".AsSpan());
+
+        if (!isTitleSelector)
+        {
+            return;
+        }
+
+        string title = separator + 1 < oscPayload.Length
+            ? oscPayload[(separator + 1)..]
+            : string.Empty;
+        TitleCallback?.Invoke(title);
     }
 
     private void ProcessDcsString(byte b)
@@ -1539,6 +1641,7 @@ public sealed class BasicVtProcessor : IVtProcessor
         _originMode = false;
         _autoWrap = true;
         _applicationCursorKeys = false;
+        _applicationKeypad = false;
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
         _useLineDrawing = false;
@@ -1647,10 +1750,18 @@ public sealed class BasicVtProcessor : IVtProcessor
     /// </summary>
     public void Reset()
     {
+        ResetInternal(raiseModeChanged: true);
+    }
+
+    private void ResetInternal(bool raiseModeChanged)
+    {
+        TerminalModeState before = ModeState;
+
         _cursorCol = 0;
         _cursorRow = 0;
         _state = ParserState.Ground;
         _params.Clear();
+        _oscBuffer.Clear();
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
         _inAltScreen = false;
@@ -1659,6 +1770,7 @@ public sealed class BasicVtProcessor : IVtProcessor
         _cursorVisible = true;
         _originMode = false;
         _applicationCursorKeys = false;
+        _applicationKeypad = false;
         _bracketedPaste = false;
         _useLineDrawing = false;
         _g0IsLineDrawing = false;
@@ -1669,6 +1781,11 @@ public sealed class BasicVtProcessor : IVtProcessor
 
         for (var r = 0; r < _screen.ViewportRows; r++)
             _screen.GetViewportRow(r).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+
+        if (raiseModeChanged)
+        {
+            RaiseModeChangedIfNeeded(before);
+        }
     }
 
     /// <summary>
@@ -1701,5 +1818,14 @@ public sealed class BasicVtProcessor : IVtProcessor
     public void Dispose()
     {
         // No unmanaged resources to release.
+    }
+
+    private void RaiseModeChangedIfNeeded(TerminalModeState before)
+    {
+        TerminalModeState current = ModeState;
+        if (before != current)
+        {
+            ModeChanged?.Invoke(this, current);
+        }
     }
 }

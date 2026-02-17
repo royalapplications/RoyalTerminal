@@ -1,10 +1,10 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Avalonia — Factory abstraction for VT processors.
+// RoyalTerminal.Terminal — Factory abstraction for VT processors.
 
 using RoyalTerminal.Avalonia.Rendering;
 
-namespace RoyalTerminal.Avalonia.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// Factory for creating terminal VT processors.
@@ -15,10 +15,7 @@ public interface IVtProcessorFactory
     /// Creates a VT processor for the provided screen.
     /// </summary>
     /// <param name="screen">Terminal screen model.</param>
-    /// <param name="useNativeVtProcessor">
-    /// Explicit processor preference:
-    /// <c>true</c> = require native, <c>false</c> = force managed fallback, <c>null</c> = auto-detect.
-    /// </param>
+    /// <param name="preference">Explicit processor preference.</param>
     /// <returns>A configured VT processor instance.</returns>
-    IVtProcessor Create(TerminalScreen screen, bool? useNativeVtProcessor);
+    IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference);
 }

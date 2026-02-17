@@ -4,7 +4,7 @@
 
 using RoyalTerminal.Avalonia.Rendering;
 
-namespace RoyalTerminal.Avalonia.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// Provides an optional native VT processor implementation.
