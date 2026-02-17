@@ -69,7 +69,8 @@ public interface ITerminalSessionService
         Action<int> onPtyProcessExited,
         Action<byte[]> onVtResponse,
         Action onVtBell,
-        Action<string> onVtTitleChanged);
+        Action<string> onVtTitleChanged,
+        IReadOnlyList<string>? arguments = null);
 
     /// <summary>
     /// Starts a transport-backed terminal session and wires event/callback handlers.
