@@ -19,13 +19,14 @@ public sealed class PtyTerminalTransportTests
 
         await transport.StartAsync(
             new PtyTransportOptions(
-                Command: new TerminalCommandSpec("/bin/custom-shell", Array.Empty<string>()),
+                Command: new TerminalCommandSpec("/bin/custom-shell", ["--login", "-i"]),
                 WorkingDirectory: "/tmp",
                 Environment: new Dictionary<string, string> { ["A"] = "B" },
                 Dimensions: new TerminalSessionDimensions(120, 40, 1200, 800)));
 
         Assert.True(pty.StartCalled);
         Assert.Equal("/bin/custom-shell", pty.StartShell);
+        Assert.Equal(["--login", "-i"], pty.StartArguments);
         Assert.Equal(120, pty.StartColumns);
         Assert.Equal(40, pty.StartRows);
         Assert.Equal("/tmp", pty.StartWorkingDirectory);
@@ -38,7 +39,7 @@ public sealed class PtyTerminalTransportTests
     {
         FakePty pty = new();
         FakePtyFactory ptyFactory = new(pty);
-        StaticShellProfileCatalog shellCatalog = new("/bin/default-shell");
+        StaticShellProfileCatalog shellCatalog = new("/bin/default-shell", ["-l"]);
         PtyTerminalTransport transport = new(ptyFactory, shellCatalog);
 
         await transport.StartAsync(
@@ -49,6 +50,28 @@ public sealed class PtyTerminalTransportTests
                 Dimensions: new TerminalSessionDimensions(80, 24, 640, 480)));
 
         Assert.Equal("/bin/default-shell", pty.StartShell);
+        Assert.Equal(["-l"], pty.StartArguments);
+
+        await transport.StopAsync();
+    }
+
+    [Fact]
+    public async Task StartAsync_UsesCatalogDefaultExecutable_WhenOnlyArgumentsAreProvided()
+    {
+        FakePty pty = new();
+        FakePtyFactory ptyFactory = new(pty);
+        StaticShellProfileCatalog shellCatalog = new("/bin/default-shell", ["-l"]);
+        PtyTerminalTransport transport = new(ptyFactory, shellCatalog);
+
+        await transport.StartAsync(
+            new PtyTransportOptions(
+                Command: new TerminalCommandSpec(string.Empty, ["-i", "-c", "echo ready"]),
+                WorkingDirectory: null,
+                Environment: null,
+                Dimensions: new TerminalSessionDimensions(80, 24, 640, 480)));
+
+        Assert.Equal("/bin/default-shell", pty.StartShell);
+        Assert.Equal(["-i", "-c", "echo ready"], pty.StartArguments);
 
         await transport.StopAsync();
     }
@@ -99,12 +122,12 @@ public sealed class PtyTerminalTransportTests
     {
         private readonly ShellProfile _default;
 
-        public StaticShellProfileCatalog(string shellPath)
+        public StaticShellProfileCatalog(string shellPath, IReadOnlyList<string>? arguments = null)
         {
             _default = new ShellProfile(
                 "default",
                 "Default",
-                new TerminalCommandSpec(shellPath, Array.Empty<string>()));
+                new TerminalCommandSpec(shellPath, arguments ?? Array.Empty<string>()));
         }
 
         public IReadOnlyList<ShellProfile> GetProfiles()
@@ -128,6 +151,7 @@ public sealed class PtyTerminalTransportTests
 
         public bool StartCalled { get; private set; }
         public string? StartShell { get; private set; }
+        public IReadOnlyList<string> StartArguments { get; private set; } = Array.Empty<string>();
         public int StartColumns { get; private set; }
         public int StartRows { get; private set; }
         public string? StartWorkingDirectory { get; private set; }
@@ -144,12 +168,14 @@ public sealed class PtyTerminalTransportTests
             int columns = 80,
             int rows = 24,
             string? workingDirectory = null,
-            Dictionary<string, string>? environment = null)
+            Dictionary<string, string>? environment = null,
+            IReadOnlyList<string>? arguments = null)
         {
             _ = environment;
 
             StartCalled = true;
             StartShell = shell;
+            StartArguments = arguments ?? Array.Empty<string>();
             StartColumns = columns;
             StartRows = rows;
             StartWorkingDirectory = workingDirectory;

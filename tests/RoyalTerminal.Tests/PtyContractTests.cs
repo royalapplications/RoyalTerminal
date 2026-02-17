@@ -11,6 +11,12 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
+[CollectionDefinition("PtyContractTests", DisableParallelization = true)]
+public sealed class PtyContractTestCollection
+{
+}
+
+[Collection("PtyContractTests")]
 public class PtyContractTests
 {
     [Fact]
@@ -80,6 +86,52 @@ public class PtyContractTests
     }
 
     [Fact]
+    public void UnixPty_StartWithArguments_ExecutesCommand()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        using UnixPty pty = new();
+        using ManualResetEventSlim sawMarker = new(false);
+        using ManualResetEventSlim sawExit = new(false);
+        StringBuilder output = new();
+        string marker = "__ROYALTERMINAL_UNIX_PTY_ARGS__";
+
+        pty.DataReceived += (data, length) =>
+        {
+            string text = Encoding.UTF8.GetString(data, 0, length);
+            lock (output)
+            {
+                output.Append(text);
+                if (output.ToString().Contains(marker, StringComparison.Ordinal))
+                {
+                    sawMarker.Set();
+                }
+            }
+        };
+
+        pty.ProcessExited += _ => sawExit.Set();
+
+        pty.Start(
+            shell: "/bin/sh",
+            columns: 80,
+            rows: 24,
+            workingDirectory: Environment.CurrentDirectory,
+            arguments:
+            [
+                "-lc",
+                $"i=0; while [ $i -lt 5 ]; do printf '{marker}\\n'; i=$((i+1)); sleep 0.2; done",
+            ]);
+
+        Assert.True(
+            sawMarker.Wait(TimeSpan.FromSeconds(10)),
+            $"Did not observe argument-driven command output. Current output: {output}");
+        Assert.True(sawExit.Wait(TimeSpan.FromSeconds(10)), "PTY child did not exit after argument-driven command.");
+    }
+
+    [Fact]
     public void WindowsPty_StartWriteReadExit_Contract()
     {
         if (!OperatingSystem.IsWindows())
@@ -113,6 +165,52 @@ public class PtyContractTests
             $"Did not observe PTY marker in output. Current output: {output}");
         pty.Stop();
         Assert.False(pty.IsRunning);
+    }
+
+    [Fact]
+    public void WindowsPty_StartWithArguments_ExecutesCommand()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using WindowsPty pty = new();
+        using ManualResetEventSlim sawMarker = new(false);
+        using ManualResetEventSlim sawExit = new(false);
+        StringBuilder output = new();
+        string marker = "__ROYALTERMINAL_WINDOWS_PTY_ARGS__";
+
+        pty.DataReceived += (data, length) =>
+        {
+            string text = Encoding.UTF8.GetString(data, 0, length);
+            lock (output)
+            {
+                output.Append(text);
+                if (output.ToString().Contains(marker, StringComparison.Ordinal))
+                {
+                    sawMarker.Set();
+                }
+            }
+        };
+
+        pty.ProcessExited += _ => sawExit.Set();
+
+        pty.Start(
+            shell: "cmd.exe",
+            columns: 80,
+            rows: 24,
+            workingDirectory: Environment.CurrentDirectory,
+            arguments:
+            [
+                "/c",
+                $"echo {marker}",
+            ]);
+
+        Assert.True(
+            sawMarker.Wait(TimeSpan.FromSeconds(10)),
+            $"Did not observe argument-driven command output. Current output: {output}");
+        Assert.True(sawExit.Wait(TimeSpan.FromSeconds(10)), "PTY child did not exit after argument-driven command.");
     }
 
     [Fact]
