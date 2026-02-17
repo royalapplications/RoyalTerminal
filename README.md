@@ -759,6 +759,43 @@ dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.
 # ROYALTERMINAL_IT_SSH_PRIVATE_KEY can contain either a PEM payload or a private-key file path.
 ```
 
+### Ncurses Harness (Manual Mouse/Keyboard/Resize Validation)
+
+The ncurses harness fixture lives at:
+
+`tests/RoyalTerminal.Tests/Fixtures/NcursesHarness.py`
+
+Important: it **requires** `RT_HARNESS_LOG`. If this variable is missing, the script exits immediately.
+
+Run it manually:
+
+```bash
+RT_HARNESS_LOG=/tmp/rt-harness.log \
+RT_HARNESS_TIMEOUT_SEC=300 \
+TERM=xterm-256color \
+python3 tests/RoyalTerminal.Tests/Fixtures/NcursesHarness.py
+```
+
+While it is running:
+
+- Press keys (logs `KEY ...`)
+- Click/scroll in the terminal viewport (logs `MOUSE ...`)
+- Resize window (logs `RESIZE ...`)
+- Press `q` to quit (logs `EXIT quit`)
+
+Watch events from another terminal:
+
+```bash
+tail -f /tmp/rt-harness.log
+```
+
+If a previous app (for example `mc`) is suspended, resume/terminate it before running the harness:
+
+```bash
+jobs
+fg %1   # or: kill %1
+```
+
 Current baseline in this repository:
 
 - Unit tests: 369 passed

@@ -5,6 +5,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Rendering.Composition;
+using Avalonia.Media;
 using RoyalTerminal.Avalonia.Rendering;
 
 namespace RoyalTerminal.Avalonia.Controls;
@@ -58,6 +59,15 @@ public class TerminalPresenter : Control
             InitializeComposition();
         UpdateVisualSize();
         return base.ArrangeOverride(finalSize);
+    }
+
+    public override void Render(DrawingContext context)
+    {
+        base.Render(context);
+
+        // Composition visuals are rendered out-of-band; draw a transparent rect
+        // so Avalonia hit-testing has a concrete surface for pointer targeting.
+        context.FillRectangle(Brushes.Transparent, new Rect(Bounds.Size));
     }
 
     private void UpdateVisualSize()
