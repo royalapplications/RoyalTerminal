@@ -29,7 +29,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
             return inputSink.SendKey(keyEvent);
         }
 
-        if (sessionService.Pty is not null)
+        if (sessionService.HasActiveTransport || sessionService.HasPty)
         {
             string? sequence = KeyToAnsiSequence(
                 e.Key,
@@ -37,7 +37,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
                 vtProcessor?.ApplicationCursorKeys ?? false);
             if (sequence is not null)
             {
-                sessionService.Pty.Write(sequence);
+                sessionService.SendInput(sequence);
                 return true;
             }
         }
@@ -78,13 +78,8 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
             return inputSink.SendText(e.Text);
         }
 
-        if (sessionService.Pty is not null)
-        {
-            sessionService.Pty.Write(e.Text);
-            return true;
-        }
-
-        return false;
+        sessionService.SendInput(e.Text);
+        return sessionService.HasActiveTransport || sessionService.HasPty;
     }
 
     private static TerminalModifiers ConvertTerminalModifiers(KeyModifiers keyModifiers)
