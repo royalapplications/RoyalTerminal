@@ -133,11 +133,6 @@ internal static partial class Program
                 continue;
             }
 
-            if (TryParseLegacyPayloadWithoutPrefix(buffer, ref index, logger))
-            {
-                continue;
-            }
-
             byte b = buffer[index++];
             logger.Log($"KEY code={b}");
             if (b is (byte)'q' or (byte)'Q')
@@ -155,36 +150,6 @@ internal static partial class Program
         return shouldExit;
     }
 
-    private static bool TryParseLegacyPayloadWithoutPrefix(List<byte> buffer, ref int index, HarnessLogger logger)
-    {
-        if (buffer.Count - index < 3)
-        {
-            return false;
-        }
-
-        byte cbEncoded = buffer[index];
-        byte colEncoded = buffer[index + 1];
-        byte rowEncoded = buffer[index + 2];
-
-        // Some canonical TTY paths can strip the ESC [ M introducer and leave
-        // only the legacy xterm payload bytes. Parse those triplets as default
-        // mouse events so integration tests can still validate end-to-end.
-        if (cbEncoded < 32 || cbEncoded > 96)
-        {
-            return false;
-        }
-
-        if (colEncoded < 33 || rowEncoded < 33)
-        {
-            return false;
-        }
-
-        logger.Log(
-            $"MOUSE encoding=default cb={cbEncoded - 32} col={colEncoded - 32} row={rowEncoded - 32}");
-        index += 3;
-        return true;
-    }
-
     private static bool TryParseEscape(List<byte> buffer, ref int index, HarnessLogger logger)
     {
         if (buffer.Count - index < 2)
@@ -196,6 +161,11 @@ internal static partial class Program
         {
             index += 2;
             return true;
+        }
+
+        if (buffer.Count - index < 3)
+        {
+            return false;
         }
 
         if (buffer[index + 2] == (byte)'M')
