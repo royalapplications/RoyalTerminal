@@ -212,6 +212,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public ITerminalTransportFactory TerminalTransportFactory { get; }
 
     /// <summary>
+    /// Gets or sets the safety policy applied to clipboard paste operations.
+    /// </summary>
+    public TerminalPasteSafetyPolicy PasteSafetyPolicy { get; set; } = TerminalPasteSafetyPolicy.None;
+
+    /// <summary>
+    /// Gets or sets an optional callback used to decide unsafe paste handling.
+    /// Used only when <see cref="PasteSafetyPolicy"/> is set to
+    /// <see cref="TerminalPasteSafetyPolicy.ConfirmUnsafe"/>.
+    /// </summary>
+    public TerminalUnsafePasteHandler? UnsafePasteHandler { get; set; }
+
+    /// <summary>
     /// Gets the SSH credential provider used by the default SSH transport provider.
     /// </summary>
     public ISshCredentialProvider SshCredentialProvider { get; }
@@ -1232,7 +1244,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public async Task PasteAsync()
     {
-        await TerminalSelectionService.PasteAsync(this, SendInput);
+        bool bracketedPaste = IsBracketedPasteActiveForInput();
+        TerminalPasteRequest request = new(
+            BracketedPasteEnabled: bracketedPaste,
+            SafetyPolicy: PasteSafetyPolicy,
+            UnsafePasteHandler: UnsafePasteHandler);
+        await TerminalSelectionService.PasteAsync(this, SendInput, request);
     }
 
     /// <summary>
@@ -1479,6 +1496,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         return TerminalSessionService.InputSink is not null
             || HasTransportOrDirectPtyInputPath();
+    }
+
+    private bool IsBracketedPasteActiveForInput()
+    {
+        ITerminalModeSource? modeSource = TerminalSessionService.ModeSource;
+        if (modeSource is not null)
+        {
+            return modeSource.ModeState.BracketedPaste;
+        }
+
+        return _vtProcessor?.BracketedPaste ?? false;
     }
 
     private bool HasTransportOrDirectPtyInputPath()

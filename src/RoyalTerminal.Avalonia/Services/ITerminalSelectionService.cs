@@ -29,6 +29,17 @@ public interface ITerminalSelectionService
     Task PasteAsync(Control owner, Action<string> sendInput);
 
     /// <summary>
+    /// Pastes clipboard text using the provided send-input callback and explicit paste options.
+    /// Custom implementations that only support legacy behavior can implement
+    /// <see cref="PasteAsync(Control, Action{string})"/> and rely on this default forwarding.
+    /// </summary>
+    Task PasteAsync(Control owner, Action<string> sendInput, TerminalPasteRequest request)
+    {
+        _ = request;
+        return PasteAsync(owner, sendInput);
+    }
+
+    /// <summary>
     /// Clears current selection and invalidates rendering.
     /// </summary>
     void ClearSelection(

@@ -3,6 +3,7 @@
 // RoyalTerminal.Tests — Avalonia headless tests for TerminalControl.
 
 using System.Runtime.InteropServices;
+using System.Text;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input.Platform;
@@ -459,6 +460,236 @@ public class TerminalControlTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task Control_PasteAsync_ManagedVt_UsesBracketedFraming_WhenModeEnabled()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("\x1b[?2004h"u8);
+            await window.Clipboard!.SetTextAsync("echo hello");
+            transport.SentInputs.Clear();
+
+            await control.PasteAsync();
+
+            Assert.Contains(
+                transport.SentInputs,
+                static payload => Encoding.UTF8.GetString(payload) == "\x1b[200~echo hello\x1b[201~");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_PasteAsync_DefaultPolicy_PreservesControlCharacters()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await window.Clipboard!.SetTextAsync("safe\x1b[201~\u0001text");
+            transport.SentInputs.Clear();
+
+            await control.PasteAsync();
+
+            Assert.Contains(transport.SentInputs, static payload =>
+                Encoding.UTF8.GetString(payload) == "safe\x1b[201~\u0001text");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_PasteAsync_NativeVt_UsesBracketedFraming_WhenModeEnabled()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(nativeProviders),
+            VtProcessorPreference.Native);
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("\x1b[?2004h"u8);
+            await window.Clipboard!.SetTextAsync("printf");
+            transport.SentInputs.Clear();
+
+            await control.PasteAsync();
+
+            Assert.Contains(
+                transport.SentInputs,
+                static payload => Encoding.UTF8.GetString(payload) == "\x1b[200~printf\x1b[201~");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_PasteAsync_BlockUnsafePolicy_BlocksMultilinePaste()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.PasteSafetyPolicy = TerminalPasteSafetyPolicy.BlockUnsafe;
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await window.Clipboard!.SetTextAsync("line1\nline2");
+            transport.SentInputs.Clear();
+
+            await control.PasteAsync();
+
+            Assert.Empty(transport.SentInputs);
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_PasteAsync_ConfirmUnsafePolicy_SupportsSanitizeDecision()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.PasteSafetyPolicy = TerminalPasteSafetyPolicy.ConfirmUnsafe;
+        control.UnsafePasteHandler = static _ =>
+            ValueTask.FromResult(TerminalPasteSafetyDecision.Sanitize);
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await window.Clipboard!.SetTextAsync("safe\x1b[201~\u0001text");
+            transport.SentInputs.Clear();
+
+            await control.PasteAsync();
+
+            Assert.Contains(transport.SentInputs, static payload =>
+                Encoding.UTF8.GetString(payload) == "safe[201~text");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_PasteAsync_LegacySelectionService_UsesInterfaceForwarder()
+    {
+        FakeTransport transport = new();
+        LegacySelectionService selectionService = new();
+        CompositeTerminalTransportFactory factory = new(
+            new ITerminalTransportProvider[]
+            {
+                new FakeTransportProvider(transport),
+            });
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            selectionService,
+            new DefaultTerminalScrollService(),
+            new DefaultVtProcessorFactory(),
+            new DefaultPtyFactory(),
+            new NullSshCredentialProvider(),
+            new RejectAllSshHostKeyValidator(),
+            factory);
+
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await window.Clipboard!.SetTextAsync("legacy");
+            transport.SentInputs.Clear();
+
+            await control.PasteAsync();
+
+            Assert.Equal(1, selectionService.LegacyPasteCallCount);
+            Assert.Contains(transport.SentInputs, static payload =>
+                Encoding.UTF8.GetString(payload) == "legacy");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    private static TerminalControl CreateControlWithTransport(
+        FakeTransport transport,
+        IVtProcessorFactory vtProcessorFactory,
+        VtProcessorPreference preference)
+    {
+        CompositeTerminalTransportFactory factory = new(
+            new ITerminalTransportProvider[]
+            {
+                new FakeTransportProvider(transport),
+            });
+
+        return new TerminalControl(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            vtProcessorFactory,
+            new DefaultPtyFactory(),
+            new NullSshCredentialProvider(),
+            new RejectAllSshHostKeyValidator(),
+            factory)
+        {
+            VtProcessorPreference = preference,
+        };
+    }
+
     private static uint ColorToArgb(Color c) =>
         ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
 
@@ -562,6 +793,50 @@ public class TerminalControlTests
         }
     }
 
+    private sealed class LegacySelectionService : ITerminalSelectionService
+    {
+        public int LegacyPasteCallCount { get; private set; }
+
+        public Task CopySelectionAsync(
+            Control owner,
+            ITerminalSessionService sessionService,
+            TerminalScreen? screen,
+            SkiaTerminalRenderer? renderer)
+        {
+            _ = owner;
+            _ = sessionService;
+            _ = screen;
+            _ = renderer;
+            return Task.CompletedTask;
+        }
+
+        public async Task PasteAsync(Control owner, Action<string> sendInput)
+        {
+            LegacyPasteCallCount++;
+            var clipboard = TopLevel.GetTopLevel(owner)?.Clipboard;
+            if (clipboard is null)
+            {
+                return;
+            }
+
+            string? text = await clipboard.TryGetTextAsync();
+            if (!string.IsNullOrEmpty(text))
+            {
+                sendInput(text);
+            }
+        }
+
+        public void ClearSelection(
+            TerminalScreen? screen,
+            SkiaTerminalRenderer? renderer,
+            TerminalPresenter? presenter)
+        {
+            _ = screen;
+            _ = renderer;
+            _ = presenter;
+        }
+    }
+
     private sealed record FakeTransportOptions(string TransportId) : ITerminalTransportOptions
     {
         public TerminalSessionDimensions Dimensions => new(80, 24, 640, 480);
@@ -608,6 +883,7 @@ public class TerminalControlTests
 
         public bool IsRunning { get; private set; }
         public bool StopCalled { get; private set; }
+        public List<byte[]> SentInputs { get; } = [];
 
         public ValueTask StartAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
         {
@@ -620,6 +896,7 @@ public class TerminalControlTests
         public void SendInput(ReadOnlySpan<byte> utf8)
         {
             byte[] data = utf8.ToArray();
+            SentInputs.Add(data);
             _dataReceived?.Invoke(data, data.Length);
         }
 
