@@ -2,17 +2,27 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Terminal.Services — Default terminal session service.
 
-using RoyalTerminal.Avalonia.Terminal;
+using System.Text;
+using RoyalTerminal.Terminal;
 
 namespace RoyalTerminal.Terminal.Services;
 
 /// <summary>
-/// Default terminal session manager for Ghostty surface and standalone PTY modes.
+/// Default terminal session manager for endpoint-attached and standalone PTY modes.
 /// </summary>
 public sealed class TerminalSessionService : ITerminalSessionService
 {
     /// <inheritdoc />
-    public ITerminalSurface? Surface { get; private set; }
+    public ITerminalEndpoint? Endpoint { get; private set; }
+
+    /// <inheritdoc />
+    public ITerminalInputSink? InputSink { get; private set; }
+
+    /// <inheritdoc />
+    public ITerminalSelectionSource? SelectionSource { get; private set; }
+
+    /// <inheritdoc />
+    public ITerminalModeSource? ModeSource { get; private set; }
 
     /// <inheritdoc />
     public IPty? Pty { get; private set; }
@@ -21,25 +31,36 @@ public sealed class TerminalSessionService : ITerminalSessionService
     public bool HasPty => Pty is not null;
 
     /// <inheritdoc />
-    public void AttachSurface(ITerminalSurface surface)
+    public void AttachEndpoint(ITerminalEndpoint endpoint)
     {
-        ArgumentNullException.ThrowIfNull(surface);
-        DetachSurface();
-        Surface = surface;
+        ArgumentNullException.ThrowIfNull(endpoint);
+
+        DetachEndpoint();
+        Endpoint = endpoint;
+        InputSink = endpoint as ITerminalInputSink;
+        SelectionSource = endpoint as ITerminalSelectionSource;
+        ModeSource = endpoint as ITerminalModeSource;
     }
 
     /// <inheritdoc />
-    public void DetachSurface()
+    public void DetachEndpoint()
     {
-        Surface = null;
+        Endpoint = null;
+        InputSink = null;
+        SelectionSource = null;
+        ModeSource = null;
     }
 
     /// <inheritdoc />
     public void SendInput(string text)
     {
-        if (Surface is not null)
+        if (Endpoint is not null)
         {
-            Surface.SendInput(text);
+            if (!string.IsNullOrEmpty(text))
+            {
+                Endpoint.SendText(Encoding.UTF8.GetBytes(text));
+            }
+
             return;
         }
 
@@ -49,9 +70,9 @@ public sealed class TerminalSessionService : ITerminalSessionService
     /// <inheritdoc />
     public void SendInput(ReadOnlySpan<byte> data)
     {
-        if (Surface is not null)
+        if (Endpoint is not null)
         {
-            Surface.SendInput(data);
+            Endpoint.SendText(data);
             return;
         }
 
@@ -83,6 +104,15 @@ public sealed class TerminalSessionService : ITerminalSessionService
             return;
         }
 
+        if (vtProcessor is not null)
+        {
+            // Configure callbacks before starting the PTY to handle data
+            // emitted synchronously during Start().
+            vtProcessor.ResponseCallback = onVtResponse;
+            vtProcessor.BellCallback = onVtBell;
+            vtProcessor.TitleCallback = onVtTitleChanged;
+        }
+
         IPty pty = ptyFactory.Create();
         pty.DataReceived += onPtyDataReceived;
         pty.ProcessExited += onPtyProcessExited;
@@ -96,15 +126,14 @@ public sealed class TerminalSessionService : ITerminalSessionService
         {
             pty.DataReceived -= onPtyDataReceived;
             pty.ProcessExited -= onPtyProcessExited;
+            if (vtProcessor is not null)
+            {
+                vtProcessor.ResponseCallback = null;
+                vtProcessor.BellCallback = null;
+                vtProcessor.TitleCallback = null;
+            }
             pty.Dispose();
             throw;
-        }
-
-        if (vtProcessor is not null)
-        {
-            vtProcessor.ResponseCallback = onVtResponse;
-            vtProcessor.BellCallback = onVtBell;
-            vtProcessor.TitleCallback = onVtTitleChanged;
         }
     }
 
@@ -130,8 +159,6 @@ public sealed class TerminalSessionService : ITerminalSessionService
         Pty.ProcessExited -= onPtyProcessExited;
         Pty.Dispose();
         Pty = null;
-
-        vtProcessor?.Dispose();
     }
 
     /// <inheritdoc />

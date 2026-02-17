@@ -2,7 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Terminal.Services.Contracts - Terminal session orchestration abstraction.
 
-using RoyalTerminal.Avalonia.Terminal;
+using RoyalTerminal.Terminal;
 
 namespace RoyalTerminal.Terminal.Services;
 
@@ -11,8 +11,17 @@ namespace RoyalTerminal.Terminal.Services;
 /// </summary>
 public interface ITerminalSessionService
 {
-    /// <summary>Gets the attached terminal surface endpoint, if any.</summary>
-    ITerminalSurface? Surface { get; }
+    /// <summary>Gets the attached terminal endpoint, if any.</summary>
+    ITerminalEndpoint? Endpoint { get; }
+
+    /// <summary>Gets the attached endpoint input capability, if available.</summary>
+    ITerminalInputSink? InputSink { get; }
+
+    /// <summary>Gets the attached endpoint selection capability, if available.</summary>
+    ITerminalSelectionSource? SelectionSource { get; }
+
+    /// <summary>Gets the attached endpoint mode capability, if available.</summary>
+    ITerminalModeSource? ModeSource { get; }
 
     /// <summary>Gets the active PTY, if any.</summary>
     IPty? Pty { get; }
@@ -21,14 +30,14 @@ public interface ITerminalSessionService
     bool HasPty { get; }
 
     /// <summary>
-    /// Attaches a terminal surface endpoint, replacing any existing attachment.
+    /// Attaches a terminal endpoint, replacing any existing attachment.
     /// </summary>
-    void AttachSurface(ITerminalSurface surface);
+    void AttachEndpoint(ITerminalEndpoint endpoint);
 
     /// <summary>
-    /// Detaches the current terminal surface endpoint.
+    /// Detaches the current terminal endpoint.
     /// </summary>
-    void DetachSurface();
+    void DetachEndpoint();
 
     /// <summary>
     /// Sends UTF-16 text input to the active terminal endpoint.
@@ -58,6 +67,7 @@ public interface ITerminalSessionService
 
     /// <summary>
     /// Stops the active PTY session and unwires handlers.
+    /// VT processor lifetime remains owned by the caller/control.
     /// </summary>
     void StopPty(
         IVtProcessor? vtProcessor,

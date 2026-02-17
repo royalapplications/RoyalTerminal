@@ -4,9 +4,8 @@
 
 using Avalonia.Input;
 using Avalonia.Input.TextInput;
-using RoyalTerminal.Avalonia.Terminal;
+using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
-using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.Avalonia.Services;
 
@@ -29,19 +28,4 @@ public interface ITerminalInputAdapter
     /// Handles text input for the current terminal session.
     /// </summary>
     bool HandleTextInput(TextInputEventArgs e, ITerminalSessionService sessionService);
-
-    /// <summary>
-    /// Converts Avalonia key modifiers into Ghostty modifier flags.
-    /// </summary>
-    GhosttyMods ConvertModifiers(KeyModifiers keyModifiers);
-
-    /// <summary>
-    /// Converts an Avalonia mouse button to Ghostty mouse button.
-    /// </summary>
-    GhosttyMouseButton ConvertMouseButton(MouseButton button);
-
-    /// <summary>
-    /// Resolves the pressed pointer button from Avalonia pointer properties.
-    /// </summary>
-    GhosttyMouseButton ConvertPressedMouseButton(PointerPointProperties properties);
 }

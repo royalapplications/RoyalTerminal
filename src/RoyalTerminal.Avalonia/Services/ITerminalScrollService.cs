@@ -21,7 +21,7 @@ public interface ITerminalScrollService
     void HandleOutput(
         TerminalScrollData? scrollData,
         bool autoScroll,
-        GhosttyTerminalPresenter? presenter,
+        TerminalPresenter? presenter,
         Action raiseScrollInvalidated);
 
     /// <summary>
@@ -31,7 +31,7 @@ public interface ITerminalScrollService
         int rows,
         TerminalScrollData? scrollData,
         TerminalScreen? screen,
-        GhosttyTerminalPresenter? presenter);
+        TerminalPresenter? presenter);
 
     /// <summary>
     /// Scrolls viewport to the bottom.
@@ -39,7 +39,7 @@ public interface ITerminalScrollService
     void ScrollToBottom(
         TerminalScrollData? scrollData,
         TerminalScreen? screen,
-        GhosttyTerminalPresenter? presenter);
+        TerminalPresenter? presenter);
 
     /// <summary>
     /// Handles mouse wheel input for terminal scrolling.
@@ -48,7 +48,6 @@ public interface ITerminalScrollService
         PointerWheelEventArgs e,
         VirtualizedTerminalScrollViewer? scrollViewer,
         ITerminalSessionService sessionService,
-        ITerminalInputAdapter inputAdapter,
-        GhosttyTerminalPresenter? presenter,
+        TerminalPresenter? presenter,
         Action raiseScrollInvalidated);
 }

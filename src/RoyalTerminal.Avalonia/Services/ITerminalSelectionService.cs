@@ -34,5 +34,5 @@ public interface ITerminalSelectionService
     void ClearSelection(
         TerminalScreen? screen,
         SkiaTerminalRenderer? renderer,
-        GhosttyTerminalPresenter? presenter);
+        TerminalPresenter? presenter);
 }

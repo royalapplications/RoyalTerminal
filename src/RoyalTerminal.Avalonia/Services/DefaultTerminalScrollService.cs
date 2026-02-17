@@ -6,9 +6,8 @@ using Avalonia.Input;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Scrolling;
+using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
-using RoyalTerminal.GhosttySharp;
-using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.Avalonia.Services;
 
@@ -21,7 +20,7 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
     public void HandleOutput(
         TerminalScrollData? scrollData,
         bool autoScroll,
-        GhosttyTerminalPresenter? presenter,
+        TerminalPresenter? presenter,
         Action raiseScrollInvalidated)
     {
         if (autoScroll)
@@ -38,7 +37,7 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
         int rows,
         TerminalScrollData? scrollData,
         TerminalScreen? screen,
-        GhosttyTerminalPresenter? presenter)
+        TerminalPresenter? presenter)
     {
         scrollData?.ScrollByRows(rows);
         screen?.InvalidateAll();
@@ -49,7 +48,7 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
     public void ScrollToBottom(
         TerminalScrollData? scrollData,
         TerminalScreen? screen,
-        GhosttyTerminalPresenter? presenter)
+        TerminalPresenter? presenter)
     {
         scrollData?.ScrollToBottom();
         screen?.InvalidateAll();
@@ -61,20 +60,37 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
         PointerWheelEventArgs e,
         VirtualizedTerminalScrollViewer? scrollViewer,
         ITerminalSessionService sessionService,
-        ITerminalInputAdapter inputAdapter,
-        GhosttyTerminalPresenter? presenter,
+        TerminalPresenter? presenter,
         Action raiseScrollInvalidated)
     {
         scrollViewer?.HandleWheel(e.Delta.Y);
 
-        GhosttySurface? surface = sessionService.Surface?.NativeHandle as GhosttySurface;
-        if (surface is not null)
+        ITerminalInputSink? inputSink = sessionService.InputSink;
+        if (inputSink is not null)
         {
-            GhosttyMods mods = inputAdapter.ConvertModifiers(e.KeyModifiers);
-            surface.SendMouseScroll(e.Delta.X, e.Delta.Y, (int)mods);
+            TerminalPointerEvent pointerEvent = new(
+                Kind: TerminalPointerEventKind.Scroll,
+                X: 0,
+                Y: 0,
+                Button: TerminalMouseButton.None,
+                Action: TerminalInputAction.Press,
+                Modifiers: ConvertTerminalModifiers(e.KeyModifiers),
+                DeltaX: e.Delta.X,
+                DeltaY: e.Delta.Y);
+            inputSink.SendPointer(pointerEvent);
         }
 
         presenter?.Invalidate();
         raiseScrollInvalidated();
+    }
+
+    private static TerminalModifiers ConvertTerminalModifiers(KeyModifiers keyModifiers)
+    {
+        TerminalModifiers mods = TerminalModifiers.None;
+        if (keyModifiers.HasFlag(KeyModifiers.Shift)) mods |= TerminalModifiers.Shift;
+        if (keyModifiers.HasFlag(KeyModifiers.Control)) mods |= TerminalModifiers.Control;
+        if (keyModifiers.HasFlag(KeyModifiers.Alt)) mods |= TerminalModifiers.Alt;
+        if (keyModifiers.HasFlag(KeyModifiers.Meta)) mods |= TerminalModifiers.Meta;
+        return mods;
     }
 }
