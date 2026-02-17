@@ -4,6 +4,7 @@
 
 using System.Text;
 using RoyalTerminal.Terminal;
+using RoyalTerminal.Terminal.Transport.Pty;
 
 namespace RoyalTerminal.Terminal.Services;
 
@@ -12,6 +13,8 @@ namespace RoyalTerminal.Terminal.Services;
 /// </summary>
 public sealed class TerminalSessionService : ITerminalSessionService
 {
+    private IVtProcessor? _activeVtProcessor;
+
     /// <inheritdoc />
     public ITerminalEndpoint? Endpoint { get; private set; }
 
@@ -23,6 +26,12 @@ public sealed class TerminalSessionService : ITerminalSessionService
 
     /// <inheritdoc />
     public ITerminalModeSource? ModeSource { get; private set; }
+
+    /// <inheritdoc />
+    public ITerminalTransport? Transport { get; private set; }
+
+    /// <inheritdoc />
+    public bool HasActiveTransport => Transport is { IsRunning: true };
 
     /// <inheritdoc />
     public IPty? Pty { get; private set; }
@@ -54,11 +63,30 @@ public sealed class TerminalSessionService : ITerminalSessionService
     /// <inheritdoc />
     public void SendInput(string text)
     {
+        ReleaseInactiveTransportIfNeeded();
+
         if (Endpoint is not null)
         {
             if (!string.IsNullOrEmpty(text))
             {
                 Endpoint.SendText(Encoding.UTF8.GetBytes(text));
+            }
+
+            return;
+        }
+
+        if (Transport is not null)
+        {
+            if (!string.IsNullOrEmpty(text))
+            {
+                if (Transport is ITerminalPtyTransport ptyTransport)
+                {
+                    ptyTransport.Pty.Write(text);
+                }
+                else
+                {
+                    Transport.SendInput(Encoding.UTF8.GetBytes(text));
+                }
             }
 
             return;
@@ -70,9 +98,17 @@ public sealed class TerminalSessionService : ITerminalSessionService
     /// <inheritdoc />
     public void SendInput(ReadOnlySpan<byte> data)
     {
+        ReleaseInactiveTransportIfNeeded();
+
         if (Endpoint is not null)
         {
             Endpoint.SendText(data);
+            return;
+        }
+
+        if (Transport is not null)
+        {
+            Transport.SendInput(data);
             return;
         }
 
@@ -99,40 +135,95 @@ public sealed class TerminalSessionService : ITerminalSessionService
         Action onVtBell,
         Action<string> onVtTitleChanged)
     {
-        if (Pty is not null)
+        TerminalCommandSpec? command = string.IsNullOrWhiteSpace(shell)
+            ? null
+            : new TerminalCommandSpec(shell, Array.Empty<string>());
+        TerminalSessionDimensions dimensions = new(columns, rows, WidthPixels: 0, HeightPixels: 0);
+        PtyTransportOptions transportOptions = new(
+            Command: command,
+            WorkingDirectory: workingDirectory,
+            Environment: null,
+            Dimensions: dimensions);
+
+        ITerminalTransportFactory transportFactory = new CompositeTerminalTransportFactory(
+            new ITerminalTransportProvider[]
+            {
+                new PtyTerminalTransportProvider(ptyFactory: ptyFactory),
+            });
+
+        StartSessionAsync(
+                transportFactory,
+                transportOptions,
+                vtProcessor,
+                onPtyDataReceived,
+                onPtyProcessExited,
+                onVtResponse,
+                onVtBell,
+                onVtTitleChanged)
+            .AsTask()
+            .GetAwaiter()
+            .GetResult();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask StartSessionAsync(
+        ITerminalTransportFactory transportFactory,
+        ITerminalTransportOptions transportOptions,
+        IVtProcessor? vtProcessor,
+        Action<byte[], int> onTransportDataReceived,
+        Action<int> onTransportProcessExited,
+        Action<byte[]> onVtResponse,
+        Action onVtBell,
+        Action<string> onVtTitleChanged,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transportFactory);
+        ArgumentNullException.ThrowIfNull(transportOptions);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        ReleaseInactiveTransportIfNeeded();
+
+        if (Transport is not null)
         {
-            return;
+            throw new InvalidOperationException("A terminal transport session is already active.");
         }
+
+        ITerminalTransport transport = transportFactory.Create(transportOptions);
 
         if (vtProcessor is not null)
         {
-            // Configure callbacks before starting the PTY to handle data
+            // Configure callbacks before starting the transport to handle data
             // emitted synchronously during Start().
             vtProcessor.ResponseCallback = onVtResponse;
             vtProcessor.BellCallback = onVtBell;
             vtProcessor.TitleCallback = onVtTitleChanged;
         }
 
-        IPty pty = ptyFactory.Create();
-        pty.DataReceived += onPtyDataReceived;
-        pty.ProcessExited += onPtyProcessExited;
+        _activeVtProcessor = vtProcessor;
+
+        transport.DataReceived += onTransportDataReceived;
+        transport.ProcessExited += onTransportProcessExited;
 
         try
         {
-            pty.Start(shell, columns, rows, workingDirectory);
-            Pty = pty;
+            await transport.StartAsync(transportOptions, cancellationToken).ConfigureAwait(false);
+            Transport = transport;
+            Pty = (transport as ITerminalPtyTransport)?.Pty;
         }
         catch
         {
-            pty.DataReceived -= onPtyDataReceived;
-            pty.ProcessExited -= onPtyProcessExited;
+            transport.DataReceived -= onTransportDataReceived;
+            transport.ProcessExited -= onTransportProcessExited;
             if (vtProcessor is not null)
             {
                 vtProcessor.ResponseCallback = null;
                 vtProcessor.BellCallback = null;
                 vtProcessor.TitleCallback = null;
             }
-            pty.Dispose();
+
+            _activeVtProcessor = null;
+
+            transport.Dispose();
             throw;
         }
     }
@@ -143,27 +234,95 @@ public sealed class TerminalSessionService : ITerminalSessionService
         Action<byte[], int> onPtyDataReceived,
         Action<int> onPtyProcessExited)
     {
-        if (Pty is null)
+        StopSessionAsync(vtProcessor, onPtyDataReceived, onPtyProcessExited)
+            .AsTask()
+            .GetAwaiter()
+            .GetResult();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask StopSessionAsync(
+        IVtProcessor? vtProcessor,
+        Action<byte[], int> onTransportDataReceived,
+        Action<int> onTransportProcessExited)
+    {
+        IVtProcessor? processorToClear = vtProcessor ?? _activeVtProcessor;
+
+        if (processorToClear is not null)
+        {
+            processorToClear.ResponseCallback = null;
+            processorToClear.BellCallback = null;
+            processorToClear.TitleCallback = null;
+        }
+
+        _activeVtProcessor = null;
+
+        ITerminalTransport? transport = Transport;
+        if (transport is null)
         {
             return;
         }
 
-        if (vtProcessor is not null)
-        {
-            vtProcessor.ResponseCallback = null;
-            vtProcessor.BellCallback = null;
-            vtProcessor.TitleCallback = null;
-        }
+        transport.DataReceived -= onTransportDataReceived;
+        transport.ProcessExited -= onTransportProcessExited;
 
-        Pty.DataReceived -= onPtyDataReceived;
-        Pty.ProcessExited -= onPtyProcessExited;
-        Pty.Dispose();
-        Pty = null;
+        try
+        {
+            await transport.StopAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            transport.Dispose();
+            Transport = null;
+            Pty = null;
+        }
     }
 
     /// <inheritdoc />
     public void ResizePty(int columns, int rows, int widthPixels, int heightPixels)
     {
-        Pty?.Resize(columns, rows, widthPixels, heightPixels);
+        ResizeSession(columns, rows, widthPixels, heightPixels);
+    }
+
+    /// <inheritdoc />
+    public void ResizeSession(int columns, int rows, int widthPixels, int heightPixels)
+    {
+        ReleaseInactiveTransportIfNeeded();
+
+        if (Transport is null)
+        {
+            return;
+        }
+
+        Transport.Resize(new TerminalSessionDimensions(columns, rows, widthPixels, heightPixels));
+    }
+
+    private void ReleaseInactiveTransportIfNeeded()
+    {
+        ITerminalTransport? transport = Transport;
+        if (transport is null || transport.IsRunning)
+        {
+            return;
+        }
+
+        if (_activeVtProcessor is not null)
+        {
+            _activeVtProcessor.ResponseCallback = null;
+            _activeVtProcessor.BellCallback = null;
+            _activeVtProcessor.TitleCallback = null;
+            _activeVtProcessor = null;
+        }
+
+        try
+        {
+            transport.Dispose();
+        }
+        catch
+        {
+            // Best effort cleanup for stale transports.
+        }
+
+        Transport = null;
+        Pty = null;
     }
 }

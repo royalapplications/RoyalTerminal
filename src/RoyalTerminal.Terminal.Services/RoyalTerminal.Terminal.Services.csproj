@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RoyalTerminal.Terminal.Services.Contracts\RoyalTerminal.Terminal.Services.Contracts.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Pty\RoyalTerminal.Terminal.Transport.Pty.csproj" />
   </ItemGroup>
 
 </Project>
