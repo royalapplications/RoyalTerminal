@@ -23,6 +23,12 @@ public interface ITerminalSessionService
     /// <summary>Gets the attached endpoint mode capability, if available.</summary>
     ITerminalModeSource? ModeSource { get; }
 
+    /// <summary>Gets the active terminal transport, if any.</summary>
+    ITerminalTransport? Transport { get; }
+
+    /// <summary>Whether a transport session is currently active and running.</summary>
+    bool HasActiveTransport { get; }
+
     /// <summary>Gets the active PTY, if any.</summary>
     IPty? Pty { get; }
 
@@ -66,6 +72,23 @@ public interface ITerminalSessionService
         Action<string> onVtTitleChanged);
 
     /// <summary>
+    /// Starts a transport-backed terminal session and wires event/callback handlers.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when a transport session is already active.
+    /// </exception>
+    ValueTask StartSessionAsync(
+        ITerminalTransportFactory transportFactory,
+        ITerminalTransportOptions transportOptions,
+        IVtProcessor? vtProcessor,
+        Action<byte[], int> onTransportDataReceived,
+        Action<int> onTransportProcessExited,
+        Action<byte[]> onVtResponse,
+        Action onVtBell,
+        Action<string> onVtTitleChanged,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Stops the active PTY session and unwires handlers.
     /// VT processor lifetime remains owned by the caller/control.
     /// </summary>
@@ -75,7 +98,21 @@ public interface ITerminalSessionService
         Action<int> onPtyProcessExited);
 
     /// <summary>
+    /// Stops the active transport session and unwires handlers.
+    /// VT processor lifetime remains owned by the caller/control.
+    /// </summary>
+    ValueTask StopSessionAsync(
+        IVtProcessor? vtProcessor,
+        Action<byte[], int> onTransportDataReceived,
+        Action<int> onTransportProcessExited);
+
+    /// <summary>
     /// Applies PTY size updates when a standalone PTY is active.
     /// </summary>
     void ResizePty(int columns, int rows, int widthPixels, int heightPixels);
+
+    /// <summary>
+    /// Applies session size updates for the active transport, if any.
+    /// </summary>
+    void ResizeSession(int columns, int rows, int widthPixels, int heightPixels);
 }

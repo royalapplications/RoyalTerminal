@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RoyalTerminal.Terminal.Transport.Pty</PackageId>
+    <Description>PTY terminal transport provider over platform PTY implementations.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Terminal.Pty.Platform\RoyalTerminal.Terminal.Pty.Platform.csproj" />
+  </ItemGroup>
+
+</Project>

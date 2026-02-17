@@ -14,6 +14,11 @@
     <ProjectReference Include="..\..\src\RoyalTerminal.Unicode\RoyalTerminal.Unicode.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia\RoyalTerminal.Avalonia.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia.Ghostty\RoyalTerminal.Avalonia.Ghostty.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Pty\RoyalTerminal.Terminal.Transport.Pty.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Pipe\RoyalTerminal.Terminal.Transport.Pipe.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Ssh.Abstractions\RoyalTerminal.Terminal.Transport.Ssh.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Ssh.SshNet\RoyalTerminal.Terminal.Transport.Ssh.SshNet.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent\RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent.csproj" />
     <ProjectReference Include="..\..\samples\RoyalTerminal.Demo\RoyalTerminal.Demo.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp.Native.OSX\RoyalTerminal.GhosttySharp.Native.OSX.csproj" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
     <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp.Native.Win64\RoyalTerminal.GhosttySharp.Native.Win64.csproj" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />

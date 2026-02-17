@@ -30,6 +30,11 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 | `RoyalTerminal.Terminal.Pty.Unix` | Unix PTY implementation (`forkpty`) |
 | `RoyalTerminal.Terminal.Pty.Windows` | Windows PTY implementation (ConPTY) |
 | `RoyalTerminal.Terminal.Pty.Platform` | Platform PTY factory (`DefaultPtyFactory`) |
+| `RoyalTerminal.Terminal.Transport.Pty` | PTY transport provider and wrapper (`PtyTerminalTransportProvider`) |
+| `RoyalTerminal.Terminal.Transport.Pipe` | Process pipe transport provider (`PipeTerminalTransportProvider`) |
+| `RoyalTerminal.Terminal.Transport.Ssh.Abstractions` | SSH host-key validation contracts |
+| `RoyalTerminal.Terminal.Transport.Ssh.SshNet` | SSH transport provider (`SshNetTerminalTransportProvider`) |
+| `RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent` | Optional SSH agent auth contributor for SSH.NET |
 | `RoyalTerminal.Terminal.Services.Contracts` | Terminal session service contracts |
 | `RoyalTerminal.Terminal.Services` | Terminal session service implementations |
 | `RoyalTerminal.Rendering.Text` | Reusable text shaping/fallback subsystem (`HarfBuzzTextShaper`, `TerminalFontResolver`) |
@@ -45,6 +50,8 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
   - `RoyalTerminal.Avalonia`: backend-neutral control and services.
   - `RoyalTerminal.Avalonia.Ghostty`: Ghostty-native/rendered controls and adapters.
 - **Backend-neutral endpoint contracts** (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`) for control reuse across backends.
+- **Pluggable transport runtime** (`ITerminalTransportFactory`) supporting PTY, process pipe, and SSH sessions.
+- **Pluggable SSH secret persistence** via `ISshSecretStore` + `ISshSecretProtector` (`ProtectedJsonFileSshSecretStore`, DPAPI on Windows).
 - **Preference-based VT selection** via `VtProcessorPreference` (`Auto`, `Managed`, `Native`).
 - **Four integration modes** with explicit trade-offs between fidelity, portability, and native dependencies.
 - **Split rendering architecture**:
@@ -56,8 +63,25 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 - **Grapheme-aware cell model** in managed VT and native VT/surface readback paths.
 - **Terminal session service split** (`Terminal.Services.Contracts` and `Terminal.Services`).
 - **Sample applications**:
-  - Avalonia demo (`samples/RoyalTerminal.Demo`)
+  - Avalonia demo (`samples/RoyalTerminal.Demo`) with transport selector (`PTY`/`Pipe`/`SSH`), shell profile picker, and SSH form fields
   - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`)
+
+## Transport Session Model
+
+`TerminalControl` now runs through a transport abstraction, not a PTY-only runtime:
+
+1. `TerminalControl.StartSessionAsync(ITerminalTransportOptions)` selects a transport.
+2. `ITerminalTransportFactory` resolves a provider by `TransportId`.
+3. The chosen `ITerminalTransport` (`pty`, `pipe`, or `ssh`) owns I/O and lifecycle.
+4. `TerminalSessionService` remains the coordination point for endpoint/input/selection/mode contracts.
+
+Supported transport option models:
+
+| Transport | Options Type | Notes |
+|-----------|--------------|-------|
+| PTY | `PtyTransportOptions` | Interactive local shell semantics (ConPTY/forkpty) |
+| Pipe | `PipeTransportOptions` | Non-PTY process streams, useful for command/log scenarios |
+| SSH | `SshTransportOptions` | Remote terminal sessions with optional PTY request and strict host-key checks |
 
 ## Integration Modes
 
@@ -102,6 +126,10 @@ flowchart TD
       P1["Terminal.Pty.Unix"]
       P2["Terminal.Pty.Windows"]
       P3["Terminal.Pty.Platform"]
+      P4["Terminal.Transport.Pty"]
+      P5["Terminal.Transport.Pipe"]
+      P6["Terminal.Transport.Ssh.Abstractions"]
+      P7["Terminal.Transport.Ssh.SshNet"]
       S1["Terminal.Services.Contracts"]
       S2["Terminal.Services"]
     end
@@ -155,6 +183,147 @@ var terminal = new TerminalControl
 
 terminal.StartPty(
     workingDirectory: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+```
+
+`StartPty(...)` remains supported for backwards compatibility. The preferred session API is `StartSessionAsync(...)` with transport options.
+
+### 1a. Unified Session Start (`StartSessionAsync`)
+
+```csharp
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Terminal;
+
+var terminal = new TerminalControl();
+
+ITerminalTransportOptions options = new PtyTransportOptions(
+    Command: null,
+    WorkingDirectory: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+    Environment: null,
+    Dimensions: new TerminalSessionDimensions(120, 40, 1200, 800));
+
+await terminal.StartSessionAsync(options);
+```
+
+### 1b. Start a Pipe Session (`PipeTransportOptions`)
+
+```csharp
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Terminal;
+
+var terminal = new TerminalControl();
+
+await terminal.StartPipeAsync(
+    new PipeTransportOptions(
+        Command: new TerminalCommandSpec(
+            FileName: "/bin/sh",
+            Arguments: new[] { "-lc", "dotnet --info" }),
+        WorkingDirectory: null,
+        Environment: null,
+        MergeStdErrIntoStdOut: true,
+        Dimensions: new TerminalSessionDimensions(120, 40, 1200, 800)));
+```
+
+### 1c. Start an SSH Session (`SshTransportOptions`)
+
+```csharp
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Terminal;
+
+var terminal = new TerminalControl();
+
+await terminal.StartSshAsync(
+    new SshTransportOptions(
+        Endpoint: new SshEndpointOptions("example.com", 22, "alice"),
+        RequestPty: true,
+        TerminalType: "xterm-256color",
+        InitialCommand: null,
+        Authentication: new SshAuthenticationOptions(
+            UsePassword: true,
+            PasswordSecretId: "demo-password",
+            PrivateKeySecretIds: Array.Empty<string>(),
+            UseAgent: false),
+        Dimensions: new TerminalSessionDimensions(120, 40, 1200, 800))
+    {
+        ExpectedHostKeyFingerprintSha256 = "SHA256:BASE64_FINGERPRINT",
+    });
+```
+
+### 1d. PTY with Custom Shell Profile
+
+```csharp
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Terminal;
+
+IShellProfileCatalog shellCatalog = new DefaultShellProfileCatalog();
+ShellProfile shellProfile = shellCatalog.GetDefaultProfile();
+
+var terminal = new TerminalControl();
+await terminal.StartSessionAsync(
+    new PtyTransportOptions(
+        Command: shellProfile.Command,
+        WorkingDirectory: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        Environment: null,
+        Dimensions: new TerminalSessionDimensions(120, 40, 1200, 800)));
+```
+
+### 1e. SSH Credential Provider Injection
+
+```csharp
+using System;
+using System.Threading;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Services;
+using RoyalTerminal.Terminal;
+using RoyalTerminal.Terminal.Services;
+using RoyalTerminal.Terminal.Transport.Ssh;
+using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
+
+sealed class RuntimeCredentialProvider : ISshCredentialProvider
+{
+    public ValueTask<SshResolvedCredentials> ResolveAsync(
+        SshCredentialRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(
+            new SshResolvedCredentials(
+                Password: Environment.GetEnvironmentVariable("SSH_PASSWORD"),
+                PrivateKeyPemOrPath: Array.Empty<string>(),
+                UseAgent: false));
+    }
+}
+
+var terminal = new TerminalControl(
+    new TerminalSessionService(),
+    new DefaultTerminalInputAdapter(),
+    new DefaultTerminalSelectionService(),
+    new DefaultTerminalScrollService(),
+    new DefaultVtProcessorFactory(),
+    new DefaultPtyFactory(),
+    new RuntimeCredentialProvider(),
+    new RejectAllSshHostKeyValidator(),
+    transportFactory: null);
+```
+
+### 1f. Protected SSH Secret Store (Config + DPAPI)
+
+```csharp
+using System;
+using System.IO;
+using RoyalTerminal.Terminal;
+
+ISshSecretProtector protector = OperatingSystem.IsWindows()
+    ? new DpapiSshSecretProtector() // Windows keychain primitive (DPAPI)
+    : new NoOpSshSecretProtector(); // Provide your own protector on non-Windows for encrypted-at-rest secrets
+
+ISshSecretStore secretStore = new ProtectedJsonFileSshSecretStore(
+    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".royalterminal", "ssh-secrets.json"),
+    protector);
+
+await secretStore.SaveSecretAsync("ssh/password", "my-password");
+await secretStore.SaveSecretAsync("ssh/key/main", "/home/user/.ssh/id_ed25519");
+
+ISshCredentialProvider credentialProvider = new SecretStoreSshCredentialProvider(secretStore);
 ```
 
 ### 2. Core Control with Native VT Provider (`libghostty-terminal`)
@@ -290,6 +459,30 @@ RenderFrameResult frame = surface.RenderToRgba(rgba, 800, 600, 800 * 4);
 surface.EndFrame(frameToken);
 ```
 
+## Migration Guide
+
+### Existing PTY Users
+
+- `TerminalControl.StartPty(...)` is still supported and remains the compatibility API.
+- `TerminalControl.Pty` and `TerminalControl.HasPty` still work for PTY sessions.
+- VT response writeback now goes through session input routing, so no PTY-specific handling is required in callers.
+
+### Preferred New Session API
+
+- New code should use `StartSessionAsync(...)`, `StartPipeAsync(...)`, or `StartSshAsync(...)`.
+- Query active session state with:
+  - `TerminalControl.HasActiveSession`
+  - `TerminalControl.ActiveTransportId`
+
+### API Name and Package Changes
+
+- Core control rename:
+  - `GhosttyTerminalControl` -> `TerminalControl`
+  - `GhosttyTerminalPresenter` -> `TerminalPresenter`
+- Ghostty-specific controls moved to `RoyalTerminal.Avalonia.Ghostty`.
+- VT selection moved from `UseNativeVtProcessor` to `VtProcessorPreference`.
+- Legacy surface-coupled `ITerminalSurface` contract was removed.
+
 ## Installation
 
 ### Backend-Neutral Setup (No Ghostty Dependency)
@@ -311,6 +504,16 @@ dotnet add package RoyalTerminal.Terminal.Vt.Ghostty
 dotnet add package RoyalTerminal.GhosttySharp.Native.OSX
 dotnet add package RoyalTerminal.GhosttySharp.Native.Linux64
 dotnet add package RoyalTerminal.GhosttySharp.Native.Win64
+```
+
+### Optional SSH Transport Packages
+
+```bash
+dotnet add package RoyalTerminal.Terminal.Transport.Ssh.Abstractions
+dotnet add package RoyalTerminal.Terminal.Transport.Ssh.SshNet
+
+# Optional SSH agent auth adapter
+dotnet add package RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent
 ```
 
 ### Ghostty Embedded Controls (macOS)
@@ -543,12 +746,23 @@ dotnet test RoyalTerminal.sln -c Release
 
 # Rendering-focused tests
 dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|RenderingSkiaInteropTests|RenderingAvaloniaAdapterTests|RenderingContractsTests"
+
+# Optional SSH transport integration tests (env-gated)
+ROYALTERMINAL_IT_SSH_HOST=127.0.0.1 \
+ROYALTERMINAL_IT_SSH_PORT=22 \
+ROYALTERMINAL_IT_SSH_USERNAME=test-user \
+ROYALTERMINAL_IT_SSH_PASSWORD=secret \
+ROYALTERMINAL_IT_SSH_HOST_KEY_SHA256=SHA256:your-host-key-fingerprint \
+dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj -c Release --filter "SshTransportIntegrationTests"
+
+# Optional key-based auth for SSH integration tests
+# ROYALTERMINAL_IT_SSH_PRIVATE_KEY can contain either a PEM payload or a private-key file path.
 ```
 
 Current baseline in this repository:
 
-- Unit tests: 306 passed
-- Integration tests: 45 passed
+- Unit tests: 369 passed
+- Integration tests: 47 passed
 
 Performance baseline harness:
 

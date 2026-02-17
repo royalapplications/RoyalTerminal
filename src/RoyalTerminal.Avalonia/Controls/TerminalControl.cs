@@ -16,6 +16,10 @@ using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Scrolling;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
+using RoyalTerminal.Terminal.Transport.Pipe;
+using RoyalTerminal.Terminal.Transport.Pty;
+using RoyalTerminal.Terminal.Transport.Ssh;
+using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
 
 namespace RoyalTerminal.Avalonia.Controls;
 
@@ -166,6 +170,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _lastAppliedWidthPx = -1;
     private int _lastAppliedHeightPx = -1;
     private VtProcessorPreference _appliedVtProcessorPreference = VtProcessorPreference.Auto;
+    private string? _activeTransportId;
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -197,8 +202,29 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public IPtyFactory PtyFactory { get; }
 
+    /// <summary>
+    /// Gets the transport factory used for runtime session startup.
+    /// </summary>
+    public ITerminalTransportFactory TerminalTransportFactory { get; }
+
+    /// <summary>
+    /// Gets the SSH credential provider used by the default SSH transport provider.
+    /// </summary>
+    public ISshCredentialProvider SshCredentialProvider { get; }
+
+    /// <summary>
+    /// Gets the SSH host-key validator used by the default SSH transport provider.
+    /// </summary>
+    public ISshHostKeyValidator SshHostKeyValidator { get; }
+
     /// <summary>Gets the currently attached terminal endpoint, if any.</summary>
     public ITerminalEndpoint? Endpoint => TerminalSessionService.Endpoint;
+
+    /// <summary>Gets whether a transport-backed session is active.</summary>
+    public bool HasActiveSession => TerminalSessionService.HasActiveTransport;
+
+    /// <summary>Gets the active transport id, if a session is active.</summary>
+    public string? ActiveTransportId => HasActiveSession ? _activeTransportId : null;
 
     /// <summary>Gets the terminal screen model.</summary>
     public TerminalScreen? Screen => _screen;
@@ -300,7 +326,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             new DefaultTerminalSelectionService(),
             new DefaultTerminalScrollService(),
             new DefaultVtProcessorFactory(),
-            new DefaultPtyFactory())
+            new DefaultPtyFactory(),
+            new NullSshCredentialProvider(),
+            new RejectAllSshHostKeyValidator(),
+            transportFactory: null)
     {
     }
 
@@ -314,6 +343,32 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         ITerminalScrollService terminalScrollService,
         IVtProcessorFactory vtProcessorFactory,
         IPtyFactory ptyFactory)
+        : this(
+            terminalSessionService,
+            terminalInputAdapter,
+            terminalSelectionService,
+            terminalScrollService,
+            vtProcessorFactory,
+            ptyFactory,
+            new NullSshCredentialProvider(),
+            new RejectAllSshHostKeyValidator(),
+            transportFactory: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a terminal control with explicit transport dependencies.
+    /// </summary>
+    public TerminalControl(
+        ITerminalSessionService terminalSessionService,
+        ITerminalInputAdapter terminalInputAdapter,
+        ITerminalSelectionService terminalSelectionService,
+        ITerminalScrollService terminalScrollService,
+        IVtProcessorFactory vtProcessorFactory,
+        IPtyFactory ptyFactory,
+        ISshCredentialProvider sshCredentialProvider,
+        ISshHostKeyValidator sshHostKeyValidator,
+        ITerminalTransportFactory? transportFactory)
     {
         TerminalSessionService = terminalSessionService ?? throw new ArgumentNullException(nameof(terminalSessionService));
         TerminalInputAdapter = terminalInputAdapter ?? throw new ArgumentNullException(nameof(terminalInputAdapter));
@@ -321,6 +376,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         TerminalScrollService = terminalScrollService ?? throw new ArgumentNullException(nameof(terminalScrollService));
         VtProcessorFactory = vtProcessorFactory ?? throw new ArgumentNullException(nameof(vtProcessorFactory));
         PtyFactory = ptyFactory ?? throw new ArgumentNullException(nameof(ptyFactory));
+        SshCredentialProvider = sshCredentialProvider ?? throw new ArgumentNullException(nameof(sshCredentialProvider));
+        SshHostKeyValidator = sshHostKeyValidator ?? throw new ArgumentNullException(nameof(sshHostKeyValidator));
+        TerminalTransportFactory = transportFactory
+            ?? CreateDefaultTransportFactory(PtyFactory, SshCredentialProvider, SshHostKeyValidator);
 
         InitializeTerminal();
     }
@@ -484,7 +543,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void ApplyVtProcessorPreference()
     {
-        if (_screen is null || TerminalSessionService.HasPty)
+        if (_screen is null || TerminalSessionService.HasActiveTransport)
         {
             return;
         }
@@ -613,7 +672,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         Endpoint?.SetSize(widthPx, heightPx);
-        TerminalSessionService.ResizePty(safeColumns, safeRows, widthPx, heightPx);
+        TerminalSessionService.ResizeSession(safeColumns, safeRows, widthPx, heightPx);
 
         bool gridChanged = safeColumns != _lastAppliedColumns || safeRows != _lastAppliedRows;
         _lastAppliedColumns = safeColumns;
@@ -1048,20 +1107,59 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// <param name="workingDirectory">Working directory, or null for home.</param>
     public void StartPty(string? shell = null, string? workingDirectory = null)
     {
+        TerminalCommandSpec? command = string.IsNullOrWhiteSpace(shell)
+            ? null
+            : new TerminalCommandSpec(shell, Array.Empty<string>());
+        int widthPx = Math.Max(1, (int)Math.Round(Bounds.Width > 0 ? Bounds.Width : Columns * (_renderer?.CellWidth ?? 1)));
+        int heightPx = Math.Max(1, (int)Math.Round(Bounds.Height > 0 ? Bounds.Height : Rows * (_renderer?.CellHeight ?? 1)));
+
+        PtyTransportOptions options = new(
+            Command: command,
+            WorkingDirectory: workingDirectory,
+            Environment: null,
+            Dimensions: new TerminalSessionDimensions(Columns, Rows, widthPx, heightPx));
+
+        StartSessionAsync(options).AsTask().GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// Starts a terminal session using a transport-specific options payload.
+    /// </summary>
+    public async ValueTask StartSessionAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
         EnsureVtProcessorPreferenceApplied();
 
-        TerminalSessionService.StartPty(
-            PtyFactory,
-            shell,
-            Columns,
-            Rows,
-            workingDirectory,
-            _vtProcessor,
-            OnPtyDataReceived,
-            OnPtyProcessExited,
-            OnVtProcessorResponse,
-            OnVtProcessorBell,
-            OnVtProcessorTitleChanged);
+        await TerminalSessionService.StartSessionAsync(
+                TerminalTransportFactory,
+                options,
+                _vtProcessor,
+                OnPtyDataReceived,
+                OnPtyProcessExited,
+                OnVtProcessorResponse,
+                OnVtProcessorBell,
+                OnVtProcessorTitleChanged,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        _activeTransportId = options.TransportId;
+    }
+
+    /// <summary>
+    /// Starts a pipe transport-backed terminal session.
+    /// </summary>
+    public ValueTask StartPipeAsync(PipeTransportOptions options, CancellationToken cancellationToken = default)
+    {
+        return StartSessionAsync(options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts an SSH transport-backed terminal session.
+    /// </summary>
+    public ValueTask StartSshAsync(SshTransportOptions options, CancellationToken cancellationToken = default)
+    {
+        return StartSessionAsync(options, cancellationToken);
     }
 
     /// <summary>
@@ -1069,7 +1167,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void StopPty()
     {
-        TerminalSessionService.StopPty(_vtProcessor, OnPtyDataReceived, OnPtyProcessExited);
+        TerminalSessionService.StopSessionAsync(_vtProcessor, OnPtyDataReceived, OnPtyProcessExited)
+            .AsTask()
+            .GetAwaiter()
+            .GetResult();
+        _activeTransportId = null;
     }
 
     /// <summary>Whether a standalone PTY is active.</summary>
@@ -1079,12 +1181,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public IPty? Pty => TerminalSessionService.Pty;
 
     /// <summary>
-    /// Handles terminal query responses (DSR, DA, etc.) by writing them back to the PTY.
+    /// Handles terminal query responses (DSR, DA, etc.) by writing them back to the active transport.
     /// Called from the VT processor when it detects a query sequence in the output stream.
     /// </summary>
     private void OnVtProcessorResponse(byte[] data)
     {
-        TerminalSessionService.Pty?.Write(data, 0, data.Length);
+        TerminalSessionService.SendInput(data);
     }
 
     private void OnVtProcessorBell()
@@ -1112,6 +1214,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         Dispatcher.UIThread.Post(() =>
         {
+            _activeTransportId = null;
             // Write exit message to screen
             var msg = $"\r\n[Process exited with code {exitCode}]\r\n";
             var bytes = Encoding.UTF8.GetBytes(msg);
@@ -1122,6 +1225,20 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     #endregion
 
     #region Helpers
+
+    private static ITerminalTransportFactory CreateDefaultTransportFactory(
+        IPtyFactory ptyFactory,
+        ISshCredentialProvider sshCredentialProvider,
+        ISshHostKeyValidator sshHostKeyValidator)
+    {
+        return new CompositeTerminalTransportFactory(
+            new ITerminalTransportProvider[]
+            {
+                new PtyTerminalTransportProvider(ptyFactory),
+                new PipeTerminalTransportProvider(),
+                new SshNetTerminalTransportProvider(sshCredentialProvider, sshHostKeyValidator),
+            });
+    }
 
     private void SendPointerEvent(TerminalPointerEvent pointerEvent)
     {

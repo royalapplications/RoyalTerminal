@@ -9,6 +9,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using RoyalTerminal.Demo.ViewModels;
+using RoyalTerminal.Terminal;
 using ReactiveUI;
 using Xunit;
 
@@ -196,6 +197,116 @@ public class MainWindowViewModelFlowTests
         Assert.True(viewModel.UseRenderedControl);
         Assert.True(viewModel.UseNativeControl);
         Assert.False(viewModel.UseNativeVtControl);
+    }
+
+    [Fact]
+    public void SessionTransport_DefaultsToPtyAndShowsLocalConfig()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+
+        Assert.Equal(TerminalTransportIds.Pty, viewModel.SelectedTransportMode.Id);
+        Assert.True(viewModel.ShowSessionTransportPicker);
+        Assert.True(viewModel.IsSessionTransportConfigEnabled);
+        Assert.False(viewModel.ShowSessionTransportHint);
+        Assert.True(viewModel.ShowLocalSessionFields);
+        Assert.False(viewModel.ShowSshSessionFields);
+    }
+
+    [Fact]
+    public void SessionTransport_GhosttyRenderedMode_ShowsPanelWithHint()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: true, useNativeVtControl: false);
+
+        Assert.True(viewModel.ShowSessionTransportPicker);
+        Assert.False(viewModel.IsSessionTransportConfigEnabled);
+        Assert.True(viewModel.ShowSessionTransportHint);
+    }
+
+    [Fact]
+    public void SessionTransport_SwitchToSsh_UpdatesVisibilityFlags()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+
+        TransportModeOption sshMode = FindTransportMode(viewModel, TerminalTransportIds.Ssh);
+        viewModel.SelectedTransportMode = sshMode;
+
+        Assert.True(viewModel.ShowSessionTransportPicker);
+        Assert.False(viewModel.ShowLocalSessionFields);
+        Assert.True(viewModel.ShowSshSessionFields);
+        Assert.True(viewModel.IsSshTransportSelected);
+    }
+
+    [Fact]
+    public void SessionTransport_SshAuthMode_Password_ShowsPasswordFieldOnly()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Ssh);
+        viewModel.SelectedSshAuthMode = FindSshAuthMode(viewModel, SshAuthModeOption.PasswordModeId);
+
+        Assert.True(viewModel.ShowSshSessionFields);
+        Assert.True(viewModel.ShowSshPasswordField);
+        Assert.False(viewModel.ShowSshPrivateKeyField);
+        Assert.False(viewModel.ShowSshAgentHint);
+    }
+
+    [Fact]
+    public void SessionTransport_SshAuthMode_Agent_ShowsAgentHintOnly()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Ssh);
+        viewModel.SelectedSshAuthMode = FindSshAuthMode(viewModel, SshAuthModeOption.AgentModeId);
+
+        Assert.True(viewModel.ShowSshSessionFields);
+        Assert.False(viewModel.ShowSshPasswordField);
+        Assert.False(viewModel.ShowSshPrivateKeyField);
+        Assert.True(viewModel.ShowSshAgentHint);
+    }
+
+    [Fact]
+    public void SetShellProfiles_UpdatesSelection()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetShellProfiles(
+        [
+            new ShellProfileOption("zsh", "Zsh", "/bin/zsh"),
+            new ShellProfileOption("bash", "Bash", "/bin/bash"),
+        ]);
+
+        Assert.NotNull(viewModel.SelectedShellProfile);
+        Assert.Equal("zsh", viewModel.SelectedShellProfile!.Id);
+        Assert.Equal(2, viewModel.ShellProfiles.Count);
+    }
+
+    private static TransportModeOption FindTransportMode(MainWindowViewModel viewModel, string transportId)
+    {
+        for (int i = 0; i < viewModel.TransportModes.Count; i++)
+        {
+            if (string.Equals(viewModel.TransportModes[i].Id, transportId, StringComparison.Ordinal))
+            {
+                return viewModel.TransportModes[i];
+            }
+        }
+
+        throw new InvalidOperationException($"Transport mode '{transportId}' was not found.");
+    }
+
+    private static SshAuthModeOption FindSshAuthMode(MainWindowViewModel viewModel, string authModeId)
+    {
+        for (int i = 0; i < viewModel.SshAuthModes.Count; i++)
+        {
+            if (string.Equals(viewModel.SshAuthModes[i].Id, authModeId, StringComparison.Ordinal))
+            {
+                return viewModel.SshAuthModes[i];
+            }
+        }
+
+        throw new InvalidOperationException($"SSH auth mode '{authModeId}' was not found.");
     }
 
     private static Window CreateWindow(object dataContext)

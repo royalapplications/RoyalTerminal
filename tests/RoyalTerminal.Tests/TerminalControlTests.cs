@@ -12,6 +12,8 @@ using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
+using RoyalTerminal.Terminal.Transport.Ssh;
+using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -142,6 +144,39 @@ public class TerminalControlTests
         control.AttachEndpoint(endpoint);
 
         Assert.Same(endpoint, control.Endpoint);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_StartSessionAsync_SetsActiveTransportAndStopClearsState()
+    {
+        FakeTransport transport = new();
+        CompositeTerminalTransportFactory factory = new(
+            new ITerminalTransportProvider[]
+            {
+                new FakeTransportProvider(transport),
+            });
+
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            new DefaultVtProcessorFactory(),
+            new DefaultPtyFactory(),
+            new NullSshCredentialProvider(),
+            new RejectAllSshHostKeyValidator(),
+            factory);
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+        Assert.True(control.HasActiveSession);
+        Assert.Equal("fake", control.ActiveTransportId);
+
+        control.StopPty();
+
+        Assert.False(control.HasActiveSession);
+        Assert.Null(control.ActiveTransportId);
+        Assert.True(transport.StopCalled);
     }
 
     [AvaloniaFact]
@@ -524,6 +559,86 @@ public class TerminalControlTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed record FakeTransportOptions(string TransportId) : ITerminalTransportOptions
+    {
+        public TerminalSessionDimensions Dimensions => new(80, 24, 640, 480);
+    }
+
+    private sealed class FakeTransportProvider : ITerminalTransportProvider
+    {
+        private readonly ITerminalTransport _transport;
+
+        public FakeTransportProvider(ITerminalTransport transport)
+        {
+            _transport = transport;
+        }
+
+        public string TransportId => "fake";
+
+        public bool CanHandle(ITerminalTransportOptions options)
+        {
+            return options is FakeTransportOptions;
+        }
+
+        public ITerminalTransport Create()
+        {
+            return _transport;
+        }
+    }
+
+    private sealed class FakeTransport : ITerminalTransport
+    {
+        private Action<byte[], int>? _dataReceived;
+        private Action<int>? _processExited;
+
+        public event Action<byte[], int>? DataReceived
+        {
+            add => _dataReceived += value;
+            remove => _dataReceived -= value;
+        }
+
+        public event Action<int>? ProcessExited
+        {
+            add => _processExited += value;
+            remove => _processExited -= value;
+        }
+
+        public bool IsRunning { get; private set; }
+        public bool StopCalled { get; private set; }
+
+        public ValueTask StartAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
+        {
+            _ = options;
+            cancellationToken.ThrowIfCancellationRequested();
+            IsRunning = true;
+            return ValueTask.CompletedTask;
+        }
+
+        public void SendInput(ReadOnlySpan<byte> utf8)
+        {
+            byte[] data = utf8.ToArray();
+            _dataReceived?.Invoke(data, data.Length);
+        }
+
+        public void Resize(TerminalSessionDimensions dimensions)
+        {
+            _ = dimensions;
+        }
+
+        public ValueTask StopAsync()
+        {
+            StopCalled = true;
+            IsRunning = false;
+            _processExited?.Invoke(0);
+            return ValueTask.CompletedTask;
+        }
+
+        public void Dispose()
+        {
+            IsRunning = false;
         }
     }
 }
