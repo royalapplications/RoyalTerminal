@@ -1,0 +1,283 @@
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
+// RoyalTerminal.Tests — tests for extracted Ghostty control infrastructure components.
+
+using System.Reflection;
+using System.Runtime.InteropServices;
+using Avalonia.Controls;
+using Avalonia.Headless.XUnit;
+using Avalonia.Threading;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Diagnostics;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.Terminal;
+using Xunit;
+
+namespace RoyalTerminal.Tests;
+
+public sealed class GhosttyComponentTests
+{
+    [AvaloniaFact]
+    public void GhosttyActionDispatcher_Render_PostsRenderCallback()
+    {
+        bool renderCalled = false;
+        GhosttyActionDispatcher dispatcher = CreateDispatcher(
+            renderRequested: () => renderCalled = true);
+
+        GhosttyAction action = new()
+        {
+            Tag = GhosttyActionTag.Render,
+        };
+
+        dispatcher.HandleAction(CreateAppTarget(), action);
+        FlushUiThread();
+
+        Assert.True(renderCalled);
+    }
+
+    [AvaloniaFact]
+    public unsafe void GhosttyActionDispatcher_SetTitle_DecodesBeforeDispatch()
+    {
+        string? capturedTitle = null;
+        GhosttyActionDispatcher dispatcher = CreateDispatcher(
+            titleChanged: title => capturedTitle = title);
+
+        nint titlePtr = Marshal.StringToCoTaskMemUTF8("phase-6-title");
+        try
+        {
+            GhosttyAction action = new()
+            {
+                Tag = GhosttyActionTag.SetTitle,
+                Action = new GhosttyActionValue
+                {
+                    SetTitle = new GhosttySetTitle
+                    {
+                        Title = (byte*)titlePtr,
+                    }
+                }
+            };
+
+            dispatcher.HandleAction(CreateAppTarget(), action);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(titlePtr);
+        }
+
+        FlushUiThread();
+        Assert.Equal("phase-6-title", capturedTitle);
+    }
+
+    [AvaloniaFact]
+    public void GhosttyActionDispatcher_SurfaceTargetMismatch_DoesNotDispatch()
+    {
+        bool renderCalled = false;
+        GhosttySurface surface = new((nint)0x1111, ownsHandle: false);
+        GhosttyActionDispatcher dispatcher = CreateDispatcher(
+            surfaceAccessor: () => surface,
+            renderRequested: () => renderCalled = true);
+
+        GhosttyTarget target = new()
+        {
+            Tag = GhosttyTargetTag.Surface,
+            Target = new GhosttyTargetUnion
+            {
+                Surface = (nint)0x9999,
+            }
+        };
+
+        dispatcher.HandleAction(
+            target,
+            new GhosttyAction
+            {
+                Tag = GhosttyActionTag.Render,
+            });
+
+        FlushUiThread();
+        Assert.False(renderCalled);
+    }
+
+    [AvaloniaFact]
+    public void GhosttyActionDispatcher_ExitAndClose_PostCallbacks()
+    {
+        int? exitCode = null;
+        int closeCount = 0;
+        GhosttyActionDispatcher dispatcher = CreateDispatcher(
+            processExited: code => exitCode = code,
+            closeRequested: () => closeCount++);
+
+        GhosttyAction exitedAction = new()
+        {
+            Tag = GhosttyActionTag.ShowChildExited,
+            Action = new GhosttyActionValue
+            {
+                ChildExited = new GhosttyChildExited
+                {
+                    ExitCode = 37,
+                }
+            }
+        };
+
+        dispatcher.HandleAction(CreateAppTarget(), exitedAction);
+        dispatcher.HandleAction(
+            CreateAppTarget(),
+            new GhosttyAction
+            {
+                Tag = GhosttyActionTag.CloseWindow,
+            });
+
+        FlushUiThread();
+        Assert.Equal(37, exitCode);
+        Assert.Equal(1, closeCount);
+    }
+
+    [AvaloniaFact]
+    public void GhosttySurfaceLifecycle_AttachAndDetach_WiresCallbacks()
+    {
+        GhosttyApp app = new((nint)0x1, ownsHandle: false);
+        GhosttySurfaceLifecycle lifecycle = CreateLifecycle();
+
+        Assert.Equal(0, GetEventSubscriptionCount(app, "WakeupRequested"));
+        Assert.Equal(0, GetEventSubscriptionCount(app, "ActionRequested"));
+        Assert.Equal(0, GetEventSubscriptionCount(app, "ClipboardReadRequested"));
+        Assert.Equal(0, GetEventSubscriptionCount(app, "ClipboardWriteRequested"));
+        Assert.Equal(0, GetEventSubscriptionCount(app, "SurfaceCloseRequested"));
+
+        lifecycle.Attach(app);
+
+        Assert.Equal(1, GetEventSubscriptionCount(app, "WakeupRequested"));
+        Assert.Equal(1, GetEventSubscriptionCount(app, "ActionRequested"));
+        Assert.Equal(1, GetEventSubscriptionCount(app, "ClipboardReadRequested"));
+        Assert.Equal(1, GetEventSubscriptionCount(app, "ClipboardWriteRequested"));
+        Assert.Equal(1, GetEventSubscriptionCount(app, "SurfaceCloseRequested"));
+
+        lifecycle.Detach();
+
+        Assert.Equal(0, GetEventSubscriptionCount(app, "WakeupRequested"));
+        Assert.Equal(0, GetEventSubscriptionCount(app, "ActionRequested"));
+        Assert.Equal(0, GetEventSubscriptionCount(app, "ClipboardReadRequested"));
+        Assert.Equal(0, GetEventSubscriptionCount(app, "ClipboardWriteRequested"));
+        Assert.Equal(0, GetEventSubscriptionCount(app, "SurfaceCloseRequested"));
+    }
+
+    [AvaloniaFact]
+    public void GhosttySurfaceLifecycle_AttachNewApp_DetachesOldApp()
+    {
+        GhosttyApp firstApp = new((nint)0x1, ownsHandle: false);
+        GhosttyApp secondApp = new((nint)0x2, ownsHandle: false);
+        GhosttySurfaceLifecycle lifecycle = CreateLifecycle();
+
+        lifecycle.Attach(firstApp);
+        Assert.Equal(1, GetEventSubscriptionCount(firstApp, "WakeupRequested"));
+
+        lifecycle.Attach(secondApp);
+
+        Assert.Equal(0, GetEventSubscriptionCount(firstApp, "WakeupRequested"));
+        Assert.Equal(1, GetEventSubscriptionCount(secondApp, "WakeupRequested"));
+        Assert.Equal(1, GetEventSubscriptionCount(secondApp, "ActionRequested"));
+        Assert.Equal(1, GetEventSubscriptionCount(secondApp, "ClipboardReadRequested"));
+        Assert.Equal(1, GetEventSubscriptionCount(secondApp, "ClipboardWriteRequested"));
+        Assert.Equal(1, GetEventSubscriptionCount(secondApp, "SurfaceCloseRequested"));
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_ModeState_MatchesIndividualFlags_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(80, 24, 0);
+        using GhosttyVtProcessor processor = new(screen);
+
+        AssertModeStateParity(processor);
+        Assert.False(processor.ApplicationKeypad);
+
+        processor.Process("\x1b="u8);
+        Assert.True(processor.ApplicationKeypad);
+        Assert.True(processor.ModeState.ApplicationKeypad);
+        AssertModeStateParity(processor);
+
+        processor.Process("\x1b>"u8);
+        Assert.False(processor.ApplicationKeypad);
+        Assert.False(processor.ModeState.ApplicationKeypad);
+        AssertModeStateParity(processor);
+
+        processor.Reset();
+        Assert.False(processor.ApplicationKeypad);
+        Assert.False(processor.ModeState.ApplicationKeypad);
+        AssertModeStateParity(processor);
+    }
+
+    private static GhosttySurfaceLifecycle CreateLifecycle()
+    {
+        GhosttyActionDispatcher dispatcher = CreateDispatcher();
+        GhosttyClipboardAdapter clipboardAdapter = new(
+            new Control(),
+            static () => NullGhosttyLogger.Instance);
+        return new GhosttySurfaceLifecycle(
+            static () => null,
+            dispatcher,
+            clipboardAdapter,
+            static () => { },
+            static () => { });
+    }
+
+    private static GhosttyActionDispatcher CreateDispatcher(
+        Func<GhosttySurface?>? surfaceAccessor = null,
+        Action? renderRequested = null,
+        Action<string>? titleChanged = null,
+        Action<int>? processExited = null,
+        Action? closeRequested = null)
+    {
+        return new GhosttyActionDispatcher(
+            surfaceAccessor ?? (static () => null),
+            renderRequested ?? (static () => { }),
+            titleChanged ?? (static _ => { }),
+            processExited ?? (static _ => { }),
+            closeRequested ?? (static () => { }));
+    }
+
+    private static GhosttyTarget CreateAppTarget()
+    {
+        return new GhosttyTarget
+        {
+            Tag = GhosttyTargetTag.App,
+        };
+    }
+
+    private static void FlushUiThread()
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.RunJobs();
+            return;
+        }
+
+        Dispatcher.UIThread.Invoke(
+            static () => Dispatcher.UIThread.RunJobs());
+    }
+
+    private static int GetEventSubscriptionCount(GhosttyApp app, string eventName)
+    {
+        FieldInfo? field = typeof(GhosttyApp).GetField(
+            eventName,
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+
+        Delegate? callback = field!.GetValue(app) as Delegate;
+        return callback?.GetInvocationList().Length ?? 0;
+    }
+
+    private static void AssertModeStateParity(IVtProcessor processor)
+    {
+        Assert.Equal(processor.CursorVisible, processor.ModeState.CursorVisible);
+        Assert.Equal(processor.ApplicationCursorKeys, processor.ModeState.ApplicationCursorKeys);
+        Assert.Equal(processor.ApplicationKeypad, processor.ModeState.ApplicationKeypad);
+        Assert.Equal(processor.AlternateScreen, processor.ModeState.AlternateScreen);
+        Assert.Equal(processor.BracketedPaste, processor.ModeState.BracketedPaste);
+    }
+}

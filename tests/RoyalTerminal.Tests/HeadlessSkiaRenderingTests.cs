@@ -795,7 +795,7 @@ public class HeadlessSkiaRenderingTests
     [AvaloniaFact]
     public void Control_InWindow_InitializesCorrectly()
     {
-        var control = new GhosttyTerminalControl
+        var control = new TerminalControl
         {
             FontFamilyName = "Consolas",
             TerminalFontSize = 14,
@@ -825,7 +825,7 @@ public class HeadlessSkiaRenderingTests
     [AvaloniaFact]
     public void Control_WriteOutput_FiresDataReceivedEvent()
     {
-        var control = new GhosttyTerminalControl();
+        var control = new TerminalControl();
         byte[]? receivedData = null;
 
         control.DataReceived += (_, args) => receivedData = args.Data.ToArray();
@@ -838,7 +838,7 @@ public class HeadlessSkiaRenderingTests
     [AvaloniaFact]
     public void Control_WriteOutput_MultipleWrites()
     {
-        var control = new GhosttyTerminalControl();
+        var control = new TerminalControl();
         var writeCount = 0;
 
         control.DataReceived += (_, _) => writeCount++;
@@ -853,7 +853,7 @@ public class HeadlessSkiaRenderingTests
     [AvaloniaFact]
     public void Control_ScreenModel_CanBeModifiedDirectly()
     {
-        var control = new GhosttyTerminalControl();
+        var control = new TerminalControl();
         var screen = control.Screen!;
 
         // Write directly to screen cells
@@ -876,7 +876,7 @@ public class HeadlessSkiaRenderingTests
     [AvaloniaFact]
     public void Control_RendererCellDimensions_AreReasonable()
     {
-        var control = new GhosttyTerminalControl
+        var control = new TerminalControl
         {
             FontFamilyName = "Consolas",
             TerminalFontSize = 14,
@@ -891,7 +891,7 @@ public class HeadlessSkiaRenderingTests
     [AvaloniaFact]
     public void Control_CursorVisibility_TogglesOnFocus()
     {
-        var control = new GhosttyTerminalControl();
+        var control = new TerminalControl();
         var renderer = control.Renderer!;
 
         // Initially visible
@@ -901,7 +901,7 @@ public class HeadlessSkiaRenderingTests
     [AvaloniaFact]
     public void Control_Scrollback_AddsRows()
     {
-        var control = new GhosttyTerminalControl
+        var control = new TerminalControl
         {
             Columns = 80,
             Rows = 24,
@@ -921,7 +921,7 @@ public class HeadlessSkiaRenderingTests
     [AvaloniaFact]
     public void Control_ScreenResize_UpdatesDimensions()
     {
-        var control = new GhosttyTerminalControl();
+        var control = new TerminalControl();
         var screen = control.Screen!;
 
         screen.Resize(120, 40);
@@ -933,7 +933,7 @@ public class HeadlessSkiaRenderingTests
     [AvaloniaFact]
     public void Control_ScrollData_Initialized()
     {
-        var control = new GhosttyTerminalControl();
+        var control = new TerminalControl();
         var scrollData = control.ScrollData!;
 
         Assert.True(scrollData.CellHeight > 0);
@@ -943,7 +943,7 @@ public class HeadlessSkiaRenderingTests
     [AvaloniaFact]
     public void Control_InvalidateTerminal_MarksDirty()
     {
-        var control = new GhosttyTerminalControl();
+        var control = new TerminalControl();
         var screen = control.Screen!;
 
         // Clear dirty flags first

@@ -3,7 +3,7 @@
 // Tests for terminal query detection and response generation.
 
 using RoyalTerminal.Avalonia.Rendering;
-using RoyalTerminal.Avalonia.Terminal;
+using RoyalTerminal.Terminal;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -249,6 +249,46 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_Bel_InvokesBellCallback()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        int bellCount = 0;
+        processor.BellCallback = () => bellCount++;
+
+        processor.Process([0x07]);
+
+        Assert.Equal(1, bellCount);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_OscTitle_BelTerminator_InvokesTitleCallback()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        string? title = null;
+        processor.TitleCallback = value => title = value;
+
+        processor.Process("\x1b]2;phase-7-title\x07"u8);
+
+        Assert.Equal("phase-7-title", title);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_OscTitle_StTerminatorAcrossChunks_InvokesTitleCallback()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        string? title = null;
+        processor.TitleCallback = value => title = value;
+
+        processor.Process("\x1b]0;phase-7-"u8);
+        processor.Process("split\x1b\\"u8);
+
+        Assert.Equal("phase-7-split", title);
+    }
+
+    [Fact]
     public void BasicVtProcessor_Dsr6_AtOrigin_Reports1_1()
     {
         var screen = new TerminalScreen(80, 24, 0);
@@ -262,6 +302,85 @@ public class TerminalQueryTests
 
         Assert.NotNull(response);
         Assert.Equal("\x1b[1;1R", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ModeState_TracksApplicationKeypad_AndRaisesModeChanged()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        int modeChangedCount = 0;
+        TerminalModeState lastState = processor.ModeState;
+
+        processor.ModeChanged += (_, state) =>
+        {
+            modeChangedCount++;
+            lastState = state;
+        };
+
+        processor.Process("\x1b="u8); // DECKPAM
+
+        Assert.True(processor.ApplicationKeypad);
+        Assert.True(processor.ModeState.ApplicationKeypad);
+        Assert.Equal(1, modeChangedCount);
+        Assert.True(lastState.ApplicationKeypad);
+
+        processor.Process("\x1b>"u8); // DECKPNM
+
+        Assert.False(processor.ApplicationKeypad);
+        Assert.False(processor.ModeState.ApplicationKeypad);
+        Assert.Equal(2, modeChangedCount);
+        Assert.False(lastState.ApplicationKeypad);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Reset_RestoresDefaultModeState()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        int modeChangedCount = 0;
+        processor.ModeChanged += (_, _) => modeChangedCount++;
+
+        processor.Process("\x1b=\x1b[?1h\x1b[?25l\x1b[?2004h\x1b[?1049h"u8);
+        Assert.True(processor.ApplicationKeypad);
+        Assert.True(processor.ApplicationCursorKeys);
+        Assert.False(processor.CursorVisible);
+        Assert.True(processor.BracketedPaste);
+        Assert.True(processor.AlternateScreen);
+
+        processor.Reset();
+
+        Assert.False(processor.ApplicationKeypad);
+        Assert.False(processor.ApplicationCursorKeys);
+        Assert.True(processor.CursorVisible);
+        Assert.False(processor.BracketedPaste);
+        Assert.False(processor.AlternateScreen);
+        Assert.Equal(
+            new TerminalModeState(
+                CursorVisible: true,
+                ApplicationCursorKeys: false,
+                ApplicationKeypad: false,
+                AlternateScreen: false,
+                BracketedPaste: false),
+            processor.ModeState);
+        Assert.Equal(2, modeChangedCount);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Ris_RaisesModeChangedOnce()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        processor.Process("\x1b="u8); // enable application keypad first
+        Assert.True(processor.ApplicationKeypad);
+
+        int modeChangedCount = 0;
+        processor.ModeChanged += (_, _) => modeChangedCount++;
+
+        processor.Process("\u001bc"u8); // RIS
+
+        Assert.Equal(1, modeChangedCount);
+        Assert.False(processor.ApplicationKeypad);
     }
 
     [Fact]

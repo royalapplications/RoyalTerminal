@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Diagnostics;
 using System.Reflection;
-using RoyalTerminal.Avalonia.Terminal;
+using RoyalTerminal.Terminal;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
