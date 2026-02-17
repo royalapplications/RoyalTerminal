@@ -43,6 +43,10 @@
     </PackageReference>
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Fixtures\NcursesHarness.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- Import native asset targets for file copying (same mechanism as NuGet package) -->
   <Import Project="..\..\src\RoyalTerminal.GhosttySharp.Native.OSX\build\RoyalTerminal.GhosttySharp.Native.OSX.targets" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
   <Import Project="..\..\src\RoyalTerminal.GhosttySharp.Native.Win64\build\RoyalTerminal.GhosttySharp.Native.Win64.targets" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
