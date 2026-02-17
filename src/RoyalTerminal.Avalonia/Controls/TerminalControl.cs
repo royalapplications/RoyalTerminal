@@ -164,6 +164,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private VirtualizedTerminalScrollViewer? _scrollViewer;
     private IVtProcessor? _vtProcessor;
     private bool _isMouseSelecting;
+    private bool _leftPointerDown;
+    private bool _middlePointerDown;
+    private bool _rightPointerDown;
     private bool _suppressGridPropertyApply;
     private int _lastAppliedColumns = -1;
     private int _lastAppliedRows = -1;
@@ -171,6 +174,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _lastAppliedHeightPx = -1;
     private VtProcessorPreference _appliedVtProcessorPreference = VtProcessorPreference.Auto;
     private string? _activeTransportId;
+    private readonly TerminalMouseModeTracker _mouseModeTracker = new();
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -317,6 +321,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     static TerminalControl()
     {
         FocusableProperty.OverrideDefaultValue<TerminalControl>(true);
+        BackgroundProperty.OverrideDefaultValue<TerminalControl>(Brushes.Transparent);
     }
 
     public TerminalControl()
@@ -382,6 +387,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             ?? CreateDefaultTransportFactory(PtyFactory, SshCredentialProvider, SshHostKeyValidator);
 
         InitializeTerminal();
+        RegisterPointerFallbackHandlers();
     }
 
     private void InitializeTerminal()
@@ -720,9 +726,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void EnsurePresenter()
     {
-        if (_presenter is not null) return;
+        if (_presenter is not null)
+        {
+            _presenter.IsHitTestVisible = true;
+            return;
+        }
 
         _presenter = new TerminalPresenter();
+        _presenter.IsHitTestVisible = true;
         ((ISetLogicalParent)_presenter).SetParent(this);
         VisualChildren.Add(_presenter);
 
@@ -775,6 +786,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return finalSize;
     }
 
+    public override void Render(DrawingContext context)
+    {
+        base.Render(context);
+
+        IBrush? background = Background;
+        if (background is not null)
+        {
+            // Provide a hit-test surface even when terminal pixels are drawn by
+            // a composition child visual outside the regular draw operation list.
+            context.FillRectangle(background, new Rect(Bounds.Size));
+        }
+    }
+
     #region Endpoint Integration
 
     /// <summary>
@@ -782,6 +806,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void AttachEndpoint(ITerminalEndpoint endpoint)
     {
+        _mouseModeTracker.Reset();
+        ResetPointerButtons();
         TerminalSessionService.AttachEndpoint(endpoint);
 
         if (_renderer is not null)
@@ -804,6 +830,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public void DetachEndpoint()
     {
         TerminalSessionService.DetachEndpoint();
+        _mouseModeTracker.Reset();
+        ResetPointerButtons();
     }
 
     /// <summary>
@@ -849,6 +877,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (_screen is null)
         {
             return;
+        }
+
+        bool mouseModeChanged = _mouseModeTracker.Process(data);
+        if (mouseModeChanged && IsMouseReportingActiveForInput())
+        {
+            ResetPointerButtons();
+            _isMouseSelecting = false;
+            TerminalSelectionService.ClearSelection(_screen, _renderer, _presenter);
         }
 
         // Lock screen during VT processing — composition thread reads cells concurrently
@@ -920,17 +956,89 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     #region Mouse Input
 
+    private void RegisterPointerFallbackHandlers()
+    {
+        AddHandler(PointerPressedEvent, OnPointerPressedTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerMovedEvent, OnPointerMovedTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerReleasedEvent, OnPointerReleasedTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerWheelChangedEvent, OnPointerWheelChangedTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+    }
+
+    private void OnPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
+    {
+        _ = sender;
+        if (!e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerPressedCore(e);
+    }
+
+    private void OnPointerMovedTunnel(object? sender, PointerEventArgs e)
+    {
+        _ = sender;
+        if (!e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerMovedCore(e);
+    }
+
+    private void OnPointerReleasedTunnel(object? sender, PointerReleasedEventArgs e)
+    {
+        _ = sender;
+        if (!e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerReleasedCore(e);
+    }
+
+    private void OnPointerWheelChangedTunnel(object? sender, PointerWheelEventArgs e)
+    {
+        _ = sender;
+        if (!e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerWheelChangedCore(e);
+    }
+
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
+        if (e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerPressedCore(e);
+    }
+
+    private void HandlePointerPressedCore(PointerPressedEventArgs e)
+    {
         Focus();
 
         var point = e.GetPosition(this);
         var props = e.GetCurrentPoint(this).Properties;
-        TerminalMouseButton button = ConvertPressedMouseButton(props);
+        TerminalMouseButton button = ResolvePressedMouseButton(props);
+        if (button == TerminalMouseButton.None &&
+            IsPrimaryPointer(e.Pointer.Type))
+        {
+            // Some platform input paths (notably certain macOS touchpad flows)
+            // can surface pressed events without explicit left-button metadata.
+            button = TerminalMouseButton.Left;
+        }
+
+        bool pointerSent = false;
         if (button != TerminalMouseButton.None)
         {
-            SendPointerEvent(new TerminalPointerEvent(
+            SetPointerButtonState(button, isDown: true);
+            pointerSent = SendPointerEvent(new TerminalPointerEvent(
                 Kind: TerminalPointerEventKind.Button,
                 X: point.X,
                 Y: point.Y,
@@ -940,7 +1048,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         // Start text selection on left click
-        if (props.IsLeftButtonPressed && _renderer is not null)
+        if ((!IsMouseReportingActiveForInput() || !pointerSent) &&
+            (button == TerminalMouseButton.Left || props.IsLeftButtonPressed) &&
+            _renderer is not null)
         {
             _isMouseSelecting = true;
 
@@ -958,13 +1068,27 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
+        if (e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerMovedCore(e);
+    }
+
+    private void HandlePointerMovedCore(PointerEventArgs e)
+    {
 
         var point = e.GetPosition(this);
-        SendPointerEvent(new TerminalPointerEvent(
+        var props = e.GetCurrentPoint(this).Properties;
+        // Preserve tracked button state when move events omit button flags.
+        SyncPointerButtonState(props, preserveWhenNoButtons: true);
+        TerminalMouseButton button = GetPrimaryPressedMouseButton(props);
+        _ = SendPointerEvent(new TerminalPointerEvent(
             Kind: TerminalPointerEventKind.Move,
             X: point.X,
             Y: point.Y,
-            Button: TerminalMouseButton.None,
+            Button: button,
             Action: TerminalInputAction.Press,
             Modifiers: ConvertTerminalModifiers(e.KeyModifiers)));
 
@@ -981,14 +1105,49 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
+        if (e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerReleasedCore(e);
+    }
+
+    private void HandlePointerReleasedCore(PointerReleasedEventArgs e)
+    {
         var point = e.GetPosition(this);
+        var props = e.GetCurrentPoint(this).Properties;
+        TerminalMouseButton button = ConvertMouseButton(e.InitialPressMouseButton);
+        if (button == TerminalMouseButton.None)
+        {
+            button = ResolveReleasedMouseButton(props);
+        }
+        if (button == TerminalMouseButton.None)
+        {
+            button = GetTrackedPressedMouseButton();
+        }
+        if (button == TerminalMouseButton.None &&
+            IsPrimaryPointer(e.Pointer.Type))
+        {
+            button = TerminalMouseButton.Left;
+        }
+
         SendPointerEvent(new TerminalPointerEvent(
             Kind: TerminalPointerEventKind.Button,
             X: point.X,
             Y: point.Y,
-            Button: ConvertMouseButton(e.InitialPressMouseButton),
+            Button: button,
             Action: TerminalInputAction.Release,
             Modifiers: ConvertTerminalModifiers(e.KeyModifiers)));
+
+        if (button != TerminalMouseButton.None)
+        {
+            SetPointerButtonState(button, isDown: false);
+        }
+        else
+        {
+            SyncPointerButtonState(props);
+        }
 
         _isMouseSelecting = false;
         e.Handled = true;
@@ -997,6 +1156,35 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
+        if (e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerWheelChangedCore(e);
+    }
+
+    private void HandlePointerWheelChangedCore(PointerWheelEventArgs e)
+    {
+
+        if (IsMouseReportingActiveForInput())
+        {
+            Point point = e.GetPosition(this);
+            bool sent = SendPointerEvent(new TerminalPointerEvent(
+                Kind: TerminalPointerEventKind.Scroll,
+                X: point.X,
+                Y: point.Y,
+                Button: TerminalMouseButton.None,
+                Action: TerminalInputAction.Press,
+                Modifiers: ConvertTerminalModifiers(e.KeyModifiers),
+                DeltaX: e.Delta.X,
+                DeltaY: e.Delta.Y));
+            if (sent)
+            {
+                e.Handled = true;
+                return;
+            }
+        }
 
         TerminalScrollService.HandlePointerWheel(
             e,
@@ -1130,6 +1318,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         ArgumentNullException.ThrowIfNull(options);
 
         EnsureVtProcessorPreferenceApplied();
+        _mouseModeTracker.Reset();
+        ResetPointerButtons();
+        _isMouseSelecting = false;
 
         await TerminalSessionService.StartSessionAsync(
                 TerminalTransportFactory,
@@ -1172,6 +1363,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             .GetAwaiter()
             .GetResult();
         _activeTransportId = null;
+        _mouseModeTracker.Reset();
+        ResetPointerButtons();
+        _isMouseSelecting = false;
     }
 
     /// <summary>Whether a standalone PTY is active.</summary>
@@ -1240,10 +1434,192 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             });
     }
 
-    private void SendPointerEvent(TerminalPointerEvent pointerEvent)
+    private bool SendPointerEvent(TerminalPointerEvent pointerEvent)
     {
-        TerminalSessionService.InputSink?.SendPointer(pointerEvent);
+        ITerminalInputSink? inputSink = TerminalSessionService.InputSink;
+        if (inputSink is not null)
+        {
+            if (inputSink.SendPointer(pointerEvent))
+            {
+                return true;
+            }
+        }
+
+        if (!_mouseModeTracker.ModeState.IsMouseReportingEnabled ||
+            !HasTransportOrDirectPtyInputPath())
+        {
+            return false;
+        }
+
+        if (!TryResolvePointerCell(pointerEvent.X, pointerEvent.Y, out int column, out int row))
+        {
+            return false;
+        }
+
+        if (!TerminalMouseProtocolEncoder.TryEncode(
+                pointerEvent,
+                _mouseModeTracker.ModeState,
+                column,
+                row,
+                out byte[] encoded))
+        {
+            return false;
+        }
+
+        TerminalSessionService.SendInput(encoded);
+        return true;
     }
+
+    private bool IsMouseReportingActiveForInput()
+    {
+        if (!_mouseModeTracker.ModeState.IsMouseReportingEnabled)
+        {
+            return false;
+        }
+
+        return TerminalSessionService.InputSink is not null
+            || HasTransportOrDirectPtyInputPath();
+    }
+
+    private bool HasTransportOrDirectPtyInputPath()
+    {
+        if (TerminalSessionService.HasActiveTransport)
+        {
+            return true;
+        }
+
+        // Support legacy/direct PTY paths where no transport instance is attached.
+        return TerminalSessionService.Transport is null && TerminalSessionService.HasPty;
+    }
+
+    private bool TryResolvePointerCell(double x, double y, out int column, out int row)
+    {
+        column = 0;
+        row = 0;
+
+        if (_renderer is null || _renderer.CellWidth <= 0 || _renderer.CellHeight <= 0)
+        {
+            return false;
+        }
+
+        int col = Math.Max(0, (int)(x / _renderer.CellWidth));
+        int rowIndex = Math.Max(0, (int)(y / _renderer.CellHeight));
+        column = Math.Clamp(col + 1, 1, Columns);
+        row = Math.Clamp(rowIndex + 1, 1, Rows);
+        return true;
+    }
+
+    private void ResetPointerButtons()
+    {
+        _leftPointerDown = false;
+        _middlePointerDown = false;
+        _rightPointerDown = false;
+    }
+
+    private void SyncPointerButtonState(PointerPointProperties properties, bool preserveWhenNoButtons = false)
+    {
+        bool anyButtonPressed =
+            properties.IsLeftButtonPressed ||
+            properties.IsMiddleButtonPressed ||
+            properties.IsRightButtonPressed;
+
+        if (preserveWhenNoButtons && !anyButtonPressed)
+        {
+            return;
+        }
+
+        _leftPointerDown = properties.IsLeftButtonPressed;
+        _middlePointerDown = properties.IsMiddleButtonPressed;
+        _rightPointerDown = properties.IsRightButtonPressed;
+    }
+
+    private void SetPointerButtonState(TerminalMouseButton button, bool isDown)
+    {
+        switch (button)
+        {
+            case TerminalMouseButton.Left:
+                _leftPointerDown = isDown;
+                break;
+            case TerminalMouseButton.Middle:
+                _middlePointerDown = isDown;
+                break;
+            case TerminalMouseButton.Right:
+                _rightPointerDown = isDown;
+                break;
+        }
+    }
+
+    private TerminalMouseButton GetPrimaryPressedMouseButton(PointerPointProperties properties)
+    {
+        if (_leftPointerDown || properties.IsLeftButtonPressed)
+        {
+            return TerminalMouseButton.Left;
+        }
+
+        if (_middlePointerDown || properties.IsMiddleButtonPressed)
+        {
+            return TerminalMouseButton.Middle;
+        }
+
+        if (_rightPointerDown || properties.IsRightButtonPressed)
+        {
+            return TerminalMouseButton.Right;
+        }
+
+        return TerminalMouseButton.None;
+    }
+
+    private TerminalMouseButton GetTrackedPressedMouseButton()
+    {
+        if (_leftPointerDown)
+        {
+            return TerminalMouseButton.Left;
+        }
+
+        if (_middlePointerDown)
+        {
+            return TerminalMouseButton.Middle;
+        }
+
+        if (_rightPointerDown)
+        {
+            return TerminalMouseButton.Right;
+        }
+
+        return TerminalMouseButton.None;
+    }
+
+    private static bool IsPrimaryPointer(PointerType pointerType)
+    {
+        return pointerType is PointerType.Mouse or PointerType.Touch;
+    }
+
+    private static TerminalMouseButton ResolvePressedMouseButton(PointerPointProperties properties)
+    {
+        TerminalMouseButton fromUpdateKind = properties.PointerUpdateKind switch
+        {
+            PointerUpdateKind.LeftButtonPressed => TerminalMouseButton.Left,
+            PointerUpdateKind.MiddleButtonPressed => TerminalMouseButton.Middle,
+            PointerUpdateKind.RightButtonPressed => TerminalMouseButton.Right,
+            _ => TerminalMouseButton.None,
+        };
+
+        if (fromUpdateKind != TerminalMouseButton.None)
+        {
+            return fromUpdateKind;
+        }
+
+        return ConvertPressedMouseButton(properties);
+    }
+
+    private static TerminalMouseButton ResolveReleasedMouseButton(PointerPointProperties properties) =>
+        properties.PointerUpdateKind switch
+        {
+            PointerUpdateKind.LeftButtonReleased => TerminalMouseButton.Left,
+            PointerUpdateKind.MiddleButtonReleased => TerminalMouseButton.Middle,
+            PointerUpdateKind.RightButtonReleased => TerminalMouseButton.Right,
+            _ => TerminalMouseButton.None,
+        };
 
     private static TerminalMouseButton ConvertPressedMouseButton(PointerPointProperties properties)
     {
