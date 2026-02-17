@@ -57,36 +57,39 @@ public sealed class NcursesHarnessFlowTests
     }
 
     [AvaloniaFact]
-    public async Task PtyHarness_MouseMatrix_1000_DefaultEncoding_IsObserved_EndToEnd()
+    public async Task PtyHarness_MouseMatrix_1000_PressReleaseTracking_IsObserved_EndToEnd()
     {
         await RunMouseMatrixCaseAsync(
-            modes: [1000],
+            modes: [1000, 1006],
             emitMouseInput: static (window, point) => RaiseMousePressRelease(window, point),
             mouseLogPredicate: static line =>
-                line.StartsWith("MOUSE encoding=default ", StringComparison.Ordinal) &&
-                line.Contains("cb=0", StringComparison.Ordinal));
+                line.StartsWith("MOUSE encoding=sgr ", StringComparison.Ordinal) &&
+                line.Contains("cb=0", StringComparison.Ordinal) &&
+                line.Contains("action=M", StringComparison.Ordinal));
     }
 
     [AvaloniaFact]
     public async Task PtyHarness_MouseMatrix_1002_ButtonMotion_IsObserved_EndToEnd()
     {
         await RunMouseMatrixCaseAsync(
-            modes: [1002],
+            modes: [1002, 1006],
             emitMouseInput: static (window, point) => RaiseButtonMotion(window, point),
             mouseLogPredicate: static line =>
-                line.StartsWith("MOUSE encoding=default ", StringComparison.Ordinal) &&
-                line.Contains("cb=32", StringComparison.Ordinal));
+                line.StartsWith("MOUSE encoding=sgr ", StringComparison.Ordinal) &&
+                line.Contains("cb=32", StringComparison.Ordinal) &&
+                line.Contains("action=M", StringComparison.Ordinal));
     }
 
     [AvaloniaFact]
     public async Task PtyHarness_MouseMatrix_1003_AnyMotion_IsObserved_EndToEnd()
     {
         await RunMouseMatrixCaseAsync(
-            modes: [1003],
+            modes: [1003, 1006],
             emitMouseInput: static (window, point) => RaiseAnyMotion(window, point),
             mouseLogPredicate: static line =>
-                line.StartsWith("MOUSE encoding=default ", StringComparison.Ordinal) &&
-                line.Contains("cb=35", StringComparison.Ordinal));
+                line.StartsWith("MOUSE encoding=sgr ", StringComparison.Ordinal) &&
+                line.Contains("cb=35", StringComparison.Ordinal) &&
+                line.Contains("action=M", StringComparison.Ordinal));
     }
 
     [AvaloniaFact]
@@ -97,7 +100,7 @@ public sealed class NcursesHarnessFlowTests
             emitMouseInput: static (window, point) => RaiseMousePressRelease(window, point),
             mouseLogPredicate: static line =>
                 line.StartsWith("MOUSE encoding=sgr ", StringComparison.Ordinal) &&
-                line.Contains("action=M", StringComparison.Ordinal));
+                line.Contains("action=m", StringComparison.Ordinal));
     }
 
     [AvaloniaFact]
@@ -387,51 +390,25 @@ public sealed class NcursesHarnessFlowTests
             TryFindPtyHarnessExecutable(out string? harnessExecutable),
             "Could not locate RoyalTerminal.PtyHarness executable for PTY integration tests.");
 
-        string shell = GetCommandShell();
-        control.StartPty(shell: shell, workingDirectory: Environment.CurrentDirectory);
-        await Task.Delay(100);
-        Dispatcher.UIThread.RunJobs();
-        control.SendInput(BuildHarnessLaunchCommand(harnessExecutable!, logPath, modes));
-        await Task.CompletedTask;
-    }
-
-    private static string GetCommandShell()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.System),
-                "cmd.exe");
-        }
-
-        return "/bin/sh";
-    }
-
-    private static string BuildHarnessLaunchCommand(string harnessExecutable, string logPath, int[] modes)
-    {
         int[] sortedModes = [.. modes.OrderBy(static mode => mode)];
-        string modeList = string.Join(",", sortedModes);
-
-        if (OperatingSystem.IsWindows())
+        Dictionary<string, string> environment = new(StringComparer.Ordinal)
         {
-            string escapedExecutable = harnessExecutable.Replace("\"", "\"\"", StringComparison.Ordinal);
-            string escapedLog = logPath.Replace("\"", "\"\"", StringComparison.Ordinal);
-            string escapedModes = modeList.Replace("\"", "\"\"", StringComparison.Ordinal);
+            ["RT_HARNESS_LOG"] = logPath,
+            ["RT_HARNESS_TIMEOUT_SEC"] = "30",
+            ["RT_HARNESS_MODES"] = string.Join(",", sortedModes),
+            ["TERM"] = "xterm-256color",
+        };
 
-            return
-                $"set \"RT_HARNESS_LOG={escapedLog}\"&& " +
-                "set \"RT_HARNESS_TIMEOUT_SEC=30\"&& " +
-                $"set \"RT_HARNESS_MODES={escapedModes}\"&& " +
-                "set \"TERM=xterm-256color\"&& " +
-                $"\"{escapedExecutable}\"\r\n";
-        }
+        int widthPx = Math.Max(1, (int)Math.Round(control.Bounds.Width));
+        int heightPx = Math.Max(1, (int)Math.Round(control.Bounds.Height));
 
-        return
-            $"RT_HARNESS_LOG={ShellQuote(logPath)} " +
-            "RT_HARNESS_TIMEOUT_SEC=30 " +
-            $"RT_HARNESS_MODES={ShellQuote(modeList)} " +
-            "TERM=xterm-256color " +
-            $"{ShellQuote(harnessExecutable)}\n";
+        PtyTransportOptions options = new(
+            Command: new TerminalCommandSpec(harnessExecutable!, Array.Empty<string>()),
+            WorkingDirectory: Environment.CurrentDirectory,
+            Environment: environment,
+            Dimensions: new TerminalSessionDimensions(control.Columns, control.Rows, widthPx, heightPx));
+
+        await control.StartSessionAsync(options);
     }
 
     private static TerminalControl CreateTerminalControl(VtProcessorPreference preference)
