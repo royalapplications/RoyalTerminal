@@ -2,8 +2,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Terminal.Transport.Pty - PTY transport implementation.
 
-using System.Text;
-
 namespace RoyalTerminal.Terminal.Transport.Pty;
 
 /// <summary>
@@ -58,7 +56,7 @@ public sealed class PtyTerminalTransport : ITerminalPtyTransport
         pty.DataReceived += OnDataReceived;
         pty.ProcessExited += OnProcessExited;
 
-        string? shellPath = ResolveShellPath(ptyOptions);
+        TerminalCommandSpec command = ResolveCommand(ptyOptions);
         Dictionary<string, string>? environment = ptyOptions.Environment is null
             ? null
             : new Dictionary<string, string>(ptyOptions.Environment);
@@ -66,11 +64,12 @@ public sealed class PtyTerminalTransport : ITerminalPtyTransport
         try
         {
             pty.Start(
-                shell: shellPath,
+                shell: command.FileName,
                 columns: Math.Max(1, ptyOptions.Dimensions.Columns),
                 rows: Math.Max(1, ptyOptions.Dimensions.Rows),
                 workingDirectory: ptyOptions.WorkingDirectory,
-                environment: environment);
+                environment: environment,
+                arguments: command.Arguments);
             _pty = pty;
         }
         catch
@@ -134,16 +133,20 @@ public sealed class PtyTerminalTransport : ITerminalPtyTransport
         _ = StopAsync();
     }
 
-    private string? ResolveShellPath(PtyTransportOptions options)
+    private TerminalCommandSpec ResolveCommand(PtyTransportOptions options)
     {
         if (options.Command is { } command && !string.IsNullOrWhiteSpace(command.FileName))
         {
-            // PTY backends currently accept shell executable path only.
-            return command.FileName;
+            return command;
         }
 
         ShellProfile profile = _shellProfileCatalog.GetDefaultProfile();
-        return profile.Command.FileName;
+        if (options.Command is { } argumentOnlyCommand && argumentOnlyCommand.Arguments.Count > 0)
+        {
+            return new TerminalCommandSpec(profile.Command.FileName, argumentOnlyCommand.Arguments);
+        }
+
+        return profile.Command;
     }
 
     private void OnDataReceived(byte[] data, int length)
