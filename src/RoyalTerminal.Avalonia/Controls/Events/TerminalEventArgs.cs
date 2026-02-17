@@ -2,8 +2,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia.Controls - Shared event args for terminal controls.
 
-using RoyalTerminal.GhosttySharp.Native;
-
 namespace RoyalTerminal.Avalonia.Controls;
 
 /// <summary>
@@ -36,13 +34,4 @@ public class TerminalSizeEventArgs : EventArgs
         Columns = columns;
         Rows = rows;
     }
-}
-
-/// <summary>
-/// Event args for Ghostty action dispatches.
-/// </summary>
-public class GhosttyActionEventArgs : EventArgs
-{
-    public GhosttyAction Action { get; }
-    public GhosttyActionEventArgs(GhosttyAction action) => Action = action;
 }

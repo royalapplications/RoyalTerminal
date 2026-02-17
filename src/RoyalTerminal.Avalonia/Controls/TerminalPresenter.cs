@@ -14,7 +14,7 @@ namespace RoyalTerminal.Avalonia.Controls;
 /// Composition API with a custom visual handler.
 /// Provides the bridge between Avalonia's visual tree and SkiaSharp rendering.
 /// </summary>
-public class GhosttyTerminalPresenter : Control
+public class TerminalPresenter : Control
 {
     private CompositionCustomVisual? _compositionVisual;
     private SkiaTerminalRenderer? _renderer;
