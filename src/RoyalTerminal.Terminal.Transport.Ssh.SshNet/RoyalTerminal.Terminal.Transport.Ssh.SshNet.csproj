@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RoyalTerminal.Terminal.Transport.Ssh.SshNet</PackageId>
+    <Description>SSH terminal transport provider implemented with SSH.NET.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Ssh.Abstractions\RoyalTerminal.Terminal.Transport.Ssh.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SSH.NET" />
+  </ItemGroup>
+
+</Project>
