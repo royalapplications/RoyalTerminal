@@ -176,21 +176,65 @@ public class PtyContractTests
             return parsed;
         }
 
-        // Give the shell process a brief moment to settle and claim the slave PTY.
-        Thread.Sleep(150);
+        static (int Rows, int Cols) WaitForAnyNonZeroSize(
+            Func<(int Rows, int Cols)> query,
+            TimeSpan timeout)
+        {
+            DateTime deadline = DateTime.UtcNow + timeout;
+            (int Rows, int Cols) last = default;
+            while (DateTime.UtcNow < deadline)
+            {
+                last = query();
+                if (last.Rows > 0 && last.Cols > 0)
+                {
+                    return last;
+                }
 
-        (int initialRows, int initialCols) = QueryPtySize(slavePath!);
+                Thread.Sleep(50);
+            }
+
+            return last;
+        }
+
+        static (bool Matched, int Rows, int Cols) WaitForExpectedSize(
+            Func<(int Rows, int Cols)> query,
+            int expectedRows,
+            int expectedCols,
+            TimeSpan timeout)
+        {
+            DateTime deadline = DateTime.UtcNow + timeout;
+            (int Rows, int Cols) last = default;
+            while (DateTime.UtcNow < deadline)
+            {
+                last = query();
+                if (last.Rows == expectedRows && last.Cols == expectedCols)
+                {
+                    return (true, last.Rows, last.Cols);
+                }
+
+                Thread.Sleep(50);
+            }
+
+            return (false, last.Rows, last.Cols);
+        }
+
+        (int initialRows, int initialCols) = WaitForAnyNonZeroSize(
+            () => QueryPtySize(slavePath!),
+            TimeSpan.FromSeconds(3));
         Assert.Equal(24, initialRows);
         Assert.Equal(80, initialCols);
 
         if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             pty.Resize(140, 45);
-            Thread.Sleep(150);
-
-            (int resizedRows, int resizedCols) = QueryPtySize(slavePath!);
-            Assert.Equal(45, resizedRows);
-            Assert.Equal(140, resizedCols);
+            (bool matched, int resizedRows, int resizedCols) = WaitForExpectedSize(
+                () => QueryPtySize(slavePath!),
+                expectedRows: 45,
+                expectedCols: 140,
+                timeout: TimeSpan.FromSeconds(3));
+            Assert.True(
+                matched,
+                $"PTY resize did not converge to expected size. Observed {resizedRows}x{resizedCols}.");
         }
     }
 }
