@@ -133,6 +133,69 @@ public class TerminalAbstractionsTests
     }
 
     [Fact]
+    public void TerminalSessionService_StartPty_ForwardsCommandArguments()
+    {
+        TerminalSessionService service = new();
+        FakePty fakePty = new();
+        FakePtyFactory factory = new(fakePty);
+
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+        Action<byte[]> onResponse = _ => { };
+        Action onBell = () => { };
+        Action<string> onTitle = _ => { };
+
+        service.StartPty(
+            factory,
+            shell: "sh",
+            columns: 120,
+            rows: 40,
+            workingDirectory: "/tmp",
+            vtProcessor: null,
+            onPtyDataReceived: onData,
+            onPtyProcessExited: onExit,
+            onVtResponse: onResponse,
+            onVtBell: onBell,
+            onVtTitleChanged: onTitle,
+            arguments: ["-lc", "echo ready"]);
+
+        Assert.Equal(["-lc", "echo ready"], fakePty.StartArguments);
+        service.StopPty(vtProcessor: null, onPtyDataReceived: onData, onPtyProcessExited: onExit);
+    }
+
+    [Fact]
+    public void TerminalSessionService_StartPty_ForwardsArguments_WhenShellIsAutoDetected()
+    {
+        TerminalSessionService service = new();
+        FakePty fakePty = new();
+        FakePtyFactory factory = new(fakePty);
+
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+        Action<byte[]> onResponse = _ => { };
+        Action onBell = () => { };
+        Action<string> onTitle = _ => { };
+
+        service.StartPty(
+            factory,
+            shell: null,
+            columns: 120,
+            rows: 40,
+            workingDirectory: "/tmp",
+            vtProcessor: null,
+            onPtyDataReceived: onData,
+            onPtyProcessExited: onExit,
+            onVtResponse: onResponse,
+            onVtBell: onBell,
+            onVtTitleChanged: onTitle,
+            arguments: ["-lc", "echo ready"]);
+
+        Assert.False(string.IsNullOrWhiteSpace(fakePty.StartShell));
+        Assert.Equal(["-lc", "echo ready"], fakePty.StartArguments);
+        service.StopPty(vtProcessor: null, onPtyDataReceived: onData, onPtyProcessExited: onExit);
+    }
+
+    [Fact]
     public void TerminalSessionService_StopPty_DoesNotDisposeVtProcessor()
     {
         TerminalSessionService service = new();
@@ -446,6 +509,7 @@ public class TerminalAbstractionsTests
 
         public bool StartCalled { get; private set; }
         public string? StartShell { get; private set; }
+        public IReadOnlyList<string> StartArguments { get; private set; } = Array.Empty<string>();
         public int StartColumns { get; private set; }
         public int StartRows { get; private set; }
         public string? StartWorkingDirectory { get; private set; }
@@ -461,11 +525,13 @@ public class TerminalAbstractionsTests
             int columns = 80,
             int rows = 24,
             string? workingDirectory = null,
-            Dictionary<string, string>? environment = null)
+            Dictionary<string, string>? environment = null,
+            IReadOnlyList<string>? arguments = null)
         {
             _ = environment;
             StartCalled = true;
             StartShell = shell;
+            StartArguments = arguments ?? Array.Empty<string>();
             StartColumns = columns;
             StartRows = rows;
             StartWorkingDirectory = workingDirectory;
@@ -521,13 +587,15 @@ public class TerminalAbstractionsTests
             int columns = 80,
             int rows = 24,
             string? workingDirectory = null,
-            Dictionary<string, string>? environment = null)
+            Dictionary<string, string>? environment = null,
+            IReadOnlyList<string>? arguments = null)
         {
             _ = shell;
             _ = columns;
             _ = rows;
             _ = workingDirectory;
             _ = environment;
+            _ = arguments;
 
             IsRunning = true;
             byte[] bytes = System.Text.Encoding.UTF8.GetBytes(InitialPayload);

@@ -1310,11 +1310,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     /// <param name="shell">Shell path, or null for auto-detect.</param>
     /// <param name="workingDirectory">Working directory, or null for home.</param>
-    public void StartPty(string? shell = null, string? workingDirectory = null)
+    /// <param name="arguments">Optional command arguments passed to the shell/program.</param>
+    public void StartPty(
+        string? shell = null,
+        string? workingDirectory = null,
+        IReadOnlyList<string>? arguments = null)
     {
+        IReadOnlyList<string> normalizedArguments = arguments ?? Array.Empty<string>();
         TerminalCommandSpec? command = string.IsNullOrWhiteSpace(shell)
-            ? null
-            : new TerminalCommandSpec(shell, Array.Empty<string>());
+            ? (normalizedArguments.Count > 0
+                ? new TerminalCommandSpec(string.Empty, normalizedArguments)
+                : null)
+            : new TerminalCommandSpec(shell, normalizedArguments);
         int widthPx = Math.Max(1, (int)Math.Round(Bounds.Width > 0 ? Bounds.Width : Columns * (_renderer?.CellWidth ?? 1)));
         int heightPx = Math.Max(1, (int)Math.Round(Bounds.Height > 0 ? Bounds.Height : Rows * (_renderer?.CellHeight ?? 1)));
 

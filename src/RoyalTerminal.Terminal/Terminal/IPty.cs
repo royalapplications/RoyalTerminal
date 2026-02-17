@@ -17,12 +17,14 @@ public interface IPty : IDisposable
     /// <param name="rows">Initial terminal rows.</param>
     /// <param name="workingDirectory">Working directory, or null for default.</param>
     /// <param name="environment">Additional environment variables.</param>
+    /// <param name="arguments">Optional command arguments passed to the shell/program.</param>
     void Start(
         string? shell = null,
         int columns = 80,
         int rows = 24,
         string? workingDirectory = null,
-        Dictionary<string, string>? environment = null);
+        Dictionary<string, string>? environment = null,
+        IReadOnlyList<string>? arguments = null);
 
     /// <summary>Raised when data is received from the PTY.</summary>
     event Action<byte[], int>? DataReceived;

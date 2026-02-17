@@ -48,12 +48,14 @@ public sealed class UnixPty : IPty
     /// <param name="rows">Initial terminal height.</param>
     /// <param name="workingDirectory">Working directory for the shell.</param>
     /// <param name="environment">Additional environment variables.</param>
+    /// <param name="arguments">Optional command arguments passed to the shell/program.</param>
     public unsafe void Start(
         string? shell = null,
         int columns = 80,
         int rows = 24,
         string? workingDirectory = null,
-        Dictionary<string, string>? environment = null)
+        Dictionary<string, string>? environment = null,
+        IReadOnlyList<string>? arguments = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -75,10 +77,21 @@ public sealed class UnixPty : IPty
         var nativeTermName = AllocNativeString("TERM");
         var nativeTermValue = AllocNativeString("xterm-256color");
 
-        // Build argv: { shell_path, NULL }
-        var argv = (byte**)Marshal.AllocHGlobal(2 * IntPtr.Size);
+        // Build argv: { shell_path, arg1, arg2, ..., NULL }
+        int argumentCount = arguments?.Count ?? 0;
+        int argvLength = argumentCount + 2;
+        var argv = (byte**)Marshal.AllocHGlobal(argvLength * IntPtr.Size);
         argv[0] = (byte*)nativeShell;
-        argv[1] = null;
+        List<IntPtr> nativeArguments = new(argumentCount);
+        for (int i = 0; i < argumentCount; i++)
+        {
+            string argument = arguments![i] ?? string.Empty;
+            IntPtr nativeArgument = AllocNativeString(argument);
+            nativeArguments.Add(nativeArgument);
+            argv[i + 1] = (byte*)nativeArgument;
+        }
+
+        argv[argvLength - 1] = null;
 
         // Build env key=value pairs for additional environment variables
         var envPairs = new List<(IntPtr key, IntPtr val)>();
@@ -114,7 +127,7 @@ public sealed class UnixPty : IPty
 
         if (_childPid < 0)
         {
-            FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, envPairs);
+            FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, nativeArguments, envPairs);
             throw new InvalidOperationException($"forkpty failed: {Marshal.GetLastPInvokeError()}");
         }
 
@@ -143,7 +156,7 @@ public sealed class UnixPty : IPty
 
         // ---- PARENT PROCESS ----
         // Free the native memory (child has its own copy after fork)
-        FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, envPairs);
+        FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, nativeArguments, envPairs);
         _slavePtyPath = TryGetSlavePtyPath(_masterFd);
 
         // Start reading from the master FD
@@ -398,12 +411,16 @@ public sealed class UnixPty : IPty
 
     private static unsafe void FreeNative(
         IntPtr shell, IntPtr cwd, IntPtr termName, IntPtr termValue,
-        byte** argv, List<(IntPtr key, IntPtr val)> envPairs)
+        byte** argv, List<IntPtr> nativeArguments, List<(IntPtr key, IntPtr val)> envPairs)
     {
         Marshal.FreeHGlobal(shell);
         if (cwd != IntPtr.Zero) Marshal.FreeHGlobal(cwd);
         Marshal.FreeHGlobal(termName);
         Marshal.FreeHGlobal(termValue);
+        for (int i = 0; i < nativeArguments.Count; i++)
+        {
+            Marshal.FreeHGlobal(nativeArguments[i]);
+        }
         Marshal.FreeHGlobal((IntPtr)argv);
         foreach (var (key, val) in envPairs)
         {

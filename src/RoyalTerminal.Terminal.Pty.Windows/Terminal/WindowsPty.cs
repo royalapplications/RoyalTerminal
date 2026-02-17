@@ -50,12 +50,14 @@ public sealed class WindowsPty : IPty
     /// <param name="rows">Initial terminal height.</param>
     /// <param name="workingDirectory">Working directory for the shell.</param>
     /// <param name="environment">Additional environment variables.</param>
+    /// <param name="arguments">Optional command arguments passed to the shell/program.</param>
     public void Start(
         string? shell = null,
         int columns = 80,
         int rows = 24,
         string? workingDirectory = null,
-        Dictionary<string, string>? environment = null)
+        Dictionary<string, string>? environment = null,
+        IReadOnlyList<string>? arguments = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -90,7 +92,7 @@ public sealed class WindowsPty : IPty
         _inputStream = new FileStream(_pipeIn, FileAccess.Write, bufferSize: 0, isAsync: false);
 
         // Launch the shell process attached to the ConPTY
-        _process = LaunchProcess(shell, workingDirectory, environment);
+        _process = LaunchProcess(shell, arguments, workingDirectory, environment);
 
         // Start reading from the PTY output
         _readThread = new Thread(ReadLoop)
@@ -230,7 +232,11 @@ public sealed class WindowsPty : IPty
         return null;
     }
 
-    private Process LaunchProcess(string shell, string workingDirectory, Dictionary<string, string>? environment)
+    private Process LaunchProcess(
+        string shell,
+        IReadOnlyList<string>? arguments,
+        string workingDirectory,
+        Dictionary<string, string>? environment)
     {
         var startupInfo = new STARTUPINFOEX();
         startupInfo.StartupInfo.cb = Marshal.SizeOf<STARTUPINFOEX>();
@@ -252,6 +258,7 @@ public sealed class WindowsPty : IPty
                 throw new Win32Exception(Marshal.GetLastWin32Error());
 
             startupInfo.lpAttributeList = attrList;
+            string commandLine = BuildCommandLine(shell, arguments);
 
             // Build environment block
             nint envBlock = 0;
@@ -273,7 +280,7 @@ public sealed class WindowsPty : IPty
             try
             {
                 if (!CreateProcessW(
-                    null, shell, 0, 0, false,
+                    shell, commandLine, 0, 0, false,
                     EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
                     envBlock, workingDirectory,
                     ref startupInfo, out var processInfo))
@@ -299,6 +306,87 @@ public sealed class WindowsPty : IPty
     {
         if (!CreatePipe(out readSide, out writeSide, 0, 0))
             throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
+    private static string BuildCommandLine(string executablePath, IReadOnlyList<string>? arguments)
+    {
+        StringBuilder builder = new();
+        builder.Append(EscapeWindowsArgument(executablePath));
+
+        if (arguments is null || arguments.Count == 0)
+        {
+            return builder.ToString();
+        }
+
+        for (int i = 0; i < arguments.Count; i++)
+        {
+            builder.Append(' ');
+            builder.Append(EscapeWindowsArgument(arguments[i] ?? string.Empty));
+        }
+
+        return builder.ToString();
+    }
+
+    private static string EscapeWindowsArgument(string argument)
+    {
+        if (argument.Length == 0)
+        {
+            return "\"\"";
+        }
+
+        bool needsQuotes = false;
+        for (int i = 0; i < argument.Length; i++)
+        {
+            char ch = argument[i];
+            if (char.IsWhiteSpace(ch) || ch == '"')
+            {
+                needsQuotes = true;
+                break;
+            }
+        }
+
+        if (!needsQuotes)
+        {
+            return argument;
+        }
+
+        StringBuilder escaped = new(argument.Length + 8);
+        escaped.Append('"');
+
+        int backslashCount = 0;
+        for (int i = 0; i < argument.Length; i++)
+        {
+            char ch = argument[i];
+            if (ch == '\\')
+            {
+                backslashCount++;
+                continue;
+            }
+
+            if (ch == '"')
+            {
+                escaped.Append('\\', backslashCount * 2 + 1);
+                escaped.Append('"');
+                backslashCount = 0;
+                continue;
+            }
+
+            if (backslashCount > 0)
+            {
+                escaped.Append('\\', backslashCount);
+                backslashCount = 0;
+            }
+
+            escaped.Append(ch);
+        }
+
+        if (backslashCount > 0)
+        {
+            escaped.Append('\\', backslashCount * 2);
+        }
+
+        escaped.Append('"');
+        return escaped.ToString();
     }
 
     #endregion

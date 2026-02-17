@@ -133,11 +133,15 @@ public sealed class TerminalSessionService : ITerminalSessionService
         Action<int> onPtyProcessExited,
         Action<byte[]> onVtResponse,
         Action onVtBell,
-        Action<string> onVtTitleChanged)
+        Action<string> onVtTitleChanged,
+        IReadOnlyList<string>? arguments = null)
     {
+        IReadOnlyList<string> normalizedArguments = arguments ?? Array.Empty<string>();
         TerminalCommandSpec? command = string.IsNullOrWhiteSpace(shell)
-            ? null
-            : new TerminalCommandSpec(shell, Array.Empty<string>());
+            ? (normalizedArguments.Count > 0
+                ? new TerminalCommandSpec(string.Empty, normalizedArguments)
+                : null)
+            : new TerminalCommandSpec(shell, normalizedArguments);
         TerminalSessionDimensions dimensions = new(columns, rows, WidthPixels: 0, HeightPixels: 0);
         PtyTransportOptions transportOptions = new(
             Command: command,
