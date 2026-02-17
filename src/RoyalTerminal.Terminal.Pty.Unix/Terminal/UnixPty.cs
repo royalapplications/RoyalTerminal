@@ -10,7 +10,7 @@ using System.Runtime.Versioning;
 using System.Text;
 using System.Diagnostics;
 
-namespace RoyalTerminal.Avalonia.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// Unix PTY that spawns a child shell process (e.g., /bin/zsh, /bin/bash)

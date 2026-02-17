@@ -3,7 +3,7 @@
 // RoyalTerminal.Tests — Tests for terminal abstractions introduced for decomposition.
 
 using RoyalTerminal.Avalonia.Rendering;
-using RoyalTerminal.Avalonia.Terminal;
+using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
 using Xunit;
 
@@ -17,7 +17,7 @@ public class TerminalAbstractionsTests
         TerminalScreen screen = new(80, 24, 10_000);
         DefaultVtProcessorFactory factory = new();
 
-        IVtProcessor processor = factory.Create(screen, useNativeVtProcessor: false);
+        IVtProcessor processor = factory.Create(screen, VtProcessorPreference.Managed);
 
         Assert.IsType<BasicVtProcessor>(processor);
         processor.Dispose();
@@ -31,7 +31,7 @@ public class TerminalAbstractionsTests
         FakeNativeVtProcessorProvider provider = new(expected, isAvailable: true);
         DefaultVtProcessorFactory factory = new([provider]);
 
-        IVtProcessor processor = factory.Create(screen, useNativeVtProcessor: null);
+        IVtProcessor processor = factory.Create(screen, VtProcessorPreference.Auto);
 
         Assert.Same(expected, processor);
         Assert.Equal(1, provider.CreateCallCount);
@@ -45,7 +45,7 @@ public class TerminalAbstractionsTests
         ThrowingNativeVtProcessorProvider provider = new(isAvailable: true);
         DefaultVtProcessorFactory factory = new([provider]);
 
-        IVtProcessor processor = factory.Create(screen, useNativeVtProcessor: null);
+        IVtProcessor processor = factory.Create(screen, VtProcessorPreference.Auto);
 
         Assert.IsType<BasicVtProcessor>(processor);
         Assert.Equal(1, provider.CreateCallCount);
@@ -61,7 +61,7 @@ public class TerminalAbstractionsTests
         DefaultVtProcessorFactory factory = new([provider]);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(
-            () => factory.Create(screen, useNativeVtProcessor: true));
+            () => factory.Create(screen, VtProcessorPreference.Native));
 
         Assert.Contains("no native VT provider is available", ex.Message);
         Assert.Equal(0, provider.CreateCallCount);
@@ -133,6 +133,118 @@ public class TerminalAbstractionsTests
     }
 
     [Fact]
+    public void TerminalSessionService_StopPty_DoesNotDisposeVtProcessor()
+    {
+        TerminalSessionService service = new();
+        FakePty fakePty = new();
+        FakePtyFactory factory = new(fakePty);
+        FakeVtProcessor vtProcessor = new();
+
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+        Action<byte[]> onResponse = _ => { };
+        Action onBell = () => { };
+        Action<string> onTitle = _ => { };
+
+        service.StartPty(
+            factory,
+            shell: "sh",
+            columns: 120,
+            rows: 40,
+            workingDirectory: "/tmp",
+            vtProcessor: vtProcessor,
+            onPtyDataReceived: onData,
+            onPtyProcessExited: onExit,
+            onVtResponse: onResponse,
+            onVtBell: onBell,
+            onVtTitleChanged: onTitle);
+
+        Assert.NotNull(vtProcessor.ResponseCallback);
+        Assert.NotNull(vtProcessor.BellCallback);
+        Assert.NotNull(vtProcessor.TitleCallback);
+
+        service.StopPty(vtProcessor: vtProcessor, onPtyDataReceived: onData, onPtyProcessExited: onExit);
+
+        Assert.False(vtProcessor.DisposeCalled);
+        Assert.Null(vtProcessor.ResponseCallback);
+        Assert.Null(vtProcessor.BellCallback);
+        Assert.Null(vtProcessor.TitleCallback);
+    }
+
+    [Fact]
+    public void TerminalSessionService_StopThenStartPty_ReusesVtProcessorWithoutDisposal()
+    {
+        TerminalSessionService service = new();
+        FakePty firstPty = new();
+        FakePty secondPty = new();
+        SequencePtyFactory factory = new(firstPty, secondPty);
+        FakeVtProcessor vtProcessor = new();
+
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+        Action<byte[]> onResponse = _ => { };
+        Action onBell = () => { };
+        Action<string> onTitle = _ => { };
+
+        service.StartPty(
+            factory,
+            shell: "sh",
+            columns: 80,
+            rows: 24,
+            workingDirectory: "/tmp",
+            vtProcessor: vtProcessor,
+            onPtyDataReceived: onData,
+            onPtyProcessExited: onExit,
+            onVtResponse: onResponse,
+            onVtBell: onBell,
+            onVtTitleChanged: onTitle);
+
+        Assert.Equal(1, factory.CreateCallCount);
+        Assert.True(firstPty.StartCalled);
+        Assert.Same(firstPty, service.Pty);
+        Assert.NotNull(vtProcessor.ResponseCallback);
+        Assert.NotNull(vtProcessor.BellCallback);
+        Assert.NotNull(vtProcessor.TitleCallback);
+
+        service.StopPty(vtProcessor: vtProcessor, onPtyDataReceived: onData, onPtyProcessExited: onExit);
+
+        Assert.True(firstPty.DisposeCalled);
+        Assert.False(vtProcessor.DisposeCalled);
+        Assert.Null(vtProcessor.ResponseCallback);
+        Assert.Null(vtProcessor.BellCallback);
+        Assert.Null(vtProcessor.TitleCallback);
+
+        service.StartPty(
+            factory,
+            shell: "zsh",
+            columns: 100,
+            rows: 30,
+            workingDirectory: "/var",
+            vtProcessor: vtProcessor,
+            onPtyDataReceived: onData,
+            onPtyProcessExited: onExit,
+            onVtResponse: onResponse,
+            onVtBell: onBell,
+            onVtTitleChanged: onTitle);
+
+        Assert.Equal(2, factory.CreateCallCount);
+        Assert.True(secondPty.StartCalled);
+        Assert.Equal("zsh", secondPty.StartShell);
+        Assert.Equal(100, secondPty.StartColumns);
+        Assert.Equal(30, secondPty.StartRows);
+        Assert.Equal("/var", secondPty.StartWorkingDirectory);
+        Assert.Same(secondPty, service.Pty);
+        Assert.NotNull(vtProcessor.ResponseCallback);
+        Assert.NotNull(vtProcessor.BellCallback);
+        Assert.NotNull(vtProcessor.TitleCallback);
+
+        service.StopPty(vtProcessor: vtProcessor, onPtyDataReceived: onData, onPtyProcessExited: onExit);
+
+        Assert.True(secondPty.DisposeCalled);
+        Assert.False(vtProcessor.DisposeCalled);
+    }
+
+    [Fact]
     public void TerminalSessionService_SendInput_UsesPty_WhenNoSurface()
     {
         TerminalSessionService service = new();
@@ -166,26 +278,25 @@ public class TerminalAbstractionsTests
     }
 
     [Fact]
-    public void TerminalSessionService_SendInput_UsesSurface_WhenAttached()
+    public void TerminalSessionService_SendInput_UsesEndpoint_WhenAttached()
     {
         TerminalSessionService service = new();
-        FakeTerminalSurface surface = new();
-        service.AttachSurface(surface);
+        FakeTerminalEndpoint endpoint = new();
+        service.AttachEndpoint(endpoint);
 
         service.SendInput("hello");
         service.SendInput("world"u8);
 
-        Assert.Equal("hello", surface.LastTextInput);
-        Assert.Equal("world"u8.ToArray(), surface.LastByteInput);
+        Assert.Equal("world"u8.ToArray(), endpoint.LastUtf8Input);
     }
 
     [Fact]
-    public void TerminalSessionService_DetachSurface_RoutesInputBackToPty()
+    public void TerminalSessionService_DetachEndpoint_RoutesInputBackToPty()
     {
         TerminalSessionService service = new();
         FakePty fakePty = new();
         FakePtyFactory factory = new(fakePty);
-        FakeTerminalSurface surface = new();
+        FakeTerminalEndpoint endpoint = new();
 
         Action<byte[], int> onData = (_, _) => { };
         Action<int> onExit = _ => { };
@@ -206,20 +317,20 @@ public class TerminalAbstractionsTests
             onVtBell: onBell,
             onVtTitleChanged: onTitle);
 
-        service.AttachSurface(surface);
+        service.AttachEndpoint(endpoint);
         service.SendInput("surface");
-        Assert.Equal("surface", surface.LastTextInput);
+        Assert.Equal("surface", System.Text.Encoding.UTF8.GetString(endpoint.LastUtf8Input!));
 
-        service.DetachSurface();
+        service.DetachEndpoint();
         service.SendInput("pty");
         Assert.Equal("pty", fakePty.LastWrittenText);
     }
 
     [Fact]
-    public void TerminalSessionService_AttachSurface_ThrowsOnNull()
+    public void TerminalSessionService_AttachEndpoint_ThrowsOnNull()
     {
         TerminalSessionService service = new();
-        Assert.Throws<ArgumentNullException>(() => service.AttachSurface(null!));
+        Assert.Throws<ArgumentNullException>(() => service.AttachEndpoint(null!));
     }
 
     [Fact]
@@ -257,6 +368,41 @@ public class TerminalAbstractionsTests
         Assert.Equal(fakePty.InitialPayload, receivedText);
     }
 
+    [Fact]
+    public void TerminalSessionService_StartPty_ConfiguresVtCallbacksBeforeEarlyData()
+    {
+        TerminalSessionService service = new();
+        EarlyEmitFakePty fakePty = new("\x1b[6n");
+        FakePtyFactory factory = new(fakePty);
+        FakeVtProcessor vtProcessor = new();
+        bool callbacksConfiguredDuringEarlyData = false;
+
+        void OnData(byte[] _data, int _length)
+        {
+            _ = _data;
+            _ = _length;
+            callbacksConfiguredDuringEarlyData =
+                vtProcessor.ResponseCallback is not null
+                && vtProcessor.BellCallback is not null
+                && vtProcessor.TitleCallback is not null;
+        }
+
+        service.StartPty(
+            factory,
+            shell: "sh",
+            columns: 80,
+            rows: 24,
+            workingDirectory: "/tmp",
+            vtProcessor: vtProcessor,
+            onPtyDataReceived: OnData,
+            onPtyProcessExited: _ => { },
+            onVtResponse: _ => { },
+            onVtBell: () => { },
+            onVtTitleChanged: _ => { });
+
+        Assert.True(callbacksConfiguredDuringEarlyData);
+    }
+
     private sealed class FakePtyFactory : IPtyFactory
     {
         private readonly IPty _pty;
@@ -272,6 +418,24 @@ public class TerminalAbstractionsTests
         {
             CreateCalled = true;
             return _pty;
+        }
+    }
+
+    private sealed class SequencePtyFactory : IPtyFactory
+    {
+        private readonly Queue<IPty> _ptys;
+
+        public SequencePtyFactory(params IPty[] ptys)
+        {
+            _ptys = new Queue<IPty>(ptys);
+        }
+
+        public int CreateCallCount { get; private set; }
+
+        public IPty Create()
+        {
+            CreateCallCount++;
+            return _ptys.Dequeue();
         }
     }
 
@@ -406,21 +570,27 @@ public class TerminalAbstractionsTests
         }
     }
 
-    private sealed class FakeTerminalSurface : ITerminalSurface
+    private sealed class FakeTerminalEndpoint : ITerminalEndpoint
     {
-        public object NativeHandle => this;
+        public byte[]? LastUtf8Input { get; private set; }
+        public bool Focused { get; private set; }
+        public int WidthPx { get; private set; }
+        public int HeightPx { get; private set; }
 
-        public string? LastTextInput { get; private set; }
-        public byte[]? LastByteInput { get; private set; }
-
-        public void SendInput(string text)
+        public void SendText(ReadOnlySpan<byte> utf8)
         {
-            LastTextInput = text;
+            LastUtf8Input = utf8.ToArray();
         }
 
-        public void SendInput(ReadOnlySpan<byte> data)
+        public void SetFocus(bool focused)
         {
-            LastByteInput = data.ToArray();
+            Focused = focused;
+        }
+
+        public void SetSize(int widthPx, int heightPx)
+        {
+            WidthPx = widthPx;
+            HeightPx = heightPx;
         }
     }
 
@@ -469,11 +639,24 @@ public class TerminalAbstractionsTests
         public int CursorRow => 0;
         public bool CursorVisible => true;
         public bool ApplicationCursorKeys => false;
+        public bool ApplicationKeypad => false;
         public bool AlternateScreen => false;
         public bool BracketedPaste => false;
+        public TerminalModeState ModeState => new(
+            CursorVisible,
+            ApplicationCursorKeys,
+            ApplicationKeypad,
+            AlternateScreen,
+            BracketedPaste);
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add { }
+            remove { }
+        }
         public Action<byte[]>? ResponseCallback { get; set; }
         public Action? BellCallback { get; set; }
         public Action<string>? TitleCallback { get; set; }
+        public bool DisposeCalled { get; private set; }
 
         public void Process(ReadOnlySpan<byte> data)
         {
@@ -500,6 +683,7 @@ public class TerminalAbstractionsTests
 
         public void Dispose()
         {
+            DisposeCalled = true;
         }
     }
 }

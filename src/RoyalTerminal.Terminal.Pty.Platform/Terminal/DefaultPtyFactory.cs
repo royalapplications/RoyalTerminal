@@ -2,7 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia — Default PTY factory.
 
-namespace RoyalTerminal.Avalonia.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// Default factory that creates OS-specific PTY implementations.

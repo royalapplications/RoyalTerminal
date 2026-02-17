@@ -7,8 +7,8 @@ using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
-using RoyalTerminal.GhosttySharp;
 
 namespace RoyalTerminal.Avalonia.Services;
 
@@ -26,12 +26,13 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
     {
         string? text = null;
 
-        GhosttySurface? surface = sessionService.Surface?.NativeHandle as GhosttySurface;
-        if (surface is not null)
+        ITerminalSelectionSource? selectionSource = sessionService.SelectionSource;
+        if (selectionSource is not null)
         {
-            text = surface.ReadSelection();
+            text = selectionSource.ReadSelection();
         }
-        else if (screen is not null && renderer is not null)
+
+        if (string.IsNullOrEmpty(text) && screen is not null && renderer is not null)
         {
             text = GetSelectedText(screen, renderer);
         }
@@ -68,7 +69,7 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
     public void ClearSelection(
         TerminalScreen? screen,
         SkiaTerminalRenderer? renderer,
-        GhosttyTerminalPresenter? presenter)
+        TerminalPresenter? presenter)
     {
         if (renderer is null)
         {

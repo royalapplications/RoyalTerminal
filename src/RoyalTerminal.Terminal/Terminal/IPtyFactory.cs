@@ -2,7 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia — Factory abstraction for PTY implementations.
 
-namespace RoyalTerminal.Avalonia.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// Factory for creating platform-specific PTY implementations.

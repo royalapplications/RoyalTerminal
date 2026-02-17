@@ -13,6 +13,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp\RoyalTerminal.GhosttySharp.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia\RoyalTerminal.Avalonia.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia.Ghostty\RoyalTerminal.Avalonia.Ghostty.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Vt.Ghostty\RoyalTerminal.Terminal.Vt.Ghostty.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp.Native.OSX\RoyalTerminal.GhosttySharp.Native.OSX.csproj" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
     <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp.Native.Win64\RoyalTerminal.GhosttySharp.Native.Win64.csproj" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
     <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp.Native.Linux64\RoyalTerminal.GhosttySharp.Native.Linux64.csproj" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />

@@ -4,7 +4,7 @@
 
 using RoyalTerminal.Avalonia.Rendering;
 
-namespace RoyalTerminal.Avalonia.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// Native VT provider that creates <see cref="GhosttyVtProcessor"/> instances.

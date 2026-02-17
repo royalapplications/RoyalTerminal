@@ -59,6 +59,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Rendering.Tex
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Unicode", "src\RoyalTerminal.Unicode\RoyalTerminal.Unicode.csproj", "{C8A3C010-D1DD-4D85-B3D6-235889F70685}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Avalonia.Ghostty", "src\RoyalTerminal.Avalonia.Ghostty\RoyalTerminal.Avalonia.Ghostty.csproj", "{9822E4B6-A964-4C79-9B77-C74458407E62}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -369,6 +371,18 @@ Global
 		{C8A3C010-D1DD-4D85-B3D6-235889F70685}.Release|x64.Build.0 = Release|Any CPU
 		{C8A3C010-D1DD-4D85-B3D6-235889F70685}.Release|x86.ActiveCfg = Release|Any CPU
 		{C8A3C010-D1DD-4D85-B3D6-235889F70685}.Release|x86.Build.0 = Release|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Debug|x64.Build.0 = Debug|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Debug|x86.Build.0 = Debug|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Release|x64.ActiveCfg = Release|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Release|x64.Build.0 = Release|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Release|x86.ActiveCfg = Release|Any CPU
+		{9822E4B6-A964-4C79-9B77-C74458407E62}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -397,5 +411,6 @@ Global
 		{2F00DA6E-B412-42CC-B86E-65ED3F6A2161} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{81E6F4F7-80A6-4842-A555-CF00762E6CD3} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{C8A3C010-D1DD-4D85-B3D6-235889F70685} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{9822E4B6-A964-4C79-9B77-C74458407E62} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

@@ -1,10 +1,10 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Avalonia — Default VT processor factory.
+// RoyalTerminal.Terminal — Default VT processor factory.
 
 using RoyalTerminal.Avalonia.Rendering;
 
-namespace RoyalTerminal.Avalonia.Terminal;
+namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// Default factory that creates the best available VT processor implementation.
@@ -31,9 +31,9 @@ public sealed class DefaultVtProcessorFactory : IVtProcessorFactory
     }
 
     /// <inheritdoc />
-    public IVtProcessor Create(TerminalScreen screen, bool? useNativeVtProcessor)
+    public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
     {
-        if (useNativeVtProcessor == false)
+        if (preference == VtProcessorPreference.Managed)
         {
             return new BasicVtProcessor(screen);
         }
@@ -50,13 +50,13 @@ public sealed class DefaultVtProcessorFactory : IVtProcessorFactory
             {
                 return provider.Create(screen);
             }
-            catch when (useNativeVtProcessor != true)
+            catch when (preference != VtProcessorPreference.Native)
             {
                 // Fall back to managed VT processor when native is optional.
             }
         }
 
-        if (useNativeVtProcessor == true)
+        if (preference == VtProcessorPreference.Native)
         {
             throw new InvalidOperationException(
                 "Native VT processor was requested but no native VT provider is available.");

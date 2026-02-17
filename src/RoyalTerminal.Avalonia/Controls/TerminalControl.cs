@@ -14,15 +14,13 @@ using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Scrolling;
-using RoyalTerminal.Avalonia.Terminal;
-using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
-using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.Avalonia.Controls;
 
 /// <summary>
-/// Full-featured Avalonia terminal control backed by Ghostty.
+/// Full-featured Avalonia terminal control with backend-neutral endpoint integration.
 /// Features:
 /// - SkiaSharp rendering via Avalonia CustomVisual composition
 /// - Keyboard input with IME support
@@ -31,53 +29,54 @@ namespace RoyalTerminal.Avalonia.Controls;
 /// - Focus management
 /// - Content scaling (DPI awareness)
 /// </summary>
-public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
+public class TerminalControl : TemplatedControl, ILogicalScrollable
 {
     #region Styled Properties
 
     /// <summary>The font family used for terminal text.</summary>
     public static readonly StyledProperty<string> FontFamilyNameProperty =
-        AvaloniaProperty.Register<GhosttyTerminalControl, string>(nameof(FontFamilyName), TerminalDefaults.DefaultMonoFont);
+        AvaloniaProperty.Register<TerminalControl, string>(nameof(FontFamilyName), TerminalDefaults.DefaultMonoFont);
 
     /// <summary>The font size for terminal text.</summary>
     public static readonly StyledProperty<double> TerminalFontSizeProperty =
-        AvaloniaProperty.Register<GhosttyTerminalControl, double>(nameof(TerminalFontSize), 14.0);
+        AvaloniaProperty.Register<TerminalControl, double>(nameof(TerminalFontSize), 14.0);
 
     /// <summary>Number of columns in the terminal grid.</summary>
     public static readonly StyledProperty<int> ColumnsProperty =
-        AvaloniaProperty.Register<GhosttyTerminalControl, int>(nameof(Columns), 80);
+        AvaloniaProperty.Register<TerminalControl, int>(nameof(Columns), 80);
 
     /// <summary>Number of rows in the terminal viewport.</summary>
     public static readonly StyledProperty<int> RowsProperty =
-        AvaloniaProperty.Register<GhosttyTerminalControl, int>(nameof(Rows), 24);
+        AvaloniaProperty.Register<TerminalControl, int>(nameof(Rows), 24);
 
     /// <summary>Maximum number of scrollback rows.</summary>
     public static readonly StyledProperty<int> ScrollbackLimitProperty =
-        AvaloniaProperty.Register<GhosttyTerminalControl, int>(nameof(ScrollbackLimit), 10_000);
+        AvaloniaProperty.Register<TerminalControl, int>(nameof(ScrollbackLimit), 10_000);
 
     /// <summary>Default foreground color.</summary>
     public static readonly StyledProperty<Color> DefaultForegroundProperty =
-        AvaloniaProperty.Register<GhosttyTerminalControl, Color>(nameof(DefaultForeground),
+        AvaloniaProperty.Register<TerminalControl, Color>(nameof(DefaultForeground),
             Color.FromRgb(0xD4, 0xD4, 0xD4));
 
     /// <summary>Default background color.</summary>
     public static readonly StyledProperty<Color> DefaultBackgroundProperty =
-        AvaloniaProperty.Register<GhosttyTerminalControl, Color>(nameof(DefaultBackground),
+        AvaloniaProperty.Register<TerminalControl, Color>(nameof(DefaultBackground),
             Color.FromRgb(0x1E, 0x1E, 0x1E));
 
     /// <summary>Whether to auto-scroll to bottom on new output.</summary>
     public static readonly StyledProperty<bool> AutoScrollProperty =
-        AvaloniaProperty.Register<GhosttyTerminalControl, bool>(nameof(AutoScroll), true);
+        AvaloniaProperty.Register<TerminalControl, bool>(nameof(AutoScroll), true);
 
-    /// <summary>When true, forces use of <see cref="GhosttyVtProcessor"/> (native libghostty-terminal).
-    /// When null (default), auto-detects the best available VT processor.</summary>
-    public static readonly DirectProperty<GhosttyTerminalControl, bool?> UseNativeVtProcessorProperty =
-        AvaloniaProperty.RegisterDirect<GhosttyTerminalControl, bool?>(
-            nameof(UseNativeVtProcessor),
-            o => o.UseNativeVtProcessor,
-            (o, v) => o.UseNativeVtProcessor = v);
+    /// <summary>
+    /// Preferred VT processor implementation.
+    /// </summary>
+    public static readonly DirectProperty<TerminalControl, VtProcessorPreference> VtProcessorPreferenceProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, VtProcessorPreference>(
+            nameof(VtProcessorPreference),
+            o => o.VtProcessorPreference,
+            (o, v) => o.VtProcessorPreference = v);
 
-    private bool? _useNativeVtProcessor;
+    private VtProcessorPreference _vtProcessorPreference = VtProcessorPreference.Auto;
 
     public string FontFamilyName
     {
@@ -128,14 +127,12 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
-    /// Gets or sets whether to force use of the native Ghostty VT processor
-    /// (<c>libghostty-terminal</c>). When <c>null</c> (default), auto-detects.
-    /// Set to <c>true</c> to require it, or <c>false</c> to force <see cref="BasicVtProcessor"/>.
+    /// Gets or sets the preferred VT processor implementation.
     /// </summary>
-    public bool? UseNativeVtProcessor
+    public VtProcessorPreference VtProcessorPreference
     {
-        get => _useNativeVtProcessor;
-        set => SetAndRaise(UseNativeVtProcessorProperty, ref _useNativeVtProcessor, value);
+        get => _vtProcessorPreference;
+        set => SetAndRaise(VtProcessorPreferenceProperty, ref _vtProcessorPreference, value);
     }
 
     #endregion
@@ -156,15 +153,19 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
 
     #endregion
 
-    private GhosttyTerminalPresenter? _presenter;
+    private TerminalPresenter? _presenter;
     private SkiaTerminalRenderer? _renderer;
     private TerminalScreen? _screen;
     private TerminalScrollData? _scrollData;
     private VirtualizedTerminalScrollViewer? _scrollViewer;
-    private GhosttySurfaceTerminalEndpoint? _surfaceEndpoint;
-
     private IVtProcessor? _vtProcessor;
     private bool _isMouseSelecting;
+    private bool _suppressGridPropertyApply;
+    private int _lastAppliedColumns = -1;
+    private int _lastAppliedRows = -1;
+    private int _lastAppliedWidthPx = -1;
+    private int _lastAppliedHeightPx = -1;
+    private VtProcessorPreference _appliedVtProcessorPreference = VtProcessorPreference.Auto;
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -196,8 +197,8 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public IPtyFactory PtyFactory { get; }
 
-    /// <summary>Gets the underlying Ghostty surface, if connected.</summary>
-    public GhosttySurface? Surface => _surfaceEndpoint?.Surface;
+    /// <summary>Gets the currently attached terminal endpoint, if any.</summary>
+    public ITerminalEndpoint? Endpoint => TerminalSessionService.Endpoint;
 
     /// <summary>Gets the terminal screen model.</summary>
     public TerminalScreen? Screen => _screen;
@@ -287,18 +288,18 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
 
     #endregion
 
-    static GhosttyTerminalControl()
+    static TerminalControl()
     {
-        FocusableProperty.OverrideDefaultValue<GhosttyTerminalControl>(true);
+        FocusableProperty.OverrideDefaultValue<TerminalControl>(true);
     }
 
-    public GhosttyTerminalControl()
+    public TerminalControl()
         : this(
             new TerminalSessionService(),
             new DefaultTerminalInputAdapter(),
             new DefaultTerminalSelectionService(),
             new DefaultTerminalScrollService(),
-            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]),
+            new DefaultVtProcessorFactory(),
             new DefaultPtyFactory())
     {
     }
@@ -306,7 +307,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     /// <summary>
     /// Initializes a terminal control with explicit service/factory dependencies.
     /// </summary>
-    public GhosttyTerminalControl(
+    public TerminalControl(
         ITerminalSessionService terminalSessionService,
         ITerminalInputAdapter terminalInputAdapter,
         ITerminalSelectionService terminalSelectionService,
@@ -336,9 +337,10 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
             DefaultBackground = ColorToArgb(bg),
         };
 
-        _vtProcessor = VtProcessorFactory.Create(_screen, UseNativeVtProcessor);
+        _vtProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
+        _appliedVtProcessorPreference = VtProcessorPreference;
 
-        _renderer = new SkiaTerminalRenderer(FontFamilyName, (float)TerminalFontSize);
+        _renderer = CreateRenderer(previous: null);
 
         _scrollData = new TerminalScrollData
         {
@@ -350,18 +352,301 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
         _scrollViewer = new VirtualizedTerminalScrollViewer(_screen, _scrollData);
     }
 
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        if (change.Property == FontFamilyNameProperty || change.Property == TerminalFontSizeProperty)
+        {
+            ApplyFontSettings();
+            return;
+        }
+
+        if (change.Property == VtProcessorPreferenceProperty)
+        {
+            ApplyVtProcessorPreference();
+            return;
+        }
+
+        if (change.Property == DefaultForegroundProperty || change.Property == DefaultBackgroundProperty)
+        {
+            ApplyColorDefaults();
+            return;
+        }
+
+        if (change.Property == ColumnsProperty || change.Property == RowsProperty)
+        {
+            if (_suppressGridPropertyApply)
+            {
+                return;
+            }
+
+            ApplyGridFromProperties();
+            return;
+        }
+
+        if (change.Property == AutoScrollProperty)
+        {
+            ApplyAutoScrollSetting();
+        }
+    }
+
+    private void ApplyFontSettings()
+    {
+        if (_screen is null)
+        {
+            return;
+        }
+
+        SkiaTerminalRenderer nextRenderer = CreateRenderer(_renderer);
+        _renderer = nextRenderer;
+
+        if (_scrollData is not null)
+        {
+            _scrollData.CellHeight = nextRenderer.CellHeight;
+            _scrollData.Viewport = Bounds.Height > 0
+                ? Bounds.Height
+                : Rows * nextRenderer.CellHeight;
+            _scrollData.UpdateExtent(_screen.TotalRows, AutoScroll);
+        }
+
+        if (_scrollData is not null)
+        {
+            _scrollViewer?.UpdateViewport(_scrollData.Viewport, nextRenderer.CellHeight);
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            _screen.InvalidateAll();
+        }
+
+        _presenter?.SetRenderState(nextRenderer, _screen);
+        _presenter?.NotifyResize(Bounds.Size);
+        _presenter?.Invalidate(fullRedraw: true);
+        RaiseScrollInvalidated();
+        InvalidateMeasure();
+    }
+
+    private SkiaTerminalRenderer CreateRenderer(SkiaTerminalRenderer? previous)
+    {
+        string family = string.IsNullOrWhiteSpace(FontFamilyName)
+            ? TerminalDefaults.DefaultMonoFont
+            : FontFamilyName;
+        SkiaTerminalRenderer renderer = new(family, (float)TerminalFontSize);
+
+        if (previous is null)
+        {
+            return renderer;
+        }
+
+        renderer.CursorColumn = previous.CursorColumn;
+        renderer.CursorRow = previous.CursorRow;
+        renderer.CursorVisible = previous.CursorVisible;
+        renderer.CursorStyle = previous.CursorStyle;
+        renderer.CursorColor = previous.CursorColor;
+        renderer.SelectionColor = previous.SelectionColor;
+        renderer.SelectionStart = previous.SelectionStart;
+        renderer.SelectionEnd = previous.SelectionEnd;
+        renderer.EnableTextRenderDiagnostics = previous.EnableTextRenderDiagnostics;
+        renderer.EnableTextShaping = previous.EnableTextShaping;
+        renderer.TextDirectionMode = previous.TextDirectionMode;
+        renderer.EnableLigatures = previous.EnableLigatures;
+        return renderer;
+    }
+
+    private void ApplyColorDefaults()
+    {
+        if (_screen is null)
+        {
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            _screen.DefaultForeground = ColorToArgb(DefaultForeground);
+            _screen.DefaultBackground = ColorToArgb(DefaultBackground);
+            _screen.InvalidateAll();
+        }
+
+        _presenter?.Invalidate(fullRedraw: true);
+    }
+
+    private void ApplyAutoScrollSetting()
+    {
+        if (!AutoScroll)
+        {
+            return;
+        }
+
+        ScrollToBottom();
+        RaiseScrollInvalidated();
+    }
+
+    private void ApplyVtProcessorPreference()
+    {
+        if (_screen is null || TerminalSessionService.HasPty)
+        {
+            return;
+        }
+
+        EnsureVtProcessorPreferenceApplied();
+    }
+
+    private void EnsureVtProcessorPreferenceApplied()
+    {
+        if (_screen is null)
+        {
+            return;
+        }
+
+        if (_vtProcessor is not null && _appliedVtProcessorPreference == VtProcessorPreference)
+        {
+            return;
+        }
+
+        IVtProcessor nextProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
+        IVtProcessor? previousProcessor = _vtProcessor;
+        _vtProcessor = nextProcessor;
+        _appliedVtProcessorPreference = VtProcessorPreference;
+        previousProcessor?.Dispose();
+    }
+
+    private void ApplyGridFromLayout(int columns, int rows, Size finalSize)
+    {
+        _suppressGridPropertyApply = true;
+        try
+        {
+            if (Columns != columns)
+            {
+                SetCurrentValue(ColumnsProperty, columns);
+            }
+
+            if (Rows != rows)
+            {
+                SetCurrentValue(RowsProperty, rows);
+            }
+        }
+        finally
+        {
+            _suppressGridPropertyApply = false;
+        }
+
+        ApplyTerminalSize(columns, rows, finalSize.Width, finalSize.Height, raiseTerminalResized: true, invalidateMeasure: true, force: true);
+    }
+
+    private void ApplyGridFromProperties()
+    {
+        ApplyTerminalSize(Columns, Rows, Bounds.Width, Bounds.Height, raiseTerminalResized: true, invalidateMeasure: true);
+    }
+
+    private void ApplyTerminalSize(
+        int columns,
+        int rows,
+        double width,
+        double height,
+        bool raiseTerminalResized,
+        bool invalidateMeasure,
+        bool force = false)
+    {
+        if (_renderer is null)
+        {
+            return;
+        }
+
+        int safeColumns = Math.Max(1, columns);
+        int safeRows = Math.Max(1, rows);
+
+        if (safeColumns != columns || safeRows != rows)
+        {
+            _suppressGridPropertyApply = true;
+            try
+            {
+                if (safeColumns != Columns)
+                {
+                    SetCurrentValue(ColumnsProperty, safeColumns);
+                }
+
+                if (safeRows != Rows)
+                {
+                    SetCurrentValue(RowsProperty, safeRows);
+                }
+            }
+            finally
+            {
+                _suppressGridPropertyApply = false;
+            }
+        }
+
+        int widthPx = width > 0
+            ? Math.Max(1, (int)Math.Round(width))
+            : Math.Max(1, (int)Math.Ceiling(safeColumns * _renderer.CellWidth));
+        int heightPx = height > 0
+            ? Math.Max(1, (int)Math.Round(height))
+            : Math.Max(1, (int)Math.Ceiling(safeRows * _renderer.CellHeight));
+
+        if (!force &&
+            safeColumns == _lastAppliedColumns &&
+            safeRows == _lastAppliedRows &&
+            widthPx == _lastAppliedWidthPx &&
+            heightPx == _lastAppliedHeightPx)
+        {
+            return;
+        }
+
+        if (_screen is not null)
+        {
+            lock (_screen.SyncRoot)
+            {
+                _screen.Resize(safeColumns, safeRows);
+                _vtProcessor?.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
+            }
+        }
+
+        _scrollData?.UpdateExtent(_screen?.TotalRows ?? 0, AutoScroll);
+
+        if (_scrollData is not null)
+        {
+            _scrollData.Viewport = height > 0
+                ? height
+                : safeRows * _renderer.CellHeight;
+            _scrollViewer?.UpdateViewport(_scrollData.Viewport, _renderer.CellHeight);
+        }
+
+        Endpoint?.SetSize(widthPx, heightPx);
+        TerminalSessionService.ResizePty(safeColumns, safeRows, widthPx, heightPx);
+
+        bool gridChanged = safeColumns != _lastAppliedColumns || safeRows != _lastAppliedRows;
+        _lastAppliedColumns = safeColumns;
+        _lastAppliedRows = safeRows;
+        _lastAppliedWidthPx = widthPx;
+        _lastAppliedHeightPx = heightPx;
+
+        RaiseScrollInvalidated();
+        if (raiseTerminalResized && gridChanged)
+        {
+            TerminalResized?.Invoke(this, new TerminalSizeEventArgs(safeColumns, safeRows));
+        }
+
+        _presenter?.NotifyResize(new Size(widthPx, heightPx));
+        _presenter?.Invalidate();
+
+        if (invalidateMeasure)
+        {
+            InvalidateMeasure();
+        }
+    }
+
     /// <summary>
-    /// Gets whether the native Ghostty VT processor is being used
-    /// instead of the fallback BasicVtProcessor.
+    /// Gets whether a native VT processor is active instead of the managed fallback.
     /// </summary>
-    public bool IsUsingNativeVtProcessor => _vtProcessor is GhosttyVtProcessor;
+    public bool IsUsingNativeVtProcessor => _vtProcessor is not null && _vtProcessor is not BasicVtProcessor;
 
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
     {
         base.OnApplyTemplate(e);
 
         // Look for the presenter in the template, or create one
-        _presenter = e.NameScope.Find<GhosttyTerminalPresenter>("PART_Presenter");
+        _presenter = e.NameScope.Find<TerminalPresenter>("PART_Presenter");
         EnsurePresenter();
     }
 
@@ -378,7 +663,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     {
         if (_presenter is not null) return;
 
-        _presenter = new GhosttyTerminalPresenter();
+        _presenter = new TerminalPresenter();
         ((ISetLogicalParent)_presenter).SetParent(this);
         VisualChildren.Add(_presenter);
 
@@ -420,67 +705,51 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
 
             if (newCols != Columns || newRows != Rows)
             {
-                Columns = newCols;
-                Rows = newRows;
-
-                if (_screen is not null)
-                {
-                    lock (_screen.SyncRoot)
-                    {
-                        _screen.Resize(newCols, newRows);
-                        _vtProcessor?.NotifyResize(newCols, newRows,
-                            (int)finalSize.Width, (int)finalSize.Height);
-                    }
-                }
-
-                _scrollData?.UpdateExtent(_screen?.TotalRows ?? 0, AutoScroll);
-                _scrollViewer?.UpdateViewport(finalSize.Height, _renderer.CellHeight);
-                RaiseScrollInvalidated();
-
-                // Notify the native surface about the resize
-                if (Surface is not null)
-                {
-                    Surface.SetSize((uint)finalSize.Width, (uint)finalSize.Height);
-                }
-
-                // Notify the PTY about the resize (standalone mode)
-                TerminalSessionService.ResizePty(newCols, newRows, (int)finalSize.Width, (int)finalSize.Height);
-
-                TerminalResized?.Invoke(this, new TerminalSizeEventArgs(newCols, newRows));
-                _presenter?.NotifyResize(finalSize);
-                _presenter?.Invalidate();
-
-                // Columns/Rows changed — next measure must reflect the new cell grid
-                InvalidateMeasure();
+                ApplyGridFromLayout(newCols, newRows, finalSize);
+            }
+            else
+            {
+                ApplyTerminalSize(newCols, newRows, finalSize.Width, finalSize.Height, raiseTerminalResized: false, invalidateMeasure: false);
             }
         }
 
         return finalSize;
     }
 
-    #region Ghostty Surface Integration
+    #region Endpoint Integration
 
     /// <summary>
-    /// Connects this control to a Ghostty surface for terminal I/O.
+    /// Connects this control to a terminal endpoint for terminal I/O.
     /// </summary>
-    public void AttachSurface(GhosttySurface surface)
+    public void AttachEndpoint(ITerminalEndpoint endpoint)
     {
-        _surfaceEndpoint = new GhosttySurfaceTerminalEndpoint(surface);
-        TerminalSessionService.AttachSurface(_surfaceEndpoint);
+        TerminalSessionService.AttachEndpoint(endpoint);
+
+        if (_renderer is not null)
+        {
+            int widthPx = Bounds.Width > 0
+                ? Math.Max(1, (int)Math.Round(Bounds.Width))
+                : Math.Max(1, (int)Math.Ceiling(Columns * _renderer.CellWidth));
+            int heightPx = Bounds.Height > 0
+                ? Math.Max(1, (int)Math.Round(Bounds.Height))
+                : Math.Max(1, (int)Math.Ceiling(Rows * _renderer.CellHeight));
+            endpoint.SetSize(widthPx, heightPx);
+        }
+
+        endpoint.SetFocus(IsFocused);
     }
 
     /// <summary>
-    /// Disconnects the current Ghostty surface.
+    /// Disconnects the current terminal endpoint.
     /// </summary>
-    public void DetachSurface()
+    public void DetachEndpoint()
     {
-        _surfaceEndpoint = null;
-        TerminalSessionService.DetachSurface();
+        TerminalSessionService.DetachEndpoint();
     }
 
     /// <summary>
     /// Writes data to the terminal screen model.
-    /// Called when output is received from the PTY/Ghostty surface.
+    /// Called when output is received from the PTY/terminal endpoint.
     /// </summary>
     public void WriteOutput(byte[] data)
     {
@@ -490,7 +759,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
 
     /// <summary>
     /// Writes data to the terminal screen model.
-    /// Called when output is received from the PTY/Ghostty surface.
+    /// Called when output is received from the PTY/terminal endpoint.
     /// </summary>
     public void WriteOutput(ReadOnlyMemory<byte> data)
     {
@@ -504,7 +773,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
 
     /// <summary>
     /// Writes data to the terminal screen model.
-    /// Called when output is received from the PTY/Ghostty surface.
+    /// Called when output is received from the PTY/terminal endpoint.
     /// </summary>
     public void WriteOutput(ReadOnlySpan<byte> data)
     {
@@ -539,7 +808,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
-    /// Sends input text to the Ghostty surface.
+    /// Sends input text to the active terminal endpoint or PTY.
     /// </summary>
     public void SendInput(string text)
     {
@@ -547,7 +816,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
-    /// Sends input bytes to the Ghostty surface.
+    /// Sends input bytes to the active terminal endpoint or PTY.
     /// </summary>
     public void SendInput(ReadOnlySpan<byte> data)
     {
@@ -597,20 +866,22 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
         base.OnPointerPressed(e);
         Focus();
 
-        if (_renderer is null) return;
-
         var point = e.GetPosition(this);
         var props = e.GetCurrentPoint(this).Properties;
-
-        if (Surface is not null)
+        TerminalMouseButton button = ConvertPressedMouseButton(props);
+        if (button != TerminalMouseButton.None)
         {
-            GhosttyMouseButton button = TerminalInputAdapter.ConvertPressedMouseButton(props);
-            GhosttyMods mods = TerminalInputAdapter.ConvertModifiers(e.KeyModifiers);
-            Surface.SendMouseButton(GhosttyMouseState.Press, button, mods);
+            SendPointerEvent(new TerminalPointerEvent(
+                Kind: TerminalPointerEventKind.Button,
+                X: point.X,
+                Y: point.Y,
+                Button: button,
+                Action: TerminalInputAction.Press,
+                Modifiers: ConvertTerminalModifiers(e.KeyModifiers)));
         }
 
         // Start text selection on left click
-        if (props.IsLeftButtonPressed)
+        if (props.IsLeftButtonPressed && _renderer is not null)
         {
             _isMouseSelecting = true;
 
@@ -629,20 +900,19 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnPointerMoved(e);
 
-        if (_renderer is null) return;
-
         var point = e.GetPosition(this);
-        var col = (int)(point.X / _renderer.CellWidth);
-        var row = (int)(point.Y / _renderer.CellHeight);
+        SendPointerEvent(new TerminalPointerEvent(
+            Kind: TerminalPointerEventKind.Move,
+            X: point.X,
+            Y: point.Y,
+            Button: TerminalMouseButton.None,
+            Action: TerminalInputAction.Press,
+            Modifiers: ConvertTerminalModifiers(e.KeyModifiers)));
 
-        if (Surface is not null)
+        if (_isMouseSelecting && _renderer is not null)
         {
-            GhosttyMods moveMods = TerminalInputAdapter.ConvertModifiers(e.KeyModifiers);
-            Surface.SendMousePos(point.X, point.Y, moveMods);
-        }
-
-        if (_isMouseSelecting)
-        {
+            var col = (int)(point.X / _renderer.CellWidth);
+            var row = (int)(point.Y / _renderer.CellHeight);
             _renderer.SelectionEnd = (col, row);
             _screen?.InvalidateAll();
             _presenter?.Invalidate();
@@ -652,13 +922,14 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
-
-        if (Surface is not null)
-        {
-            GhosttyMouseButton button = TerminalInputAdapter.ConvertMouseButton(e.InitialPressMouseButton);
-            GhosttyMods mods = TerminalInputAdapter.ConvertModifiers(e.KeyModifiers);
-            Surface.SendMouseButton(GhosttyMouseState.Release, button, mods);
-        }
+        var point = e.GetPosition(this);
+        SendPointerEvent(new TerminalPointerEvent(
+            Kind: TerminalPointerEventKind.Button,
+            X: point.X,
+            Y: point.Y,
+            Button: ConvertMouseButton(e.InitialPressMouseButton),
+            Action: TerminalInputAction.Release,
+            Modifiers: ConvertTerminalModifiers(e.KeyModifiers)));
 
         _isMouseSelecting = false;
         e.Handled = true;
@@ -672,7 +943,6 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
             e,
             _scrollViewer,
             TerminalSessionService,
-            TerminalInputAdapter,
             _presenter,
             RaiseScrollInvalidated);
         e.Handled = true;
@@ -685,7 +955,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnGotFocus(GotFocusEventArgs e)
     {
         base.OnGotFocus(e);
-        Surface?.SetFocus(true);
+        Endpoint?.SetFocus(true);
         _renderer?.SetCursorVisible(true);
         _presenter?.Invalidate();
     }
@@ -693,7 +963,7 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnLostFocus(RoutedEventArgs e)
     {
         base.OnLostFocus(e);
-        Surface?.SetFocus(false);
+        Endpoint?.SetFocus(false);
         _renderer?.SetCursorVisible(false);
         _presenter?.Invalidate();
     }
@@ -760,7 +1030,10 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void SetContentScale(double scaleX, double scaleY)
     {
-        Surface?.SetContentScale(scaleX, scaleY);
+        if (Endpoint is ITerminalScaleSink scaleSink)
+        {
+            scaleSink.SetContentScale(scaleX, scaleY);
+        }
     }
 
     #endregion
@@ -768,13 +1041,15 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     #region Standalone PTY Mode
 
     /// <summary>
-    /// Starts a shell process with a PTY in standalone mode (without Ghostty native library).
+    /// Starts a shell process with a standalone PTY-backed session.
     /// On macOS/Linux uses POSIX forkpty(); on Windows uses ConPTY.
     /// </summary>
     /// <param name="shell">Shell path, or null for auto-detect.</param>
     /// <param name="workingDirectory">Working directory, or null for home.</param>
     public void StartPty(string? shell = null, string? workingDirectory = null)
     {
+        EnsureVtProcessorPreferenceApplied();
+
         TerminalSessionService.StartPty(
             PtyFactory,
             shell,
@@ -847,6 +1122,38 @@ public class GhosttyTerminalControl : TemplatedControl, ILogicalScrollable
     #endregion
 
     #region Helpers
+
+    private void SendPointerEvent(TerminalPointerEvent pointerEvent)
+    {
+        TerminalSessionService.InputSink?.SendPointer(pointerEvent);
+    }
+
+    private static TerminalMouseButton ConvertPressedMouseButton(PointerPointProperties properties)
+    {
+        if (properties.IsLeftButtonPressed) return TerminalMouseButton.Left;
+        if (properties.IsMiddleButtonPressed) return TerminalMouseButton.Middle;
+        if (properties.IsRightButtonPressed) return TerminalMouseButton.Right;
+        return TerminalMouseButton.None;
+    }
+
+    private static TerminalMouseButton ConvertMouseButton(MouseButton button) =>
+        button switch
+        {
+            MouseButton.Left => TerminalMouseButton.Left,
+            MouseButton.Middle => TerminalMouseButton.Middle,
+            MouseButton.Right => TerminalMouseButton.Right,
+            _ => TerminalMouseButton.None,
+        };
+
+    private static TerminalModifiers ConvertTerminalModifiers(KeyModifiers keyModifiers)
+    {
+        TerminalModifiers mods = TerminalModifiers.None;
+        if (keyModifiers.HasFlag(KeyModifiers.Shift)) mods |= TerminalModifiers.Shift;
+        if (keyModifiers.HasFlag(KeyModifiers.Control)) mods |= TerminalModifiers.Control;
+        if (keyModifiers.HasFlag(KeyModifiers.Alt)) mods |= TerminalModifiers.Alt;
+        if (keyModifiers.HasFlag(KeyModifiers.Meta)) mods |= TerminalModifiers.Meta;
+        return mods;
+    }
 
     private static uint ColorToArgb(Color c) =>
         ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;

@@ -1,6 +1,6 @@
 # RoyalTerminal
 
-High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-org/ghostty) terminal emulator with four integration modes, modular terminal/PTY/VT packages, and a split rendering stack (contracts, native interop, Skia bridge, and Avalonia adapters).
+High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`RoyalTerminal.Avalonia`) and optional Ghostty integrations (`RoyalTerminal.Avalonia.Ghostty`).
 
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com)
 [![Avalonia](https://img.shields.io/badge/Avalonia-11.x-8b44ac)](https://avaloniaui.net)
@@ -12,8 +12,9 @@ High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-o
 
 | Package | NuGet | Description |
 |---------|-------|-------------|
+| **RoyalTerminal.Avalonia** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.Avalonia.svg)](https://www.nuget.org/packages/RoyalTerminal.Avalonia) | Backend-neutral Avalonia terminal control (`TerminalControl`) and presentation services (no Ghostty dependency) |
+| **RoyalTerminal.Avalonia.Ghostty** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.Avalonia.Ghostty.svg)](https://www.nuget.org/packages/RoyalTerminal.Avalonia.Ghostty) | Ghostty-specific Avalonia controls (`GhosttyNativeTerminalControl`, `GhosttyRenderedTerminalControl`) and endpoint adapters |
 | **RoyalTerminal.GhosttySharp** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp) | Core Ghostty bindings (`libghostty`, `libghostty-vt`, `libghostty-terminal`) |
-| **RoyalTerminal.Avalonia** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.Avalonia.svg)](https://www.nuget.org/packages/RoyalTerminal.Avalonia) | Avalonia controls (`GhosttyNativeTerminalControl`, `GhosttyRenderedTerminalControl`, `GhosttyTerminalControl`) |
 | **RoyalTerminal.GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.OSX) | Native runtime assets for macOS (`libghostty`, `libghostty-vt`, `libghostty-terminal`, `libghostty-renderer-capi`) |
 | **RoyalTerminal.GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Win64) | Native runtime assets for Windows x64 (`ghostty.dll`, `ghostty-vt.dll`, `ghostty-terminal.dll`, `ghostty-renderer-capi.dll`) |
 | **RoyalTerminal.GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Linux64) | Native runtime assets for Linux (`libghostty.so`, `libghostty-vt.so`, `libghostty-terminal.so`, `libghostty-renderer-capi.so`) |
@@ -22,10 +23,10 @@ High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-o
 
 | Package | Responsibility |
 |---------|----------------|
-| `RoyalTerminal.Terminal` | Core terminal contracts and screen model |
+| `RoyalTerminal.Terminal` | Core terminal contracts (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`) and screen model |
 | `RoyalTerminal.Terminal.Vt.Managed` | Managed VT processor (`BasicVtProcessor`) |
-| `RoyalTerminal.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over `libghostty-terminal`) |
-| `RoyalTerminal.Terminal.Vt.Default` | Auto-selection VT processor factory |
+| `RoyalTerminal.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over `libghostty-terminal`) + `GhosttyVtProcessorProvider` |
+| `RoyalTerminal.Terminal.Vt.Default` | Preference-based VT processor factory (`VtProcessorPreference`) |
 | `RoyalTerminal.Terminal.Pty.Unix` | Unix PTY implementation (`forkpty`) |
 | `RoyalTerminal.Terminal.Pty.Windows` | Windows PTY implementation (ConPTY) |
 | `RoyalTerminal.Terminal.Pty.Platform` | Platform PTY factory (`DefaultPtyFactory`) |
@@ -40,36 +41,38 @@ High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-o
 
 ## Features
 
+- **Core/Ghostty package split**:
+  - `RoyalTerminal.Avalonia`: backend-neutral control and services.
+  - `RoyalTerminal.Avalonia.Ghostty`: Ghostty-native/rendered controls and adapters.
+- **Backend-neutral endpoint contracts** (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`) for control reuse across backends.
+- **Preference-based VT selection** via `VtProcessorPreference` (`Auto`, `Managed`, `Native`).
 - **Four integration modes** with explicit trade-offs between fidelity, portability, and native dependencies.
 - **Split rendering architecture**:
   - CPU cell rendering path (`RoyalTerminal.Rendering.Skia`)
   - GPU interop path (`RoyalTerminal.Rendering.*` + `ghostty-renderer-capi`)
-- **Ghostty Rendered TextureInterop mode** in `GhosttyRenderedTerminalControl`.
 - **Standalone VT engine** via `libghostty-terminal` on all platforms.
 - **Modular PTY and VT packages** (`Terminal.Pty.*`, `Terminal.Vt.*`).
 - **HarfBuzz-backed text shaping** with grid-safe fallback behavior and optional diagnostics counters.
 - **Grapheme-aware cell model** in managed VT and native VT/surface readback paths.
 - **Terminal session service split** (`Terminal.Services.Contracts` and `Terminal.Services`).
-- **Native artifact pipeline** for macOS/Linux/Windows, consumed by managed build/test/pack stages.
-- **Central NuGet package management** via `Directory.Packages.props`.
 - **Sample applications**:
   - Avalonia demo (`samples/RoyalTerminal.Demo`)
   - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`)
 
 ## Integration Modes
 
-| Mode | Label | VT Engine | Renderer | PTY | Platform | Airspace | Best For |
-|------|-------|-----------|----------|-----|----------|----------|----------|
-| **Ghostty Native** | ◆ Yellow | Ghostty (`libghostty`) | Metal (Ghostty) | Ghostty | macOS | Yes | Maximum native fidelity |
-| **Ghostty Rendered** | ● Blue | Ghostty (`libghostty`) | Skia (`CpuCellRenderer`) or renderer interop (`TextureInterop`) | Ghostty | macOS | No | Ghostty behavior with composited rendering |
-| **Native VT** | ▲ Orange | `libghostty-terminal` | Skia cell renderer | Unix PTY / ConPTY | All | No | Cross-platform Ghostty VT parser |
-| **Rendered** | ■ Green | `BasicVtProcessor` (C#) | Skia cell renderer | Unix PTY / ConPTY | All | No | Pure managed VT fallback |
+| Mode | Control | Package Set | VT Engine | Renderer | PTY | Platform | Best For |
+|------|---------|-------------|-----------|----------|-----|----------|----------|
+| **Ghostty Native** | `GhosttyNativeTerminalControl` | `RoyalTerminal.Avalonia.Ghostty` + `RoyalTerminal.GhosttySharp` + native assets | Ghostty (`libghostty`) | Metal (Ghostty) | Ghostty | macOS | Maximum native fidelity |
+| **Ghostty Rendered** | `GhosttyRenderedTerminalControl` | `RoyalTerminal.Avalonia.Ghostty` + `RoyalTerminal.GhosttySharp` (+ interop packages for `TextureInterop`) | Ghostty (`libghostty`) | Skia (`CpuCellRenderer`) or renderer interop (`TextureInterop`) | Ghostty | macOS | Ghostty behavior with composited rendering |
+| **Native VT** | `TerminalControl` | `RoyalTerminal.Avalonia` + `RoyalTerminal.Terminal.Vt.Ghostty` + native assets | `libghostty-terminal` | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Cross-platform native VT parser |
+| **Rendered** | `TerminalControl` | `RoyalTerminal.Avalonia` | `BasicVtProcessor` (C#) | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Pure managed fallback |
 
 ### Ghostty Rendered Rendering Modes
 
 | `GhosttyRenderedTerminalRenderingMode` | Path | Notes |
 |----------------------------------------|------|-------|
-| `CpuCellRenderer` | Read Ghostty screen cells and paint with `SkiaTerminalRenderer` | Existing rendered mode, full Avalonia composition |
+| `CpuCellRenderer` | Read Ghostty screen cells and paint with `SkiaTerminalRenderer` | Full Avalonia composition |
 | `TextureInterop` | `ghostty-renderer-capi` + `SkiaInteropRenderer` + `TerminalTextureInteropDrawHandler` | Backend-aware target acquisition with CPU RGBA fallback |
 
 > Airspace applies only to `GhosttyNativeTerminalControl` because it hosts an OS-native view (`NativeControlHost`).
@@ -78,56 +81,135 @@ High-performance .NET 10 bindings for the [Ghostty](https://github.com/ghostty-o
 
 ```mermaid
 flowchart TD
-    App[Application / Avalonia Host]
+    App["Application / Avalonia Host"]
 
-    subgraph UI[RoyalTerminal.Avalonia]
-      C1[GhosttyNativeTerminalControl]
-      C2[GhosttyRenderedTerminalControl]
-      C3[GhosttyTerminalControl]
-      UIRender[TerminalDrawHandler / GhosttyTerminalPresenter]
+    subgraph CoreUI["RoyalTerminal.Avalonia (Core)"]
+      C1["TerminalControl"]
+      C2["TerminalDrawHandler / TerminalPresenter"]
     end
 
-    subgraph Terminal[Terminal Modules]
-      T0[RoyalTerminal.Terminal]
-      T1[Terminal.Vt.Managed]
-      T2[Terminal.Vt.Ghostty]
-      T3[Terminal.Vt.Default]
-      P1[Terminal.Pty.Unix]
-      P2[Terminal.Pty.Windows]
-      P3[Terminal.Pty.Platform]
-      S1[Terminal.Services.Contracts]
-      S2[Terminal.Services]
+    subgraph GhosttyUI["RoyalTerminal.Avalonia.Ghostty (Optional)"]
+      G1["GhosttyNativeTerminalControl"]
+      G2["GhosttyRenderedTerminalControl"]
+      G3["GhosttySurfaceTerminalEndpoint"]
     end
 
-    subgraph Render[Rendering Interop Modules]
-      R0[Rendering.Contracts]
-      R1[Rendering.Interop.Ghostty]
-      R2[Rendering.Interop.Ghostty.Skia]
-      R3[Avalonia.Rendering.GhosttyInterop]
-      R4[Rendering.Skia]
+    subgraph Terminal["Terminal Modules"]
+      T0["RoyalTerminal.Terminal"]
+      T1["Terminal.Vt.Managed"]
+      T2["Terminal.Vt.Ghostty"]
+      T3["Terminal.Vt.Default"]
+      P1["Terminal.Pty.Unix"]
+      P2["Terminal.Pty.Windows"]
+      P3["Terminal.Pty.Platform"]
+      S1["Terminal.Services.Contracts"]
+      S2["Terminal.Services"]
     end
 
-    subgraph Native[Native Libraries]
-      N1[libghostty]
-      N2[libghostty-vt]
-      N3[libghostty-terminal]
-      N4[libghostty-renderer-capi]
+    subgraph CoreRender["Rendering Core"]
+      R4["Rendering.Skia"]
     end
 
-    App --> UI
-    UI --> Terminal
-    UI --> Render
+    subgraph GhosttyRender["Ghostty Rendering Interop (Optional)"]
+      R0["Rendering.Contracts"]
+      R1["Rendering.Interop.Ghostty"]
+      R2["Rendering.Interop.Ghostty.Skia"]
+      R3["Avalonia.Rendering.GhosttyInterop"]
+    end
+
+    subgraph Native["Native Libraries"]
+      N1["libghostty"]
+      N2["libghostty-vt"]
+      N3["libghostty-terminal"]
+      N4["libghostty-renderer-capi"]
+    end
+
+    App --> CoreUI
+    App --> GhosttyUI
+    CoreUI --> Terminal
+    CoreUI --> CoreRender
+    GhosttyUI --> Terminal
+    GhosttyUI --> CoreRender
+    GhosttyUI --> GhosttyRender
     Terminal --> Native
-    Render --> Native
+    GhosttyRender --> Native
 ```
 
 ## Usage
 
-### 1. Ghostty Native (macOS)
+### 1. Backend-Neutral Cross-Platform Control (`RoyalTerminal.Avalonia`)
 
 ```csharp
-using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Terminal;
+
+var terminal = new TerminalControl
+{
+    FontFamilyName = "JetBrains Mono",
+    TerminalFontSize = 14,
+    Columns = 120,
+    Rows = 40,
+    ScrollbackLimit = 10_000,
+    VtProcessorPreference = VtProcessorPreference.Managed,
+};
+
+terminal.StartPty(
+    workingDirectory: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+```
+
+### 2. Core Control with Native VT Provider (`libghostty-terminal`)
+
+```csharp
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Services;
+using RoyalTerminal.Terminal;
+using RoyalTerminal.Terminal.Services;
+
+var terminal = new TerminalControl(
+    new TerminalSessionService(),
+    new DefaultTerminalInputAdapter(),
+    new DefaultTerminalSelectionService(),
+    new DefaultTerminalScrollService(),
+    new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]),
+    new DefaultPtyFactory())
+{
+    VtProcessorPreference = VtProcessorPreference.Native,
+};
+
+terminal.StartPty();
+```
+
+### 3. Attach a Custom Endpoint (`ITerminalEndpoint`)
+
+```csharp
+using System;
+using System.Text;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Terminal;
+
+sealed class LoggingEndpoint : ITerminalEndpoint
+{
+    public void SendText(ReadOnlySpan<byte> utf8)
+        => Console.WriteLine($"INPUT: {Encoding.UTF8.GetString(utf8)}");
+
+    public void SetFocus(bool focused)
+        => Console.WriteLine($"FOCUS: {focused}");
+
+    public void SetSize(int widthPx, int heightPx)
+        => Console.WriteLine($"SIZE: {widthPx}x{heightPx}");
+}
+
+var terminal = new TerminalControl();
+terminal.AttachEndpoint(new LoggingEndpoint());
+terminal.SendInput("echo hello\n");
+terminal.DetachEndpoint();
+```
+
+### 4. Ghostty Native Control (macOS, `RoyalTerminal.Avalonia.Ghostty`)
+
+```csharp
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.GhosttySharp;
 
 Ghostty.Initialize();
 using var config = new GhosttyConfig();
@@ -144,34 +226,12 @@ var terminal = new GhosttyNativeTerminalControl
 terminal.Initialize(app);
 ```
 
-### 2. Ghostty Rendered (CPU Cell Renderer)
+### 5. Ghostty Rendered Control (macOS, CPU or TextureInterop)
 
 ```csharp
-using RoyalTerminal.GhosttySharp;
-using RoyalTerminal.Avalonia.Controls;
-
-Ghostty.Initialize();
-using var config = new GhosttyConfig();
-config.LoadDefaultFiles();
-config.Finalize_();
-using var app = new GhosttyApp(config);
-
-var terminal = new GhosttyRenderedTerminalControl
-{
-    RenderingMode = GhosttyRenderedTerminalRenderingMode.CpuCellRenderer,
-    FontFamilyName = "JetBrains Mono",
-    TerminalFontSize = 14.0f,
-};
-
-terminal.Initialize(app);
-```
-
-### 3. Ghostty Rendered (TextureInterop)
-
-```csharp
-using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
+using RoyalTerminal.GhosttySharp;
 
 Ghostty.Initialize();
 using var config = new GhosttyConfig();
@@ -184,55 +244,35 @@ var terminal = new GhosttyRenderedTerminalControl
     RenderingMode = GhosttyRenderedTerminalRenderingMode.TextureInterop,
     InteropRenderTargetProvider = new AvaloniaSkiaRenderTargetProvider(
         backendPreference: AvaloniaRenderBackendPreference.Auto),
+    FontFamilyName = "JetBrains Mono",
     TerminalFontSize = 14.0f,
 };
 
+// Use GhosttyRenderedTerminalRenderingMode.CpuCellRenderer for CPU-only mode.
 terminal.Initialize(app);
 ```
 
-### 4. Cross-Platform Terminal Control (`GhosttyTerminalControl`)
-
-```csharp
-using RoyalTerminal.Avalonia.Controls;
-
-var terminal = new GhosttyTerminalControl
-{
-    FontFamilyName = "JetBrains Mono",
-    TerminalFontSize = 14,
-    Columns = 120,
-    Rows = 40,
-    ScrollbackLimit = 10000,
-
-    // null = auto, true = force native VT, false = force managed VT
-    UseNativeVtProcessor = null,
-};
-
-terminal.StartPty(
-    workingDirectory: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-```
-
-### 5. Renderer Shaping Controls and Diagnostics
+### 6. Renderer Shaping Controls and Diagnostics
 
 ```csharp
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 
-var terminal = new GhosttyTerminalControl();
+var terminal = new TerminalControl();
 terminal.StartPty();
 
-// Available after control initialization.
 if (terminal.Renderer is { } renderer)
 {
-    renderer.EnableTextShaping = true;                 // rollout switch
+    renderer.EnableTextShaping = true;
     renderer.TextDirectionMode = TextDirectionMode.Auto;
-    renderer.EnableLigatures = false;                  // terminal-safe default
+    renderer.EnableLigatures = false;
     renderer.EnableTextRenderDiagnostics = true;
 
     TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics(reset: true);
 }
 ```
 
-### 6. Direct Renderer Interop (No Avalonia Adapter)
+### 7. Direct Renderer Interop (No Avalonia Adapter)
 
 ```csharp
 using RoyalTerminal.Rendering.Contracts;
@@ -252,14 +292,20 @@ surface.EndFrame(frameToken);
 
 ## Installation
 
-### Common App Setup
+### Backend-Neutral Setup (No Ghostty Dependency)
 
 ```bash
-# Core bindings
-dotnet add package RoyalTerminal.GhosttySharp
+# Core Avalonia control + PTY + managed VT defaults
 
-# Avalonia controls
 dotnet add package RoyalTerminal.Avalonia
+```
+
+### Optional Native VT for Core Control
+
+```bash
+# Native VT provider over libghostty-terminal
+
+dotnet add package RoyalTerminal.Terminal.Vt.Ghostty
 
 # Native runtime assets (pick your target platforms)
 dotnet add package RoyalTerminal.GhosttySharp.Native.OSX
@@ -267,9 +313,19 @@ dotnet add package RoyalTerminal.GhosttySharp.Native.Linux64
 dotnet add package RoyalTerminal.GhosttySharp.Native.Win64
 ```
 
+### Ghostty Embedded Controls (macOS)
+
+```bash
+# Ghostty-native and Ghostty-rendered Avalonia controls
+
+dotnet add package RoyalTerminal.Avalonia.Ghostty
+dotnet add package RoyalTerminal.GhosttySharp
+dotnet add package RoyalTerminal.GhosttySharp.Native.OSX
+```
+
 ### Modular Rendering Interop Setup
 
-Use this when embedding the renderer interop pipeline directly:
+Use this when embedding the renderer interop pipeline directly (for `TextureInterop` or custom integrations):
 
 ```bash
 dotnet add package RoyalTerminal.Rendering.Contracts
@@ -283,17 +339,18 @@ If your feed does not yet publish these composition packages, create them from s
 
 ## Feature Comparison
 
-| Capability | Ghostty Native | Ghostty Rendered (`CpuCellRenderer`) | Ghostty Rendered (`TextureInterop`) | Native VT | Rendered |
-|------------|----------------|--------------------------------------|-------------------------------------|-----------|----------|
-| Platform | macOS | macOS | macOS | macOS/Linux/Windows | macOS/Linux/Windows |
-| VT engine | Ghostty | Ghostty | Ghostty + renderer C API | `libghostty-terminal` | `BasicVtProcessor` |
-| Renderer path | Native Metal | Skia cell renderer | Interop target + Skia fallback | Skia cell renderer | Skia cell renderer |
-| Airspace issue | Yes | No | No | No | No |
-| Requires `libghostty` | Yes | Yes | Yes | No | No |
-| Requires `libghostty-terminal` | No | No | No | Yes | No |
-| Requires `ghostty-renderer-capi` | No | No | Yes | No | No |
-| Full Avalonia overlay support | No | Yes | Yes | Yes | Yes |
-| Cross-platform mode | No | No | No | Yes | Yes |
+| Capability | Ghostty Native | Ghostty Rendered (`CpuCellRenderer` / `TextureInterop`) | Native VT (`TerminalControl`) | Managed VT (`TerminalControl`) |
+|------------|----------------|-----------------------------------------------------------|--------------------------------------|---------------------------------------|
+| Package entry point | `RoyalTerminal.Avalonia.Ghostty` | `RoyalTerminal.Avalonia.Ghostty` | `RoyalTerminal.Avalonia` (+ `Terminal.Vt.Ghostty`) | `RoyalTerminal.Avalonia` |
+| Platform | macOS | macOS | macOS/Linux/Windows | macOS/Linux/Windows |
+| VT engine | Ghostty | Ghostty | `libghostty-terminal` | `BasicVtProcessor` |
+| Renderer path | Native Metal | Skia cell renderer or interop target + Skia fallback | Skia cell renderer | Skia cell renderer |
+| Airspace issue | Yes | No | No | No |
+| Requires `libghostty` | Yes | Yes | No | No |
+| Requires `libghostty-terminal` | No | No | Yes | No |
+| Requires `ghostty-renderer-capi` | No | `TextureInterop` only | No | No |
+| Full Avalonia overlay support | No | Yes | Yes | Yes |
+| Cross-platform mode | No | No | Yes | Yes |
 
 ## Rendering Interop Contract
 
@@ -403,6 +460,7 @@ RoyalTerminal/
 ├── src/
 │   ├── RoyalTerminal.GhosttySharp/
 │   ├── RoyalTerminal.Avalonia/
+│   ├── RoyalTerminal.Avalonia.Ghostty/
 │   ├── RoyalTerminal.Avalonia.Rendering.GhosttyInterop/
 │   ├── RoyalTerminal.Terminal/
 │   ├── RoyalTerminal.Terminal.Vt.Managed/
@@ -489,8 +547,8 @@ dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --fi
 
 Current baseline in this repository:
 
-- Unit tests: 257 passed
-- Integration tests: 44 passed
+- Unit tests: 306 passed
+- Integration tests: 45 passed
 
 Performance baseline harness:
 

@@ -550,6 +550,9 @@ jobs:
       - name: Pack RoyalTerminal.Avalonia
         run: dotnet pack src/RoyalTerminal.Avalonia/RoyalTerminal.Avalonia.csproj -c Release -o artifacts/
 
+      - name: Pack RoyalTerminal.Avalonia.Ghostty
+        run: dotnet pack src/RoyalTerminal.Avalonia.Ghostty/RoyalTerminal.Avalonia.Ghostty.csproj -c Release -o artifacts/
+
       - name: Pack RoyalTerminal.Avalonia.Rendering.GhosttyInterop
         run: dotnet pack src/RoyalTerminal.Avalonia.Rendering.GhosttyInterop/RoyalTerminal.Avalonia.Rendering.GhosttyInterop.csproj -c Release -o artifacts/
 

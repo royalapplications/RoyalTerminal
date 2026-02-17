@@ -4,10 +4,8 @@
 
 using Avalonia.Input;
 using Avalonia.Input.TextInput;
-using RoyalTerminal.Avalonia.Terminal;
+using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
-using RoyalTerminal.GhosttySharp;
-using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.Avalonia.Services;
 
@@ -19,21 +17,16 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
     /// <inheritdoc />
     public bool HandleKeyDown(KeyEventArgs e, ITerminalSessionService sessionService, IVtProcessor? vtProcessor)
     {
-        GhosttySurface? surface = GetGhosttySurface(sessionService);
-        if (surface is not null)
+        ITerminalInputSink? inputSink = sessionService.InputSink;
+        if (inputSink is not null)
         {
-            GhosttyMods mods = ConvertModifiers(e.KeyModifiers);
-            GhosttyKey key = ConvertKey(e.Key);
-            GhosttyInputKey inputKey = new()
-            {
-                Action = GhosttyInputAction.Press,
-                Keycode = (uint)key,
-                Mods = mods,
-                Composing = false,
-            };
-
-            surface.SendKey(inputKey);
-            return true;
+            TerminalKeyEvent keyEvent = new(
+                TerminalInputAction.Press,
+                KeyCode: (uint)e.Key,
+                Text: null,
+                Modifiers: ConvertTerminalModifiers(e.KeyModifiers),
+                IsComposing: false);
+            return inputSink.SendKey(keyEvent);
         }
 
         if (sessionService.Pty is not null)
@@ -55,24 +48,20 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
     /// <inheritdoc />
     public bool HandleKeyUp(KeyEventArgs e, ITerminalSessionService sessionService)
     {
-        GhosttySurface? surface = GetGhosttySurface(sessionService);
-        if (surface is null)
+        ITerminalInputSink? inputSink = sessionService.InputSink;
+        if (inputSink is null)
         {
             return false;
         }
 
-        GhosttyMods mods = ConvertModifiers(e.KeyModifiers);
-        GhosttyKey key = ConvertKey(e.Key);
-        GhosttyInputKey inputKey = new()
-        {
-            Action = GhosttyInputAction.Release,
-            Keycode = (uint)key,
-            Mods = mods,
-            Composing = false,
-        };
+        TerminalKeyEvent keyEvent = new(
+            TerminalInputAction.Release,
+            KeyCode: (uint)e.Key,
+            Text: null,
+            Modifiers: ConvertTerminalModifiers(e.KeyModifiers),
+            IsComposing: false);
 
-        surface.SendKey(inputKey);
-        return true;
+        return inputSink.SendKey(keyEvent);
     }
 
     /// <inheritdoc />
@@ -83,11 +72,10 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
             return false;
         }
 
-        GhosttySurface? surface = GetGhosttySurface(sessionService);
-        if (surface is not null)
+        ITerminalInputSink? inputSink = sessionService.InputSink;
+        if (inputSink is not null)
         {
-            surface.SendText(e.Text);
-            return true;
+            return inputSink.SendText(e.Text);
         }
 
         if (sessionService.Pty is not null)
@@ -99,143 +87,15 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         return false;
     }
 
-    private static GhosttySurface? GetGhosttySurface(ITerminalSessionService sessionService)
+    private static TerminalModifiers ConvertTerminalModifiers(KeyModifiers keyModifiers)
     {
-        return sessionService.Surface?.NativeHandle as GhosttySurface;
-    }
-
-    /// <inheritdoc />
-    public GhosttyMods ConvertModifiers(KeyModifiers keyModifiers)
-    {
-        GhosttyMods mods = GhosttyMods.None;
-        if (keyModifiers.HasFlag(KeyModifiers.Shift)) mods |= GhosttyMods.Shift;
-        if (keyModifiers.HasFlag(KeyModifiers.Control)) mods |= GhosttyMods.Ctrl;
-        if (keyModifiers.HasFlag(KeyModifiers.Alt)) mods |= GhosttyMods.Alt;
-        if (keyModifiers.HasFlag(KeyModifiers.Meta)) mods |= GhosttyMods.Super;
+        TerminalModifiers mods = TerminalModifiers.None;
+        if (keyModifiers.HasFlag(KeyModifiers.Shift)) mods |= TerminalModifiers.Shift;
+        if (keyModifiers.HasFlag(KeyModifiers.Control)) mods |= TerminalModifiers.Control;
+        if (keyModifiers.HasFlag(KeyModifiers.Alt)) mods |= TerminalModifiers.Alt;
+        if (keyModifiers.HasFlag(KeyModifiers.Meta)) mods |= TerminalModifiers.Meta;
         return mods;
     }
-
-    /// <inheritdoc />
-    public GhosttyMouseButton ConvertMouseButton(MouseButton button)
-        => button switch
-        {
-            MouseButton.Left => GhosttyMouseButton.Left,
-            MouseButton.Right => GhosttyMouseButton.Right,
-            MouseButton.Middle => GhosttyMouseButton.Middle,
-            _ => GhosttyMouseButton.Left,
-        };
-
-    /// <inheritdoc />
-    public GhosttyMouseButton ConvertPressedMouseButton(PointerPointProperties properties)
-    {
-        if (properties.IsLeftButtonPressed) return GhosttyMouseButton.Left;
-        if (properties.IsRightButtonPressed) return GhosttyMouseButton.Right;
-        if (properties.IsMiddleButtonPressed) return GhosttyMouseButton.Middle;
-        return GhosttyMouseButton.Left;
-    }
-
-    private static GhosttyKey ConvertKey(Key key)
-        => key switch
-        {
-            Key.A => GhosttyKey.A,
-            Key.B => GhosttyKey.B,
-            Key.C => GhosttyKey.C,
-            Key.D => GhosttyKey.D,
-            Key.E => GhosttyKey.E,
-            Key.F => GhosttyKey.F,
-            Key.G => GhosttyKey.G,
-            Key.H => GhosttyKey.H,
-            Key.I => GhosttyKey.I,
-            Key.J => GhosttyKey.J,
-            Key.K => GhosttyKey.K,
-            Key.L => GhosttyKey.L,
-            Key.M => GhosttyKey.M,
-            Key.N => GhosttyKey.N,
-            Key.O => GhosttyKey.O,
-            Key.P => GhosttyKey.P,
-            Key.Q => GhosttyKey.Q,
-            Key.R => GhosttyKey.R,
-            Key.S => GhosttyKey.S,
-            Key.T => GhosttyKey.T,
-            Key.U => GhosttyKey.U,
-            Key.V => GhosttyKey.V,
-            Key.W => GhosttyKey.W,
-            Key.X => GhosttyKey.X,
-            Key.Y => GhosttyKey.Y,
-            Key.Z => GhosttyKey.Z,
-            Key.D0 => GhosttyKey.Digit0,
-            Key.D1 => GhosttyKey.Digit1,
-            Key.D2 => GhosttyKey.Digit2,
-            Key.D3 => GhosttyKey.Digit3,
-            Key.D4 => GhosttyKey.Digit4,
-            Key.D5 => GhosttyKey.Digit5,
-            Key.D6 => GhosttyKey.Digit6,
-            Key.D7 => GhosttyKey.Digit7,
-            Key.D8 => GhosttyKey.Digit8,
-            Key.D9 => GhosttyKey.Digit9,
-            Key.Return => GhosttyKey.Enter,
-            Key.Escape => GhosttyKey.Escape,
-            Key.Back => GhosttyKey.Backspace,
-            Key.Tab => GhosttyKey.Tab,
-            Key.Space => GhosttyKey.Space,
-            Key.OemMinus => GhosttyKey.Minus,
-            Key.OemPlus => GhosttyKey.Equal,
-            Key.OemOpenBrackets => GhosttyKey.BracketLeft,
-            Key.OemCloseBrackets => GhosttyKey.BracketRight,
-            Key.OemBackslash => GhosttyKey.Backslash,
-            Key.OemSemicolon => GhosttyKey.Semicolon,
-            Key.OemQuotes => GhosttyKey.Quote,
-            Key.OemTilde => GhosttyKey.Backquote,
-            Key.OemComma => GhosttyKey.Comma,
-            Key.OemPeriod => GhosttyKey.Period,
-            Key.Oem2 => GhosttyKey.Slash,
-            Key.F1 => GhosttyKey.F1,
-            Key.F2 => GhosttyKey.F2,
-            Key.F3 => GhosttyKey.F3,
-            Key.F4 => GhosttyKey.F4,
-            Key.F5 => GhosttyKey.F5,
-            Key.F6 => GhosttyKey.F6,
-            Key.F7 => GhosttyKey.F7,
-            Key.F8 => GhosttyKey.F8,
-            Key.F9 => GhosttyKey.F9,
-            Key.F10 => GhosttyKey.F10,
-            Key.F11 => GhosttyKey.F11,
-            Key.F12 => GhosttyKey.F12,
-            Key.Insert => GhosttyKey.Insert,
-            Key.Home => GhosttyKey.Home,
-            Key.PageUp => GhosttyKey.PageUp,
-            Key.Delete => GhosttyKey.Delete,
-            Key.End => GhosttyKey.End,
-            Key.PageDown => GhosttyKey.PageDown,
-            Key.Right => GhosttyKey.ArrowRight,
-            Key.Left => GhosttyKey.ArrowLeft,
-            Key.Down => GhosttyKey.ArrowDown,
-            Key.Up => GhosttyKey.ArrowUp,
-            Key.NumPad0 => GhosttyKey.Numpad0,
-            Key.NumPad1 => GhosttyKey.Numpad1,
-            Key.NumPad2 => GhosttyKey.Numpad2,
-            Key.NumPad3 => GhosttyKey.Numpad3,
-            Key.NumPad4 => GhosttyKey.Numpad4,
-            Key.NumPad5 => GhosttyKey.Numpad5,
-            Key.NumPad6 => GhosttyKey.Numpad6,
-            Key.NumPad7 => GhosttyKey.Numpad7,
-            Key.NumPad8 => GhosttyKey.Numpad8,
-            Key.NumPad9 => GhosttyKey.Numpad9,
-            Key.Decimal => GhosttyKey.NumpadDecimal,
-            Key.Divide => GhosttyKey.NumpadDivide,
-            Key.Multiply => GhosttyKey.NumpadMultiply,
-            Key.Subtract => GhosttyKey.NumpadSubtract,
-            Key.Add => GhosttyKey.NumpadAdd,
-            Key.LeftShift => GhosttyKey.ShiftLeft,
-            Key.LeftCtrl => GhosttyKey.ControlLeft,
-            Key.LeftAlt => GhosttyKey.AltLeft,
-            Key.LWin => GhosttyKey.MetaLeft,
-            Key.RightShift => GhosttyKey.ShiftRight,
-            Key.RightCtrl => GhosttyKey.ControlRight,
-            Key.RightAlt => GhosttyKey.AltRight,
-            Key.RWin => GhosttyKey.MetaRight,
-            _ => GhosttyKey.Unidentified,
-        };
 
     private static string? KeyToAnsiSequence(Key key, KeyModifiers modifiers, bool applicationCursorKeys)
     {
