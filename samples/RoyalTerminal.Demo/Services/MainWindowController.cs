@@ -118,6 +118,8 @@ internal sealed class MainWindowController
                 ? "Ghostty native terminal ready"
                 : _viewModel.UseNativeVtControl
                     ? "Native VT (libghostty-terminal) ready"
+                    : _viewModel.UseManagedVtControl
+                        ? "Managed VT (BasicVtProcessor) ready"
                     : "Terminal ready - Rendered (Custom PTY) mode");
 
         lifetime.Add(Disposable.Create(DisposeResources));
@@ -351,6 +353,8 @@ internal sealed class MainWindowController
             standaloneControl.ScrollbackLimit = 10_000;
             standaloneControl.VtProcessorPreference = _viewModel.UseNativeVtControl
                 ? VtProcessorPreference.Native
+                : _viewModel.UseManagedVtControl
+                    ? VtProcessorPreference.Managed
                 : VtProcessorPreference.Auto;
             standaloneControl.DefaultForeground = palette.TerminalForeground;
             standaloneControl.DefaultBackground = palette.TerminalBackground;
@@ -440,7 +444,11 @@ internal sealed class MainWindowController
         string vtLabel = terminal is TerminalControl gtc && gtc.IsUsingNativeVtProcessor
             ? "Ghostty VT"
             : "Basic VT";
-        string prefix = _viewModel.UseNativeVtControl ? "Native VT" : "Rendered";
+        string prefix = _viewModel.UseNativeVtControl
+            ? "Native VT"
+            : _viewModel.UseManagedVtControl
+                ? "Managed VT"
+                : "Rendered";
         string transportName = _viewModel.SelectedTransportMode.DisplayName;
         string glyph = isPipeTransport
             ? "\u25A1"

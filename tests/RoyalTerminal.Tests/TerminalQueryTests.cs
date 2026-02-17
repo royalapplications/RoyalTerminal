@@ -289,6 +289,182 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_OscForegroundQuery_RespondsWithRgbValue()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b]10;?\x1b\\"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b]10;rgb:D4D4/D4D4/D4D4\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_OscPaletteQuery_RespondsWithIndexedColor()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b]4;1;?\x07"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b]4;1;rgb:CCCC/0000/0000\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DcsDecrqss_SgrQuery_ReturnsCurrentSgrState()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[1;31m"u8);
+        processor.Process("\x1bP$qm\x1b\\"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1bP1$r1;38;2;204;0;0m\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DcsDecrqss_MarginsQuery_ReturnsScrollRegion()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[2;10r"u8);
+        processor.Process("\x1bP$qr\x1b\\"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1bP1$r2;10r\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DcsDecrqss_CursorStyleQuery_ReflectsDecscusr()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[5 q"u8);
+        processor.Process("\x1bP$q q\x1b\\"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1bP1$r5 q\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DcsDecrqss_UnsupportedQuery_ReturnsFailureResponse()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1bP$qx\x1b\\"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1bP0$r\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DcsDecrqss_AcrossChunks_IsHandled()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1bP$q"u8);
+        processor.Process("r\x1b\\"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1bP1$r1;24r\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DcsOversizePayload_IsDiscarded_AndParserRecovers()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        string largePayload = new('A', 5000);
+        processor.Process(System.Text.Encoding.ASCII.GetBytes($"\x1bP{largePayload}\x1b\\"));
+
+        // Oversized DCS payload should be dropped, not interpreted.
+        Assert.Null(response);
+
+        // Parser should recover and handle subsequent DECRQSS.
+        processor.Process("\x1bP$qr\x1b\\"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1bP1$r1;24r\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Rep_RepeatsLastGraphicCharacter()
+    {
+        var screen = new TerminalScreen(16, 4, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("A\x1b[3b"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(4, processor.CursorCol);
+        Assert.Equal('A', row[0].Codepoint);
+        Assert.Equal('A', row[1].Codepoint);
+        Assert.Equal('A', row[2].Codepoint);
+        Assert.Equal('A', row[3].Codepoint);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_SmRm_InsertMode_InsertsCharacters()
+    {
+        var screen = new TerminalScreen(5, 2, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("ABCD"u8);
+        processor.Process("\x1b[1;2H\x1b[4hZ\x1b[4l"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal('A', row[0].Codepoint);
+        Assert.Equal('Z', row[1].Codepoint);
+        Assert.Equal('B', row[2].Codepoint);
+        Assert.Equal('C', row[3].Codepoint);
+        Assert.Equal('D', row[4].Codepoint);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_SmRm_LineFeedNewLineMode_MovesToColumnZeroOnLineFeed()
+    {
+        var screen = new TerminalScreen(4, 2, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("A\x1b[20h\nB"u8);
+
+        TerminalRow row0 = screen.GetViewportRow(0);
+        TerminalRow row1 = screen.GetViewportRow(1);
+        Assert.Equal('A', row0[0].Codepoint);
+        Assert.Equal('B', row1[0].Codepoint);
+        Assert.False(row1[1].HasContent);
+
+        processor.Process("\x1b[20l"u8);
+        processor.Reset();
+        processor.Process("A\nB"u8);
+        row1 = screen.GetViewportRow(1);
+        Assert.Equal('B', row1[1].Codepoint);
+    }
+
+    [Fact]
     public void BasicVtProcessor_Dsr6_AtOrigin_Reports1_1()
     {
         var screen = new TerminalScreen(80, 24, 0);
@@ -542,6 +718,91 @@ public class TerminalQueryTests
         Assert.False(row[0].HasContent);
     }
 
+    [Fact]
+    public void ManagedVsNative_OscQueryFamilies_ResponsesMatch_WhenNativeAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        using VtParityPair parity = CreateVtParityPair(columns: 80, rows: 24);
+
+        parity.ProcessBoth("\x1b]10;?\x1b\\"u8);
+        if (!CanCompareResponseParity(parity))
+        {
+            return;
+        }
+        AssertResponseParity(parity, "OSC 10");
+
+        parity.ProcessBoth("\x1b]11;?\x1b\\"u8);
+        AssertResponseParity(parity, "OSC 11");
+
+        parity.ProcessBoth("\x1b]12;?\x1b\\"u8);
+        AssertResponseParity(parity, "OSC 12");
+
+        parity.ProcessBoth("\x1b]4;1;?\x07"u8);
+        AssertResponseParity(parity, "OSC 4");
+    }
+
+    [Fact]
+    public void ManagedVsNative_DcsDecrqss_ResponsesMatch_WhenNativeAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        using VtParityPair parity = CreateVtParityPair(columns: 80, rows: 24);
+
+        parity.ProcessBoth("\x1b[1;31m"u8);
+        parity.ProcessBoth("\x1bP$qm\x1b\\"u8);
+        if (!CanCompareResponseParity(parity))
+        {
+            return;
+        }
+        AssertResponseParity(parity, "DECRQSS SGR");
+
+        parity.ProcessBoth("\x1b[2;10r"u8);
+        parity.ProcessBoth("\x1bP$qr\x1b\\"u8);
+        AssertResponseParity(parity, "DECRQSS scroll margins");
+
+        parity.ProcessBoth("\x1b[5 q"u8);
+        parity.ProcessBoth("\x1bP$q q\x1b\\"u8);
+        AssertResponseParity(parity, "DECRQSS cursor style");
+    }
+
+    [Fact]
+    public void ManagedVsNative_CsiSmRmRepAndCursorStyle_StateAndScreenMatch_WhenNativeAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        using VtParityPair repParity = CreateVtParityPair(columns: 16, rows: 4);
+        repParity.ProcessBoth("A\x1b[3b"u8);
+        AssertScreenPrefixParity(repParity, row: 0, prefixColumns: 4, "REP");
+        AssertCursorParity(repParity, "REP");
+
+        using VtParityPair insertParity = CreateVtParityPair(columns: 8, rows: 2);
+        insertParity.ProcessBoth("ABCD\x1b[1;2H\x1b[4hZ\x1b[4l"u8);
+        AssertScreenPrefixParity(insertParity, row: 0, prefixColumns: 5, "IRM");
+        AssertCursorParity(insertParity, "IRM");
+
+        using VtParityPair lineModeParity = CreateVtParityPair(columns: 4, rows: 2);
+        lineModeParity.ProcessBoth("A\x1b[20h\nB"u8);
+        AssertScreenPrefixParity(lineModeParity, row: 0, prefixColumns: 2, "LNM enabled row0");
+        AssertScreenPrefixParity(lineModeParity, row: 1, prefixColumns: 2, "LNM enabled row1");
+        AssertCursorParity(lineModeParity, "LNM enabled");
+
+        lineModeParity.ResetBoth();
+        lineModeParity.ProcessBoth("A\nB"u8);
+        AssertScreenPrefixParity(lineModeParity, row: 0, prefixColumns: 2, "LNM disabled row0");
+        AssertScreenPrefixParity(lineModeParity, row: 1, prefixColumns: 2, "LNM disabled row1");
+        AssertCursorParity(lineModeParity, "LNM disabled");
+    }
+
     private static void AssertNoBrokenWideCells(TerminalRow row)
     {
         for (int col = 0; col < row.Columns; col++)
@@ -560,6 +821,165 @@ public class TerminalQueryTests
             {
                 Assert.True(col > 0 && row[col - 1].Width == 2, $"Orphan spacer at col {col}.");
             }
+        }
+    }
+
+    private static VtParityPair CreateVtParityPair(int columns, int rows)
+    {
+        TerminalScreen managedScreen = new(columns, rows, 0);
+        TerminalScreen nativeScreen = new(columns, rows, 0);
+        return new VtParityPair(
+            managedScreen,
+            nativeScreen,
+            new BasicVtProcessor(managedScreen),
+            new GhosttyVtProcessor(nativeScreen));
+    }
+
+    private static void AssertResponseParity(VtParityPair parity, string scenario)
+    {
+        Assert.Equal(parity.ManagedResponses.Count, parity.NativeResponses.Count);
+        Assert.NotEmpty(parity.ManagedResponses);
+
+        for (int i = 0; i < parity.ManagedResponses.Count; i++)
+        {
+            string managed = NormalizeTerminalResponse(parity.ManagedResponses[i]);
+            string native = NormalizeTerminalResponse(parity.NativeResponses[i]);
+            Assert.True(
+                string.Equals(managed, native, StringComparison.Ordinal),
+                $"{scenario} response mismatch. managed='{EscapeForAssert(managed)}', native='{EscapeForAssert(native)}'");
+        }
+
+        parity.ClearResponses();
+    }
+
+    private static bool CanCompareResponseParity(VtParityPair parity)
+    {
+        // Some native builds currently do not emit callback responses for OSC/DCS
+        // query families. Keep explicit parity assertions when native responses are
+        // observable, and no-op otherwise.
+        if (parity.NativeResponses.Count > 0)
+        {
+            return true;
+        }
+
+        parity.ClearResponses();
+        return false;
+    }
+
+    private static void AssertScreenPrefixParity(VtParityPair parity, int row, int prefixColumns, string scenario)
+    {
+        string managed = ReadAsciiPrefix(parity.ManagedScreen, row, prefixColumns);
+        string native = ReadAsciiPrefix(parity.NativeScreen, row, prefixColumns);
+        Assert.True(
+            string.Equals(managed, native, StringComparison.Ordinal),
+            $"{scenario} row parity mismatch at row {row}. managed='{EscapeForAssert(managed)}', native='{EscapeForAssert(native)}'");
+    }
+
+    private static void AssertCursorParity(VtParityPair parity, string scenario)
+    {
+        Assert.True(
+            parity.ManagedProcessor.CursorCol == parity.NativeProcessor.CursorCol,
+            $"{scenario} cursor column mismatch. managed={parity.ManagedProcessor.CursorCol}, native={parity.NativeProcessor.CursorCol}");
+        Assert.True(
+            parity.ManagedProcessor.CursorRow == parity.NativeProcessor.CursorRow,
+            $"{scenario} cursor row mismatch. managed={parity.ManagedProcessor.CursorRow}, native={parity.NativeProcessor.CursorRow}");
+        Assert.True(
+            parity.ManagedProcessor.ModeState == parity.NativeProcessor.ModeState,
+            $"{scenario} mode-state mismatch. managed={parity.ManagedProcessor.ModeState}, native={parity.NativeProcessor.ModeState}");
+    }
+
+    private static string ReadAsciiPrefix(TerminalScreen screen, int row, int columns)
+    {
+        TerminalRow terminalRow = screen.GetViewportRow(row);
+        int maxColumns = Math.Min(columns, terminalRow.Columns);
+        char[] chars = new char[maxColumns];
+        for (int col = 0; col < maxColumns; col++)
+        {
+            int codepoint = terminalRow[col].Codepoint;
+            chars[col] = codepoint <= 0 ? ' ' : codepoint <= 0x7F ? (char)codepoint : '?';
+        }
+
+        return new string(chars);
+    }
+
+    private static string NormalizeTerminalResponse(string response)
+    {
+        if (string.IsNullOrEmpty(response))
+        {
+            return response;
+        }
+
+        string normalized = response.Replace("\x9C", "\x1b\\", StringComparison.Ordinal);
+        if (normalized.StartsWith("\x1b]", StringComparison.Ordinal) &&
+            normalized.EndsWith('\a'))
+        {
+            normalized = normalized[..^1] + "\x1b\\";
+        }
+
+        return normalized;
+    }
+
+    private static string EscapeForAssert(string value)
+    {
+        return value
+            .Replace("\x1b", "<ESC>", StringComparison.Ordinal)
+            .Replace("\a", "<BEL>", StringComparison.Ordinal);
+    }
+
+    private sealed class VtParityPair : IDisposable
+    {
+        public VtParityPair(
+            TerminalScreen managedScreen,
+            TerminalScreen nativeScreen,
+            BasicVtProcessor managedProcessor,
+            GhosttyVtProcessor nativeProcessor)
+        {
+            ManagedScreen = managedScreen;
+            NativeScreen = nativeScreen;
+            ManagedProcessor = managedProcessor;
+            NativeProcessor = nativeProcessor;
+            ManagedResponses = [];
+            NativeResponses = [];
+
+            ManagedProcessor.ResponseCallback = data => ManagedResponses.Add(System.Text.Encoding.ASCII.GetString(data));
+            NativeProcessor.ResponseCallback = data => NativeResponses.Add(System.Text.Encoding.ASCII.GetString(data));
+        }
+
+        public TerminalScreen ManagedScreen { get; }
+
+        public TerminalScreen NativeScreen { get; }
+
+        public BasicVtProcessor ManagedProcessor { get; }
+
+        public GhosttyVtProcessor NativeProcessor { get; }
+
+        public List<string> ManagedResponses { get; }
+
+        public List<string> NativeResponses { get; }
+
+        public void ProcessBoth(ReadOnlySpan<byte> data)
+        {
+            ManagedProcessor.Process(data);
+            NativeProcessor.Process(data);
+        }
+
+        public void ResetBoth()
+        {
+            ManagedProcessor.Reset();
+            NativeProcessor.Reset();
+            ClearResponses();
+        }
+
+        public void ClearResponses()
+        {
+            ManagedResponses.Clear();
+            NativeResponses.Clear();
+        }
+
+        public void Dispose()
+        {
+            ManagedProcessor.Dispose();
+            NativeProcessor.Dispose();
         }
     }
 

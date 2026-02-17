@@ -187,16 +187,43 @@ public class MainWindowViewModelFlowTests
         Assert.False(viewModel.UseRenderedControl);
         Assert.False(viewModel.UseNativeControl);
         Assert.True(viewModel.UseNativeVtControl);
+        Assert.False(viewModel.UseManagedVtControl);
 
         viewModel.CycleRenderModeCommand.Execute().Wait();
         Assert.False(viewModel.UseRenderedControl);
         Assert.False(viewModel.UseNativeControl);
         Assert.False(viewModel.UseNativeVtControl);
+        Assert.True(viewModel.UseManagedVtControl);
+
+        viewModel.CycleRenderModeCommand.Execute().Wait();
+        Assert.False(viewModel.UseRenderedControl);
+        Assert.False(viewModel.UseNativeControl);
+        Assert.False(viewModel.UseNativeVtControl);
+        Assert.False(viewModel.UseManagedVtControl);
 
         viewModel.CycleRenderModeCommand.Execute().Wait();
         Assert.True(viewModel.UseRenderedControl);
         Assert.True(viewModel.UseNativeControl);
         Assert.False(viewModel.UseNativeVtControl);
+        Assert.False(viewModel.UseManagedVtControl);
+    }
+
+    [Fact]
+    public void ModeSwitching_NoGhosttyNoNative_CyclesManagedAndStandalone()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: false, nativeVtAvailable: false);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+
+        viewModel.CycleRenderModeCommand.Execute().Wait();
+        Assert.False(viewModel.UseNativeVtControl);
+        Assert.True(viewModel.UseManagedVtControl);
+        Assert.Equal("Managed VT", viewModel.ModeButtonText);
+
+        viewModel.CycleRenderModeCommand.Execute().Wait();
+        Assert.False(viewModel.UseNativeVtControl);
+        Assert.False(viewModel.UseManagedVtControl);
+        Assert.Equal("Rendered", viewModel.ModeButtonText);
     }
 
     [Fact]

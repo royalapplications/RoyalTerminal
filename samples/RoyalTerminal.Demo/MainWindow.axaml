@@ -59,7 +59,7 @@
                     <Button Content="{Binding ModeButtonText}" Height="24"
                             FontSize="10" Padding="8,2"
                             Command="{Binding CycleRenderModeCommand}"
-                            ToolTip.Tip="Switch rendering mode (Ghostty Rendered / Ghostty Native / Native VT / Rendered)" />
+                            ToolTip.Tip="Switch rendering mode (Ghostty Rendered / Ghostty Native / Native VT / Managed VT / Rendered)" />
                     <Button Content="{Binding RenderedBackendButtonText}" Height="24"
                             FontSize="10" Padding="8,2"
                             Command="{Binding ToggleRenderedBackendCommand}"

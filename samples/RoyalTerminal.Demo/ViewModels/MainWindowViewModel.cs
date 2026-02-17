@@ -21,6 +21,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _useNativeControl;
     private bool _useRenderedControl;
     private bool _useNativeVtControl;
+    private bool _useManagedVtControl;
     private bool _useTextureInterop;
     private string _statusText = "Ready";
     private string _dimensionsText = "80x24";
@@ -212,6 +213,12 @@ public sealed class MainWindowViewModel : ReactiveObject
         private set => this.RaiseAndSetIfChanged(ref _useNativeVtControl, value);
     }
 
+    public bool UseManagedVtControl
+    {
+        get => _useManagedVtControl;
+        private set => this.RaiseAndSetIfChanged(ref _useManagedVtControl, value);
+    }
+
     public bool UseTextureInterop
     {
         get => _useTextureInterop;
@@ -399,11 +406,20 @@ public sealed class MainWindowViewModel : ReactiveObject
         UpdateModeButtonText();
     }
 
-    public void SetRenderMode(bool useRenderedControl, bool useNativeControl, bool useNativeVtControl)
+    public void SetRenderMode(
+        bool useRenderedControl,
+        bool useNativeControl,
+        bool useNativeVtControl,
+        bool useManagedVtControl = false)
     {
+        bool isStandaloneMode = !useRenderedControl && !useNativeControl;
+        bool resolvedUseNativeVtControl = isStandaloneMode && useNativeVtControl;
+        bool resolvedUseManagedVtControl = isStandaloneMode && !resolvedUseNativeVtControl && useManagedVtControl;
+
         UseRenderedControl = useRenderedControl;
         UseNativeControl = useNativeControl;
-        UseNativeVtControl = useNativeVtControl;
+        UseNativeVtControl = resolvedUseNativeVtControl;
+        UseManagedVtControl = resolvedUseManagedVtControl;
         UpdateModeButtonText();
     }
 
@@ -443,6 +459,11 @@ public sealed class MainWindowViewModel : ReactiveObject
         if (UseNativeVtControl)
         {
             return $"Native VT ({transportName})";
+        }
+
+        if (UseManagedVtControl)
+        {
+            return $"Managed VT ({transportName})";
         }
 
         return $"Rendered ({transportName})";
@@ -539,7 +560,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         if (GhosttyAvailable)
         {
-            // Cycle: Rendered -> Native -> Native VT -> Standalone -> Rendered.
+            // Cycle: Ghostty Rendered -> Ghostty Native -> Native VT -> Managed VT -> Standalone -> Ghostty Rendered.
             if (UseRenderedControl)
             {
                 SetRenderMode(useRenderedControl: false, useNativeControl: true, useNativeVtControl: false);
@@ -549,11 +570,24 @@ public sealed class MainWindowViewModel : ReactiveObject
                 SetRenderMode(
                     useRenderedControl: false,
                     useNativeControl: false,
-                    useNativeVtControl: NativeVtAvailable);
+                    useNativeVtControl: NativeVtAvailable,
+                    useManagedVtControl: !NativeVtAvailable);
             }
             else if (UseNativeVtControl)
             {
-                SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+                SetRenderMode(
+                    useRenderedControl: false,
+                    useNativeControl: false,
+                    useNativeVtControl: false,
+                    useManagedVtControl: true);
+            }
+            else if (UseManagedVtControl)
+            {
+                SetRenderMode(
+                    useRenderedControl: false,
+                    useNativeControl: false,
+                    useNativeVtControl: false,
+                    useManagedVtControl: false);
             }
             else
             {
@@ -562,13 +596,40 @@ public sealed class MainWindowViewModel : ReactiveObject
         }
         else if (NativeVtAvailable)
         {
-            // Cycle: Native VT -> Standalone -> Native VT.
-            SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: !UseNativeVtControl);
+            // Cycle: Native VT -> Managed VT -> Standalone -> Native VT.
+            if (UseNativeVtControl)
+            {
+                SetRenderMode(
+                    useRenderedControl: false,
+                    useNativeControl: false,
+                    useNativeVtControl: false,
+                    useManagedVtControl: true);
+            }
+            else if (UseManagedVtControl)
+            {
+                SetRenderMode(
+                    useRenderedControl: false,
+                    useNativeControl: false,
+                    useNativeVtControl: false,
+                    useManagedVtControl: false);
+            }
+            else
+            {
+                SetRenderMode(
+                    useRenderedControl: false,
+                    useNativeControl: false,
+                    useNativeVtControl: true,
+                    useManagedVtControl: false);
+            }
         }
         else
         {
-            SetStatus("Only Rendered mode is available on this platform");
-            return;
+            // Cycle: Standalone -> Managed VT -> Standalone.
+            SetRenderMode(
+                useRenderedControl: false,
+                useNativeControl: false,
+                useNativeVtControl: false,
+                useManagedVtControl: !UseManagedVtControl);
         }
 
         SetStatus($"New tabs will use: {GetNewTabModeName()}");
@@ -579,6 +640,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         ModeButtonText = UseRenderedControl ? "Ghostty Rendered"
             : UseNativeControl ? "Ghostty Native"
             : UseNativeVtControl ? "Native VT"
+            : UseManagedVtControl ? "Managed VT"
             : "Rendered";
     }
 

@@ -23,6 +23,8 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 public sealed class BasicVtProcessor : IVtProcessor
 {
+    private const int MaxDcsBufferBytes = 4096;
+
     private readonly TerminalScreen _screen;
     private int _cursorCol;
     private int _cursorRow;
@@ -37,6 +39,8 @@ public sealed class BasicVtProcessor : IVtProcessor
     private bool _hasParam;
     private char _intermediateChar;
     private readonly List<byte> _oscBuffer = [];
+    private readonly List<byte> _dcsBuffer = [];
+    private bool _isDiscardingDcsPayload;
 
     // Saved cursor state (for DECSC/DECRC — ESC 7 / ESC 8)
     private int _savedCursorCol;
@@ -69,6 +73,9 @@ public sealed class BasicVtProcessor : IVtProcessor
     private bool _applicationCursorKeys; // DECCKM (mode 1)
     private bool _applicationKeypad;   // DECKPAM/DECKPNM
     private bool _bracketedPaste;      // Bracketed paste mode (mode 2004)
+    private bool _insertMode;          // IRM (ANSI mode 4)
+    private bool _lineFeedNewLineMode; // LNM (ANSI mode 20)
+    private int _cursorStyle = 1;      // DECSCUSR (CSI Ps SP q), default blinking block
 
     // Tab stops
     private readonly HashSet<int> _tabStops = [];
@@ -76,6 +83,7 @@ public sealed class BasicVtProcessor : IVtProcessor
     // UTF-8 multi-byte decoding state
     private int _utf8Codepoint;
     private int _utf8Remaining;
+    private int _lastGraphicCodepoint;
 
     private enum ParserState
     {
@@ -88,6 +96,7 @@ public sealed class BasicVtProcessor : IVtProcessor
         OscString,
         OscEscape,
         DcsString,
+        DcsEscape,
     }
 
     /// <summary>Current cursor column.</summary>
@@ -187,6 +196,9 @@ public sealed class BasicVtProcessor : IVtProcessor
                 case ParserState.DcsString:
                     ProcessDcsString(b);
                     break;
+                case ParserState.DcsEscape:
+                    ProcessDcsEscape(b);
+                    break;
             }
         }
 
@@ -225,6 +237,10 @@ public sealed class BasicVtProcessor : IVtProcessor
             case (byte)'\n': // LF
             case 0x0B:       // VT
             case 0x0C:       // FF
+                if (_lineFeedNewLineMode)
+                {
+                    _cursorCol = 0;
+                }
                 LineFeed();
                 break;
 
@@ -343,6 +359,16 @@ public sealed class BasicVtProcessor : IVtProcessor
             if (_cursorCol >= row.Columns) return;
         }
 
+        if (_insertMode)
+        {
+            InsertCharacters(width);
+            row = _screen.GetViewportRow(_cursorRow);
+            if (_cursorCol < 0 || _cursorCol >= row.Columns)
+            {
+                return;
+            }
+        }
+
         ClearCellAndWideArtifacts(row, _cursorCol);
         if (width == 2 && _cursorCol + 1 < row.Columns)
         {
@@ -371,6 +397,7 @@ public sealed class BasicVtProcessor : IVtProcessor
         row.IsDirty = true;
 
         _cursorCol += width;
+        _lastGraphicCodepoint = codepoint;
     }
 
     private bool TryAppendToPreviousCellGrapheme(int codepoint)
@@ -653,6 +680,8 @@ public sealed class BasicVtProcessor : IVtProcessor
 
             case (byte)'P': // DCS
                 _state = ParserState.DcsString;
+                _dcsBuffer.Clear();
+                _isDiscardingDcsPayload = false;
                 break;
 
             case (byte)'(': // Designate G0 charset
@@ -894,29 +923,246 @@ public sealed class BasicVtProcessor : IVtProcessor
         }
 
         ReadOnlySpan<char> selector = oscPayload.AsSpan(0, separator);
-        bool isTitleSelector =
-            selector.SequenceEqual("0".AsSpan()) ||
-            selector.SequenceEqual("1".AsSpan()) ||
-            selector.SequenceEqual("2".AsSpan());
+        string value = separator + 1 < oscPayload.Length
+            ? oscPayload[(separator + 1)..]
+            : string.Empty;
 
-        if (!isTitleSelector)
+        if (!int.TryParse(selector, out int selectorCode))
         {
             return;
         }
 
-        string title = separator + 1 < oscPayload.Length
-            ? oscPayload[(separator + 1)..]
-            : string.Empty;
-        TitleCallback?.Invoke(title);
+        switch (selectorCode)
+        {
+            case 0:
+            case 1:
+            case 2:
+                TitleCallback?.Invoke(value);
+                break;
+
+            case 4:
+                // OSC 4;index;? — palette query.
+                HandleOscPaletteQuery(value);
+                break;
+
+            case 10:
+                // OSC 10;? — foreground query.
+                if (value == "?")
+                {
+                    SendOscColorResponse("10", _screen.DefaultForeground);
+                }
+
+                break;
+
+            case 11:
+                // OSC 11;? — background query.
+                if (value == "?")
+                {
+                    SendOscColorResponse("11", _screen.DefaultBackground);
+                }
+
+                break;
+
+            case 12:
+                // OSC 12;? — cursor color query.
+                if (value == "?")
+                {
+                    SendOscColorResponse("12", _screen.DefaultForeground);
+                }
+
+                break;
+        }
+    }
+
+    private void HandleOscPaletteQuery(string value)
+    {
+        int separator = value.IndexOf(';');
+        if (separator <= 0)
+        {
+            return;
+        }
+
+        ReadOnlySpan<char> indexPart = value.AsSpan(0, separator);
+        ReadOnlySpan<char> queryPart = value.AsSpan(separator + 1);
+        if (!queryPart.SequenceEqual("?".AsSpan()))
+        {
+            return;
+        }
+
+        if (!int.TryParse(indexPart, out int colorIndex))
+        {
+            return;
+        }
+
+        colorIndex = Math.Clamp(colorIndex, 0, 255);
+        uint color = Color256(colorIndex);
+        string rgb = FormatRgbColor(color);
+        string response = $"\x1b]4;{colorIndex};{rgb}\x1b\\";
+        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+    }
+
+    private void SendOscColorResponse(string selector, uint argbColor)
+    {
+        string rgb = FormatRgbColor(argbColor);
+        string response = $"\x1b]{selector};{rgb}\x1b\\";
+        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+    }
+
+    private static string FormatRgbColor(uint argbColor)
+    {
+        int red = (int)((argbColor >> 16) & 0xFF);
+        int green = (int)((argbColor >> 8) & 0xFF);
+        int blue = (int)(argbColor & 0xFF);
+        return $"rgb:{red * 0x101:X4}/{green * 0x101:X4}/{blue * 0x101:X4}";
     }
 
     private void ProcessDcsString(byte b)
     {
-        // Consume DCS until ST
         if (b == 0x1B)
-            _state = ParserState.Escape;
-        else if (b == 0x9C) // 8-bit ST
+        {
+            _state = ParserState.DcsEscape;
+            return;
+        }
+
+        if (b == 0x9C) // 8-bit ST
+        {
+            HandleDcsString();
             _state = ParserState.Ground;
+            return;
+        }
+
+        AppendDcsByteOrDiscard(b);
+    }
+
+    private void ProcessDcsEscape(byte b)
+    {
+        if (b == (byte)'\\')
+        {
+            HandleDcsString();
+            _state = ParserState.Ground;
+            return;
+        }
+
+        // False alarm: preserve ESC as payload and continue DCS parsing.
+        AppendDcsByteOrDiscard(0x1B);
+
+        if (b == 0x1B)
+        {
+            _state = ParserState.DcsEscape;
+            return;
+        }
+
+        if (b == 0x9C)
+        {
+            HandleDcsString();
+            _state = ParserState.Ground;
+            return;
+        }
+
+        AppendDcsByteOrDiscard(b);
+        _state = ParserState.DcsString;
+    }
+
+    private void HandleDcsString()
+    {
+        if (_isDiscardingDcsPayload)
+        {
+            _dcsBuffer.Clear();
+            _isDiscardingDcsPayload = false;
+            return;
+        }
+
+        if (_dcsBuffer.Count == 0)
+        {
+            return;
+        }
+
+        string payload = Encoding.ASCII.GetString(_dcsBuffer.ToArray());
+        _dcsBuffer.Clear();
+
+        // DCS $ q Pt ST — DECRQSS request.
+        if (payload.StartsWith("$q", StringComparison.Ordinal))
+        {
+            string request = payload.Length > 2 ? payload[2..] : string.Empty;
+            HandleDecRequestStatusString(request);
+        }
+    }
+
+    private void AppendDcsByteOrDiscard(byte b)
+    {
+        if (_isDiscardingDcsPayload)
+        {
+            return;
+        }
+
+        if (_dcsBuffer.Count >= MaxDcsBufferBytes)
+        {
+            _dcsBuffer.Clear();
+            _isDiscardingDcsPayload = true;
+            return;
+        }
+
+        _dcsBuffer.Add(b);
+    }
+
+    private void HandleDecRequestStatusString(string request)
+    {
+        string? responsePayload = request switch
+        {
+            "m" => $"{BuildCurrentSgrState()}m",
+            "r" => $"{_scrollTop + 1};{_scrollBottom + 1}r",
+            " q" => $"{_cursorStyle} q",
+            _ => null,
+        };
+
+        if (responsePayload is null)
+        {
+            // Unsupported request.
+            ResponseCallback?.Invoke("\x1bP0$r\x1b\\"u8.ToArray());
+            return;
+        }
+
+        string response = $"\x1bP1$r{responsePayload}\x1b\\";
+        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+    }
+
+    private string BuildCurrentSgrState()
+    {
+        List<int> parameters = [];
+
+        if ((_currentAttrs & CellAttributes.Bold) != 0) parameters.Add(1);
+        if ((_currentAttrs & CellAttributes.Dim) != 0) parameters.Add(2);
+        if ((_currentAttrs & CellAttributes.Italic) != 0) parameters.Add(3);
+        if ((_currentAttrs & CellAttributes.Underline) != 0) parameters.Add(4);
+        if ((_currentAttrs & CellAttributes.Blink) != 0) parameters.Add(5);
+        if ((_currentAttrs & CellAttributes.Inverse) != 0) parameters.Add(7);
+        if ((_currentAttrs & CellAttributes.Hidden) != 0) parameters.Add(8);
+        if ((_currentAttrs & CellAttributes.Strikethrough) != 0) parameters.Add(9);
+
+        if (_currentFg != _screen.DefaultForeground)
+        {
+            parameters.Add(38);
+            parameters.Add(2);
+            parameters.Add((int)((_currentFg >> 16) & 0xFF));
+            parameters.Add((int)((_currentFg >> 8) & 0xFF));
+            parameters.Add((int)(_currentFg & 0xFF));
+        }
+
+        if (_currentBg != _screen.DefaultBackground)
+        {
+            parameters.Add(48);
+            parameters.Add(2);
+            parameters.Add((int)((_currentBg >> 16) & 0xFF));
+            parameters.Add((int)((_currentBg >> 8) & 0xFF));
+            parameters.Add((int)(_currentBg & 0xFF));
+        }
+
+        if (parameters.Count == 0)
+        {
+            return "0";
+        }
+
+        return string.Join(';', parameters);
     }
 
     private void ExecuteCsi(char finalByte)
@@ -958,7 +1204,10 @@ public sealed class BasicVtProcessor : IVtProcessor
 
         // CSI <space> q — Set cursor style (DECSCUSR)
         if (_intermediateChar == ' ' && finalByte == 'q')
+        {
+            SetCursorStyle(Math.Max(0, p0));
             return;
+        }
 
         switch (finalByte)
         {
@@ -1122,13 +1371,47 @@ public sealed class BasicVtProcessor : IVtProcessor
                 break;
 
             case 'h': // SM — Set Mode (ANSI modes, non-private)
+            {
+                if (_params.Count == 0)
+                {
+                    break;
+                }
+
+                for (int i = 0; i < _params.Count; i++)
+                {
+                    HandleAnsiMode(_params[i], set: true);
+                }
                 break;
+            }
 
             case 'l': // RM — Reset Mode
+            {
+                if (_params.Count == 0)
+                {
+                    break;
+                }
+
+                for (int i = 0; i < _params.Count; i++)
+                {
+                    HandleAnsiMode(_params[i], set: false);
+                }
                 break;
+            }
 
             case 'b': // REP — Repeat preceding graphic character
+            {
+                if (_lastGraphicCodepoint == 0)
+                {
+                    break;
+                }
+
+                int count = Math.Max(1, p0);
+                for (int i = 0; i < count; i++)
+                {
+                    PutChar(_lastGraphicCodepoint);
+                }
                 break;
+            }
 
             case 'Z': // CBT — Cursor Backward Tabulation
             {
@@ -1155,6 +1438,30 @@ public sealed class BasicVtProcessor : IVtProcessor
                     TabForward();
                 break;
         }
+    }
+
+    private void HandleAnsiMode(int mode, bool set)
+    {
+        switch (mode)
+        {
+            case 4: // IRM — Insert/replace mode.
+                _insertMode = set;
+                break;
+
+            case 20: // LNM — Linefeed/newline mode.
+                _lineFeedNewLineMode = set;
+                break;
+        }
+    }
+
+    private void SetCursorStyle(int styleParameter)
+    {
+        _cursorStyle = styleParameter switch
+        {
+            <= 0 => 1,
+            > 6 => 6,
+            _ => styleParameter,
+        };
     }
 
     #endregion
@@ -1642,12 +1949,18 @@ public sealed class BasicVtProcessor : IVtProcessor
         _autoWrap = true;
         _applicationCursorKeys = false;
         _applicationKeypad = false;
+        _insertMode = false;
+        _lineFeedNewLineMode = false;
+        _cursorStyle = 1;
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
         _useLineDrawing = false;
         _g0IsLineDrawing = false;
         _g1IsLineDrawing = false;
         _shiftOut = false;
+        _lastGraphicCodepoint = 0;
+        _dcsBuffer.Clear();
+        _isDiscardingDcsPayload = false;
         ResetAttributes();
         InitTabStops();
     }
@@ -1762,6 +2075,8 @@ public sealed class BasicVtProcessor : IVtProcessor
         _state = ParserState.Ground;
         _params.Clear();
         _oscBuffer.Clear();
+        _dcsBuffer.Clear();
+        _isDiscardingDcsPayload = false;
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
         _inAltScreen = false;
@@ -1772,10 +2087,14 @@ public sealed class BasicVtProcessor : IVtProcessor
         _applicationCursorKeys = false;
         _applicationKeypad = false;
         _bracketedPaste = false;
+        _insertMode = false;
+        _lineFeedNewLineMode = false;
+        _cursorStyle = 1;
         _useLineDrawing = false;
         _g0IsLineDrawing = false;
         _g1IsLineDrawing = false;
         _shiftOut = false;
+        _lastGraphicCodepoint = 0;
         ResetAttributes();
         InitTabStops();
 
