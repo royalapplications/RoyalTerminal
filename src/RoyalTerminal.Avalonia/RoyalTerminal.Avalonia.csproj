@@ -2,19 +2,24 @@
 
   <PropertyGroup>
     <PackageId>RoyalTerminal.Avalonia</PackageId>
-    <Description>Avalonia UI terminal control for RoyalTerminal.GhosttySharp with SkiaSharp rendering, CustomVisual composition, and virtualized scrolling.</Description>
+    <Description>Backend-neutral Avalonia terminal controls and presentation infrastructure with SkiaSharp rendering and virtualized scrolling.</Description>
+    <PackageProjectUrl>https://github.com/royalapplications/RoyalTerminal</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/royalapplications/RoyalTerminal</RepositoryUrl>
+    <PackageTags>terminal;avalonia;vte;pty;skia</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\RoyalTerminal.GhosttySharp\RoyalTerminal.GhosttySharp.csproj" />
+    <None Include="../../README.md" Pack="true" PackagePath="" Condition="Exists('../../README.md')" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Services.Contracts\RoyalTerminal.Terminal.Services.Contracts.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Services\RoyalTerminal.Terminal.Services.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Rendering.Skia\RoyalTerminal.Rendering.Skia.csproj" />
-    <ProjectReference Include="..\RoyalTerminal.Avalonia.Rendering.GhosttyInterop\RoyalTerminal.Avalonia.Rendering.GhosttyInterop.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Vt.Default\RoyalTerminal.Terminal.Vt.Default.csproj" />
-    <ProjectReference Include="..\RoyalTerminal.Terminal.Vt.Ghostty\RoyalTerminal.Terminal.Vt.Ghostty.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Pty.Platform\RoyalTerminal.Terminal.Pty.Platform.csproj" />
   </ItemGroup>
 

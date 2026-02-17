@@ -15,7 +15,6 @@ using Avalonia.Media;
 using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Diagnostics;
-using RoyalTerminal.Avalonia.Input;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
 using RoyalTerminal.GhosttySharp;
@@ -72,6 +71,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     private bool _syncFailed;
     private IGhosttyLogger _logger = NullGhosttyLogger.Instance;
     private IAvaloniaSkiaRenderTargetProvider _interopRenderTargetProvider = new AvaloniaSkiaRenderTargetProvider();
+    private readonly GhosttyClipboardAdapter _clipboardAdapter;
+    private readonly GhosttySurfaceLifecycle _surfaceLifecycle;
 
     #endregion
 
@@ -187,6 +188,19 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     public GhosttyRenderedTerminalControl()
     {
+        _clipboardAdapter = new GhosttyClipboardAdapter(this, () => Logger);
+        GhosttyActionDispatcher actionDispatcher = new(
+            () => _surface,
+            OnRenderRequested,
+            title => TitleChanged?.Invoke(this, title),
+            exitCode => ProcessExited?.Invoke(this, exitCode),
+            () => CloseRequested?.Invoke(this, EventArgs.Empty));
+        _surfaceLifecycle = new GhosttySurfaceLifecycle(
+            () => _surface,
+            actionDispatcher,
+            _clipboardAdapter,
+            () => _app?.Tick(),
+            () => CloseRequested?.Invoke(this, EventArgs.Empty));
         _interopRenderTargetProvider.DiagnosticReported += OnInteropRenderTargetProviderDiagnosticReported;
     }
 
@@ -204,12 +218,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     public void Initialize(GhosttyApp app)
     {
         _app = app;
-
-        _app.WakeupRequested += OnWakeupRequested;
-        _app.ActionRequested += OnActionRequested;
-        _app.ClipboardReadRequested += OnClipboardReadRequested;
-        _app.ClipboardWriteRequested += OnClipboardWriteRequested;
-        _app.SurfaceCloseRequested += OnSurfaceCloseRequested;
+        _surfaceLifecycle.Attach(app);
 
         // Initialize rendering pipeline
         _renderer = new SkiaTerminalRenderer(FontFamilyName, TerminalFontSize);
@@ -893,149 +902,75 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     #region Input Handling
 
-    protected override unsafe void OnKeyDown(KeyEventArgs e)
+    protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (_surface is null) return;
-
-        var macKeycode = MacKeyMapping.ConvertKeyToMacKeycode(e.Key);
-        if (macKeycode == MacKeyMapping.Unmapped) return;
-
-        // Get the character text for this key event (layout-aware).
-        // Only set text for printable characters (codepoint >= 0x20).
-        // Control characters (Enter, Tab, Escape, etc.) are encoded by Ghostty
-        // from the physical key identity.
-        var keySymbol = e.KeySymbol;
-        byte[]? textBytes = null;
-        if (!string.IsNullOrEmpty(keySymbol))
-        {
-            var firstCodepoint = char.ConvertToUtf32(keySymbol, 0);
-            if (firstCodepoint >= 0x20)
-                textBytes = Encoding.UTF8.GetBytes(keySymbol + '\0');
-        }
-
-        fixed (byte* textPtr = textBytes)
-        {
-            var inputKey = new GhosttyInputKey
+        bool handled = GhosttyInputPipeline.HandleKeyDown(
+            _surface,
+            e,
+            dispatch =>
             {
-                Action = GhosttyInputAction.Press,
-                Keycode = macKeycode,
-                Mods = MacKeyMapping.ConvertModifiers(e.KeyModifiers),
-                Text = textPtr,
-                Composing = false,
-            };
+                string text = dispatch.HasText ? dispatch.KeySymbol ?? string.Empty : "(none)";
+                Logger.Debug(
+                    $"[GhosttyRendered] KeyDown: key={e.Key}, keySymbol={dispatch.KeySymbol ?? "(null)"}, " +
+                    $"macKeycode=0x{dispatch.MacKeycode:X2}, text={text}, accepted={dispatch.Accepted}");
+            });
 
-            var accepted = _surface.SendKey(inputKey);
-            Logger.Debug(
-                $"[GhosttyRendered] KeyDown: key={e.Key}, keySymbol={keySymbol ?? "(null)"}, " +
-                $"macKeycode=0x{macKeycode:X2}, text={(textBytes is not null ? keySymbol : "(none)")}, " +
-                $"accepted={accepted}");
-
-            if (accepted)
-                e.Handled = true;
-        }
-    }
-
-    protected override unsafe void OnKeyUp(KeyEventArgs e)
-    {
-        base.OnKeyUp(e);
-        if (_surface is null) return;
-
-        var macKeycode = MacKeyMapping.ConvertKeyToMacKeycode(e.Key);
-        if (macKeycode == MacKeyMapping.Unmapped) return;
-
-        fixed (byte* _ = (byte[]?)null)
+        if (handled)
         {
-            var inputKey = new GhosttyInputKey
-            {
-                Action = GhosttyInputAction.Release,
-                Keycode = macKeycode,
-                Mods = MacKeyMapping.ConvertModifiers(e.KeyModifiers),
-                Composing = false,
-            };
-
-            _surface.SendKey(inputKey);
             e.Handled = true;
         }
     }
 
-    protected override unsafe void OnTextInput(TextInputEventArgs e)
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+        if (GhosttyInputPipeline.HandleKeyUp(_surface, e))
+        {
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnTextInput(TextInputEventArgs e)
     {
         base.OnTextInput(e);
-        if (_surface is null || string.IsNullOrEmpty(e.Text)) return;
-
-        // For composed/IME text that wasn't handled by OnKeyDown,
-        // send each character as a key event with text (matching
-        // macOS native Ghostty behavior).
-        var textBytes = Encoding.UTF8.GetBytes(e.Text + '\0');
-        fixed (byte* textPtr = textBytes)
+        if (GhosttyInputPipeline.HandleTextInput(_surface, e))
         {
-            var inputKey = new GhosttyInputKey
-            {
-                Action = GhosttyInputAction.Press,
-                Keycode = 0, // no physical key for composed text
-                Mods = GhosttyMods.None,
-                Text = textPtr,
-                Composing = false,
-            };
-
-            _surface.SendKey(inputKey);
+            e.Handled = true;
         }
-        e.Handled = true;
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        Focus();
-        if (_surface is null) return;
-
-        var point = e.GetPosition(this);
-        var props = e.GetCurrentPoint(this).Properties;
-
-        var button = props.IsLeftButtonPressed ? GhosttyMouseButton.Left
-            : props.IsRightButtonPressed ? GhosttyMouseButton.Right
-            : props.IsMiddleButtonPressed ? GhosttyMouseButton.Middle
-            : GhosttyMouseButton.Left;
-
-        _surface.SendMouseButton(GhosttyMouseState.Press, button, MacKeyMapping.ConvertModifiers(e.KeyModifiers));
-        _surface.SendMousePos(point.X, point.Y, MacKeyMapping.ConvertModifiers(e.KeyModifiers));
-        e.Handled = true;
+        if (GhosttyInputPipeline.HandlePointerPressed(this, _surface, e))
+        {
+            e.Handled = true;
+        }
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
-        if (_surface is null) return;
-
-        var point = e.GetPosition(this);
-        _surface.SendMousePos(point.X, point.Y, MacKeyMapping.ConvertModifiers(e.KeyModifiers));
+        GhosttyInputPipeline.HandlePointerMoved(this, _surface, e);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
-        if (_surface is null) return;
-
-        var button = e.InitialPressMouseButton switch
+        if (GhosttyInputPipeline.HandlePointerReleased(_surface, e))
         {
-            MouseButton.Left => GhosttyMouseButton.Left,
-            MouseButton.Right => GhosttyMouseButton.Right,
-            MouseButton.Middle => GhosttyMouseButton.Middle,
-            _ => GhosttyMouseButton.Left,
-        };
-
-        _surface.SendMouseButton(GhosttyMouseState.Release, button, MacKeyMapping.ConvertModifiers(e.KeyModifiers));
-        e.Handled = true;
+            e.Handled = true;
+        }
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
-        if (_surface is null) return;
-
-        _surface.SendMouseScroll(e.Delta.X, e.Delta.Y, (int)MacKeyMapping.ConvertModifiers(e.KeyModifiers));
-        e.Handled = true;
+        if (GhosttyInputPipeline.HandlePointerWheelChanged(_surface, e))
+        {
+            e.Handled = true;
+        }
     }
 
     #endregion
@@ -1073,78 +1008,18 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     #region Runtime Callbacks
 
-    private void OnWakeupRequested()
+    private void OnRenderRequested()
     {
-        Dispatcher.UIThread.Post(() => _app?.Tick());
-    }
-
-    private bool OnActionRequested(GhosttyTarget target, GhosttyAction action)
-    {
-        // Filter: only handle surface-targeted actions for our surface
-        if (target.Tag == GhosttyTargetTag.Surface && _surface is not null
-            && target.Target.Surface != _surface.Handle)
+        // Instead of calling _surface.Draw() (Metal), we read screen state
+        // and render with SkiaSharp or texture interop mode.
+        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
         {
-            return false;
+            SyncScreenFromGhostty();
+            SyncTextureInteropFrame();
+            return;
         }
 
-        Dispatcher.UIThread.Post(() =>
-        {
-            switch (action.Tag)
-            {
-                case GhosttyActionTag.SetTitle:
-                    unsafe
-                    {
-                        var titlePtr = action.Action.SetTitle.Title;
-                        if (titlePtr != null)
-                        {
-                            var title = Marshal.PtrToStringUTF8((nint)titlePtr);
-                            if (title is not null)
-                                TitleChanged?.Invoke(this, title);
-                        }
-                    }
-                    break;
-
-                case GhosttyActionTag.Render:
-                    // Instead of calling _surface.Draw() (Metal), we read screen state
-                    // and render with SkiaSharp or texture interop mode.
-                    if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
-                    {
-                        SyncScreenFromGhostty();
-                        SyncTextureInteropFrame();
-                    }
-                    else
-                    {
-                        SyncScreenFromGhostty();
-                    }
-                    break;
-
-                case GhosttyActionTag.ShowChildExited:
-                    ProcessExited?.Invoke(this, (int)action.Action.ChildExited.ExitCode);
-                    break;
-
-                case GhosttyActionTag.CloseWindow:
-                case GhosttyActionTag.Quit:
-                    CloseRequested?.Invoke(this, EventArgs.Empty);
-                    break;
-            }
-        });
-
-        return false;
-    }
-
-    private void OnClipboardReadRequested(GhosttyClipboard clipboard, nint state)
-    {
-        GhosttyClipboardBridge.HandleReadRequest(this, _surface, state, Logger);
-    }
-
-    private void OnClipboardWriteRequested(GhosttyClipboard clipboard, nint contentPtr, nuint len, bool confirm)
-    {
-        GhosttyClipboardBridge.HandleWriteRequest(this, contentPtr, len, Logger);
-    }
-
-    private void OnSurfaceCloseRequested(bool processAlive)
-    {
-        Dispatcher.UIThread.Post(() => CloseRequested?.Invoke(this, EventArgs.Empty));
+        SyncScreenFromGhostty();
     }
 
     #endregion
@@ -1164,13 +1039,13 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     /// <summary>Copies the selection to clipboard.</summary>
     public async Task CopySelectionAsync()
     {
-        await GhosttyClipboardBridge.CopySelectionAsync(this, _surface);
+        await _clipboardAdapter.CopySelectionAsync(_surface);
     }
 
     /// <summary>Pastes from clipboard.</summary>
     public async Task PasteAsync()
     {
-        await GhosttyClipboardBridge.PasteAsync(this, _surface);
+        await _clipboardAdapter.PasteAsync(_surface);
     }
 
     /// <summary>Sends text to the terminal.</summary>
@@ -1189,16 +1064,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         _disposed = true;
 
         DestroyGhosttySurface();
+        _surfaceLifecycle.Dispose();
         _interopRenderTargetProvider.DiagnosticReported -= OnInteropRenderTargetProviderDiagnosticReported;
-
-        if (_app is not null)
-        {
-            _app.WakeupRequested -= OnWakeupRequested;
-            _app.ActionRequested -= OnActionRequested;
-            _app.ClipboardReadRequested -= OnClipboardReadRequested;
-            _app.ClipboardWriteRequested -= OnClipboardWriteRequested;
-            _app.SurfaceCloseRequested -= OnSurfaceCloseRequested;
-        }
 
         _renderer?.Dispose();
         _renderer = null;
