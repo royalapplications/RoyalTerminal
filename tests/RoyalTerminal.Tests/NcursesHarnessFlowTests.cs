@@ -1,8 +1,9 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Tests — headless PTY flow tests using a real ncurses harness.
+// RoyalTerminal.Tests — headless PTY flow tests using real PTY-backed harnesses.
 
 using System.Diagnostics;
+using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -22,6 +23,10 @@ namespace RoyalTerminal.Tests;
 
 public sealed class NcursesHarnessFlowTests
 {
+    private const string HarnessBaseName = "RoyalTerminal.PtyHarness";
+    private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan EventTimeout = TimeSpan.FromSeconds(10);
+
     [AvaloniaFact]
     public async Task NcursesHarness_ManagedVt_HandlesKeyboardMouseAndResize()
     {
@@ -41,43 +46,80 @@ public sealed class NcursesHarnessFlowTests
 
     private static async Task RunHarnessFlowAsync(VtProcessorPreference preference)
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        if ((OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) &&
+            TryFindPythonWithCurses(out string? pythonExe))
         {
+            await RunNcursesPythonHarnessFlowAsync(preference, pythonExe!);
             return;
         }
 
-        if (!TryFindPythonWithCurses(out string? pythonExe))
-        {
-            return;
-        }
+        await RunManagedPtyHarnessFlowAsync(preference);
+    }
 
+    [AvaloniaFact]
+    public async Task PtyHarness_MouseMatrix_1000_DefaultEncoding_IsObserved_EndToEnd()
+    {
+        await RunMouseMatrixCaseAsync(
+            modes: [1000],
+            emitMouseInput: static (window, point) => RaiseMousePressRelease(window, point),
+            mouseLogPredicate: static line =>
+                line.StartsWith("MOUSE encoding=default ", StringComparison.Ordinal) &&
+                line.Contains("cb=0", StringComparison.Ordinal));
+    }
+
+    [AvaloniaFact]
+    public async Task PtyHarness_MouseMatrix_1002_ButtonMotion_IsObserved_EndToEnd()
+    {
+        await RunMouseMatrixCaseAsync(
+            modes: [1002],
+            emitMouseInput: static (window, point) => RaiseButtonMotion(window, point),
+            mouseLogPredicate: static line =>
+                line.StartsWith("MOUSE encoding=default ", StringComparison.Ordinal) &&
+                line.Contains("cb=32", StringComparison.Ordinal));
+    }
+
+    [AvaloniaFact]
+    public async Task PtyHarness_MouseMatrix_1003_AnyMotion_IsObserved_EndToEnd()
+    {
+        await RunMouseMatrixCaseAsync(
+            modes: [1003],
+            emitMouseInput: static (window, point) => RaiseAnyMotion(window, point),
+            mouseLogPredicate: static line =>
+                line.StartsWith("MOUSE encoding=default ", StringComparison.Ordinal) &&
+                line.Contains("cb=35", StringComparison.Ordinal));
+    }
+
+    [AvaloniaFact]
+    public async Task PtyHarness_MouseMatrix_1006_SgrEncoding_IsObserved_EndToEnd()
+    {
+        await RunMouseMatrixCaseAsync(
+            modes: [1000, 1006],
+            emitMouseInput: static (window, point) => RaiseMousePressRelease(window, point),
+            mouseLogPredicate: static line =>
+                line.StartsWith("MOUSE encoding=sgr ", StringComparison.Ordinal) &&
+                line.Contains("action=M", StringComparison.Ordinal));
+    }
+
+    [AvaloniaFact]
+    public async Task PtyHarness_MouseMatrix_1015_UrxvtEncoding_IsObserved_EndToEnd()
+    {
+        await RunMouseMatrixCaseAsync(
+            modes: [1000, 1015],
+            emitMouseInput: static (window, point) => RaiseMousePressRelease(window, point),
+            mouseLogPredicate: static line =>
+                line.StartsWith("MOUSE encoding=urxvt ", StringComparison.Ordinal) &&
+                line.Contains("cb=0", StringComparison.Ordinal));
+    }
+
+    private static async Task RunNcursesPythonHarnessFlowAsync(
+        VtProcessorPreference preference,
+        string pythonExecutable)
+    {
         string fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "NcursesHarness.py");
         Assert.True(File.Exists(fixturePath), $"Ncurses harness fixture not found: {fixturePath}");
 
-        string tempDir = Path.Combine(Path.GetTempPath(), "RoyalTerminal", "NcursesHarness");
-        Directory.CreateDirectory(tempDir);
-        string logPath = Path.Combine(tempDir, $"harness-{Guid.NewGuid():N}.log");
-
-        INativeVtProcessorProvider[] nativeProviders =
-        [
-            new GhosttyVtProcessorProvider(),
-        ];
-
-        TerminalControl control = new(
-            new TerminalSessionService(),
-            new DefaultTerminalInputAdapter(),
-            new DefaultTerminalSelectionService(),
-            new DefaultTerminalScrollService(),
-            new DefaultVtProcessorFactory(nativeProviders),
-            new DefaultPtyFactory(),
-            new NullSshCredentialProvider(),
-            new RejectAllSshHostKeyValidator(),
-            transportFactory: null)
-        {
-            VtProcessorPreference = preference,
-            Columns = 80,
-            Rows = 24,
-        };
+        string logPath = CreateHarnessLogPath("NcursesHarness");
+        TerminalControl control = CreateTerminalControl(preference);
         Window window = new()
         {
             Width = 960,
@@ -99,20 +141,20 @@ public sealed class NcursesHarnessFlowTests
                 $"RT_HARNESS_LOG={ShellQuote(logPath)} " +
                 $"RT_HARNESS_TIMEOUT_SEC=30 " +
                 $"TERM=xterm-256color " +
-                $"{ShellQuote(pythonExe!)} {ShellQuote(fixturePath)}\n";
+                $"{ShellQuote(pythonExecutable)} {ShellQuote(fixturePath)}\n";
             control.SendInput(command);
 
             string ready = await WaitForLogLineAsync(
                 logPath,
                 static line => line.StartsWith("READY ", StringComparison.Ordinal),
-                timeout: TimeSpan.FromSeconds(15));
+                timeout: ReadyTimeout);
             Assert.Contains("x", ready, StringComparison.Ordinal);
 
-            control.SendInput("a");
+            control.SendInput("a\n");
             string key = await WaitForLogLineAsync(
                 logPath,
                 static line => line == "KEY code=97",
-                timeout: TimeSpan.FromSeconds(8));
+                timeout: EventTimeout);
             Assert.Equal("KEY code=97", key);
 
             int pointerPressedCount = 0;
@@ -123,14 +165,14 @@ public sealed class NcursesHarnessFlowTests
                 handledEventsToo: true);
 
             Point point = await GetInteractionPointAsync(control, window);
-            RaiseMousePressRelease(control, window, point);
+            RaiseMousePressRelease(window, point);
             Dispatcher.UIThread.RunJobs();
             Assert.True(pointerPressedCount > 0, "Headless pointer press was not routed to TerminalControl.");
 
             string mouse = await WaitForLogLineAsync(
                 logPath,
                 static line => line.StartsWith("MOUSE ", StringComparison.Ordinal),
-                timeout: TimeSpan.FromSeconds(8));
+                timeout: EventTimeout);
             Assert.Contains("x=", mouse, StringComparison.Ordinal);
 
             control.Columns = 100;
@@ -139,14 +181,14 @@ public sealed class NcursesHarnessFlowTests
             string resize = await WaitForLogLineAsync(
                 logPath,
                 static line => line == "RESIZE 40x100",
-                timeout: TimeSpan.FromSeconds(8));
+                timeout: EventTimeout);
             Assert.Equal("RESIZE 40x100", resize);
 
             control.SendInput("q");
             string exit = await WaitForLogLineAsync(
                 logPath,
                 static line => line == "EXIT quit",
-                timeout: TimeSpan.FromSeconds(8));
+                timeout: EventTimeout);
             Assert.Equal("EXIT quit", exit);
         }
         finally
@@ -161,6 +203,266 @@ public sealed class NcursesHarnessFlowTests
                 // Best effort cleanup in tests.
             }
         }
+    }
+
+    private static async Task RunManagedPtyHarnessFlowAsync(VtProcessorPreference preference)
+    {
+        string logPath = CreateHarnessLogPath("PtyHarness");
+        TerminalControl control = CreateTerminalControl(preference);
+        Window window = new()
+        {
+            Width = 960,
+            Height = 640,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            bool arranged = await WaitUntilAsync(
+                () => control.Bounds.Width > 1 && control.Bounds.Height > 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(arranged, $"Terminal control was not arranged in time. Bounds={control.Bounds}");
+
+            await StartManagedHarnessSessionAsync(control, logPath, modes: [1002, 1006]);
+
+            string ready = await WaitForLogLineAsync(
+                logPath,
+                static line => line.StartsWith("READY ", StringComparison.Ordinal),
+                timeout: ReadyTimeout);
+            Assert.Contains("x", ready, StringComparison.Ordinal);
+
+            control.SendInput("a\n");
+            string key = await WaitForLogLineAsync(
+                logPath,
+                static line => line == "KEY code=97",
+                timeout: EventTimeout);
+            Assert.Equal("KEY code=97", key);
+
+            int pointerPressedCount = 0;
+            control.AddHandler(
+                InputElement.PointerPressedEvent,
+                (_, _) => pointerPressedCount++,
+                RoutingStrategies.Tunnel | RoutingStrategies.Bubble,
+                handledEventsToo: true);
+
+            Point point = await GetInteractionPointAsync(control, window);
+            RaiseMousePressRelease(window, point);
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(pointerPressedCount > 0, "Headless pointer press was not routed to TerminalControl.");
+
+            string mouse = await WaitForLogLineAsync(
+                logPath,
+                static line => line.StartsWith("MOUSE encoding=sgr ", StringComparison.Ordinal),
+                timeout: EventTimeout);
+            Assert.Contains("action=", mouse, StringComparison.Ordinal);
+
+            control.Columns = 100;
+            control.Rows = 40;
+
+            string resize = await WaitForLogLineAsync(
+                logPath,
+                static line => line == "RESIZE 40x100",
+                timeout: EventTimeout);
+            Assert.Equal("RESIZE 40x100", resize);
+
+            control.SendInput("q\n");
+            string exit = await WaitForLogLineAsync(
+                logPath,
+                static line => line == "EXIT quit",
+                timeout: EventTimeout);
+            Assert.Equal("EXIT quit", exit);
+        }
+        finally
+        {
+            window.Close();
+            try
+            {
+                control.StopPty();
+            }
+            catch
+            {
+                // Best effort cleanup in tests.
+            }
+        }
+    }
+
+    private static async Task RunMouseMatrixCaseAsync(
+        int[] modes,
+        Action<Window, Point> emitMouseInput,
+        Func<string, bool> mouseLogPredicate)
+    {
+        string logPath = CreateHarnessLogPath("PtyHarness-Matrix");
+        TerminalControl control = CreateTerminalControl(VtProcessorPreference.Managed);
+        StringBuilder terminalOutput = new();
+        control.DataReceived += (_, args) =>
+        {
+            ReadOnlySpan<byte> payload = args.Data.Span;
+            if (payload.IsEmpty)
+            {
+                return;
+            }
+
+            lock (terminalOutput)
+            {
+                terminalOutput.Append(Encoding.UTF8.GetString(payload));
+            }
+        };
+
+        Window window = new()
+        {
+            Width = 960,
+            Height = 640,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            bool arranged = await WaitUntilAsync(
+                () => control.Bounds.Width > 1 && control.Bounds.Height > 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(arranged, $"Terminal control was not arranged in time. Bounds={control.Bounds}");
+
+            await StartManagedHarnessSessionAsync(control, logPath, modes);
+
+            await WaitForLogLineAsync(
+                logPath,
+                static line => line.StartsWith("READY ", StringComparison.Ordinal),
+                timeout: ReadyTimeout);
+
+            int[] sortedModes = [.. modes.OrderBy(static mode => mode)];
+            string expectedModeLine = $"MODE {string.Join(",", sortedModes)}";
+            string modeLine = await WaitForLogLineAsync(
+                logPath,
+                static line => line.StartsWith("MODE ", StringComparison.Ordinal),
+                timeout: EventTimeout);
+            Assert.Equal(expectedModeLine, modeLine);
+
+            Point point = await GetInteractionPointAsync(control, window);
+            emitMouseInput(window, point);
+            control.SendInput("\n");
+            Dispatcher.UIThread.RunJobs();
+
+            string mouse = await WaitForLogLineAsync(logPath, mouseLogPredicate, timeout: EventTimeout);
+            Assert.NotNull(mouse);
+
+            control.SendInput("q\n");
+            string exit = await WaitForLogLineAsync(
+                logPath,
+                static line => line == "EXIT quit",
+                timeout: EventTimeout);
+            Assert.Equal("EXIT quit", exit);
+        }
+        catch (Xunit.Sdk.XunitException ex)
+        {
+            string outputSnapshot;
+            lock (terminalOutput)
+            {
+                outputSnapshot = terminalOutput.Length == 0
+                    ? "<empty>"
+                    : terminalOutput.ToString();
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                $"{ex.Message}\nObserved terminal output:\n{outputSnapshot}");
+        }
+        finally
+        {
+            window.Close();
+            try
+            {
+                control.StopPty();
+            }
+            catch
+            {
+                // Best effort cleanup in tests.
+            }
+        }
+    }
+
+    private static async Task StartManagedHarnessSessionAsync(TerminalControl control, string logPath, int[] modes)
+    {
+        Assert.True(
+            TryFindPtyHarnessExecutable(out string? harnessExecutable),
+            "Could not locate RoyalTerminal.PtyHarness executable for PTY integration tests.");
+
+        string shell = GetCommandShell();
+        control.StartPty(shell: shell, workingDirectory: Environment.CurrentDirectory);
+        await Task.Delay(100);
+        Dispatcher.UIThread.RunJobs();
+        control.SendInput(BuildHarnessLaunchCommand(harnessExecutable!, logPath, modes));
+        await Task.CompletedTask;
+    }
+
+    private static string GetCommandShell()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.System),
+                "cmd.exe");
+        }
+
+        return "/bin/sh";
+    }
+
+    private static string BuildHarnessLaunchCommand(string harnessExecutable, string logPath, int[] modes)
+    {
+        int[] sortedModes = [.. modes.OrderBy(static mode => mode)];
+        string modeList = string.Join(",", sortedModes);
+
+        if (OperatingSystem.IsWindows())
+        {
+            string escapedExecutable = harnessExecutable.Replace("\"", "\"\"", StringComparison.Ordinal);
+            string escapedLog = logPath.Replace("\"", "\"\"", StringComparison.Ordinal);
+            string escapedModes = modeList.Replace("\"", "\"\"", StringComparison.Ordinal);
+
+            return
+                $"set \"RT_HARNESS_LOG={escapedLog}\"&& " +
+                "set \"RT_HARNESS_TIMEOUT_SEC=30\"&& " +
+                $"set \"RT_HARNESS_MODES={escapedModes}\"&& " +
+                "set \"TERM=xterm-256color\"&& " +
+                $"\"{escapedExecutable}\"\r\n";
+        }
+
+        return
+            $"RT_HARNESS_LOG={ShellQuote(logPath)} " +
+            "RT_HARNESS_TIMEOUT_SEC=30 " +
+            $"RT_HARNESS_MODES={ShellQuote(modeList)} " +
+            "TERM=xterm-256color " +
+            $"{ShellQuote(harnessExecutable)}\n";
+    }
+
+    private static TerminalControl CreateTerminalControl(VtProcessorPreference preference)
+    {
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+
+        return new TerminalControl(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            new DefaultVtProcessorFactory(nativeProviders),
+            new DefaultPtyFactory(),
+            new NullSshCredentialProvider(),
+            new RejectAllSshHostKeyValidator(),
+            transportFactory: null)
+        {
+            VtProcessorPreference = preference,
+            Columns = 80,
+            Rows = 24,
+        };
+    }
+
+    private static string CreateHarnessLogPath(string harnessName)
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "RoyalTerminal", harnessName);
+        Directory.CreateDirectory(tempDir);
+        return Path.Combine(tempDir, $"harness-{Guid.NewGuid():N}.log");
     }
 
     private static bool TryFindPythonWithCurses(out string? executable)
@@ -214,6 +516,114 @@ public sealed class NcursesHarnessFlowTests
         return false;
     }
 
+    private static bool TryFindPtyHarnessExecutable(out string? executablePath)
+    {
+        string executableName = OperatingSystem.IsWindows()
+            ? "RoyalTerminal.PtyHarness.exe"
+            : "RoyalTerminal.PtyHarness";
+
+        string outputDirectoryCandidate = Path.Combine(AppContext.BaseDirectory, executableName);
+        if (IsRunnableHarnessExecutable(outputDirectoryCandidate))
+        {
+            executablePath = outputDirectoryCandidate;
+            return true;
+        }
+
+        string? repositoryRoot = FindRepositoryRoot();
+        if (repositoryRoot is null)
+        {
+            executablePath = null;
+            return false;
+        }
+
+        DirectoryInfo baseDirectory = new(AppContext.BaseDirectory);
+        string targetFramework = baseDirectory.Name;
+        string configuration = baseDirectory.Parent?.Name ?? "Debug";
+
+        string sameConfigurationCandidate = Path.Combine(
+            repositoryRoot,
+            "tests",
+            "RoyalTerminal.PtyHarness",
+            "bin",
+            configuration,
+            targetFramework,
+            executableName);
+        if (IsRunnableHarnessExecutable(sameConfigurationCandidate))
+        {
+            executablePath = sameConfigurationCandidate;
+            return true;
+        }
+
+        string searchRoot = Path.Combine(repositoryRoot, "tests", "RoyalTerminal.PtyHarness", "bin");
+        if (Directory.Exists(searchRoot))
+        {
+            string[] candidates = Directory.GetFiles(searchRoot, executableName, SearchOption.AllDirectories);
+            if (candidates.Length > 0)
+            {
+                string? latest = null;
+                DateTime latestWrite = DateTime.MinValue;
+                for (int i = 0; i < candidates.Length; i++)
+                {
+                    string candidate = candidates[i];
+                    if (!IsRunnableHarnessExecutable(candidate))
+                    {
+                        continue;
+                    }
+
+                    DateTime candidateWrite = File.GetLastWriteTimeUtc(candidate);
+                    if (candidateWrite > latestWrite)
+                    {
+                        latest = candidate;
+                        latestWrite = candidateWrite;
+                    }
+                }
+
+                if (latest is not null)
+                {
+                    executablePath = latest;
+                    return true;
+                }
+            }
+        }
+
+        executablePath = null;
+        return false;
+    }
+
+    private static bool IsRunnableHarnessExecutable(string executablePath)
+    {
+        if (!File.Exists(executablePath))
+        {
+            return false;
+        }
+
+        string? directory = Path.GetDirectoryName(executablePath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return false;
+        }
+
+        string siblingDll = Path.Combine(directory, $"{HarnessBaseName}.dll");
+        string siblingRuntimeConfig = Path.Combine(directory, $"{HarnessBaseName}.runtimeconfig.json");
+        return File.Exists(siblingDll) && File.Exists(siblingRuntimeConfig);
+    }
+
+    private static string? FindRepositoryRoot()
+    {
+        DirectoryInfo? current = new(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "RoyalTerminal.sln")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        return null;
+    }
+
     private static async Task<Point> GetInteractionPointAsync(TerminalControl control, Window window)
     {
         bool arranged = await WaitUntilAsync(
@@ -227,12 +637,26 @@ public sealed class NcursesHarnessFlowTests
         return translated!.Value;
     }
 
-    private static void RaiseMousePressRelease(TerminalControl control, Window window, Point windowPoint)
+    private static void RaiseMousePressRelease(Window window, Point windowPoint)
     {
-        _ = control;
         window.MouseMove(windowPoint, RawInputModifiers.None);
         window.MouseDown(windowPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
         window.MouseUp(windowPoint, MouseButton.Left, RawInputModifiers.None);
+    }
+
+    private static void RaiseButtonMotion(Window window, Point windowPoint)
+    {
+        Point movedPoint = new(windowPoint.X + 16, windowPoint.Y + 16);
+        window.MouseDown(windowPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        window.MouseMove(movedPoint, RawInputModifiers.LeftMouseButton);
+        window.MouseUp(movedPoint, MouseButton.Left, RawInputModifiers.None);
+    }
+
+    private static void RaiseAnyMotion(Window window, Point windowPoint)
+    {
+        Point movedPoint = new(windowPoint.X + 16, windowPoint.Y + 16);
+        window.MouseMove(windowPoint, RawInputModifiers.None);
+        window.MouseMove(movedPoint, RawInputModifiers.None);
     }
 
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
