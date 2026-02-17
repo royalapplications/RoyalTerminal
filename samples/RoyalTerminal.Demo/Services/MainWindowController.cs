@@ -15,9 +15,12 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.Terminal;
+using RoyalTerminal.Terminal.Services;
 using ReactiveUI;
 
 namespace RoyalTerminal.Demo.Services;
@@ -90,7 +93,7 @@ internal sealed class MainWindowController
         RegisterInteractionHandlers(lifetime);
 
         bool ghosttyAvailable = TryInitializeGhostty();
-        bool nativeVtAvailable = RoyalTerminal.Avalonia.Terminal.GhosttyVtProcessor.IsAvailable();
+        bool nativeVtAvailable = GhosttyVtProcessor.IsAvailable();
         _viewModel.SetTerminalCapabilities(ghosttyAvailable, nativeVtAvailable);
 
         if (!ghosttyAvailable)
@@ -307,17 +310,17 @@ internal sealed class MainWindowController
         {
             ThemePalette palette = GetPalette(_viewModel.IsDarkTheme);
 
-            GhosttyTerminalControl standaloneControl = new()
-            {
-                FontFamilyName = MonoFont,
-                TerminalFontSize = _viewModel.FontSize,
-                Columns = 80,
-                Rows = 24,
-                ScrollbackLimit = 10_000,
-                UseNativeVtProcessor = _viewModel.UseNativeVtControl ? true : null,
-                DefaultForeground = palette.TerminalForeground,
-                DefaultBackground = palette.TerminalBackground,
-            };
+            TerminalControl standaloneControl = CreateStandaloneControl();
+            standaloneControl.FontFamilyName = MonoFont;
+            standaloneControl.TerminalFontSize = _viewModel.FontSize;
+            standaloneControl.Columns = 80;
+            standaloneControl.Rows = 24;
+            standaloneControl.ScrollbackLimit = 10_000;
+            standaloneControl.VtProcessorPreference = _viewModel.UseNativeVtControl
+                ? VtProcessorPreference.Native
+                : VtProcessorPreference.Auto;
+            standaloneControl.DefaultForeground = palette.TerminalForeground;
+            standaloneControl.DefaultBackground = palette.TerminalBackground;
             ConfigureRenderer(standaloneControl.Renderer);
 
             standaloneControl.DataReceived += (_, args) =>
@@ -355,7 +358,7 @@ internal sealed class MainWindowController
         TabVisualMode tabMode = ResolveTabMode(terminal);
         Button headerButton = CreateTabHeader(tabName, tabMode);
 
-        Control container = terminal is GhosttyTerminalControl
+        Control container = terminal is TerminalControl
             ? new ScrollViewer
             {
                 Content = terminal,
@@ -409,7 +412,7 @@ internal sealed class MainWindowController
                 new SolidColorBrush(Color.FromRgb(0xCE, 0x91, 0x78)));
         }
 
-        string vtLabel = terminal is GhosttyTerminalControl gtc && gtc.IsUsingNativeVtProcessor
+        string vtLabel = terminal is TerminalControl gtc && gtc.IsUsingNativeVtProcessor
             ? "Ghostty VT"
             : "Basic VT";
         return new TabVisualMode(
@@ -435,6 +438,18 @@ internal sealed class MainWindowController
 
         renderer.EnableTextShaping = !s_disableTextShaping;
         renderer.EnableTextRenderDiagnostics = s_enableRenderDiagnostics;
+    }
+
+    private static TerminalControl CreateStandaloneControl()
+    {
+        INativeVtProcessorProvider[] nativeProviders = [new GhosttyVtProcessorProvider()];
+        return new TerminalControl(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            new DefaultVtProcessorFactory(nativeProviders),
+            new DefaultPtyFactory());
     }
 
     private static bool ReadEnvironmentToggle(string variableName)
@@ -610,7 +625,7 @@ internal sealed class MainWindowController
         {
             await rendered.CopySelectionAsync();
         }
-        else if (tab.Control is GhosttyTerminalControl standalone)
+        else if (tab.Control is TerminalControl standalone)
         {
             await standalone.CopySelectionAsync();
         }
@@ -632,7 +647,7 @@ internal sealed class MainWindowController
         {
             await rendered.PasteAsync();
         }
-        else if (tab.Control is GhosttyTerminalControl standalone)
+        else if (tab.Control is TerminalControl standalone)
         {
             await standalone.PasteAsync();
         }
@@ -646,7 +661,7 @@ internal sealed class MainWindowController
     {
         foreach (TerminalTab tab in _tabs)
         {
-            if (tab.Control is GhosttyTerminalControl standalone)
+            if (tab.Control is TerminalControl standalone)
             {
                 standalone.TerminalFontSize = fontSize;
                 standalone.InvalidateTerminal();
@@ -668,7 +683,7 @@ internal sealed class MainWindowController
 
         foreach (TerminalTab tab in _tabs)
         {
-            if (tab.Control is GhosttyTerminalControl standalone)
+            if (tab.Control is TerminalControl standalone)
             {
                 standalone.DefaultForeground = palette.TerminalForeground;
                 standalone.DefaultBackground = palette.TerminalBackground;
@@ -772,10 +787,10 @@ internal sealed class MainWindowController
 
     private static void DisposeTerminal(Control control)
     {
-        if (control is GhosttyTerminalControl standaloneControl)
+        if (control is TerminalControl standaloneControl)
         {
             standaloneControl.StopPty();
-            standaloneControl.DetachSurface();
+            standaloneControl.DetachEndpoint();
             return;
         }
 
