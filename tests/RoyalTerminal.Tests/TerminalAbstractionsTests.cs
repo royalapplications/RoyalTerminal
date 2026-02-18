@@ -225,6 +225,8 @@ public class TerminalAbstractionsTests
         Assert.NotNull(vtProcessor.ResponseCallback);
         Assert.NotNull(vtProcessor.BellCallback);
         Assert.NotNull(vtProcessor.TitleCallback);
+        Assert.NotNull(service.ModeSource);
+        Assert.Equal(vtProcessor.ModeState, service.ModeSource!.ModeState);
 
         service.StopPty(vtProcessor: vtProcessor, onPtyDataReceived: onData, onPtyProcessExited: onExit);
 
@@ -232,6 +234,7 @@ public class TerminalAbstractionsTests
         Assert.Null(vtProcessor.ResponseCallback);
         Assert.Null(vtProcessor.BellCallback);
         Assert.Null(vtProcessor.TitleCallback);
+        Assert.Null(service.ModeSource);
     }
 
     [Fact]

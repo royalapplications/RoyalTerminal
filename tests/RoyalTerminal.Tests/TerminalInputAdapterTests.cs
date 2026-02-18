@@ -152,6 +152,44 @@ public sealed class TerminalInputAdapterTests
         await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
     }
 
+    [Fact]
+    public async Task HandleKeyDown_UsesSessionModeSourceForApplicationCursorMode()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetModeState(vtProcessor.ModeState with { ApplicationCursorKeys = true });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Up,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal("\x1BOA", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
     private sealed class FakeEndpoint : ITerminalEndpoint, ITerminalInputSink
     {
         public bool KeyResult { get; set; } = true;
@@ -274,6 +312,62 @@ public sealed class TerminalInputAdapterTests
         public void Dispose()
         {
             IsRunning = false;
+        }
+    }
+
+    private sealed class FakeVtProcessor : IVtProcessor
+    {
+        private TerminalModeState _modeState = new(
+            CursorVisible: true,
+            ApplicationCursorKeys: false,
+            ApplicationKeypad: false,
+            AlternateScreen: false,
+            BracketedPaste: false);
+
+        public int CursorCol => 0;
+        public int CursorRow => 0;
+        public bool CursorVisible => _modeState.CursorVisible;
+        public bool ApplicationCursorKeys => _modeState.ApplicationCursorKeys;
+        public bool ApplicationKeypad => _modeState.ApplicationKeypad;
+        public bool AlternateScreen => _modeState.AlternateScreen;
+        public bool BracketedPaste => _modeState.BracketedPaste;
+        public TerminalModeState ModeState => _modeState;
+        public event EventHandler<TerminalModeState>? ModeChanged;
+        public Action<byte[]>? ResponseCallback { get; set; }
+        public Action? BellCallback { get; set; }
+        public Action<string>? TitleCallback { get; set; }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            _ = data;
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            _ = columns;
+            _ = rows;
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            _ = columns;
+            _ = rows;
+            _ = widthPx;
+            _ = heightPx;
+        }
+
+        public void Reset()
+        {
+        }
+
+        public void SetModeState(TerminalModeState state)
+        {
+            _modeState = state;
+            ModeChanged?.Invoke(this, state);
+        }
+
+        public void Dispose()
+        {
         }
     }
 }

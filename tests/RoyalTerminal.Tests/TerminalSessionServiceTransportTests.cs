@@ -49,6 +49,51 @@ public sealed class TerminalSessionServiceTransportTests
     }
 
     [Fact]
+    public async Task StartSessionAsync_WithVtProcessor_ExposesModeSourceAndForwardsModeChanges()
+    {
+        TerminalSessionService service = new();
+        FakeTransport transport = new();
+        FixedTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await service.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        ITerminalModeSource? modeSource = service.ModeSource;
+        Assert.NotNull(modeSource);
+        Assert.Equal(vtProcessor.ModeState, modeSource.ModeState);
+
+        TerminalModeState? observed = null;
+        modeSource.ModeChanged += (_, state) => observed = state;
+
+        TerminalModeState updated = vtProcessor.ModeState with
+        {
+            ApplicationCursorKeys = true,
+            BracketedPaste = true,
+        };
+        vtProcessor.SetModeState(updated);
+
+        Assert.Equal(updated, observed);
+
+        await service.StopSessionAsync(vtProcessor, onData, onExit);
+        Assert.Null(service.ModeSource);
+
+        observed = null;
+        vtProcessor.SetModeState(updated with { BracketedPaste = false });
+        Assert.Null(observed);
+    }
+
+    [Fact]
     public async Task StartSessionAsync_WhenStartFails_CleansCallbacksAndHandlers()
     {
         TerminalSessionService service = new();
@@ -80,6 +125,7 @@ public sealed class TerminalSessionServiceTransportTests
         Assert.Equal(0, transport.ExitSubscriberCount);
         Assert.Null(service.Transport);
         Assert.False(service.HasActiveTransport);
+        Assert.Null(service.ModeSource);
         Assert.True(transport.DisposeCalled);
     }
 
@@ -425,26 +471,24 @@ public sealed class TerminalSessionServiceTransportTests
 
     private sealed class FakeVtProcessor : IVtProcessor
     {
+        private TerminalModeState _modeState = new(
+            CursorVisible: true,
+            ApplicationCursorKeys: false,
+            ApplicationKeypad: false,
+            AlternateScreen: false,
+            BracketedPaste: false);
+
         public int CursorCol => 0;
         public int CursorRow => 0;
-        public bool CursorVisible => true;
-        public bool ApplicationCursorKeys => false;
-        public bool ApplicationKeypad => false;
-        public bool AlternateScreen => false;
-        public bool BracketedPaste => false;
+        public bool CursorVisible => _modeState.CursorVisible;
+        public bool ApplicationCursorKeys => _modeState.ApplicationCursorKeys;
+        public bool ApplicationKeypad => _modeState.ApplicationKeypad;
+        public bool AlternateScreen => _modeState.AlternateScreen;
+        public bool BracketedPaste => _modeState.BracketedPaste;
 
-        public TerminalModeState ModeState => new(
-            CursorVisible,
-            ApplicationCursorKeys,
-            ApplicationKeypad,
-            AlternateScreen,
-            BracketedPaste);
+        public TerminalModeState ModeState => _modeState;
 
-        public event EventHandler<TerminalModeState>? ModeChanged
-        {
-            add { }
-            remove { }
-        }
+        public event EventHandler<TerminalModeState>? ModeChanged;
 
         public Action<byte[]>? ResponseCallback { get; set; }
 
@@ -473,6 +517,12 @@ public sealed class TerminalSessionServiceTransportTests
 
         public void Reset()
         {
+        }
+
+        public void SetModeState(TerminalModeState state)
+        {
+            _modeState = state;
+            ModeChanged?.Invoke(this, state);
         }
 
         public void Dispose()
