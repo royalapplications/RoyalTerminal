@@ -190,6 +190,464 @@ public sealed class TerminalInputAdapterTests
         await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
     }
 
+    [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_EncodesModifierAwareArrowKeys()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Up,
+            KeyModifiers = KeyModifiers.Control | KeyModifiers.Shift,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal("\x1B[1;6A", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_ApplicationCursorMode_WithModifiers_UsesCsiEncoding()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetModeState(vtProcessor.ModeState with { ApplicationCursorKeys = true });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Up,
+            KeyModifiers = KeyModifiers.Shift,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal("\x1B[1;2A", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_EncodesModifierAwareFunctionKeys()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.F5,
+            KeyModifiers = KeyModifiers.Alt,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal("\x1B[15;3~", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_EncodesControlPunctuation()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.OemOpenBrackets,
+            KeyModifiers = KeyModifiers.Control,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal(new byte[] { 0x1B }, transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_EncodesCtrlSpaceAsNul()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Space,
+            KeyModifiers = KeyModifiers.Control,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal(new byte[] { 0x00 }, transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_EncodesAltControlChord()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.C,
+            KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal(new byte[] { 0x1B, 0x03 }, transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_EncodesAltSpace()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Space,
+            KeyModifiers = KeyModifiers.Alt,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal(new byte[] { 0x1B, 0x20 }, transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_UsesSessionModeSourceForApplicationKeypadMode()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetModeState(vtProcessor.ModeState with { ApplicationKeypad = true });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.NumPad1,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal("\x1BOq", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_EncodesNormalKeypadDigits()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.NumPad1,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal("1", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_EncodesShiftTabAsBacktab()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Tab,
+            KeyModifiers = KeyModifiers.Shift,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal("\x1B[Z", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_DoesNotHandleCtrlTab()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Tab,
+            KeyModifiers = KeyModifiers.Control,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.False(handled);
+        Assert.Null(transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_DoesNotHandleMetaModifiedNavigationKey()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Up,
+            KeyModifiers = KeyModifiers.Meta,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.False(handled);
+        Assert.Null(transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_DoesNotHandlePrintableKeyOnKeyDownPath()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.A,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.False(handled);
+        Assert.Null(transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
     private sealed class FakeEndpoint : ITerminalEndpoint, ITerminalInputSink
     {
         public bool KeyResult { get; set; } = true;
