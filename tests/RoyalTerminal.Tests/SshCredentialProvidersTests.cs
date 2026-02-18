@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using RoyalTerminal.Terminal;
+using System.Security.Cryptography;
 using System.Text;
 using Xunit;
 
@@ -92,6 +93,43 @@ public sealed class SshCredentialProvidersTests
             if (File.Exists(filePath))
             {
                 File.Delete(filePath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task JsonFileStore_DoesNotModifyExistingDirectoryPermissionsOnUnix()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string directory = Path.Combine(Path.GetTempPath(), "royalterminal-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        UnixFileMode originalMode = UnixFileMode.UserRead |
+            UnixFileMode.UserWrite |
+            UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead |
+            UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead |
+            UnixFileMode.OtherExecute;
+        File.SetUnixFileMode(directory, originalMode);
+        string filePath = Path.Combine(directory, "secrets.json");
+
+        try
+        {
+            JsonFileSshSecretStore store = new(filePath);
+            await store.SaveSecretAsync("secret-id", "value");
+
+            UnixFileMode actualDirectoryMode = File.GetUnixFileMode(directory);
+            Assert.Equal(originalMode, actualDirectoryMode);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
             }
         }
     }
@@ -377,6 +415,236 @@ public sealed class SshCredentialProvidersTests
         byte[] plaintext = protector.Unprotect(protectedPayload);
 
         Assert.Equal("top-secret", Encoding.UTF8.GetString(plaintext));
+    }
+
+    [Fact]
+    public void AesGcmProtector_RoundTripsPayload()
+    {
+        string keyPath = Path.Combine(
+            Path.GetTempPath(),
+            "royalterminal-tests",
+            Guid.NewGuid().ToString("N"),
+            "ssh-secrets.key");
+        string directory = Path.GetDirectoryName(keyPath)!;
+
+        try
+        {
+            AesGcmSshSecretProtector protector = new(keyPath);
+            byte[] protectedPayload = protector.Protect("cross-platform-secret"u8);
+            byte[] plaintext = protector.Unprotect(protectedPayload);
+
+            Assert.Equal("cross-platform-secret", Encoding.UTF8.GetString(plaintext));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AesGcmProtector_SecondInstance_CanDecryptPayload()
+    {
+        string keyPath = Path.Combine(
+            Path.GetTempPath(),
+            "royalterminal-tests",
+            Guid.NewGuid().ToString("N"),
+            "ssh-secrets.key");
+        string directory = Path.GetDirectoryName(keyPath)!;
+
+        try
+        {
+            AesGcmSshSecretProtector first = new(keyPath);
+            byte[] protectedPayload = first.Protect("shared-key-secret"u8);
+
+            AesGcmSshSecretProtector second = new(keyPath);
+            byte[] plaintext = second.Unprotect(protectedPayload);
+
+            Assert.Equal("shared-key-secret", Encoding.UTF8.GetString(plaintext));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AesGcmProtector_CreatesOwnerOnlyKeyFileOnUnix()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string keyPath = Path.Combine(
+            Path.GetTempPath(),
+            "royalterminal-tests",
+            Guid.NewGuid().ToString("N"),
+            "ssh-secrets.key");
+        string directory = Path.GetDirectoryName(keyPath)!;
+
+        try
+        {
+            AesGcmSshSecretProtector protector = new(keyPath);
+            _ = protector.Protect("mode-check"u8);
+
+            UnixFileMode mode = File.GetUnixFileMode(keyPath);
+            UnixFileMode disallowed = mode & (
+                UnixFileMode.GroupRead |
+                UnixFileMode.GroupWrite |
+                UnixFileMode.GroupExecute |
+                UnixFileMode.OtherRead |
+                UnixFileMode.OtherWrite |
+                UnixFileMode.OtherExecute);
+
+            Assert.Equal((UnixFileMode)0, disallowed);
+            Assert.Equal(
+                UnixFileMode.UserRead | UnixFileMode.UserWrite,
+                mode & (UnixFileMode.UserRead | UnixFileMode.UserWrite));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AesGcmProtector_HardensExistingKeyFilePermissionsOnUnix()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string keyPath = Path.Combine(
+            Path.GetTempPath(),
+            "royalterminal-tests",
+            Guid.NewGuid().ToString("N"),
+            "ssh-secrets.key");
+        string directory = Path.GetDirectoryName(keyPath)!;
+
+        try
+        {
+            Directory.CreateDirectory(directory);
+            byte[] keyBytes = RandomNumberGenerator.GetBytes(32);
+            File.WriteAllBytes(keyPath, keyBytes);
+            File.SetUnixFileMode(
+                keyPath,
+                UnixFileMode.UserRead |
+                UnixFileMode.UserWrite |
+                UnixFileMode.GroupRead |
+                UnixFileMode.OtherRead);
+
+            AesGcmSshSecretProtector protector = new(keyPath);
+            _ = protector.Protect("mode-harden"u8);
+
+            UnixFileMode mode = File.GetUnixFileMode(keyPath);
+            UnixFileMode disallowed = mode & (
+                UnixFileMode.GroupRead |
+                UnixFileMode.GroupWrite |
+                UnixFileMode.GroupExecute |
+                UnixFileMode.OtherRead |
+                UnixFileMode.OtherWrite |
+                UnixFileMode.OtherExecute);
+
+            Assert.Equal((UnixFileMode)0, disallowed);
+            Assert.Equal(
+                UnixFileMode.UserRead | UnixFileMode.UserWrite,
+                mode & (UnixFileMode.UserRead | UnixFileMode.UserWrite));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void SecretProtectionFactory_CreateDefaultProtector_UsesSecurePlatformDefault()
+    {
+        ISshSecretProtector protector = SshSecretProtectionFactory.CreateDefaultProtector();
+
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.IsType<DpapiSshSecretProtector>(protector);
+            return;
+        }
+
+        Assert.IsType<AesGcmSshSecretProtector>(protector);
+    }
+
+    [Fact]
+    public async Task SecretProtectionFactory_DefaultStore_SaveThenLoad_RoundTrips()
+    {
+        string basePath = Path.Combine(
+            Path.GetTempPath(),
+            "royalterminal-tests",
+            Guid.NewGuid().ToString("N"));
+        string secretStorePath = Path.Combine(basePath, "ssh-secrets.json");
+        string keyPath = Path.Combine(basePath, "ssh-secrets.key");
+
+        try
+        {
+            ISshSecretStore store = SshSecretProtectionFactory.CreateDefaultSecretStore(
+                secretsFilePath: secretStorePath,
+                nonWindowsKeyFilePath: keyPath);
+
+            await store.SaveSecretAsync("ssh/password", "super-secret");
+            string? value = await store.LoadSecretAsync("ssh/password");
+
+            Assert.Equal("super-secret", value);
+
+            if (!OperatingSystem.IsWindows())
+            {
+                UnixFileMode secretsFileMode = File.GetUnixFileMode(secretStorePath);
+                UnixFileMode keyFileMode = File.GetUnixFileMode(keyPath);
+                UnixFileMode directoryMode = File.GetUnixFileMode(basePath);
+                UnixFileMode disallowedFileBits = UnixFileMode.GroupRead |
+                    UnixFileMode.GroupWrite |
+                    UnixFileMode.GroupExecute |
+                    UnixFileMode.OtherRead |
+                    UnixFileMode.OtherWrite |
+                    UnixFileMode.OtherExecute;
+
+                Assert.Equal((UnixFileMode)0, secretsFileMode & disallowedFileBits);
+                Assert.Equal((UnixFileMode)0, keyFileMode & disallowedFileBits);
+                Assert.Equal(
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite,
+                    secretsFileMode & (UnixFileMode.UserRead | UnixFileMode.UserWrite));
+                Assert.Equal(
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite,
+                    keyFileMode & (UnixFileMode.UserRead | UnixFileMode.UserWrite));
+
+                UnixFileMode disallowedDirectoryBits = UnixFileMode.GroupRead |
+                    UnixFileMode.GroupWrite |
+                    UnixFileMode.GroupExecute |
+                    UnixFileMode.OtherRead |
+                    UnixFileMode.OtherWrite |
+                    UnixFileMode.OtherExecute;
+                Assert.Equal((UnixFileMode)0, directoryMode & disallowedDirectoryBits);
+                Assert.Equal(
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                    directoryMode &
+                    (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute));
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(basePath))
+            {
+                Directory.Delete(basePath, recursive: true);
+            }
+        }
     }
 
     private sealed class PrefixProtector : ISshSecretProtector
