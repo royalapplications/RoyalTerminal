@@ -163,11 +163,29 @@ public sealed class RenderingAvaloniaAdapterTests
     }
 
     [Fact]
-    public void RenderTargetProvider_AutoWithOpenGlContextWithoutProvider_FallsBackWithProviderDiagnostic()
+    public void RenderTargetProvider_AutoWithOpenGlContextWithoutInjectedProvider_UsesDefaultOpenGlDescriptor()
     {
         AvaloniaSkiaRenderTargetProvider provider = new();
 
-        using FakePlatformLease platformLease = new(new FakeOpenGlContext());
+        using FakePlatformLease platformLease = new(new FakeOpenGlContext((nint)901));
+        using FakeSkiaLease lease = new(platformLease);
+
+        var request = provider.CreateRenderRequest(lease, new PixelSize(48, 24));
+
+        Assert.Equal(RenderBackendKind.OpenGL, request.TargetDescriptor.BackendKind);
+        Assert.Equal(RenderTargetKind.Framebuffer, request.TargetDescriptor.TargetKind);
+        Assert.Equal((nint)901, request.TargetDescriptor.ContextHandle);
+        Assert.Equal(nint.Zero, request.TargetDescriptor.TargetHandle);
+        Assert.Null(provider.LastDiagnostic);
+    }
+
+    [Fact]
+    public void RenderTargetProvider_AutoWithOpenGlContextAndExplicitNullProvider_FallsBackWithProviderDiagnostic()
+    {
+        AvaloniaSkiaRenderTargetProvider provider = new(
+            openGlRenderTargetHandleProvider: NullAvaloniaOpenGlRenderTargetHandleProvider.Instance);
+
+        using FakePlatformLease platformLease = new(new FakeOpenGlContext((nint)777));
         using FakeSkiaLease lease = new(platformLease);
 
         var request = provider.CreateRenderRequest(lease, new PixelSize(48, 24));
@@ -197,6 +215,46 @@ public sealed class RenderingAvaloniaAdapterTests
         Assert.Equal(RenderPixelFormat.Unknown, request.TargetDescriptor.PixelFormat);
         Assert.Equal((nint)700, request.TargetDescriptor.ContextHandle);
         Assert.Equal(nint.Zero, request.TargetDescriptor.TargetHandle);
+    }
+
+    [Fact]
+    public void RenderTargetProvider_OpenGlPreferenceWithNonGlContext_FallsBackToSoftware()
+    {
+        AvaloniaSkiaRenderTargetProvider provider = new(
+            backendPreference: AvaloniaRenderBackendPreference.OpenGL);
+
+        using FakePlatformLease platformLease = new(new FakeContextWithHandle((nint)999));
+        using FakeSkiaLease lease = new(platformLease);
+
+        var request = provider.CreateRenderRequest(lease, new PixelSize(64, 32));
+
+        Assert.Equal(RenderBackendKind.Software, request.TargetDescriptor.BackendKind);
+        Assert.NotNull(provider.LastDiagnostic);
+        Assert.Contains("unavailable", provider.LastDiagnostic!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DefaultMetalHandleProvider_ExtractsHandlesFromLeaseSessionShape()
+    {
+        DefaultAvaloniaMetalTextureHandleProvider provider = DefaultAvaloniaMetalTextureHandleProvider.Instance;
+        FakeMetalDeviceContext metalContext = new(
+            deviceHandle: (nint)300,
+            commandQueueHandle: (nint)301);
+        using FakeSkiaLease lease = new(
+            platformLease: new FakePlatformLease(metalContext),
+            skiaSession: new FakeMetalSkiaSession((nint)302));
+
+        bool success = provider.TryGetHandles(
+            lease,
+            metalContext,
+            out nint deviceHandle,
+            out nint commandQueueHandle,
+            out nint textureHandle);
+
+        Assert.True(success);
+        Assert.Equal((nint)300, deviceHandle);
+        Assert.Equal((nint)301, commandQueueHandle);
+        Assert.Equal((nint)302, textureHandle);
     }
 
     private static AvaloniaRenderBackendPreference GetUnsupportedBackendPreferenceForHost()
@@ -281,11 +339,15 @@ public sealed class RenderingAvaloniaAdapterTests
     {
         private readonly SKSurface _surface;
         private readonly ISkiaSharpPlatformGraphicsApiLease? _platformLease;
+        private readonly FakeLeaseDrawingContext? _context;
 
-        public FakeSkiaLease(ISkiaSharpPlatformGraphicsApiLease? platformLease)
+        public FakeSkiaLease(
+            ISkiaSharpPlatformGraphicsApiLease? platformLease,
+            object? skiaSession = null)
         {
             _platformLease = platformLease;
             _surface = SKSurface.Create(new SKImageInfo(1, 1)) ?? throw new InvalidOperationException("Failed to create test surface.");
+            _context = skiaSession is null ? null : new FakeLeaseDrawingContext(skiaSession);
         }
 
         public SKCanvas SkCanvas => _surface.Canvas;
@@ -296,12 +358,28 @@ public sealed class RenderingAvaloniaAdapterTests
 
         public double CurrentOpacity => 1.0;
 
-        public ISkiaSharpPlatformGraphicsApiLease? TryLeasePlatformGraphicsApi() => _platformLease;
+        public ISkiaSharpPlatformGraphicsApiLease? TryLeasePlatformGraphicsApi()
+        {
+            _ = _context;
+            return _platformLease;
+        }
 
         public void Dispose()
         {
             _surface.Dispose();
         }
+    }
+
+    private sealed class FakeLeaseDrawingContext
+    {
+        private readonly object _session;
+
+        public FakeLeaseDrawingContext(object session)
+        {
+            _session = session;
+        }
+
+        public object Session => _session;
     }
 
     private sealed class FakePlatformLease : ISkiaSharpPlatformGraphicsApiLease
@@ -332,8 +410,35 @@ public sealed class RenderingAvaloniaAdapterTests
         }
     }
 
+    private sealed class FakeContextWithHandle : IPlatformGraphicsContext
+    {
+        public FakeContextWithHandle(nint handle)
+        {
+            Handle = handle;
+        }
+
+        public nint Handle { get; }
+
+        public bool IsLost => false;
+
+        public IDisposable EnsureCurrent() => DummyDisposable.Instance;
+
+        public object? TryGetFeature(Type featureType) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
     private sealed class FakeOpenGlContext : IGlContext
     {
+        public FakeOpenGlContext(nint handle = default)
+        {
+            Handle = handle;
+        }
+
+        public nint Handle { get; }
+
         public GlVersion Version => default;
 
         public GlInterface GlInterface => throw new NotSupportedException();
@@ -359,6 +464,51 @@ public sealed class RenderingAvaloniaAdapterTests
         public void Dispose()
         {
         }
+    }
+
+    private sealed class FakeMetalDeviceContext : IPlatformGraphicsContext
+    {
+        public FakeMetalDeviceContext(nint deviceHandle, nint commandQueueHandle)
+        {
+            Device = deviceHandle;
+            CommandQueue = commandQueueHandle;
+        }
+
+        public nint Device { get; }
+
+        public nint CommandQueue { get; }
+
+        public bool IsLost => false;
+
+        public IDisposable EnsureCurrent() => DummyDisposable.Instance;
+
+        public void Dispose()
+        {
+        }
+
+        public object? TryGetFeature(Type featureType) => null;
+    }
+
+    private sealed class FakeMetalSkiaSession
+    {
+        private readonly FakeMetalPlatformSession _session;
+
+        public FakeMetalSkiaSession(nint textureHandle)
+        {
+            _session = new FakeMetalPlatformSession(textureHandle);
+        }
+
+        public FakeMetalPlatformSession Session => _session;
+    }
+
+    private sealed class FakeMetalPlatformSession
+    {
+        public FakeMetalPlatformSession(nint textureHandle)
+        {
+            Texture = textureHandle;
+        }
+
+        public nint Texture { get; }
     }
 
     private sealed class DummyDisposable : IDisposable
