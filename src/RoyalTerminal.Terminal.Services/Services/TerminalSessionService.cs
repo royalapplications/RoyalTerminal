@@ -14,6 +14,8 @@ namespace RoyalTerminal.Terminal.Services;
 public sealed class TerminalSessionService : ITerminalSessionService
 {
     private IVtProcessor? _activeVtProcessor;
+    private ITerminalModeSource? _endpointModeSource;
+    private VtProcessorModeSource? _transportModeSource;
 
     /// <inheritdoc />
     public ITerminalEndpoint? Endpoint { get; private set; }
@@ -48,7 +50,8 @@ public sealed class TerminalSessionService : ITerminalSessionService
         Endpoint = endpoint;
         InputSink = endpoint as ITerminalInputSink;
         SelectionSource = endpoint as ITerminalSelectionSource;
-        ModeSource = endpoint as ITerminalModeSource;
+        _endpointModeSource = endpoint as ITerminalModeSource;
+        RefreshModeSource();
     }
 
     /// <inheritdoc />
@@ -57,7 +60,8 @@ public sealed class TerminalSessionService : ITerminalSessionService
         Endpoint = null;
         InputSink = null;
         SelectionSource = null;
-        ModeSource = null;
+        _endpointModeSource = null;
+        RefreshModeSource();
     }
 
     /// <inheritdoc />
@@ -204,6 +208,7 @@ public sealed class TerminalSessionService : ITerminalSessionService
         }
 
         _activeVtProcessor = vtProcessor;
+        ReplaceTransportModeSource(vtProcessor);
 
         transport.DataReceived += onTransportDataReceived;
         transport.ProcessExited += onTransportProcessExited;
@@ -226,6 +231,7 @@ public sealed class TerminalSessionService : ITerminalSessionService
             }
 
             _activeVtProcessor = null;
+            ReplaceTransportModeSource(null);
 
             transport.Dispose();
             throw;
@@ -264,6 +270,7 @@ public sealed class TerminalSessionService : ITerminalSessionService
         ITerminalTransport? transport = Transport;
         if (transport is null)
         {
+            ReplaceTransportModeSource(null);
             return;
         }
 
@@ -279,6 +286,7 @@ public sealed class TerminalSessionService : ITerminalSessionService
             transport.Dispose();
             Transport = null;
             Pty = null;
+            ReplaceTransportModeSource(null);
         }
     }
 
@@ -316,6 +324,7 @@ public sealed class TerminalSessionService : ITerminalSessionService
             _activeVtProcessor.TitleCallback = null;
             _activeVtProcessor = null;
         }
+        ReplaceTransportModeSource(null);
 
         try
         {
@@ -328,5 +337,49 @@ public sealed class TerminalSessionService : ITerminalSessionService
 
         Transport = null;
         Pty = null;
+    }
+
+    private void ReplaceTransportModeSource(IVtProcessor? vtProcessor)
+    {
+        _transportModeSource?.Dispose();
+        _transportModeSource = vtProcessor is null ? null : new VtProcessorModeSource(vtProcessor);
+        RefreshModeSource();
+    }
+
+    private void RefreshModeSource()
+    {
+        ModeSource = _endpointModeSource ?? _transportModeSource;
+    }
+
+    private sealed class VtProcessorModeSource : ITerminalModeSource, IDisposable
+    {
+        private readonly IVtProcessor _vtProcessor;
+        private event EventHandler<TerminalModeState>? _modeChanged;
+
+        public VtProcessorModeSource(IVtProcessor vtProcessor)
+        {
+            _vtProcessor = vtProcessor ?? throw new ArgumentNullException(nameof(vtProcessor));
+            _vtProcessor.ModeChanged += OnProcessorModeChanged;
+        }
+
+        public TerminalModeState ModeState => _vtProcessor.ModeState;
+
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add => _modeChanged += value;
+            remove => _modeChanged -= value;
+        }
+
+        public void Dispose()
+        {
+            _vtProcessor.ModeChanged -= OnProcessorModeChanged;
+            _modeChanged = null;
+        }
+
+        private void OnProcessorModeChanged(object? sender, TerminalModeState state)
+        {
+            _ = sender;
+            _modeChanged?.Invoke(this, state);
+        }
     }
 }
