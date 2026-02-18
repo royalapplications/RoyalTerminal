@@ -87,11 +87,31 @@ Supported transport option models:
 
 | Mode | Control | Package Set | VT Engine | Renderer | PTY | Platform | Best For |
 |------|---------|-------------|-----------|----------|-----|----------|----------|
-| **Ghostty Native** | `GhosttyNativeTerminalControl` | `RoyalTerminal.Avalonia.Ghostty` + `RoyalTerminal.GhosttySharp` + native assets | Ghostty (`libghostty`) | Metal (Ghostty) | Ghostty | macOS | Maximum native fidelity |
-| **Ghostty Rendered** | `GhosttyRenderedTerminalControl` | `RoyalTerminal.Avalonia.Ghostty` + `RoyalTerminal.GhosttySharp` (+ interop packages for `TextureInterop`) | Ghostty (`libghostty`) | Skia (`CpuCellRenderer`) or renderer interop (`TextureInterop`) | Ghostty | macOS | Ghostty behavior with composited rendering |
+| **Ghostty Native** | `GhosttyNativeTerminalControl` | `RoyalTerminal.Avalonia.Ghostty` + `RoyalTerminal.GhosttySharp` + native assets | Ghostty (`libghostty`) | Metal (Ghostty) | Ghostty | Capability-gated (currently macOS-only) | Maximum native fidelity when embedded Ghostty is available |
+| **Ghostty Rendered** | `GhosttyRenderedTerminalControl` | `RoyalTerminal.Avalonia.Ghostty` + `RoyalTerminal.GhosttySharp` (+ interop packages for `TextureInterop`) | Ghostty (`libghostty`) | Skia (`CpuCellRenderer`) or renderer interop (`TextureInterop`) | Ghostty | Capability-gated (currently macOS-only) | Ghostty behavior with composited rendering when embedded Ghostty is available |
 | **Native VT** | `TerminalControl` | `RoyalTerminal.Avalonia` + `RoyalTerminal.Terminal.Vt.Ghostty` + native assets | `libghostty-terminal` | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Cross-platform native VT parser |
 | **Managed VT** | `TerminalControl` | `RoyalTerminal.Avalonia` | `BasicVtProcessor` (C#) | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Explicit managed VT path |
 | **Rendered (Auto VT)** | `TerminalControl` | `RoyalTerminal.Avalonia` (+ optional native VT provider packages) | Auto (`libghostty-terminal` when available, otherwise `BasicVtProcessor`) | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Default backend-neutral mode |
+
+### Mode Availability and Fallback Policy (Demo)
+
+Embedded Ghostty modes are optional runtime capabilities. When an embedded mode is unavailable (for example on Linux/Windows), mode routing falls back deterministically to the next supported mode.
+
+Resolver cycle order:
+
+`Ghostty Rendered -> Ghostty Native -> Native VT -> Managed VT -> Rendered (Auto VT)`
+
+Fallback chains when requested mode is unavailable:
+
+| Requested Mode | Fallback Chain (next supported mode in resolver order) |
+|----------------|---------------------------------------------------------|
+| `Ghostty Rendered` | `Ghostty Native -> Native VT -> Managed VT -> Rendered (Auto VT)` |
+| `Ghostty Native` | `Native VT -> Managed VT -> Rendered (Auto VT)` |
+| `Native VT` | `Managed VT -> Rendered (Auto VT)` |
+| `Managed VT` | `Rendered (Auto VT)` |
+| `Rendered (Auto VT)` | Always supported (no fallback required) |
+
+Mode cycle in the demo also skips unsupported modes and always lands on a runnable mode.
 
 ### `TerminalControl` VT Preference Modes
 
@@ -568,7 +588,7 @@ If your feed does not yet publish these composition packages, create them from s
 | Capability | Ghostty Native | Ghostty Rendered (`CpuCellRenderer` / `TextureInterop`) | Native VT (`TerminalControl`) | Managed VT (`TerminalControl`) |
 |------------|----------------|-----------------------------------------------------------|--------------------------------------|---------------------------------------|
 | Package entry point | `RoyalTerminal.Avalonia.Ghostty` | `RoyalTerminal.Avalonia.Ghostty` | `RoyalTerminal.Avalonia` (+ `Terminal.Vt.Ghostty`) | `RoyalTerminal.Avalonia` |
-| Platform | macOS | macOS | macOS/Linux/Windows | macOS/Linux/Windows |
+| Platform availability | Capability-gated (currently macOS-only) | Capability-gated (currently macOS-only) | macOS/Linux/Windows | macOS/Linux/Windows |
 | VT engine | Ghostty | Ghostty | `libghostty-terminal` | `BasicVtProcessor` |
 | Renderer path | Native Metal | Skia cell renderer or interop target + Skia fallback | Skia cell renderer | Skia cell renderer |
 | Airspace issue | Yes | No | No | No |
@@ -577,6 +597,7 @@ If your feed does not yet publish these composition packages, create them from s
 | Requires `ghostty-renderer-capi` | No | `TextureInterop` only | No | No |
 | Full Avalonia overlay support | No | Yes | Yes | Yes |
 | Cross-platform mode | No | No | Yes | Yes |
+| Demo fallback when unavailable | Routed to next supported mode (`Native VT -> Managed VT -> Rendered`) | Routed to next supported mode (`Native VT -> Managed VT -> Rendered`) | Routed to `Managed VT` then `Rendered` | Routed to `Rendered` |
 
 ## Rendering Interop Contract
 
