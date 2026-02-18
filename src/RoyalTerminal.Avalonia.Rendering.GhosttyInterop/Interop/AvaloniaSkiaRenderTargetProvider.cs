@@ -60,11 +60,11 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
         AvaloniaRenderBackendPreference backendPreference = AvaloniaRenderBackendPreference.Auto,
         IAvaloniaOpenGlRenderTargetHandleProvider? openGlRenderTargetHandleProvider = null)
     {
-        _metalTextureHandleProvider = metalTextureHandleProvider ?? NullAvaloniaMetalTextureHandleProvider.Instance;
-        _vulkanTextureHandleProvider = vulkanTextureHandleProvider ?? NullAvaloniaVulkanTextureHandleProvider.Instance;
-        _d3d11TextureHandleProvider = d3d11TextureHandleProvider ?? NullAvaloniaD3D11TextureHandleProvider.Instance;
-        _d3d12TextureHandleProvider = d3d12TextureHandleProvider ?? NullAvaloniaD3D12TextureHandleProvider.Instance;
-        _openGlRenderTargetHandleProvider = openGlRenderTargetHandleProvider ?? NullAvaloniaOpenGlRenderTargetHandleProvider.Instance;
+        _metalTextureHandleProvider = metalTextureHandleProvider ?? DefaultAvaloniaMetalTextureHandleProvider.Instance;
+        _vulkanTextureHandleProvider = vulkanTextureHandleProvider ?? DefaultAvaloniaVulkanTextureHandleProvider.Instance;
+        _d3d11TextureHandleProvider = d3d11TextureHandleProvider ?? DefaultAvaloniaD3D11TextureHandleProvider.Instance;
+        _d3d12TextureHandleProvider = d3d12TextureHandleProvider ?? DefaultAvaloniaD3D12TextureHandleProvider.Instance;
+        _openGlRenderTargetHandleProvider = openGlRenderTargetHandleProvider ?? DefaultAvaloniaOpenGlRenderTargetHandleProvider.Instance;
         BackendPreference = backendPreference;
     }
 
