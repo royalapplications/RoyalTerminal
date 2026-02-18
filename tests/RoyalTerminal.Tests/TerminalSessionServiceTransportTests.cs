@@ -261,6 +261,38 @@ public sealed class TerminalSessionServiceTransportTests
     }
 
     [Fact]
+    public async Task StartSessionAsync_VtResponseCallback_RoundTripsToActiveTransport()
+    {
+        TerminalSessionService service = new();
+        FakeTransport transport = new();
+        FixedTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+        Action<byte[]> onVtResponse = bytes => service.SendInput(bytes);
+
+        await service.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            onVtResponse,
+            () => { },
+            _ => { });
+
+        Assert.NotNull(vtProcessor.ResponseCallback);
+
+        vtProcessor.ResponseCallback!("\x1b[0n"u8.ToArray());
+
+        Assert.NotNull(transport.LastInputBytes);
+        Assert.Equal("\x1b[0n", Encoding.ASCII.GetString(transport.LastInputBytes));
+
+        await service.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
     public async Task StartSessionAsync_WhenPriorTransportExited_ReleasesStaleTransportAndStartsNewSession()
     {
         TerminalSessionService service = new();
