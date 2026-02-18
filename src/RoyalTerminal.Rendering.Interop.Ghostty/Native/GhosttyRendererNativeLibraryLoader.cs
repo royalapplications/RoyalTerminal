@@ -47,22 +47,22 @@ public static class GhosttyRendererNativeLibraryLoader
             return nint.Zero;
         }
 
-        if (NativeLibrary.TryLoad(libraryName, assembly, searchPath, out nint handle))
-        {
-            return handle;
-        }
-
         foreach (string candidatePath in GetCandidatePaths(assembly))
         {
-            if (NativeLibrary.TryLoad(candidatePath, out handle))
+            if (NativeLibrary.TryLoad(candidatePath, out nint handle))
             {
                 return handle;
             }
         }
 
-        if (NativeLibrary.TryLoad(libraryName, out handle))
+        if (NativeLibrary.TryLoad(libraryName, assembly, searchPath, out nint assemblyResolvedHandle))
         {
-            return handle;
+            return assemblyResolvedHandle;
+        }
+
+        if (NativeLibrary.TryLoad(libraryName, out nint defaultHandle))
+        {
+            return defaultHandle;
         }
 
         return nint.Zero;

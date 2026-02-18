@@ -101,13 +101,124 @@ public sealed class RenderingInteropTests
             Assert.Contains(rgbaBuffer, static value => value != 0);
 
             RenderFrameResult targetResult = surface.Render(descriptor);
-            Assert.False(targetResult.Succeeded);
-            Assert.Contains("unsupported", targetResult.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.True(targetResult.Succeeded, targetResult.ErrorMessage);
+            Assert.NotEqual(0UL, targetResult.SynchronizationToken);
         }
         finally
         {
             Environment.SetEnvironmentVariable("GHOSTTY_RENDERER_CAPI_LIBRARY_PATH", originalPath);
         }
+    }
+
+    [Fact]
+    public void GhosttyRenderSurface_WithFixtureLibrary_NonMetalBackendsValidateAndRenderTargets()
+    {
+        string? fixtureLibraryPath = ResolveFixtureLibraryPath();
+        if (fixtureLibraryPath is null)
+        {
+            return;
+        }
+
+        string? originalPath = Environment.GetEnvironmentVariable("GHOSTTY_RENDERER_CAPI_LIBRARY_PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("GHOSTTY_RENDERER_CAPI_LIBRARY_PATH", fixtureLibraryPath);
+
+            using GhosttyRenderContext context = new();
+
+            ValidateAndRenderDescriptor(
+                context,
+                RenderBackendKind.Vulkan,
+                new RenderTargetDescriptor
+                {
+                    BackendKind = RenderBackendKind.Vulkan,
+                    TargetKind = RenderTargetKind.Texture2D,
+                    PixelFormat = RenderPixelFormat.Bgra8Unorm,
+                    Width = 96,
+                    Height = 54,
+                    SampleCount = 1,
+                    DeviceHandle = (nint)1,
+                    CommandQueueHandle = (nint)2,
+                    TargetHandle = (nint)3,
+                    TargetViewHandle = (nint)4,
+                },
+                RenderFeatureFlags.ExternalTextureTargets);
+
+            ValidateAndRenderDescriptor(
+                context,
+                RenderBackendKind.D3D11,
+                new RenderTargetDescriptor
+                {
+                    BackendKind = RenderBackendKind.D3D11,
+                    TargetKind = RenderTargetKind.Texture2D,
+                    PixelFormat = RenderPixelFormat.Bgra8Unorm,
+                    Width = 96,
+                    Height = 54,
+                    SampleCount = 1,
+                    DeviceHandle = (nint)10,
+                    TargetHandle = (nint)11,
+                    TargetViewHandle = (nint)12,
+                },
+                RenderFeatureFlags.ExternalTextureTargets);
+
+            ValidateAndRenderDescriptor(
+                context,
+                RenderBackendKind.D3D12,
+                new RenderTargetDescriptor
+                {
+                    BackendKind = RenderBackendKind.D3D12,
+                    TargetKind = RenderTargetKind.Texture2D,
+                    PixelFormat = RenderPixelFormat.Bgra8Unorm,
+                    Width = 96,
+                    Height = 54,
+                    SampleCount = 1,
+                    DeviceHandle = (nint)20,
+                    CommandQueueHandle = (nint)21,
+                    CommandBufferHandle = (nint)22,
+                    TargetHandle = (nint)23,
+                    TargetViewHandle = (nint)24,
+                },
+                RenderFeatureFlags.ExternalTextureTargets);
+
+            ValidateAndRenderDescriptor(
+                context,
+                RenderBackendKind.OpenGL,
+                new RenderTargetDescriptor
+                {
+                    BackendKind = RenderBackendKind.OpenGL,
+                    TargetKind = RenderTargetKind.Framebuffer,
+                    PixelFormat = RenderPixelFormat.Unknown,
+                    Width = 96,
+                    Height = 54,
+                    SampleCount = 1,
+                    ContextHandle = (nint)30,
+                    TargetHandle = nint.Zero,
+                },
+                RenderFeatureFlags.ExternalFramebufferTargets);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GHOSTTY_RENDERER_CAPI_LIBRARY_PATH", originalPath);
+        }
+    }
+
+    private static void ValidateAndRenderDescriptor(
+        GhosttyRenderContext context,
+        RenderBackendKind backendKind,
+        RenderTargetDescriptor descriptor,
+        RenderFeatureFlags requiredDirectFeature)
+    {
+        using GhosttyRenderSurface surface = context.CreateSurface(backendKind);
+        Assert.True(surface.Capabilities.SupportsFeatures(requiredDirectFeature));
+        Assert.True(surface.Capabilities.SupportsFeatures(RenderFeatureFlags.ExplicitFrameLifecycle));
+        Assert.True(surface.Capabilities.SupportsFeatures(RenderFeatureFlags.CpuRgbaFallback));
+
+        RenderValidationResult validation = surface.ValidateTarget(descriptor);
+        Assert.True(validation.IsValid, validation.ErrorMessage);
+
+        RenderFrameResult frame = surface.Render(descriptor);
+        Assert.True(frame.Succeeded, frame.ErrorMessage);
+        Assert.NotEqual(0UL, frame.SynchronizationToken);
     }
 
     private static string? ResolveFixtureLibraryPath()

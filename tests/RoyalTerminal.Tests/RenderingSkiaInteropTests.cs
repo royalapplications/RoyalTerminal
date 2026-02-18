@@ -147,6 +147,86 @@ public sealed class RenderingSkiaInteropTests
     }
 
     [Fact]
+    public void SkiaInteropRenderer_OpenGlFramebufferDirectPath_UsesSurfaceRender()
+    {
+        FakeRenderSurface surface = new(
+            RenderFrameResult.Success(),
+            backendKind: RenderBackendKind.OpenGL,
+            featureFlags: RenderFeatureFlags.ExternalFramebufferTargets | RenderFeatureFlags.CpuRgbaFallback);
+        FakeRgbaFallbackRenderer fallback = new(RenderFrameResult.Success());
+        SkiaInteropRenderer renderer = new(surface, fallback);
+
+        using SKBitmap bitmap = new(4, 4);
+        using SKCanvas canvas = new(bitmap);
+
+        RenderTargetDescriptor descriptor = new()
+        {
+            BackendKind = RenderBackendKind.OpenGL,
+            TargetKind = RenderTargetKind.Framebuffer,
+            PixelFormat = RenderPixelFormat.Unknown,
+            Width = 4,
+            Height = 4,
+            SampleCount = 1,
+            ContextHandle = (nint)1,
+            TargetHandle = nint.Zero,
+        };
+
+        SkiaInteropRenderRequest request = new()
+        {
+            TargetDescriptor = descriptor,
+            AllowCpuFallback = true,
+        };
+
+        SkiaInteropRenderResult result = renderer.Render(canvas, request);
+
+        Assert.True(result.FrameResult.Succeeded, result.FrameResult.ErrorMessage);
+        Assert.False(result.UsedCpuFallback);
+        Assert.Equal(1, surface.ValidateTargetCallCount);
+        Assert.Equal(1, surface.RenderCallCount);
+        Assert.Equal(0, fallback.CallCount);
+    }
+
+    [Fact]
+    public void SkiaInteropRenderer_OpenGlFramebufferWithoutFramebufferCapability_UsesFallback()
+    {
+        FakeRenderSurface surface = new(
+            RenderFrameResult.Success(),
+            backendKind: RenderBackendKind.OpenGL,
+            featureFlags: RenderFeatureFlags.ExternalTextureTargets | RenderFeatureFlags.CpuRgbaFallback);
+        FakeRgbaFallbackRenderer fallback = new(RenderFrameResult.Success());
+        SkiaInteropRenderer renderer = new(surface, fallback);
+
+        using SKBitmap bitmap = new(4, 4, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using SKCanvas canvas = new(bitmap);
+
+        RenderTargetDescriptor descriptor = new()
+        {
+            BackendKind = RenderBackendKind.OpenGL,
+            TargetKind = RenderTargetKind.Framebuffer,
+            PixelFormat = RenderPixelFormat.Unknown,
+            Width = 4,
+            Height = 4,
+            SampleCount = 1,
+            ContextHandle = (nint)1,
+            TargetHandle = nint.Zero,
+        };
+
+        SkiaInteropRenderRequest request = new()
+        {
+            TargetDescriptor = descriptor,
+            AllowCpuFallback = true,
+        };
+
+        SkiaInteropRenderResult result = renderer.Render(canvas, request);
+
+        Assert.True(result.FrameResult.Succeeded, result.FrameResult.ErrorMessage);
+        Assert.True(result.UsedCpuFallback);
+        Assert.Equal(0, surface.ValidateTargetCallCount);
+        Assert.Equal(0, surface.RenderCallCount);
+        Assert.Equal(1, fallback.CallCount);
+    }
+
+    [Fact]
     public void SkiaInteropRenderer_WhenSurfaceCapabilitiesDoNotAdvertiseExternalTargets_UsesFallback()
     {
         FakeRenderSurface surface = new(
