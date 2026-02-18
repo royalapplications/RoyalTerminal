@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Reactive;
 using System.Reactive.Linq;
+using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Terminal;
 using ReactiveUI;
 
@@ -26,6 +27,11 @@ public sealed class MainWindowViewModel : ReactiveObject
     private string _statusText = "Ready";
     private string _dimensionsText = "80x24";
     private string _modeButtonText = "Rendered";
+    private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(
+        embeddedGhosttyAvailable: false,
+        nativeVtAvailable: false);
+    private TerminalRenderMode _activeRenderMode = TerminalRenderMode.RenderedAuto;
+    private readonly ITerminalModeResolver _modeResolver;
 
     private IReadOnlyList<ShellProfileOption> _shellProfiles =
     [
@@ -54,7 +60,14 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _sshRequestPty = true;
 
     public MainWindowViewModel()
+        : this(TerminalModeResolver.Default)
     {
+    }
+
+    internal MainWindowViewModel(ITerminalModeResolver modeResolver)
+    {
+        _modeResolver = modeResolver ?? throw new ArgumentNullException(nameof(modeResolver));
+
         _transportModes =
         [
             new TransportModeOption(TerminalTransportIds.Pty, "PTY"),
@@ -401,9 +414,19 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public void SetTerminalCapabilities(bool ghosttyAvailable, bool nativeVtAvailable)
     {
-        GhosttyAvailable = ghosttyAvailable;
-        NativeVtAvailable = nativeVtAvailable;
-        UpdateModeButtonText();
+        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
+            embeddedGhosttyAvailable: ghosttyAvailable,
+            nativeVtAvailable: nativeVtAvailable);
+        SetTerminalCapabilities(capabilities);
+    }
+
+    internal void SetTerminalCapabilities(TerminalModeCapabilities capabilities)
+    {
+        _terminalCapabilities = capabilities;
+        GhosttyAvailable = capabilities.EmbeddedGhosttyNativeAvailable
+            || capabilities.EmbeddedGhosttyRenderedAvailable;
+        NativeVtAvailable = capabilities.NativeVtAvailable;
+        SetRenderMode(_activeRenderMode);
     }
 
     public void SetRenderMode(
@@ -412,15 +435,18 @@ public sealed class MainWindowViewModel : ReactiveObject
         bool useNativeVtControl,
         bool useManagedVtControl = false)
     {
-        bool isStandaloneMode = !useRenderedControl && !useNativeControl;
-        bool resolvedUseNativeVtControl = isStandaloneMode && useNativeVtControl;
-        bool resolvedUseManagedVtControl = isStandaloneMode && !resolvedUseNativeVtControl && useManagedVtControl;
+        TerminalRenderMode requestedMode = ResolveRequestedMode(
+            useRenderedControl,
+            useNativeControl,
+            useNativeVtControl,
+            useManagedVtControl);
+        SetRenderMode(requestedMode);
+    }
 
-        UseRenderedControl = useRenderedControl;
-        UseNativeControl = useNativeControl;
-        UseNativeVtControl = resolvedUseNativeVtControl;
-        UseManagedVtControl = resolvedUseManagedVtControl;
-        UpdateModeButtonText();
+    internal void SetRenderMode(TerminalRenderMode mode)
+    {
+        TerminalRenderMode resolvedMode = _modeResolver.ResolveSupportedMode(mode, _terminalCapabilities);
+        ApplyRenderMode(resolvedMode);
     }
 
     public void SetShellProfiles(IReadOnlyList<ShellProfileOption> profiles)
@@ -443,30 +469,21 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public string GetNewTabModeName()
     {
-        if (UseRenderedControl)
+        switch (_activeRenderMode)
         {
-            return UseTextureInterop
-                ? "Rendered (Ghostty VT + TextureInterop)"
-                : "Rendered (Ghostty VT + CPU Cell Renderer)";
+            case TerminalRenderMode.GhosttyRendered:
+                return UseTextureInterop
+                    ? "Rendered (Ghostty VT + TextureInterop)"
+                    : "Rendered (Ghostty VT + CPU Cell Renderer)";
+            case TerminalRenderMode.GhosttyNative:
+                return "Native (Ghostty Metal)";
+            case TerminalRenderMode.NativeVt:
+                return $"Native VT ({SelectedTransportMode.DisplayName})";
+            case TerminalRenderMode.ManagedVt:
+                return $"Managed VT ({SelectedTransportMode.DisplayName})";
+            default:
+                return $"Rendered ({SelectedTransportMode.DisplayName})";
         }
-
-        if (UseNativeControl)
-        {
-            return "Native (Ghostty Metal)";
-        }
-
-        string transportName = SelectedTransportMode.DisplayName;
-        if (UseNativeVtControl)
-        {
-            return $"Native VT ({transportName})";
-        }
-
-        if (UseManagedVtControl)
-        {
-            return $"Managed VT ({transportName})";
-        }
-
-        return $"Rendered ({transportName})";
     }
 
     public void SetStatus(string text)
@@ -558,90 +575,61 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private void CycleRenderMode()
     {
-        if (GhosttyAvailable)
-        {
-            // Cycle: Ghostty Rendered -> Ghostty Native -> Native VT -> Managed VT -> Standalone -> Ghostty Rendered.
-            if (UseRenderedControl)
-            {
-                SetRenderMode(useRenderedControl: false, useNativeControl: true, useNativeVtControl: false);
-            }
-            else if (UseNativeControl)
-            {
-                SetRenderMode(
-                    useRenderedControl: false,
-                    useNativeControl: false,
-                    useNativeVtControl: NativeVtAvailable,
-                    useManagedVtControl: !NativeVtAvailable);
-            }
-            else if (UseNativeVtControl)
-            {
-                SetRenderMode(
-                    useRenderedControl: false,
-                    useNativeControl: false,
-                    useNativeVtControl: false,
-                    useManagedVtControl: true);
-            }
-            else if (UseManagedVtControl)
-            {
-                SetRenderMode(
-                    useRenderedControl: false,
-                    useNativeControl: false,
-                    useNativeVtControl: false,
-                    useManagedVtControl: false);
-            }
-            else
-            {
-                SetRenderMode(useRenderedControl: true, useNativeControl: true, useNativeVtControl: false);
-            }
-        }
-        else if (NativeVtAvailable)
-        {
-            // Cycle: Native VT -> Managed VT -> Standalone -> Native VT.
-            if (UseNativeVtControl)
-            {
-                SetRenderMode(
-                    useRenderedControl: false,
-                    useNativeControl: false,
-                    useNativeVtControl: false,
-                    useManagedVtControl: true);
-            }
-            else if (UseManagedVtControl)
-            {
-                SetRenderMode(
-                    useRenderedControl: false,
-                    useNativeControl: false,
-                    useNativeVtControl: false,
-                    useManagedVtControl: false);
-            }
-            else
-            {
-                SetRenderMode(
-                    useRenderedControl: false,
-                    useNativeControl: false,
-                    useNativeVtControl: true,
-                    useManagedVtControl: false);
-            }
-        }
-        else
-        {
-            // Cycle: Standalone -> Managed VT -> Standalone.
-            SetRenderMode(
-                useRenderedControl: false,
-                useNativeControl: false,
-                useNativeVtControl: false,
-                useManagedVtControl: !UseManagedVtControl);
-        }
+        TerminalRenderMode nextMode = _modeResolver.ResolveNextMode(_activeRenderMode, _terminalCapabilities);
+        ApplyRenderMode(nextMode);
 
         SetStatus($"New tabs will use: {GetNewTabModeName()}");
     }
 
     private void UpdateModeButtonText()
     {
-        ModeButtonText = UseRenderedControl ? "Ghostty Rendered"
-            : UseNativeControl ? "Ghostty Native"
-            : UseNativeVtControl ? "Native VT"
-            : UseManagedVtControl ? "Managed VT"
-            : "Rendered";
+        ModeButtonText = _activeRenderMode switch
+        {
+            TerminalRenderMode.GhosttyRendered => "Ghostty Rendered",
+            TerminalRenderMode.GhosttyNative => "Ghostty Native",
+            TerminalRenderMode.NativeVt => "Native VT",
+            TerminalRenderMode.ManagedVt => "Managed VT",
+            _ => "Rendered",
+        };
+    }
+
+    private void ApplyRenderMode(TerminalRenderMode mode)
+    {
+        _activeRenderMode = mode;
+        UseRenderedControl = mode == TerminalRenderMode.GhosttyRendered;
+        UseNativeControl = mode == TerminalRenderMode.GhosttyNative;
+        UseNativeVtControl = mode == TerminalRenderMode.NativeVt;
+        UseManagedVtControl = mode == TerminalRenderMode.ManagedVt;
+        UpdateModeButtonText();
+    }
+
+    private static TerminalRenderMode ResolveRequestedMode(
+        bool useRenderedControl,
+        bool useNativeControl,
+        bool useNativeVtControl,
+        bool useManagedVtControl)
+    {
+        if (useRenderedControl)
+        {
+            return TerminalRenderMode.GhosttyRendered;
+        }
+
+        if (useNativeControl)
+        {
+            return TerminalRenderMode.GhosttyNative;
+        }
+
+        if (useNativeVtControl)
+        {
+            return TerminalRenderMode.NativeVt;
+        }
+
+        if (useManagedVtControl)
+        {
+            return TerminalRenderMode.ManagedVt;
+        }
+
+        return TerminalRenderMode.RenderedAuto;
     }
 
     private void RaiseSessionConfigurationVisibilityChanged()
