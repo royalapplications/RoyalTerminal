@@ -285,7 +285,7 @@ jobs:
           find native/ghostty-renderer-capi/zig-out -name "libghostty-renderer-capi.so*" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \; || true
           for base in libghostty libghostty-vt libghostty-terminal libghostty-renderer-capi; do
             if [ ! -f "artifacts/linux-${{ matrix.arch }}/native/${base}.so" ]; then
-              candidate="$(ls -1 artifacts/linux-${{ matrix.arch }}/native/${base}.so* 2>/dev/null | head -n1 || true)"
+              candidate="$(find "artifacts/linux-${{ matrix.arch }}/native" -maxdepth 1 -type f -name "${base}.so*" | head -n1 || true)"
               if [ -n "${candidate}" ]; then
                 cp -f "${candidate}" "artifacts/linux-${{ matrix.arch }}/native/${base}.so"
               fi
@@ -318,8 +318,11 @@ jobs:
           retention-days: 7
 
   native-build-windows:
-    name: Native Build (Windows)
+    name: Native Build (Windows ${{ matrix.arch }})
     runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -333,42 +336,60 @@ jobs:
 
       - name: Build libghostty and libghostty-vt
         working-directory: external/ghostty
-        run: zig build -Doptimize=ReleaseFast -Dapp-runtime=none
+        shell: bash
+        run: |
+          target=""
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            target="-Dtarget=aarch64-windows"
+          fi
+          zig build -Doptimize=ReleaseFast -Dapp-runtime=none ${target}
 
       - name: Build ghostty-terminal
         working-directory: native/ghostty-terminal
-        run: zig build -Doptimize=ReleaseFast
+        shell: bash
+        run: |
+          target=""
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            target="-Dtarget=aarch64-windows"
+          fi
+          zig build -Doptimize=ReleaseFast ${target}
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
-        run: zig build -Doptimize=ReleaseFast
+        shell: bash
+        run: |
+          target=""
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            target="-Dtarget=aarch64-windows"
+          fi
+          zig build -Doptimize=ReleaseFast ${target}
 
       - name: Collect artifacts
         shell: bash
         run: |
-          mkdir -p artifacts/win-x64/native
-          find external/ghostty/zig-out -name "*.dll" -exec cp -L {} artifacts/win-x64/native/ \;
-          find external/ghostty/zig-out -name "*.lib" -exec cp -L {} artifacts/win-x64/native/ \;
-          find external/ghostty/zig-out -name "libghostty.so" -exec cp -L {} artifacts/win-x64/native/ \; || true
-          find native/ghostty-terminal/zig-out -name "*ghostty-terminal*.dll" -exec cp -L {} artifacts/win-x64/native/ \; || true
-          find native/ghostty-terminal/zig-out -name "*ghostty-terminal*.lib" -exec cp -L {} artifacts/win-x64/native/ \; || true
-          find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.dll" -exec cp -L {} artifacts/win-x64/native/ \; || true
-          find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.lib" -exec cp -L {} artifacts/win-x64/native/ \; || true
+          mkdir -p artifacts/win-${{ matrix.arch }}/native
+          find external/ghostty/zig-out -name "*.dll" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \;
+          find external/ghostty/zig-out -name "*.lib" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \;
+          find external/ghostty/zig-out -name "libghostty.so" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \; || true
+          find native/ghostty-terminal/zig-out -name "*ghostty-terminal*.dll" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \; || true
+          find native/ghostty-terminal/zig-out -name "*ghostty-terminal*.lib" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \; || true
+          find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.dll" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \; || true
+          find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.lib" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \; || true
           for base in ghostty ghostty-vt ghostty-terminal ghostty-renderer-capi; do
-            if [ ! -f "artifacts/win-x64/native/${base}.dll" ] && [ -f "artifacts/win-x64/native/lib${base}.dll" ]; then
-              cp -f "artifacts/win-x64/native/lib${base}.dll" "artifacts/win-x64/native/${base}.dll"
+            if [ ! -f "artifacts/win-${{ matrix.arch }}/native/${base}.dll" ] && [ -f "artifacts/win-${{ matrix.arch }}/native/lib${base}.dll" ]; then
+              cp -f "artifacts/win-${{ matrix.arch }}/native/lib${base}.dll" "artifacts/win-${{ matrix.arch }}/native/${base}.dll"
             fi
           done
-          if [ ! -f "artifacts/win-x64/native/ghostty.dll" ] && [ -f "artifacts/win-x64/native/libghostty.so" ]; then
-            cp -f "artifacts/win-x64/native/libghostty.so" "artifacts/win-x64/native/ghostty.dll"
+          if [ ! -f "artifacts/win-${{ matrix.arch }}/native/ghostty.dll" ] && [ -f "artifacts/win-${{ matrix.arch }}/native/libghostty.so" ]; then
+            cp -f "artifacts/win-${{ matrix.arch }}/native/libghostty.so" "artifacts/win-${{ matrix.arch }}/native/ghostty.dll"
           fi
-          ls -la artifacts/win-x64/native/
+          ls -la artifacts/win-${{ matrix.arch }}/native/
 
       - name: Verify required native artifacts (Windows)
         shell: bash
         run: |
           set -euo pipefail
-          artifact_dir="artifacts/win-x64/native"
+          artifact_dir="artifacts/win-${{ matrix.arch }}/native"
           required=(
             "ghostty.dll"
             "ghostty-vt.dll"
@@ -385,8 +406,8 @@ jobs:
       - name: Upload native library
         uses: actions/upload-artifact@v4
         with:
-          name: native-win-x64
-          path: artifacts/win-x64/native/
+          name: native-win-${{ matrix.arch }}
+          path: artifacts/win-${{ matrix.arch }}/native/
           retention-days: 7
 
   integration-tests:
@@ -480,6 +501,12 @@ jobs:
           name: native-win-x64
           path: src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-x64/native/
 
+      - name: Download Windows arm64 native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-win-arm64
+          path: src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-arm64/native/
+
       - name: Verify downloaded native artifacts
         shell: bash
         run: |
@@ -505,6 +532,8 @@ jobs:
           check_files "src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-arm64/native" \
             "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
           check_files "src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-x64/native" \
+            "ghostty.dll" "ghostty-vt.dll" "ghostty-terminal.dll" "ghostty-renderer-capi.dll"
+          check_files "src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-arm64/native" \
             "ghostty.dll" "ghostty-vt.dll" "ghostty-terminal.dll" "ghostty-renderer-capi.dll"
 
       # Pack managed packages

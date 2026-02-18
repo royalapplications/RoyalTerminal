@@ -1,6 +1,9 @@
 <Project>
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
-    <NativeLibrary Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/*" />
+    <NativeLibrary Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/*"
+                   Condition="'$(RuntimeIdentifier)' == 'win-x64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64')" />
+    <NativeLibrary Include="$(MSBuildThisFileDirectory)../runtimes/win-arm64/native/*"
+                   Condition="'$(RuntimeIdentifier)' == 'win-arm64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64')" />
     <None Include="@(NativeLibrary)"
           CopyToOutputDirectory="PreserveNewest"
           Link="%(Filename)%(Extension)"

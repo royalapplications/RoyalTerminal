@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <PackageId>RoyalTerminal.GhosttySharp.Native.Win64</PackageId>
-    <Description>Native Ghostty libraries for Windows x64. Provides ghostty.dll, ghostty-vt.dll, ghostty-terminal.dll, and ghostty-renderer-capi.dll shared libraries required by RoyalTerminal.GhosttySharp on Windows.</Description>
-    <PackageTags>ghostty;terminal;native;windows;x64</PackageTags>
+    <Description>Native Ghostty libraries for Windows (x64 and arm64). Provides ghostty.dll, ghostty-vt.dll, ghostty-terminal.dll, and ghostty-renderer-capi.dll shared libraries required by RoyalTerminal.GhosttySharp on Windows.</Description>
+    <PackageTags>ghostty;terminal;native;windows;x64;arm64</PackageTags>
 
     <!-- This is a native-only package, no managed assembly -->
     <IncludeBuildOutput>false</IncludeBuildOutput>
@@ -15,6 +15,7 @@
   <!-- NuGet pack: include all runtimes -->
   <ItemGroup>
     <None Include="runtimes/win-x64/native/**" Pack="true" PackagePath="runtimes/win-x64/native" Condition="Exists('runtimes/win-x64/native')" />
+    <None Include="runtimes/win-arm64/native/**" Pack="true" PackagePath="runtimes/win-arm64/native" Condition="Exists('runtimes/win-arm64/native')" />
   </ItemGroup>
 
   <ItemGroup>

@@ -144,14 +144,25 @@ public sealed class NcursesHarnessFlowTests
                 TimeSpan.FromSeconds(2));
             Assert.True(arranged, $"Terminal control was not arranged in time. Bounds={control.Bounds}");
 
-            control.StartPty(shell: "/bin/sh", workingDirectory: Environment.CurrentDirectory);
-
-            string command =
-                $"RT_HARNESS_LOG={ShellQuote(logPath)} " +
-                $"RT_HARNESS_TIMEOUT_SEC=30 " +
-                $"TERM=xterm-256color " +
-                $"{ShellQuote(pythonExecutable)} {ShellQuote(fixturePath)}\n";
-            control.SendInput(command);
+            string envExecutable = File.Exists("/usr/bin/env")
+                ? "/usr/bin/env"
+                : "env";
+            string[] harnessArguments =
+            [
+                $"RT_HARNESS_LOG={logPath}",
+                "RT_HARNESS_TIMEOUT_SEC=30",
+                "TERM=xterm-256color",
+                pythonExecutable,
+                fixturePath,
+            ];
+            control.StartPty(
+                shell: envExecutable,
+                workingDirectory: Environment.CurrentDirectory,
+                arguments: harnessArguments);
+            bool sessionStarted = await WaitUntilAsync(
+                () => control.HasActiveSession,
+                TimeSpan.FromSeconds(2));
+            Assert.True(sessionStarted, "PTY session did not become active in time.");
 
             string ready = await WaitForLogLineAsync(
                 logPath,
@@ -693,8 +704,4 @@ public sealed class NcursesHarnessFlowTests
             $"Timed out waiting for harness log line. File: {path}\nObserved log:\n{snapshot}");
     }
 
-    private static string ShellQuote(string value)
-    {
-        return "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
-    }
 }
