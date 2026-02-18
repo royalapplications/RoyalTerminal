@@ -257,7 +257,9 @@ public sealed class GhosttyRenderSurface : IRenderSurface
 
             RenderBackendKind.Vulkan => new(
                 backendKind,
+                RenderFeatureFlags.ExternalTextureTargets |
                 RenderFeatureFlags.ExplicitFrameLifecycle |
+                RenderFeatureFlags.ExplicitSynchronization |
                 RenderFeatureFlags.CpuRgbaFallback,
                 minSampleCount: 1,
                 maxSampleCount: 1,
@@ -265,6 +267,7 @@ public sealed class GhosttyRenderSurface : IRenderSurface
 
             RenderBackendKind.D3D11 => new(
                 backendKind,
+                RenderFeatureFlags.ExternalTextureTargets |
                 RenderFeatureFlags.ExplicitFrameLifecycle |
                 RenderFeatureFlags.CpuRgbaFallback,
                 minSampleCount: 1,
@@ -273,7 +276,9 @@ public sealed class GhosttyRenderSurface : IRenderSurface
 
             RenderBackendKind.D3D12 => new(
                 backendKind,
+                RenderFeatureFlags.ExternalTextureTargets |
                 RenderFeatureFlags.ExplicitFrameLifecycle |
+                RenderFeatureFlags.ExplicitSynchronization |
                 RenderFeatureFlags.CpuRgbaFallback,
                 minSampleCount: 1,
                 maxSampleCount: 1,
@@ -289,6 +294,8 @@ public sealed class GhosttyRenderSurface : IRenderSurface
 
             RenderBackendKind.OpenGL => new(
                 backendKind,
+                RenderFeatureFlags.ExternalTextureTargets |
+                RenderFeatureFlags.ExternalFramebufferTargets |
                 RenderFeatureFlags.ExplicitFrameLifecycle |
                 RenderFeatureFlags.CpuRgbaFallback,
                 minSampleCount: 1,

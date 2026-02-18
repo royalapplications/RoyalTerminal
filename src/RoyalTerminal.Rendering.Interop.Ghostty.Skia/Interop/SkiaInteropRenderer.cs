@@ -11,7 +11,7 @@ namespace RoyalTerminal.Rendering.Interop.Ghostty.Skia;
 
 /// <summary>
 /// Bridges renderer interop surfaces to Skia rendering targets.
-/// Uses backend-aware direct texture interop with CPU RGBA fallback.
+/// Uses backend-aware direct texture/framebuffer interop with CPU RGBA fallback.
 /// </summary>
 public sealed class SkiaInteropRenderer
 {
@@ -45,9 +45,10 @@ public sealed class SkiaInteropRenderer
         }
 
         bool allowCpuFallback = request.AllowCpuFallback && _rgbaFallbackRenderer is not null;
-        bool backendSupportsDirectInterop =
-            _renderSurface.Capabilities.SupportsFeatures(RenderFeatureFlags.ExternalTextureTargets);
-        bool supportsDirectInterop = backendSupportsDirectInterop && SkiaInteropSupport.CanUseDirectTextureInterop(
+        bool backendSupportsDirectInterop = SkiaInteropSupport.SupportsDirectInteropTarget(
+            _renderSurface.Capabilities.FeatureFlags,
+            request.TargetDescriptor.TargetKind);
+        bool supportsDirectInterop = backendSupportsDirectInterop && SkiaInteropSupport.CanUseDirectInterop(
             request.TargetDescriptor,
             _renderSurface.BackendKind);
         if (supportsDirectInterop)
@@ -57,7 +58,7 @@ public sealed class SkiaInteropRenderer
             {
                 if (!allowCpuFallback)
                 {
-                    string message = surfaceValidation.ErrorMessage ?? "Render target is not valid for direct texture interop.";
+                    string message = surfaceValidation.ErrorMessage ?? "Render target is not valid for direct interop.";
                     return new SkiaInteropRenderResult(RenderFrameResult.Failure(message), usedCpuFallback: false);
                 }
 
@@ -65,7 +66,7 @@ public sealed class SkiaInteropRenderer
                 if (!validationFallbackResult.Succeeded)
                 {
                     string combinedMessage = CombineFailureMessages(
-                        surfaceValidation.ErrorMessage ?? "Render target is not valid for direct texture interop.",
+                        surfaceValidation.ErrorMessage ?? "Render target is not valid for direct interop.",
                         validationFallbackResult.ErrorMessage);
                     RenderFrameResult combinedFailure = RenderFrameResult.Failure(combinedMessage);
                     return new SkiaInteropRenderResult(combinedFailure, usedCpuFallback: true);
@@ -95,7 +96,7 @@ public sealed class SkiaInteropRenderer
 
         if (!allowCpuFallback)
         {
-            string message = "Direct Skia texture interop is unavailable for this render target/backend and CPU fallback is disabled.";
+            string message = "Direct Skia interop is unavailable for this render target/backend and CPU fallback is disabled.";
             return new SkiaInteropRenderResult(RenderFrameResult.Failure(message), usedCpuFallback: false);
         }
 
