@@ -203,7 +203,7 @@ public class MainWindowViewModelFlowTests
 
         viewModel.CycleRenderModeCommand.Execute().Wait();
         Assert.True(viewModel.UseRenderedControl);
-        Assert.True(viewModel.UseNativeControl);
+        Assert.False(viewModel.UseNativeControl);
         Assert.False(viewModel.UseNativeVtControl);
         Assert.False(viewModel.UseManagedVtControl);
     }
@@ -224,6 +224,58 @@ public class MainWindowViewModelFlowTests
         Assert.False(viewModel.UseNativeVtControl);
         Assert.False(viewModel.UseManagedVtControl);
         Assert.Equal("Rendered", viewModel.ModeButtonText);
+    }
+
+    [Fact]
+    public void ModeSwitching_NoGhostty_WithNativeVt_SkipsUnavailableModes()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: false, nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+
+        viewModel.CycleRenderModeCommand.Execute().Wait();
+        Assert.True(viewModel.UseNativeVtControl);
+        Assert.False(viewModel.UseManagedVtControl);
+        Assert.Equal("Native VT", viewModel.ModeButtonText);
+
+        viewModel.CycleRenderModeCommand.Execute().Wait();
+        Assert.False(viewModel.UseNativeVtControl);
+        Assert.True(viewModel.UseManagedVtControl);
+        Assert.Equal("Managed VT", viewModel.ModeButtonText);
+
+        viewModel.CycleRenderModeCommand.Execute().Wait();
+        Assert.False(viewModel.UseNativeVtControl);
+        Assert.False(viewModel.UseManagedVtControl);
+        Assert.Equal("Rendered", viewModel.ModeButtonText);
+    }
+
+    [Fact]
+    public void ModeSwitching_RequestUnavailableGhosttyMode_FallsBackToSupportedMode()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: false, nativeVtAvailable: true);
+
+        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: false, useNativeVtControl: false);
+
+        Assert.False(viewModel.UseRenderedControl);
+        Assert.False(viewModel.UseNativeControl);
+        Assert.True(viewModel.UseNativeVtControl);
+        Assert.Equal("Native VT", viewModel.ModeButtonText);
+    }
+
+    [Fact]
+    public void ModeSwitching_RequestUnavailableNativeVt_WithGhosttyAvailable_FallsBackToManagedVt()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: false);
+
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: true);
+
+        Assert.False(viewModel.UseRenderedControl);
+        Assert.False(viewModel.UseNativeControl);
+        Assert.False(viewModel.UseNativeVtControl);
+        Assert.True(viewModel.UseManagedVtControl);
+        Assert.Equal("Managed VT", viewModel.ModeButtonText);
     }
 
     [Fact]
