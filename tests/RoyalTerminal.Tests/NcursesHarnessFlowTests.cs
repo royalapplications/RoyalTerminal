@@ -34,6 +34,12 @@ public sealed class NcursesHarnessFlowTests
     }
 
     [AvaloniaFact]
+    public async Task NcursesHarness_AutoVt_HandlesKeyboardMouseAndResize()
+    {
+        await RunHarnessFlowAsync(VtProcessorPreference.Auto);
+    }
+
+    [AvaloniaFact]
     public async Task NcursesHarness_NativeVt_HandlesKeyboardMouseAndResize_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
