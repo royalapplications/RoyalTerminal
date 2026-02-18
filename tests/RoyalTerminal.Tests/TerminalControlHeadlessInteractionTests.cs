@@ -410,7 +410,69 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    private static TerminalControl CreateControlWithTransport(RecordingTransport transport)
+    [AvaloniaFact]
+    public async Task Headless_FallbackParity_AutoAndManaged_PreserveKeyboardMousePasteAndResize()
+    {
+        DefaultVtProcessorFactory vtFactory = new();
+        InteractionCoverageResult autoResult = await RunInteractionCoverageScenarioAsync(
+            vtFactory,
+            VtProcessorPreference.Auto);
+        InteractionCoverageResult managedResult = await RunInteractionCoverageScenarioAsync(
+            vtFactory,
+            VtProcessorPreference.Managed);
+
+        AssertInteractionCoverage(autoResult);
+        AssertInteractionCoverage(managedResult);
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_FallbackParity_AutoAndManaged_PreserveKeyboardMousePasteAndResize_WhenHostedInScrollViewer()
+    {
+        DefaultVtProcessorFactory vtFactory = new();
+        InteractionCoverageResult autoResult = await RunInteractionCoverageScenarioAsync(
+            vtFactory,
+            VtProcessorPreference.Auto,
+            hostInScrollViewer: true,
+            useTopLevelMouseRouting: true);
+        InteractionCoverageResult managedResult = await RunInteractionCoverageScenarioAsync(
+            vtFactory,
+            VtProcessorPreference.Managed,
+            hostInScrollViewer: true,
+            useTopLevelMouseRouting: true);
+
+        AssertInteractionCoverage(autoResult);
+        AssertInteractionCoverage(managedResult);
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_FallbackParity_NativeAndManaged_PreserveKeyboardMousePasteAndResize_WhenNativeAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        DefaultVtProcessorFactory vtFactory = new(nativeProviders);
+
+        InteractionCoverageResult nativeResult = await RunInteractionCoverageScenarioAsync(
+            vtFactory,
+            VtProcessorPreference.Native);
+        InteractionCoverageResult managedResult = await RunInteractionCoverageScenarioAsync(
+            vtFactory,
+            VtProcessorPreference.Managed);
+
+        AssertInteractionCoverage(nativeResult);
+        AssertInteractionCoverage(managedResult);
+    }
+
+    private static TerminalControl CreateControlWithTransport(
+        RecordingTransport transport,
+        IVtProcessorFactory? vtProcessorFactory = null,
+        VtProcessorPreference preference = VtProcessorPreference.Auto)
     {
         CompositeTerminalTransportFactory factory = new(
             new ITerminalTransportProvider[]
@@ -418,12 +480,12 @@ public sealed class TerminalControlHeadlessInteractionTests
                 new RecordingTransportProvider(transport),
             });
 
-        return new TerminalControl(
+        TerminalControl control = new(
             new TerminalSessionService(),
             new DefaultTerminalInputAdapter(),
             new DefaultTerminalSelectionService(),
             new DefaultTerminalScrollService(),
-            new DefaultVtProcessorFactory(),
+            vtProcessorFactory ?? new DefaultVtProcessorFactory(),
             new DefaultPtyFactory(),
             new NullSshCredentialProvider(),
             new RejectAllSshHostKeyValidator(),
@@ -431,6 +493,113 @@ public sealed class TerminalControlHeadlessInteractionTests
         {
             Background = Brushes.Transparent,
         };
+
+        control.VtProcessorPreference = preference;
+        return control;
+    }
+
+    private static async Task<InteractionCoverageResult> RunInteractionCoverageScenarioAsync(
+        IVtProcessorFactory vtProcessorFactory,
+        VtProcessorPreference preference,
+        bool hostInScrollViewer = false,
+        bool useTopLevelMouseRouting = false)
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport, vtProcessorFactory, preference);
+        Control content = hostInScrollViewer
+            ? new ScrollViewer
+            {
+                Content = control,
+                VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            }
+            : control;
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = content,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            transport.Inputs.Clear();
+            window.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+            bool keyboardSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(static input => input.Length == 1 && input[0] == (byte)'\r'),
+                TimeSpan.FromSeconds(2));
+
+            transport.Inputs.Clear();
+            window.KeyTextInput("p");
+            bool textSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(static input => input.Length == 1 && input[0] == (byte)'p'),
+                TimeSpan.FromSeconds(2));
+
+            transport.Inputs.Clear();
+            control.WriteOutput("\x1b[?1002h\x1b[?1006h"u8);
+            Dispatcher.UIThread.RunJobs();
+            Point point = await GetInteractionPointAsync(control, window);
+            if (useTopLevelMouseRouting)
+            {
+                SendMouseSequenceViaTopLevel(window, point);
+            }
+            else
+            {
+                RaiseMouseSequence(control, window, point);
+            }
+            Dispatcher.UIThread.RunJobs();
+            bool mouseSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(IsMouseProtocolInput),
+                TimeSpan.FromSeconds(2));
+
+            transport.Inputs.Clear();
+            control.WriteOutput("\x1b[?2004h"u8);
+            await window.Clipboard!.SetTextAsync("echo parity");
+            await control.PasteAsync();
+            bool pasteSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(static payload =>
+                    Encoding.UTF8.GetString(payload) == "\x1b[200~echo parity\x1b[201~"),
+                TimeSpan.FromSeconds(2));
+
+            int initialCols = control.Columns;
+            int initialRows = control.Rows;
+            int resizeCountBefore = transport.Resizes.Count;
+            window.Width = 960;
+            window.Height = 640;
+            Dispatcher.UIThread.RunJobs();
+
+            bool resizeSent = await WaitUntilAsync(
+                () => transport.Resizes.Count > resizeCountBefore
+                      && (control.Columns != initialCols || control.Rows != initialRows),
+                TimeSpan.FromSeconds(2));
+
+            return new InteractionCoverageResult(
+                KeyboardSent: keyboardSent,
+                TextSent: textSent,
+                MouseSent: mouseSent,
+                PasteSent: pasteSent,
+                ResizeSent: resizeSent);
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    private static void AssertInteractionCoverage(InteractionCoverageResult result)
+    {
+        Assert.True(result.KeyboardSent);
+        Assert.True(result.TextSent);
+        Assert.True(result.MouseSent);
+        Assert.True(result.PasteSent);
+        Assert.True(result.ResizeSent);
     }
 
     private static bool IsMouseProtocolInput(byte[] input)
@@ -715,4 +884,11 @@ public sealed class TerminalControlHeadlessInteractionTests
             return true;
         }
     }
+
+    private readonly record struct InteractionCoverageResult(
+        bool KeyboardSent,
+        bool TextSent,
+        bool MouseSent,
+        bool PasteSent,
+        bool ResizeSent);
 }
