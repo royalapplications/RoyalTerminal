@@ -34,7 +34,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
             string? sequence = KeyToAnsiSequence(
                 e.Key,
                 e.KeyModifiers,
-                vtProcessor?.ApplicationCursorKeys ?? false);
+                ResolveApplicationCursorKeys(sessionService, vtProcessor));
             if (sequence is not null)
             {
                 sessionService.SendInput(sequence);
@@ -80,6 +80,19 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
 
         sessionService.SendInput(e.Text);
         return sessionService.HasActiveTransport || sessionService.HasPty;
+    }
+
+    private static bool ResolveApplicationCursorKeys(
+        ITerminalSessionService sessionService,
+        IVtProcessor? vtProcessor)
+    {
+        ITerminalModeSource? modeSource = sessionService.ModeSource;
+        if (modeSource is not null)
+        {
+            return modeSource.ModeState.ApplicationCursorKeys;
+        }
+
+        return vtProcessor?.ApplicationCursorKeys ?? false;
     }
 
     private static TerminalModifiers ConvertTerminalModifiers(KeyModifiers keyModifiers)
