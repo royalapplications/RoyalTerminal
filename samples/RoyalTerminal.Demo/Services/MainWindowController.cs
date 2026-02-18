@@ -697,7 +697,7 @@ internal sealed class MainWindowController
         INativeVtProcessorProvider[] nativeProviders = [new GhosttyVtProcessorProvider()];
         DefaultPtyFactory ptyFactory = new();
         DemoSshCredentialProvider credentialProvider = new(_viewModel);
-        RejectAllSshHostKeyValidator hostKeyValidator = new();
+        KnownHostsSshHostKeyValidator hostKeyValidator = new();
         CompositeTerminalTransportFactory transportFactory = new(
             new ITerminalTransportProvider[]
             {
@@ -796,14 +796,9 @@ internal sealed class MainWindowController
         }
 
         string expectedHostKeyFingerprint = _viewModel.SshExpectedHostKeyFingerprintSha256.Trim();
-        if (string.IsNullOrWhiteSpace(expectedHostKeyFingerprint))
-        {
-            throw new InvalidOperationException(
-                "SSH host key SHA-256 fingerprint is required when strict host-key validation is enabled.");
-        }
 
         SshAuthenticationOptions authentication = BuildSshAuthenticationOptions();
-        return new SshTransportOptions(
+        SshTransportOptions options = new(
             Endpoint: new SshEndpointOptions(host, port, username),
             RequestPty: _viewModel.SshRequestPty,
             TerminalType: string.IsNullOrWhiteSpace(_viewModel.SshTerminalType)
@@ -813,10 +808,14 @@ internal sealed class MainWindowController
                 ? null
                 : _viewModel.SshInitialCommand.Trim(),
             Authentication: authentication,
-            Dimensions: dimensions)
+            Dimensions: dimensions);
+
+        if (!string.IsNullOrWhiteSpace(expectedHostKeyFingerprint))
         {
-            ExpectedHostKeyFingerprintSha256 = expectedHostKeyFingerprint,
-        };
+            options = options with { ExpectedHostKeyFingerprintSha256 = expectedHostKeyFingerprint };
+        }
+
+        return options;
     }
 
     private SshAuthenticationOptions BuildSshAuthenticationOptions()

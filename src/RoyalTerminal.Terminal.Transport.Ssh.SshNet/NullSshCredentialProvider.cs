@@ -18,6 +18,8 @@ public sealed class NullSshCredentialProvider : ISshCredentialProvider
         _ = cancellationToken;
 
         throw new InvalidOperationException(
-            "No SSH credential provider was configured. Provide an ISshCredentialProvider to resolve runtime credentials.");
+            "No SSH credential provider was configured. " +
+            "Provide an ISshCredentialProvider to resolve runtime credentials " +
+            "(for example SecretStoreSshCredentialProvider with SshSecretProtectionFactory.CreateDefaultSecretStore()).");
     }
 }

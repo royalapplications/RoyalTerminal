@@ -404,6 +404,8 @@ internal static class SshSecretFileIo
 {
     private static readonly UTF8Encoding s_utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
     private const UnixFileMode OwnerReadWriteMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+    private const UnixFileMode OwnerDirectoryMode =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 
     public static void WriteJsonAtomically(string filePath, string json)
     {
@@ -414,7 +416,7 @@ internal static class SshSecretFileIo
         string baseDirectory = string.IsNullOrWhiteSpace(directory)
             ? Directory.GetCurrentDirectory()
             : directory;
-        Directory.CreateDirectory(baseDirectory);
+        CreateSecureDirectory(baseDirectory);
 
         string tempPath = Path.Combine(baseDirectory, $"{Path.GetFileName(filePath)}.{Guid.NewGuid():N}.tmp");
 
@@ -425,6 +427,46 @@ internal static class SshSecretFileIo
                 using StreamWriter writer = new(stream, s_utf8NoBom);
                 writer.Write(json);
                 writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+
+            RestrictFilePermissionsIfSupported(tempPath);
+            File.Move(tempPath, filePath, overwrite: true);
+            RestrictFilePermissionsIfSupported(filePath);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
+            catch
+            {
+                // Best effort cleanup only.
+            }
+        }
+    }
+
+    public static void WriteBytesAtomically(string filePath, ReadOnlySpan<byte> payload)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+
+        string? directory = Path.GetDirectoryName(filePath);
+        string baseDirectory = string.IsNullOrWhiteSpace(directory)
+            ? Directory.GetCurrentDirectory()
+            : directory;
+        CreateSecureDirectory(baseDirectory);
+
+        string tempPath = Path.Combine(baseDirectory, $"{Path.GetFileName(filePath)}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            using (FileStream stream = OpenSecureCreateStream(tempPath))
+            {
+                stream.Write(payload);
                 stream.Flush(flushToDisk: true);
             }
 
@@ -477,6 +519,31 @@ internal static class SshSecretFileIo
         try
         {
             File.SetUnixFileMode(path, OwnerReadWriteMode);
+        }
+        catch
+        {
+            // Best effort only (unsupported FS/platform combinations).
+        }
+    }
+
+    private static void CreateSecureDirectory(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.CreateDirectory(path);
+            return;
+        }
+
+        bool alreadyExists = Directory.Exists(path);
+        DirectoryInfo directory = Directory.CreateDirectory(path, OwnerDirectoryMode);
+        if (alreadyExists)
+        {
+            return;
+        }
+
+        try
+        {
+            File.SetUnixFileMode(directory.FullName, OwnerDirectoryMode);
         }
         catch
         {
