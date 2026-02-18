@@ -578,6 +578,45 @@ dotnet add package RoyalTerminal.Avalonia.Rendering.GhosttyInterop
 
 If your feed does not yet publish these composition packages, create them from source with `dotnet pack -c Release` and consume from your local/internal feed.
 
+## Codex SKILL
+
+This repository includes a Codex skill:
+
+- `skills/royalterminal-development`
+
+### Install to Codex Skills Directory
+
+From the repository root:
+
+```bash
+SKILL_NAME="royalterminal-development"
+CODEX_SKILLS_DIR="${CODEX_HOME:-$HOME/.codex}/skills"
+
+mkdir -p "$CODEX_SKILLS_DIR"
+cp -R "skills/$SKILL_NAME" "$CODEX_SKILLS_DIR/$SKILL_NAME"
+```
+
+### Install as Symlink (recommended while iterating on the skill)
+
+```bash
+SKILL_NAME="royalterminal-development"
+CODEX_SKILLS_DIR="${CODEX_HOME:-$HOME/.codex}/skills"
+
+mkdir -p "$CODEX_SKILLS_DIR"
+ln -sfn "$(pwd)/skills/$SKILL_NAME" "$CODEX_SKILLS_DIR/$SKILL_NAME"
+```
+
+### Verify Install
+
+```bash
+test -f "${CODEX_HOME:-$HOME/.codex}/skills/royalterminal-development/SKILL.md" && echo "skill installed"
+```
+
+### Skill Entry Files
+
+- Skill instructions: `skills/royalterminal-development/SKILL.md`
+- Granular references: `skills/royalterminal-development/references/`
+
 ## Feature Comparison
 
 | Capability | Ghostty Native | Ghostty Rendered (`CpuCellRenderer` / `TextureInterop`) | Native VT (`TerminalControl`) | Managed VT (`TerminalControl`) |
