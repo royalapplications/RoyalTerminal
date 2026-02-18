@@ -51,7 +51,7 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
   - `RoyalTerminal.Avalonia.Ghostty`: Ghostty-native/rendered controls and adapters.
 - **Backend-neutral endpoint contracts** (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`) for control reuse across backends.
 - **Pluggable transport runtime** (`ITerminalTransportFactory`) supporting PTY, process pipe, and SSH sessions.
-- **Pluggable SSH secret persistence** via `ISshSecretStore` + `ISshSecretProtector` (`ProtectedJsonFileSshSecretStore`, DPAPI on Windows).
+- **Pluggable SSH secret persistence** via `ISshSecretStore` + `ISshSecretProtector` with cross-platform secure defaults (`SshSecretProtectionFactory`).
 - **Preference-based VT selection** via `VtProcessorPreference` (`Auto`, `Managed`, `Native`).
 - **Five integration modes** with explicit trade-offs between fidelity, portability, and native dependencies.
 - **Split rendering architecture**:
@@ -81,7 +81,7 @@ Supported transport option models:
 |-----------|--------------|-------|
 | PTY | `PtyTransportOptions` | Interactive local shell semantics (ConPTY/forkpty) |
 | Pipe | `PipeTransportOptions` | Non-PTY process streams, useful for command/log scenarios |
-| SSH | `SshTransportOptions` | Remote terminal sessions with optional PTY request and strict host-key checks |
+| SSH | `SshTransportOptions` | Remote terminal sessions with optional PTY request and host-key checks (OpenSSH `known_hosts` and optional SHA-256 pinning) |
 
 ## Integration Modes
 
@@ -277,6 +277,8 @@ await terminal.StartSshAsync(
     });
 ```
 
+`ExpectedHostKeyFingerprintSha256` is optional. When omitted, host-key trust falls back to `KnownHostsSshHostKeyValidator` (OpenSSH `known_hosts`).
+
 ### 1d. PTY with Custom Shell Profile
 
 ```csharp
@@ -330,24 +332,17 @@ var terminal = new TerminalControl(
     new DefaultVtProcessorFactory(),
     new DefaultPtyFactory(),
     new RuntimeCredentialProvider(),
-    new RejectAllSshHostKeyValidator(),
+    new KnownHostsSshHostKeyValidator(),
     transportFactory: null);
 ```
 
-### 1f. Protected SSH Secret Store (Config + DPAPI)
+### 1f. Protected SSH Secret Store (Cross-Platform Default)
 
 ```csharp
 using System;
-using System.IO;
 using RoyalTerminal.Terminal;
 
-ISshSecretProtector protector = OperatingSystem.IsWindows()
-    ? new DpapiSshSecretProtector() // Windows keychain primitive (DPAPI)
-    : new NoOpSshSecretProtector(); // Provide your own protector on non-Windows for encrypted-at-rest secrets
-
-ISshSecretStore secretStore = new ProtectedJsonFileSshSecretStore(
-    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".royalterminal", "ssh-secrets.json"),
-    protector);
+ISshSecretStore secretStore = SshSecretProtectionFactory.CreateDefaultSecretStore();
 
 await secretStore.SaveSecretAsync("ssh/password", "my-password");
 await secretStore.SaveSecretAsync("ssh/key/main", "/home/user/.ssh/id_ed25519");
