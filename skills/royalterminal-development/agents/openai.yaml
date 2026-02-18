@@ -1,0 +1,4 @@
+interface:
+  display_name: "RoyalTerminal Development"
+  short_description: "Develop and validate RoyalTerminal changes"
+  default_prompt: "Use $royalterminal-development to implement or review RoyalTerminal changes with correct mode selection, settings, and validation."
