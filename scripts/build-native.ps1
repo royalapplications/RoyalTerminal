@@ -2,6 +2,7 @@
 #
 # Usage:
 #   .\scripts\build-native.ps1              # Build for current platform
+#   .\scripts\build-native.ps1 -Arch arm64  # Build Windows arm64 artifacts
 #   .\scripts\build-native.ps1 -Clean       # Clean build
 #   .\scripts\build-native.ps1 -Help        # Show usage
 #
@@ -20,6 +21,8 @@ param(
     [switch]$Release,
     [switch]$Debug,
     [switch]$Static,
+    [ValidateSet("x64", "arm64")]
+    [string]$Arch = "x64",
     [switch]$Help
 )
 
@@ -45,6 +48,7 @@ Options:
   -Release     Build with ReleaseFast optimization (default)
   -Debug       Build with Debug optimization
   -Static      Also build static library
+  -Arch        Target architecture: x64 or arm64 (default: x64)
   -Help        Show this help message
 
 Prerequisites:
@@ -79,10 +83,12 @@ if (-not (Test-Path (Join-Path $GhosttyDir "build.zig"))) {
     exit 1
 }
 
-$RID = "win-x64"
+$RID = if ($Arch -eq "arm64") { "win-arm64" } else { "win-x64" }
+$ZigTarget = if ($Arch -eq "arm64") { "aarch64-windows" } else { "x86_64-windows" }
 $LibName = "ghostty.dll"
 
 Write-Info "Platform: Windows ($RID)"
+Write-Info "Target: $ZigTarget"
 Write-Info "Library: $LibName"
 
 Push-Location $GhosttyDir
@@ -98,9 +104,9 @@ try {
     # Build
     $optimize = if ($Debug) { "" } else { "-Doptimize=ReleaseFast" }
     Write-Info "Building libghostty shared library..."
-    Write-Info "Command: zig build $optimize -Dapp-runtime=none"
+    Write-Info "Command: zig build $optimize -Dapp-runtime=none -Dtarget=$ZigTarget"
 
-    $buildArgs = @("build", "-Dapp-runtime=none")
+    $buildArgs = @("build", "-Dapp-runtime=none", "-Dtarget=$ZigTarget")
     if (-not $Debug) { $buildArgs += "-Doptimize=ReleaseFast" }
 
     & zig @buildArgs
@@ -164,7 +170,7 @@ try {
                 if (Test-Path ".zig-cache") { Remove-Item -Recurse -Force ".zig-cache" }
             }
 
-            $terminalBuildArgs = @("build")
+            $terminalBuildArgs = @("build", "-Dtarget=$ZigTarget")
             if (-not $Debug) { $terminalBuildArgs += "-Doptimize=ReleaseFast" }
 
             & zig @terminalBuildArgs
@@ -216,7 +222,7 @@ try {
                 if (Test-Path ".zig-cache") { Remove-Item -Recurse -Force ".zig-cache" }
             }
 
-            $rendererBuildArgs = @("build")
+            $rendererBuildArgs = @("build", "-Dtarget=$ZigTarget")
             if (-not $Debug) { $rendererBuildArgs += "-Doptimize=ReleaseFast" }
 
             & zig @rendererBuildArgs
