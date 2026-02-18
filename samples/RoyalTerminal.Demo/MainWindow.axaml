@@ -184,7 +184,7 @@
                                Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
                                IsVisible="{Binding ShowSshAgentHint}" />
 
-                    <TextBlock Text="Host Key SHA256" Margin="0,4,6,0"
+                    <TextBlock Text="Host Key SHA256 (optional pin)" Margin="0,4,6,0"
                                Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
                     <TextBox Width="220" Margin="0,0,8,0" Text="{Binding SshExpectedHostKeyFingerprintSha256}" />
 

@@ -326,7 +326,8 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
                 eventArgs.HostKeyName,
                 displayFingerprint,
                 eventArgs.FingerPrintMD5,
-                eventArgs.KeyLength);
+                eventArgs.KeyLength,
+                HostKeyBase64: Convert.ToBase64String(eventArgs.HostKey));
             bool trustedByValidator = _hostKeyValidator.IsTrusted(options.Endpoint, keyInfo);
             eventArgs.CanTrust = trustedByValidator;
             if (!trustedByValidator)
@@ -432,7 +433,7 @@ public sealed class SshNetTerminalTransportProvider : ITerminalTransportProvider
         IReadOnlyList<ISshNetAuthenticationMethodContributor>? authContributors = null)
     {
         _credentialProvider = credentialProvider ?? new NullSshCredentialProvider();
-        _hostKeyValidator = hostKeyValidator ?? new RejectAllSshHostKeyValidator();
+        _hostKeyValidator = hostKeyValidator ?? new KnownHostsSshHostKeyValidator();
         _authContributors = authContributors ?? Array.Empty<ISshNetAuthenticationMethodContributor>();
     }
 

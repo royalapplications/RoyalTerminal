@@ -11,7 +11,8 @@ public readonly record struct SshHostKeyInfo(
     string HostKeyAlgorithm,
     string FingerprintSha256,
     string FingerprintMd5,
-    int KeyLengthBits);
+    int KeyLengthBits,
+    string? HostKeyBase64 = null);
 
 /// <summary>
 /// Validates SSH host keys for endpoint connections.
@@ -25,7 +26,7 @@ public interface ISshHostKeyValidator
 }
 
 /// <summary>
-/// Strict default host-key validator that rejects all unknown host keys.
+/// Strict host-key validator that rejects all host keys.
 /// </summary>
 public sealed class RejectAllSshHostKeyValidator : ISshHostKeyValidator
 {

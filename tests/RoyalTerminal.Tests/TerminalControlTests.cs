@@ -50,6 +50,14 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_DefaultSshHostKeyValidator_UsesKnownHostsValidator()
+    {
+        var control = new TerminalControl();
+
+        Assert.IsType<KnownHostsSshHostKeyValidator>(control.SshHostKeyValidator);
+    }
+
+    [AvaloniaFact]
     public void Control_StyledProperties_CanBeSetAndRead()
     {
         var control = new TerminalControl

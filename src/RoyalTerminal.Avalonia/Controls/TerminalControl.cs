@@ -345,7 +345,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             new DefaultVtProcessorFactory(),
             new DefaultPtyFactory(),
             new NullSshCredentialProvider(),
-            new RejectAllSshHostKeyValidator(),
+            new KnownHostsSshHostKeyValidator(),
             transportFactory: null)
     {
     }
@@ -368,7 +368,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             vtProcessorFactory,
             ptyFactory,
             new NullSshCredentialProvider(),
-            new RejectAllSshHostKeyValidator(),
+            new KnownHostsSshHostKeyValidator(),
             transportFactory: null)
     {
     }
