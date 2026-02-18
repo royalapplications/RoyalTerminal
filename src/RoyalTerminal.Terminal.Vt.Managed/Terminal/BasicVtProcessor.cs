@@ -84,6 +84,7 @@ public sealed class BasicVtProcessor : IVtProcessor
     private int _utf8Codepoint;
     private int _utf8Remaining;
     private int _lastGraphicCodepoint;
+    private byte[]? _enquiryResponse;
 
     private enum ParserState
     {
@@ -139,6 +140,16 @@ public sealed class BasicVtProcessor : IVtProcessor
 
     /// <inheritdoc />
     public Action<string>? TitleCallback { get; set; }
+
+    /// <summary>
+    /// Optional ENQ (0x05) answerback payload. When null or empty, ENQ is acknowledged
+    /// but no response is emitted (secure default).
+    /// </summary>
+    public byte[]? EnquiryResponse
+    {
+        get => _enquiryResponse?.ToArray();
+        set => _enquiryResponse = value is null ? null : value.ToArray();
+    }
 
     public BasicVtProcessor(TerminalScreen screen)
     {
@@ -254,6 +265,13 @@ public sealed class BasicVtProcessor : IVtProcessor
 
             case (byte)'\t': // HT — Horizontal Tab
                 TabForward();
+                break;
+
+            case 0x05: // ENQ
+                if (_enquiryResponse is { Length: > 0 } enquiryResponse)
+                {
+                    ResponseCallback?.Invoke(enquiryResponse.ToArray());
+                }
                 break;
 
             case 0x07: // BEL
