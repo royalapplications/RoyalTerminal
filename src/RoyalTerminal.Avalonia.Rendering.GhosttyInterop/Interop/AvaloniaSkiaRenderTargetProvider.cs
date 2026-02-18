@@ -24,11 +24,13 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
     private readonly IAvaloniaVulkanTextureHandleProvider _vulkanTextureHandleProvider;
     private readonly IAvaloniaD3D11TextureHandleProvider _d3d11TextureHandleProvider;
     private readonly IAvaloniaD3D12TextureHandleProvider _d3d12TextureHandleProvider;
+    private readonly IAvaloniaOpenGlRenderTargetHandleProvider _openGlRenderTargetHandleProvider;
     private string? _lastDiagnostic;
 
     private static readonly RenderBackendKind[] MacBackendCandidates = [RenderBackendKind.Metal];
     private static readonly RenderBackendKind[] LinuxBackendCandidates = [RenderBackendKind.Vulkan];
     private static readonly RenderBackendKind[] WindowsBackendCandidates = [RenderBackendKind.D3D11, RenderBackendKind.D3D12];
+    private static readonly RenderBackendKind[] OpenGlBackendCandidates = [RenderBackendKind.OpenGL];
     private static readonly RenderBackendKind[] EmptyBackendCandidates = [];
 
     /// <summary>
@@ -47,17 +49,22 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
     /// Optional D3D12 texture resolver. When unavailable, requests fall back to CPU RGBA rendering.
     /// </param>
     /// <param name="backendPreference">Preferred backend selection behavior.</param>
+    /// <param name="openGlRenderTargetHandleProvider">
+    /// Optional OpenGL framebuffer/context resolver. When unavailable, requests fall back to CPU RGBA rendering.
+    /// </param>
     public AvaloniaSkiaRenderTargetProvider(
         IAvaloniaMetalTextureHandleProvider? metalTextureHandleProvider = null,
         IAvaloniaVulkanTextureHandleProvider? vulkanTextureHandleProvider = null,
         IAvaloniaD3D11TextureHandleProvider? d3d11TextureHandleProvider = null,
         IAvaloniaD3D12TextureHandleProvider? d3d12TextureHandleProvider = null,
-        AvaloniaRenderBackendPreference backendPreference = AvaloniaRenderBackendPreference.Auto)
+        AvaloniaRenderBackendPreference backendPreference = AvaloniaRenderBackendPreference.Auto,
+        IAvaloniaOpenGlRenderTargetHandleProvider? openGlRenderTargetHandleProvider = null)
     {
         _metalTextureHandleProvider = metalTextureHandleProvider ?? NullAvaloniaMetalTextureHandleProvider.Instance;
         _vulkanTextureHandleProvider = vulkanTextureHandleProvider ?? NullAvaloniaVulkanTextureHandleProvider.Instance;
         _d3d11TextureHandleProvider = d3d11TextureHandleProvider ?? NullAvaloniaD3D11TextureHandleProvider.Instance;
         _d3d12TextureHandleProvider = d3d12TextureHandleProvider ?? NullAvaloniaD3D12TextureHandleProvider.Instance;
+        _openGlRenderTargetHandleProvider = openGlRenderTargetHandleProvider ?? NullAvaloniaOpenGlRenderTargetHandleProvider.Instance;
         BackendPreference = backendPreference;
     }
 
@@ -174,6 +181,7 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
             RenderBackendKind.Vulkan => TryCreateVulkanTextureDescriptor(lease, context, width, height, out descriptor),
             RenderBackendKind.D3D11 => TryCreateD3D11TextureDescriptor(lease, context, width, height, out descriptor),
             RenderBackendKind.D3D12 => TryCreateD3D12TextureDescriptor(lease, context, width, height, out descriptor),
+            RenderBackendKind.OpenGL => TryCreateOpenGlFramebufferDescriptor(lease, context, width, height, out descriptor),
             _ => TryCreateUnsupportedDescriptor(out descriptor),
         };
     }
@@ -339,6 +347,40 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
         return true;
     }
 
+    private bool TryCreateOpenGlFramebufferDescriptor(
+        ISkiaSharpApiLease lease,
+        IPlatformGraphicsContext context,
+        int width,
+        int height,
+        out RenderTargetDescriptor descriptor)
+    {
+        descriptor = default;
+        if (!_openGlRenderTargetHandleProvider.TryGetHandles(
+                lease,
+                context,
+                out nint contextHandle,
+                out nint framebufferHandle) ||
+            contextHandle == nint.Zero)
+        {
+            return false;
+        }
+
+        descriptor = new()
+        {
+            BackendKind = RenderBackendKind.OpenGL,
+            TargetKind = RenderTargetKind.Framebuffer,
+            PixelFormat = RenderPixelFormat.Unknown,
+            Width = width,
+            Height = height,
+            SampleCount = 1,
+            ContextHandle = contextHandle,
+            TargetHandle = framebufferHandle,
+            DebugName = "avalonia-skiacanvas-opengl",
+        };
+
+        return true;
+    }
+
     private static bool TryCreateUnsupportedDescriptor(out RenderTargetDescriptor descriptor)
     {
         descriptor = default;
@@ -375,9 +417,7 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
 
         if (context is IGlContext)
         {
-            noCandidateReason =
-                "Avalonia is using an OpenGL graphics context; direct texture interop provider support is not implemented.";
-            return EmptyBackendCandidates;
+            return OpenGlBackendCandidates;
         }
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
@@ -422,6 +462,11 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
                 NullAvaloniaD3D12TextureHandleProvider.Instance)
                 => "D3D12 interop handle provider is not configured.",
 
+            RenderBackendKind.OpenGL when ReferenceEquals(
+                _openGlRenderTargetHandleProvider,
+                NullAvaloniaOpenGlRenderTargetHandleProvider.Instance)
+                => "OpenGL interop handle provider is not configured.",
+
             _ => null,
         };
 
@@ -450,6 +495,10 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
                 backend = RenderBackendKind.D3D12;
                 return true;
 
+            case AvaloniaRenderBackendPreference.OpenGL:
+                backend = RenderBackendKind.OpenGL;
+                return true;
+
             default:
                 backend = RenderBackendKind.Unknown;
                 return false;
@@ -466,6 +515,10 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
             RenderBackendKind.Vulkan => RuntimeInformation.IsOSPlatform(OSPlatform.Linux),
             RenderBackendKind.D3D11 => RuntimeInformation.IsOSPlatform(OSPlatform.Windows),
             RenderBackendKind.D3D12 => RuntimeInformation.IsOSPlatform(OSPlatform.Windows),
+            RenderBackendKind.OpenGL =>
+                RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ||
+                RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ||
+                RuntimeInformation.IsOSPlatform(OSPlatform.Windows),
             _ => false,
         };
 
@@ -495,6 +548,7 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
             RenderBackendKind.Vulkan => true,
             RenderBackendKind.D3D11 => true,
             RenderBackendKind.D3D12 => true,
+            RenderBackendKind.OpenGL => true,
             _ => false,
         };
     }

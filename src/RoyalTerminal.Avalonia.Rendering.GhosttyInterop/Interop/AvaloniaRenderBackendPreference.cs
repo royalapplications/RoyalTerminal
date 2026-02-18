@@ -38,4 +38,9 @@ public enum AvaloniaRenderBackendPreference
     /// Force software descriptor fallback.
     /// </summary>
     Software = 5,
+
+    /// <summary>
+    /// Prefer OpenGL interop.
+    /// </summary>
+    OpenGL = 6,
 }
