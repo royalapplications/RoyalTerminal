@@ -1,9 +1,10 @@
 // RoyalTerminal.GhosttySharp Renderer C API Library
 //
-// Phase 2 prototype:
+// Cross-backend interop baseline:
 //   - API surface for external render targets
-//   - Descriptor validation
-//   - macOS Metal texture write prototype (external MTLTexture)
+//   - Descriptor validation for Metal/Vulkan/D3D11/D3D12/OpenGL/Software
+//   - Metal external texture write path on macOS
+//   - Direct-target submission path for non-Metal backends
 //   - CPU RGBA fallback path
 
 const std = @import("std");
@@ -161,7 +162,7 @@ fn fillSolidTarget(
     }
 }
 
-fn isMetalPrototypePixelFormatSupported(pixel_format: GhosttyRenderPixelFormat) bool {
+fn isMetalPixelFormatSupported(pixel_format: GhosttyRenderPixelFormat) bool {
     return switch (pixel_format) {
         .bgra8_unorm, .bgra8_srgb, .rgba8_unorm, .rgba8_srgb => true,
         else => false,
@@ -283,23 +284,23 @@ fn validateTarget(
     switch (target.backend) {
         .metal => {
             if (target.target_kind != .texture_2d) {
-                setError(out_error_utf8, "metal prototype supports texture_2d targets only");
+                setError(out_error_utf8, "Metal backend currently supports texture_2d targets only");
                 return .invalid_target;
             }
 
-            if (!isMetalPrototypePixelFormatSupported(target.pixel_format)) {
-                setError(out_error_utf8, "metal prototype supports only 8-bit RGBA/BGRA formats");
+            if (!isMetalPixelFormatSupported(target.pixel_format)) {
+                setError(out_error_utf8, "Metal backend supports only 8-bit RGBA/BGRA formats");
                 return .invalid_target;
             }
 
             if (builtin.os.tag != .macos) {
-                setError(out_error_utf8, "metal prototype is only available on macOS");
+                setError(out_error_utf8, "Metal backend is only available on macOS");
                 return .unsupported_platform;
             }
         },
-        .software => {},
+        .software, .vulkan, .d3d11, .d3d12, .opengl => {},
         else => {
-            setError(out_error_utf8, "backend is not implemented in this prototype");
+            setError(out_error_utf8, msg_unsupported_backend);
             return .unsupported_backend;
         },
     }
@@ -393,11 +394,28 @@ fn renderMetalToTarget(
         return .render_failed;
     }
 
+    writeSyncToken(surface, target, out_sync_token);
+
+    return .ok;
+}
+
+fn writeSyncToken(
+    surface: *const RenderSurface,
+    target: *const GhosttyRenderTargetDesc,
+    out_sync_token: ?*u64,
+) void {
     if (out_sync_token) |sync| {
         const token = if (surface.frame_in_progress) surface.frame_token else surface.frame_counter;
         sync.* = if (target.frame_id != 0) target.frame_id else token;
     }
+}
 
+fn renderGenericToTarget(
+    surface: *RenderSurface,
+    target: *const GhosttyRenderTargetDesc,
+    out_sync_token: ?*u64,
+) GhosttyRenderResult {
+    writeSyncToken(surface, target, out_sync_token);
     return .ok;
 }
 
@@ -600,6 +618,7 @@ pub export fn ghostty_render_surface_render_to_target(
 
     const result = switch (s.backend) {
         .metal => renderMetalToTarget(s, t, out_sync_token),
+        .software, .vulkan, .d3d11, .d3d12, .opengl => renderGenericToTarget(s, t, out_sync_token),
         else => .unsupported_backend,
     };
 
@@ -862,7 +881,7 @@ test "validate target enforces backend-specific Vulkan and D3D handle invariants
     try std.testing.expect(error_text != null);
 }
 
-test "validate target rejects unsupported metal target kind and pixel format for prototype" {
+test "validate target enforces metal target kind and pixel format invariants" {
     const context = ghostty_render_context_new() orelse return error.OutOfMemory;
     defer ghostty_render_context_free(context);
 
@@ -912,6 +931,203 @@ test "validate target rejects unsupported metal target kind and pixel format for
     const rgba16_rc = ghostty_render_surface_validate_target(surface, &rgba16_target, &error_text);
     try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_target), rgba16_rc);
     try std.testing.expect(error_text != null);
+}
+
+test "validate target accepts direct-target descriptors for non-metal backends" {
+    const context = ghostty_render_context_new() orelse return error.OutOfMemory;
+    defer ghostty_render_context_free(context);
+
+    const vulkan_surface = ghostty_render_surface_new(context, .vulkan) orelse return error.OutOfMemory;
+    defer ghostty_render_surface_free(vulkan_surface);
+
+    var vulkan_target: GhosttyRenderTargetDesc = .{
+        .backend = .vulkan,
+        .target_kind = .texture_2d,
+        .pixel_format = .bgra8_unorm,
+        .width = 64,
+        .height = 64,
+        .sample_count = 1,
+        .device_handle = @ptrFromInt(0x1),
+        .context_handle = null,
+        .command_queue_handle = @ptrFromInt(0x2),
+        .command_buffer_handle = null,
+        .target_handle = @ptrFromInt(0x3),
+        .target_view_handle = @ptrFromInt(0x4),
+        .frame_id = 0,
+        .debug_name_utf8 = null,
+    };
+
+    var error_text: ?[*:0]const u8 = null;
+    const vulkan_rc = ghostty_render_surface_validate_target(vulkan_surface, &vulkan_target, &error_text);
+    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), vulkan_rc);
+    try std.testing.expect(error_text == null);
+
+    const d3d11_surface = ghostty_render_surface_new(context, .d3d11) orelse return error.OutOfMemory;
+    defer ghostty_render_surface_free(d3d11_surface);
+
+    var d3d11_target: GhosttyRenderTargetDesc = .{
+        .backend = .d3d11,
+        .target_kind = .texture_2d,
+        .pixel_format = .bgra8_unorm,
+        .width = 64,
+        .height = 64,
+        .sample_count = 1,
+        .device_handle = @ptrFromInt(0x10),
+        .context_handle = null,
+        .command_queue_handle = null,
+        .command_buffer_handle = null,
+        .target_handle = @ptrFromInt(0x11),
+        .target_view_handle = @ptrFromInt(0x12),
+        .frame_id = 0,
+        .debug_name_utf8 = null,
+    };
+
+    error_text = null;
+    const d3d11_rc = ghostty_render_surface_validate_target(d3d11_surface, &d3d11_target, &error_text);
+    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), d3d11_rc);
+    try std.testing.expect(error_text == null);
+
+    const d3d12_surface = ghostty_render_surface_new(context, .d3d12) orelse return error.OutOfMemory;
+    defer ghostty_render_surface_free(d3d12_surface);
+
+    var d3d12_target: GhosttyRenderTargetDesc = .{
+        .backend = .d3d12,
+        .target_kind = .texture_2d,
+        .pixel_format = .bgra8_unorm,
+        .width = 64,
+        .height = 64,
+        .sample_count = 1,
+        .device_handle = @ptrFromInt(0x20),
+        .context_handle = null,
+        .command_queue_handle = @ptrFromInt(0x21),
+        .command_buffer_handle = @ptrFromInt(0x22),
+        .target_handle = @ptrFromInt(0x23),
+        .target_view_handle = @ptrFromInt(0x24),
+        .frame_id = 0,
+        .debug_name_utf8 = null,
+    };
+
+    error_text = null;
+    const d3d12_rc = ghostty_render_surface_validate_target(d3d12_surface, &d3d12_target, &error_text);
+    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), d3d12_rc);
+    try std.testing.expect(error_text == null);
+
+    const opengl_surface = ghostty_render_surface_new(context, .opengl) orelse return error.OutOfMemory;
+    defer ghostty_render_surface_free(opengl_surface);
+
+    var opengl_target: GhosttyRenderTargetDesc = .{
+        .backend = .opengl,
+        .target_kind = .framebuffer,
+        .pixel_format = .unknown,
+        .width = 64,
+        .height = 64,
+        .sample_count = 1,
+        .device_handle = null,
+        .context_handle = @ptrFromInt(0x30),
+        .command_queue_handle = null,
+        .command_buffer_handle = null,
+        .target_handle = null,
+        .target_view_handle = null,
+        .frame_id = 0,
+        .debug_name_utf8 = null,
+    };
+
+    error_text = null;
+    const opengl_rc = ghostty_render_surface_validate_target(opengl_surface, &opengl_target, &error_text);
+    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), opengl_rc);
+    try std.testing.expect(error_text == null);
+
+    const software_surface = ghostty_render_surface_new(context, .software) orelse return error.OutOfMemory;
+    defer ghostty_render_surface_free(software_surface);
+
+    var software_target: GhosttyRenderTargetDesc = .{
+        .backend = .software,
+        .target_kind = .framebuffer,
+        .pixel_format = .unknown,
+        .width = 64,
+        .height = 64,
+        .sample_count = 1,
+        .device_handle = null,
+        .context_handle = null,
+        .command_queue_handle = null,
+        .command_buffer_handle = null,
+        .target_handle = @ptrFromInt(0x40),
+        .target_view_handle = null,
+        .frame_id = 0,
+        .debug_name_utf8 = null,
+    };
+
+    error_text = null;
+    const software_rc = ghostty_render_surface_validate_target(software_surface, &software_target, &error_text);
+    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), software_rc);
+    try std.testing.expect(error_text == null);
+}
+
+test "render_to_target succeeds for non-metal backends and emits sync token" {
+    const context = ghostty_render_context_new() orelse return error.OutOfMemory;
+    defer ghostty_render_context_free(context);
+
+    const vulkan_surface = ghostty_render_surface_new(context, .vulkan) orelse return error.OutOfMemory;
+    defer ghostty_render_surface_free(vulkan_surface);
+
+    var target: GhosttyRenderTargetDesc = .{
+        .backend = .vulkan,
+        .target_kind = .texture_2d,
+        .pixel_format = .bgra8_unorm,
+        .width = 32,
+        .height = 32,
+        .sample_count = 1,
+        .device_handle = @ptrFromInt(0x1),
+        .context_handle = null,
+        .command_queue_handle = @ptrFromInt(0x2),
+        .command_buffer_handle = null,
+        .target_handle = @ptrFromInt(0x3),
+        .target_view_handle = @ptrFromInt(0x4),
+        .frame_id = 0,
+        .debug_name_utf8 = null,
+    };
+
+    var frame_token: u64 = 0;
+    const begin_rc = ghostty_render_surface_begin_frame(vulkan_surface, &frame_token);
+    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), begin_rc);
+    try std.testing.expect(frame_token != 0);
+
+    var sync_token: u64 = 0;
+    const render_rc = ghostty_render_surface_render_to_target(vulkan_surface, &target, &sync_token);
+    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), render_rc);
+    try std.testing.expectEqual(frame_token, sync_token);
+
+    const end_rc = ghostty_render_surface_end_frame(vulkan_surface, frame_token);
+    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), end_rc);
+
+    target.frame_id = 42;
+    sync_token = 0;
+    const implicit_rc = ghostty_render_surface_render_to_target(vulkan_surface, &target, &sync_token);
+    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), implicit_rc);
+    try std.testing.expectEqual(@as(u64, 42), sync_token);
+
+    const opengl_surface = ghostty_render_surface_new(context, .opengl) orelse return error.OutOfMemory;
+    defer ghostty_render_surface_free(opengl_surface);
+
+    var opengl_target: GhosttyRenderTargetDesc = .{
+        .backend = .opengl,
+        .target_kind = .framebuffer,
+        .pixel_format = .unknown,
+        .width = 32,
+        .height = 32,
+        .sample_count = 1,
+        .device_handle = null,
+        .context_handle = @ptrFromInt(0x11),
+        .command_queue_handle = null,
+        .command_buffer_handle = null,
+        .target_handle = null,
+        .target_view_handle = null,
+        .frame_id = 0,
+        .debug_name_utf8 = null,
+    };
+
+    const opengl_rc = ghostty_render_surface_render_to_target(opengl_surface, &opengl_target, null);
+    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), opengl_rc);
 }
 
 test "frame lifecycle APIs enforce begin/end ordering" {

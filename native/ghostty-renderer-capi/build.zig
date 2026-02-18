@@ -1,7 +1,8 @@
 // build.zig — Builds libghostty-renderer-capi shared library.
 //
-// This library exposes a minimal C API for experimental GPU render-target
-// interop. Phase 2 prototype supports a macOS Metal texture target path.
+// This library exposes a C API for GPU render-target interop across
+// Metal/Vulkan/D3D11/D3D12/OpenGL/Software backends, with a concrete macOS
+// Metal texture write path and CPU fallback rendering support.
 
 const std = @import("std");
 

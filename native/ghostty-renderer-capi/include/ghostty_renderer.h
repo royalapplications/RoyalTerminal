@@ -1,10 +1,11 @@
 /*
- * ghostty_renderer.h — C API for Ghostty GPU Rendering Interop (prototype)
+ * ghostty_renderer.h — C API for Ghostty GPU Rendering Interop
  *
- * Phase 2 prototype:
+ * Current scope:
  *   - Common render target descriptors
  *   - Backend/target validation API
- *   - macOS Metal path: render into external MTLTexture
+ *   - Direct-target render API for Metal/Vulkan/D3D11/D3D12/OpenGL/Software
+ *   - macOS Metal texture write path for external MTLTexture targets
  *   - CPU RGBA fallback
  *
  * Thread safety: callers must externally synchronize access per surface handle.
