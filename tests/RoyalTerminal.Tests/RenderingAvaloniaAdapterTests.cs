@@ -163,7 +163,7 @@ public sealed class RenderingAvaloniaAdapterTests
     }
 
     [Fact]
-    public void RenderTargetProvider_AutoWithOpenGlContext_FallsBackWithOpenGlDiagnostic()
+    public void RenderTargetProvider_AutoWithOpenGlContextWithoutProvider_FallsBackWithProviderDiagnostic()
     {
         AvaloniaSkiaRenderTargetProvider provider = new();
 
@@ -174,7 +174,29 @@ public sealed class RenderingAvaloniaAdapterTests
 
         Assert.Equal(RenderBackendKind.Software, request.TargetDescriptor.BackendKind);
         Assert.NotNull(provider.LastDiagnostic);
-        Assert.Contains("opengl", provider.LastDiagnostic!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("provider", provider.LastDiagnostic!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RenderTargetProvider_AutoWithOpenGlContextAndProvider_UsesOpenGlDescriptor()
+    {
+        FakeOpenGlRenderTargetHandleProvider handleProvider = new(
+            success: true,
+            contextHandle: (nint)700,
+            framebufferHandle: nint.Zero);
+        AvaloniaSkiaRenderTargetProvider provider = new(
+            openGlRenderTargetHandleProvider: handleProvider);
+
+        using FakePlatformLease platformLease = new(new FakeOpenGlContext());
+        using FakeSkiaLease lease = new(platformLease);
+
+        var request = provider.CreateRenderRequest(lease, new PixelSize(96, 48));
+
+        Assert.Equal(RenderBackendKind.OpenGL, request.TargetDescriptor.BackendKind);
+        Assert.Equal(RenderTargetKind.Framebuffer, request.TargetDescriptor.TargetKind);
+        Assert.Equal(RenderPixelFormat.Unknown, request.TargetDescriptor.PixelFormat);
+        Assert.Equal((nint)700, request.TargetDescriptor.ContextHandle);
+        Assert.Equal(nint.Zero, request.TargetDescriptor.TargetHandle);
     }
 
     private static AvaloniaRenderBackendPreference GetUnsupportedBackendPreferenceForHost()
@@ -226,6 +248,31 @@ public sealed class RenderingAvaloniaAdapterTests
             deviceHandle = _deviceHandle;
             commandQueueHandle = _commandQueueHandle;
             textureHandle = _textureHandle;
+            return _success;
+        }
+    }
+
+    private sealed class FakeOpenGlRenderTargetHandleProvider : IAvaloniaOpenGlRenderTargetHandleProvider
+    {
+        private readonly bool _success;
+        private readonly nint _contextHandle;
+        private readonly nint _framebufferHandle;
+
+        public FakeOpenGlRenderTargetHandleProvider(bool success, nint contextHandle, nint framebufferHandle)
+        {
+            _success = success;
+            _contextHandle = contextHandle;
+            _framebufferHandle = framebufferHandle;
+        }
+
+        public bool TryGetHandles(
+            ISkiaSharpApiLease lease,
+            IPlatformGraphicsContext context,
+            out nint contextHandle,
+            out nint framebufferHandle)
+        {
+            contextHandle = _contextHandle;
+            framebufferHandle = _framebufferHandle;
             return _success;
         }
     }
