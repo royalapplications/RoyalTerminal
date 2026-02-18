@@ -585,12 +585,12 @@ If your feed does not yet publish these composition packages, create them from s
 - `RenderBackendKind`: `Software`, `Metal`, `Vulkan`, `D3D11`, `D3D12`, `OpenGL`
 - `RenderTargetDescriptor`: native handle carrier for one render target submission
 - `RenderBackendCapabilities`: supported features/sample counts/pixel formats
-- `RenderFeatureFlags`: `ExternalTextureTargets`, `CpuRgbaFallback`, `ExplicitFrameLifecycle`, etc.
+- `RenderFeatureFlags`: `ExternalTextureTargets`, `ExternalFramebufferTargets`, `CpuRgbaFallback`, `ExplicitFrameLifecycle`, etc.
 
 `RoyalTerminal.Rendering.Interop.Ghostty.Skia` (`SkiaInteropRenderer`) behavior:
 
 1. Validate descriptor.
-2. Attempt direct interop only when surface capabilities advertise `ExternalTextureTargets`.
+2. Attempt direct interop only when surface capabilities advertise the target kind (`ExternalTextureTargets` or `ExternalFramebufferTargets`).
 3. Fall back to CPU RGBA path when direct interop is unavailable or fails and fallback is enabled.
 
 ## Native Renderer C API (`ghostty-renderer-capi`)
@@ -858,7 +858,7 @@ dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csp
 | Context/surface lifecycle | Implemented |
 | Target validation + render-to-target | Implemented |
 | CPU RGBA fallback | Implemented |
-| Backend descriptors (Metal/Vulkan/D3D11/D3D12/OpenGL/Software) | Implemented in contract; direct external target path currently prototype-level |
+| Backend descriptors (Metal/Vulkan/D3D11/D3D12/OpenGL/Software) | Implemented end-to-end (validation + direct-target render dispatch + CPU fallback) |
 
 ## Notes
 
