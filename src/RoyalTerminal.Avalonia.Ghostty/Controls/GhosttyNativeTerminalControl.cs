@@ -11,9 +11,12 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Diagnostics;
 using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Internal.Theme;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.Terminal.Theming;
 
 namespace RoyalTerminal.Avalonia.Controls;
 
@@ -29,6 +32,10 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
     private GhosttySurface? _surface;
     private nint _nsView;
     private bool _disposed;
+    private TerminalTheme? _theme;
+    private GhosttyConfig? _appliedThemeConfig;
+    private bool _suppressThemePropertyApply;
+    private Func<GhosttyConfig>? _themeConfigFactory;
     private IGhosttyLogger _logger = NullGhosttyLogger.Instance;
     private readonly GhosttyClipboardAdapter _clipboardAdapter;
     private readonly GhosttySurfaceLifecycle _surfaceLifecycle;
@@ -61,6 +68,12 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
     public static readonly StyledProperty<string?> CommandProperty =
         AvaloniaProperty.Register<GhosttyNativeTerminalControl, string?>(nameof(Command));
 
+    public static new readonly DirectProperty<GhosttyNativeTerminalControl, TerminalTheme?> ThemeProperty =
+        AvaloniaProperty.RegisterDirect<GhosttyNativeTerminalControl, TerminalTheme?>(
+            nameof(Theme),
+            control => control.Theme,
+            (control, value) => control.Theme = value);
+
     public float TerminalFontSize
     {
         get => GetValue(TerminalFontSizeProperty);
@@ -80,6 +93,36 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
     }
 
     /// <summary>
+    /// Gets or sets the active neutral terminal theme.
+    /// </summary>
+    public new TerminalTheme? Theme
+    {
+        get => _theme;
+        set => SetAndRaise(ThemeProperty, ref _theme, value);
+    }
+
+    /// <summary>
+    /// Optional factory that provides a base Ghostty config used when adapting neutral themes.
+    /// </summary>
+    public Func<GhosttyConfig>? ThemeConfigFactory
+    {
+        get => _themeConfigFactory;
+        set
+        {
+            if (ReferenceEquals(_themeConfigFactory, value))
+            {
+                return;
+            }
+
+            _themeConfigFactory = value;
+            if (_surface is not null)
+            {
+                ApplyThemeCore(ResolveActiveTheme(), updateThemeProperty: false, updateGhosttyRuntime: true);
+            }
+        }
+    }
+
+    /// <summary>
     /// Gets or sets the logger used for control diagnostics.
     /// Defaults to a no-op logger.
     /// </summary>
@@ -92,17 +135,23 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
     static GhosttyNativeTerminalControl()
     {
         FocusableProperty.OverrideDefaultValue<GhosttyNativeTerminalControl>(true);
+        ThemeProperty.Changed.AddClassHandler<GhosttyNativeTerminalControl>(
+            static (control, _) => control.OnThemePropertyChanged());
     }
 
     public GhosttyNativeTerminalControl()
     {
+        _theme = TerminalTheme.Dark;
         _clipboardAdapter = new GhosttyClipboardAdapter(this, () => Logger);
         GhosttyActionDispatcher actionDispatcher = new(
             () => _surface,
             () => _surface?.Draw(),
             title => TitleChanged?.Invoke(this, title),
             exitCode => ProcessExited?.Invoke(this, exitCode),
-            () => CloseRequested?.Invoke(this, EventArgs.Empty));
+            () => CloseRequested?.Invoke(this, EventArgs.Empty),
+            OnRuntimeColorChanged,
+            OnRuntimeConfigChanged,
+            OnRuntimeReloadConfig);
         _surfaceLifecycle = new GhosttySurfaceLifecycle(
             () => _surface,
             actionDispatcher,
@@ -200,6 +249,7 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
 
             _surface.SetContentScale(scale, scale);
             _surface.SetFocus(IsFocused);
+            ApplyThemeCore(ResolveActiveTheme(), updateThemeProperty: false, updateGhosttyRuntime: true);
 
             Logger.Debug(
                 $"Ghostty surface created: NSView=0x{_nsView:X}, size={bounds.Width:F0}x{bounds.Height:F0}");
@@ -212,11 +262,167 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
 
     private void DestroyGhosttySurface()
     {
+        DisposeAppliedThemeConfig();
         if (_surface is not null)
         {
             _surface.Dispose();
             _surface = null;
         }
+    }
+
+    private void OnThemePropertyChanged()
+    {
+        if (_suppressThemePropertyApply)
+        {
+            return;
+        }
+
+        ApplyThemeCore(ResolveActiveTheme(), updateThemeProperty: false, updateGhosttyRuntime: true);
+    }
+
+    private TerminalTheme ResolveActiveTheme()
+    {
+        return Theme ?? _theme ?? TerminalTheme.Dark;
+    }
+
+    private static GhosttyColorScheme ToLegacyColorScheme(TerminalTheme theme)
+    {
+        return IsPerceivedLightColor(theme.DefaultBackground)
+            ? GhosttyColorScheme.Light
+            : GhosttyColorScheme.Dark;
+    }
+
+    private static bool IsPerceivedLightColor(uint argb)
+    {
+        int red = (int)((argb >> 16) & 0xFF);
+        int green = (int)((argb >> 8) & 0xFF);
+        int blue = (int)(argb & 0xFF);
+        int luminance = ((red * 299) + (green * 587) + (blue * 114)) / 1000;
+        return luminance >= 128;
+    }
+
+    private void ApplyThemeCore(TerminalTheme theme, bool updateThemeProperty, bool updateGhosttyRuntime)
+    {
+        _theme = theme;
+
+        if (updateThemeProperty)
+        {
+            _suppressThemePropertyApply = true;
+            try
+            {
+                SetCurrentValue(ThemeProperty, theme);
+            }
+            finally
+            {
+                _suppressThemePropertyApply = false;
+            }
+        }
+
+        if (updateGhosttyRuntime && _surface is not null)
+        {
+            _surface.SetColorScheme(ToLegacyColorScheme(theme));
+            ApplyThemeToGhosttySurface(theme);
+            _surface.Refresh();
+        }
+    }
+
+    private void ApplyThemeToGhosttySurface(TerminalTheme theme)
+    {
+        if (_surface is null)
+        {
+            return;
+        }
+
+        GhosttyConfig? previousConfig = _appliedThemeConfig;
+        GhosttyConfig? nextConfig = null;
+        try
+        {
+            nextConfig = GhosttyThemeCompatibilityAdapter.CreateConfigForTheme(theme, _themeConfigFactory);
+            _surface.UpdateConfig(nextConfig);
+            _appliedThemeConfig = nextConfig;
+            nextConfig = null;
+            previousConfig?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            nextConfig?.Dispose();
+            Logger.Error("Failed to apply Ghostty native theme config.", ex);
+        }
+    }
+
+    private void DisposeAppliedThemeConfig()
+    {
+        _appliedThemeConfig?.Dispose();
+        _appliedThemeConfig = null;
+    }
+
+    private void OnRuntimeColorChanged(GhosttyColorChange change)
+    {
+        TerminalTheme current = ResolveActiveTheme();
+        uint color = 0xFF000000u | ((uint)change.R << 16) | ((uint)change.G << 8) | change.B;
+        int kind = (int)change.Kind;
+
+        TerminalTheme? next = null;
+        if (kind == (int)GhosttyColorKind.Foreground)
+        {
+            if (current.DefaultForeground != color)
+            {
+                next = current.WithDefaultForeground(color);
+            }
+        }
+        else if (kind == (int)GhosttyColorKind.Background)
+        {
+            if (current.DefaultBackground != color)
+            {
+                next = current.WithDefaultBackground(color);
+            }
+        }
+        else if (kind == (int)GhosttyColorKind.Cursor)
+        {
+            if (current.CursorColor != color)
+            {
+                next = current.WithCursorColor(color);
+            }
+        }
+        else if ((uint)kind < 256u)
+        {
+            if (current.Palette[kind] != color)
+            {
+                next = current.WithPaletteColor(kind, color, explicitOverride: true);
+            }
+        }
+
+        if (next is not null)
+        {
+            ApplyThemeCore(next, updateThemeProperty: true, updateGhosttyRuntime: false);
+        }
+    }
+
+    private void OnRuntimeConfigChanged(nint configHandle)
+    {
+        if (!GhosttyThemeCompatibilityAdapter.TryReadTheme(configHandle, out TerminalTheme theme))
+        {
+            return;
+        }
+
+        void ApplySnapshot()
+        {
+            ApplyThemeCore(theme, updateThemeProperty: true, updateGhosttyRuntime: false);
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            ApplySnapshot();
+            return;
+        }
+
+        Dispatcher.UIThread.Post(ApplySnapshot);
+    }
+
+    private void OnRuntimeReloadConfig(bool soft)
+    {
+        Logger.Debug($"Ghostty native reload config action received (soft={soft}).");
+        _surface?.Refresh();
     }
 
     #endregion
@@ -337,7 +543,22 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
     public void Refresh() => _surface?.Refresh();
 
     /// <summary>Sets the color scheme.</summary>
-    public void SetColorScheme(GhosttyColorScheme scheme) => _surface?.SetColorScheme(scheme);
+    public void SetColorScheme(GhosttyColorScheme scheme)
+    {
+        TerminalTheme mappedTheme = scheme == GhosttyColorScheme.Light
+            ? TerminalTheme.Light
+            : TerminalTheme.Dark;
+        ApplyTheme(mappedTheme);
+    }
+
+    /// <summary>
+    /// Applies a neutral terminal theme at runtime.
+    /// </summary>
+    public void ApplyTheme(TerminalTheme theme)
+    {
+        ArgumentNullException.ThrowIfNull(theme);
+        SetCurrentValue(ThemeProperty, theme);
+    }
 
     /// <summary>Checks if the terminal has a selection.</summary>
     public bool HasSelection => _surface?.HasSelection ?? false;

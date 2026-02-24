@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.Terminal.Theming;
 
 namespace RoyalTerminal.Terminal;
 
@@ -22,11 +23,12 @@ namespace RoyalTerminal.Terminal;
 /// Falls back to <see cref="BasicVtProcessor"/> when <c>libghostty-terminal</c> is not
 /// available.
 /// </summary>
-public sealed class GhosttyVtProcessor : IVtProcessor
+public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink
 {
     private readonly TerminalScreen _screen;
     private nint _terminal;
     private bool _disposed;
+    private TerminalTheme _theme;
 
     private int _cursorCol;
     private int _cursorRow;
@@ -91,6 +93,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor
     public GhosttyVtProcessor(TerminalScreen screen)
     {
         _screen = screen;
+        _theme = screen.Theme;
 
         _terminal = GhosttyTerminalNative.TerminalNew(
             (uint)screen.Columns,
@@ -104,15 +107,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor
                 "Ensure libghostty-terminal is available.");
         }
 
-        // Sync default colors from the screen so unstyled cells match the
-        // configured theme rather than the Ghostty built-in colors.
-        GhosttyTerminalNative.TerminalSetDefaultColors(
-            _terminal, screen.DefaultForeground, screen.DefaultBackground);
-
-        // Override the first 16 palette entries with standard xterm colors so
-        // ANSI-color applications (mc, htop, etc.) render with the expected
-        // saturated palette instead of Ghostty's muted "Tomorrow Night" theme.
-        SetXtermPalette(_terminal);
+        ApplyThemeToNative(_theme);
 
         // Set up the native response callback — the Zig library will call this
         // when it encounters a query escape sequence (DSR, DA, DECRQM, etc.)
@@ -124,29 +119,30 @@ public sealed class GhosttyVtProcessor : IVtProcessor
         RefreshStateFromNative();
     }
 
-    /// <summary>
-    /// Configures the standard xterm 16-color palette on the native terminal.
-    /// </summary>
-    private static void SetXtermPalette(nint terminal)
+    private void ApplyThemeToNative(TerminalTheme theme)
     {
-        // Standard xterm 16-color palette (matching xterm-256color)
-        ReadOnlySpan<byte> palette =
-        [
-            // 0  black          1  red            2  green          3  yellow
-            0x00, 0x00, 0x00,    0xCD, 0x00, 0x00, 0x00, 0xCD, 0x00, 0xCD, 0xCD, 0x00,
-            // 4  blue           5  magenta        6  cyan           7  white
-            0x00, 0x00, 0xEE,    0xCD, 0x00, 0xCD, 0x00, 0xCD, 0xCD, 0xE5, 0xE5, 0xE5,
-            // 8  bright black   9  bright red    10  bright green  11  bright yellow
-            0x7F, 0x7F, 0x7F,    0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00, 0xFF, 0xFF, 0x00,
-            //12  bright blue   13  bright mag.   14  bright cyan   15  bright white
-            0x5C, 0x5C, 0xFF,    0xFF, 0x00, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        ];
-
-        for (byte i = 0; i < 16; i++)
+        if (_terminal == nint.Zero)
         {
-            var offset = i * 3;
+            return;
+        }
+
+        GhosttyTerminalNative.TerminalSetDefaultColors(
+            _terminal,
+            theme.DefaultForeground,
+            theme.DefaultBackground);
+
+        for (int i = 0; i < 256; i++)
+        {
+            uint color = theme.Palette[i];
+            byte red = (byte)((color >> 16) & 0xFF);
+            byte green = (byte)((color >> 8) & 0xFF);
+            byte blue = (byte)(color & 0xFF);
             GhosttyTerminalNative.TerminalSetPaletteColor(
-                terminal, i, palette[offset], palette[offset + 1], palette[offset + 2]);
+                _terminal,
+                (byte)i,
+                red,
+                green,
+                blue);
         }
     }
 
@@ -267,6 +263,18 @@ public sealed class GhosttyVtProcessor : IVtProcessor
     }
 
     /// <inheritdoc />
+    public void ApplyTheme(TerminalTheme theme)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(theme);
+
+        _theme = theme;
+        _screen.ApplyTheme(theme, invalidateRows: true);
+        ApplyThemeToNative(theme);
+        SyncScreenFromNative();
+    }
+
+    /// <inheritdoc />
     public void Reset()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -286,9 +294,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor
         // Re-establish the native callbacks on the new terminal
         if (_terminal != nint.Zero)
         {
-            GhosttyTerminalNative.TerminalSetDefaultColors(
-                _terminal, _screen.DefaultForeground, _screen.DefaultBackground);
-            SetXtermPalette(_terminal);
+            ApplyThemeToNative(_theme);
             SetupNativeResponseCallback();
             SetupNativeNotificationCallback();
         }
