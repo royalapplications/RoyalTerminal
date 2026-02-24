@@ -16,6 +16,7 @@ public sealed class GhosttyRenderSurface : IRenderSurface
 {
     private readonly GhosttyRenderContext _context;
     private readonly GhosttyRenderSurfaceHandle _handle;
+    private RenderTheme _theme = RenderTheme.Light;
     private bool _disposed;
 
     internal GhosttyRenderSurface(
@@ -36,6 +37,11 @@ public sealed class GhosttyRenderSurface : IRenderSurface
     public RenderBackendCapabilities Capabilities { get; }
 
     /// <summary>
+    /// Gets the currently applied neutral render theme.
+    /// </summary>
+    public RenderTheme Theme => _theme;
+
+    /// <summary>
     /// Updates native focus state.
     /// </summary>
     public void SetFocus(bool focused)
@@ -53,6 +59,37 @@ public sealed class GhosttyRenderSurface : IRenderSurface
         ThrowIfDisposed();
         int resultCode = GhosttyRendererNative.SurfaceSetColorScheme(_handle.DangerousGetHandle(), colorScheme);
         ThrowOnFailure(resultCode, "surface_set_color_scheme");
+
+        _theme = colorScheme == 0 ? RenderTheme.Light : RenderTheme.Dark;
+    }
+
+    /// <summary>
+    /// Updates neutral renderer theme values.
+    /// </summary>
+    public void SetTheme(RenderTheme theme)
+    {
+        ThrowIfDisposed();
+        GhosttyRenderThemeNative nativeTheme = new()
+        {
+            DefaultForegroundArgb = theme.DefaultForegroundArgb,
+            DefaultBackgroundArgb = theme.DefaultBackgroundArgb,
+            CursorArgb = theme.CursorArgb,
+        };
+
+        try
+        {
+            int resultCode = GhosttyRendererNative.SurfaceSetTheme(_handle.DangerousGetHandle(), in nativeTheme);
+            ThrowOnFailure(resultCode, "surface_set_theme");
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Fallback for older native binaries that only expose legacy color scheme switching.
+            uint legacyScheme = IsPerceivedLightColor(theme.DefaultBackgroundArgb) ? 0u : 1u;
+            int resultCode = GhosttyRendererNative.SurfaceSetColorScheme(_handle.DangerousGetHandle(), legacyScheme);
+            ThrowOnFailure(resultCode, "surface_set_color_scheme");
+        }
+
+        _theme = theme;
     }
 
     /// <summary>
@@ -309,6 +346,15 @@ public sealed class GhosttyRenderSurface : IRenderSurface
                 maxSampleCount: 1,
                 supportedPixelFormats: [RenderPixelFormat.Bgra8Unorm, RenderPixelFormat.Rgba8Unorm]),
         };
+    }
+
+    private static bool IsPerceivedLightColor(uint argb)
+    {
+        int red = (int)((argb >> 16) & 0xFF);
+        int green = (int)((argb >> 8) & 0xFF);
+        int blue = (int)(argb & 0xFF);
+        int luminance = ((red * 299) + (green * 587) + (blue * 114)) / 1000;
+        return luminance >= 128;
     }
 
     private static GhosttyRenderTargetDescriptorNative ToNativeDescriptor(

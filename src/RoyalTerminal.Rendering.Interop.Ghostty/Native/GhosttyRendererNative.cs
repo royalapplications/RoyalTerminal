@@ -44,6 +44,10 @@ internal static unsafe partial class GhosttyRendererNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial int SurfaceSetColorScheme(nint surface, uint colorScheme);
 
+    [LibraryImport(LibraryName, EntryPoint = "ghostty_render_surface_set_theme")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial int SurfaceSetTheme(nint surface, in GhosttyRenderThemeNative theme);
+
     [LibraryImport(LibraryName, EntryPoint = "ghostty_render_surface_begin_frame")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial int SurfaceBeginFrame(nint surface, out ulong frameToken);

@@ -68,6 +68,10 @@ public sealed class RenderingInteropTests
             surface.SetScale(1.0, 1.0);
             surface.SetFocus(true);
             surface.SetColorScheme(0);
+            surface.SetTheme(new RenderTheme(
+                defaultForegroundArgb: 0xFFFFFFFFu,
+                defaultBackgroundArgb: 0xFF112233u,
+                cursorArgb: 0xFFFFFFFFu));
 
             ulong frameToken = surface.BeginFrame();
             surface.EndFrame(frameToken);
@@ -99,6 +103,11 @@ public sealed class RenderingInteropTests
             RenderFrameResult rgbaResult = surface.RenderToRgba(rgbaBuffer, 64, 32, 64 * 4);
             Assert.True(rgbaResult.Succeeded, rgbaResult.ErrorMessage);
             Assert.Contains(rgbaBuffer, static value => value != 0);
+            Assert.Equal(0x11, rgbaBuffer[0]);
+            Assert.Equal(0x22, rgbaBuffer[1]);
+            Assert.Equal(0x33, rgbaBuffer[2]);
+            Assert.Equal(0xFF, rgbaBuffer[3]);
+            Assert.Equal(0xFF112233u, surface.Theme.DefaultBackgroundArgb);
 
             RenderFrameResult targetResult = surface.Render(descriptor);
             Assert.True(targetResult.Succeeded, targetResult.ErrorMessage);
