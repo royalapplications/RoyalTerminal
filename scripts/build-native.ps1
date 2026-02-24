@@ -80,7 +80,7 @@ function Test-SymlinkCreation {
     }
 }
 
-function Get-ZigMissingPackageCachePaths {
+function Get-ZigCacheFileNotFoundPaths {
     param(
         [Parameter(Mandatory = $true)]
         [string[]]$OutputLines
@@ -89,6 +89,11 @@ function Get-ZigMissingPackageCachePaths {
     $paths = New-Object System.Collections.Generic.List[string]
     foreach ($line in $OutputLines) {
         if ($line -match "unable to open '([^']+)': FileNotFound") {
+            $paths.Add($Matches[1])
+            continue
+        }
+
+        if ($line -match "failed to check cache: '([^']+)' file_hash FileNotFound") {
             $paths.Add($Matches[1])
         }
     }
@@ -102,7 +107,7 @@ function Invoke-ZigBuildWithCacheRecovery {
         [string[]]$Args
     )
 
-    $maxAttempts = 2
+    $maxAttempts = 3
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         $rawOutput = & zig @Args 2>&1
         $outputLines = @($rawOutput | ForEach-Object { [string]$_ })
@@ -114,14 +119,19 @@ function Invoke-ZigBuildWithCacheRecovery {
             return $true
         }
 
-        if ($attempt -lt $maxAttempts) {
-            $missingCachePaths = Get-ZigMissingPackageCachePaths -OutputLines $outputLines
-            if ($missingCachePaths.Count -gt 0) {
-                Write-Warn "Detected missing Zig package cache entries. Resetting cache and retrying once."
+        $missingCachePaths = Get-ZigCacheFileNotFoundPaths -OutputLines $outputLines
+        if ($missingCachePaths.Count -gt 0) {
+            if ($attempt -lt $maxAttempts) {
+                Write-Warn "Detected Zig cache FileNotFound inconsistency. Resetting caches and retrying."
 
                 foreach ($missingPath in $missingCachePaths) {
                     if (Test-Path $missingPath) {
                         Remove-Item -Path $missingPath -Recurse -Force -ErrorAction SilentlyContinue
+                    } else {
+                        $missingDir = Split-Path -Parent $missingPath
+                        if ($missingDir -and (Test-Path $missingDir)) {
+                            Remove-Item -Path $missingDir -Recurse -Force -ErrorAction SilentlyContinue
+                        }
                     }
                 }
 
@@ -138,6 +148,10 @@ function Invoke-ZigBuildWithCacheRecovery {
 
                 continue
             }
+
+            Write-Warn "Zig cache FileNotFound persisted after retries."
+            Write-Warn "Try: .\scripts\build-native.ps1 -Clean"
+            Write-Warn "If it still fails, exclude '$RootDir' and '$ZigGlobalCacheDir' from antivirus real-time scanning."
         }
 
         return $false
