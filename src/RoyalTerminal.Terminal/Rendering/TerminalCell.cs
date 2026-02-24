@@ -283,7 +283,7 @@ public sealed class TerminalScreen
     /// </summary>
     public TerminalRow GetViewportRow(int viewportRow)
     {
-        var absoluteRow = TotalRows - ViewportRows + _viewportTop + viewportRow;
+        var absoluteRow = TotalRows - ViewportRows - _viewportTop + viewportRow;
         absoluteRow = Math.Clamp(absoluteRow, 0, TotalRows - 1);
         return _rows[absoluteRow];
     }

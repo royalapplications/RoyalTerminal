@@ -51,6 +51,9 @@ public class TerminalScrollData
     /// <summary>Current scroll offset in rows.</summary>
     public int OffsetRows => _cellHeight > 0 ? (int)(Offset / _cellHeight) : 0;
 
+    /// <summary>Maximum scroll offset in rows.</summary>
+    public int MaxOffsetRows => _cellHeight > 0 ? (int)(MaxOffset / _cellHeight) : 0;
+
     /// <summary>Number of visible rows in the viewport.</summary>
     public int ViewportRows => _cellHeight > 0 ? (int)Math.Ceiling(Viewport / _cellHeight) : 0;
 
@@ -73,7 +76,13 @@ public class TerminalScrollData
         Extent = totalRows * CellHeight;
 
         if (autoScrollToBottom && wasAtBottom)
+        {
             Offset = MaxOffset;
+            return;
+        }
+
+        // Keep the current view position while still clamping into the new range.
+        Offset = Offset;
     }
 
     /// <summary>
@@ -141,4 +150,32 @@ public class TerminalScrollData
     /// Gets the scrollbar thumb position as a proportion.
     /// </summary>
     public double ThumbPosition => MaxOffset > 0 ? Offset / MaxOffset : 0;
+
+    /// <summary>
+    /// Converts the top-anchored UI scroll offset to bottom-anchored screen rows.
+    /// </summary>
+    public int ToScreenScrollOffsetRows(int screenMaxScrollOffsetRows)
+    {
+        if (screenMaxScrollOffsetRows <= 0 || MaxOffset <= 0)
+        {
+            return 0;
+        }
+
+        if (Offset <= 0)
+        {
+            return screenMaxScrollOffsetRows;
+        }
+
+        if (Offset >= MaxOffset)
+        {
+            return 0;
+        }
+
+        // Map the top-anchored pixel offset to the screen row range while preserving
+        // endpoint behavior even when the viewport isn't an exact row multiple.
+        double scaledTopOffsetRows = (Offset * screenMaxScrollOffsetRows) / MaxOffset;
+        int topAnchoredRows = Math.Clamp((int)Math.Floor(scaledTopOffsetRows), 0, screenMaxScrollOffsetRows);
+        int bottomAnchoredRows = screenMaxScrollOffsetRows - topAnchoredRows;
+        return Math.Clamp(bottomAnchoredRows, 0, screenMaxScrollOffsetRows);
+    }
 }

@@ -169,6 +169,30 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_GetViewportRow_UsesBottomAnchoredScrollOffset()
+    {
+        var screen = new TerminalScreen(1, 3, scrollbackLimit: 100);
+
+        screen.GetViewportRow(0)[0].Codepoint = '0';
+        screen.GetViewportRow(1)[0].Codepoint = '1';
+        screen.GetViewportRow(2)[0].Codepoint = '2';
+
+        for (int i = 0; i < 10; i++)
+        {
+            TerminalRow row = screen.AddRow();
+            row[0].Codepoint = 'A' + i;
+        }
+
+        screen.ScrollOffset = 0;
+        Assert.Equal('H', screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal('J', screen.GetViewportRow(2)[0].Codepoint);
+
+        screen.ScrollOffset = 1;
+        Assert.Equal('G', screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal('I', screen.GetViewportRow(2)[0].Codepoint);
+    }
+
+    [Fact]
     public void TerminalScreen_DefaultColors_Applied()
     {
         var screen = new TerminalScreen(80, 24)

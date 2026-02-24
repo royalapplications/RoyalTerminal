@@ -439,6 +439,31 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_WriteOutput_UpdatesScrollExtent_WithoutResize()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.ScrollData);
+        Assert.NotNull(control.Screen);
+        double initialExtent = control.ScrollData!.Extent;
+        int initialRows = control.Rows;
+        int initialTotalRows = control.Screen!.TotalRows;
+
+        for (int i = 0; i < 128; i++)
+        {
+            control.WriteOutput("line\n"u8);
+        }
+
+        Assert.Equal(initialRows, control.Rows); // no resize side effects
+        Assert.True(control.Screen.TotalRows > initialTotalRows);
+        Assert.True(control.ScrollData.Extent > initialExtent);
+        Assert.True(control.ScrollData.MaxOffset > 0);
+    }
+
+    [AvaloniaFact]
     public void Control_MultipleInstances_AreIndependent()
     {
         var control1 = new TerminalControl { Columns = 80, Rows = 24 };

@@ -318,10 +318,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             if (_scrollData is not null)
             {
                 _scrollData.Offset = value.Y;
-                if (_scrollViewer is not null)
-                {
-                    _screen!.ScrollOffset = _scrollData.OffsetRows;
-                }
+                SyncScreenScrollOffsetFromScrollData();
                 _presenter?.Invalidate();
                 RaiseScrollInvalidated();
             }
@@ -822,6 +819,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 ? height
                 : safeRows * _renderer.CellHeight;
             _scrollViewer?.UpdateViewport(_scrollData.Viewport, _renderer.CellHeight);
+            SyncScreenScrollOffsetFromScrollData();
         }
 
         Endpoint?.SetSize(widthPx, heightPx);
@@ -1002,7 +1000,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // Raise event without copying when input is already managed memory.
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data));
 
-        TerminalScrollService.HandleOutput(_scrollData, AutoScroll, _presenter, RaiseScrollInvalidated);
+        TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
     }
 
     /// <summary>
@@ -1016,7 +1014,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // Span input may come from transient memory, so copy to a managed payload for event consumers.
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data.ToArray()));
 
-        TerminalScrollService.HandleOutput(_scrollData, AutoScroll, _presenter, RaiseScrollInvalidated);
+        TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
     }
 
     private void WriteOutputCore(ReadOnlySpan<byte> data)
@@ -1829,6 +1827,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private static uint ColorToArgb(Color c) =>
         ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+
+    private void SyncScreenScrollOffsetFromScrollData()
+    {
+        if (_scrollData is null || _screen is null)
+        {
+            return;
+        }
+
+        _screen.ScrollOffset = _scrollData.ToScreenScrollOffsetRows(_screen.MaxScrollOffset);
+    }
 
     private static Color ArgbToAvaloniaColor(uint argb) =>
         Color.FromArgb(
