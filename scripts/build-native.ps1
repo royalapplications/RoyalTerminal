@@ -160,6 +160,32 @@ function Invoke-ZigBuildWithCacheRecovery {
     return $false
 }
 
+function Resolve-ZigArtifactPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName
+    )
+
+    $candidatePaths = @(
+        (Join-Path "zig-out\bin" $FileName),
+        (Join-Path "zig-out\lib" $FileName)
+    )
+
+    foreach ($candidate in $candidatePaths) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    $found = Get-ChildItem -Path "zig-out" -Recurse -Filter $FileName -File -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($found) {
+        return $found.FullName
+    }
+
+    return $null
+}
+
 if ($Help) {
     Write-Host @"
 Usage: .\scripts\build-native.ps1 [OPTIONS]
@@ -273,17 +299,12 @@ try {
     }
 
     # Locate built library
-    $builtLib = Join-Path "zig-out\lib" $LibName
-    if (-not (Test-Path $builtLib)) {
-        $found = Get-ChildItem -Path "zig-out" -Recurse -Filter $LibName -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) {
-            $builtLib = $found.FullName
-        } else {
-            Write-Warn "Library not found. Listing built artifacts:"
-            Get-ChildItem -Path "zig-out" -Recurse -Include "*.dll","*.lib","*.a" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
-            Write-Err "Could not find $LibName"
-            exit 1
-        }
+    $builtLib = Resolve-ZigArtifactPath -FileName $LibName
+    if (-not $builtLib) {
+        Write-Warn "Library not found. Listing built artifacts:"
+        Get-ChildItem -Path "zig-out" -Recurse -Include "*.dll","*.lib","*.a" -File -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
+        Write-Err "Could not find $LibName"
+        exit 1
     }
 
     Write-Info "Built library: $builtLib"
@@ -331,8 +352,8 @@ try {
 
             if (Invoke-ZigBuildWithCacheRecovery -Args $terminalBuildArgs) {
                 $terminalLibName = "ghostty-terminal.dll"
-                $terminalLib = Join-Path "zig-out\lib" $terminalLibName
-                if (Test-Path $terminalLib) {
+                $terminalLib = Resolve-ZigArtifactPath -FileName $terminalLibName
+                if ($terminalLib) {
                     Write-Info "Built: $terminalLib"
 
                     Copy-Item $terminalLib $nativeRuntimeDir
@@ -347,7 +368,7 @@ try {
                         Write-Info "Copied header: $headerDest\ghostty_terminal.h"
                     }
                 } else {
-                    Write-Warn "ghostty-terminal.dll not found in zig-out\lib\"
+                    Write-Warn "ghostty-terminal.dll not found under zig-out\ (bin/lib)."
                 }
             } else {
                 Write-Warn "libghostty-terminal build failed - skipping."
@@ -382,8 +403,8 @@ try {
 
             if (Invoke-ZigBuildWithCacheRecovery -Args $rendererBuildArgs) {
                 $rendererLibName = "ghostty-renderer-capi.dll"
-                $rendererLib = Join-Path "zig-out\lib" $rendererLibName
-                if (Test-Path $rendererLib) {
+                $rendererLib = Resolve-ZigArtifactPath -FileName $rendererLibName
+                if ($rendererLib) {
                     Write-Info "Built: $rendererLib"
 
                     Copy-Item $rendererLib $nativeRuntimeDir
@@ -398,7 +419,7 @@ try {
                         Write-Info "Copied header: $headerDest\ghostty_renderer.h"
                     }
                 } else {
-                    Write-Warn "ghostty-renderer-capi.dll not found in zig-out\lib\"
+                    Write-Warn "ghostty-renderer-capi.dll not found under zig-out\ (bin/lib)."
                 }
             } else {
                 Write-Warn "ghostty-renderer-capi build failed - skipping."
