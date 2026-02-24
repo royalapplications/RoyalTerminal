@@ -51,10 +51,14 @@
                             Command="{Binding IncreaseFontSizeCommand}"
                             ToolTip.Tip="Increase font size (Ctrl++)" />
                     <Border Width="1" Background="{StaticResource ToolbarDividerBrush}" Margin="4,2" />
-                    <Button Content="{Binding ThemeToggleContent}" Width="28" Height="24"
-                            FontSize="12" Padding="2"
-                            Command="{Binding ToggleThemeCommand}"
-                            ToolTip.Tip="Toggle light/dark theme" />
+                    <Button Content="{Binding ThemePresetButtonText}" Height="24"
+                            FontSize="10" Padding="8,2"
+                            Command="{Binding CycleThemePresetCommand}"
+                            ToolTip.Tip="Cycle predefined terminal themes for the active mode" />
+                    <Button Content="Generate Theme" Height="24"
+                            FontSize="10" Padding="8,2"
+                            Command="{Binding GenerateThemeCommand}"
+                            ToolTip.Tip="Generate a new mode-specific terminal theme for the active mode" />
                     <Border Width="1" Background="{StaticResource ToolbarDividerBrush}" Margin="4,2" />
                     <Button Content="{Binding ModeButtonText}" Height="24"
                             FontSize="10" Padding="8,2"

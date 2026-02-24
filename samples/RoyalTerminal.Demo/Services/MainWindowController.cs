@@ -22,6 +22,7 @@ using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
 using RoyalTerminal.Terminal;
+using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
 using RoyalTerminal.Terminal.Transport.Pipe;
 using RoyalTerminal.Terminal.Transport.Pty;
@@ -44,36 +45,6 @@ internal sealed class MainWindowController
     private static readonly bool s_disableTextShaping = ReadEnvironmentToggle(DisableTextShapingEnvVar);
     private static readonly bool s_enableRenderDiagnostics = ReadEnvironmentToggle(EnableRenderDiagnosticsEnvVar);
 
-    private static readonly ThemePalette DarkPalette = new(
-        Color.FromRgb(0x1E, 0x1E, 0x1E),
-        Color.FromRgb(0x33, 0x33, 0x33),
-        Color.FromRgb(0x55, 0x55, 0x55),
-        Color.FromRgb(0xCC, 0xCC, 0xCC),
-        Color.FromRgb(0x25, 0x25, 0x26),
-        Color.FromRgb(0x00, 0x7A, 0xCC),
-        Color.FromRgb(0xFF, 0xFF, 0xFF),
-        Color.FromRgb(0x2D, 0x2D, 0x2D),
-        Color.FromRgb(0x96, 0x96, 0x96),
-        Color.FromRgb(0x1E, 0x1E, 0x1E),
-        Color.FromRgb(0xFF, 0xFF, 0xFF),
-        Color.FromRgb(0xD4, 0xD4, 0xD4),
-        Color.FromRgb(0x1E, 0x1E, 0x1E));
-
-    private static readonly ThemePalette LightPalette = new(
-        Color.FromRgb(0xFF, 0xFF, 0xFF),
-        Color.FromRgb(0xE5, 0xE5, 0xE5),
-        Color.FromRgb(0xC4, 0xC4, 0xC4),
-        Color.FromRgb(0x33, 0x33, 0x33),
-        Color.FromRgb(0xF0, 0xF0, 0xF0),
-        Color.FromRgb(0x00, 0x7A, 0xCC),
-        Color.FromRgb(0xFF, 0xFF, 0xFF),
-        Color.FromRgb(0xDC, 0xDC, 0xDC),
-        Color.FromRgb(0x33, 0x33, 0x33),
-        Color.FromRgb(0xFF, 0xFF, 0xFF),
-        Color.FromRgb(0x11, 0x11, 0x11),
-        Color.FromRgb(0x1E, 0x1E, 0x1E),
-        Color.FromRgb(0xFF, 0xFF, 0xFF));
-
     private readonly MainWindowViewModel _viewModel;
     private readonly Grid _terminalHost;
     private readonly StackPanel _tabStrip;
@@ -86,7 +57,6 @@ internal sealed class MainWindowController
     private int _tabCounter;
     private GhosttyApp? _ghosttyApp;
     private GhosttyConfig? _ghosttyConfig;
-    private DispatcherTimer? _tickTimer;
     private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(
         embeddedGhosttyAvailable: false,
         nativeVtAvailable: false);
@@ -124,24 +94,21 @@ internal sealed class MainWindowController
         CompositeDisposable lifetime = new();
         RegisterInteractionHandlers(lifetime);
 
-        bool embeddedGhosttyAvailable = _skipEmbeddedGhosttyInitialization
-            ? false
-            : TryInitializeGhostty();
+        bool embeddedGhosttyAvailable = !_skipEmbeddedGhosttyInitialization
+            && RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
         _terminalCapabilities = _modeCapabilityResolver.Resolve(
             embeddedGhosttyAvailable,
             GhosttyVtProcessor.IsAvailable());
         _viewModel.SetTerminalCapabilities(_terminalCapabilities);
 
-        TerminalRenderMode startupMode = _terminalCapabilities.EmbeddedGhosttyRenderedAvailable
-            ? TerminalRenderMode.GhosttyRendered
-            : TerminalRenderMode.RenderedAuto;
+        TerminalRenderMode startupMode = TerminalRenderMode.RenderedAuto;
         _viewModel.SetRenderMode(startupMode);
 
-        ApplyThemeResources(_viewModel.IsDarkTheme);
+        ApplyThemeResources(CreateChromePalette(_viewModel.ActiveTheme));
         InitializeShellProfiles();
 
         CreateNewTab();
-        UpdateStatus(_viewModel.UseRenderedControl
+        string startupStatus = _viewModel.UseRenderedControl
             ? $"Ghostty VT + {GetRenderedBackendLabel()} rendering"
             : _viewModel.UseNativeControl
                 ? "Ghostty native terminal ready"
@@ -149,7 +116,11 @@ internal sealed class MainWindowController
                     ? "Native VT (libghostty-terminal) ready"
                     : _viewModel.UseManagedVtControl
                         ? "Managed VT (BasicVtProcessor) ready"
-                    : "Terminal ready - Rendered (Custom PTY) mode");
+                        : "Terminal ready - Rendered (Custom PTY) mode";
+        string? nativeModeHint = BuildNativeModeAvailabilityHint();
+        UpdateStatus(nativeModeHint is null
+            ? startupStatus
+            : $"{startupStatus} | {nativeModeHint}");
 
         lifetime.Add(Disposable.Create(DisposeResources));
         return lifetime;
@@ -217,6 +188,12 @@ internal sealed class MainWindowController
             context.SetOutput(Unit.Default);
         }));
 
+        disposables.Add(_viewModel.ApplyThemeModelInteraction.RegisterHandler(context =>
+        {
+            ApplyTheme(context.Input.Theme);
+            context.SetOutput(Unit.Default);
+        }));
+
         disposables.Add(_viewModel.ApplyRenderedBackendInteraction.RegisterHandler(context =>
         {
             ApplyRenderedBackend(context.Input);
@@ -246,13 +223,6 @@ internal sealed class MainWindowController
 
             _ghosttyApp = new GhosttyApp(_ghosttyConfig);
 
-            _tickTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(16),
-            };
-            _tickTimer.Tick += (_, _) => _ghosttyApp?.Tick();
-            _tickTimer.Start();
-
             GhosttyLibraryInfo info = Ghostty.GetInfo();
             UpdateStatus($"Ghostty {info.Version} - custom rendered mode");
             return true;
@@ -261,6 +231,37 @@ internal sealed class MainWindowController
         {
             return false;
         }
+    }
+
+    private bool EnsureEmbeddedGhosttyInitialized()
+    {
+        if (_ghosttyApp is not null)
+        {
+            return true;
+        }
+
+        if (_skipEmbeddedGhosttyInitialization)
+        {
+            return false;
+        }
+
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return false;
+        }
+
+        bool initialized = TryInitializeGhostty();
+        if (initialized)
+        {
+            _terminalCapabilities = _terminalCapabilities with
+            {
+                EmbeddedGhosttyNativeAvailable = true,
+                EmbeddedGhosttyRenderedAvailable = true,
+            };
+            _viewModel.SetTerminalCapabilities(_terminalCapabilities);
+        }
+
+        return initialized;
     }
 
     private void InitializeShellProfiles()
@@ -330,9 +331,10 @@ internal sealed class MainWindowController
     private TerminalModeSelection ResolveModeSelectionForNewTab()
     {
         TerminalRenderMode requestedMode = GetRequestedRenderMode();
-        _terminalCapabilities = _modeCapabilityResolver.Resolve(
-            _ghosttyApp is not null,
-            GhosttyVtProcessor.IsAvailable());
+        _terminalCapabilities = _terminalCapabilities with
+        {
+            NativeVtAvailable = GhosttyVtProcessor.IsAvailable(),
+        };
         _viewModel.SetTerminalCapabilities(_terminalCapabilities);
 
         TerminalRenderMode resolvedMode = _modeResolver.ResolveSupportedMode(requestedMode, _terminalCapabilities);
@@ -404,10 +406,12 @@ internal sealed class MainWindowController
 
     private GhosttyRenderedTerminalControl CreateGhosttyRenderedControl()
     {
-        if (_ghosttyApp is null)
+        if (!EnsureEmbeddedGhosttyInitialized())
         {
             throw new InvalidOperationException("Ghostty rendered mode is unavailable because the embedded Ghostty app is not initialized.");
         }
+        GhosttyApp app = _ghosttyApp
+            ?? throw new InvalidOperationException("Ghostty rendered mode is unavailable because the embedded Ghostty app is not initialized.");
 
         GhosttyRenderedTerminalControl renderedControl = new()
         {
@@ -416,7 +420,8 @@ internal sealed class MainWindowController
             WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             RenderingMode = GetRenderedRenderingMode(_viewModel.UseTextureInterop),
         };
-        renderedControl.Initialize(_ghosttyApp);
+        renderedControl.Initialize(app);
+        renderedControl.ApplyTheme(_viewModel.ActiveTheme);
         ConfigureRenderer(renderedControl.Renderer);
 
         renderedControl.TitleChanged += (_, title) =>
@@ -446,17 +451,20 @@ internal sealed class MainWindowController
 
     private GhosttyNativeTerminalControl CreateGhosttyNativeControl()
     {
-        if (_ghosttyApp is null)
+        if (!EnsureEmbeddedGhosttyInitialized())
         {
             throw new InvalidOperationException("Ghostty native mode is unavailable because the embedded Ghostty app is not initialized.");
         }
+        GhosttyApp app = _ghosttyApp
+            ?? throw new InvalidOperationException("Ghostty native mode is unavailable because the embedded Ghostty app is not initialized.");
 
         GhosttyNativeTerminalControl nativeControl = new()
         {
             TerminalFontSize = (float)_viewModel.FontSize,
             WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
-        nativeControl.Initialize(_ghosttyApp);
+        nativeControl.Initialize(app);
+        nativeControl.ApplyTheme(_viewModel.ActiveTheme);
 
         nativeControl.TitleChanged += (_, title) =>
         {
@@ -485,7 +493,7 @@ internal sealed class MainWindowController
 
     private TerminalControl CreateStandaloneTerminalControl(TerminalRenderMode mode)
     {
-        ThemePalette palette = GetPalette(_viewModel.IsDarkTheme);
+        TerminalTheme theme = _viewModel.ActiveTheme;
         TerminalControl standaloneControl = CreateStandaloneControl();
         standaloneControl.FontFamilyName = MonoFont;
         standaloneControl.TerminalFontSize = _viewModel.FontSize;
@@ -493,8 +501,7 @@ internal sealed class MainWindowController
         standaloneControl.Rows = 24;
         standaloneControl.ScrollbackLimit = 10_000;
         standaloneControl.VtProcessorPreference = ResolveVtProcessorPreference(mode);
-        standaloneControl.DefaultForeground = palette.TerminalForeground;
-        standaloneControl.DefaultBackground = palette.TerminalBackground;
+        standaloneControl.ApplyTheme(theme);
         ConfigureRenderer(standaloneControl.Renderer);
 
         standaloneControl.DataReceived += (_, args) =>
@@ -680,6 +687,21 @@ internal sealed class MainWindowController
 
     private string GetRenderedBackendLabel()
         => _viewModel.UseTextureInterop ? "TextureInterop (Preview)" : "CPU Cell Renderer";
+
+    private string? BuildNativeModeAvailabilityHint()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return null;
+        }
+
+        if (_terminalCapabilities.EmbeddedGhosttyRenderedAvailable || _terminalCapabilities.NativeVtAvailable)
+        {
+            return null;
+        }
+
+        return "Ghostty native libraries were not found; run ./scripts/build-native.sh --debug.";
+    }
 
     private static void ConfigureRenderer(SkiaTerminalRenderer? renderer)
     {
@@ -1150,27 +1172,29 @@ internal sealed class MainWindowController
 
     private void ApplyTheme(bool isDarkTheme)
     {
-        ThemePalette palette = GetPalette(isDarkTheme);
+        ApplyTheme(isDarkTheme ? TerminalTheme.Dark : TerminalTheme.Light);
+    }
 
+    private void ApplyTheme(TerminalTheme theme)
+    {
         foreach (TerminalTab tab in _tabs)
         {
             if (tab.Control is TerminalControl standalone)
             {
-                standalone.DefaultForeground = palette.TerminalForeground;
-                standalone.DefaultBackground = palette.TerminalBackground;
+                standalone.ApplyTheme(theme);
                 standalone.InvalidateTerminal();
             }
             else if (tab.Control is GhosttyRenderedTerminalControl rendered)
             {
-                rendered.SetColorScheme(isDarkTheme ? GhosttyColorScheme.Dark : GhosttyColorScheme.Light);
+                rendered.ApplyTheme(theme);
             }
             else if (tab.Control is GhosttyNativeTerminalControl native)
             {
-                native.SetColorScheme(isDarkTheme ? GhosttyColorScheme.Dark : GhosttyColorScheme.Light);
+                native.ApplyTheme(theme);
             }
         }
 
-        ApplyThemeResources(isDarkTheme);
+        ApplyThemeResources(CreateChromePalette(theme));
     }
 
     private void ApplyRenderedBackend(bool useTextureInterop)
@@ -1197,12 +1221,8 @@ internal sealed class MainWindowController
         }
     }
 
-    private static ThemePalette GetPalette(bool isDarkTheme)
-        => isDarkTheme ? DarkPalette : LightPalette;
-
-    private static void ApplyThemeResources(bool isDarkTheme)
+    private static void ApplyThemeResources(ThemePalette palette)
     {
-        ThemePalette palette = GetPalette(isDarkTheme);
         UpdateBrushResource("WindowBackgroundBrush", palette.WindowBackground);
         UpdateBrushResource("ToolbarBackgroundBrush", palette.ToolbarBackground);
         UpdateBrushResource("ToolbarDividerBrush", palette.ToolbarDivider);
@@ -1224,6 +1244,52 @@ internal sealed class MainWindowController
         }
 
         Application.Current.Resources[key] = new SolidColorBrush(color);
+    }
+
+    private static ThemePalette CreateChromePalette(TerminalTheme theme)
+    {
+        Color background = ToAvaloniaColor(theme.DefaultBackground);
+        Color foreground = ToAvaloniaColor(theme.DefaultForeground);
+        Color accent = ToAvaloniaColor(theme.Palette[4]);
+        Color softAccent = BlendColor(background, accent, 0.18);
+        Color divider = BlendColor(background, foreground, 0.24);
+        Color toolbarBackground = BlendColor(background, foreground, 0.06);
+        Color tabHeaderBackground = BlendColor(background, foreground, 0.10);
+        Color tabHeaderActiveBackground = BlendColor(background, accent, 0.10);
+
+        return new ThemePalette(
+            WindowBackground: background,
+            ToolbarBackground: toolbarBackground,
+            ToolbarDivider: divider,
+            ToolbarForeground: foreground,
+            TabStripBackground: BlendColor(background, foreground, 0.04),
+            StatusBarBackground: softAccent,
+            StatusBarForeground: foreground,
+            TabHeaderBackground: tabHeaderBackground,
+            TabHeaderForeground: foreground,
+            TabHeaderActiveBackground: tabHeaderActiveBackground,
+            TabHeaderActiveForeground: foreground,
+            TerminalForeground: foreground,
+            TerminalBackground: background);
+    }
+
+    private static Color ToAvaloniaColor(uint argb)
+    {
+        return Color.FromArgb(
+            (byte)((argb >> 24) & 0xFF),
+            (byte)((argb >> 16) & 0xFF),
+            (byte)((argb >> 8) & 0xFF),
+            (byte)(argb & 0xFF));
+    }
+
+    private static Color BlendColor(Color from, Color to, double amount)
+    {
+        double t = Math.Clamp(amount, 0.0, 1.0);
+        byte a = (byte)Math.Clamp((int)Math.Round(from.A + ((to.A - from.A) * t), MidpointRounding.AwayFromZero), 0, 255);
+        byte r = (byte)Math.Clamp((int)Math.Round(from.R + ((to.R - from.R) * t), MidpointRounding.AwayFromZero), 0, 255);
+        byte g = (byte)Math.Clamp((int)Math.Round(from.G + ((to.G - from.G) * t), MidpointRounding.AwayFromZero), 0, 255);
+        byte b = (byte)Math.Clamp((int)Math.Round(from.B + ((to.B - from.B) * t), MidpointRounding.AwayFromZero), 0, 255);
+        return Color.FromArgb(a, r, g, b);
     }
 
     #endregion
@@ -1251,8 +1317,6 @@ internal sealed class MainWindowController
 
     private void DisposeResources()
     {
-        _tickTimer?.Stop();
-
         foreach (TerminalTab tab in _tabs)
         {
             DisposeTerminal(tab.Control);

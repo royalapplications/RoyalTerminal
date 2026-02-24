@@ -10,6 +10,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.Terminal;
+using RoyalTerminal.Terminal.Theming;
 using ReactiveUI;
 using Xunit;
 
@@ -276,6 +277,84 @@ public class MainWindowViewModelFlowTests
         Assert.False(viewModel.UseNativeVtControl);
         Assert.True(viewModel.UseManagedVtControl);
         Assert.Equal("Managed VT", viewModel.ModeButtonText);
+    }
+
+    [Fact]
+    public void ThemeSwitching_CycleThemePreset_UpdatesActiveThemeForCurrentMode()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: false, useNativeVtControl: false);
+
+        string initialButtonText = viewModel.ThemePresetButtonText;
+        string? appliedThemeName = null;
+        int applyCount = 0;
+        using var registration = viewModel.ApplyThemeModelInteraction.RegisterHandler(context =>
+        {
+            appliedThemeName = context.Input.ThemeName;
+            applyCount++;
+            context.SetOutput(Unit.Default);
+        });
+
+        viewModel.CycleThemePresetCommand.Execute().Wait();
+
+        Assert.Equal(1, applyCount);
+        Assert.NotNull(appliedThemeName);
+        Assert.Equal($"Theme: {appliedThemeName}", viewModel.ThemePresetButtonText);
+        Assert.NotEqual(initialButtonText, viewModel.ThemePresetButtonText);
+        Assert.Contains("Theme preset:", viewModel.StatusText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThemeSwitching_GeneratedTheme_IsTrackedPerMode()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: true);
+
+        TerminalTheme nativeBefore = viewModel.ActiveTheme;
+        int applyCount = 0;
+        using var registration = viewModel.ApplyThemeModelInteraction.RegisterHandler(context =>
+        {
+            applyCount++;
+            context.SetOutput(Unit.Default);
+        });
+
+        viewModel.GenerateThemeCommand.Execute().Wait();
+        TerminalTheme nativeGenerated = viewModel.ActiveTheme;
+        Assert.NotSame(nativeBefore, nativeGenerated);
+
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false, useManagedVtControl: true);
+        TerminalTheme managedBefore = viewModel.ActiveTheme;
+
+        viewModel.GenerateThemeCommand.Execute().Wait();
+        TerminalTheme managedGenerated = viewModel.ActiveTheme;
+        Assert.NotSame(managedBefore, managedGenerated);
+
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: true);
+        Assert.Same(nativeGenerated, viewModel.ActiveTheme);
+        Assert.Equal(2, applyCount);
+    }
+
+    [Fact]
+    public void ThemeSwitching_ToggleTheme_SwitchesBetweenLightAndModeDefaultPreset()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: true);
+
+        using var registration = viewModel.ApplyThemeModelInteraction.RegisterHandler(context =>
+        {
+            context.SetOutput(Unit.Default);
+        });
+
+        viewModel.ToggleThemeCommand.Execute().Wait();
+        Assert.False(viewModel.IsDarkTheme);
+        Assert.Equal("Theme: Solarized Light", viewModel.ThemePresetButtonText);
+
+        viewModel.ToggleThemeCommand.Execute().Wait();
+        Assert.True(viewModel.IsDarkTheme);
+        Assert.Equal("Theme: Gruvbox Dark", viewModel.ThemePresetButtonText);
     }
 
     [Fact]
