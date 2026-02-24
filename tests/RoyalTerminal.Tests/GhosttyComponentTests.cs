@@ -280,6 +280,98 @@ public sealed class GhosttyComponentTests
         AssertModeStateParity(processor);
     }
 
+    [Theory]
+    [InlineData(0, TerminalUnderlineStyle.None, false)]
+    [InlineData(1, TerminalUnderlineStyle.Single, true)]
+    [InlineData(2, TerminalUnderlineStyle.Double, true)]
+    [InlineData(3, TerminalUnderlineStyle.Curly, true)]
+    [InlineData(4, TerminalUnderlineStyle.Dotted, true)]
+    [InlineData(5, TerminalUnderlineStyle.Dashed, true)]
+    [InlineData(6, TerminalUnderlineStyle.None, false)]
+    public void GhosttyVtProcessor_PrivateMappings_MapUnderlineStyleBits(
+        int underlineBits,
+        TerminalUnderlineStyle expectedStyle,
+        bool expectsUnderlineAttribute)
+    {
+        uint attrs = (uint)(underlineBits << 8);
+
+        TerminalUnderlineStyle mappedStyle = InvokePrivateStatic<TerminalUnderlineStyle>(
+            typeof(GhosttyVtProcessor),
+            "MapUnderlineStyle",
+            attrs);
+        CellAttributes mappedAttributes = InvokePrivateStatic<CellAttributes>(
+            typeof(GhosttyVtProcessor),
+            "MapAttributes",
+            attrs);
+
+        Assert.Equal(expectedStyle, mappedStyle);
+        Assert.Equal(expectsUnderlineAttribute, (mappedAttributes & CellAttributes.Underline) != 0);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_PrivateMappings_MapOverlineDecoration()
+    {
+        uint attrs = 1u << 6;
+
+        CellDecorations mappedDecorations = InvokePrivateStatic<CellDecorations>(
+            typeof(GhosttyVtProcessor),
+            "MapDecorations",
+            attrs);
+        CellAttributes mappedAttributes = InvokePrivateStatic<CellAttributes>(
+            typeof(GhosttyVtProcessor),
+            "MapAttributes",
+            attrs);
+
+        Assert.True((mappedDecorations & CellDecorations.Overline) != 0);
+        Assert.False((mappedAttributes & CellAttributes.Underline) != 0);
+    }
+
+    [Theory]
+    [InlineData(0, TerminalUnderlineStyle.None, false)]
+    [InlineData(1, TerminalUnderlineStyle.Single, true)]
+    [InlineData(2, TerminalUnderlineStyle.Double, true)]
+    [InlineData(3, TerminalUnderlineStyle.Curly, true)]
+    [InlineData(4, TerminalUnderlineStyle.Dotted, true)]
+    [InlineData(5, TerminalUnderlineStyle.Dashed, true)]
+    [InlineData(6, TerminalUnderlineStyle.None, false)]
+    public void GhosttyRenderedTerminalControl_PrivateMappings_MapUnderlineStyleBits(
+        int underlineBits,
+        TerminalUnderlineStyle expectedStyle,
+        bool expectsUnderlineAttribute)
+    {
+        ushort attrs = (ushort)(underlineBits << 8);
+
+        TerminalUnderlineStyle mappedStyle = InvokePrivateStatic<TerminalUnderlineStyle>(
+            typeof(GhosttyRenderedTerminalControl),
+            "ConvertUnderlineStyle",
+            attrs);
+        CellAttributes mappedAttributes = InvokePrivateStatic<CellAttributes>(
+            typeof(GhosttyRenderedTerminalControl),
+            "ConvertAttributes",
+            attrs);
+
+        Assert.Equal(expectedStyle, mappedStyle);
+        Assert.Equal(expectsUnderlineAttribute, (mappedAttributes & CellAttributes.Underline) != 0);
+    }
+
+    [Fact]
+    public void GhosttyRenderedTerminalControl_PrivateMappings_MapOverlineDecoration()
+    {
+        const ushort attrs = 1 << 6;
+
+        CellDecorations mappedDecorations = InvokePrivateStatic<CellDecorations>(
+            typeof(GhosttyRenderedTerminalControl),
+            "ConvertDecorations",
+            attrs);
+        CellAttributes mappedAttributes = InvokePrivateStatic<CellAttributes>(
+            typeof(GhosttyRenderedTerminalControl),
+            "ConvertAttributes",
+            attrs);
+
+        Assert.True((mappedDecorations & CellDecorations.Overline) != 0);
+        Assert.False((mappedAttributes & CellAttributes.Underline) != 0);
+    }
+
     private static GhosttySurfaceLifecycle CreateLifecycle()
     {
         GhosttyActionDispatcher dispatcher = CreateDispatcher();
@@ -344,6 +436,16 @@ public sealed class GhosttyComponentTests
 
         Delegate? callback = field!.GetValue(app) as Delegate;
         return callback?.GetInvocationList().Length ?? 0;
+    }
+
+    private static T InvokePrivateStatic<T>(Type type, string methodName, params object[] args)
+    {
+        MethodInfo? method = type.GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        object? value = method!.Invoke(null, args);
+        Assert.NotNull(value);
+        return (T)value!;
     }
 
     private static void AssertModeStateParity(IVtProcessor processor)

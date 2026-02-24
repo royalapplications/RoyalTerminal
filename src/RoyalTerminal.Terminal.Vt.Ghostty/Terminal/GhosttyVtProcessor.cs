@@ -23,7 +23,7 @@ namespace RoyalTerminal.Terminal;
 /// Falls back to <see cref="BasicVtProcessor"/> when <c>libghostty-terminal</c> is not
 /// available.
 /// </summary>
-public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink
+public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource
 {
     private readonly TerminalScreen _screen;
     private nint _terminal;
@@ -64,6 +64,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink
 
     /// <inheritdoc />
     public bool BracketedPaste => _bracketedPaste;
+
+    /// <inheritdoc />
+    public int KittyKeyboardFlags => 0;
 
     /// <inheritdoc />
     public TerminalModeState ModeState => new(
@@ -430,6 +433,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink
                         cell.Foreground = native.FgColor != 0 ? native.FgColor : _screen.DefaultForeground;
                         cell.Background = native.BgColor != 0 ? native.BgColor : _screen.DefaultBackground;
                         cell.Attributes = MapAttributes(native.Attrs);
+                        cell.UnderlineStyle = MapUnderlineStyle(native.Attrs);
+                        cell.Decorations = MapDecorations(native.Attrs);
 
                         // Wide char handling
                         if ((native.Attrs & (1 << 16)) != 0)
@@ -449,6 +454,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink
                         cell.Foreground = _screen.DefaultForeground;
                         cell.Background = _screen.DefaultBackground;
                         cell.Attributes = CellAttributes.None;
+                        cell.UnderlineStyle = TerminalUnderlineStyle.None;
+                        cell.Decorations = CellDecorations.None;
                         cell.Width = 1;
                     }
 
@@ -528,13 +535,35 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink
         if ((attrs & (1 << 3)) != 0) result |= CellAttributes.Inverse;
         if ((attrs & (1 << 4)) != 0) result |= CellAttributes.Hidden;
         if ((attrs & (1 << 5)) != 0) result |= CellAttributes.Strikethrough;
-        // bit 6 = overline (not in CellAttributes — skip)
-        // bits 8-10 = underline style
-        if (((attrs >> 8) & 0x7) != 0) result |= CellAttributes.Underline;
+        if (MapUnderlineStyle(attrs) != TerminalUnderlineStyle.None) result |= CellAttributes.Underline;
         // bit 7 = blink (from Ghostty flags — map to Blink)
         if ((attrs & (1 << 7)) != 0) result |= CellAttributes.Blink;
 
         return result;
+    }
+
+    private static TerminalUnderlineStyle MapUnderlineStyle(uint attrs)
+    {
+        return ((attrs >> 8) & 0x7) switch
+        {
+            1 => TerminalUnderlineStyle.Single,
+            2 => TerminalUnderlineStyle.Double,
+            3 => TerminalUnderlineStyle.Curly,
+            4 => TerminalUnderlineStyle.Dotted,
+            5 => TerminalUnderlineStyle.Dashed,
+            _ => TerminalUnderlineStyle.None,
+        };
+    }
+
+    private static CellDecorations MapDecorations(uint attrs)
+    {
+        CellDecorations decorations = CellDecorations.None;
+        if ((attrs & (1 << 6)) != 0)
+        {
+            decorations |= CellDecorations.Overline;
+        }
+
+        return decorations;
     }
 
     /// <summary>

@@ -805,6 +805,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
                                     ? PackArgb(src.BgR, src.BgG, src.BgB)
                                     : defaultBg;
                                 dst.Attributes = CellAttributes.None;
+                                dst.UnderlineStyle = TerminalUnderlineStyle.None;
+                                dst.Decorations = CellDecorations.None;
                                 continue;
                             }
 
@@ -820,6 +822,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
                                 ? PackArgb(src.BgR, src.BgG, src.BgB)
                                 : defaultBg;
                             dst.Attributes = ConvertAttributes(src.Attrs);
+                            dst.UnderlineStyle = ConvertUnderlineStyle(src.Attrs);
+                            dst.Decorations = ConvertDecorations(src.Attrs);
                         }
 
                         for (var col = (int)cellCount; col < termRow.Columns; col++)
@@ -830,6 +834,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
                             dst.Foreground = _screen.DefaultForeground;
                             dst.Background = _screen.DefaultBackground;
                             dst.Attributes = CellAttributes.None;
+                            dst.UnderlineStyle = TerminalUnderlineStyle.None;
+                            dst.Decorations = CellDecorations.None;
                             dst.Width = 1;
                         }
 
@@ -946,10 +952,33 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         if ((attrs & (1 << 3)) != 0) result |= CellAttributes.Inverse;
         if ((attrs & (1 << 4)) != 0) result |= CellAttributes.Hidden;
         if ((attrs & (1 << 5)) != 0) result |= CellAttributes.Strikethrough;
-        // bit 6: overline (no mapping in CellAttributes)
-        if (((attrs >> 8) & 0x7) != 0) result |= CellAttributes.Underline;
+        if (ConvertUnderlineStyle(attrs) != TerminalUnderlineStyle.None) result |= CellAttributes.Underline;
         if ((attrs & (1 << 7)) != 0) result |= CellAttributes.Blink;
         return result;
+    }
+
+    private static TerminalUnderlineStyle ConvertUnderlineStyle(ushort attrs)
+    {
+        return ((attrs >> 8) & 0x7) switch
+        {
+            1 => TerminalUnderlineStyle.Single,
+            2 => TerminalUnderlineStyle.Double,
+            3 => TerminalUnderlineStyle.Curly,
+            4 => TerminalUnderlineStyle.Dotted,
+            5 => TerminalUnderlineStyle.Dashed,
+            _ => TerminalUnderlineStyle.None,
+        };
+    }
+
+    private static CellDecorations ConvertDecorations(ushort attrs)
+    {
+        CellDecorations decorations = CellDecorations.None;
+        if ((attrs & (1 << 6)) != 0)
+        {
+            decorations |= CellDecorations.Overline;
+        }
+
+        return decorations;
     }
 
     private void OnThemePropertyChanged()

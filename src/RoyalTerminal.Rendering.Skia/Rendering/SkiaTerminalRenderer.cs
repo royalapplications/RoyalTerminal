@@ -48,6 +48,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private long _diagnosticFallbackFontHits;
     private long _diagnosticGridClampedRuns;
     private long _diagnosticSpriteCells;
+    private long _diagnosticBoxDrawingSpriteCells;
+    private long _diagnosticBrailleSpriteCells;
+    private long _diagnosticBlockSpriteCells;
+    private long _diagnosticScanLineSpriteCells;
 
     // Reusable paint objects to avoid per-frame allocation
     private readonly SKPaint _bgPaint;
@@ -425,20 +429,21 @@ public sealed class SkiaTerminalRenderer : IDisposable
         for (int col = startCol; col < endCol; col++)
         {
             ref readonly TerminalCell cell = ref cells[col];
-            if (!TryGetSpriteCodepoint(in cell, out int codepoint))
+            if (!TryGetSpriteCodepoint(in cell, out int codepoint, out SpriteCategory category))
             {
                 continue;
             }
 
             int cellWidth = cell.Width <= 0 ? 1 : cell.Width;
-            DrawSpriteCell(canvas, codepoint, col, cellWidth, y, color);
-            RecordSpriteCell();
+            DrawSpriteCell(canvas, codepoint, category, col, cellWidth, y, color);
+            RecordSpriteCell(category);
         }
     }
 
     private void DrawSpriteCell(
         SKCanvas canvas,
         int codepoint,
+        SpriteCategory category,
         int column,
         int widthCells,
         float y,
@@ -456,26 +461,29 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         try
         {
-            if (TryGetBoxSegments(codepoint, out BoxSegments segments))
+            switch (category)
             {
-                DrawBoxSegments(canvas, x, y, spriteWidth, spriteHeight, segments, color);
-                return;
-            }
+                case SpriteCategory.BoxDrawing:
+                    if (TryGetBoxSegments(codepoint, out BoxSegments segments))
+                    {
+                        DrawBoxSegments(canvas, x, y, spriteWidth, spriteHeight, segments, color);
+                    }
+                    break;
 
-            if (codepoint >= 0x2800 && codepoint <= 0x28FF)
-            {
-                DrawBraillePattern(canvas, x, y, spriteWidth, spriteHeight, codepoint - 0x2800, color);
-                return;
-            }
+                case SpriteCategory.Braille:
+                    DrawBraillePattern(canvas, x, y, spriteWidth, spriteHeight, codepoint - 0x2800, color);
+                    break;
 
-            if (TryDrawBlockElement(canvas, x, y, spriteWidth, spriteHeight, codepoint, color))
-            {
-                return;
-            }
+                case SpriteCategory.BlockElement:
+                    _ = TryDrawBlockElement(canvas, x, y, spriteWidth, spriteHeight, codepoint, color);
+                    break;
 
-            if (TryGetScanLineRatio(codepoint, out float scanLineRatio))
-            {
-                DrawScanLine(canvas, x, y, spriteWidth, spriteHeight, scanLineRatio, color);
+                case SpriteCategory.ScanLine:
+                    if (TryGetScanLineRatio(codepoint, out float scanLineRatio))
+                    {
+                        DrawScanLine(canvas, x, y, spriteWidth, spriteHeight, scanLineRatio, color);
+                    }
+                    break;
             }
         }
         finally
@@ -738,6 +746,15 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private static bool TryGetSpriteCodepoint(ref readonly TerminalCell cell, out int codepoint)
     {
+        return TryGetSpriteCodepoint(in cell, out codepoint, out _);
+    }
+
+    private static bool TryGetSpriteCodepoint(
+        ref readonly TerminalCell cell,
+        out int codepoint,
+        out SpriteCategory category)
+    {
+        category = default;
         if (!TryGetCellCodepoint(in cell, out codepoint))
         {
             return false;
@@ -745,17 +762,45 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         if (TryGetBoxSegments(codepoint, out _))
         {
+            category = SpriteCategory.BoxDrawing;
             return true;
         }
 
-        if ((codepoint >= 0x2800 && codepoint <= 0x28FF) ||
-            TryGetScanLineRatio(codepoint, out _) ||
-            (codepoint >= 0x2580 && codepoint <= 0x259F))
+        if (codepoint >= 0x2800 && codepoint <= 0x28FF)
         {
+            category = SpriteCategory.Braille;
+            return true;
+        }
+
+        if (TryGetScanLineRatio(codepoint, out _))
+        {
+            category = SpriteCategory.ScanLine;
+            return true;
+        }
+
+        if (IsBlockElementCodepoint(codepoint))
+        {
+            category = SpriteCategory.BlockElement;
             return true;
         }
 
         return false;
+    }
+
+    private static bool IsBlockElementCodepoint(int codepoint)
+    {
+        if ((codepoint >= 0x2581 && codepoint <= 0x2588) ||
+            (codepoint >= 0x2589 && codepoint <= 0x258F))
+        {
+            return true;
+        }
+
+        if (codepoint is 0x2580 or 0x2590 or 0x2591 or 0x2592 or 0x2593 or 0x2594 or 0x2595)
+        {
+            return true;
+        }
+
+        return TryGetQuadrantMask(codepoint, out _);
     }
 
     private static bool TryGetCellCodepoint(ref readonly TerminalCell cell, out int codepoint)
@@ -802,26 +847,133 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             0x2500 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None),
             0x2501 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None),
+            0x2504 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None),
+            0x2505 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None),
+            0x2508 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None),
+            0x2509 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None),
+            0x254C => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None),
+            0x254D => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None),
             0x2502 => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light),
             0x2503 => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x2506 => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light),
+            0x2507 => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x250A => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light),
+            0x250B => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x254E => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light),
+            0x254F => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
+
             0x250C => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Light),
+            0x250D => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Light),
+            0x250E => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Heavy),
             0x250F => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy),
             0x2510 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light),
+            0x2511 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light),
+            0x2512 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy),
             0x2513 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy),
             0x2514 => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None),
+            0x2515 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.None),
+            0x2516 => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.None),
             0x2517 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None),
             0x2518 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.None),
+            0x2519 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.None),
+            0x251A => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None),
             0x251B => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None),
+
             0x251C => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Light),
+            0x251D => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Light),
+            0x251E => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Light),
+            0x251F => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Heavy),
+            0x2520 => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x2521 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Light),
+            0x2522 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Heavy),
             0x2523 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy),
             0x2524 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light),
+            0x2525 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light),
+            0x2526 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Light),
+            0x2527 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Heavy),
+            0x2528 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x2529 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Light),
+            0x252A => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Heavy),
             0x252B => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
+
             0x252C => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Light),
+            0x252D => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Light),
+            0x252E => new BoxSegments(StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Light),
+            0x252F => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Light),
+            0x2530 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Heavy),
+            0x2531 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Heavy),
+            0x2532 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy),
             0x2533 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy),
             0x2534 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None),
+            0x2535 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None),
+            0x2536 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.None),
+            0x2537 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.None),
+            0x2538 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.None),
+            0x2539 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.None),
+            0x253A => new BoxSegments(StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None),
             0x253B => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None),
+
             0x253C => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Light),
+            0x253D => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Light),
+            0x253E => new BoxSegments(StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Light),
+            0x253F => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Light),
+            0x2540 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Light),
+            0x2541 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Heavy),
+            0x2542 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x2543 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Light),
+            0x2544 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Light),
+            0x2545 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Heavy),
+            0x2546 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Heavy),
+            0x2547 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Light),
+            0x2548 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Heavy),
+            0x2549 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x254A => new BoxSegments(StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy),
             0x254B => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy),
+
+            // Unicode box-drawing "double" variants mapped to heavy strokes.
+            0x2550 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None),
+            0x2551 => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x2552 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Light),
+            0x2553 => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Heavy),
+            0x2554 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy),
+            0x2555 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light),
+            0x2556 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy),
+            0x2557 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy),
+            0x2558 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.None),
+            0x2559 => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.None),
+            0x255A => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None),
+            0x255B => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.None),
+            0x255C => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None),
+            0x255D => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None),
+            0x255E => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Light),
+            0x255F => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x2560 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x2561 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light),
+            0x2562 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x2563 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x2564 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Light),
+            0x2565 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Heavy),
+            0x2566 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy),
+            0x2567 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.None),
+            0x2568 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.None),
+            0x2569 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None),
+            0x256A => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.Light),
+            0x256B => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x256C => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy),
+
+            // Half-connection box drawings.
+            0x2574 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None, StrokeWeight.None),
+            0x2575 => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.None),
+            0x2576 => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None),
+            0x2577 => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light),
+            0x2578 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None, StrokeWeight.None),
+            0x2579 => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None),
+            0x257A => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None),
+            0x257B => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy),
+            0x257C => new BoxSegments(StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None),
+            0x257D => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Heavy),
+            0x257E => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None),
+            0x257F => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Light),
             _ => default,
         };
 
@@ -1143,9 +1295,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 continue;
             }
 
-            bool underline = (cell.Attributes & CellAttributes.Underline) != 0;
+            TerminalUnderlineStyle underlineStyle = GetEffectiveUnderlineStyle(in cell);
+            bool overline = (cell.Decorations & CellDecorations.Overline) != 0;
             bool strikethrough = (cell.Attributes & CellAttributes.Strikethrough) != 0;
-            if (!underline && !strikethrough)
+            if (underlineStyle == TerminalUnderlineStyle.None && !strikethrough && !overline)
             {
                 continue;
             }
@@ -1153,10 +1306,15 @@ public sealed class SkiaTerminalRenderer : IDisposable
             float x = col * _cellWidth;
             float width = _cellWidth * cell.Width;
 
-            if (underline)
+            if (underlineStyle != TerminalUnderlineStyle.None)
             {
-                float ulY = y + _cellHeight - 2;
-                canvas.DrawLine(x, ulY, x + width, ulY, _fgPaint);
+                DrawStyledUnderline(canvas, x, y, width, underlineStyle);
+            }
+
+            if (overline)
+            {
+                float overlineY = y + 1f;
+                canvas.DrawLine(x, overlineY, x + width, overlineY, _fgPaint);
             }
 
             if (strikethrough)
@@ -1164,6 +1322,78 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 float stY = y + _cellHeight / 2;
                 canvas.DrawLine(x, stY, x + width, stY, _fgPaint);
             }
+        }
+    }
+
+    private void DrawStyledUnderline(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        TerminalUnderlineStyle style)
+    {
+        if (width <= 0f)
+        {
+            return;
+        }
+
+        float baseY = y + _cellHeight - 2f;
+        float endX = x + width;
+
+        switch (style)
+        {
+            case TerminalUnderlineStyle.Double:
+            {
+                float secondY = Math.Max(y + 1f, baseY - 2f);
+                canvas.DrawLine(x, baseY, endX, baseY, _fgPaint);
+                canvas.DrawLine(x, secondY, endX, secondY, _fgPaint);
+                break;
+            }
+
+            case TerminalUnderlineStyle.Dotted:
+            {
+                const float step = 2f;
+                for (float px = x; px < endX; px += step)
+                {
+                    float dotWidth = Math.Min(1f, endX - px);
+                    canvas.DrawRect(px, baseY, dotWidth, 1f, _fgPaint);
+                }
+                break;
+            }
+
+            case TerminalUnderlineStyle.Dashed:
+            {
+                const float dashLength = 3f;
+                const float gapLength = 2f;
+                for (float px = x; px < endX; px += dashLength + gapLength)
+                {
+                    float segmentEnd = Math.Min(endX, px + dashLength);
+                    canvas.DrawLine(px, baseY, segmentEnd, baseY, _fgPaint);
+                }
+                break;
+            }
+
+            case TerminalUnderlineStyle.Curly:
+            {
+                float amplitude = Math.Max(1f, MathF.Round(_cellHeight * 0.06f));
+                float wavelength = Math.Max(4f, MathF.Round(_cellWidth * 0.5f));
+                float halfWave = wavelength * 0.5f;
+                bool up = true;
+                for (float px = x; px < endX; px += halfWave)
+                {
+                    float next = Math.Min(endX, px + halfWave);
+                    float y0 = baseY + (up ? -amplitude : amplitude);
+                    float y1 = baseY + (up ? amplitude : -amplitude);
+                    canvas.DrawLine(px, y0, next, y1, _fgPaint);
+                    up = !up;
+                }
+                break;
+            }
+
+            case TerminalUnderlineStyle.Single:
+            default:
+                canvas.DrawLine(x, baseY, endX, baseY, _fgPaint);
+                break;
         }
     }
 
@@ -1264,6 +1494,19 @@ public sealed class SkiaTerminalRenderer : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static TerminalUnderlineStyle GetEffectiveUnderlineStyle(ref readonly TerminalCell cell)
+    {
+        if (cell.UnderlineStyle != TerminalUnderlineStyle.None)
+        {
+            return cell.UnderlineStyle;
+        }
+
+        return (cell.Attributes & CellAttributes.Underline) != 0
+            ? TerminalUnderlineStyle.Single
+            : TerminalUnderlineStyle.None;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static SKColor GetEffectiveForeground(ref readonly TerminalCell cell)
     {
         bool inverse = (cell.Attributes & CellAttributes.Inverse) != 0;
@@ -1361,7 +1604,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 Interlocked.Exchange(ref _diagnosticFallbackRuns, 0),
                 Interlocked.Exchange(ref _diagnosticFallbackFontHits, 0),
                 Interlocked.Exchange(ref _diagnosticGridClampedRuns, 0),
-                Interlocked.Exchange(ref _diagnosticSpriteCells, 0));
+                Interlocked.Exchange(ref _diagnosticSpriteCells, 0),
+                Interlocked.Exchange(ref _diagnosticBoxDrawingSpriteCells, 0),
+                Interlocked.Exchange(ref _diagnosticBrailleSpriteCells, 0),
+                Interlocked.Exchange(ref _diagnosticBlockSpriteCells, 0),
+                Interlocked.Exchange(ref _diagnosticScanLineSpriteCells, 0));
         }
 
         TextRenderDiagnostics snapshot = new(
@@ -1369,7 +1616,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
             Volatile.Read(ref _diagnosticFallbackRuns),
             Volatile.Read(ref _diagnosticFallbackFontHits),
             Volatile.Read(ref _diagnosticGridClampedRuns),
-            Volatile.Read(ref _diagnosticSpriteCells));
+            Volatile.Read(ref _diagnosticSpriteCells),
+            Volatile.Read(ref _diagnosticBoxDrawingSpriteCells),
+            Volatile.Read(ref _diagnosticBrailleSpriteCells),
+            Volatile.Read(ref _diagnosticBlockSpriteCells),
+            Volatile.Read(ref _diagnosticScanLineSpriteCells));
 
         return snapshot;
     }
@@ -1384,6 +1635,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
         Interlocked.Exchange(ref _diagnosticFallbackFontHits, 0);
         Interlocked.Exchange(ref _diagnosticGridClampedRuns, 0);
         Interlocked.Exchange(ref _diagnosticSpriteCells, 0);
+        Interlocked.Exchange(ref _diagnosticBoxDrawingSpriteCells, 0);
+        Interlocked.Exchange(ref _diagnosticBrailleSpriteCells, 0);
+        Interlocked.Exchange(ref _diagnosticBlockSpriteCells, 0);
+        Interlocked.Exchange(ref _diagnosticScanLineSpriteCells, 0);
     }
 
     public void Dispose()
@@ -1446,11 +1701,28 @@ public sealed class SkiaTerminalRenderer : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void RecordSpriteCell()
+    private void RecordSpriteCell(SpriteCategory category)
     {
-        if (EnableTextRenderDiagnostics)
+        if (!EnableTextRenderDiagnostics)
         {
-            Interlocked.Increment(ref _diagnosticSpriteCells);
+            return;
+        }
+
+        Interlocked.Increment(ref _diagnosticSpriteCells);
+        switch (category)
+        {
+            case SpriteCategory.BoxDrawing:
+                Interlocked.Increment(ref _diagnosticBoxDrawingSpriteCells);
+                break;
+            case SpriteCategory.Braille:
+                Interlocked.Increment(ref _diagnosticBrailleSpriteCells);
+                break;
+            case SpriteCategory.BlockElement:
+                Interlocked.Increment(ref _diagnosticBlockSpriteCells);
+                break;
+            case SpriteCategory.ScanLine:
+                Interlocked.Increment(ref _diagnosticScanLineSpriteCells);
+                break;
         }
     }
 
@@ -1476,6 +1748,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
         UpperRight = 1 << 1,
         LowerLeft = 1 << 2,
         LowerRight = 1 << 3,
+    }
+
+    private enum SpriteCategory : byte
+    {
+        BoxDrawing = 0,
+        Braille = 1,
+        BlockElement = 2,
+        ScanLine = 3,
     }
 
     private readonly record struct BoxSegments(
