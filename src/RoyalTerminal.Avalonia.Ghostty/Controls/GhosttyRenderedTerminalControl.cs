@@ -1147,23 +1147,10 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     private void OnRuntimeConfigChanged(nint configHandle)
     {
-        if (!GhosttyThemeCompatibilityAdapter.TryReadTheme(configHandle, out TerminalTheme theme))
-        {
-            return;
-        }
-
-        void ApplySnapshot()
-        {
-            ApplyThemeCore(theme, updateThemeProperty: true, updateGhosttyRuntime: false);
-        }
-
-        if (Dispatcher.UIThread.CheckAccess())
-        {
-            ApplySnapshot();
-            return;
-        }
-
-        Dispatcher.UIThread.Post(ApplySnapshot);
+        // Ghostty runtime config-change actions can carry transient pointers.
+        // Avoid dereferencing the native config handle from managed code here.
+        // We keep runtime stable and let explicit theme application drive state.
+        Logger.Debug($"[GhosttyRendered] ConfigChange action received (handle=0x{configHandle:X}).");
     }
 
     private void OnRuntimeReloadConfig(bool soft)
