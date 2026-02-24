@@ -795,6 +795,11 @@ RoyalTerminal/
 git submodule update --init --recursive
 ```
 
+Windows-specific prerequisite:
+- Symlink creation must be available for Zig package extraction.
+- Enable Developer Mode (`start ms-settings:developers`) or run PowerShell as Administrator.
+- `scripts/build-native.ps1` uses a repository-local Zig global cache at `.zig-global-cache` to avoid stale user-level cache state.
+
 ### Build Native + Managed
 
 ```bash

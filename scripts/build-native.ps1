@@ -9,6 +9,7 @@
 # Prerequisites:
 #   - Zig 0.15.2+ (https://ziglang.org/download/)
 #   - Git submodule initialized: git submodule update --init
+#   - Windows symlink support (Developer Mode enabled or elevated shell)
 #
 # The script builds libghostty, libghostty-terminal, and ghostty-renderer-capi as shared libraries
 # and copies them to the correct NuGet runtime package location.
@@ -32,10 +33,118 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RootDir = Split-Path -Parent $ScriptDir
 $GhosttyDir = Join-Path $RootDir "external\ghostty"
 $NativeOutDir = Join-Path $RootDir "native"
+$ZigGlobalCacheDir = Join-Path $RootDir ".zig-global-cache"
 
 function Write-Info  { Write-Host "[INFO] $args" -ForegroundColor Green }
 function Write-Warn  { Write-Host "[WARN] $args" -ForegroundColor Yellow }
 function Write-Err   { Write-Host "[ERROR] $args" -ForegroundColor Red }
+
+function Test-IsElevated {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Test-DeveloperModeEnabled {
+    try {
+        $unlock = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" `
+            -Name "AllowDevelopmentWithoutDevLicense" `
+            -ErrorAction Stop
+        return $unlock.AllowDevelopmentWithoutDevLicense -eq 1
+    } catch {
+        return $false
+    }
+}
+
+function Test-SymlinkCreation {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RootPath
+    )
+
+    $probeDir = Join-Path $RootPath ".rt-symlink-probe"
+    $targetPath = Join-Path $probeDir "target.txt"
+    $linkPath = Join-Path $probeDir "link.txt"
+
+    try {
+        New-Item -ItemType Directory -Path $probeDir -Force | Out-Null
+        Set-Content -Path $targetPath -Value "probe" -NoNewline -Encoding Ascii
+        New-Item -ItemType SymbolicLink -Path $linkPath -Target $targetPath -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if (Test-Path $probeDir) {
+            Remove-Item -Path $probeDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-ZigMissingPackageCachePaths {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$OutputLines
+    )
+
+    $paths = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $OutputLines) {
+        if ($line -match "unable to open '([^']+)': FileNotFound") {
+            $paths.Add($Matches[1])
+        }
+    }
+
+    return $paths | Select-Object -Unique
+}
+
+function Invoke-ZigBuildWithCacheRecovery {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Args
+    )
+
+    $maxAttempts = 2
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $rawOutput = & zig @Args 2>&1
+        $outputLines = @($rawOutput | ForEach-Object { [string]$_ })
+        if ($outputLines.Count -gt 0) {
+            $outputLines | ForEach-Object { Write-Host $_ }
+        }
+
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+
+        if ($attempt -lt $maxAttempts) {
+            $missingCachePaths = Get-ZigMissingPackageCachePaths -OutputLines $outputLines
+            if ($missingCachePaths.Count -gt 0) {
+                Write-Warn "Detected missing Zig package cache entries. Resetting cache and retrying once."
+
+                foreach ($missingPath in $missingCachePaths) {
+                    if (Test-Path $missingPath) {
+                        Remove-Item -Path $missingPath -Recurse -Force -ErrorAction SilentlyContinue
+                    }
+                }
+
+                if (Test-Path ".zig-cache") {
+                    Remove-Item -Path ".zig-cache" -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                if (Test-Path "zig-out") {
+                    Remove-Item -Path "zig-out" -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                if (Test-Path $ZigGlobalCacheDir) {
+                    Remove-Item -Path $ZigGlobalCacheDir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                New-Item -ItemType Directory -Path $ZigGlobalCacheDir -Force | Out-Null
+
+                continue
+            }
+        }
+
+        return $false
+    }
+
+    return $false
+}
 
 if ($Help) {
     Write-Host @"
@@ -55,6 +164,9 @@ Prerequisites:
   - Zig 0.15.2+ must be in PATH
   - Git submodule must be initialized:
     git submodule update --init
+  - Windows symlink support:
+    - Enable Developer Mode (start ms-settings:developers)
+    - or run PowerShell as Administrator
 
 NOTE: Ghostty does not currently support Windows builds upstream.
       This script is prepared for future compatibility.
@@ -91,6 +203,35 @@ Write-Info "Platform: Windows ($RID)"
 Write-Info "Target: $ZigTarget"
 Write-Info "Library: $LibName"
 
+if (-not (Test-SymlinkCreation -RootPath $GhosttyDir)) {
+    $isElevated = Test-IsElevated
+    $developerModeEnabled = Test-DeveloperModeEnabled
+
+    Write-Err "Windows symbolic link creation is not available in this shell."
+    Write-Warn "Zig cannot unpack Ghostty's libxml2 dependency without symlink support."
+    Write-Host ""
+    Write-Host "Fix one of the following, then re-run this script:"
+    if (-not $developerModeEnabled) {
+        Write-Host "  1. Enable Developer Mode: start ms-settings:developers"
+    } else {
+        Write-Host "  1. Developer Mode is enabled."
+    }
+    if (-not $isElevated) {
+        Write-Host "  2. Run PowerShell as Administrator"
+    } else {
+        Write-Host "  2. Current shell is elevated."
+    }
+    Write-Host "  3. Ensure your account has the 'Create symbolic links' privilege"
+    Write-Host ""
+    Write-Warn "Ghostty does not currently support Windows builds upstream."
+    exit 1
+}
+
+$previousZigGlobalCacheDir = $env:ZIG_GLOBAL_CACHE_DIR
+$env:ZIG_GLOBAL_CACHE_DIR = $ZigGlobalCacheDir
+New-Item -ItemType Directory -Force -Path $ZigGlobalCacheDir | Out-Null
+Write-Info "Zig global cache: $ZigGlobalCacheDir"
+
 Push-Location $GhosttyDir
 
 try {
@@ -99,6 +240,8 @@ try {
         Write-Info "Cleaning previous build..."
         if (Test-Path "zig-out") { Remove-Item -Recurse -Force "zig-out" }
         if (Test-Path ".zig-cache") { Remove-Item -Recurse -Force ".zig-cache" }
+        if (Test-Path $ZigGlobalCacheDir) { Remove-Item -Recurse -Force $ZigGlobalCacheDir }
+        New-Item -ItemType Directory -Force -Path $ZigGlobalCacheDir | Out-Null
     }
 
     # Build
@@ -109,8 +252,7 @@ try {
     $buildArgs = @("build", "-Dapp-runtime=none", "-Dtarget=$ZigTarget")
     if (-not $Debug) { $buildArgs += "-Doptimize=ReleaseFast" }
 
-    & zig @buildArgs
-    if ($LASTEXITCODE -ne 0) {
+    if (-not (Invoke-ZigBuildWithCacheRecovery -Args $buildArgs)) {
         Write-Err "Zig build failed."
         Write-Warn "Ghostty does not currently support Windows builds upstream."
         exit 1
@@ -173,8 +315,7 @@ try {
             $terminalBuildArgs = @("build", "-Dtarget=$ZigTarget")
             if (-not $Debug) { $terminalBuildArgs += "-Doptimize=ReleaseFast" }
 
-            & zig @terminalBuildArgs
-            if ($LASTEXITCODE -eq 0) {
+            if (Invoke-ZigBuildWithCacheRecovery -Args $terminalBuildArgs) {
                 $terminalLibName = "ghostty-terminal.dll"
                 $terminalLib = Join-Path "zig-out\lib" $terminalLibName
                 if (Test-Path $terminalLib) {
@@ -225,8 +366,7 @@ try {
             $rendererBuildArgs = @("build", "-Dtarget=$ZigTarget")
             if (-not $Debug) { $rendererBuildArgs += "-Doptimize=ReleaseFast" }
 
-            & zig @rendererBuildArgs
-            if ($LASTEXITCODE -eq 0) {
+            if (Invoke-ZigBuildWithCacheRecovery -Args $rendererBuildArgs) {
                 $rendererLibName = "ghostty-renderer-capi.dll"
                 $rendererLib = Join-Path "zig-out\lib" $rendererLibName
                 if (Test-Path $rendererLib) {
@@ -268,4 +408,9 @@ try {
 
 } finally {
     Pop-Location
+    if ($null -ne $previousZigGlobalCacheDir -and $previousZigGlobalCacheDir -ne "") {
+        $env:ZIG_GLOBAL_CACHE_DIR = $previousZigGlobalCacheDir
+    } else {
+        Remove-Item Env:ZIG_GLOBAL_CACHE_DIR -ErrorAction SilentlyContinue
+    }
 }
