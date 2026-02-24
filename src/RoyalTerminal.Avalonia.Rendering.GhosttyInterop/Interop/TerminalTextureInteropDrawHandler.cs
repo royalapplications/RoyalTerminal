@@ -85,6 +85,8 @@ public sealed class TerminalTextureInteropDrawHandler : CompositionCustomVisualH
     /// <inheritdoc />
     public override void OnRender(ImmediateDrawingContext context)
     {
+        bool requiresRedraw = false;
+
         try
         {
             SkiaInteropRenderer? renderer = _renderer;
@@ -110,7 +112,8 @@ public sealed class TerminalTextureInteropDrawHandler : CompositionCustomVisualH
             }
 
             SkiaInteropRenderRequest request = renderTargetProvider.CreateRenderRequest(lease, targetPixelSize);
-            _ = renderer.Render(canvas, request);
+            SkiaInteropRenderResult renderResult = renderer.Render(canvas, request);
+            requiresRedraw = renderResult.FrameResult.RequiresRedraw;
 
             SkiaTerminalRenderer? overlayRenderer = _overlayRenderer;
             TerminalScreen? overlayScreen = _overlayScreen;
@@ -128,7 +131,11 @@ public sealed class TerminalTextureInteropDrawHandler : CompositionCustomVisualH
         }
         finally
         {
-            _pendingRender = false;
+            _pendingRender = requiresRedraw;
+            if (requiresRedraw)
+            {
+                RegisterForNextAnimationFrameUpdate();
+            }
         }
     }
 
