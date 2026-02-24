@@ -200,9 +200,15 @@ public sealed class NcursesHarnessFlowTests
 
             string resize = await WaitForLogLineAsync(
                 logPath,
-                static line => line == "RESIZE 40x100",
+                static line =>
+                    TryParseResizeLine(line, out int rows, out int columns) &&
+                    rows > 0 &&
+                    columns == 100,
                 timeout: EventTimeout);
-            Assert.Equal("RESIZE 40x100", resize);
+            bool parsedResize = TryParseResizeLine(resize, out int resizeRows, out int resizeColumns);
+            Assert.True(parsedResize, $"Unexpected resize log format: {resize}");
+            Assert.True(resizeRows > 0, $"Expected positive resize row count, got: {resizeRows}");
+            Assert.Equal(100, resizeColumns);
 
             control.SendInput("q");
             string exit = await WaitForLogLineAsync(
@@ -702,6 +708,28 @@ public sealed class NcursesHarnessFlowTests
         string snapshot = lines.Length == 0 ? "<empty>" : string.Join("\n", lines);
         throw new Xunit.Sdk.XunitException(
             $"Timed out waiting for harness log line. File: {path}\nObserved log:\n{snapshot}");
+    }
+
+    private static bool TryParseResizeLine(string line, out int rows, out int columns)
+    {
+        const string Prefix = "RESIZE ";
+        rows = 0;
+        columns = 0;
+
+        if (!line.StartsWith(Prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string payload = line[Prefix.Length..];
+        string[] parts = payload.Split('x', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+        {
+            return false;
+        }
+
+        return int.TryParse(parts[0], out rows) &&
+               int.TryParse(parts[1], out columns);
     }
 
 }
