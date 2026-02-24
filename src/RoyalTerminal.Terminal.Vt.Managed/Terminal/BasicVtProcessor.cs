@@ -23,9 +23,11 @@ namespace RoyalTerminal.Terminal;
 /// of the VT protocol to render typical shell output and full-screen TUI
 /// applications such as Midnight Commander, htop, vim, etc.
 /// </summary>
-public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
+public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource
 {
     private const int MaxDcsBufferBytes = 4096;
+    private const int KittyKeyboardFlagMask = 0x1F;
+    private const int KittyKeyboardMaxStackDepth = 32;
 
     private readonly TerminalScreen _screen;
     private int _cursorCol;
@@ -33,6 +35,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
     private uint _currentFg;
     private uint _currentBg;
     private CellAttributes _currentAttrs;
+    private TerminalUnderlineStyle _currentUnderlineStyle;
+    private CellDecorations _currentDecorations;
     private TerminalTheme _theme;
 
     // Parser state machine
@@ -51,6 +55,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
     private uint _savedFg;
     private uint _savedBg;
     private CellAttributes _savedAttrs;
+    private TerminalUnderlineStyle _savedUnderlineStyle;
+    private CellDecorations _savedDecorations;
     private bool _savedUseLineDrawing;
 
     // Scroll region (DECSTBM)
@@ -79,6 +85,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
     private bool _insertMode;          // IRM (ANSI mode 4)
     private bool _lineFeedNewLineMode; // LNM (ANSI mode 20)
     private int _cursorStyle = 1;      // DECSCUSR (CSI Ps SP q), default blinking block
+    private int _widthPx;
+    private int _heightPx;
+    private int _kittyKeyboardFlagsMain;
+    private int _kittyKeyboardFlagsAlt;
+    private readonly List<int> _kittyKeyboardStackMain = [];
+    private readonly List<int> _kittyKeyboardStackAlt = [];
 
     // Tab stops
     private readonly HashSet<int> _tabStops = [];
@@ -123,6 +135,9 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
 
     /// <summary>Whether bracketed paste mode is active.</summary>
     public bool BracketedPaste => _bracketedPaste;
+
+    /// <inheritdoc />
+    public int KittyKeyboardFlags => _inAltScreen ? _kittyKeyboardFlagsAlt : _kittyKeyboardFlagsMain;
 
     /// <inheritdoc />
     public TerminalModeState ModeState => new(
@@ -220,6 +235,28 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         RaiseModeChangedIfNeeded(before);
     }
 
+    private void EnterCsiState()
+    {
+        _state = ParserState.CsiEntry;
+        _params.Clear();
+        _currentParam = 0;
+        _hasParam = false;
+        _intermediateChar = '\0';
+    }
+
+    private void EnterOscState()
+    {
+        _state = ParserState.OscString;
+        _oscBuffer.Clear();
+    }
+
+    private void EnterDcsState()
+    {
+        _state = ParserState.DcsString;
+        _dcsBuffer.Clear();
+        _isDiscardingDcsPayload = false;
+    }
+
     #region Ground State
 
     private void ProcessGround(byte b)
@@ -247,6 +284,22 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         {
             case 0x1B: // ESC
                 _state = ParserState.Escape;
+                break;
+
+            case 0x9B: // C1 CSI
+                EnterCsiState();
+                break;
+
+            case 0x9D: // C1 OSC
+                EnterOscState();
+                break;
+
+            case 0x90: // C1 DCS
+                EnterDcsState();
+                break;
+
+            case 0x9C: // C1 ST
+                _state = ParserState.Ground;
                 break;
 
             case (byte)'\n': // LF
@@ -403,6 +456,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         cell.Foreground = _currentFg;
         cell.Background = _currentBg;
         cell.Attributes = _currentAttrs;
+        cell.UnderlineStyle = _currentUnderlineStyle;
+        cell.Decorations = _currentDecorations;
         cell.Width = (byte)width;
 
         if (width == 2 && _cursorCol + 1 < row.Columns)
@@ -413,6 +468,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
             spacer.Foreground = _currentFg;
             spacer.Background = _currentBg;
             spacer.Attributes = _currentAttrs;
+            spacer.UnderlineStyle = _currentUnderlineStyle;
+            spacer.Decorations = _currentDecorations;
             spacer.Width = 0;
         }
 
@@ -504,6 +561,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
             spacer.Foreground = targetCell.Foreground;
             spacer.Background = targetCell.Background;
             spacer.Attributes = targetCell.Attributes;
+            spacer.UnderlineStyle = targetCell.UnderlineStyle;
+            spacer.Decorations = targetCell.Decorations;
             spacer.Width = 0;
         }
 
@@ -688,22 +747,15 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         switch (b)
         {
             case (byte)'[': // CSI
-                _state = ParserState.CsiEntry;
-                _params.Clear();
-                _currentParam = 0;
-                _hasParam = false;
-                _intermediateChar = '\0';
+                EnterCsiState();
                 break;
 
             case (byte)']': // OSC
-                _state = ParserState.OscString;
-                _oscBuffer.Clear();
+                EnterOscState();
                 break;
 
             case (byte)'P': // DCS
-                _state = ParserState.DcsString;
-                _dcsBuffer.Clear();
-                _isDiscardingDcsPayload = false;
+                EnterDcsState();
                 break;
 
             case (byte)'(': // Designate G0 charset
@@ -814,7 +866,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
             _params.Add(0);
             _state = ParserState.CsiParam;
         }
-        else if (b == (byte)'?' || b == (byte)'>' || b == (byte)'!')
+        else if (b == (byte)'?' || b == (byte)'>' || b == (byte)'!' || b == (byte)'=' || b == (byte)'<')
         {
             _intermediateChar = (char)b;
             _state = ParserState.CsiParam;
@@ -890,6 +942,13 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
             return;
         }
 
+        if (b == 0x9C) // 8-bit ST
+        {
+            HandleOscString();
+            _state = ParserState.Ground;
+            return;
+        }
+
         if (b == 0x1B) // Potential ST (ESC \)
         {
             _state = ParserState.OscEscape;
@@ -918,6 +977,13 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         }
 
         if (b == 0x07)
+        {
+            HandleOscString();
+            _state = ParserState.Ground;
+            return;
+        }
+
+        if (b == 0x9C)
         {
             HandleOscString();
             _state = ParserState.Ground;
@@ -1188,11 +1254,20 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         if ((_currentAttrs & CellAttributes.Bold) != 0) parameters.Add(1);
         if ((_currentAttrs & CellAttributes.Dim) != 0) parameters.Add(2);
         if ((_currentAttrs & CellAttributes.Italic) != 0) parameters.Add(3);
-        if ((_currentAttrs & CellAttributes.Underline) != 0) parameters.Add(4);
+        if (_currentUnderlineStyle == TerminalUnderlineStyle.Double)
+        {
+            parameters.Add(21);
+        }
+        else if (_currentUnderlineStyle != TerminalUnderlineStyle.None ||
+                 (_currentAttrs & CellAttributes.Underline) != 0)
+        {
+            parameters.Add(4);
+        }
         if ((_currentAttrs & CellAttributes.Blink) != 0) parameters.Add(5);
         if ((_currentAttrs & CellAttributes.Inverse) != 0) parameters.Add(7);
         if ((_currentAttrs & CellAttributes.Hidden) != 0) parameters.Add(8);
         if ((_currentAttrs & CellAttributes.Strikethrough) != 0) parameters.Add(9);
+        if ((_currentDecorations & CellDecorations.Overline) != 0) parameters.Add(53);
 
         if (_currentFg != _screen.DefaultForeground)
         {
@@ -1230,7 +1305,13 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         // DEC private modes: CSI ? ... h/l
         if (_intermediateChar == '?')
         {
-            var set = (finalByte == 'h');
+            if (finalByte == 'u')
+            {
+                HandleKittyKeyboardQuery();
+                return;
+            }
+
+            var set = finalByte == 'h';
             if (finalByte is 'h' or 'l')
             {
                 foreach (var p in _params)
@@ -1253,6 +1334,35 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
             {
                 // DA2 — Secondary Device Attributes
                 ResponseCallback?.Invoke("\x1b[>1;10;0c"u8.ToArray());
+            }
+            else if (finalByte == 'u')
+            {
+                HandleKittyKeyboardPush();
+            }
+            return;
+        }
+
+        // CSI = ... c — Tertiary DA
+        if (_intermediateChar == '=')
+        {
+            if (finalByte == 'c')
+            {
+                // DA3 response payload mirrors native wrapper behavior.
+                ResponseCallback?.Invoke("\x1bP!|464F4F\x1b\\"u8.ToArray());
+            }
+            else if (finalByte == 'u')
+            {
+                HandleKittyKeyboardSet();
+            }
+            return;
+        }
+
+        // CSI < ... u — kitty keyboard pop mode
+        if (_intermediateChar == '<')
+        {
+            if (finalByte == 'u')
+            {
+                HandleKittyKeyboardPop();
             }
             return;
         }
@@ -1492,7 +1602,134 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
                 for (var n = 0; n < Math.Max(1, p0); n++)
                     TabForward();
                 break;
+
+            case 't': // XTWINOPS reports
+                HandleWindowReport(Math.Max(0, p0));
+                break;
         }
+    }
+
+    private void HandleWindowReport(int reportCode)
+    {
+        switch (reportCode)
+        {
+            case 14: // CSI 14 t — text area size in pixels
+            {
+                string response = $"\x1b[4;{Math.Max(0, _heightPx)};{Math.Max(0, _widthPx)}t";
+                ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+                break;
+            }
+
+            case 16: // CSI 16 t — cell size in pixels
+            {
+                int cellWidth = _screen.Columns > 0 && _widthPx > 0
+                    ? _widthPx / _screen.Columns
+                    : 8;
+                int cellHeight = _screen.ViewportRows > 0 && _heightPx > 0
+                    ? _heightPx / _screen.ViewportRows
+                    : 16;
+
+                if (cellWidth <= 0) cellWidth = 8;
+                if (cellHeight <= 0) cellHeight = 16;
+
+                string response = $"\x1b[6;{cellHeight};{cellWidth}t";
+                ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+                break;
+            }
+
+            case 18: // CSI 18 t — text area size in characters
+            {
+                string response = $"\x1b[8;{_screen.ViewportRows};{_screen.Columns}t";
+                ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+                break;
+            }
+
+            case 21: // CSI 21 t — report window title
+                ResponseCallback?.Invoke("\x1b]l\x1b\\"u8.ToArray());
+                break;
+        }
+    }
+
+    private void HandleKittyKeyboardQuery()
+    {
+        string response = $"\x1b[?{KittyKeyboardFlags}u";
+        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+    }
+
+    private void HandleKittyKeyboardSet()
+    {
+        int flags = _params.Count > 0 ? _params[0] : 0;
+        int operation = _params.Count > 1 ? _params[1] : 1;
+        flags = NormalizeKittyKeyboardFlags(flags);
+
+        switch (operation)
+        {
+            case 2: // OR
+                SetKittyKeyboardFlags(KittyKeyboardFlags | flags);
+                break;
+            case 3: // AND NOT
+                SetKittyKeyboardFlags(KittyKeyboardFlags & ~flags);
+                break;
+            case 1:
+            default: // SET
+                SetKittyKeyboardFlags(flags);
+                break;
+        }
+    }
+
+    private void HandleKittyKeyboardPush()
+    {
+        List<int> stack = GetActiveKittyKeyboardStack();
+        if (stack.Count >= KittyKeyboardMaxStackDepth)
+        {
+            stack.RemoveAt(0);
+        }
+
+        stack.Add(KittyKeyboardFlags);
+        int flags = _params.Count > 0 ? _params[0] : 0;
+        SetKittyKeyboardFlags(flags);
+    }
+
+    private void HandleKittyKeyboardPop()
+    {
+        int count = _params.Count > 0 ? Math.Max(1, _params[0]) : 1;
+        List<int> stack = GetActiveKittyKeyboardStack();
+
+        for (int i = 0; i < count; i++)
+        {
+            if (stack.Count == 0)
+            {
+                break;
+            }
+
+            int topIndex = stack.Count - 1;
+            int flags = stack[topIndex];
+            stack.RemoveAt(topIndex);
+            SetKittyKeyboardFlags(flags);
+        }
+    }
+
+    private List<int> GetActiveKittyKeyboardStack()
+    {
+        return _inAltScreen ? _kittyKeyboardStackAlt : _kittyKeyboardStackMain;
+    }
+
+    private void SetKittyKeyboardFlags(int flags)
+    {
+        int normalized = NormalizeKittyKeyboardFlags(flags);
+        if (_inAltScreen)
+        {
+            _kittyKeyboardFlagsAlt = normalized;
+        }
+        else
+        {
+            _kittyKeyboardFlagsMain = normalized;
+        }
+    }
+
+    private static int NormalizeKittyKeyboardFlags(int flags)
+    {
+        return Math.Max(0, flags) & KittyKeyboardFlagMask;
     }
 
     private void HandleAnsiMode(int mode, bool set)
@@ -1666,6 +1903,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         _savedFg = _currentFg;
         _savedBg = _currentBg;
         _savedAttrs = _currentAttrs;
+        _savedUnderlineStyle = _currentUnderlineStyle;
+        _savedDecorations = _currentDecorations;
         _savedUseLineDrawing = _useLineDrawing;
     }
 
@@ -1676,6 +1915,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         _currentFg = _savedFg;
         _currentBg = _savedBg;
         _currentAttrs = _savedAttrs;
+        _currentUnderlineStyle = _savedUnderlineStyle;
+        _currentDecorations = _savedDecorations;
         _useLineDrawing = _savedUseLineDrawing;
     }
 
@@ -1701,19 +1942,34 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
                 case 1: _currentAttrs |= CellAttributes.Bold; break;
                 case 2: _currentAttrs |= CellAttributes.Dim; break;
                 case 3: _currentAttrs |= CellAttributes.Italic; break;
-                case 4: _currentAttrs |= CellAttributes.Underline; break;
+                case 4:
+                    _currentAttrs |= CellAttributes.Underline;
+                    _currentUnderlineStyle = TerminalUnderlineStyle.Single;
+                    break;
                 case 5: _currentAttrs |= CellAttributes.Blink; break;
                 case 7: _currentAttrs |= CellAttributes.Inverse; break;
                 case 8: _currentAttrs |= CellAttributes.Hidden; break;
                 case 9: _currentAttrs |= CellAttributes.Strikethrough; break;
-                case 21: _currentAttrs |= CellAttributes.Underline; break; // double underline
+                case 21:
+                    _currentAttrs |= CellAttributes.Underline;
+                    _currentUnderlineStyle = TerminalUnderlineStyle.Double;
+                    break;
                 case 22: _currentAttrs &= ~(CellAttributes.Bold | CellAttributes.Dim); break;
                 case 23: _currentAttrs &= ~CellAttributes.Italic; break;
-                case 24: _currentAttrs &= ~CellAttributes.Underline; break;
+                case 24:
+                    _currentAttrs &= ~CellAttributes.Underline;
+                    _currentUnderlineStyle = TerminalUnderlineStyle.None;
+                    break;
                 case 25: _currentAttrs &= ~CellAttributes.Blink; break;
                 case 27: _currentAttrs &= ~CellAttributes.Inverse; break;
                 case 28: _currentAttrs &= ~CellAttributes.Hidden; break;
                 case 29: _currentAttrs &= ~CellAttributes.Strikethrough; break;
+                case 53:
+                    _currentDecorations |= CellDecorations.Overline;
+                    break;
+                case 55:
+                    _currentDecorations &= ~CellDecorations.Overline;
+                    break;
 
                 // Standard foreground colors
                 case >= 30 and <= 37:
@@ -1784,6 +2040,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         _currentFg = _screen.DefaultForeground;
         _currentBg = _screen.DefaultBackground;
         _currentAttrs = CellAttributes.None;
+        _currentUnderlineStyle = TerminalUnderlineStyle.None;
+        _currentDecorations = CellDecorations.None;
     }
 
     #endregion
@@ -1970,6 +2228,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
                 trailing.Foreground = cell.Foreground;
                 trailing.Background = cell.Background;
                 trailing.Attributes = cell.Attributes;
+                trailing.UnderlineStyle = cell.UnderlineStyle;
+                trailing.Decorations = cell.Decorations;
                 trailing.Width = 0;
                 col++;
                 continue;
@@ -2016,6 +2276,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         _lastGraphicCodepoint = 0;
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
+        _savedUnderlineStyle = TerminalUnderlineStyle.None;
+        _savedDecorations = CellDecorations.None;
+        _kittyKeyboardFlagsMain = 0;
+        _kittyKeyboardFlagsAlt = 0;
+        _kittyKeyboardStackMain.Clear();
+        _kittyKeyboardStackAlt.Clear();
         ResetAttributes();
         InitTabStops();
     }
@@ -2139,6 +2405,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
         _g1IsLineDrawing = false;
         _shiftOut = false;
         _lastGraphicCodepoint = 0;
+        _savedUnderlineStyle = TerminalUnderlineStyle.None;
+        _savedDecorations = CellDecorations.None;
+        _kittyKeyboardFlagsMain = 0;
+        _kittyKeyboardFlagsAlt = 0;
+        _kittyKeyboardStackMain.Clear();
+        _kittyKeyboardStackAlt.Clear();
         ResetAttributes();
         InitTabStops();
 
@@ -2169,11 +2441,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
 
     /// <summary>
     /// Notify the processor that the screen has been resized with pixel dimensions.
-    /// BasicVtProcessor doesn't use pixel dimensions, so this delegates to the
-    /// column/row overload.
+    /// Pixel dimensions are used to answer CSI 14t/16t size reports.
     /// </summary>
     public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
     {
+        _widthPx = Math.Max(0, widthPx);
+        _heightPx = Math.Max(0, heightPx);
         NotifyResize(columns, rows);
     }
 

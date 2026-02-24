@@ -134,6 +134,240 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_DA3_SendsTertiaryDeviceAttributes()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[=c"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1bP!|464F4F\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Csi14t_ReportsPixelTextAreaSize()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        processor.NotifyResize(80, 24, 800, 480);
+
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[14t"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[4;480;800t", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Csi16t_ReportsCellPixelSize()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        processor.NotifyResize(80, 24, 800, 480);
+
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[16t"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[6;20;10t", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Csi18t_ReportsCharacterGridSize()
+    {
+        var screen = new TerminalScreen(132, 40, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[18t"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[8;40;132t", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Csi21t_ReportsWindowTitlePayload()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[21t"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b]l\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_C1Csi_Dsr6_SendsCursorPositionReport()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[4;5H"u8);
+        processor.Process([0x9B, (byte)'6', (byte)'n']);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[4;5R", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_C1Osc_TitleBelTerminator_InvokesTitleCallback()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        string? title = null;
+        processor.TitleCallback = value => title = value;
+
+        byte[] payload = [0x9D, (byte)'2', (byte)';', (byte)'c', (byte)'1', (byte)'-', (byte)'t', (byte)'i', (byte)'t', (byte)'l', (byte)'e', 0x07];
+        processor.Process(payload);
+
+        Assert.Equal("c1-title", title);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_C1Osc_TitleStTerminator_InvokesTitleCallback()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        string? title = null;
+        processor.TitleCallback = value => title = value;
+
+        byte[] payload = [0x9D, (byte)'2', (byte)';', (byte)'c', (byte)'1', (byte)'-', (byte)'s', (byte)'t', 0x9C];
+        processor.Process(payload);
+
+        Assert.Equal("c1-st", title);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_C1Osc_TitleStTerminator_AllowsFollowingPrintableData()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        string? title = null;
+        processor.TitleCallback = value => title = value;
+
+        byte[] payload =
+        [
+            0x9D, (byte)'2', (byte)';', (byte)'x', 0x9C,
+            (byte)'A',
+        ];
+        processor.Process(payload);
+
+        Assert.Equal("x", title);
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal('A', row[0].Codepoint);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_C1Dcs_DecrqssMargins_ReturnsResponse()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process([0x90, (byte)'$', (byte)'q', (byte)'r', 0x9C]);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1bP1$r1;24r\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_KittyKeyboardQuery_DefaultsToZero()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[?u"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?0u", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_KittyKeyboardSetOrAndNot_UpdatesQueryState()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[=1;1u"u8); // set
+        processor.Process("\x1b[=4;2u"u8); // or
+        processor.Process("\x1b[?u"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?5u", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[=1;3u"u8); // and-not
+        processor.Process("\x1b[?u"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?4u", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_KittyKeyboardPushPop_UsesPerScreenStack()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[=2;1u"u8);
+        processor.Process("\x1b[>5u"u8);
+        processor.Process("\x1b[?u"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?5u", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[<u"u8);
+        processor.Process("\x1b[?u"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?2u", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_KittyKeyboardState_IsolatedBetweenMainAndAltScreens()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[=3;1u"u8);
+        processor.Process("\x1b[?1049h"u8); // alt screen
+        processor.Process("\x1b[?u"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?0u", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[=7;1u"u8);
+        processor.Process("\x1b[?1049l"u8); // back to main
+        processor.Process("\x1b[?u"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?3u", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
     public void BasicVtProcessor_NoCallback_DoesNotThrow()
     {
         var screen = new TerminalScreen(80, 24, 0);
@@ -358,6 +592,21 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_DcsDecrqss_SgrQuery_IncludesDoubleUnderlineAndOverline()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[21;53m"u8);
+        processor.Process("\x1bP$qm\x1b\\"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1bP1$r21;53m\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
     public void BasicVtProcessor_DcsDecrqss_MarginsQuery_ReturnsScrollRegion()
     {
         var screen = new TerminalScreen(80, 24, 0);
@@ -488,6 +737,39 @@ public class TerminalQueryTests
         processor.Process("A\nB"u8);
         row1 = screen.GetViewportRow(1);
         Assert.Equal('B', row1[1].Codepoint);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Sgr_UnderlineAndOverline_AreCapturedInCellModel()
+    {
+        var screen = new TerminalScreen(8, 2, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("\x1b[53;4mX\x1b[55;24mY"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.True((row[0].Attributes & CellAttributes.Underline) != 0);
+        Assert.Equal(TerminalUnderlineStyle.Single, row[0].UnderlineStyle);
+        Assert.True((row[0].Decorations & CellDecorations.Overline) != 0);
+
+        Assert.Equal('Y', row[1].Codepoint);
+        Assert.False((row[1].Attributes & CellAttributes.Underline) != 0);
+        Assert.Equal(TerminalUnderlineStyle.None, row[1].UnderlineStyle);
+        Assert.Equal(CellDecorations.None, row[1].Decorations);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Sgr21_UsesDoubleUnderlineStyle()
+    {
+        var screen = new TerminalScreen(8, 2, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("\x1b[21mZ"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal('Z', row[0].Codepoint);
+        Assert.True((row[0].Attributes & CellAttributes.Underline) != 0);
+        Assert.Equal(TerminalUnderlineStyle.Double, row[0].UnderlineStyle);
     }
 
     [Fact]

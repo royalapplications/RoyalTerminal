@@ -17,6 +17,8 @@ public sealed class SkiaInteropRenderer
 {
     private readonly IRenderSurface _renderSurface;
     private readonly ISkiaRgbaFallbackRenderer? _rgbaFallbackRenderer;
+    private ulong _nextExplicitSyncFrameId = 1;
+    private RenderBackendKind _explicitSyncBackendKind = RenderBackendKind.Unknown;
 
     /// <summary>
     /// Initializes a new Skia interop bridge.
@@ -53,7 +55,8 @@ public sealed class SkiaInteropRenderer
             _renderSurface.BackendKind);
         if (supportsDirectInterop)
         {
-            RenderValidationResult surfaceValidation = _renderSurface.ValidateTarget(request.TargetDescriptor);
+            RenderTargetDescriptor synchronizedDescriptor = PrepareSynchronizedDescriptor(request.TargetDescriptor, out bool explicitSyncEnabled);
+            RenderValidationResult surfaceValidation = _renderSurface.ValidateTarget(synchronizedDescriptor);
             if (!surfaceValidation.IsValid)
             {
                 if (!allowCpuFallback)
@@ -75,7 +78,8 @@ public sealed class SkiaInteropRenderer
                 return new SkiaInteropRenderResult(validationFallbackResult, usedCpuFallback: true);
             }
 
-            RenderFrameResult directResult = _renderSurface.Render(request.TargetDescriptor);
+            RenderFrameResult directResult = _renderSurface.Render(synchronizedDescriptor);
+            AdvanceSynchronizationState(explicitSyncEnabled, synchronizedDescriptor.FrameId, directResult);
             if (directResult.Succeeded || !allowCpuFallback)
             {
                 return new SkiaInteropRenderResult(directResult, usedCpuFallback: false);
@@ -102,6 +106,58 @@ public sealed class SkiaInteropRenderer
 
         RenderFrameResult fallbackResult = RenderWithCpuFallback(canvas, request);
         return new SkiaInteropRenderResult(fallbackResult, usedCpuFallback: true);
+    }
+
+    private RenderTargetDescriptor PrepareSynchronizedDescriptor(
+        in RenderTargetDescriptor descriptor,
+        out bool explicitSyncEnabled)
+    {
+        explicitSyncEnabled = RequiresExplicitSynchronization(descriptor);
+        if (!explicitSyncEnabled)
+        {
+            return descriptor;
+        }
+
+        if (_explicitSyncBackendKind != descriptor.BackendKind)
+        {
+            _explicitSyncBackendKind = descriptor.BackendKind;
+            _nextExplicitSyncFrameId = 1;
+        }
+
+        ulong frameId = descriptor.FrameId != 0 ? descriptor.FrameId : _nextExplicitSyncFrameId;
+        if (frameId == 0)
+        {
+            frameId = 1;
+        }
+
+        return descriptor with { FrameId = frameId };
+    }
+
+    private void AdvanceSynchronizationState(bool explicitSyncEnabled, ulong frameId, in RenderFrameResult frameResult)
+    {
+        if (!explicitSyncEnabled)
+        {
+            return;
+        }
+
+        ulong nextFrameId = IncrementFrameId(frameId);
+        if (frameResult.Succeeded && frameResult.SynchronizationToken != 0)
+        {
+            nextFrameId = IncrementFrameId(frameResult.SynchronizationToken);
+        }
+
+        _nextExplicitSyncFrameId = nextFrameId;
+    }
+
+    private bool RequiresExplicitSynchronization(in RenderTargetDescriptor descriptor)
+    {
+        return descriptor.BackendKind == _renderSurface.BackendKind &&
+               (_renderSurface.Capabilities.FeatureFlags & RenderFeatureFlags.ExplicitSynchronization) != 0;
+    }
+
+    private static ulong IncrementFrameId(ulong frameId)
+    {
+        return frameId == ulong.MaxValue ? 1 : frameId + 1;
     }
 
     private RenderFrameResult RenderWithCpuFallback(SKCanvas canvas, in SkiaInteropRenderRequest request)

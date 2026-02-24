@@ -369,6 +369,82 @@ public sealed class TerminalInputAdapterTests
     }
 
     [Fact]
+    public async Task HandleKeyDown_WithKittyKeyboardDisambiguation_EncodesCtrlChordAsCsiU()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetKittyKeyboardFlags(1);
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.I,
+            KeyModifiers = KeyModifiers.Control,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal("\x1B[105;5u", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithKittyKeyboardDisambiguation_UsesModeSourceWhenProcessorArgumentIsNull()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetKittyKeyboardFlags(1);
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Up,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal("\x1B[57352u", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
     public async Task HandleKeyDown_WithActiveTransport_EncodesAltControlChord()
     {
         DefaultTerminalInputAdapter adapter = new();
@@ -773,7 +849,7 @@ public sealed class TerminalInputAdapterTests
         }
     }
 
-    private sealed class FakeVtProcessor : IVtProcessor
+    private sealed class FakeVtProcessor : IVtProcessor, IKittyKeyboardStateSource
     {
         private TerminalModeState _modeState = new(
             CursorVisible: true,
@@ -781,6 +857,7 @@ public sealed class TerminalInputAdapterTests
             ApplicationKeypad: false,
             AlternateScreen: false,
             BracketedPaste: false);
+        private int _kittyKeyboardFlags;
 
         public int CursorCol => 0;
         public int CursorRow => 0;
@@ -789,6 +866,7 @@ public sealed class TerminalInputAdapterTests
         public bool ApplicationKeypad => _modeState.ApplicationKeypad;
         public bool AlternateScreen => _modeState.AlternateScreen;
         public bool BracketedPaste => _modeState.BracketedPaste;
+        public int KittyKeyboardFlags => _kittyKeyboardFlags;
         public TerminalModeState ModeState => _modeState;
         public event EventHandler<TerminalModeState>? ModeChanged;
         public Action<byte[]>? ResponseCallback { get; set; }
@@ -822,6 +900,11 @@ public sealed class TerminalInputAdapterTests
         {
             _modeState = state;
             ModeChanged?.Invoke(this, state);
+        }
+
+        public void SetKittyKeyboardFlags(int flags)
+        {
+            _kittyKeyboardFlags = flags < 0 ? 0 : flags;
         }
 
         public void Dispose()

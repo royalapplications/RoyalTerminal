@@ -115,6 +115,15 @@ public class TerminalPresenter : Control
             if (_compositionVisual is null) return;
         }
 
+        if (fullRedraw && _renderer is not null && _screen is not null)
+        {
+            // Force a full handler refresh when callers require a complete redraw
+            // (for example, theme changes that can update defaults/palette mappings).
+            _compositionVisual.SendHandlerMessage(
+                new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
+            return;
+        }
+
         _compositionVisual.SendHandlerMessage(
             new TerminalDrawHandler.InvalidateMessage());
     }

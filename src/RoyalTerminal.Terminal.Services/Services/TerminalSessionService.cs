@@ -351,7 +351,7 @@ public sealed class TerminalSessionService : ITerminalSessionService
         ModeSource = _endpointModeSource ?? _transportModeSource;
     }
 
-    private sealed class VtProcessorModeSource : ITerminalModeSource, IDisposable
+    private sealed class VtProcessorModeSource : ITerminalModeSource, IKittyKeyboardStateSource, IDisposable
     {
         private readonly IVtProcessor _vtProcessor;
         private event EventHandler<TerminalModeState>? _modeChanged;
@@ -363,6 +363,10 @@ public sealed class TerminalSessionService : ITerminalSessionService
         }
 
         public TerminalModeState ModeState => _vtProcessor.ModeState;
+
+        public int KittyKeyboardFlags => _vtProcessor is IKittyKeyboardStateSource kitty
+            ? kitty.KittyKeyboardFlags
+            : 0;
 
         public event EventHandler<TerminalModeState>? ModeChanged
         {

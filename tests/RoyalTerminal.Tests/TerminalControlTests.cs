@@ -297,6 +297,42 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_ApplyTheme_MarksRowsDirtyWithoutResizing()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 80,
+            Rows = 24,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.Screen);
+        TerminalScreen screen = control.Screen!;
+        int columnsBefore = control.Columns;
+        int rowsBefore = control.Rows;
+
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            screen.GetViewportRow(row).IsDirty = false;
+        }
+
+        Assert.False(screen.HasDirtyRows());
+
+        TerminalTheme theme = TerminalTheme.Light
+            .WithDefaultForeground(0xFF0F172Au)
+            .WithDefaultBackground(0xFFE2E8F0u)
+            .WithCursorColor(0xFF2563EBu);
+
+        control.ApplyTheme(theme);
+
+        Assert.Equal(columnsBefore, control.Columns);
+        Assert.Equal(rowsBefore, control.Rows);
+        Assert.Equal(theme.DefaultForeground, screen.DefaultForeground);
+        Assert.Equal(theme.DefaultBackground, screen.DefaultBackground);
+        Assert.True(screen.HasDirtyRows());
+    }
+
+    [AvaloniaFact]
     public void Control_ApplyTheme_PropagatesToThemeSinkProcessor()
     {
         ThemeTrackingVtProcessorFactory factory = new();
@@ -491,6 +527,45 @@ public class TerminalControlTests
         ((IScrollable)control).Offset = new Vector(0, 0);
 
         Assert.True(screen.ScrollOffset > 0);
+        Assert.False(renderer.CursorVisible);
+
+        control.ScrollToBottom();
+
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.True(renderer.CursorVisible);
+    }
+
+    [AvaloniaFact]
+    public void Control_ScrollingBack_HidesCursorEvenWhenCursorRowIsInViewportRange()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.ScrollData);
+        Assert.NotNull(control.Screen);
+        Assert.NotNull(control.Renderer);
+
+        for (int i = 0; i < 128; i++)
+        {
+            control.WriteOutput("line\n"u8);
+        }
+
+        TerminalScreen screen = control.Screen!;
+        SkiaTerminalRenderer renderer = control.Renderer!;
+        Assert.True(control.ScrollData!.MaxOffset > 0);
+
+        // Keep the cursor on the first viewport row so it still lands in-range
+        // when we move one row into scrollback.
+        control.WriteOutput("\x1b[1;1H"u8);
+        Assert.Equal(0, renderer.CursorRow);
+        Assert.True(renderer.CursorVisible);
+
+        control.ScrollByRows(-1);
+
+        Assert.True(screen.ScrollOffset > 0);
+        Assert.True((uint)renderer.CursorRow < (uint)screen.ViewportRows);
         Assert.False(renderer.CursorVisible);
 
         control.ScrollToBottom();

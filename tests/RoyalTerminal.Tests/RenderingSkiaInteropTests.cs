@@ -376,6 +376,102 @@ public sealed class RenderingSkiaInteropTests
         Assert.Contains("RGBA fallback failed.", result.FrameResult.ErrorMessage!, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void SkiaInteropRenderer_D3D12ExplicitSynchronization_InjectsFrameIdAndConsumesSyncToken()
+    {
+        FakeRenderSurface surface = new(
+            RenderFrameResult.Success(),
+            backendKind: RenderBackendKind.D3D12,
+            featureFlags: RenderFeatureFlags.ExternalTextureTargets |
+                          RenderFeatureFlags.CpuRgbaFallback |
+                          RenderFeatureFlags.ExplicitSynchronization,
+            renderCallback: descriptor => RenderFrameResult.Success(synchronizationToken: descriptor.FrameId + 9));
+        SkiaInteropRenderer renderer = new(surface);
+
+        using SKBitmap bitmap = new(8, 8);
+        using SKCanvas canvas = new(bitmap);
+
+        RenderTargetDescriptor descriptor = CreateD3D12Descriptor(8, 8);
+
+        SkiaInteropRenderResult first = renderer.Render(canvas, new SkiaInteropRenderRequest
+        {
+            TargetDescriptor = descriptor,
+            AllowCpuFallback = false,
+        });
+        SkiaInteropRenderResult second = renderer.Render(canvas, new SkiaInteropRenderRequest
+        {
+            TargetDescriptor = descriptor,
+            AllowCpuFallback = false,
+        });
+
+        Assert.True(first.FrameResult.Succeeded, first.FrameResult.ErrorMessage);
+        Assert.True(second.FrameResult.Succeeded, second.FrameResult.ErrorMessage);
+        Assert.Equal(2, surface.RenderDescriptors.Count);
+        Assert.Equal((ulong)1, surface.RenderDescriptors[0].FrameId);
+        Assert.Equal((ulong)11, surface.RenderDescriptors[1].FrameId);
+    }
+
+    [Fact]
+    public void SkiaInteropRenderer_D3D12ExplicitSynchronization_UsesCallerFrameIdWhenProvided()
+    {
+        FakeRenderSurface surface = new(
+            RenderFrameResult.Success(),
+            backendKind: RenderBackendKind.D3D12,
+            featureFlags: RenderFeatureFlags.ExternalTextureTargets |
+                          RenderFeatureFlags.CpuRgbaFallback |
+                          RenderFeatureFlags.ExplicitSynchronization,
+            renderCallback: descriptor => RenderFrameResult.Success(synchronizationToken: descriptor.FrameId));
+        SkiaInteropRenderer renderer = new(surface);
+
+        using SKBitmap bitmap = new(8, 8);
+        using SKCanvas canvas = new(bitmap);
+
+        RenderTargetDescriptor firstDescriptor = CreateD3D12Descriptor(8, 8) with { FrameId = 42 };
+        RenderTargetDescriptor secondDescriptor = CreateD3D12Descriptor(8, 8);
+
+        SkiaInteropRenderResult first = renderer.Render(canvas, new SkiaInteropRenderRequest
+        {
+            TargetDescriptor = firstDescriptor,
+            AllowCpuFallback = false,
+        });
+        SkiaInteropRenderResult second = renderer.Render(canvas, new SkiaInteropRenderRequest
+        {
+            TargetDescriptor = secondDescriptor,
+            AllowCpuFallback = false,
+        });
+
+        Assert.True(first.FrameResult.Succeeded, first.FrameResult.ErrorMessage);
+        Assert.True(second.FrameResult.Succeeded, second.FrameResult.ErrorMessage);
+        Assert.Equal(2, surface.RenderDescriptors.Count);
+        Assert.Equal((ulong)42, surface.RenderDescriptors[0].FrameId);
+        Assert.Equal((ulong)43, surface.RenderDescriptors[1].FrameId);
+    }
+
+    [Fact]
+    public void SkiaInteropRenderer_WithoutExplicitSynchronization_DoesNotInjectFrameId()
+    {
+        FakeRenderSurface surface = new(
+            RenderFrameResult.Success(synchronizationToken: 33),
+            backendKind: RenderBackendKind.D3D11,
+            featureFlags: RenderFeatureFlags.ExternalTextureTargets | RenderFeatureFlags.CpuRgbaFallback,
+            renderCallback: descriptor => RenderFrameResult.Success(synchronizationToken: 33));
+        SkiaInteropRenderer renderer = new(surface);
+
+        using SKBitmap bitmap = new(8, 8);
+        using SKCanvas canvas = new(bitmap);
+
+        RenderTargetDescriptor descriptor = CreateD3D11Descriptor(8, 8);
+        SkiaInteropRenderResult result = renderer.Render(canvas, new SkiaInteropRenderRequest
+        {
+            TargetDescriptor = descriptor,
+            AllowCpuFallback = false,
+        });
+
+        Assert.True(result.FrameResult.Succeeded, result.FrameResult.ErrorMessage);
+        Assert.Single(surface.RenderDescriptors);
+        Assert.Equal((ulong)0, surface.RenderDescriptors[0].FrameId);
+    }
+
     private static RenderTargetDescriptor CreateMetalDescriptor(int width, int height)
     {
         return new RenderTargetDescriptor
@@ -391,21 +487,58 @@ public sealed class RenderingSkiaInteropTests
         };
     }
 
+    private static RenderTargetDescriptor CreateD3D11Descriptor(int width, int height)
+    {
+        return new RenderTargetDescriptor
+        {
+            BackendKind = RenderBackendKind.D3D11,
+            TargetKind = RenderTargetKind.Texture2D,
+            PixelFormat = RenderPixelFormat.Bgra8Unorm,
+            Width = width,
+            Height = height,
+            SampleCount = 1,
+            DeviceHandle = (nint)1,
+            TargetHandle = (nint)2,
+            TargetViewHandle = (nint)3,
+        };
+    }
+
+    private static RenderTargetDescriptor CreateD3D12Descriptor(int width, int height)
+    {
+        return new RenderTargetDescriptor
+        {
+            BackendKind = RenderBackendKind.D3D12,
+            TargetKind = RenderTargetKind.Texture2D,
+            PixelFormat = RenderPixelFormat.Bgra8Unorm,
+            Width = width,
+            Height = height,
+            SampleCount = 1,
+            DeviceHandle = (nint)1,
+            CommandQueueHandle = (nint)2,
+            CommandBufferHandle = (nint)3,
+            TargetHandle = (nint)4,
+            TargetViewHandle = (nint)5,
+        };
+    }
+
     private sealed class FakeRenderSurface : IRenderSurface
     {
         private readonly RenderFrameResult _renderResult;
         private readonly RenderValidationResult? _validationResult;
         private readonly RenderBackendKind _backendKind;
+        private readonly Func<RenderTargetDescriptor, RenderFrameResult>? _renderCallback;
 
         public FakeRenderSurface(
             RenderFrameResult renderResult,
             RenderValidationResult? validationResult = null,
             RenderBackendKind backendKind = RenderBackendKind.Metal,
-            RenderFeatureFlags featureFlags = RenderFeatureFlags.ExternalTextureTargets | RenderFeatureFlags.CpuRgbaFallback)
+            RenderFeatureFlags featureFlags = RenderFeatureFlags.ExternalTextureTargets | RenderFeatureFlags.CpuRgbaFallback,
+            Func<RenderTargetDescriptor, RenderFrameResult>? renderCallback = null)
         {
             _renderResult = renderResult;
             _validationResult = validationResult;
             _backendKind = backendKind;
+            _renderCallback = renderCallback;
             Capabilities = new RenderBackendCapabilities(
                 backendKind,
                 featureFlags,
@@ -421,6 +554,8 @@ public sealed class RenderingSkiaInteropTests
         public int RenderCallCount { get; private set; }
 
         public int ValidateTargetCallCount { get; private set; }
+
+        public List<RenderTargetDescriptor> RenderDescriptors { get; } = [];
 
         public void SetSize(int width, int height)
         {
@@ -444,7 +579,10 @@ public sealed class RenderingSkiaInteropTests
         public RenderFrameResult Render(in RenderTargetDescriptor descriptor)
         {
             RenderCallCount++;
-            return _renderResult;
+            RenderDescriptors.Add(descriptor);
+            return _renderCallback is null
+                ? _renderResult
+                : _renderCallback(descriptor);
         }
 
         public void Dispose()

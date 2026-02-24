@@ -419,6 +419,10 @@ public class RenderingTests
         Assert.Equal(0, diagnostics.FallbackFontHits);
         Assert.Equal(0, diagnostics.GridClampedRuns);
         Assert.Equal(0, diagnostics.SpriteCells);
+        Assert.Equal(0, diagnostics.BoxDrawingSpriteCells);
+        Assert.Equal(0, diagnostics.BrailleSpriteCells);
+        Assert.Equal(0, diagnostics.BlockSpriteCells);
+        Assert.Equal(0, diagnostics.ScanLineSpriteCells);
     }
 
     [Fact]
@@ -481,6 +485,10 @@ public class RenderingTests
         Assert.Equal(0, afterReset.FallbackFontHits);
         Assert.Equal(0, afterReset.GridClampedRuns);
         Assert.Equal(0, afterReset.SpriteCells);
+        Assert.Equal(0, afterReset.BoxDrawingSpriteCells);
+        Assert.Equal(0, afterReset.BrailleSpriteCells);
+        Assert.Equal(0, afterReset.BlockSpriteCells);
+        Assert.Equal(0, afterReset.ScanLineSpriteCells);
     }
 
     [Fact]
@@ -503,6 +511,10 @@ public class RenderingTests
         Assert.Equal(0, diagnostics.FallbackFontHits);
         Assert.Equal(0, diagnostics.GridClampedRuns);
         Assert.Equal(0, diagnostics.SpriteCells);
+        Assert.Equal(0, diagnostics.BoxDrawingSpriteCells);
+        Assert.Equal(0, diagnostics.BrailleSpriteCells);
+        Assert.Equal(0, diagnostics.BlockSpriteCells);
+        Assert.Equal(0, diagnostics.ScanLineSpriteCells);
     }
 
     [Fact]
@@ -520,6 +532,118 @@ public class RenderingTests
         TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
 
         Assert.True(diagnostics.SpriteCells >= 4);
+        Assert.True(diagnostics.BoxDrawingSpriteCells >= 2);
+        Assert.True(diagnostics.BrailleSpriteCells >= 2);
+        Assert.Equal(0, diagnostics.BlockSpriteCells);
+        Assert.Equal(0, diagnostics.ScanLineSpriteCells);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_SpriteFallback_CategorizesSpriteTypes()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableTextRenderDiagnostics = true,
+        };
+
+        using var surface = CreateRenderSurface(renderer, columns: 4, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 4, rows: 1, text: "\u253C\u28FF\u2588\u23BA");
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.True(diagnostics.SpriteCells >= 4);
+        Assert.True(diagnostics.BoxDrawingSpriteCells >= 1);
+        Assert.True(diagnostics.BrailleSpriteCells >= 1);
+        Assert.True(diagnostics.BlockSpriteCells >= 1);
+        Assert.True(diagnostics.ScanLineSpriteCells >= 1);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_MixedBoxDrawingMatrix_UsesSpriteFallbackAndDrawsPixels()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableTextRenderDiagnostics = true,
+        };
+
+        string[] rows =
+        [
+            "\u250D\u252F\u2511\u250E\u2530\u2512",
+            "\u251D\u253F\u2525\u251E\u2542\u2526",
+            "\u2515\u2537\u2519\u2516\u2538\u251A",
+            "\u257C\u257D\u257E\u257F\u2520\u2528",
+        ];
+
+        TerminalScreen screen = CreateScreenFromRows(rows);
+        using var surface = CreateRenderSurface(renderer, columns: screen.Columns, rows: screen.ViewportRows);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        int expectedBoxCells = 0;
+        foreach (string row in rows)
+        {
+            foreach (Rune _ in row.EnumerateRunes())
+            {
+                expectedBoxCells++;
+            }
+        }
+
+        Assert.True(diagnostics.SpriteCells >= expectedBoxCells);
+        Assert.True(diagnostics.BoxDrawingSpriteCells >= expectedBoxCells);
+        Assert.Equal(0, diagnostics.BrailleSpriteCells);
+        Assert.Equal(0, diagnostics.BlockSpriteCells);
+        Assert.Equal(0, diagnostics.ScanLineSpriteCells);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int nonBackground = CountNonBackgroundPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: screen.Columns * renderer.CellWidth,
+            startY: 0f,
+            endY: screen.ViewportRows * renderer.CellHeight);
+
+        Assert.True(nonBackground > 0, "Mixed box-drawing matrix should render visible sprite pixels.");
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_DoubleLineMatrix_UsesSpriteFallbackAndDrawsPixels()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableTextRenderDiagnostics = true,
+        };
+
+        string[] rows =
+        [
+            "\u2554\u2566\u2557",
+            "\u2560\u256C\u2563",
+            "\u255A\u2569\u255D",
+        ];
+
+        TerminalScreen screen = CreateScreenFromRows(rows);
+        using var surface = CreateRenderSurface(renderer, columns: screen.Columns, rows: screen.ViewportRows);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.True(diagnostics.SpriteCells >= 9);
+        Assert.True(diagnostics.BoxDrawingSpriteCells >= 9);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int nonBackground = CountNonBackgroundPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: screen.Columns * renderer.CellWidth,
+            startY: 0f,
+            endY: screen.ViewportRows * renderer.CellHeight);
+
+        Assert.True(nonBackground > 0, "Double-line matrix should render visible sprite pixels.");
     }
 
     [Fact]
@@ -545,6 +669,135 @@ public class RenderingTests
         Assert.True(mediumPixels > 0);
         Assert.True(darkPixels > 0);
         Assert.NotEqual(lightPixels, darkPixels);
+    }
+
+    [Theory]
+    [InlineData(TerminalUnderlineStyle.Single)]
+    [InlineData(TerminalUnderlineStyle.Double)]
+    [InlineData(TerminalUnderlineStyle.Curly)]
+    [InlineData(TerminalUnderlineStyle.Dotted)]
+    [InlineData(TerminalUnderlineStyle.Dashed)]
+    public void SkiaTerminalRenderer_StyledUnderlines_DrawBottomBandPixels(TerminalUnderlineStyle style)
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+
+        using var styledSurface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        using var controlSurface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+
+        TerminalScreen styledScreen = CreateDecorationScreen(
+            attributes: CellAttributes.Underline,
+            underlineStyle: style);
+        TerminalScreen controlScreen = CreateDecorationScreen();
+
+        styledSurface.Canvas.Clear(SKColors.Black);
+        controlSurface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(styledSurface.Canvas, styledScreen);
+        renderer.RenderFull(controlSurface.Canvas, controlScreen);
+
+        using SKImage styledSnapshot = styledSurface.Snapshot();
+        using SKPixmap styledPixels = styledSnapshot.PeekPixels();
+        using SKImage controlSnapshot = controlSurface.Snapshot();
+        using SKPixmap controlPixels = controlSnapshot.PeekPixels();
+
+        float bandStart = Math.Max(0f, renderer.CellHeight - 5f);
+        int styledCount = CountNonBackgroundPixelsInRegion(
+            styledPixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: bandStart,
+            endY: renderer.CellHeight);
+        int controlCount = CountNonBackgroundPixelsInRegion(
+            controlPixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: bandStart,
+            endY: renderer.CellHeight);
+
+        Assert.True(styledCount > controlCount, $"{style} underline should draw pixels in the bottom band.");
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_OverlineDecoration_DrawsTopBandPixels()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+
+        using var overlineSurface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        using var controlSurface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+
+        TerminalScreen overlineScreen = CreateDecorationScreen(decorations: CellDecorations.Overline);
+        TerminalScreen controlScreen = CreateDecorationScreen();
+
+        overlineSurface.Canvas.Clear(SKColors.Black);
+        controlSurface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(overlineSurface.Canvas, overlineScreen);
+        renderer.RenderFull(controlSurface.Canvas, controlScreen);
+
+        using SKImage overlineSnapshot = overlineSurface.Snapshot();
+        using SKPixmap overlinePixels = overlineSnapshot.PeekPixels();
+        using SKImage controlSnapshot = controlSurface.Snapshot();
+        using SKPixmap controlPixels = controlSnapshot.PeekPixels();
+
+        int overlineCount = CountNonBackgroundPixelsInRegion(
+            overlinePixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: 0f,
+            endY: Math.Min(3f, renderer.CellHeight));
+        int controlCount = CountNonBackgroundPixelsInRegion(
+            controlPixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: 0f,
+            endY: Math.Min(3f, renderer.CellHeight));
+
+        Assert.True(overlineCount > controlCount, "Overline should draw pixels in the top band.");
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_LegacyUnderlineAttribute_UsesSingleUnderlineFallback()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+
+        using var underlineSurface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        using var controlSurface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+
+        TerminalScreen underlineScreen = CreateDecorationScreen(attributes: CellAttributes.Underline);
+        TerminalScreen controlScreen = CreateDecorationScreen();
+
+        underlineSurface.Canvas.Clear(SKColors.Black);
+        controlSurface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(underlineSurface.Canvas, underlineScreen);
+        renderer.RenderFull(controlSurface.Canvas, controlScreen);
+
+        using SKImage underlineSnapshot = underlineSurface.Snapshot();
+        using SKPixmap underlinePixels = underlineSnapshot.PeekPixels();
+        using SKImage controlSnapshot = controlSurface.Snapshot();
+        using SKPixmap controlPixels = controlSnapshot.PeekPixels();
+
+        float bandStart = Math.Max(0f, renderer.CellHeight - 5f);
+        int underlineCount = CountNonBackgroundPixelsInRegion(
+            underlinePixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: bandStart,
+            endY: renderer.CellHeight);
+        int controlCount = CountNonBackgroundPixelsInRegion(
+            controlPixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: bandStart,
+            endY: renderer.CellHeight);
+
+        Assert.True(underlineCount > controlCount, "Legacy underline attribute should draw a single underline.");
     }
 
     private static void VerifyResolverMatchesSkiaForCodepoint(int codepoint, CultureInfo culture)
@@ -663,6 +916,97 @@ public class RenderingTests
         }
 
         return count;
+    }
+
+    private static int CountNonBackgroundPixelsInRegion(
+        SKPixmap pixels,
+        float startX,
+        float endX,
+        float startY,
+        float endY)
+    {
+        int count = 0;
+        int minX = Math.Clamp((int)MathF.Floor(startX), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling(endX), 0, pixels.Width);
+        int minY = Math.Clamp((int)MathF.Floor(startY), 0, pixels.Height);
+        int maxY = Math.Clamp((int)MathF.Ceiling(endY), 0, pixels.Height);
+
+        for (int y = minY; y < maxY; y++)
+        {
+            for (int x = minX; x < maxX; x++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                if (pixel.Red > 0 || pixel.Green > 0 || pixel.Blue > 0)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static TerminalScreen CreateDecorationScreen(
+        CellAttributes attributes = CellAttributes.None,
+        TerminalUnderlineStyle underlineStyle = TerminalUnderlineStyle.None,
+        CellDecorations decorations = CellDecorations.None)
+    {
+        var screen = new TerminalScreen(1, 1);
+        TerminalRow row = screen.GetViewportRow(0);
+        ref TerminalCell cell = ref row[0];
+        cell.Codepoint = ' ';
+        cell.Foreground = 0xFFFFFFFF;
+        cell.Background = 0xFF000000;
+        cell.Attributes = attributes;
+        cell.UnderlineStyle = underlineStyle;
+        cell.Decorations = decorations;
+        cell.Width = 1;
+        row.IsDirty = true;
+        return screen;
+    }
+
+    private static TerminalScreen CreateScreenFromRows(string[] rows)
+    {
+        int rowCount = rows.Length;
+        int columns = 1;
+        for (int row = 0; row < rows.Length; row++)
+        {
+            int runeCount = 0;
+            foreach (Rune _ in rows[row].EnumerateRunes())
+            {
+                runeCount++;
+            }
+
+            if (runeCount > columns)
+            {
+                columns = runeCount;
+            }
+        }
+
+        var screen = new TerminalScreen(columns, Math.Max(1, rowCount));
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            TerminalRow row = screen.GetViewportRow(rowIndex);
+            int col = 0;
+            foreach (Rune rune in rows[rowIndex].EnumerateRunes())
+            {
+                if (col >= columns)
+                {
+                    break;
+                }
+
+                row[col].Codepoint = rune.Value;
+                row[col].Foreground = 0xFFFFFFFF;
+                row[col].Background = 0xFF000000;
+                row[col].Attributes = CellAttributes.None;
+                row[col].Width = 1;
+                col++;
+            }
+
+            row.IsDirty = true;
+        }
+
+        return screen;
     }
 
     private static TerminalScreen CreateAsciiScreen(int columns, int rows, string text)
