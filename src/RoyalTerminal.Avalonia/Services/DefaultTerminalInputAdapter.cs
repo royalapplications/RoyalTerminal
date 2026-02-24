@@ -32,7 +32,8 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         if (sessionService.HasActiveTransport || sessionService.HasPty)
         {
             TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor);
-            if (TerminalKeySequenceEncoder.TryEncode(e.Key, e.KeyModifiers, modeState, out string sequence))
+            int kittyKeyboardFlags = ResolveKittyKeyboardFlags(sessionService, vtProcessor);
+            if (TerminalKeySequenceEncoder.TryEncode(e.Key, e.KeyModifiers, modeState, kittyKeyboardFlags, out string sequence))
             {
                 sessionService.SendInput(sequence);
                 return true;
@@ -110,5 +111,22 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         if (keyModifiers.HasFlag(KeyModifiers.Alt)) mods |= TerminalModifiers.Alt;
         if (keyModifiers.HasFlag(KeyModifiers.Meta)) mods |= TerminalModifiers.Meta;
         return mods;
+    }
+
+    private static int ResolveKittyKeyboardFlags(
+        ITerminalSessionService sessionService,
+        IVtProcessor? vtProcessor)
+    {
+        if (vtProcessor is IKittyKeyboardStateSource kittyFromProcessor)
+        {
+            return kittyFromProcessor.KittyKeyboardFlags;
+        }
+
+        if (sessionService.ModeSource is IKittyKeyboardStateSource kittyFromModeSource)
+        {
+            return kittyFromModeSource.KittyKeyboardFlags;
+        }
+
+        return 0;
     }
 }

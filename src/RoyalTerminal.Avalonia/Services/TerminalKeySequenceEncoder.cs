@@ -13,11 +13,28 @@ namespace RoyalTerminal.Avalonia.Services;
 internal static class TerminalKeySequenceEncoder
 {
     private const string Escape = "\x1B";
+    private const int KittyFlagDisambiguateEscCodes = 0x01;
+    private const int KittyFlagReportAllKeysAsEscapeCodes = 0x08;
 
     public static bool TryEncode(
         Key key,
         KeyModifiers modifiers,
         in TerminalModeState modeState,
+        out string sequence)
+    {
+        return TryEncode(
+            key,
+            modifiers,
+            modeState,
+            kittyKeyboardFlags: 0,
+            out sequence);
+    }
+
+    public static bool TryEncode(
+        Key key,
+        KeyModifiers modifiers,
+        in TerminalModeState modeState,
+        int kittyKeyboardFlags,
         out string sequence)
     {
         bool meta = modifiers.HasFlag(KeyModifiers.Meta);
@@ -35,6 +52,11 @@ internal static class TerminalKeySequenceEncoder
         {
             sequence = string.Empty;
             return false;
+        }
+
+        if (TryEncodeKittyKey(key, shift, alt, ctrl, kittyKeyboardFlags, out sequence))
+        {
+            return true;
         }
 
         if (ctrl && TryEncodeControlChord(key, out string controlSequence))
@@ -263,6 +285,154 @@ internal static class TerminalKeySequenceEncoder
             default:
                 return false;
         }
+    }
+
+    private static bool TryEncodeKittyKey(
+        Key key,
+        bool shift,
+        bool alt,
+        bool ctrl,
+        int kittyKeyboardFlags,
+        out string sequence)
+    {
+        sequence = string.Empty;
+        if (!CanUseKittyEncoding(kittyKeyboardFlags))
+        {
+            return false;
+        }
+
+        int modifiers = GetModifierParameter(shift, alt, ctrl);
+        bool hasModifiers = modifiers > 1;
+
+        if (TryGetKittySpecialCodepoint(key, out int specialCodepoint))
+        {
+            sequence = CreateKittySequence(specialCodepoint, modifiers);
+            return true;
+        }
+
+        if (!TryGetKittyTextCodepoint(key, out int textCodepoint))
+        {
+            return false;
+        }
+
+        // Preserve text-input path for plain printable keys on key-down.
+        if (!hasModifiers)
+        {
+            return false;
+        }
+
+        sequence = CreateKittySequence(textCodepoint, modifiers);
+        return true;
+    }
+
+    private static bool CanUseKittyEncoding(int kittyKeyboardFlags)
+    {
+        return (kittyKeyboardFlags & (KittyFlagDisambiguateEscCodes | KittyFlagReportAllKeysAsEscapeCodes)) != 0;
+    }
+
+    private static bool TryGetKittySpecialCodepoint(Key key, out int codepoint)
+    {
+        codepoint = key switch
+        {
+            Key.Escape => 27,
+            Key.Return => 13,
+            Key.Tab => 9,
+            Key.Back => 127,
+            Key.Insert => 57348,
+            Key.Delete => 57349,
+            Key.Home => 57350,
+            Key.End => 57351,
+            Key.Up => 57352,
+            Key.Down => 57353,
+            Key.Right => 57354,
+            Key.Left => 57355,
+            Key.PageUp => 57356,
+            Key.PageDown => 57357,
+            Key.F1 => 57364,
+            Key.F2 => 57365,
+            Key.F3 => 57366,
+            Key.F4 => 57367,
+            Key.F5 => 57368,
+            Key.F6 => 57369,
+            Key.F7 => 57370,
+            Key.F8 => 57371,
+            Key.F9 => 57372,
+            Key.F10 => 57373,
+            Key.F11 => 57374,
+            Key.F12 => 57375,
+            Key.F13 => 57376,
+            Key.F14 => 57377,
+            Key.F15 => 57378,
+            Key.F16 => 57379,
+            Key.F17 => 57380,
+            Key.F18 => 57381,
+            Key.F19 => 57382,
+            Key.F20 => 57383,
+            Key.NumPad0 => 57399,
+            Key.NumPad1 => 57400,
+            Key.NumPad2 => 57401,
+            Key.NumPad3 => 57402,
+            Key.NumPad4 => 57403,
+            Key.NumPad5 => 57404,
+            Key.NumPad6 => 57405,
+            Key.NumPad7 => 57406,
+            Key.NumPad8 => 57407,
+            Key.NumPad9 => 57408,
+            Key.Decimal => 57409,
+            Key.Divide => 57410,
+            Key.Multiply => 57411,
+            Key.Subtract => 57412,
+            Key.Add => 57413,
+            _ => 0,
+        };
+
+        return codepoint != 0;
+    }
+
+    private static bool TryGetKittyTextCodepoint(Key key, out int codepoint)
+    {
+        if (key >= Key.A && key <= Key.Z)
+        {
+            codepoint = 'a' + (key - Key.A);
+            return true;
+        }
+
+        codepoint = key switch
+        {
+            Key.D0 => '0',
+            Key.D1 => '1',
+            Key.D2 => '2',
+            Key.D3 => '3',
+            Key.D4 => '4',
+            Key.D5 => '5',
+            Key.D6 => '6',
+            Key.D7 => '7',
+            Key.D8 => '8',
+            Key.D9 => '9',
+            Key.Space => ' ',
+            Key.OemMinus => '-',
+            Key.OemPlus => '=',
+            Key.OemOpenBrackets => '[',
+            Key.OemCloseBrackets => ']',
+            Key.OemBackslash => '\\',
+            Key.OemPipe => '\\',
+            Key.OemSemicolon => ';',
+            Key.OemQuotes => '\'',
+            Key.OemTilde => '`',
+            Key.OemComma => ',',
+            Key.OemPeriod => '.',
+            Key.Oem2 => '/',
+            _ => 0,
+        };
+
+        return codepoint != 0;
+    }
+
+    private static string CreateKittySequence(int codepoint, int modifiers)
+    {
+        return modifiers <= 1
+            ? $"{Escape}[{codepoint}u"
+            : $"{Escape}[{codepoint};{modifiers}u";
     }
 
     private static bool TryGetArrowOrHomeEndFinal(Key key, out char final)
