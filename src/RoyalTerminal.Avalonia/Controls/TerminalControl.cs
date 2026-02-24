@@ -319,6 +319,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             {
                 _scrollData.Offset = value.Y;
                 SyncScreenScrollOffsetFromScrollData();
+                UpdateRendererCursorForViewport();
                 _presenter?.Invalidate();
                 RaiseScrollInvalidated();
             }
@@ -542,6 +543,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (_scrollData is not null)
         {
             _scrollViewer?.UpdateViewport(_scrollData.Viewport, nextRenderer.CellHeight);
+            SyncScreenScrollOffsetFromScrollData();
+            UpdateRendererCursorForViewport();
         }
 
         lock (_screen.SyncRoot)
@@ -820,6 +823,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 : safeRows * _renderer.CellHeight;
             _scrollViewer?.UpdateViewport(_scrollData.Viewport, _renderer.CellHeight);
             SyncScreenScrollOffsetFromScrollData();
+            UpdateRendererCursorForViewport();
         }
 
         Endpoint?.SetSize(widthPx, heightPx);
@@ -1001,6 +1005,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data));
 
         TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
+        UpdateRendererCursorForViewport();
     }
 
     /// <summary>
@@ -1015,6 +1020,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data.ToArray()));
 
         TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
+        UpdateRendererCursorForViewport();
     }
 
     private void WriteOutputCore(ReadOnlySpan<byte> data)
@@ -1337,6 +1343,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             TerminalSessionService,
             _presenter,
             RaiseScrollInvalidated);
+        UpdateRendererCursorForViewport();
         e.Handled = true;
     }
 
@@ -1348,7 +1355,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnGotFocus(e);
         Endpoint?.SetFocus(true);
-        _renderer?.SetCursorVisible(true);
+        UpdateRendererCursorForViewport();
         _presenter?.Invalidate();
     }
 
@@ -1421,6 +1428,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public void ScrollByRows(int rows)
     {
         TerminalScrollService.ScrollByRows(rows, _scrollData, _screen, _presenter);
+        UpdateRendererCursorForViewport();
     }
 
     /// <summary>
@@ -1429,6 +1437,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public void ScrollToBottom()
     {
         TerminalScrollService.ScrollToBottom(_scrollData, _screen, _presenter);
+        UpdateRendererCursorForViewport();
     }
 
     /// <summary>
@@ -1835,7 +1844,31 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        _screen.ScrollOffset = _scrollData.ToScreenScrollOffsetRows(_screen.MaxScrollOffset);
+        int nextOffset = _scrollData.ToScreenScrollOffsetRows(_screen.MaxScrollOffset);
+        if (_screen.ScrollOffset == nextOffset)
+        {
+            return;
+        }
+
+        _screen.ScrollOffset = nextOffset;
+        _screen.InvalidateAll();
+    }
+
+    private void UpdateRendererCursorForViewport()
+    {
+        if (_renderer is null || _screen is null || _vtProcessor is null)
+        {
+            return;
+        }
+
+        int cursorColumn = _vtProcessor.CursorCol;
+        int cursorRow = _vtProcessor.CursorRow + _screen.ScrollOffset;
+        _renderer.CursorColumn = cursorColumn;
+        _renderer.CursorRow = cursorRow;
+
+        bool rowVisible = (uint)cursorRow < (uint)_screen.ViewportRows;
+        bool columnVisible = (uint)cursorColumn < (uint)_screen.Columns;
+        _renderer.CursorVisible = _vtProcessor.CursorVisible && rowVisible && columnVisible;
     }
 
     private static Color ArgbToAvaloniaColor(uint argb) =>

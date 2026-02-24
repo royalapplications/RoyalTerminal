@@ -418,6 +418,7 @@ public class RenderingTests
         Assert.Equal(0, diagnostics.FallbackRuns);
         Assert.Equal(0, diagnostics.FallbackFontHits);
         Assert.Equal(0, diagnostics.GridClampedRuns);
+        Assert.Equal(0, diagnostics.SpriteCells);
     }
 
     [Fact]
@@ -479,6 +480,7 @@ public class RenderingTests
         Assert.Equal(0, afterReset.FallbackRuns);
         Assert.Equal(0, afterReset.FallbackFontHits);
         Assert.Equal(0, afterReset.GridClampedRuns);
+        Assert.Equal(0, afterReset.SpriteCells);
     }
 
     [Fact]
@@ -500,6 +502,49 @@ public class RenderingTests
         Assert.Equal(0, diagnostics.FallbackRuns);
         Assert.Equal(0, diagnostics.FallbackFontHits);
         Assert.Equal(0, diagnostics.GridClampedRuns);
+        Assert.Equal(0, diagnostics.SpriteCells);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_SpriteFallback_CountsLineDrawingAndBrailleCells()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableTextRenderDiagnostics = true,
+        };
+
+        using var surface = CreateRenderSurface(renderer, columns: 4, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 4, rows: 1, text: "\u2500\u253C\u2801\u28FF");
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.True(diagnostics.SpriteCells >= 4);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_ShadeBlockSprites_IncreaseFilledPixelsByDensity()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        using var surface = CreateRenderSurface(renderer, columns: 3, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 3, rows: 1, text: "\u2591\u2592\u2593");
+
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+
+        float cellWidth = renderer.CellWidth;
+        float cellHeight = renderer.CellHeight;
+        int lightPixels = CountNonBackgroundPixels(pixels, startX: 0f, cellWidth, cellHeight);
+        int mediumPixels = CountNonBackgroundPixels(pixels, startX: cellWidth, cellWidth, cellHeight);
+        int darkPixels = CountNonBackgroundPixels(pixels, startX: cellWidth * 2f, cellWidth, cellHeight);
+
+        Assert.True(lightPixels > 0);
+        Assert.True(mediumPixels > 0);
+        Assert.True(darkPixels > 0);
+        Assert.NotEqual(lightPixels, darkPixels);
     }
 
     private static void VerifyResolverMatchesSkiaForCodepoint(int codepoint, CultureInfo culture)
@@ -597,6 +642,27 @@ public class RenderingTests
         int width = Math.Max(1, (int)Math.Ceiling(columns * renderer.CellWidth));
         int height = Math.Max(1, (int)Math.Ceiling(rows * renderer.CellHeight));
         return SKSurface.Create(new SKImageInfo(width, height));
+    }
+
+    private static int CountNonBackgroundPixels(SKPixmap pixels, float startX, float cellWidth, float cellHeight)
+    {
+        int count = 0;
+        int minX = Math.Clamp((int)MathF.Floor(startX), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling(startX + cellWidth), 0, pixels.Width);
+        int maxY = Math.Clamp((int)MathF.Ceiling(cellHeight), 0, pixels.Height);
+        for (int y = 0; y < maxY; y++)
+        {
+            for (int x = minX; x < maxX; x++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                if (pixel.Red > 0 || pixel.Green > 0 || pixel.Blue > 0)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
     }
 
     private static TerminalScreen CreateAsciiScreen(int columns, int rows, string text)

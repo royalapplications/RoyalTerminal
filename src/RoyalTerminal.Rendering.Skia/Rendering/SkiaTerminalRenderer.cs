@@ -47,12 +47,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private long _diagnosticFallbackRuns;
     private long _diagnosticFallbackFontHits;
     private long _diagnosticGridClampedRuns;
+    private long _diagnosticSpriteCells;
 
     // Reusable paint objects to avoid per-frame allocation
     private readonly SKPaint _bgPaint;
     private readonly SKPaint _fgPaint;
     private readonly SKPaint _cursorPaint;
     private readonly SKPaint _selectionPaint;
+    private readonly SKPaint _spritePaint;
 
     /// <summary>Cell width in pixels.</summary>
     public float CellWidth => _cellWidth;
@@ -163,6 +165,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
             IsAntialias = false,
             Style = SKPaintStyle.Fill,
             Color = SelectionColor,
+        };
+        _spritePaint = new SKPaint
+        {
+            IsAntialias = false,
+            Style = SKPaintStyle.Fill,
         };
     }
 
@@ -309,6 +316,38 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 continue;
             }
 
+            if (TryGetSpriteCodepoint(in firstCell, out _))
+            {
+                SKColor spriteColor = GetEffectiveForeground(in firstCell);
+                int spriteRunEnd = col + 1;
+                while (spriteRunEnd < cells.Length)
+                {
+                    ref readonly TerminalCell spriteCandidate = ref cells[spriteRunEnd];
+                    if (!IsRenderableGlyphCell(in spriteCandidate))
+                    {
+                        break;
+                    }
+
+                    if (!TryGetSpriteCodepoint(in spriteCandidate, out _))
+                    {
+                        break;
+                    }
+
+                    SKColor nextColor = GetEffectiveForeground(in spriteCandidate);
+                    if (nextColor != spriteColor)
+                    {
+                        break;
+                    }
+
+                    spriteRunEnd++;
+                }
+
+                DrawSpriteRun(canvas, cells, col, spriteRunEnd, y, spriteColor);
+                DrawRunDecorations(canvas, cells, col, spriteRunEnd, y, spriteColor);
+                col = spriteRunEnd;
+                continue;
+            }
+
             bool bold = (firstCell.Attributes & CellAttributes.Bold) != 0;
             bool italic = (firstCell.Attributes & CellAttributes.Italic) != 0;
             SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
@@ -320,6 +359,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
             {
                 ref readonly TerminalCell nextCell = ref cells[runEnd];
                 if (!IsRenderableGlyphCell(in nextCell))
+                {
+                    break;
+                }
+
+                if (TryGetSpriteCodepoint(in nextCell, out _))
                 {
                     break;
                 }
@@ -368,6 +412,440 @@ public sealed class SkiaTerminalRenderer : IDisposable
             DrawRunDecorations(canvas, cells, col, runEnd, y, runColor);
             col = runEnd;
         }
+    }
+
+    private void DrawSpriteRun(
+        SKCanvas canvas,
+        ReadOnlySpan<TerminalCell> cells,
+        int startCol,
+        int endCol,
+        float y,
+        SKColor color)
+    {
+        for (int col = startCol; col < endCol; col++)
+        {
+            ref readonly TerminalCell cell = ref cells[col];
+            if (!TryGetSpriteCodepoint(in cell, out int codepoint))
+            {
+                continue;
+            }
+
+            int cellWidth = cell.Width <= 0 ? 1 : cell.Width;
+            DrawSpriteCell(canvas, codepoint, col, cellWidth, y, color);
+            RecordSpriteCell();
+        }
+    }
+
+    private void DrawSpriteCell(
+        SKCanvas canvas,
+        int codepoint,
+        int column,
+        int widthCells,
+        float y,
+        SKColor color)
+    {
+        float x = column * _cellWidth;
+        float spriteWidth = Math.Max(_cellWidth, _cellWidth * widthCells);
+        float spriteHeight = _cellHeight;
+
+        canvas.Save();
+        canvas.ClipRect(
+            new SKRect(x, y, x + spriteWidth, y + spriteHeight),
+            SKClipOperation.Intersect,
+            antialias: false);
+
+        try
+        {
+            if (TryGetBoxSegments(codepoint, out BoxSegments segments))
+            {
+                DrawBoxSegments(canvas, x, y, spriteWidth, spriteHeight, segments, color);
+                return;
+            }
+
+            if (codepoint >= 0x2800 && codepoint <= 0x28FF)
+            {
+                DrawBraillePattern(canvas, x, y, spriteWidth, spriteHeight, codepoint - 0x2800, color);
+                return;
+            }
+
+            if (TryDrawBlockElement(canvas, x, y, spriteWidth, spriteHeight, codepoint, color))
+            {
+                return;
+            }
+
+            if (TryGetScanLineRatio(codepoint, out float scanLineRatio))
+            {
+                DrawScanLine(canvas, x, y, spriteWidth, spriteHeight, scanLineRatio, color);
+            }
+        }
+        finally
+        {
+            canvas.Restore();
+        }
+    }
+
+    private void DrawBoxSegments(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        BoxSegments segments,
+        SKColor color)
+    {
+        float centerX = x + (width * 0.5f);
+        float centerY = y + (height * 0.5f);
+        float minDimension = MathF.Max(1f, MathF.Min(width, height));
+        float lightThickness = MathF.Max(1f, MathF.Round(minDimension * 0.12f));
+        float heavyThickness = MathF.Max(lightThickness + 1f, MathF.Round(lightThickness * 1.75f));
+
+        float leftThickness = segments.Left == StrokeWeight.Heavy ? heavyThickness : lightThickness;
+        float rightThickness = segments.Right == StrokeWeight.Heavy ? heavyThickness : lightThickness;
+        float upThickness = segments.Up == StrokeWeight.Heavy ? heavyThickness : lightThickness;
+        float downThickness = segments.Down == StrokeWeight.Heavy ? heavyThickness : lightThickness;
+
+        DrawHorizontalSegment(canvas, x, centerX + leftThickness, centerY, leftThickness, segments.Left, color);
+        DrawHorizontalSegment(canvas, centerX - rightThickness, x + width, centerY, rightThickness, segments.Right, color);
+        DrawVerticalSegment(canvas, y, centerY + upThickness, centerX, upThickness, segments.Up, color);
+        DrawVerticalSegment(canvas, centerY - downThickness, y + height, centerX, downThickness, segments.Down, color);
+    }
+
+    private void DrawHorizontalSegment(
+        SKCanvas canvas,
+        float startX,
+        float endX,
+        float centerY,
+        float thickness,
+        StrokeWeight weight,
+        SKColor color)
+    {
+        if (weight == StrokeWeight.None || endX <= startX)
+        {
+            return;
+        }
+
+        _spritePaint.Color = color;
+        float halfThickness = thickness * 0.5f;
+        canvas.DrawRect(startX, centerY - halfThickness, endX - startX, thickness, _spritePaint);
+    }
+
+    private void DrawVerticalSegment(
+        SKCanvas canvas,
+        float startY,
+        float endY,
+        float centerX,
+        float thickness,
+        StrokeWeight weight,
+        SKColor color)
+    {
+        if (weight == StrokeWeight.None || endY <= startY)
+        {
+            return;
+        }
+
+        _spritePaint.Color = color;
+        float halfThickness = thickness * 0.5f;
+        canvas.DrawRect(centerX - halfThickness, startY, thickness, endY - startY, _spritePaint);
+    }
+
+    private void DrawBraillePattern(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        int pattern,
+        SKColor color)
+    {
+        if ((pattern & 0xFF) == 0)
+        {
+            return;
+        }
+
+        float insetX = MathF.Max(0f, width * 0.16f);
+        float insetY = MathF.Max(0f, height * 0.1f);
+        float stepX = MathF.Max(1f, (width - (2f * insetX)) * 0.5f);
+        float stepY = MathF.Max(1f, (height - (2f * insetY)) * 0.25f);
+        float dotWidth = MathF.Max(1f, stepX * 0.45f);
+        float dotHeight = MathF.Max(1f, stepY * 0.45f);
+
+        _spritePaint.Color = color;
+        for (int bit = 0; bit < 8; bit++)
+        {
+            if ((pattern & (1 << bit)) == 0)
+            {
+                continue;
+            }
+
+            (int dotColumn, int dotRow) = bit switch
+            {
+                0 => (0, 0),
+                1 => (0, 1),
+                2 => (0, 2),
+                3 => (1, 0),
+                4 => (1, 1),
+                5 => (1, 2),
+                6 => (0, 3),
+                _ => (1, 3),
+            };
+
+            float cx = x + insetX + (dotColumn * stepX) + (stepX * 0.5f);
+            float cy = y + insetY + (dotRow * stepY) + (stepY * 0.5f);
+            canvas.DrawRect(cx - (dotWidth * 0.5f), cy - (dotHeight * 0.5f), dotWidth, dotHeight, _spritePaint);
+        }
+    }
+
+    private bool TryDrawBlockElement(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        int codepoint,
+        SKColor color)
+    {
+        _spritePaint.Color = color;
+
+        if (codepoint >= 0x2581 && codepoint <= 0x2588)
+        {
+            int eighths = codepoint - 0x2580;
+            float blockHeight = height * (eighths / 8f);
+            float top = y + (height - blockHeight);
+            canvas.DrawRect(x, top, width, blockHeight, _spritePaint);
+            return true;
+        }
+
+        if (codepoint >= 0x2589 && codepoint <= 0x258F)
+        {
+            int eighths = 0x2590 - codepoint;
+            float blockWidth = width * (eighths / 8f);
+            canvas.DrawRect(x, y, blockWidth, height, _spritePaint);
+            return true;
+        }
+
+        switch (codepoint)
+        {
+            case 0x2580:
+                canvas.DrawRect(x, y, width, height * 0.5f, _spritePaint);
+                return true;
+            case 0x2590:
+                canvas.DrawRect(x + (width * 0.5f), y, width * 0.5f, height, _spritePaint);
+                return true;
+            case 0x2591:
+            case 0x2592:
+            case 0x2593:
+            {
+                int fillLevel = codepoint == 0x2591 ? 4 : codepoint == 0x2592 ? 8 : 12;
+                DrawShadePattern(canvas, x, y, width, height, fillLevel, color);
+                return true;
+            }
+            case 0x2594:
+                canvas.DrawRect(x, y, width, height * 0.125f, _spritePaint);
+                return true;
+            case 0x2595:
+                canvas.DrawRect(x + (width * 0.875f), y, width * 0.125f, height, _spritePaint);
+                return true;
+        }
+
+        if (TryGetQuadrantMask(codepoint, out QuadrantMask quadrants))
+        {
+            float halfWidth = width * 0.5f;
+            float halfHeight = height * 0.5f;
+
+            if ((quadrants & QuadrantMask.UpperLeft) != 0)
+            {
+                canvas.DrawRect(x, y, halfWidth, halfHeight, _spritePaint);
+            }
+
+            if ((quadrants & QuadrantMask.UpperRight) != 0)
+            {
+                canvas.DrawRect(x + halfWidth, y, halfWidth, halfHeight, _spritePaint);
+            }
+
+            if ((quadrants & QuadrantMask.LowerLeft) != 0)
+            {
+                canvas.DrawRect(x, y + halfHeight, halfWidth, halfHeight, _spritePaint);
+            }
+
+            if ((quadrants & QuadrantMask.LowerRight) != 0)
+            {
+                canvas.DrawRect(x + halfWidth, y + halfHeight, halfWidth, halfHeight, _spritePaint);
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private void DrawScanLine(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        float ratio,
+        SKColor color)
+    {
+        _spritePaint.Color = color;
+        float thickness = MathF.Max(1f, MathF.Round(height * 0.1f));
+        float lineY = y + (height * ratio) - (thickness * 0.5f);
+        canvas.DrawRect(x, lineY, width, thickness, _spritePaint);
+    }
+
+    private void DrawShadePattern(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        int fillLevel,
+        SKColor color)
+    {
+        if (fillLevel <= 0)
+        {
+            return;
+        }
+
+        ReadOnlySpan<int> matrix =
+        [
+            0, 8, 2, 10,
+            12, 4, 14, 6,
+            3, 11, 1, 9,
+            15, 7, 13, 5,
+        ];
+
+        float cellWidth = width / 4f;
+        float cellHeight = height / 4f;
+        _spritePaint.Color = color;
+
+        for (int row = 0; row < 4; row++)
+        {
+            for (int col = 0; col < 4; col++)
+            {
+                int threshold = matrix[(row * 4) + col];
+                if (threshold >= fillLevel)
+                {
+                    continue;
+                }
+
+                float px = x + (col * cellWidth);
+                float py = y + (row * cellHeight);
+                canvas.DrawRect(px, py, cellWidth, cellHeight, _spritePaint);
+            }
+        }
+    }
+
+    private static bool TryGetSpriteCodepoint(ref readonly TerminalCell cell, out int codepoint)
+    {
+        if (!TryGetCellCodepoint(in cell, out codepoint))
+        {
+            return false;
+        }
+
+        if (TryGetBoxSegments(codepoint, out _))
+        {
+            return true;
+        }
+
+        if ((codepoint >= 0x2800 && codepoint <= 0x28FF) ||
+            TryGetScanLineRatio(codepoint, out _) ||
+            (codepoint >= 0x2580 && codepoint <= 0x259F))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetCellCodepoint(ref readonly TerminalCell cell, out int codepoint)
+    {
+        codepoint = 0;
+        if (!string.IsNullOrEmpty(cell.Grapheme))
+        {
+            if (Rune.DecodeFromUtf16(cell.Grapheme.AsSpan(), out Rune rune, out int charsConsumed) != OperationStatus.Done ||
+                charsConsumed != cell.Grapheme.Length)
+            {
+                return false;
+            }
+
+            codepoint = rune.Value;
+            return true;
+        }
+
+        if (!Rune.IsValid(cell.Codepoint))
+        {
+            return false;
+        }
+
+        codepoint = cell.Codepoint;
+        return true;
+    }
+
+    private static bool TryGetScanLineRatio(int codepoint, out float ratio)
+    {
+        ratio = codepoint switch
+        {
+            0x23BA => 0.125f,
+            0x23BB => 0.375f,
+            0x23BC => 0.625f,
+            0x23BD => 0.875f,
+            _ => 0f,
+        };
+
+        return ratio > 0f;
+    }
+
+    private static bool TryGetBoxSegments(int codepoint, out BoxSegments segments)
+    {
+        segments = codepoint switch
+        {
+            0x2500 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None),
+            0x2501 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None),
+            0x2502 => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light),
+            0x2503 => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x250C => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Light),
+            0x250F => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy),
+            0x2510 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.None, StrokeWeight.Light),
+            0x2513 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy),
+            0x2514 => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None),
+            0x2517 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None),
+            0x2518 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.None),
+            0x251B => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None),
+            0x251C => new BoxSegments(StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Light),
+            0x2523 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x2524 => new BoxSegments(StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Light, StrokeWeight.Light),
+            0x252B => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            0x252C => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None, StrokeWeight.Light),
+            0x2533 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Heavy),
+            0x2534 => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.None),
+            0x253B => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None),
+            0x253C => new BoxSegments(StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Light, StrokeWeight.Light),
+            0x254B => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy),
+            _ => default,
+        };
+
+        return segments != default;
+    }
+
+    private static bool TryGetQuadrantMask(int codepoint, out QuadrantMask mask)
+    {
+        mask = codepoint switch
+        {
+            0x2596 => QuadrantMask.LowerLeft,
+            0x2597 => QuadrantMask.LowerRight,
+            0x2598 => QuadrantMask.UpperLeft,
+            0x2599 => QuadrantMask.UpperLeft | QuadrantMask.LowerLeft | QuadrantMask.LowerRight,
+            0x259A => QuadrantMask.UpperLeft | QuadrantMask.LowerRight,
+            0x259B => QuadrantMask.UpperLeft | QuadrantMask.UpperRight | QuadrantMask.LowerLeft,
+            0x259C => QuadrantMask.UpperLeft | QuadrantMask.UpperRight | QuadrantMask.LowerRight,
+            0x259D => QuadrantMask.UpperRight,
+            0x259E => QuadrantMask.UpperRight | QuadrantMask.LowerLeft,
+            0x259F => QuadrantMask.UpperRight | QuadrantMask.LowerLeft | QuadrantMask.LowerRight,
+            _ => QuadrantMask.None,
+        };
+
+        return mask != QuadrantMask.None;
     }
 
     private void DrawShapedTextRun(
@@ -882,14 +1360,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 Interlocked.Exchange(ref _diagnosticShapedRuns, 0),
                 Interlocked.Exchange(ref _diagnosticFallbackRuns, 0),
                 Interlocked.Exchange(ref _diagnosticFallbackFontHits, 0),
-                Interlocked.Exchange(ref _diagnosticGridClampedRuns, 0));
+                Interlocked.Exchange(ref _diagnosticGridClampedRuns, 0),
+                Interlocked.Exchange(ref _diagnosticSpriteCells, 0));
         }
 
         TextRenderDiagnostics snapshot = new(
             Volatile.Read(ref _diagnosticShapedRuns),
             Volatile.Read(ref _diagnosticFallbackRuns),
             Volatile.Read(ref _diagnosticFallbackFontHits),
-            Volatile.Read(ref _diagnosticGridClampedRuns));
+            Volatile.Read(ref _diagnosticGridClampedRuns),
+            Volatile.Read(ref _diagnosticSpriteCells));
 
         return snapshot;
     }
@@ -903,6 +1383,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         Interlocked.Exchange(ref _diagnosticFallbackRuns, 0);
         Interlocked.Exchange(ref _diagnosticFallbackFontHits, 0);
         Interlocked.Exchange(ref _diagnosticGridClampedRuns, 0);
+        Interlocked.Exchange(ref _diagnosticSpriteCells, 0);
     }
 
     public void Dispose()
@@ -914,6 +1395,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _fgPaint.Dispose();
         _cursorPaint.Dispose();
         _selectionPaint.Dispose();
+        _spritePaint.Dispose();
         _textShaper.Dispose();
         _fontResolver.Dispose();
         _shapedRunCache.Clear();
@@ -963,12 +1445,44 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordSpriteCell()
+    {
+        if (EnableTextRenderDiagnostics)
+        {
+            Interlocked.Increment(ref _diagnosticSpriteCells);
+        }
+    }
+
     private enum GridPlacementMode
     {
         Natural,
         Clamped,
         UnsafeFallback,
     }
+
+    private enum StrokeWeight : byte
+    {
+        None = 0,
+        Light = 1,
+        Heavy = 2,
+    }
+
+    [Flags]
+    private enum QuadrantMask : byte
+    {
+        None = 0,
+        UpperLeft = 1 << 0,
+        UpperRight = 1 << 1,
+        LowerLeft = 1 << 2,
+        LowerRight = 1 << 3,
+    }
+
+    private readonly record struct BoxSegments(
+        StrokeWeight Left,
+        StrokeWeight Right,
+        StrokeWeight Up,
+        StrokeWeight Down);
 }
 
 /// <summary>
