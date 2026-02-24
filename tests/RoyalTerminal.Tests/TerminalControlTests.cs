@@ -4,7 +4,9 @@
 
 using System.Runtime.InteropServices;
 using System.Text;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
@@ -461,6 +463,79 @@ public class TerminalControlTests
         Assert.True(control.Screen.TotalRows > initialTotalRows);
         Assert.True(control.ScrollData.Extent > initialExtent);
         Assert.True(control.ScrollData.MaxOffset > 0);
+    }
+
+    [AvaloniaFact]
+    public void Control_ScrollingBack_HidesCursorUntilBottom()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.ScrollData);
+        Assert.NotNull(control.Screen);
+        Assert.NotNull(control.Renderer);
+
+        for (int i = 0; i < 128; i++)
+        {
+            control.WriteOutput("line\n"u8);
+        }
+
+        TerminalScreen screen = control.Screen!;
+        SkiaTerminalRenderer renderer = control.Renderer!;
+
+        Assert.True(control.ScrollData!.MaxOffset > 0);
+        Assert.True(renderer.CursorVisible);
+
+        ((IScrollable)control).Offset = new Vector(0, 0);
+
+        Assert.True(screen.ScrollOffset > 0);
+        Assert.False(renderer.CursorVisible);
+
+        control.ScrollToBottom();
+
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.True(renderer.CursorVisible);
+    }
+
+    [AvaloniaFact]
+    public void Control_OffsetScroll_MarksViewportRowsDirty()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.ScrollData);
+        Assert.NotNull(control.Screen);
+        TerminalScreen screen = control.Screen!;
+
+        for (int i = 0; i < 128; i++)
+        {
+            control.WriteOutput("line\n"u8);
+        }
+
+        Assert.True(control.ScrollData!.MaxOffset > 0);
+
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            screen.GetViewportRow(row).IsDirty = false;
+        }
+
+        ((IScrollable)control).Offset = new Vector(0, 0);
+
+        bool hasDirtyRow = false;
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            if (screen.GetViewportRow(row).IsDirty)
+            {
+                hasDirtyRow = true;
+                break;
+            }
+        }
+
+        Assert.True(hasDirtyRow);
     }
 
     [AvaloniaFact]

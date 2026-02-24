@@ -48,7 +48,6 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
     {
         scrollData?.ScrollByRows(rows);
         SyncScreenScrollOffset(scrollData, screen);
-        screen?.InvalidateAll();
         presenter?.Invalidate();
     }
 
@@ -60,7 +59,6 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
     {
         scrollData?.ScrollToBottom();
         SyncScreenScrollOffset(scrollData, screen);
-        screen?.InvalidateAll();
         presenter?.Invalidate();
     }
 
@@ -110,6 +108,13 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
             return;
         }
 
-        screen.ScrollOffset = scrollData.ToScreenScrollOffsetRows(screen.MaxScrollOffset);
+        int nextOffset = scrollData.ToScreenScrollOffsetRows(screen.MaxScrollOffset);
+        if (screen.ScrollOffset == nextOffset)
+        {
+            return;
+        }
+
+        screen.ScrollOffset = nextOffset;
+        screen.InvalidateAll();
     }
 }
