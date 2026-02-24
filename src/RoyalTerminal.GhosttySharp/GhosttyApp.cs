@@ -182,62 +182,141 @@ public sealed class GhosttyApp : IDisposable
 
     // Native callback trampolines using UnmanagedCallersOnly
 
+    private static bool TryGetApp(nint userdata, out GhosttyApp? app)
+    {
+        app = null;
+        if (userdata == nint.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (GCHandle.FromIntPtr(userdata).Target is GhosttyApp resolved)
+            {
+                app = resolved;
+                return true;
+            }
+        }
+        catch
+        {
+            // Ignore stale or invalid userdata handles.
+        }
+
+        return false;
+    }
+
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void OnWakeupNative(nint userdata)
     {
-        if (userdata == nint.Zero) return;
-        if (GCHandle.FromIntPtr(userdata).Target is GhosttyApp app)
+        if (!TryGetApp(userdata, out GhosttyApp? app) || app is null)
+        {
+            return;
+        }
+
+        try
+        {
             app.WakeupRequested?.Invoke();
+        }
+        catch
+        {
+            // Swallow callback exceptions to avoid tearing down the process.
+        }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static byte OnActionNative(nint appHandle, GhosttyTarget target, GhosttyAction action)
     {
-        // We need to find our app from the userdata, which is stored in the runtime config
-        var userdata = GhosttyNative.AppUserdata(appHandle);
-        if (userdata == nint.Zero) return 0;
-
-        if (GCHandle.FromIntPtr(userdata).Target is GhosttyApp app)
+        try
         {
-            var result = app.ActionRequested?.Invoke(target, action);
+            // We need to find our app from the userdata, which is stored in the runtime config.
+            nint userdata = GhosttyNative.AppUserdata(appHandle);
+            if (!TryGetApp(userdata, out GhosttyApp? app) || app is null)
+            {
+                return 0;
+            }
+
+            bool? result = app.ActionRequested?.Invoke(target, action);
             return (byte)(result == true ? 1 : 0);
         }
-        return 0;
+        catch
+        {
+            // Never let managed exceptions escape unmanaged callback entrypoints.
+            return 0;
+        }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void OnReadClipboardNative(nint userdata, GhosttyClipboard clipboard, nint state)
     {
-        if (userdata == nint.Zero) return;
-        if (GCHandle.FromIntPtr(userdata).Target is GhosttyApp app)
+        if (!TryGetApp(userdata, out GhosttyApp? app) || app is null)
+        {
+            return;
+        }
+
+        try
+        {
             app.ClipboardReadRequested?.Invoke(clipboard, state);
+        }
+        catch
+        {
+            // Swallow callback exceptions to avoid tearing down the process.
+        }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static unsafe void OnConfirmReadClipboardNative(nint userdata, nint str, nint state, GhosttyClipboardRequest request)
     {
-        if (userdata == nint.Zero) return;
-        if (GCHandle.FromIntPtr(userdata).Target is GhosttyApp app)
+        if (!TryGetApp(userdata, out GhosttyApp? app) || app is null)
+        {
+            return;
+        }
+
+        try
         {
             var text = str != nint.Zero ? Marshal.PtrToStringUTF8(str) : null;
             app.ClipboardConfirmReadRequested?.Invoke(text, state, request);
+        }
+        catch
+        {
+            // Swallow callback exceptions to avoid tearing down the process.
         }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void OnWriteClipboardNative(nint userdata, GhosttyClipboard clipboard, nint content, nuint len, byte confirm)
     {
-        if (userdata == nint.Zero) return;
-        if (GCHandle.FromIntPtr(userdata).Target is GhosttyApp app)
+        if (!TryGetApp(userdata, out GhosttyApp? app) || app is null)
+        {
+            return;
+        }
+
+        try
+        {
             app.ClipboardWriteRequested?.Invoke(clipboard, content, len, confirm != 0);
+        }
+        catch
+        {
+            // Swallow callback exceptions to avoid tearing down the process.
+        }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void OnCloseSurfaceNative(nint userdata, byte processAlive)
     {
-        if (userdata == nint.Zero) return;
-        if (GCHandle.FromIntPtr(userdata).Target is GhosttyApp app)
+        if (!TryGetApp(userdata, out GhosttyApp? app) || app is null)
+        {
+            return;
+        }
+
+        try
+        {
             app.SurfaceCloseRequested?.Invoke(processAlive != 0);
+        }
+        catch
+        {
+            // Swallow callback exceptions to avoid tearing down the process.
+        }
     }
 
     public void Dispose()

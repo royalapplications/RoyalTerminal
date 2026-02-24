@@ -2,6 +2,8 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia - Terminal cell model.
 
+using RoyalTerminal.Terminal.Theming;
+
 namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
@@ -109,6 +111,8 @@ public sealed class TerminalScreen
     private readonly List<TerminalRow> _rows;
     private int _scrollbackLimit;
     private int _viewportTop;
+    private TerminalTheme _theme = TerminalTheme.Dark;
+    private long _themeRevision;
 
     /// <summary>Number of visible rows in the viewport.</summary>
     public int ViewportRows { get; private set; }
@@ -135,6 +139,15 @@ public sealed class TerminalScreen
     /// <summary>Default background color.</summary>
     public uint DefaultBackground { get; set; } = 0xFF1E1E1E;
 
+    /// <summary>The active immutable terminal theme snapshot.</summary>
+    public TerminalTheme Theme => _theme;
+
+    /// <summary>
+    /// Monotonically increasing theme revision.
+    /// Incremented each time <see cref="ApplyTheme"/> is called.
+    /// </summary>
+    public long ThemeRevision => _themeRevision;
+
     /// <summary>Lock object for thread-safe access from UI and composition threads.</summary>
     public object SyncRoot { get; } = new object();
 
@@ -144,10 +157,125 @@ public sealed class TerminalScreen
         ViewportRows = viewportRows;
         _scrollbackLimit = scrollbackLimit;
         _rows = new List<TerminalRow>(viewportRows);
+        _theme = _theme
+            .WithDefaultForeground(DefaultForeground)
+            .WithDefaultBackground(DefaultBackground)
+            .WithCursorColor(DefaultForeground);
 
         // Initialize visible rows
         for (var i = 0; i < viewportRows; i++)
             _rows.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground));
+    }
+
+    /// <summary>
+    /// Applies a new immutable theme snapshot to this screen.
+    /// </summary>
+    public void ApplyTheme(TerminalTheme theme, bool invalidateRows = true)
+    {
+        ArgumentNullException.ThrowIfNull(theme);
+
+        TerminalTheme previousTheme = _theme;
+        Dictionary<uint, uint> colorRemap = BuildColorRemap(previousTheme, theme);
+
+        if (colorRemap.Count > 0)
+        {
+            RemapExistingCellColors(colorRemap);
+        }
+
+        _theme = theme;
+        _themeRevision++;
+        DefaultForeground = theme.DefaultForeground;
+        DefaultBackground = theme.DefaultBackground;
+
+        if (invalidateRows)
+        {
+            InvalidateAll();
+        }
+    }
+
+    private void RemapExistingCellColors(IReadOnlyDictionary<uint, uint> colorRemap)
+    {
+        for (int rowIndex = 0; rowIndex < _rows.Count; rowIndex++)
+        {
+            TerminalRow row = _rows[rowIndex];
+            Span<TerminalCell> cells = row.Cells;
+            bool changed = false;
+
+            for (int col = 0; col < cells.Length; col++)
+            {
+                ref TerminalCell cell = ref cells[col];
+
+                if (colorRemap.TryGetValue(cell.Foreground, out uint mappedFg))
+                {
+                    cell.Foreground = mappedFg;
+                    changed = true;
+                }
+
+                if (colorRemap.TryGetValue(cell.Background, out uint mappedBg))
+                {
+                    cell.Background = mappedBg;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                row.IsDirty = true;
+            }
+        }
+    }
+
+    private static Dictionary<uint, uint> BuildColorRemap(TerminalTheme previousTheme, TerminalTheme nextTheme)
+    {
+        Dictionary<uint, uint> remap = new(capacity: 258);
+        HashSet<uint> ambiguousSources = new();
+
+        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultForeground, nextTheme.DefaultForeground);
+        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultBackground, nextTheme.DefaultBackground);
+
+        for (int i = 0; i < 256; i++)
+        {
+            AddColorRemap(remap, ambiguousSources, previousTheme.Palette[i], nextTheme.Palette[i]);
+        }
+
+        return remap;
+    }
+
+    private static void AddColorRemap(
+        IDictionary<uint, uint> remap,
+        ISet<uint> ambiguousSources,
+        uint source,
+        uint target)
+    {
+        if (source == target || ambiguousSources.Contains(source))
+        {
+            return;
+        }
+
+        if (!remap.TryGetValue(source, out uint existing))
+        {
+            remap[source] = target;
+            return;
+        }
+
+        if (existing != target)
+        {
+            remap.Remove(source);
+            ambiguousSources.Add(source);
+        }
+    }
+
+    /// <summary>
+    /// Resolves an indexed ANSI/256 palette color from the active theme.
+    /// </summary>
+    public uint ResolvePaletteColor(int index)
+    {
+        if ((uint)index >= 256)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        return _theme.Palette[index];
     }
 
     /// <summary>

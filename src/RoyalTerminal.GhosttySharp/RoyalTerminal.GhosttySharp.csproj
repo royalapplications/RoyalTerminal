@@ -11,4 +11,8 @@
     <None Include="../../README.md" Pack="true" PackagePath="" Condition="Exists('../../README.md')" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
+  </ItemGroup>
+
 </Project>

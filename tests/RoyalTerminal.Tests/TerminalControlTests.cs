@@ -12,6 +12,7 @@ using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Terminal;
+using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
 using RoyalTerminal.Terminal.Transport.Ssh;
 using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
@@ -259,6 +260,58 @@ public class TerminalControlTests
         Assert.NotNull(control.Screen);
         Assert.Equal(ColorToArgb(foreground), control.Screen!.DefaultForeground);
         Assert.Equal(ColorToArgb(background), control.Screen.DefaultBackground);
+    }
+
+    [AvaloniaFact]
+    public void Control_LegacyColorProperties_UpdateNeutralTheme()
+    {
+        var control = new TerminalControl();
+        Color foreground = Color.FromRgb(0x22, 0x44, 0x66);
+        Color background = Color.FromRgb(0x11, 0x33, 0x55);
+
+        control.DefaultForeground = foreground;
+        control.DefaultBackground = background;
+
+        Assert.NotNull(control.Theme);
+        Assert.Equal(ColorToArgb(foreground), control.Theme!.DefaultForeground);
+        Assert.Equal(ColorToArgb(background), control.Theme.DefaultBackground);
+    }
+
+    [AvaloniaFact]
+    public void Control_ApplyTheme_UpdatesLegacyDefaultProperties()
+    {
+        var control = new TerminalControl();
+        TerminalTheme theme = TerminalTheme.Dark
+            .WithDefaultForeground(0xFF102030u)
+            .WithDefaultBackground(0xFF405060u)
+            .WithCursorColor(0xFF708090u);
+
+        control.ApplyTheme(theme);
+
+        Assert.Equal(0xFF102030u, ColorToArgb(control.DefaultForeground));
+        Assert.Equal(0xFF405060u, ColorToArgb(control.DefaultBackground));
+        Assert.NotNull(control.Theme);
+        Assert.Equal(0xFF708090u, control.Theme!.CursorColor);
+    }
+
+    [AvaloniaFact]
+    public void Control_ApplyTheme_PropagatesToThemeSinkProcessor()
+    {
+        ThemeTrackingVtProcessorFactory factory = new();
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            factory,
+            new DefaultPtyFactory());
+
+        TerminalTheme theme = TerminalTheme.Dark.WithDefaultForeground(0xFFAABBCCu);
+        control.ApplyTheme(theme);
+
+        Assert.NotNull(factory.LastProcessor);
+        Assert.NotNull(factory.LastProcessor!.LastAppliedTheme);
+        Assert.Equal(0xFFAABBCCu, factory.LastProcessor.LastAppliedTheme!.DefaultForeground);
     }
 
     [AvaloniaFact]
@@ -794,6 +847,81 @@ public class TerminalControlTests
 
         public void Reset()
         {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class ThemeTrackingVtProcessorFactory : IVtProcessorFactory
+    {
+        public ThemeTrackingVtProcessor? LastProcessor { get; private set; }
+
+        public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
+        {
+            _ = screen;
+            _ = preference;
+            ThemeTrackingVtProcessor processor = new();
+            LastProcessor = processor;
+            return processor;
+        }
+    }
+
+    private sealed class ThemeTrackingVtProcessor : IVtProcessor, ITerminalThemeSink
+    {
+        public int CursorCol => 0;
+        public int CursorRow => 0;
+        public bool CursorVisible => true;
+        public bool ApplicationCursorKeys => false;
+        public bool ApplicationKeypad => false;
+        public bool AlternateScreen => false;
+        public bool BracketedPaste => false;
+        public TerminalModeState ModeState => new(
+            CursorVisible,
+            ApplicationCursorKeys,
+            ApplicationKeypad,
+            AlternateScreen,
+            BracketedPaste);
+
+        public TerminalTheme? LastAppliedTheme { get; private set; }
+
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Action<byte[]>? ResponseCallback { get; set; }
+        public Action? BellCallback { get; set; }
+        public Action<string>? TitleCallback { get; set; }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            _ = data;
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            _ = columns;
+            _ = rows;
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            _ = columns;
+            _ = rows;
+            _ = widthPx;
+            _ = heightPx;
+        }
+
+        public void Reset()
+        {
+        }
+
+        public void ApplyTheme(TerminalTheme theme)
+        {
+            LastAppliedTheme = theme;
         }
 
         public void Dispose()

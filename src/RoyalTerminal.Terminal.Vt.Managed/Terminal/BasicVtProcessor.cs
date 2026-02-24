@@ -7,7 +7,9 @@
 // DEC line-drawing character set, erase, insert/delete lines & characters, and tabs.
 
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Unicode;
+using System.Globalization;
 using System.Text;
 
 namespace RoyalTerminal.Terminal;
@@ -21,7 +23,7 @@ namespace RoyalTerminal.Terminal;
 /// of the VT protocol to render typical shell output and full-screen TUI
 /// applications such as Midnight Commander, htop, vim, etc.
 /// </summary>
-public sealed class BasicVtProcessor : IVtProcessor
+public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink
 {
     private const int MaxDcsBufferBytes = 4096;
 
@@ -31,6 +33,7 @@ public sealed class BasicVtProcessor : IVtProcessor
     private uint _currentFg;
     private uint _currentBg;
     private CellAttributes _currentAttrs;
+    private TerminalTheme _theme;
 
     // Parser state machine
     private ParserState _state = ParserState.Ground;
@@ -154,6 +157,7 @@ public sealed class BasicVtProcessor : IVtProcessor
     public BasicVtProcessor(TerminalScreen screen)
     {
         _screen = screen;
+        _theme = screen.Theme;
         _currentFg = screen.DefaultForeground;
         _currentBg = screen.DefaultBackground;
         _scrollBottom = screen.ViewportRows - 1;
@@ -959,64 +963,94 @@ public sealed class BasicVtProcessor : IVtProcessor
                 break;
 
             case 4:
-                // OSC 4;index;? — palette query.
-                HandleOscPaletteQuery(value);
+                HandleOscPalette(value);
                 break;
 
             case 10:
-                // OSC 10;? — foreground query.
-                if (value == "?")
-                {
-                    SendOscColorResponse("10", _screen.DefaultForeground);
-                }
-
+                HandleOscDynamicColor(selectorCode, value);
                 break;
 
             case 11:
-                // OSC 11;? — background query.
-                if (value == "?")
-                {
-                    SendOscColorResponse("11", _screen.DefaultBackground);
-                }
-
+                HandleOscDynamicColor(selectorCode, value);
                 break;
 
             case 12:
-                // OSC 12;? — cursor color query.
-                if (value == "?")
-                {
-                    SendOscColorResponse("12", _screen.DefaultForeground);
-                }
-
+                HandleOscDynamicColor(selectorCode, value);
                 break;
         }
     }
 
-    private void HandleOscPaletteQuery(string value)
+    private void HandleOscPalette(string value)
     {
-        int separator = value.IndexOf(';');
-        if (separator <= 0)
+        string[] parts = value.Split(';', StringSplitOptions.TrimEntries);
+        if (parts.Length < 2)
         {
             return;
         }
 
-        ReadOnlySpan<char> indexPart = value.AsSpan(0, separator);
-        ReadOnlySpan<char> queryPart = value.AsSpan(separator + 1);
-        if (!queryPart.SequenceEqual("?".AsSpan()))
+        TerminalTheme nextTheme = _theme;
+        bool changed = false;
+        for (int i = 0; i + 1 < parts.Length; i += 2)
+        {
+            if (!int.TryParse(parts[i], out int colorIndex))
+            {
+                continue;
+            }
+
+            colorIndex = Math.Clamp(colorIndex, 0, 255);
+            string colorSpec = parts[i + 1];
+            if (colorSpec == "?")
+            {
+                uint color = PaletteColor(colorIndex);
+                string rgb = FormatRgbColor(color);
+                string response = $"\x1b]4;{colorIndex};{rgb}\x1b\\";
+                ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+                continue;
+            }
+
+            if (!TryParseOscColorSpec(colorSpec, out uint parsedColor))
+            {
+                continue;
+            }
+
+            nextTheme = nextTheme.WithPaletteColor(colorIndex, parsedColor, explicitOverride: true);
+            changed = true;
+        }
+
+        if (changed)
+        {
+            ApplyTheme(nextTheme);
+        }
+    }
+
+    private void HandleOscDynamicColor(int selectorCode, string value)
+    {
+        if (value == "?")
+        {
+            uint queryColor = selectorCode switch
+            {
+                10 => _screen.DefaultForeground,
+                11 => _screen.DefaultBackground,
+                12 => _theme.CursorColor,
+                _ => _screen.DefaultForeground,
+            };
+            SendOscColorResponse(selectorCode.ToString(), queryColor);
+            return;
+        }
+
+        if (!TryParseOscColorSpec(value, out uint parsedColor))
         {
             return;
         }
 
-        if (!int.TryParse(indexPart, out int colorIndex))
+        TerminalTheme nextTheme = selectorCode switch
         {
-            return;
-        }
-
-        colorIndex = Math.Clamp(colorIndex, 0, 255);
-        uint color = Color256(colorIndex);
-        string rgb = FormatRgbColor(color);
-        string response = $"\x1b]4;{colorIndex};{rgb}\x1b\\";
-        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+            10 => _theme.WithDefaultForeground(parsedColor),
+            11 => _theme.WithDefaultBackground(parsedColor),
+            12 => _theme.WithCursorColor(parsedColor),
+            _ => _theme,
+        };
+        ApplyTheme(nextTheme);
     }
 
     private void SendOscColorResponse(string selector, uint argbColor)
@@ -1026,12 +1060,15 @@ public sealed class BasicVtProcessor : IVtProcessor
         ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
     }
 
-    private static string FormatRgbColor(uint argbColor)
+    private string FormatRgbColor(uint argbColor)
     {
         int red = (int)((argbColor >> 16) & 0xFF);
         int green = (int)((argbColor >> 8) & 0xFF);
         int blue = (int)(argbColor & 0xFF);
-        return $"rgb:{red * 0x101:X4}/{green * 0x101:X4}/{blue * 0x101:X4}";
+
+        return _theme.OscColorReportFormat == TerminalOscColorReportFormat.Bit8
+            ? $"rgb:{red:X2}/{green:X2}/{blue:X2}"
+            : $"rgb:{red * 0x101:X4}/{green * 0x101:X4}/{blue * 0x101:X4}";
     }
 
     private void ProcessDcsString(byte b)
@@ -1680,7 +1717,7 @@ public sealed class BasicVtProcessor : IVtProcessor
 
                 // Standard foreground colors
                 case >= 30 and <= 37:
-                    _currentFg = StandardColor(p - 30);
+                    _currentFg = PaletteColor(p - 30);
                     break;
                 case 39:
                     _currentFg = _screen.DefaultForeground;
@@ -1688,7 +1725,7 @@ public sealed class BasicVtProcessor : IVtProcessor
 
                 // Standard background colors
                 case >= 40 and <= 47:
-                    _currentBg = StandardColor(p - 40);
+                    _currentBg = PaletteColor(p - 40);
                     break;
                 case 49:
                     _currentBg = _screen.DefaultBackground;
@@ -1696,12 +1733,12 @@ public sealed class BasicVtProcessor : IVtProcessor
 
                 // Bright foreground colors
                 case >= 90 and <= 97:
-                    _currentFg = BrightColor(p - 90);
+                    _currentFg = PaletteColor(p - 82);
                     break;
 
                 // Bright background colors
                 case >= 100 and <= 107:
-                    _currentBg = BrightColor(p - 100);
+                    _currentBg = PaletteColor(p - 92);
                     break;
 
                 // 256-color and truecolor
@@ -1710,7 +1747,7 @@ public sealed class BasicVtProcessor : IVtProcessor
                     {
                         if (_params[i + 1] == 5 && i + 2 < _params.Count)
                         {
-                            _currentFg = Color256(_params[i + 2]);
+                            _currentFg = PaletteColor(_params[i + 2]);
                             i += 2;
                         }
                         else if (_params[i + 1] == 2 && i + 4 < _params.Count)
@@ -1727,7 +1764,7 @@ public sealed class BasicVtProcessor : IVtProcessor
                     {
                         if (_params[i + 1] == 5 && i + 2 < _params.Count)
                         {
-                            _currentBg = Color256(_params[i + 2]);
+                            _currentBg = PaletteColor(_params[i + 2]);
                             i += 2;
                         }
                         else if (_params[i + 1] == 2 && i + 4 < _params.Count)
@@ -2026,52 +2063,41 @@ public sealed class BasicVtProcessor : IVtProcessor
 
     #endregion
 
-    #region Color Tables
+    #region Colors
 
-    private static uint StandardColor(int index) => index switch
+    private uint PaletteColor(int index)
     {
-        0 => 0xFF000000, // Black
-        1 => 0xFFCC0000, // Red
-        2 => 0xFF4E9A06, // Green
-        3 => 0xFFC4A000, // Yellow
-        4 => 0xFF3465A4, // Blue
-        5 => 0xFF75507B, // Magenta
-        6 => 0xFF06989A, // Cyan
-        7 => 0xFFD3D7CF, // White
-        _ => 0xFFD4D4D4,
-    };
+        index = Math.Clamp(index, 0, 255);
+        return _theme.Palette[index];
+    }
 
-    private static uint BrightColor(int index) => index switch
+    private static bool TryParseOscColorSpec(string value, out uint color)
     {
-        0 => 0xFF555753, // Bright Black
-        1 => 0xFFEF2929, // Bright Red
-        2 => 0xFF8AE234, // Bright Green
-        3 => 0xFFFCE94F, // Bright Yellow
-        4 => 0xFF729FCF, // Bright Blue
-        5 => 0xFFAD7FA8, // Bright Magenta
-        6 => 0xFF34E2E2, // Bright Cyan
-        7 => 0xFFEEEEEC, // Bright White
-        _ => 0xFFFFFFFF,
-    };
-
-    private static uint Color256(int index)
-    {
-        if (index < 8) return StandardColor(index);
-        if (index < 16) return BrightColor(index - 8);
-
-        // 216-color cube (6x6x6): indices 16-231
-        if (index < 232)
+        color = 0;
+        string token = value.Trim();
+        if (token.Length == 0)
         {
-            var i = index - 16;
-            var r = (i / 36) * 51;
-            var g = ((i / 6) % 6) * 51;
-            var b = (i % 6) * 51;
-            return 0xFF000000 | ((uint)r << 16) | ((uint)g << 8) | (uint)b;
+            return false;
         }
 
-        // Grayscale ramp: indices 232-255
-        var gray = (index - 232) * 10 + 8;
-        return 0xFF000000 | ((uint)gray << 16) | ((uint)gray << 8) | (uint)gray;
+        if (token.StartsWith('#'))
+        {
+            return TerminalThemeParser.TryParseColor(token, out color);
+        }
+
+        if (token.StartsWith("rgb:", StringComparison.OrdinalIgnoreCase))
+        {
+            return TerminalThemeParser.TryParseColor(token, out color);
+        }
+
+        if (token.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            uint.TryParse(token.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint packed))
+        {
+            color = (packed & 0x00FFFFFFu) | 0xFF000000u;
+            return true;
+        }
+
+        return false;
     }
 
     #endregion
@@ -2149,6 +2175,68 @@ public sealed class BasicVtProcessor : IVtProcessor
     public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
     {
         NotifyResize(columns, rows);
+    }
+
+    /// <inheritdoc />
+    public void ApplyTheme(TerminalTheme theme)
+    {
+        ArgumentNullException.ThrowIfNull(theme);
+
+        TerminalTheme previousTheme = _theme;
+        Dictionary<uint, uint> colorRemap = BuildColorRemap(previousTheme, theme);
+
+        _theme = theme;
+        _screen.ApplyTheme(theme, invalidateRows: true);
+
+        _currentFg = RemapColor(_currentFg, colorRemap);
+        _currentBg = RemapColor(_currentBg, colorRemap);
+        _savedFg = RemapColor(_savedFg, colorRemap);
+        _savedBg = RemapColor(_savedBg, colorRemap);
+    }
+
+    private static Dictionary<uint, uint> BuildColorRemap(TerminalTheme previousTheme, TerminalTheme nextTheme)
+    {
+        Dictionary<uint, uint> remap = new(capacity: 258);
+        HashSet<uint> ambiguousSources = new();
+
+        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultForeground, nextTheme.DefaultForeground);
+        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultBackground, nextTheme.DefaultBackground);
+
+        for (int i = 0; i < 256; i++)
+        {
+            AddColorRemap(remap, ambiguousSources, previousTheme.Palette[i], nextTheme.Palette[i]);
+        }
+
+        return remap;
+    }
+
+    private static void AddColorRemap(
+        IDictionary<uint, uint> remap,
+        ISet<uint> ambiguousSources,
+        uint source,
+        uint target)
+    {
+        if (source == target || ambiguousSources.Contains(source))
+        {
+            return;
+        }
+
+        if (!remap.TryGetValue(source, out uint existing))
+        {
+            remap[source] = target;
+            return;
+        }
+
+        if (existing != target)
+        {
+            remap.Remove(source);
+            ambiguousSources.Add(source);
+        }
+    }
+
+    private static uint RemapColor(uint color, IReadOnlyDictionary<uint, uint> remap)
+    {
+        return remap.TryGetValue(color, out uint mapped) ? mapped : color;
     }
 
     /// <inheritdoc />

@@ -14,14 +14,17 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
+using SkiaSharp;
 using RoyalTerminal.Avalonia.Diagnostics;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
 using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Internal.Theme;
 using RoyalTerminal.Rendering.Contracts;
 using RoyalTerminal.Rendering.Interop.Ghostty;
 using RoyalTerminal.Rendering.Interop.Ghostty.Skia;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.Terminal.Theming;
 
 namespace RoyalTerminal.Avalonia.Controls;
 
@@ -50,6 +53,10 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     private GhosttyRenderSurface? _interopSurface;
     private SkiaInteropRenderer? _interopRenderer;
     private bool _disposed;
+    private TerminalTheme? _theme;
+    private GhosttyConfig? _appliedThemeConfig;
+    private bool _suppressThemePropertyApply;
+    private Func<GhosttyConfig>? _themeConfigFactory;
 
     // Rendering
     private CompositionCustomVisual? _compositionVisual;
@@ -111,6 +118,12 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             nameof(RenderingMode),
             GhosttyRenderedTerminalRenderingMode.CpuCellRenderer);
 
+    public static new readonly DirectProperty<GhosttyRenderedTerminalControl, TerminalTheme?> ThemeProperty =
+        AvaloniaProperty.RegisterDirect<GhosttyRenderedTerminalControl, TerminalTheme?>(
+            nameof(Theme),
+            control => control.Theme,
+            (control, value) => control.Theme = value);
+
     public float TerminalFontSize
     {
         get => GetValue(TerminalFontSizeProperty);
@@ -142,6 +155,36 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     {
         get => GetValue(RenderingModeProperty);
         set => SetValue(RenderingModeProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the active neutral terminal theme.
+    /// </summary>
+    public new TerminalTheme? Theme
+    {
+        get => _theme;
+        set => SetAndRaise(ThemeProperty, ref _theme, value);
+    }
+
+    /// <summary>
+    /// Optional factory that provides a base Ghostty config used when adapting neutral themes.
+    /// </summary>
+    public Func<GhosttyConfig>? ThemeConfigFactory
+    {
+        get => _themeConfigFactory;
+        set
+        {
+            if (ReferenceEquals(_themeConfigFactory, value))
+            {
+                return;
+            }
+
+            _themeConfigFactory = value;
+            if (_surface is not null)
+            {
+                ApplyThemeCore(ResolveActiveTheme(), updateThemeProperty: false, updateGhosttyRuntime: true);
+            }
+        }
     }
 
     /// <summary>
@@ -188,13 +231,17 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     public GhosttyRenderedTerminalControl()
     {
+        _theme = TerminalTheme.Dark;
         _clipboardAdapter = new GhosttyClipboardAdapter(this, () => Logger);
         GhosttyActionDispatcher actionDispatcher = new(
             () => _surface,
             OnRenderRequested,
             title => TitleChanged?.Invoke(this, title),
             exitCode => ProcessExited?.Invoke(this, exitCode),
-            () => CloseRequested?.Invoke(this, EventArgs.Empty));
+            () => CloseRequested?.Invoke(this, EventArgs.Empty),
+            OnRuntimeColorChanged,
+            OnRuntimeConfigChanged,
+            OnRuntimeReloadConfig);
         _surfaceLifecycle = new GhosttySurfaceLifecycle(
             () => _surface,
             actionDispatcher,
@@ -209,6 +256,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         FocusableProperty.OverrideDefaultValue<GhosttyRenderedTerminalControl>(true);
         RenderingModeProperty.Changed.AddClassHandler<GhosttyRenderedTerminalControl>(
             static (control, _) => control.OnRenderingModeChanged());
+        ThemeProperty.Changed.AddClassHandler<GhosttyRenderedTerminalControl>(
+            static (control, _) => control.OnThemePropertyChanged());
     }
 
     /// <summary>
@@ -223,6 +272,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         // Initialize rendering pipeline
         _renderer = new SkiaTerminalRenderer(FontFamilyName, TerminalFontSize);
         _screen = new TerminalScreen(80, 24);
+        ApplyThemeCore(ResolveActiveTheme(), updateThemeProperty: false, updateGhosttyRuntime: false);
     }
 
     #region Lifecycle Overrides
@@ -315,6 +365,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
                 // input, title, clipboard, and process events remain wired.
                 CreateTextureInteropSurface();
             }
+
+            ApplyThemeCore(ResolveActiveTheme(), updateThemeProperty: false, updateGhosttyRuntime: true);
 
             if (_renderTimer is null)
             {
@@ -427,6 +479,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             _renderTimer.Stop();
             _renderTimer = null;
         }
+
+        DisposeAppliedThemeConfig();
 
         _interopRenderer = null;
 
@@ -898,6 +952,233 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         return result;
     }
 
+    private void OnThemePropertyChanged()
+    {
+        if (_suppressThemePropertyApply)
+        {
+            return;
+        }
+
+        ApplyThemeCore(ResolveActiveTheme(), updateThemeProperty: false, updateGhosttyRuntime: true);
+    }
+
+    private TerminalTheme ResolveActiveTheme()
+    {
+        return Theme ?? _theme ?? TerminalTheme.Dark;
+    }
+
+    private static RenderTheme ToRenderTheme(TerminalTheme theme)
+    {
+        return new RenderTheme(
+            theme.DefaultForeground,
+            theme.DefaultBackground,
+            theme.CursorColor);
+    }
+
+    private static GhosttyColorScheme ToLegacyColorScheme(TerminalTheme theme)
+    {
+        return IsPerceivedLightColor(theme.DefaultBackground)
+            ? GhosttyColorScheme.Light
+            : GhosttyColorScheme.Dark;
+    }
+
+    private static uint ToLegacyColorSchemeId(TerminalTheme theme)
+    {
+        return ToLegacyColorScheme(theme) == GhosttyColorScheme.Light ? 0u : 1u;
+    }
+
+    private static bool IsPerceivedLightColor(uint argb)
+    {
+        int red = (int)((argb >> 16) & 0xFF);
+        int green = (int)((argb >> 8) & 0xFF);
+        int blue = (int)(argb & 0xFF);
+        int luminance = ((red * 299) + (green * 587) + (blue * 114)) / 1000;
+        return luminance >= 128;
+    }
+
+    private static void ApplyThemeToRenderer(TerminalTheme theme, SkiaTerminalRenderer renderer)
+    {
+        renderer.CursorColor = new SKColor(
+            (byte)((theme.CursorColor >> 16) & 0xFF),
+            (byte)((theme.CursorColor >> 8) & 0xFF),
+            (byte)(theme.CursorColor & 0xFF),
+            (byte)((theme.CursorColor >> 24) & 0xFF));
+
+        if (theme.SelectionBackground is uint selectionBg)
+        {
+            uint translucent = (selectionBg & 0x00FFFFFFu) | 0x80000000u;
+            renderer.SelectionColor = new SKColor(
+                (byte)((translucent >> 16) & 0xFF),
+                (byte)((translucent >> 8) & 0xFF),
+                (byte)(translucent & 0xFF),
+                (byte)((translucent >> 24) & 0xFF));
+        }
+    }
+
+    private void ApplyThemeCore(TerminalTheme theme, bool updateThemeProperty, bool updateGhosttyRuntime)
+    {
+        _theme = theme;
+
+        if (updateThemeProperty)
+        {
+            _suppressThemePropertyApply = true;
+            try
+            {
+                SetCurrentValue(ThemeProperty, theme);
+            }
+            finally
+            {
+                _suppressThemePropertyApply = false;
+            }
+        }
+
+        if (_screen is not null)
+        {
+            lock (_screen.SyncRoot)
+            {
+                _screen.ApplyTheme(theme, invalidateRows: true);
+            }
+        }
+
+        if (_renderer is not null)
+        {
+            ApplyThemeToRenderer(theme, _renderer);
+        }
+
+        if (_interopSurface is not null)
+        {
+            _interopSurface.SetColorScheme(ToLegacyColorSchemeId(theme));
+            _interopSurface.SetTheme(ToRenderTheme(theme));
+        }
+
+        if (updateGhosttyRuntime && _surface is not null)
+        {
+            _surface.SetColorScheme(ToLegacyColorScheme(theme));
+            ApplyThemeToGhosttySurface(theme);
+        }
+
+        if (_compositionVisual is not null && _renderer is not null && _screen is not null)
+        {
+            if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
+            {
+                SyncTextureInteropFrame();
+            }
+            else
+            {
+                _compositionVisual.SendHandlerMessage(
+                    new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
+            }
+        }
+
+        InvalidateVisual();
+    }
+
+    private void ApplyThemeToGhosttySurface(TerminalTheme theme)
+    {
+        if (_surface is null)
+        {
+            return;
+        }
+
+        GhosttyConfig? previousConfig = _appliedThemeConfig;
+        GhosttyConfig? nextConfig = null;
+        try
+        {
+            nextConfig = GhosttyThemeCompatibilityAdapter.CreateConfigForTheme(theme, _themeConfigFactory);
+            _surface.UpdateConfig(nextConfig);
+            _appliedThemeConfig = nextConfig;
+            nextConfig = null;
+            previousConfig?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            nextConfig?.Dispose();
+            Logger.Error("[GhosttyRendered] Failed to apply theme config.", ex);
+        }
+    }
+
+    private void DisposeAppliedThemeConfig()
+    {
+        _appliedThemeConfig?.Dispose();
+        _appliedThemeConfig = null;
+    }
+
+    private void OnRuntimeColorChanged(GhosttyColorChange change)
+    {
+        TerminalTheme current = ResolveActiveTheme();
+        uint color = PackArgb(change.R, change.G, change.B);
+        int kind = (int)change.Kind;
+
+        TerminalTheme? next = null;
+        if (kind == (int)GhosttyColorKind.Foreground)
+        {
+            if (current.DefaultForeground != color)
+            {
+                next = current.WithDefaultForeground(color);
+            }
+        }
+        else if (kind == (int)GhosttyColorKind.Background)
+        {
+            if (current.DefaultBackground != color)
+            {
+                next = current.WithDefaultBackground(color);
+            }
+        }
+        else if (kind == (int)GhosttyColorKind.Cursor)
+        {
+            if (current.CursorColor != color)
+            {
+                next = current.WithCursorColor(color);
+            }
+        }
+        else if ((uint)kind < 256u)
+        {
+            if (current.Palette[kind] != color)
+            {
+                next = current.WithPaletteColor(kind, color, explicitOverride: true);
+            }
+        }
+
+        if (next is not null)
+        {
+            ApplyThemeCore(next, updateThemeProperty: true, updateGhosttyRuntime: false);
+        }
+    }
+
+    private void OnRuntimeConfigChanged(nint configHandle)
+    {
+        if (!GhosttyThemeCompatibilityAdapter.TryReadTheme(configHandle, out TerminalTheme theme))
+        {
+            return;
+        }
+
+        void ApplySnapshot()
+        {
+            ApplyThemeCore(theme, updateThemeProperty: true, updateGhosttyRuntime: false);
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            ApplySnapshot();
+            return;
+        }
+
+        Dispatcher.UIThread.Post(ApplySnapshot);
+    }
+
+    private void OnRuntimeReloadConfig(bool soft)
+    {
+        Logger.Debug($"[GhosttyRendered] ReloadConfig action received (soft={soft}).");
+        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
+        {
+            SyncTextureInteropFrame();
+        }
+        else
+        {
+            SyncScreenFromGhostty();
+        }
+    }
+
     #endregion
 
     #region Input Handling
@@ -1029,8 +1310,19 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     /// <summary>Sets the color scheme.</summary>
     public void SetColorScheme(GhosttyColorScheme scheme)
     {
-        _surface?.SetColorScheme(scheme);
-        _interopSurface?.SetColorScheme((uint)scheme);
+        TerminalTheme mappedTheme = scheme == GhosttyColorScheme.Light
+            ? TerminalTheme.Light
+            : TerminalTheme.Dark;
+        ApplyTheme(mappedTheme);
+    }
+
+    /// <summary>
+    /// Applies a neutral terminal theme at runtime.
+    /// </summary>
+    public void ApplyTheme(TerminalTheme theme)
+    {
+        ArgumentNullException.ThrowIfNull(theme);
+        SetCurrentValue(ThemeProperty, theme);
     }
 
     /// <summary>Checks if the terminal has a selection.</summary>

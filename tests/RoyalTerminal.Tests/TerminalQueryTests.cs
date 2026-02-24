@@ -4,6 +4,7 @@
 
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
+using RoyalTerminal.Terminal.Theming;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -238,7 +239,107 @@ public class TerminalQueryTests
         processor.Process("\x1b]4;1;?\x07"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1b]4;1;rgb:CCCC/0000/0000\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1b]4;1;rgb:CDCD/0000/0000\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_OscForegroundSetThenQuery_UsesActiveThemeColor()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b]10;#112233\x1b\\"u8);
+        processor.Process("\x1b]10;?\x1b\\"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b]10;rgb:1111/2222/3333\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal(0xFF112233u, screen.DefaultForeground);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_OscPaletteSetThenQuery_UsesUpdatedColor()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b]4;42;#445566\x1b\\"u8);
+        processor.Process("\x1b]4;42;?\x1b\\"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b]4;42;rgb:4444/5555/6666\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal(0xFF445566u, screen.Theme.Palette[42]);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_OscQuery_Uses8BitFormatWhenConfigured()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        TerminalTheme theme = TerminalTheme.Dark
+            .WithDefaultForeground(0xFF112233u)
+            .WithOscColorReportFormat(TerminalOscColorReportFormat.Bit8);
+        processor.ApplyTheme(theme);
+
+        processor.Process("\x1b]10;?\x1b\\"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b]10;rgb:11/22/33\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void TerminalScreen_ApplyTheme_RemapsExistingDefaultAndIndexedColors()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("A\x1b[31mB"u8);
+
+        TerminalTheme theme = screen.Theme
+            .WithDefaultForeground(0xFF112233u)
+            .WithDefaultBackground(0xFF223344u)
+            .WithPaletteColor(1, 0xFF44AA55u, explicitOverride: true);
+
+        screen.ApplyTheme(theme, invalidateRows: true);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(theme.DefaultForeground, row[0].Foreground);
+        Assert.Equal(theme.DefaultBackground, row[0].Background);
+        Assert.Equal(theme.Palette[1], row[1].Foreground);
+        Assert.Equal(theme.DefaultBackground, row[1].Background);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ApplyTheme_WhenScreenWasPreApplied_RemapsActiveColors()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("\x1b[31mA"u8);
+
+        TerminalTheme theme = screen.Theme
+            .WithDefaultForeground(0xFF102030u)
+            .WithDefaultBackground(0xFF203040u)
+            .WithPaletteColor(1, 0xFF55AA11u, explicitOverride: true);
+
+        // Mirrors TerminalControl theme flow that may pre-apply to screen first.
+        screen.ApplyTheme(theme, invalidateRows: true);
+        processor.ApplyTheme(theme);
+
+        processor.Process("B\x1b[0mC"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(theme.Palette[1], row[0].Foreground);
+        Assert.Equal(theme.Palette[1], row[1].Foreground);
+        Assert.Equal(theme.DefaultBackground, row[1].Background);
+        Assert.Equal(theme.DefaultForeground, row[2].Foreground);
+        Assert.Equal(theme.DefaultBackground, row[2].Background);
     }
 
     [Fact]
@@ -253,7 +354,7 @@ public class TerminalQueryTests
         processor.Process("\x1bP$qm\x1b\\"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1bP1$r1;38;2;204;0;0m\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1bP1$r1;38;2;205;0;0m\x1b\\", System.Text.Encoding.ASCII.GetString(response));
     }
 
     [Fact]

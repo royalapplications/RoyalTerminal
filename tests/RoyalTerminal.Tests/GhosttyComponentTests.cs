@@ -134,6 +134,74 @@ public sealed class GhosttyComponentTests
     }
 
     [AvaloniaFact]
+    public void GhosttyActionDispatcher_ColorConfigReload_PostCallbacks()
+    {
+        GhosttyColorChange? capturedColor = null;
+        nint capturedConfig = nint.Zero;
+        bool? capturedReloadSoft = null;
+
+        GhosttyActionDispatcher dispatcher = CreateDispatcher(
+            colorChanged: change => capturedColor = change,
+            configChanged: configHandle => capturedConfig = configHandle,
+            reloadConfig: soft => capturedReloadSoft = soft);
+
+        dispatcher.HandleAction(
+            CreateAppTarget(),
+            new GhosttyAction
+            {
+                Tag = GhosttyActionTag.ColorChange,
+                Action = new GhosttyActionValue
+                {
+                    ColorChange = new GhosttyColorChange
+                    {
+                        Kind = (GhosttyColorKind)15,
+                        R = 0x12,
+                        G = 0x34,
+                        B = 0x56,
+                    }
+                }
+            });
+
+        dispatcher.HandleAction(
+            CreateAppTarget(),
+            new GhosttyAction
+            {
+                Tag = GhosttyActionTag.ConfigChange,
+                Action = new GhosttyActionValue
+                {
+                    ConfigChange = new GhosttyConfigChange
+                    {
+                        Config = (nint)0x7777,
+                    }
+                }
+            });
+
+        dispatcher.HandleAction(
+            CreateAppTarget(),
+            new GhosttyAction
+            {
+                Tag = GhosttyActionTag.ReloadConfig,
+                Action = new GhosttyActionValue
+                {
+                    ReloadConfig = new GhosttyReloadConfig
+                    {
+                        Soft = true,
+                    }
+                }
+            });
+
+        FlushUiThread();
+
+        Assert.NotNull(capturedColor);
+        Assert.Equal((GhosttyColorKind)15, capturedColor!.Value.Kind);
+        Assert.Equal(0x12, capturedColor.Value.R);
+        Assert.Equal(0x34, capturedColor.Value.G);
+        Assert.Equal(0x56, capturedColor.Value.B);
+        Assert.Equal((nint)0x7777, capturedConfig);
+        Assert.True(capturedReloadSoft);
+    }
+
+    [AvaloniaFact]
     public void GhosttySurfaceLifecycle_AttachAndDetach_WiresCallbacks()
     {
         GhosttyApp app = new((nint)0x1, ownsHandle: false);
@@ -231,14 +299,20 @@ public sealed class GhosttyComponentTests
         Action? renderRequested = null,
         Action<string>? titleChanged = null,
         Action<int>? processExited = null,
-        Action? closeRequested = null)
+        Action? closeRequested = null,
+        Action<GhosttyColorChange>? colorChanged = null,
+        Action<nint>? configChanged = null,
+        Action<bool>? reloadConfig = null)
     {
         return new GhosttyActionDispatcher(
             surfaceAccessor ?? (static () => null),
             renderRequested ?? (static () => { }),
             titleChanged ?? (static _ => { }),
             processExited ?? (static _ => { }),
-            closeRequested ?? (static () => { }));
+            closeRequested ?? (static () => { }),
+            colorChanged,
+            configChanged,
+            reloadConfig);
     }
 
     private static GhosttyTarget CreateAppTarget()

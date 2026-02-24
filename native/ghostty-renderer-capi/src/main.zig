@@ -45,6 +45,12 @@ pub const GhosttyRenderResult = enum(c_int) {
     out_of_memory = 6,
 };
 
+pub const GhosttyRenderTheme = extern struct {
+    default_foreground_argb: u32,
+    default_background_argb: u32,
+    cursor_argb: u32,
+};
+
 pub const GhosttyRenderTargetDesc = extern struct {
     backend: GhosttyGpuBackend,
     target_kind: GhosttyRenderTargetKind,
@@ -78,6 +84,11 @@ const RenderSurface = struct {
     scale_y: f64 = 1.0,
     focused: bool = true,
     color_scheme: u32 = 0,
+    theme: GhosttyRenderTheme = .{
+        .default_foreground_argb = 0xFF111111,
+        .default_background_argb = 0xFFF5F5F5,
+        .cursor_argb = 0xFF111111,
+    },
     frame_counter: u64 = 0,
     frame_in_progress: bool = false,
     frame_token: u64 = 0,
@@ -113,6 +124,25 @@ fn checkedMul(a: usize, b: usize) ?usize {
     return std.math.mul(usize, a, b) catch null;
 }
 
+fn ensureOpaqueAlpha(argb: u32) u32 {
+    return (argb & 0x00FFFFFF) | 0xFF000000;
+}
+
+fn themeForColorScheme(color_scheme: u32) GhosttyRenderTheme {
+    return if (color_scheme == 0)
+        .{
+            .default_foreground_argb = 0xFF111111,
+            .default_background_argb = 0xFFF5F5F5,
+            .cursor_argb = 0xFF111111,
+        }
+    else
+        .{
+            .default_foreground_argb = 0xFFD4D4D4,
+            .default_background_argb = 0xFF1E1E1E,
+            .cursor_argb = 0xFFD4D4D4,
+        };
+}
+
 fn ensureScratch(surface: *RenderSurface, required_len: usize) GhosttyRenderResult {
     if (surface.scratch.len >= required_len) {
         return .ok;
@@ -132,12 +162,12 @@ fn fillSolidTarget(
     width: usize,
     height: usize,
     format: GhosttyRenderPixelFormat,
-    color_scheme: u32,
+    theme: GhosttyRenderTheme,
 ) void {
-    const is_light = color_scheme == 0;
-    const r: u8 = if (is_light) 0xF5 else 0x1E;
-    const g: u8 = if (is_light) 0xF5 else 0x1E;
-    const b: u8 = if (is_light) 0xF5 else 0x1E;
+    const bg = theme.default_background_argb;
+    const r: u8 = @intCast((bg >> 16) & 0xFF);
+    const g: u8 = @intCast((bg >> 8) & 0xFF);
+    const b: u8 = @intCast(bg & 0xFF);
 
     var idx: usize = 0;
     for (0..height) |_| {
@@ -387,7 +417,7 @@ fn renderMetalToTarget(
     }
 
     const buffer = surface.scratch[0..bytes_len];
-    fillSolidTarget(buffer, width, height, target.pixel_format, surface.color_scheme);
+    fillSolidTarget(buffer, width, height, target.pixel_format, surface.theme);
 
     const wrote = mac.replaceTexture(target.target_handle, buffer, width, height, bytes_per_row);
     if (!wrote) {
@@ -424,12 +454,12 @@ fn fillRgbaFallback(
     width: usize,
     height: usize,
     stride: usize,
-    color_scheme: u32,
+    theme: GhosttyRenderTheme,
 ) void {
-    const is_light = color_scheme == 0;
-    const r: u8 = if (is_light) 0xF5 else 0x1E;
-    const g: u8 = if (is_light) 0xF5 else 0x1E;
-    const b: u8 = if (is_light) 0xF5 else 0x1E;
+    const bg = theme.default_background_argb;
+    const r: u8 = @intCast((bg >> 16) & 0xFF);
+    const g: u8 = @intCast((bg >> 8) & 0xFF);
+    const b: u8 = @intCast(bg & 0xFF);
 
     for (0..height) |y| {
         const row = dst_rgba[y * stride .. y * stride + stride];
@@ -528,6 +558,21 @@ pub export fn ghostty_render_surface_set_color_scheme(
 ) c_int {
     const s = surface orelse return toCode(.invalid_argument);
     s.color_scheme = color_scheme;
+    s.theme = themeForColorScheme(color_scheme);
+    return toCode(.ok);
+}
+
+pub export fn ghostty_render_surface_set_theme(
+    surface: ?*RenderSurface,
+    theme: ?*const GhosttyRenderTheme,
+) c_int {
+    const s = surface orelse return toCode(.invalid_argument);
+    const t = theme orelse return toCode(.invalid_argument);
+    s.theme = .{
+        .default_foreground_argb = ensureOpaqueAlpha(t.default_foreground_argb),
+        .default_background_argb = ensureOpaqueAlpha(t.default_background_argb),
+        .cursor_argb = ensureOpaqueAlpha(t.cursor_argb),
+    };
     return toCode(.ok);
 }
 
@@ -658,7 +703,7 @@ pub export fn ghostty_render_surface_render_to_rgba(
     if (!s.frame_in_progress) {
         s.frame_counter +%= 1;
     }
-    fillRgbaFallback(dst, w, h, row_stride, s.color_scheme);
+    fillRgbaFallback(dst, w, h, row_stride, s.theme);
 
     return toCode(.ok);
 }

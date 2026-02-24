@@ -59,6 +59,12 @@ typedef enum ghostty_render_result {
     GHOSTTY_RENDER_RESULT_OUT_OF_MEMORY = 6,
 } ghostty_render_result;
 
+typedef struct ghostty_render_theme {
+    uint32_t default_foreground_argb;
+    uint32_t default_background_argb;
+    uint32_t cursor_argb;
+} ghostty_render_theme;
+
 typedef struct ghostty_render_target_desc {
     ghostty_gpu_backend backend;
     ghostty_render_target_kind target_kind;
@@ -106,6 +112,10 @@ int32_t ghostty_render_surface_set_focus(
 int32_t ghostty_render_surface_set_color_scheme(
     ghostty_render_surface_t surface,
     uint32_t color_scheme);
+
+int32_t ghostty_render_surface_set_theme(
+    ghostty_render_surface_t surface,
+    const ghostty_render_theme* theme);
 
 int32_t ghostty_render_surface_begin_frame(
     ghostty_render_surface_t surface,

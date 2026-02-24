@@ -7,6 +7,7 @@ using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Diagnostics;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.Terminal.Theming;
 using System.Runtime.Versioning;
 using Xunit;
 
@@ -85,6 +86,48 @@ public class NativeTerminalControlTests
         await control.CopySelectionAsync();
         await control.PasteAsync();
         control.Dispose();
+    }
+
+    [AvaloniaFact]
+    public void RenderedControl_ThemeApi_WithoutSurface_StoresNeutralTheme()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        GhosttyRenderedTerminalControl control = new();
+        TerminalTheme theme = TerminalTheme.Dark
+            .WithDefaultForeground(0xFF102030u)
+            .WithDefaultBackground(0xFF405060u)
+            .WithCursorColor(0xFF708090u);
+
+        control.ApplyTheme(theme);
+
+        Assert.NotNull(control.Theme);
+        Assert.Equal(0xFF102030u, control.Theme!.DefaultForeground);
+        Assert.Equal(0xFF405060u, control.Theme.DefaultBackground);
+    }
+
+    [AvaloniaFact]
+    public void NativeControl_ThemeApi_WithoutSurface_StoresNeutralTheme()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        GhosttyNativeTerminalControl control = new();
+        TerminalTheme theme = TerminalTheme.Light
+            .WithDefaultForeground(0xFF203040u)
+            .WithDefaultBackground(0xFFE8E8E8u)
+            .WithCursorColor(0xFF001122u);
+
+        control.ApplyTheme(theme);
+
+        Assert.NotNull(control.Theme);
+        Assert.Equal(0xFF203040u, control.Theme!.DefaultForeground);
+        Assert.Equal(0xFFE8E8E8u, control.Theme.DefaultBackground);
     }
 
     [AvaloniaFact]

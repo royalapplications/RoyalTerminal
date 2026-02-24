@@ -124,9 +124,9 @@ fi
 
 # Build shared library
 info "Building libghostty shared library..."
-info "Command: zig build $OPTIMIZE -Dapp-runtime=none"
+info "Command: zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none"
 
-zig build $OPTIMIZE -Dapp-runtime=none 2>&1 || {
+zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none 2>&1 || {
     error "Zig build failed."
     warn "This may be expected if platform-specific dependencies are missing."
     warn "On macOS, ensure Xcode command line tools are installed: xcode-select --install"

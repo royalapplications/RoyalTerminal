@@ -9,6 +9,7 @@ using System.Reactive;
 using System.Reactive.Linq;
 using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Terminal;
+using RoyalTerminal.Terminal.Theming;
 using ReactiveUI;
 
 namespace RoyalTerminal.Demo.ViewModels;
@@ -17,6 +18,7 @@ public sealed class MainWindowViewModel : ReactiveObject
 {
     private double _fontSize = 14.0;
     private bool _isDarkTheme = true;
+    private string _themePresetButtonText = "Theme: Default";
     private bool _ghosttyAvailable;
     private bool _nativeVtAvailable;
     private bool _useNativeControl;
@@ -32,6 +34,9 @@ public sealed class MainWindowViewModel : ReactiveObject
         nativeVtAvailable: false);
     private TerminalRenderMode _activeRenderMode = TerminalRenderMode.RenderedAuto;
     private readonly ITerminalModeResolver _modeResolver;
+    private readonly ITerminalThemeCatalog _themeCatalog;
+    private readonly IReadOnlyList<TerminalThemePreset> _themePresets;
+    private readonly Dictionary<TerminalRenderMode, ModeThemeState> _modeThemes = [];
 
     private IReadOnlyList<ShellProfileOption> _shellProfiles =
     [
@@ -60,13 +65,16 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _sshRequestPty = true;
 
     public MainWindowViewModel()
-        : this(TerminalModeResolver.Default)
+        : this(TerminalModeResolver.Default, new TerminalThemeCatalog())
     {
     }
 
-    internal MainWindowViewModel(ITerminalModeResolver modeResolver)
+    internal MainWindowViewModel(ITerminalModeResolver modeResolver, ITerminalThemeCatalog themeCatalog)
     {
         _modeResolver = modeResolver ?? throw new ArgumentNullException(nameof(modeResolver));
+        _themeCatalog = themeCatalog ?? throw new ArgumentNullException(nameof(themeCatalog));
+        _themePresets = _themeCatalog.Presets;
+        InitializeModeThemes();
 
         _transportModes =
         [
@@ -97,6 +105,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         PasteClipboardInteraction = new Interaction<Unit, Unit>();
         ApplyFontSizeInteraction = new Interaction<double, Unit>();
         ApplyThemeInteraction = new Interaction<bool, Unit>();
+        ApplyThemeModelInteraction = new Interaction<TerminalThemeApplyRequest, Unit>();
         ApplyRenderedBackendInteraction = new Interaction<bool, Unit>();
 
         NewTabCommand = ReactiveCommand.CreateFromObservable(() => CreateNewTabInteraction.Handle(Unit.Default));
@@ -112,8 +121,12 @@ public sealed class MainWindowViewModel : ReactiveObject
         DecreaseFontSizeCommand = ReactiveCommand.CreateFromObservable(() => ChangeFontSize(-1));
         ResetFontSizeCommand = ReactiveCommand.CreateFromObservable(ResetFontSize);
         ToggleThemeCommand = ReactiveCommand.CreateFromObservable(ToggleTheme);
+        CycleThemePresetCommand = ReactiveCommand.CreateFromObservable(CycleThemePreset);
+        GenerateThemeCommand = ReactiveCommand.CreateFromObservable(GenerateTheme);
         ToggleRenderedBackendCommand = ReactiveCommand.CreateFromObservable(ToggleRenderedBackend);
         CycleRenderModeCommand = ReactiveCommand.Create(CycleRenderMode);
+
+        UpdateThemePresetButtonText();
     }
 
     public Interaction<Unit, Unit> CreateNewTabInteraction { get; }
@@ -126,6 +139,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<Unit, Unit> PasteClipboardInteraction { get; }
     public Interaction<double, Unit> ApplyFontSizeInteraction { get; }
     public Interaction<bool, Unit> ApplyThemeInteraction { get; }
+    public Interaction<TerminalThemeApplyRequest, Unit> ApplyThemeModelInteraction { get; }
     public Interaction<bool, Unit> ApplyRenderedBackendInteraction { get; }
 
     public ReactiveCommand<Unit, Unit> NewTabCommand { get; }
@@ -141,6 +155,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> DecreaseFontSizeCommand { get; }
     public ReactiveCommand<Unit, Unit> ResetFontSizeCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleThemeCommand { get; }
+    public ReactiveCommand<Unit, Unit> CycleThemePresetCommand { get; }
+    public ReactiveCommand<Unit, Unit> GenerateThemeCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleRenderedBackendCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleRenderModeCommand { get; }
 
@@ -177,6 +193,14 @@ public sealed class MainWindowViewModel : ReactiveObject
     }
 
     public string ThemeToggleContent => IsDarkTheme ? "\u2600" : "\U0001F319";
+
+    public string ThemePresetButtonText
+    {
+        get => _themePresetButtonText;
+        private set => this.RaiseAndSetIfChanged(ref _themePresetButtonText, value);
+    }
+
+    internal TerminalTheme ActiveTheme => GetModeThemeState(_activeRenderMode).Theme;
 
     public bool GhosttyAvailable
     {
@@ -558,10 +582,35 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private IObservable<Unit> ToggleTheme()
     {
-        IsDarkTheme = !IsDarkTheme;
-        return ApplyThemeInteraction
-            .Handle(IsDarkTheme)
-            .Do(_ => SetStatus(IsDarkTheme ? "Dark theme" : "Light theme"));
+        string presetId = IsThemeDark(ActiveTheme)
+            ? TerminalThemeCatalog.LightPresetId
+            : _themeCatalog.GetDefaultPreset(_activeRenderMode).Id;
+
+        ApplyPresetToMode(_activeRenderMode, presetId);
+        return ApplyCurrentModeTheme($"Theme preset: {GetModeThemeState(_activeRenderMode).DisplayName}");
+    }
+
+    private IObservable<Unit> CycleThemePreset()
+    {
+        ModeThemeState state = GetModeThemeState(_activeRenderMode);
+        int currentIndex = FindPresetIndex(state.PresetId);
+        int nextIndex = (currentIndex + 1) % _themePresets.Count;
+        TerminalThemePreset preset = _themePresets[nextIndex];
+
+        ApplyPresetToMode(_activeRenderMode, preset.Id);
+        return ApplyCurrentModeTheme($"Theme preset: {preset.DisplayName}");
+    }
+
+    private IObservable<Unit> GenerateTheme()
+    {
+        ModeThemeState state = GetModeThemeState(_activeRenderMode);
+        state.Generation++;
+        state.Theme = _themeCatalog.CreateGeneratedTheme(_activeRenderMode, state.Generation);
+        state.DisplayName = $"Generated {_activeRenderMode} #{state.Generation}";
+        state.PresetId = null;
+        UpdateThemePresetButtonText();
+
+        return ApplyCurrentModeTheme($"Generated theme: {state.DisplayName}");
     }
 
     private IObservable<Unit> ToggleRenderedBackend()
@@ -601,6 +650,109 @@ public sealed class MainWindowViewModel : ReactiveObject
         UseNativeVtControl = mode == TerminalRenderMode.NativeVt;
         UseManagedVtControl = mode == TerminalRenderMode.ManagedVt;
         UpdateModeButtonText();
+        UpdateThemePresetButtonText();
+        IsDarkTheme = IsThemeDark(ActiveTheme);
+    }
+
+    private void InitializeModeThemes()
+    {
+        foreach (TerminalRenderMode mode in Enum.GetValues<TerminalRenderMode>())
+        {
+            TerminalThemePreset preset = _themeCatalog.GetDefaultPreset(mode);
+            TerminalTheme theme = _themeCatalog.CreatePresetTheme(preset.Id, mode);
+            _modeThemes[mode] = new ModeThemeState(
+                preset.Id,
+                preset.DisplayName,
+                theme,
+                0);
+        }
+    }
+
+    private void ApplyPresetToMode(TerminalRenderMode mode, string presetId)
+    {
+        ModeThemeState state = GetModeThemeState(mode);
+        TerminalThemePreset preset = _themeCatalog.GetPreset(presetId);
+        state.PresetId = preset.Id;
+        state.DisplayName = preset.DisplayName;
+        state.Theme = _themeCatalog.CreatePresetTheme(preset.Id, mode);
+        state.Generation = 0;
+        UpdateThemePresetButtonText();
+    }
+
+    private IObservable<Unit> ApplyCurrentModeTheme(string statusText)
+    {
+        TerminalTheme theme = ActiveTheme;
+        string themeName = GetModeThemeState(_activeRenderMode).DisplayName;
+        IsDarkTheme = IsThemeDark(theme);
+
+        return ApplyThemeModelInteraction
+            .Handle(new TerminalThemeApplyRequest(theme, themeName))
+            .Do(_ => SetStatus(statusText));
+    }
+
+    private ModeThemeState GetModeThemeState(TerminalRenderMode mode)
+    {
+        if (_modeThemes.TryGetValue(mode, out ModeThemeState? state))
+        {
+            return state;
+        }
+
+        TerminalThemePreset preset = _themeCatalog.GetDefaultPreset(mode);
+        state = new ModeThemeState(
+            preset.Id,
+            preset.DisplayName,
+            _themeCatalog.CreatePresetTheme(preset.Id, mode),
+            0);
+        _modeThemes[mode] = state;
+        return state;
+    }
+
+    private int FindPresetIndex(string? presetId)
+    {
+        if (string.IsNullOrWhiteSpace(presetId))
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < _themePresets.Count; i++)
+        {
+            if (string.Equals(_themePresets[i].Id, presetId, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private void UpdateThemePresetButtonText()
+    {
+        ThemePresetButtonText = $"Theme: {GetModeThemeState(_activeRenderMode).DisplayName}";
+    }
+
+    private static bool IsThemeDark(TerminalTheme theme)
+    {
+        double luminance = RelativeLuminance(theme.DefaultBackground);
+        return luminance < 0.5;
+    }
+
+    private static double RelativeLuminance(uint argb)
+    {
+        double r = ((argb >> 16) & 0xFF) / 255.0;
+        double g = ((argb >> 8) & 0xFF) / 255.0;
+        double b = (argb & 0xFF) / 255.0;
+
+        static double ToLinear(double channel)
+        {
+            return channel <= 0.03928
+                ? channel / 12.92
+                : Math.Pow((channel + 0.055) / 1.055, 2.4);
+        }
+
+        double lr = ToLinear(r);
+        double lg = ToLinear(g);
+        double lb = ToLinear(b);
+        return (0.2126 * lr) + (0.7152 * lg) + (0.0722 * lb);
     }
 
     private static TerminalRenderMode ResolveRequestedMode(
@@ -673,6 +825,25 @@ public sealed class MainWindowViewModel : ReactiveObject
                 result = -1;
                 return false;
         }
+    }
+
+    private sealed class ModeThemeState
+    {
+        public ModeThemeState(string? presetId, string displayName, TerminalTheme theme, int generation)
+        {
+            PresetId = presetId;
+            DisplayName = displayName;
+            Theme = theme;
+            Generation = generation;
+        }
+
+        public string? PresetId { get; set; }
+
+        public string DisplayName { get; set; }
+
+        public TerminalTheme Theme { get; set; }
+
+        public int Generation { get; set; }
     }
 }
 
