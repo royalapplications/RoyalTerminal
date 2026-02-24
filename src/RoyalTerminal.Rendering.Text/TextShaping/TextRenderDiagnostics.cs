@@ -11,4 +11,5 @@ public readonly record struct TextRenderDiagnostics(
     long ShapedRuns,
     long FallbackRuns,
     long FallbackFontHits,
-    long GridClampedRuns);
+    long GridClampedRuns,
+    long SpriteCells = 0);
