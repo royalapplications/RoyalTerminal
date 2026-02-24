@@ -11,10 +11,12 @@ using Avalonia.Input.TextInput;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
+using SkiaSharp;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Scrolling;
 using RoyalTerminal.Terminal;
+using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
 using RoyalTerminal.Terminal.Transport.Pipe;
 using RoyalTerminal.Terminal.Transport.Pty;
@@ -82,6 +84,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private VtProcessorPreference _vtProcessorPreference = VtProcessorPreference.Auto;
 
+    /// <summary>
+    /// Active immutable terminal theme snapshot.
+    /// </summary>
+    public static new readonly DirectProperty<TerminalControl, TerminalTheme?> ThemeProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, TerminalTheme?>(
+            nameof(Theme),
+            o => o.Theme,
+            (o, v) => o.Theme = v);
+
+    private TerminalTheme? _theme;
+
     public string FontFamilyName
     {
         get => GetValue(FontFamilyNameProperty);
@@ -139,6 +152,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         set => SetAndRaise(VtProcessorPreferenceProperty, ref _vtProcessorPreference, value);
     }
 
+    /// <summary>
+    /// Gets or sets the active terminal theme.
+    /// </summary>
+    public new TerminalTheme? Theme
+    {
+        get => _theme;
+        set => SetAndRaise(ThemeProperty, ref _theme, value);
+    }
+
     #endregion
 
     #region Events
@@ -168,6 +190,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private bool _middlePointerDown;
     private bool _rightPointerDown;
     private bool _suppressGridPropertyApply;
+    private bool _suppressLegacyColorThemeBridge;
     private int _lastAppliedColumns = -1;
     private int _lastAppliedRows = -1;
     private int _lastAppliedWidthPx = -1;
@@ -397,6 +420,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         SshHostKeyValidator = sshHostKeyValidator ?? throw new ArgumentNullException(nameof(sshHostKeyValidator));
         TerminalTransportFactory = transportFactory
             ?? CreateDefaultTransportFactory(PtyFactory, SshCredentialProvider, SshHostKeyValidator);
+        _theme = (Theme ?? TerminalTheme.Dark)
+            .WithDefaultForeground(ColorToArgb(DefaultForeground))
+            .WithDefaultBackground(ColorToArgb(DefaultBackground))
+            .WithCursorColor(ColorToArgb(DefaultForeground));
 
         InitializeTerminal();
         RegisterPointerFallbackHandlers();
@@ -414,10 +441,25 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             DefaultBackground = ColorToArgb(bg),
         };
 
+        TerminalTheme activeTheme = (_theme ?? TerminalTheme.Dark)
+            .WithDefaultForeground(ColorToArgb(fg))
+            .WithDefaultBackground(ColorToArgb(bg))
+            .WithCursorColor(ColorToArgb(fg));
+        _theme = activeTheme;
+        _screen.ApplyTheme(activeTheme);
+
         _vtProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
+        if (_vtProcessor is ITerminalThemeSink themeSink)
+        {
+            lock (_screen.SyncRoot)
+            {
+                themeSink.ApplyTheme(activeTheme);
+            }
+        }
         _appliedVtProcessorPreference = VtProcessorPreference;
 
         _renderer = CreateRenderer(previous: null);
+        ApplyThemeToRenderer(activeTheme, _renderer);
 
         _scrollData = new TerminalScrollData
         {
@@ -445,9 +487,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        if (change.Property == ThemeProperty)
+        {
+            ApplyThemeFromProperty();
+            return;
+        }
+
         if (change.Property == DefaultForegroundProperty || change.Property == DefaultBackgroundProperty)
         {
-            ApplyColorDefaults();
+            if (_suppressLegacyColorThemeBridge)
+            {
+                ApplyColorDefaults();
+            }
+            else
+            {
+                ApplyLegacyColorBridge();
+            }
             return;
         }
 
@@ -548,6 +603,79 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _presenter?.Invalidate(fullRedraw: true);
     }
 
+    private void ApplyLegacyColorBridge()
+    {
+        TerminalTheme next = (_theme ?? TerminalTheme.Dark)
+            .WithDefaultForeground(ColorToArgb(DefaultForeground))
+            .WithDefaultBackground(ColorToArgb(DefaultBackground));
+        ApplyThemeCore(next, updateStyledDefaults: false);
+    }
+
+    private void ApplyThemeFromProperty()
+    {
+        TerminalTheme next = Theme
+            ?? (_theme ?? TerminalTheme.Dark)
+                .WithDefaultForeground(ColorToArgb(DefaultForeground))
+                .WithDefaultBackground(ColorToArgb(DefaultBackground));
+        ApplyThemeCore(next, updateStyledDefaults: true);
+    }
+
+    private void ApplyThemeCore(TerminalTheme theme, bool updateStyledDefaults)
+    {
+        ArgumentNullException.ThrowIfNull(theme);
+        _theme = theme;
+
+        if (_screen is not null)
+        {
+            lock (_screen.SyncRoot)
+            {
+                _screen.ApplyTheme(theme, invalidateRows: true);
+
+                if (_vtProcessor is ITerminalThemeSink themeSink)
+                {
+                    themeSink.ApplyTheme(theme);
+                }
+            }
+        }
+        else if (_vtProcessor is ITerminalThemeSink themeSink)
+        {
+            themeSink.ApplyTheme(theme);
+        }
+
+        if (_renderer is not null)
+        {
+            ApplyThemeToRenderer(theme, _renderer);
+        }
+
+        if (updateStyledDefaults)
+        {
+            _suppressLegacyColorThemeBridge = true;
+            try
+            {
+                SetCurrentValue(DefaultForegroundProperty, ArgbToAvaloniaColor(theme.DefaultForeground));
+                SetCurrentValue(DefaultBackgroundProperty, ArgbToAvaloniaColor(theme.DefaultBackground));
+            }
+            finally
+            {
+                _suppressLegacyColorThemeBridge = false;
+            }
+        }
+
+        _screen?.InvalidateAll();
+        _presenter?.Invalidate(fullRedraw: true);
+    }
+
+    private static void ApplyThemeToRenderer(TerminalTheme theme, SkiaTerminalRenderer renderer)
+    {
+        renderer.CursorColor = ArgbToSkColor(theme.CursorColor);
+        if (theme.SelectionBackground is uint selectionBg)
+        {
+            // Use a translucent selection fill to keep glyphs legible.
+            uint translucent = (selectionBg & 0x00FFFFFFu) | 0x80000000u;
+            renderer.SelectionColor = ArgbToSkColor(translucent);
+        }
+    }
+
     private void ApplyAutoScrollSetting()
     {
         if (!AutoScroll)
@@ -584,6 +712,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         IVtProcessor nextProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
         IVtProcessor? previousProcessor = _vtProcessor;
         _vtProcessor = nextProcessor;
+        if (_theme is not null && _vtProcessor is ITerminalThemeSink themeSink)
+        {
+            lock (_screen.SyncRoot)
+            {
+                themeSink.ApplyTheme(_theme);
+            }
+        }
         _appliedVtProcessorPreference = VtProcessorPreference;
         previousProcessor?.Dispose();
     }
@@ -1265,6 +1400,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     #region Public API
 
     /// <summary>
+    /// Applies a terminal theme at runtime.
+    /// </summary>
+    public void ApplyTheme(TerminalTheme theme)
+    {
+        ArgumentNullException.ThrowIfNull(theme);
+        SetCurrentValue(ThemeProperty, theme);
+    }
+
+    /// <summary>
     /// Forces a full re-render of the terminal.
     /// </summary>
     public void InvalidateTerminal()
@@ -1685,6 +1829,20 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private static uint ColorToArgb(Color c) =>
         ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+
+    private static Color ArgbToAvaloniaColor(uint argb) =>
+        Color.FromArgb(
+            (byte)((argb >> 24) & 0xFF),
+            (byte)((argb >> 16) & 0xFF),
+            (byte)((argb >> 8) & 0xFF),
+            (byte)(argb & 0xFF));
+
+    private static SKColor ArgbToSkColor(uint argb) =>
+        new(
+            (byte)((argb >> 16) & 0xFF),
+            (byte)((argb >> 8) & 0xFF),
+            (byte)(argb & 0xFF),
+            (byte)((argb >> 24) & 0xFF));
 
     #endregion
 }
