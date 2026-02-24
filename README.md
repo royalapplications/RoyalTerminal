@@ -113,6 +113,18 @@ Fallback chains when requested mode is unavailable:
 
 Mode cycle in the demo also skips unsupported modes and always lands on a runnable mode.
 
+### Demo Tab Mode Indicators
+
+The Avalonia demo uses a glyph + color marker in each tab header:
+
+| Mode | Marker | Color |
+|------|--------|-------|
+| `Ghostty Rendered` (`CpuCellRenderer` / `TextureInterop`) | `○` or `●` | Blue (`#569CD6`) |
+| `Ghostty Native` | `◆` | Yellow (`#DCDCAA`) |
+| `Native VT` | `■` | Green (`#6AB04C`) |
+| `Managed VT` | `▲` | Teal (`#4EC9B0`) |
+| `Rendered (Auto VT)` | `▼` | Olive (`#6A9955`) |
+
 ### `TerminalControl` VT Preference Modes
 
 | Demo Mode Label | `VtProcessorPreference` | Behavior |
