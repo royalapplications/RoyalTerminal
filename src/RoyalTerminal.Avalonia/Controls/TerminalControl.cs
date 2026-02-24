@@ -1868,7 +1868,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         bool rowVisible = (uint)cursorRow < (uint)_screen.ViewportRows;
         bool columnVisible = (uint)cursorColumn < (uint)_screen.Columns;
-        _renderer.CursorVisible = _vtProcessor.CursorVisible && rowVisible && columnVisible;
+        bool atLiveBottom = _screen.ScrollOffset == 0;
+        _renderer.CursorVisible = _vtProcessor.CursorVisible && atLiveBottom && rowVisible && columnVisible;
     }
 
     private static Color ArgbToAvaloniaColor(uint argb) =>
