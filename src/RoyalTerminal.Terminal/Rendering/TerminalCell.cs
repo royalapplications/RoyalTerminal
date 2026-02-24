@@ -30,6 +30,12 @@ public struct TerminalCell
     /// <summary>Cell attribute flags.</summary>
     public CellAttributes Attributes;
 
+    /// <summary>Underline rendering style for this cell.</summary>
+    public TerminalUnderlineStyle UnderlineStyle;
+
+    /// <summary>Extended decoration flags not represented in <see cref="CellAttributes"/>.</summary>
+    public CellDecorations Decorations;
+
     /// <summary>Number of columns this character spans (1 for normal, 2 for wide/CJK).</summary>
     public byte Width;
 
@@ -44,6 +50,8 @@ public struct TerminalCell
         Foreground = fg,
         Background = bg,
         Attributes = CellAttributes.None,
+        UnderlineStyle = TerminalUnderlineStyle.None,
+        Decorations = CellDecorations.None,
         Width = 1,
     };
 }
@@ -63,6 +71,29 @@ public enum CellAttributes : byte
     Blink = 1 << 5,
     Dim = 1 << 6,
     Hidden = 1 << 7,
+}
+
+/// <summary>
+/// Underline style for terminal cell decorations.
+/// </summary>
+public enum TerminalUnderlineStyle : byte
+{
+    None = 0,
+    Single = 1,
+    Double = 2,
+    Curly = 3,
+    Dotted = 4,
+    Dashed = 5,
+}
+
+/// <summary>
+/// Additional cell decorations not captured by <see cref="CellAttributes"/>.
+/// </summary>
+[Flags]
+public enum CellDecorations : byte
+{
+    None = 0,
+    Overline = 1 << 0,
 }
 
 /// <summary>
