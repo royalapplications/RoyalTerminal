@@ -15,6 +15,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
@@ -49,6 +50,7 @@ internal sealed class MainWindowController
     private readonly Grid _terminalHost;
     private readonly StackPanel _tabStrip;
     private readonly List<TerminalTab> _tabs = [];
+    private readonly HashSet<TerminalControl> _startingStandaloneControls = [];
     private readonly ITerminalModeCapabilityResolver _modeCapabilityResolver;
     private readonly ITerminalModeResolver _modeResolver;
     private readonly bool _skipEmbeddedGhosttyInitialization;
@@ -107,7 +109,7 @@ internal sealed class MainWindowController
         ApplyThemeResources(CreateChromePalette(_viewModel.ActiveTheme));
         InitializeShellProfiles();
 
-        CreateNewTab();
+        CreateInitialTabsForSupportedModes();
         string startupStatus = _viewModel.UseRenderedControl
             ? $"Ghostty VT + {GetRenderedBackendLabel()} rendering"
             : _viewModel.UseNativeControl
@@ -290,6 +292,36 @@ internal sealed class MainWindowController
     }
 
     #region Tab Management
+
+    private void CreateInitialTabsForSupportedModes()
+    {
+        TerminalRenderMode[] startupModes =
+        [
+            TerminalRenderMode.GhosttyRendered,
+            TerminalRenderMode.GhosttyNative,
+            TerminalRenderMode.NativeVt,
+            TerminalRenderMode.ManagedVt,
+            TerminalRenderMode.RenderedAuto,
+        ];
+
+        for (int i = 0; i < startupModes.Length; i++)
+        {
+            TerminalRenderMode mode = startupModes[i];
+            if (!_modeResolver.IsSupported(mode, _terminalCapabilities))
+            {
+                continue;
+            }
+
+            _viewModel.SetRenderMode(mode);
+            CreateNewTab();
+        }
+
+        if (_tabs.Count == 0)
+        {
+            _viewModel.SetRenderMode(TerminalRenderMode.RenderedAuto);
+            CreateNewTab();
+        }
+    }
 
     private void CreateNewTab()
     {
@@ -513,19 +545,61 @@ internal sealed class MainWindowController
             UpdateDimensions(args.Columns, args.Rows);
         };
 
+        QueueStandaloneSessionStart(standaloneControl);
+
+        return standaloneControl;
+    }
+
+    private void QueueStandaloneSessionStart(TerminalControl standaloneControl)
+    {
+        if (standaloneControl.HasActiveSession || standaloneControl.HasPty)
+        {
+            return;
+        }
+
+        if (!_startingStandaloneControls.Add(standaloneControl))
+        {
+            return;
+        }
+
         Dispatcher.UIThread.Post(async () =>
         {
             try
             {
-                await StartStandaloneSessionAsync(standaloneControl);
+                await WaitForStandaloneControlAttachmentAsync(standaloneControl);
+                if (standaloneControl.GetVisualRoot() is null || standaloneControl.Parent is null)
+                {
+                    return;
+                }
+
+                if (!standaloneControl.HasActiveSession && !standaloneControl.HasPty)
+                {
+                    await StartStandaloneSessionAsync(standaloneControl);
+                }
             }
             catch (Exception ex)
             {
                 UpdateStatus($"Failed to start session: {ex.Message}");
             }
+            finally
+            {
+                _startingStandaloneControls.Remove(standaloneControl);
+            }
         }, DispatcherPriority.Background);
+    }
 
-        return standaloneControl;
+    private static async Task WaitForStandaloneControlAttachmentAsync(TerminalControl standaloneControl)
+    {
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (standaloneControl.GetVisualRoot() is not null)
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
     }
 
     private static VtProcessorPreference ResolveVtProcessorPreference(TerminalRenderMode mode)
@@ -644,15 +718,6 @@ internal sealed class MainWindowController
                 new SolidColorBrush(Color.FromRgb(0xDC, 0xDC, 0xAA)));
         }
 
-        bool isPipeTransport = string.Equals(
-            _viewModel.SelectedTransportMode.Id,
-            TerminalTransportIds.Pipe,
-            StringComparison.OrdinalIgnoreCase);
-        bool isSshTransport = string.Equals(
-            _viewModel.SelectedTransportMode.Id,
-            TerminalTransportIds.Ssh,
-            StringComparison.OrdinalIgnoreCase);
-
         string vtLabel = terminal is TerminalControl gtc && gtc.IsUsingNativeVtProcessor
             ? "Ghostty VT"
             : "Basic VT";
@@ -663,16 +728,8 @@ internal sealed class MainWindowController
             _ => "Rendered",
         };
         string transportName = _viewModel.SelectedTransportMode.DisplayName;
-        string glyph = isPipeTransport
-            ? "\u25A1"
-            : isSshTransport
-                ? "\u25B3"
-                : "\u25A0";
-        SolidColorBrush glyphBrush = isPipeTransport
-            ? new SolidColorBrush(Color.FromRgb(0x4E, 0xC9, 0xB0))
-            : isSshTransport
-                ? new SolidColorBrush(Color.FromRgb(0xD7, 0xBA, 0x7D))
-                : new SolidColorBrush(Color.FromRgb(0x6A, 0x99, 0x55));
+        string glyph = CreateStandaloneModeGlyph(mode);
+        SolidColorBrush glyphBrush = CreateStandaloneModeGlyphBrush(mode);
 
         return new TabVisualMode(
             $"{prefix} ({transportName} - {vtLabel})",
@@ -684,6 +741,28 @@ internal sealed class MainWindowController
         => useTextureInterop
             ? GhosttyRenderedTerminalRenderingMode.TextureInterop
             : GhosttyRenderedTerminalRenderingMode.CpuCellRenderer;
+
+    private static string CreateStandaloneModeGlyph(TerminalRenderMode mode)
+    {
+        return mode switch
+        {
+            TerminalRenderMode.NativeVt => "\u25A0", // ■
+            TerminalRenderMode.ManagedVt => "\u25B2", // ▲
+            _ => "\u25BC", // ▼ Rendered (Auto VT)
+        };
+    }
+
+    private static SolidColorBrush CreateStandaloneModeGlyphBrush(TerminalRenderMode mode)
+    {
+        Color color = mode switch
+        {
+            TerminalRenderMode.NativeVt => Color.FromRgb(0x6A, 0xB0, 0x4C),
+            TerminalRenderMode.ManagedVt => Color.FromRgb(0x4E, 0xC9, 0xB0),
+            _ => Color.FromRgb(0x6A, 0x99, 0x55),
+        };
+
+        return new SolidColorBrush(color);
+    }
 
     private string GetRenderedBackendLabel()
         => _viewModel.UseTextureInterop ? "TextureInterop (Preview)" : "CPU Cell Renderer";
@@ -1081,7 +1160,19 @@ internal sealed class MainWindowController
         target.HeaderButton.Classes.Add("active");
         _activeTab = target;
 
-        Dispatcher.UIThread.Post(() => target.Control.Focus(), DispatcherPriority.Input);
+        if (target.Control is TerminalControl standaloneControl)
+        {
+            QueueStandaloneSessionStart(standaloneControl);
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            target.Control.Focus();
+            if (target.Control is TerminalControl standalone)
+            {
+                standalone.InvalidateTerminal();
+            }
+        }, DispatcherPriority.Input);
     }
 
     private void CycleTab(bool forward)
@@ -1317,6 +1408,8 @@ internal sealed class MainWindowController
 
     private void DisposeResources()
     {
+        _startingStandaloneControls.Clear();
+
         foreach (TerminalTab tab in _tabs)
         {
             DisposeTerminal(tab.Control);

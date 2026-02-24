@@ -5,6 +5,7 @@
 using System.Reactive.Linq;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Media;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Demo.Services;
@@ -16,6 +17,86 @@ namespace RoyalTerminal.Tests;
 
 public sealed class MainWindowControllerModeStartupTests
 {
+    [AvaloniaFact]
+    public async Task Controller_Startup_CreatesTabsForEachSupportedMode()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo startup-modes";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            skipEmbeddedGhosttyInitialization: true);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
+                embeddedGhosttyAvailable: viewModel.GhosttyAvailable,
+                nativeVtAvailable: viewModel.NativeVtAvailable);
+            TerminalModeResolver resolver = TerminalModeResolver.Default;
+            int expectedStartupTabs = CountSupportedModes(resolver, capabilities);
+
+            bool createdExpectedTabs = await WaitUntilAsync(
+                () => terminalHost.Children.Count == expectedStartupTabs,
+                TimeSpan.FromSeconds(2));
+            Assert.True(
+                createdExpectedTabs,
+                $"Expected {expectedStartupTabs} startup tabs but found {terminalHost.Children.Count}.");
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_Startup_StandaloneModeIndicators_UseDistinctColors()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pty);
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            skipEmbeddedGhosttyInitialization: true);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
+            Dictionary<string, Color> standaloneModeColors = GetStandaloneModeIndicatorColors(tabStrip);
+            Dictionary<string, string> standaloneModeGlyphs = GetStandaloneModeIndicatorGlyphs(tabStrip);
+
+            Assert.True(standaloneModeColors.Count >= 2, "Expected at least two standalone startup modes.");
+            Assert.Equal(standaloneModeColors.Count, standaloneModeColors.Values.Distinct().Count());
+            Assert.Equal(standaloneModeGlyphs.Count, standaloneModeGlyphs.Values.Distinct().Count());
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
     [AvaloniaFact]
     public async Task Controller_NewTab_RequestModes_ResolveToSupportedModesWithoutCrash()
     {
@@ -266,5 +347,114 @@ public sealed class MainWindowControllerModeStartupTests
 
         Dispatcher.UIThread.RunJobs();
         return predicate();
+    }
+
+    private static int CountSupportedModes(TerminalModeResolver resolver, TerminalModeCapabilities capabilities)
+    {
+        TerminalRenderMode[] startupModes =
+        [
+            TerminalRenderMode.GhosttyRendered,
+            TerminalRenderMode.GhosttyNative,
+            TerminalRenderMode.NativeVt,
+            TerminalRenderMode.ManagedVt,
+            TerminalRenderMode.RenderedAuto,
+        ];
+
+        int count = 0;
+        for (int i = 0; i < startupModes.Length; i++)
+        {
+            if (resolver.IsSupported(startupModes[i], capabilities))
+            {
+                count++;
+            }
+        }
+
+        return Math.Max(1, count);
+    }
+
+    private static Dictionary<string, Color> GetStandaloneModeIndicatorColors(StackPanel tabStrip)
+    {
+        Dictionary<string, Color> colors = new(StringComparer.Ordinal);
+
+        for (int i = 0; i < tabStrip.Children.Count; i++)
+        {
+            if (tabStrip.Children[i] is not Button headerButton)
+            {
+                continue;
+            }
+
+            string? tip = ToolTip.GetTip(headerButton) as string;
+            if (string.IsNullOrWhiteSpace(tip) || !tip.Contains(" - ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string modeName = tip.StartsWith("Native VT", StringComparison.Ordinal)
+                ? "Native VT"
+                : tip.StartsWith("Managed VT", StringComparison.Ordinal)
+                    ? "Managed VT"
+                    : tip.StartsWith("Rendered (", StringComparison.Ordinal)
+                        ? "Rendered (Auto VT)"
+                        : string.Empty;
+            if (string.IsNullOrEmpty(modeName))
+            {
+                continue;
+            }
+
+            if (headerButton.Content is not StackPanel content
+                || content.Children.Count == 0
+                || content.Children[0] is not TextBlock modeIndicator
+                || modeIndicator.Foreground is not SolidColorBrush brush)
+            {
+                continue;
+            }
+
+            colors[modeName] = brush.Color;
+        }
+
+        return colors;
+    }
+
+    private static Dictionary<string, string> GetStandaloneModeIndicatorGlyphs(StackPanel tabStrip)
+    {
+        Dictionary<string, string> glyphs = new(StringComparer.Ordinal);
+
+        for (int i = 0; i < tabStrip.Children.Count; i++)
+        {
+            if (tabStrip.Children[i] is not Button headerButton)
+            {
+                continue;
+            }
+
+            string? tip = ToolTip.GetTip(headerButton) as string;
+            if (string.IsNullOrWhiteSpace(tip) || !tip.Contains(" - ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string modeName = tip.StartsWith("Native VT", StringComparison.Ordinal)
+                ? "Native VT"
+                : tip.StartsWith("Managed VT", StringComparison.Ordinal)
+                    ? "Managed VT"
+                    : tip.StartsWith("Rendered (", StringComparison.Ordinal)
+                        ? "Rendered (Auto VT)"
+                        : string.Empty;
+            if (string.IsNullOrEmpty(modeName))
+            {
+                continue;
+            }
+
+            if (headerButton.Content is not StackPanel content
+                || content.Children.Count == 0
+                || content.Children[0] is not TextBlock modeIndicator
+                || string.IsNullOrEmpty(modeIndicator.Text))
+            {
+                continue;
+            }
+
+            glyphs[modeName] = modeIndicator.Text;
+        }
+
+        return glyphs;
     }
 }

@@ -20,6 +20,7 @@ public interface ITerminalScrollService
     /// </summary>
     void HandleOutput(
         TerminalScrollData? scrollData,
+        TerminalScreen? screen,
         bool autoScroll,
         TerminalPresenter? presenter,
         Action raiseScrollInvalidated);

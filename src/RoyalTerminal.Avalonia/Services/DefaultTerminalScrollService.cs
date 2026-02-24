@@ -19,14 +19,21 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
     /// <inheritdoc />
     public void HandleOutput(
         TerminalScrollData? scrollData,
+        TerminalScreen? screen,
         bool autoScroll,
         TerminalPresenter? presenter,
         Action raiseScrollInvalidated)
     {
-        if (autoScroll)
+        if (scrollData is not null && screen is not null)
         {
-            scrollData?.ScrollToBottom();
+            scrollData.UpdateExtent(screen.TotalRows, autoScroll);
+            if (autoScroll)
+            {
+                scrollData.ScrollToBottom();
+            }
         }
+
+        SyncScreenScrollOffset(scrollData, screen);
 
         presenter?.Invalidate();
         raiseScrollInvalidated();
@@ -40,6 +47,7 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
         TerminalPresenter? presenter)
     {
         scrollData?.ScrollByRows(rows);
+        SyncScreenScrollOffset(scrollData, screen);
         screen?.InvalidateAll();
         presenter?.Invalidate();
     }
@@ -51,6 +59,7 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
         TerminalPresenter? presenter)
     {
         scrollData?.ScrollToBottom();
+        SyncScreenScrollOffset(scrollData, screen);
         screen?.InvalidateAll();
         presenter?.Invalidate();
     }
@@ -92,5 +101,15 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
         if (keyModifiers.HasFlag(KeyModifiers.Alt)) mods |= TerminalModifiers.Alt;
         if (keyModifiers.HasFlag(KeyModifiers.Meta)) mods |= TerminalModifiers.Meta;
         return mods;
+    }
+
+    private static void SyncScreenScrollOffset(TerminalScrollData? scrollData, TerminalScreen? screen)
+    {
+        if (scrollData is null || screen is null)
+        {
+            return;
+        }
+
+        screen.ScrollOffset = scrollData.ToScreenScrollOffsetRows(screen.MaxScrollOffset);
     }
 }

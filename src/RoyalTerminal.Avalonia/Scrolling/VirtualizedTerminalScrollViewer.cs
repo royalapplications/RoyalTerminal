@@ -129,7 +129,7 @@ public class VirtualizedTerminalScrollViewer : Control, ILogicalScrollable
 
     private void UpdateScreenScroll()
     {
-        _screen.ScrollOffset = _scrollData.OffsetRows;
+        _screen.ScrollOffset = _scrollData.ToScreenScrollOffsetRows(_screen.MaxScrollOffset);
     }
 
     private void InvalidateScrollInfo()

@@ -185,6 +185,51 @@ public class TerminalScrollDataTests
     }
 
     [Fact]
+    public void UpdateExtent_ClampsOffset_WhenExtentShrinks()
+    {
+        var data = CreateScrollData(cellHeight: 16, viewport: 384, extent: 3200);
+        data.Offset = 2000;
+
+        data.UpdateExtent(totalRows: 20, autoScrollToBottom: false);
+
+        Assert.Equal(data.MaxOffset, data.Offset);
+    }
+
+    [Fact]
+    public void ToScreenScrollOffsetRows_ConvertsTopAnchoredOffsetToBottomAnchoredRows()
+    {
+        var data = CreateScrollData(cellHeight: 16, viewport: 384, extent: 1600); // max row offset = 76
+        int screenMaxScrollOffsetRows = 76;
+
+        data.Offset = 0; // top in UI
+        Assert.Equal(76, data.ToScreenScrollOffsetRows(screenMaxScrollOffsetRows));
+
+        data.ScrollToBottom(); // bottom in UI
+        Assert.Equal(0, data.ToScreenScrollOffsetRows(screenMaxScrollOffsetRows));
+    }
+
+    [Fact]
+    public void ToScreenScrollOffsetRows_MapsBottomCorrectly_WhenViewportHasPartialRow()
+    {
+        // 100 rows * 10px = 1000 extent, viewport 95px means max pixel offset 905.
+        // Screen model still uses 9 visible rows => max row offset 91.
+        TerminalScrollData data = new()
+        {
+            CellHeight = 10,
+            Viewport = 95,
+            Extent = 1000,
+        };
+
+        int screenMaxScrollOffsetRows = 91;
+
+        data.ScrollToTop();
+        Assert.Equal(91, data.ToScreenScrollOffsetRows(screenMaxScrollOffsetRows));
+
+        data.ScrollToBottom();
+        Assert.Equal(0, data.ToScreenScrollOffsetRows(screenMaxScrollOffsetRows));
+    }
+
+    [Fact]
     public void ViewportYToRow_ConvertsCorrectly()
     {
         var data = CreateScrollData(cellHeight: 16);
