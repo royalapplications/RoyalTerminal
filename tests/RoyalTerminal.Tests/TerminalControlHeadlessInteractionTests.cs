@@ -158,6 +158,52 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
+    public async Task Headless_KeyboardInput_FallsBackToAttachedEndpointTextPath_WhenNoInputSink()
+    {
+        RecordingTextEndpoint endpoint = new();
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            control.AttachEndpoint(endpoint);
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            endpoint.Inputs.Clear();
+
+            window.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None);
+            bool enterSent = await WaitUntilAsync(
+                () => endpoint.Inputs.Any(static input => input.Length == 1 && input[0] == (byte)'\r'),
+                TimeSpan.FromSeconds(2));
+            Assert.True(enterSent);
+
+            endpoint.Inputs.Clear();
+            window.KeyTextInput("x");
+
+            bool textSent = await WaitUntilAsync(
+                () => endpoint.Inputs.Any(static input => input.Length == 1 && input[0] == (byte)'x'),
+                TimeSpan.FromSeconds(2));
+            Assert.True(textSent);
+        }
+        finally
+        {
+            window.Close();
+            control.DetachEndpoint();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Headless_MouseInput_UsesAttachedEndpointSink()
     {
         RecordingEndpoint endpoint = new();
@@ -197,6 +243,108 @@ public sealed class TerminalControlHeadlessInteractionTests
                 evt.Kind == TerminalPointerEventKind.Button && evt.Action == TerminalInputAction.Release);
             Assert.Contains(endpoint.PointerEvents, static evt =>
                 evt.Kind == TerminalPointerEventKind.Scroll);
+        }
+        finally
+        {
+            window.Close();
+            control.DetachEndpoint();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_MouseInput_EncodesToAttachedEndpointTextPath_WhenNoInputSinkAndMouseModeEnabled()
+    {
+        RecordingTextEndpoint endpoint = new();
+        TerminalControl control = new()
+        {
+            Width = 640,
+            Height = 400,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            control.AttachEndpoint(endpoint);
+            control.WriteOutput("\x1b[?1002h\x1b[?1006h"u8);
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            endpoint.Inputs.Clear();
+
+            Point point = await GetInteractionPointAsync(control, window);
+            RaiseMouseSequence(control, window, point);
+            Dispatcher.UIThread.RunJobs();
+
+            bool vtMouseSent = await WaitUntilAsync(
+                () => endpoint.Inputs.Any(IsMouseProtocolInput),
+                TimeSpan.FromSeconds(2));
+            Assert.True(vtMouseSent);
+        }
+        finally
+        {
+            window.Close();
+            control.DetachEndpoint();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_FocusEvents_EncodeToAttachedEndpointTextPath_WhenNoInputSinkAndMode1004Enabled()
+    {
+        RecordingTextEndpoint endpoint = new();
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Button other = new();
+        StackPanel root = new()
+        {
+            Children =
+            {
+                control,
+                other,
+            },
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = root,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            control.AttachEndpoint(endpoint);
+            control.WriteOutput("\x1b[?1004h"u8);
+            Dispatcher.UIThread.RunJobs();
+
+            other.Focus();
+            Dispatcher.UIThread.RunJobs();
+            endpoint.Inputs.Clear();
+
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+            other.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            bool focusInSent = await WaitUntilAsync(
+                () => endpoint.Inputs.Any(static input => Encoding.UTF8.GetString(input) == "\x1b[I"),
+                TimeSpan.FromSeconds(2));
+            bool focusOutSent = await WaitUntilAsync(
+                () => endpoint.Inputs.Any(static input => Encoding.UTF8.GetString(input) == "\x1b[O"),
+                TimeSpan.FromSeconds(2));
+
+            Assert.True(focusInSent);
+            Assert.True(focusOutSent);
         }
         finally
         {
@@ -966,6 +1114,27 @@ public sealed class TerminalControlHeadlessInteractionTests
         {
             PointerEvents.Add(pointerEvent);
             return true;
+        }
+    }
+
+    private sealed class RecordingTextEndpoint : ITerminalEndpoint
+    {
+        public List<byte[]> Inputs { get; } = [];
+
+        public void SendText(ReadOnlySpan<byte> utf8)
+        {
+            Inputs.Add(utf8.ToArray());
+        }
+
+        public void SetFocus(bool focused)
+        {
+            _ = focused;
+        }
+
+        public void SetSize(int widthPx, int heightPx)
+        {
+            _ = widthPx;
+            _ = heightPx;
         }
     }
 

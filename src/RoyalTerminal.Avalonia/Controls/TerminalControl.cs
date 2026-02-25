@@ -1079,7 +1079,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public void WriteOutput(byte[] data)
     {
         ArgumentNullException.ThrowIfNull(data);
-        WriteOutput((ReadOnlyMemory<byte>)data);
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            EnqueueOutputForUiThread(data.AsSpan().ToArray());
+            return;
+        }
+
+        WriteOutputOnUiThread(data);
     }
 
     /// <summary>
@@ -1088,13 +1094,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void WriteOutput(ReadOnlyMemory<byte> data)
     {
-        WriteOutputCore(data.Span);
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            EnqueueOutputForUiThread(data.Span.ToArray());
+            return;
+        }
 
-        // Raise event without copying when input is already managed memory.
-        DataReceived?.Invoke(this, new TerminalDataEventArgs(data));
-
-        TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
-        UpdateRendererCursorForViewport();
+        WriteOutputOnUiThread(data);
     }
 
     /// <summary>
@@ -1103,10 +1109,27 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void WriteOutput(ReadOnlySpan<byte> data)
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            EnqueueOutputForUiThread(data.ToArray());
+            return;
+        }
+
         WriteOutputCore(data);
 
         // Span input may come from transient memory, so copy to a managed payload for event consumers.
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data.ToArray()));
+
+        TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
+        UpdateRendererCursorForViewport();
+    }
+
+    private void WriteOutputOnUiThread(ReadOnlyMemory<byte> data)
+    {
+        WriteOutputCore(data.Span);
+
+        // Raise event without copying when input is already managed memory.
+        DataReceived?.Invoke(this, new TerminalDataEventArgs(data));
 
         TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
         UpdateRendererCursorForViewport();
@@ -1746,7 +1769,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             .AsTask()
             .GetAwaiter()
             .GetResult();
-        DrainPendingTransportOutput(flushAll: true);
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            DrainPendingTransportOutput(flushAll: true);
+        }
+        else
+        {
+            Dispatcher.UIThread.InvokeAsync(() => DrainPendingTransportOutput(flushAll: true))
+                .GetAwaiter()
+                .GetResult();
+        }
         ResetPendingTransportOutputQueue();
         _activeTransportId = null;
         _mouseModeTracker.Reset();
@@ -1796,6 +1828,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // The PTY reader reuses its read buffer, so we must copy before posting
         // to the UI thread — otherwise the buffer may be overwritten by the next read.
         byte[] copy = data.AsSpan(0, length).ToArray();
+        EnqueueOutputForUiThread(copy);
+    }
+
+    private void EnqueueOutputForUiThread(byte[] copy)
+    {
+        if (copy.Length == 0)
+        {
+            return;
+        }
 
         bool scheduleDrain = false;
         lock (_pendingTransportOutputSync)
@@ -1856,7 +1897,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 nextChunk = _pendingTransportOutput.Dequeue();
             }
 
-            WriteOutput(nextChunk);
+            WriteOutputOnUiThread(nextChunk);
             processed++;
         }
     }
@@ -1958,6 +1999,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return focusModeSource.FocusEventsEnabled;
         }
 
+        if (TerminalSessionService.ModeSource is ITerminalFocusEventModeSource focusModeFromSource)
+        {
+            return focusModeFromSource.FocusEventsEnabled;
+        }
+
         return false;
     }
 
@@ -1973,6 +2019,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool HasTransportOrDirectPtyInputPath()
     {
+        if (TerminalSessionService.Endpoint is not null)
+        {
+            return true;
+        }
+
         if (TerminalSessionService.HasActiveTransport)
         {
             return true;

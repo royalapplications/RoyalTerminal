@@ -678,6 +678,54 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_WriteOutput_FromBackgroundThread_IsQueuedToUiThread()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        object sync = new();
+        int receivedCount = 0;
+        StringBuilder payloads = new();
+
+        control.DataReceived += (_, args) =>
+        {
+            lock (sync)
+            {
+                receivedCount++;
+                payloads.Append(Encoding.UTF8.GetString(args.Data.Span));
+            }
+        };
+
+        const int writes = 64;
+        await Task.Run(() =>
+        {
+            for (int i = 0; i < writes; i++)
+            {
+                control.WriteOutput(Encoding.UTF8.GetBytes($"bg-{i}\n"));
+            }
+        });
+
+        bool drained = await WaitUntilAsync(
+            () =>
+            {
+                lock (sync)
+                {
+                    return receivedCount == writes;
+                }
+            },
+            TimeSpan.FromSeconds(5));
+
+        Assert.True(drained, $"Expected {writes} queued background writes to drain on UI thread.");
+        lock (sync)
+        {
+            Assert.Contains("bg-0", payloads.ToString(), StringComparison.Ordinal);
+            Assert.Contains($"bg-{writes - 1}", payloads.ToString(), StringComparison.Ordinal);
+        }
+    }
+
+    [AvaloniaFact]
     public void Control_WriteOutput_UpdatesScrollExtent_WithoutResize()
     {
         TerminalControl control = new()

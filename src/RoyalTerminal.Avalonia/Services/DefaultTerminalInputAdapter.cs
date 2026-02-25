@@ -29,7 +29,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
             return inputSink.SendKey(keyEvent);
         }
 
-        if (sessionService.HasActiveTransport || sessionService.HasPty)
+        if (HasFallbackByteInputPath(sessionService))
         {
             TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor);
             if (ShouldUseWin32InputMode(modeState) &&
@@ -61,7 +61,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         ITerminalInputSink? inputSink = sessionService.InputSink;
         if (inputSink is null)
         {
-            if (sessionService.HasActiveTransport || sessionService.HasPty)
+            if (HasFallbackByteInputPath(sessionService))
             {
                 TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor: null);
                 if (ShouldUseWin32InputMode(modeState) &&
@@ -104,7 +104,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
             return inputSink.SendText(e.Text);
         }
 
-        bool hasFallbackPath = sessionService.HasActiveTransport || sessionService.HasPty;
+        bool hasFallbackPath = HasFallbackByteInputPath(sessionService);
         if (!hasFallbackPath)
         {
             return false;
@@ -173,5 +173,12 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
     private static bool ShouldUseWin32InputMode(in TerminalModeState modeState)
     {
         return OperatingSystem.IsWindows() && modeState.Win32InputMode;
+    }
+
+    private static bool HasFallbackByteInputPath(ITerminalSessionService sessionService)
+    {
+        return sessionService.Endpoint is not null ||
+               sessionService.HasActiveTransport ||
+               sessionService.HasPty;
     }
 }
