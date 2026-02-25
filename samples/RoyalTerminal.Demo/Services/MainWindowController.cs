@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reactive;
 using System.Reactive.Disposables;
+using System.Reactive.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,8 +15,10 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using RoyalTerminal.Avalonia.Capture;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
@@ -46,14 +49,17 @@ internal sealed class MainWindowController
     private static readonly bool s_disableTextShaping = ReadEnvironmentToggle(DisableTextShapingEnvVar);
     private static readonly bool s_enableRenderDiagnostics = ReadEnvironmentToggle(EnableRenderDiagnosticsEnvVar);
 
+    private readonly Window _window;
     private readonly MainWindowViewModel _viewModel;
     private readonly Grid _terminalHost;
     private readonly StackPanel _tabStrip;
     private readonly List<TerminalTab> _tabs = [];
     private readonly HashSet<TerminalControl> _startingStandaloneControls = [];
+    private readonly Dictionary<TerminalControl, TerminalCaptureRuntime> _captureRuntimes = [];
     private readonly ITerminalModeCapabilityResolver _modeCapabilityResolver;
     private readonly ITerminalModeResolver _modeResolver;
     private readonly bool _skipEmbeddedGhosttyInitialization;
+    private bool _suppressReplayTimelineSeek;
 
     private TerminalTab? _activeTab;
     private int _tabCounter;
@@ -80,14 +86,15 @@ internal sealed class MainWindowController
         ITerminalModeResolver modeResolver,
         bool skipEmbeddedGhosttyInitialization)
     {
+        _window = window ?? throw new ArgumentNullException(nameof(window));
         _viewModel = viewModel;
         _modeCapabilityResolver = modeCapabilityResolver
             ?? throw new ArgumentNullException(nameof(modeCapabilityResolver));
         _modeResolver = modeResolver ?? throw new ArgumentNullException(nameof(modeResolver));
         _skipEmbeddedGhosttyInitialization = skipEmbeddedGhosttyInitialization;
-        _terminalHost = window.FindControl<Grid>("TerminalHost")
+        _terminalHost = _window.FindControl<Grid>("TerminalHost")
             ?? throw new InvalidOperationException("TerminalHost was not found in MainWindow.");
-        _tabStrip = window.FindControl<StackPanel>("TabStrip")
+        _tabStrip = _window.FindControl<StackPanel>("TabStrip")
             ?? throw new InvalidOperationException("TabStrip was not found in MainWindow.");
     }
 
@@ -110,6 +117,7 @@ internal sealed class MainWindowController
         InitializeShellProfiles();
 
         CreateInitialTabsForSupportedModes();
+        SyncCaptureReplayState();
         string startupStatus = _viewModel.UseRenderedControl
             ? $"Ghostty VT + {GetRenderedBackendLabel()} rendering"
             : _viewModel.UseNativeControl
@@ -201,6 +209,41 @@ internal sealed class MainWindowController
             ApplyRenderedBackend(context.Input);
             context.SetOutput(Unit.Default);
         }));
+
+        disposables.Add(_viewModel.ToggleCaptureInteraction.RegisterHandler(context =>
+        {
+            ToggleCapture(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.SaveCaptureInteraction.RegisterHandler(async context =>
+        {
+            await SaveCaptureAsync();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.LoadReplayInteraction.RegisterHandler(async context =>
+        {
+            await LoadReplayAsync();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.SetReplayPlayingInteraction.RegisterHandler(context =>
+        {
+            SetReplayPlaying(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.StopReplayInteraction.RegisterHandler(context =>
+        {
+            StopReplay();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel
+            .WhenAnyValue(model => model.ReplayTimelineValue)
+            .Skip(1)
+            .Subscribe(SeekReplayFromViewModel));
     }
 
     private bool TryInitializeGhostty()
@@ -344,7 +387,13 @@ internal sealed class MainWindowController
             }
             : terminal;
 
-        TerminalTab tab = new(headerButton, terminal, container, _tabCounter, tabMode.Name);
+        TerminalTab tab = new(
+            headerButton,
+            terminal,
+            container,
+            _tabCounter,
+            tabMode.Name,
+            autoStartSession: terminal is TerminalControl);
         tab.CloseButton.Command = _viewModel.CloseTabCommand;
         tab.CloseButton.CommandParameter = tab.Index;
         headerButton.Command = _viewModel.ActivateTabCommand;
@@ -358,6 +407,55 @@ internal sealed class MainWindowController
 
         SwitchToTab(_tabs.Count - 1);
         UpdateStatus(BuildTabOpenedStatus(tabName, finalizedModeSelection));
+    }
+
+    private void CreateReplayTab(TerminalCaptureSession session, string sourceLabel)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        _tabCounter++;
+        string tabName = $"Replay {_tabCounter}";
+        TerminalControl terminal = CreateStandaloneReplayControl(session);
+        TerminalCaptureRuntime runtime = EnsureCaptureRuntime(terminal);
+        runtime.LoadReplay(session, sourceLabel);
+
+        TabVisualMode tabMode = new(
+            "Replay Capture",
+            "\u25B7",
+            new SolidColorBrush(Color.FromRgb(0x9C, 0xD6, 0x56)));
+        Button headerButton = CreateTabHeader(tabName, tabMode);
+
+        ScrollViewer container = new()
+        {
+            Content = terminal,
+            VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+        };
+
+        TerminalTab tab = new(
+            headerButton,
+            terminal,
+            container,
+            _tabCounter,
+            tabMode.Name,
+            autoStartSession: false);
+        if (!string.IsNullOrWhiteSpace(sourceLabel))
+        {
+            tab.UpdateTitle($"Replay: {sourceLabel}");
+        }
+
+        tab.CloseButton.Command = _viewModel.CloseTabCommand;
+        tab.CloseButton.CommandParameter = tab.Index;
+        headerButton.Command = _viewModel.ActivateTabCommand;
+        headerButton.CommandParameter = tab.Index;
+
+        _tabs.Add(tab);
+        container.IsVisible = false;
+        _terminalHost.Children.Add(container);
+        _tabStrip.Children.Add(headerButton);
+
+        SwitchToTab(_tabs.Count - 1);
+        UpdateStatus($"Loaded replay '{sourceLabel}'.");
     }
 
     private TerminalModeSelection ResolveModeSelectionForNewTab()
@@ -545,8 +643,36 @@ internal sealed class MainWindowController
             UpdateDimensions(args.Columns, args.Rows);
         };
 
+        EnsureCaptureRuntime(standaloneControl);
         QueueStandaloneSessionStart(standaloneControl);
 
+        return standaloneControl;
+    }
+
+    private TerminalControl CreateStandaloneReplayControl(TerminalCaptureSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        TerminalTheme theme = _viewModel.ActiveTheme;
+        TerminalControl standaloneControl = CreateStandaloneControl();
+        standaloneControl.FontFamilyName = MonoFont;
+        standaloneControl.TerminalFontSize = _viewModel.FontSize;
+        standaloneControl.Columns = Math.Max(1, session.InitialColumns);
+        standaloneControl.Rows = Math.Max(1, session.InitialRows);
+        standaloneControl.ScrollbackLimit = 10_000;
+        standaloneControl.VtProcessorPreference = VtProcessorPreference.Managed;
+        standaloneControl.ApplyTheme(theme);
+        ConfigureRenderer(standaloneControl.Renderer);
+
+        standaloneControl.TerminalResized += (_, args) =>
+        {
+            if (_activeTab?.Control == standaloneControl)
+            {
+                UpdateDimensions(args.Columns, args.Rows);
+            }
+        };
+
+        EnsureCaptureRuntime(standaloneControl);
         return standaloneControl;
     }
 
@@ -1130,6 +1256,7 @@ internal sealed class MainWindowController
         }
 
         UpdateStatus($"Closed {tab.Title}");
+        SyncCaptureReplayState();
     }
 
     private void CloseCurrentTab()
@@ -1160,7 +1287,7 @@ internal sealed class MainWindowController
         target.HeaderButton.Classes.Add("active");
         _activeTab = target;
 
-        if (target.Control is TerminalControl standaloneControl)
+        if (target.AutoStartSession && target.Control is TerminalControl standaloneControl)
         {
             QueueStandaloneSessionStart(standaloneControl);
         }
@@ -1173,6 +1300,8 @@ internal sealed class MainWindowController
                 standalone.InvalidateTerminal();
             }
         }, DispatcherPriority.Input);
+
+        SyncCaptureReplayState();
     }
 
     private void CycleTab(bool forward)
@@ -1187,6 +1316,269 @@ internal sealed class MainWindowController
             ? (currentIndex + 1) % _tabs.Count
             : (currentIndex - 1 + _tabs.Count) % _tabs.Count;
         SwitchToTab(next);
+    }
+
+    #endregion
+
+    #region Capture And Replay
+
+    private TerminalCaptureRuntime EnsureCaptureRuntime(TerminalControl control)
+    {
+        if (_captureRuntimes.TryGetValue(control, out TerminalCaptureRuntime? runtime))
+        {
+            return runtime;
+        }
+
+        runtime = new TerminalCaptureRuntime(control);
+        runtime.StateChanged += OnCaptureRuntimeStateChanged;
+        _captureRuntimes[control] = runtime;
+        return runtime;
+    }
+
+    private TerminalCaptureRuntime? GetActiveCaptureRuntime()
+    {
+        if (_activeTab?.Control is not TerminalControl control)
+        {
+            return null;
+        }
+
+        return _captureRuntimes.TryGetValue(control, out TerminalCaptureRuntime? runtime)
+            ? runtime
+            : EnsureCaptureRuntime(control);
+    }
+
+    private void ToggleCapture(bool shouldStartCapture)
+    {
+        TerminalCaptureRuntime? runtime = GetActiveCaptureRuntime();
+        if (runtime is null)
+        {
+            _viewModel.SetCaptureState(false, false);
+            UpdateStatus("Capture is available for standalone terminal tabs only.");
+            return;
+        }
+
+        if (shouldStartCapture)
+        {
+            runtime.StartCapture();
+            UpdateStatus("Capture started.");
+        }
+        else
+        {
+            TerminalCaptureSession session = runtime.StopCapture();
+            UpdateStatus(
+                $"Capture stopped ({session.Events.Count} events, {session.DurationMilliseconds / 1000.0:0.00}s).");
+        }
+
+        SyncCaptureReplayState();
+    }
+
+    private async Task SaveCaptureAsync()
+    {
+        TerminalCaptureRuntime? runtime = GetActiveCaptureRuntime();
+        if (runtime is null)
+        {
+            UpdateStatus("No standalone terminal is active to save capture.");
+            return;
+        }
+
+        TerminalCaptureSession? session = runtime.GetCaptureSnapshot();
+        if (session is null || session.Events.Count == 0)
+        {
+            UpdateStatus("No captured events are available to save.");
+            return;
+        }
+
+        if (!_window.StorageProvider.CanSave)
+        {
+            UpdateStatus("Save file picker is unavailable in this runtime.");
+            return;
+        }
+
+        try
+        {
+            FilePickerSaveOptions options = new()
+            {
+                Title = "Save Terminal Capture",
+                SuggestedFileName = CreateCaptureFileName(),
+                DefaultExtension = "json",
+                ShowOverwritePrompt = true,
+                FileTypeChoices =
+                [
+                    CreateCaptureFileType(),
+                ],
+            };
+
+            IStorageFile? file = await _window.StorageProvider.SaveFilePickerAsync(options);
+            if (file is null)
+            {
+                return;
+            }
+
+            await using Stream stream = await file.OpenWriteAsync();
+            await TerminalCaptureSessionSerializer.SaveAsync(session, stream);
+            await stream.FlushAsync();
+
+            UpdateStatus($"Capture saved to '{file.Name}'.");
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus($"Failed to save capture: {ex.Message}");
+        }
+        finally
+        {
+            SyncCaptureReplayState();
+        }
+    }
+
+    private async Task LoadReplayAsync()
+    {
+        if (!_window.StorageProvider.CanOpen)
+        {
+            UpdateStatus("Open file picker is unavailable in this runtime.");
+            return;
+        }
+
+        try
+        {
+            FilePickerOpenOptions options = new()
+            {
+                Title = "Load Terminal Capture",
+                AllowMultiple = false,
+                FileTypeFilter =
+                [
+                    CreateCaptureFileType(),
+                ],
+            };
+
+            IReadOnlyList<IStorageFile> files = await _window.StorageProvider.OpenFilePickerAsync(options);
+            if (files.Count == 0)
+            {
+                return;
+            }
+
+            IStorageFile file = files[0];
+            await using Stream stream = await file.OpenReadAsync();
+            TerminalCaptureSession session = await TerminalCaptureSessionSerializer.LoadAsync(stream);
+
+            CreateReplayTab(session, file.Name);
+            SyncCaptureReplayState();
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus($"Failed to load replay: {ex.Message}");
+        }
+    }
+
+    private void SetReplayPlaying(bool shouldPlay)
+    {
+        TerminalCaptureRuntime? runtime = GetActiveCaptureRuntime();
+        if (runtime is null || !runtime.IsReplayEnabled)
+        {
+            UpdateStatus("Replay is not enabled for the active tab.");
+            return;
+        }
+
+        if (shouldPlay)
+        {
+            runtime.PlayReplay();
+            UpdateStatus("Replay playing.");
+        }
+        else
+        {
+            runtime.PauseReplay();
+            UpdateStatus("Replay paused.");
+        }
+
+        SyncCaptureReplayState();
+    }
+
+    private void StopReplay()
+    {
+        TerminalCaptureRuntime? runtime = GetActiveCaptureRuntime();
+        if (runtime is null || !runtime.IsReplayEnabled)
+        {
+            return;
+        }
+
+        runtime.StopReplay();
+        UpdateStatus("Replay stopped.");
+        SyncCaptureReplayState();
+    }
+
+    private void SeekReplayFromViewModel(double value)
+    {
+        if (_suppressReplayTimelineSeek)
+        {
+            return;
+        }
+
+        TerminalCaptureRuntime? runtime = GetActiveCaptureRuntime();
+        if (runtime is null || !runtime.IsReplayEnabled)
+        {
+            return;
+        }
+
+        runtime.SeekReplay(value);
+        SyncCaptureReplayState();
+    }
+
+    private void OnCaptureRuntimeStateChanged(object? sender, EventArgs e)
+    {
+        _ = e;
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => OnCaptureRuntimeStateChanged(sender, EventArgs.Empty));
+            return;
+        }
+
+        TerminalCaptureRuntime? runtime = GetActiveCaptureRuntime();
+        if (runtime is null || !ReferenceEquals(runtime, sender))
+        {
+            return;
+        }
+
+        SyncCaptureReplayState();
+    }
+
+    private void SyncCaptureReplayState()
+    {
+        TerminalCaptureRuntime? runtime = GetActiveCaptureRuntime();
+        _suppressReplayTimelineSeek = true;
+        try
+        {
+            if (runtime is null)
+            {
+                _viewModel.SetCaptureState(false, false);
+                _viewModel.SetReplayState(false, false, 0, 0, string.Empty);
+                return;
+            }
+
+            _viewModel.SetCaptureState(runtime.IsCaptureActive, runtime.HasCapture);
+            _viewModel.SetReplayState(
+                runtime.IsReplayEnabled,
+                runtime.IsReplayPlaying,
+                runtime.ReplayPositionSeconds,
+                runtime.ReplayDurationSeconds,
+                runtime.ReplaySourceLabel);
+        }
+        finally
+        {
+            _suppressReplayTimelineSeek = false;
+        }
+    }
+
+    private static FilePickerFileType CreateCaptureFileType()
+    {
+        return new FilePickerFileType("RoyalTerminal Capture")
+        {
+            Patterns = ["*.rtcap.json", "*.json"],
+            MimeTypes = ["application/json"],
+        };
+    }
+
+    private static string CreateCaptureFileName()
+    {
+        return $"terminal-capture-{DateTime.UtcNow:yyyyMMdd-HHmmss}.rtcap.json";
     }
 
     #endregion
@@ -1415,15 +1807,22 @@ internal sealed class MainWindowController
             DisposeTerminal(tab.Control);
         }
         _tabs.Clear();
+        _captureRuntimes.Clear();
 
         _ghosttyApp?.Dispose();
         _ghosttyConfig?.Dispose();
     }
 
-    private static void DisposeTerminal(Control control)
+    private void DisposeTerminal(Control control)
     {
         if (control is TerminalControl standaloneControl)
         {
+            if (_captureRuntimes.Remove(standaloneControl, out TerminalCaptureRuntime? runtime))
+            {
+                runtime.StateChanged -= OnCaptureRuntimeStateChanged;
+                runtime.Dispose();
+            }
+
             standaloneControl.StopPty();
             standaloneControl.DetachEndpoint();
             return;
@@ -1504,13 +1903,20 @@ internal sealed class MainWindowController
 
     private sealed class TerminalTab
     {
-        public TerminalTab(Button headerButton, Control control, Control container, int index, string modeName)
+        public TerminalTab(
+            Button headerButton,
+            Control control,
+            Control container,
+            int index,
+            string modeName,
+            bool autoStartSession)
         {
             HeaderButton = headerButton;
             Control = control;
             Container = container;
             Index = index;
             ModeName = modeName;
+            AutoStartSession = autoStartSession;
             CloseButton = headerButton.Tag as Button
                 ?? throw new InvalidOperationException("Tab header close button is missing.");
             TitleText = ((headerButton.Content as StackPanel)?.Children[1] as TextBlock)
@@ -1524,6 +1930,7 @@ internal sealed class MainWindowController
         public TextBlock TitleText { get; }
         public int Index { get; }
         public string ModeName { get; }
+        public bool AutoStartSession { get; }
         public string Title => TitleText.Text ?? $"Terminal {Index}";
 
         public void UpdateTitle(string title)

@@ -68,6 +68,20 @@
                             FontSize="10" Padding="8,2"
                             Command="{Binding ToggleRenderedBackendCommand}"
                             ToolTip.Tip="Toggle Ghostty rendered backend (TextureInterop / CPU Cell Renderer)" />
+                    <Border Width="1" Background="{StaticResource ToolbarDividerBrush}" Margin="4,2" />
+                    <Button Content="{Binding CaptureToggleButtonText}" Height="24"
+                            FontSize="10" Padding="8,2"
+                            Command="{Binding ToggleCaptureCommand}"
+                            ToolTip.Tip="Start or stop capture for the active standalone terminal tab" />
+                    <Button Content="Save Capture" Height="24"
+                            FontSize="10" Padding="8,2"
+                            IsEnabled="{Binding CanSaveCapture}"
+                            Command="{Binding SaveCaptureCommand}"
+                            ToolTip.Tip="Save the active tab capture to a file" />
+                    <Button Content="Load Replay" Height="24"
+                            FontSize="10" Padding="8,2"
+                            Command="{Binding LoadReplayCommand}"
+                            ToolTip.Tip="Load a capture file and open a replay tab" />
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
@@ -200,6 +214,37 @@
                                Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
                     <TextBox Width="220" Margin="0,0,8,0" Text="{Binding SshInitialCommand}" />
                 </WrapPanel>
+            </StackPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource ToolbarBackgroundBrush}"
+                BorderBrush="{StaticResource ToolbarDividerBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="6,4"
+                IsVisible="{Binding IsReplayEnabled}">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock Text="Replay" Margin="0,4,0,0"
+                           Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                <Button Content="{Binding ReplayPlayPauseButtonText}" Height="24"
+                        FontSize="10" Padding="8,2"
+                        IsEnabled="{Binding CanReplayControl}"
+                        Command="{Binding ToggleReplayPlaybackCommand}" />
+                <Button Content="Stop" Height="24"
+                        FontSize="10" Padding="8,2"
+                        IsEnabled="{Binding CanReplayControl}"
+                        Command="{Binding StopReplayCommand}" />
+                <Slider Width="340"
+                        Minimum="0"
+                        Maximum="{Binding ReplayDurationSeconds}"
+                        Value="{Binding ReplayTimelineValue, Mode=TwoWay}"
+                        IsEnabled="{Binding CanSeekReplay}" />
+                <TextBlock Text="{Binding ReplayTimelineText}"
+                           Margin="0,4,0,0"
+                           Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                <TextBlock Text="{Binding ReplaySourceLabel}"
+                           Margin="8,4,0,0"
+                           Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
             </StackPanel>
         </Border>
 
