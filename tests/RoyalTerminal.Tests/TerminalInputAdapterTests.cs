@@ -153,6 +153,143 @@ public sealed class TerminalInputAdapterTests
     }
 
     [Fact]
+    public async Task HandleKeyDown_WithWindowsWin32InputMode_EncodesWin32InputRecord()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetModeState(vtProcessor.ModeState with { Win32InputMode = true });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.A,
+            KeyModifiers = KeyModifiers.None,
+            KeySymbol = "a",
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        string[] fields = ParseWin32InputFields(transport.LastInput!);
+        Assert.Equal("65", fields[0]); // VK_A
+        Assert.Equal("97", fields[2]); // 'a'
+        Assert.Equal("1", fields[3]);  // key down
+        Assert.Equal("0", fields[4]);  // control key state
+        Assert.Equal("1", fields[5]);  // repeat count
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyUp_WithWindowsWin32InputMode_EncodesWin32InputRecord()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetModeState(vtProcessor.ModeState with { Win32InputMode = true });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.A,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyUp(keyEventArgs, sessionService);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        string[] fields = ParseWin32InputFields(transport.LastInput!);
+        Assert.Equal("65", fields[0]); // VK_A
+        Assert.Equal("0", fields[2]);  // no UnicodeChar on key up
+        Assert.Equal("0", fields[3]);  // key up
+        Assert.Equal("1", fields[5]);  // repeat count
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleTextInput_WithWindowsWin32InputMode_DoesNotSendDuplicateText()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetModeState(vtProcessor.ModeState with { Win32InputMode = true });
+
+        TextInputEventArgs textInputEventArgs = new()
+        {
+            Text = "a",
+        };
+
+        bool handled = adapter.HandleTextInput(textInputEventArgs, sessionService);
+
+        Assert.True(handled);
+        Assert.Null(transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
     public async Task HandleKeyDown_UsesSessionModeSourceForApplicationCursorMode()
     {
         DefaultTerminalInputAdapter adapter = new();
@@ -775,6 +912,18 @@ public sealed class TerminalInputAdapterTests
         }
     }
 
+    private static string[] ParseWin32InputFields(byte[] bytes)
+    {
+        string sequence = Encoding.UTF8.GetString(bytes);
+        Assert.StartsWith("\x1B[", sequence);
+        Assert.EndsWith("_", sequence);
+
+        string payload = sequence.Substring(2, sequence.Length - 3);
+        string[] fields = payload.Split(';');
+        Assert.Equal(6, fields.Length);
+        return fields;
+    }
+
     private sealed record FakeTransportOptions(string TransportId) : ITerminalTransportOptions
     {
         public TerminalSessionDimensions Dimensions => new(80, 24, 640, 480);
@@ -866,6 +1015,7 @@ public sealed class TerminalInputAdapterTests
         public bool ApplicationKeypad => _modeState.ApplicationKeypad;
         public bool AlternateScreen => _modeState.AlternateScreen;
         public bool BracketedPaste => _modeState.BracketedPaste;
+        public bool Win32InputMode => _modeState.Win32InputMode;
         public int KittyKeyboardFlags => _kittyKeyboardFlags;
         public TerminalModeState ModeState => _modeState;
         public event EventHandler<TerminalModeState>? ModeChanged;
