@@ -11,6 +11,11 @@ namespace RoyalTerminal.Terminal.Services;
 /// </summary>
 public interface ITerminalSessionService
 {
+    /// <summary>
+    /// Raised when UTF-8 input bytes are sent to the active endpoint, transport, or PTY.
+    /// </summary>
+    event EventHandler<TerminalSessionInputEventArgs>? InputSent;
+
     /// <summary>Gets the attached terminal endpoint, if any.</summary>
     ITerminalEndpoint? Endpoint { get; }
 

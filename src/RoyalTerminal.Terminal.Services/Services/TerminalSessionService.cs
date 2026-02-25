@@ -18,6 +18,9 @@ public sealed class TerminalSessionService : ITerminalSessionService
     private VtProcessorModeSource? _transportModeSource;
 
     /// <inheritdoc />
+    public event EventHandler<TerminalSessionInputEventArgs>? InputSent;
+
+    /// <inheritdoc />
     public ITerminalEndpoint? Endpoint { get; private set; }
 
     /// <inheritdoc />
@@ -68,61 +71,98 @@ public sealed class TerminalSessionService : ITerminalSessionService
     public void SendInput(string text)
     {
         ReleaseInactiveTransportIfNeeded();
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
 
         if (Endpoint is not null)
         {
-            if (!string.IsNullOrEmpty(text))
-            {
-                Endpoint.SendText(Encoding.UTF8.GetBytes(text));
-            }
-
+            byte[] utf8 = Encoding.UTF8.GetBytes(text);
+            Endpoint.SendText(utf8);
+            RaiseInputSent(utf8);
             return;
         }
 
         if (Transport is not null)
         {
-            if (!string.IsNullOrEmpty(text))
+            if (Transport is ITerminalPtyTransport ptyTransport)
             {
-                if (Transport is ITerminalPtyTransport ptyTransport)
+                ptyTransport.Pty.Write(text);
+                if (InputSent is not null)
                 {
-                    ptyTransport.Pty.Write(text);
-                }
-                else
-                {
-                    Transport.SendInput(Encoding.UTF8.GetBytes(text));
+                    RaiseInputSent(Encoding.UTF8.GetBytes(text));
                 }
             }
-
+            else
+            {
+                byte[] utf8 = Encoding.UTF8.GetBytes(text);
+                Transport.SendInput(utf8);
+                RaiseInputSent(utf8);
+            }
             return;
         }
 
-        Pty?.Write(text);
+        if (Pty is null)
+        {
+            return;
+        }
+
+        Pty.Write(text);
+        if (InputSent is not null)
+        {
+            RaiseInputSent(Encoding.UTF8.GetBytes(text));
+        }
     }
 
     /// <inheritdoc />
     public void SendInput(ReadOnlySpan<byte> data)
     {
         ReleaseInactiveTransportIfNeeded();
+        if (data.IsEmpty)
+        {
+            return;
+        }
+
+        bool shouldRaiseInputSent = InputSent is not null;
+        byte[]? capturedPayload = shouldRaiseInputSent
+            ? data.ToArray()
+            : null;
+        ReadOnlySpan<byte> payload = capturedPayload is null
+            ? data
+            : capturedPayload;
 
         if (Endpoint is not null)
         {
-            Endpoint.SendText(data);
+            Endpoint.SendText(payload);
+            if (capturedPayload is not null)
+            {
+                RaiseInputSent(capturedPayload);
+            }
             return;
         }
 
         if (Transport is not null)
         {
-            Transport.SendInput(data);
+            Transport.SendInput(payload);
+            if (capturedPayload is not null)
+            {
+                RaiseInputSent(capturedPayload);
+            }
             return;
         }
 
-        if (Pty is null || data.IsEmpty)
+        if (Pty is null)
         {
             return;
         }
 
-        byte[] copy = data.ToArray();
-        Pty.Write(copy, 0, copy.Length);
+        byte[] ptyPayload = capturedPayload ?? data.ToArray();
+        Pty.Write(ptyPayload, 0, ptyPayload.Length);
+        if (capturedPayload is not null)
+        {
+            RaiseInputSent(capturedPayload);
+        }
     }
 
     /// <inheritdoc />
@@ -349,6 +389,16 @@ public sealed class TerminalSessionService : ITerminalSessionService
     private void RefreshModeSource()
     {
         ModeSource = _endpointModeSource ?? _transportModeSource;
+    }
+
+    private void RaiseInputSent(ReadOnlyMemory<byte> payload)
+    {
+        if (payload.IsEmpty)
+        {
+            return;
+        }
+
+        InputSent?.Invoke(this, new TerminalSessionInputEventArgs(payload));
     }
 
     private sealed class VtProcessorModeSource : ITerminalModeSource, IKittyKeyboardStateSource, IDisposable
