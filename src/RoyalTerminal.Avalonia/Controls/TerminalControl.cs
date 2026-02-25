@@ -1453,6 +1453,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnGotFocus(e);
         Endpoint?.SetFocus(true);
+        SendFocusEventIfNeeded(focused: true);
         _cursorBlinkVisiblePhase = true;
         UpdateRendererCursorForViewport();
         _presenter?.Invalidate();
@@ -1462,6 +1463,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnLostFocus(e);
         Endpoint?.SetFocus(false);
+        SendFocusEventIfNeeded(focused: false);
         EnsureCursorBlinkTimerRunning(false);
         _renderer?.SetCursorVisible(false);
         _presenter?.Invalidate();
@@ -1875,6 +1877,31 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         return _vtProcessor?.BracketedPaste ?? false;
+    }
+
+    private bool IsFocusEventModeActiveForInput()
+    {
+        if (!HasTransportOrDirectPtyInputPath() || TerminalSessionService.InputSink is not null)
+        {
+            return false;
+        }
+
+        if (_vtProcessor is ITerminalFocusEventModeSource focusModeSource)
+        {
+            return focusModeSource.FocusEventsEnabled;
+        }
+
+        return false;
+    }
+
+    private void SendFocusEventIfNeeded(bool focused)
+    {
+        if (!IsFocusEventModeActiveForInput())
+        {
+            return;
+        }
+
+        TerminalSessionService.SendInput(focused ? "\x1b[I" : "\x1b[O");
     }
 
     private bool HasTransportOrDirectPtyInputPath()

@@ -32,6 +32,18 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         if (sessionService.HasActiveTransport || sessionService.HasPty)
         {
             TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor);
+            if (ShouldUseWin32InputMode(modeState) &&
+                TerminalWin32InputSequenceEncoder.TryEncode(
+                    e.Key,
+                    e.KeyModifiers,
+                    e.KeySymbol,
+                    keyDown: true,
+                    out string win32Sequence))
+            {
+                sessionService.SendInput(win32Sequence);
+                return true;
+            }
+
             int kittyKeyboardFlags = ResolveKittyKeyboardFlags(sessionService, vtProcessor);
             if (TerminalKeySequenceEncoder.TryEncode(e.Key, e.KeyModifiers, modeState, kittyKeyboardFlags, out string sequence))
             {
@@ -49,6 +61,22 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         ITerminalInputSink? inputSink = sessionService.InputSink;
         if (inputSink is null)
         {
+            if (sessionService.HasActiveTransport || sessionService.HasPty)
+            {
+                TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor: null);
+                if (ShouldUseWin32InputMode(modeState) &&
+                    TerminalWin32InputSequenceEncoder.TryEncode(
+                        e.Key,
+                        e.KeyModifiers,
+                        keySymbol: null,
+                        keyDown: false,
+                        out string win32Sequence))
+                {
+                    sessionService.SendInput(win32Sequence);
+                    return true;
+                }
+            }
+
             return false;
         }
 
@@ -76,8 +104,20 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
             return inputSink.SendText(e.Text);
         }
 
+        bool hasFallbackPath = sessionService.HasActiveTransport || sessionService.HasPty;
+        if (!hasFallbackPath)
+        {
+            return false;
+        }
+
+        TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor: null);
+        if (ShouldUseWin32InputMode(modeState))
+        {
+            return true;
+        }
+
         sessionService.SendInput(e.Text);
-        return sessionService.HasActiveTransport || sessionService.HasPty;
+        return true;
     }
 
     private static TerminalModeState ResolveModeState(
@@ -128,5 +168,10 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         }
 
         return 0;
+    }
+
+    private static bool ShouldUseWin32InputMode(in TerminalModeState modeState)
+    {
+        return OperatingSystem.IsWindows() && modeState.Win32InputMode;
     }
 }

@@ -917,6 +917,55 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_FocusEvents_ManagedVt_SendCsiIAndO_WhenMode1004Enabled()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        Button other = new();
+        StackPanel root = new()
+        {
+            Children =
+            {
+                control,
+                other,
+            },
+        };
+        Window window = new() { Content = root };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            // Enable focus-event reporting (DECSET 1004) in managed VT state.
+            control.WriteOutput("\x1b[?1004h"u8);
+            Dispatcher.UIThread.RunJobs();
+
+            other.Focus();
+            Dispatcher.UIThread.RunJobs();
+            transport.SentInputs.Clear();
+
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+            other.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains(transport.SentInputs, static payload =>
+                Encoding.UTF8.GetString(payload) == "\x1b[I");
+            Assert.Contains(transport.SentInputs, static payload =>
+                Encoding.UTF8.GetString(payload) == "\x1b[O");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_PasteAsync_DefaultPolicy_PreservesControlCharacters()
     {
         FakeTransport transport = new();
@@ -1191,12 +1240,14 @@ public class TerminalControlTests
         public bool ApplicationKeypad => false;
         public bool AlternateScreen => false;
         public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
         public TerminalModeState ModeState => new(
             CursorVisible,
             ApplicationCursorKeys,
             ApplicationKeypad,
             AlternateScreen,
-            BracketedPaste);
+            BracketedPaste,
+            Win32InputMode);
 
         public event EventHandler<TerminalModeState>? ModeChanged
         {
@@ -1259,12 +1310,14 @@ public class TerminalControlTests
         public bool ApplicationKeypad => false;
         public bool AlternateScreen => false;
         public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
         public TerminalModeState ModeState => new(
             CursorVisible,
             ApplicationCursorKeys,
             ApplicationKeypad,
             AlternateScreen,
-            BracketedPaste);
+            BracketedPaste,
+            Win32InputMode);
 
         public TerminalTheme? LastAppliedTheme { get; private set; }
 

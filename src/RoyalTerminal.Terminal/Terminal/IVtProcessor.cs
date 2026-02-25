@@ -40,6 +40,9 @@ public interface IVtProcessor : IDisposable
     /// <summary>Whether bracketed paste mode is active.</summary>
     bool BracketedPaste { get; }
 
+    /// <summary>Whether win32 input mode (DECSET 9001) is active.</summary>
+    bool Win32InputMode { get; }
+
     /// <summary>Current snapshot of VT mode flags.</summary>
     TerminalModeState ModeState { get; }
 

@@ -23,11 +23,46 @@ namespace RoyalTerminal.Terminal;
 /// of the VT protocol to render typical shell output and full-screen TUI
 /// applications such as Midnight Commander, htop, vim, etc.
 /// </summary>
-public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource
+public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource, ITerminalFocusEventModeSource
 {
     private const int MaxDcsBufferBytes = 4096;
     private const int KittyKeyboardFlagMask = 0x1F;
     private const int KittyKeyboardMaxStackDepth = 32;
+    private static readonly int[] ExtendedDecModes =
+    [
+        3,
+        4,
+        5,
+        8,
+        9,
+        12,
+        40,
+        45,
+        69,
+        1000,
+        1002,
+        1003,
+        1004,
+        1005,
+        1006,
+        1007,
+        1015,
+        1016,
+        1035,
+        1036,
+        1039,
+        1045,
+        2026,
+        2027,
+        2031,
+        2048,
+    ];
+    private static readonly int[] ExtendedDecModesEnabledByDefault =
+    [
+        1007,
+        1035,
+        1036,
+    ];
 
     private readonly TerminalScreen _screen;
     private int _cursorCol;
@@ -47,6 +82,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private readonly List<int> _params = [];
     private int _currentParam;
     private bool _hasParam;
+    private char _csiPrivateMarker;
     private char _intermediateChar;
     private readonly List<byte> _oscBuffer = [];
     private readonly List<byte> _dcsBuffer = [];
@@ -87,7 +123,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private bool _originMode;          // DECOM (mode 6)
     private bool _applicationCursorKeys; // DECCKM (mode 1)
     private bool _applicationKeypad;   // DECKPAM/DECKPNM
+    private bool _saveCursorMode;      // DECSC/DECRC via mode 1048
     private bool _bracketedPaste;      // Bracketed paste mode (mode 2004)
+    private bool _win32InputMode;      // Win32 input mode (mode 9001)
+    private bool _keyboardLocked;      // KAM (ANSI mode 2)
+    private bool _sendReceiveMode = true; // SRM (ANSI mode 12)
     private bool _insertMode;          // IRM (ANSI mode 4)
     private bool _lineFeedNewLineMode; // LNM (ANSI mode 20)
     private int _cursorStyle = 1;      // DECSCUSR (CSI Ps SP q), default blinking block
@@ -97,6 +137,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private int _kittyKeyboardFlagsAlt;
     private readonly List<int> _kittyKeyboardStackMain = [];
     private readonly List<int> _kittyKeyboardStackAlt = [];
+    private readonly HashSet<int> _extendedDecModesEnabled = [];
 
     // Tab stops
     private readonly HashSet<int> _tabStops = [];
@@ -143,6 +184,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     public bool BracketedPaste => _bracketedPaste;
 
     /// <inheritdoc />
+    public bool Win32InputMode => _win32InputMode;
+
+    /// <inheritdoc />
+    public bool FocusEventsEnabled => _extendedDecModesEnabled.Contains(1004);
+
+    /// <inheritdoc />
     public TerminalCursorStyle CursorStyle => MapCursorStyle(_cursorStyle);
 
     /// <inheritdoc />
@@ -157,7 +204,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         ApplicationCursorKeys,
         ApplicationKeypad,
         AlternateScreen,
-        BracketedPaste);
+        BracketedPaste,
+        Win32InputMode);
 
     /// <inheritdoc />
     public event EventHandler<TerminalModeState>? ModeChanged;
@@ -188,6 +236,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _currentFg = screen.DefaultForeground;
         _currentBg = screen.DefaultBackground;
         _scrollBottom = screen.ViewportRows - 1;
+        ResetExtendedDecModesToDefaults();
         InitTabStops();
     }
 
@@ -253,6 +302,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _params.Clear();
         _currentParam = 0;
         _hasParam = false;
+        _csiPrivateMarker = '\0';
         _intermediateChar = '\0';
     }
 
@@ -892,7 +942,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         }
         else if (b == (byte)'?' || b == (byte)'>' || b == (byte)'!' || b == (byte)'=' || b == (byte)'<')
         {
-            _intermediateChar = (char)b;
+            _csiPrivateMarker = (char)b;
             _state = ParserState.CsiParam;
         }
         else if (b is >= 0x40 and <= 0x7E)
@@ -1350,9 +1400,15 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         var p0 = _params.Count > 0 ? _params[0] : 0;
         var p1 = _params.Count > 1 ? _params[1] : 0;
 
-        // DEC private modes: CSI ? ... h/l
-        if (_intermediateChar == '?')
+        // DEC private mode families: CSI ? ...
+        if (_csiPrivateMarker == '?')
         {
+            if (_intermediateChar == '$' && finalByte == 'p')
+            {
+                HandleDecModeQuery();
+                return;
+            }
+
             if (finalByte == 'u')
             {
                 HandleKittyKeyboardQuery();
@@ -1369,14 +1425,14 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         }
 
         // CSI ! p — Soft terminal reset (DECSTR)
-        if (_intermediateChar == '!' && finalByte == 'p')
+        if (_csiPrivateMarker == '!' && finalByte == 'p')
         {
             SoftReset();
             return;
         }
 
         // CSI > ... c — Secondary DA
-        if (_intermediateChar == '>')
+        if (_csiPrivateMarker == '>')
         {
             if (finalByte == 'c')
             {
@@ -1391,7 +1447,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         }
 
         // CSI = ... c — Tertiary DA
-        if (_intermediateChar == '=')
+        if (_csiPrivateMarker == '=')
         {
             if (finalByte == 'c')
             {
@@ -1406,7 +1462,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         }
 
         // CSI < ... u — kitty keyboard pop mode
-        if (_intermediateChar == '<')
+        if (_csiPrivateMarker == '<')
         {
             if (finalByte == 'u')
             {
@@ -1419,6 +1475,13 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         if (_intermediateChar == ' ' && finalByte == 'q')
         {
             SetCursorStyle(Math.Max(0, p0));
+            return;
+        }
+
+        // ANSI mode query family: CSI Ps $ p
+        if (_csiPrivateMarker == '\0' && _intermediateChar == '$' && finalByte == 'p')
+        {
+            HandleAnsiModeQuery();
             return;
         }
 
@@ -1698,6 +1761,93 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         }
     }
 
+    private void HandleDecModeQuery()
+    {
+        if (_params.Count == 0)
+        {
+            EmitDecModeQueryResponse(mode: 0, status: 0);
+            return;
+        }
+
+        for (int i = 0; i < _params.Count; i++)
+        {
+            int mode = _params[i];
+            int status = GetDecPrivateModeReportStatus(mode);
+            EmitDecModeQueryResponse(mode, status);
+        }
+    }
+
+    private void HandleAnsiModeQuery()
+    {
+        if (_params.Count == 0)
+        {
+            EmitAnsiModeQueryResponse(mode: 0, status: 0);
+            return;
+        }
+
+        for (int i = 0; i < _params.Count; i++)
+        {
+            int mode = _params[i];
+            int status = GetAnsiModeReportStatus(mode);
+            EmitAnsiModeQueryResponse(mode, status);
+        }
+    }
+
+    private int GetAnsiModeReportStatus(int mode)
+    {
+        return mode switch
+        {
+            2 => _keyboardLocked ? 1 : 2,
+            4 => _insertMode ? 1 : 2,
+            12 => _sendReceiveMode ? 1 : 2,
+            20 => _lineFeedNewLineMode ? 1 : 2,
+            _ => 0,
+        };
+    }
+
+    private int GetDecPrivateModeReportStatus(int mode)
+    {
+        int status = mode switch
+        {
+            1 => _applicationCursorKeys ? 1 : 2,
+            6 => _originMode ? 1 : 2,
+            7 => _autoWrap ? 1 : 2,
+            25 => _cursorVisible ? 1 : 2,
+            66 => _applicationKeypad ? 1 : 2,
+            47 => _inAltScreen ? 1 : 2,
+            1047 => _inAltScreen ? 1 : 2,
+            1048 => _saveCursorMode ? 1 : 2,
+            1049 => _inAltScreen ? 1 : 2,
+            2004 => _bracketedPaste ? 1 : 2,
+            9001 => _win32InputMode ? 1 : 2,
+            _ => 0,
+        };
+
+        if (status != 0)
+        {
+            return status;
+        }
+
+        if (TryGetExtendedDecMode(mode, out bool enabled))
+        {
+            return enabled ? 1 : 2;
+        }
+
+        return 0;
+    }
+
+    private void EmitDecModeQueryResponse(int mode, int status)
+    {
+        string response = $"\x1b[?{Math.Max(0, mode)};{status}$y";
+        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+    }
+
+    private void EmitAnsiModeQueryResponse(int mode, int status)
+    {
+        string response = $"\x1b[{Math.Max(0, mode)};{status}$y";
+        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+    }
+
     private void HandleKittyKeyboardQuery()
     {
         string response = $"\x1b[?{KittyKeyboardFlags}u";
@@ -1780,12 +1930,71 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         return Math.Max(0, flags) & KittyKeyboardFlagMask;
     }
 
+    private static bool IsExtendedDecModeSupported(int mode)
+    {
+        for (int i = 0; i < ExtendedDecModes.Length; i++)
+        {
+            if (ExtendedDecModes[i] == mode)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void SetExtendedDecMode(int mode, bool enabled)
+    {
+        if (!IsExtendedDecModeSupported(mode))
+        {
+            return;
+        }
+
+        if (enabled)
+        {
+            _extendedDecModesEnabled.Add(mode);
+        }
+        else
+        {
+            _extendedDecModesEnabled.Remove(mode);
+        }
+    }
+
+    private bool TryGetExtendedDecMode(int mode, out bool enabled)
+    {
+        if (!IsExtendedDecModeSupported(mode))
+        {
+            enabled = false;
+            return false;
+        }
+
+        enabled = _extendedDecModesEnabled.Contains(mode);
+        return true;
+    }
+
+    private void ResetExtendedDecModesToDefaults()
+    {
+        _extendedDecModesEnabled.Clear();
+        for (int i = 0; i < ExtendedDecModesEnabledByDefault.Length; i++)
+        {
+            _extendedDecModesEnabled.Add(ExtendedDecModesEnabledByDefault[i]);
+        }
+    }
+
     private void HandleAnsiMode(int mode, bool set)
     {
         switch (mode)
         {
+            case 2: // KAM — Keyboard action mode (keyboard locked).
+                _keyboardLocked = set;
+                break;
+
             case 4: // IRM — Insert/replace mode.
                 _insertMode = set;
+                break;
+
+            case 12: // SRM — Send/receive mode.
+                _sendReceiveMode = set;
                 break;
 
             case 20: // LNM — Linefeed/newline mode.
@@ -1841,7 +2050,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
                 _autoWrap = set;
                 break;
 
-            case 12: // Blinking cursor (att610) — ignore
+            case 66: // DECNKM — Application keypad keys
+                _applicationKeypad = set;
                 break;
 
             case 25: // DECTCEM — Show/hide cursor
@@ -1855,12 +2065,33 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
                     SwitchToMainScreen();
                 break;
 
-            case 1000: // Mouse tracking — ignore
-            case 1002:
-            case 1003:
-            case 1005:
-            case 1006:
-            case 1015:
+            case 3: // 132-column mode
+            case 4: // Smooth scroll
+            case 5: // Reverse video
+            case 8: // Auto-repeat
+            case 9: // X10 mouse tracking
+            case 12: // Cursor blinking
+            case 40: // Allow 80/132 mode
+            case 45: // Reverse wraparound
+            case 69: // Left/right margin mode
+            case 1000: // Mouse tracking normal
+            case 1002: // Mouse button-event tracking
+            case 1003: // Mouse any-event tracking
+            case 1004: // Focus event reporting
+            case 1005: // Mouse UTF-8 encoding
+            case 1006: // Mouse SGR encoding
+            case 1007: // Alternate scroll mode
+            case 1015: // Mouse urxvt encoding
+            case 1016: // Mouse pixel mode
+            case 1035: // Ignore keypad with numlock
+            case 1036: // Meta sends escape prefix
+            case 1039: // Alt sends escape
+            case 1045: // Reverse wrap extended
+            case 2026: // Synchronized output
+            case 2027: // Grapheme cluster mode
+            case 2031: // Report color scheme mode
+            case 2048: // In-band size reports
+                SetExtendedDecMode(mode, set);
                 break;
 
             case 1047: // Use alternate screen buffer
@@ -1875,9 +2106,15 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
             case 1048: // Save/restore cursor (for 1049)
                 if (set)
+                {
                     SaveCursor();
+                    _saveCursorMode = true;
+                }
                 else
+                {
                     RestoreCursor();
+                    _saveCursorMode = false;
+                }
                 break;
 
             case 1049: // Save cursor + switch to alt screen + clear
@@ -1895,6 +2132,10 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
             case 2004: // Bracketed paste mode
                 _bracketedPaste = set;
+                break;
+
+            case 9001: // Win32 input mode
+                _win32InputMode = set;
                 break;
         }
     }
@@ -2365,6 +2606,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _autoWrap = true;
         _applicationCursorKeys = false;
         _applicationKeypad = false;
+        _saveCursorMode = false;
+        _bracketedPaste = false;
+        _win32InputMode = false;
+        _keyboardLocked = false;
+        _sendReceiveMode = true;
+        ResetExtendedDecModesToDefaults();
         _insertMode = false;
         _lineFeedNewLineMode = false;
         _cursorStyle = 1;
@@ -2489,6 +2736,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _cursorRow = 0;
         _state = ParserState.Ground;
         _params.Clear();
+        _csiPrivateMarker = '\0';
+        _intermediateChar = '\0';
         _oscBuffer.Clear();
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
@@ -2501,7 +2750,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _originMode = false;
         _applicationCursorKeys = false;
         _applicationKeypad = false;
+        _saveCursorMode = false;
         _bracketedPaste = false;
+        _win32InputMode = false;
+        _keyboardLocked = false;
+        _sendReceiveMode = true;
+        ResetExtendedDecModesToDefaults();
         _insertMode = false;
         _lineFeedNewLineMode = false;
         _cursorStyle = 1;

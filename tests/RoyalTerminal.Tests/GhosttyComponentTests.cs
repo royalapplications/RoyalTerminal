@@ -693,5 +693,6 @@ public sealed class GhosttyComponentTests
         Assert.Equal(processor.ApplicationKeypad, processor.ModeState.ApplicationKeypad);
         Assert.Equal(processor.AlternateScreen, processor.ModeState.AlternateScreen);
         Assert.Equal(processor.BracketedPaste, processor.ModeState.BracketedPaste);
+        Assert.Equal(processor.Win32InputMode, processor.ModeState.Win32InputMode);
     }
 }

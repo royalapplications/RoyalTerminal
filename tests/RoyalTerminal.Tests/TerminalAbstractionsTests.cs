@@ -713,12 +713,14 @@ public class TerminalAbstractionsTests
         public bool ApplicationKeypad => false;
         public bool AlternateScreen => false;
         public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
         public TerminalModeState ModeState => new(
             CursorVisible,
             ApplicationCursorKeys,
             ApplicationKeypad,
             AlternateScreen,
-            BracketedPaste);
+            BracketedPaste,
+            Win32InputMode);
         public event EventHandler<TerminalModeState>? ModeChanged
         {
             add { }
