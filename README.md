@@ -23,7 +23,7 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 
 | Package | Responsibility |
 |---------|----------------|
-| `RoyalTerminal.Terminal` | Core terminal contracts (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`) and screen model |
+| `RoyalTerminal.Terminal` | Core terminal contracts (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`), SSH bootstrap helpers, and screen model |
 | `RoyalTerminal.Terminal.Vt.Managed` | Managed VT processor (`BasicVtProcessor`) |
 | `RoyalTerminal.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over `libghostty-terminal`) + `GhosttyVtProcessorProvider` |
 | `RoyalTerminal.Terminal.Vt.Default` | Preference-based VT processor factory (`VtProcessorPreference`) |
@@ -51,7 +51,9 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
   - `RoyalTerminal.Avalonia.Ghostty`: Ghostty-native/rendered controls and adapters.
 - **Backend-neutral endpoint contracts** (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`) for control reuse across backends.
 - **Pluggable transport runtime** (`ITerminalTransportFactory`) supporting PTY, process pipe, and SSH sessions.
+- **Shared SSH bootstrap helper** (`SshShellBootstrapCommandBuilder`) for consistent POSIX `export` command composition across SSH backends.
 - **Pluggable SSH secret persistence** via `ISshSecretStore` + `ISshSecretProtector` with cross-platform secure defaults (`SshSecretProtectionFactory`).
+- **Thread-safe output ingestion**: `TerminalControl.WriteOutput(...)` can be called from background SSH/network callbacks (marshaled to UI thread internally).
 - **Preference-based VT selection** via `VtProcessorPreference` (`Auto`, `Managed`, `Native`).
 - **Five integration modes** with explicit trade-offs between fidelity, portability, and native dependencies.
 - **Split rendering architecture**:
@@ -267,29 +269,74 @@ await terminal.StartPipeAsync(
 ### 1c. Start an SSH Session (`SshTransportOptions`)
 
 ```csharp
+using System;
+using System.Collections.Generic;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Terminal;
 
 var terminal = new TerminalControl();
 
-await terminal.StartSshAsync(
-    new SshTransportOptions(
-        Endpoint: new SshEndpointOptions("example.com", 22, "alice"),
-        RequestPty: true,
-        TerminalType: "xterm-256color",
-        InitialCommand: null,
-        Authentication: new SshAuthenticationOptions(
-            UsePassword: true,
-            PasswordSecretId: "demo-password",
-            PrivateKeySecretIds: Array.Empty<string>(),
-            UseAgent: false),
-        Dimensions: new TerminalSessionDimensions(120, 40, 1200, 800))
+SshTransportOptions options = new(
+    Endpoint: new SshEndpointOptions("example.com", 22, "alice"),
+    RequestPty: true,
+    TerminalType: "xterm-256color",
+    InitialCommand: null,
+    Authentication: new SshAuthenticationOptions(
+        UsePassword: true,
+        PasswordSecretId: "demo-password",
+        PrivateKeySecretIds: Array.Empty<string>(),
+        UseAgent: false),
+    Dimensions: new TerminalSessionDimensions(120, 40, 1200, 800))
+{
+    ExpectedHostKeyFingerprintSha256 = "SHA256:BASE64_FINGERPRINT",
+    EnvironmentVariables = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ExpectedHostKeyFingerprintSha256 = "SHA256:BASE64_FINGERPRINT",
-    });
+        ["LANG"] = "en_US.UTF-8",
+        ["LC_CTYPE"] = "en_US.UTF-8",
+        ["TERM"] = "xterm-256color",
+    },
+};
+
+await terminal.StartSshAsync(options);
 ```
 
 `ExpectedHostKeyFingerprintSha256` is optional. When omitted, host-key trust falls back to `KnownHostsSshHostKeyValidator` (OpenSSH `known_hosts`).
+
+`EnvironmentVariables` is optional. When provided, values are applied through a POSIX-shell bootstrap command (`export KEY='value'`) before `InitialCommand`.
+
+Environment-variable validation rules:
+
+- Name must match `[A-Za-z_][A-Za-z0-9_]*`.
+- Value must be non-null.
+- Value must not contain `CR`, `LF`, or `NUL`.
+
+### 1c.1 Reuse SSH Bootstrap Composition in Custom Backends (Rebex, etc.)
+
+If you run SSH with a custom backend instead of `RoyalTerminal.Terminal.Transport.Ssh.SshNet`, use the same bootstrap helper for consistent behavior:
+
+```csharp
+using RoyalTerminal.Terminal;
+
+SshTransportOptions options = /* build options */;
+string? bootstrap = SshShellBootstrapCommandBuilder.Build(options);
+
+if (!string.IsNullOrWhiteSpace(bootstrap))
+{
+    // WriteLine to your custom shell channel (for example Rebex shell stream).
+    SendLineToRemoteShell(bootstrap);
+}
+```
+
+You can also use the overload:
+
+```csharp
+string? bootstrap = SshShellBootstrapCommandBuilder.Build(
+    initialCommand: "exec $SHELL -il",
+    environmentVariables: new Dictionary<string, string>
+    {
+        ["LANG"] = "en_US.UTF-8",
+    });
+```
 
 ### 1d. PTY with Custom Shell Profile
 
@@ -423,6 +470,70 @@ terminal.AttachEndpoint(new LoggingEndpoint());
 terminal.SendInput("echo hello\n");
 terminal.DetachEndpoint();
 ```
+
+`TerminalControl` supports two endpoint integration levels:
+
+- `ITerminalEndpoint` only (byte-stream integration): fallback key/text/mouse/focus VT sequences are written through `SendText(...)`.
+- `ITerminalEndpoint` + `ITerminalInputSink` (full-fidelity event integration): structured key/text/pointer events are passed directly to your backend.
+
+### 4a. Comprehensive Custom SSH Endpoint Setup (Rebex or Other SSH SDKs)
+
+Use this model when you own the SSH channel/session lifecycle and only need `TerminalControl` for VT parsing, rendering, and input mapping:
+
+```csharp
+using System;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Terminal;
+
+sealed class ByteStreamSshEndpoint : ITerminalEndpoint
+{
+    private readonly Action<byte[]> _sendBytes;
+    private readonly Action<bool> _setRemoteFocus;
+    private readonly Action<int, int> _setRemoteSizePx;
+
+    public ByteStreamSshEndpoint(
+        Action<byte[]> sendBytes,
+        Action<bool> setRemoteFocus,
+        Action<int, int> setRemoteSizePx)
+    {
+        _sendBytes = sendBytes;
+        _setRemoteFocus = setRemoteFocus;
+        _setRemoteSizePx = setRemoteSizePx;
+    }
+
+    public void SendText(ReadOnlySpan<byte> utf8) => _sendBytes(utf8.ToArray());
+    public void SetFocus(bool focused) => _setRemoteFocus(focused);
+    public void SetSize(int widthPx, int heightPx) => _setRemoteSizePx(widthPx, heightPx);
+}
+
+var terminal = new TerminalControl
+{
+    VtProcessorPreference = VtProcessorPreference.Managed,
+};
+
+var endpoint = new ByteStreamSshEndpoint(
+    sendBytes: bytes => SendBytesToSshShell(bytes),          // your SSH write path
+    setRemoteFocus: focused => NotifySshFocus(focused),      // optional backend-specific signal
+    setRemoteSizePx: (w, h) => NotifySshPixelSize(w, h));    // optional backend-specific signal
+
+terminal.AttachEndpoint(endpoint);
+
+// Route remote output to TerminalControl from any thread (network callback thread is fine).
+OnSshData((buffer, length) =>
+{
+    terminal.WriteOutput(buffer.AsSpan(0, length));
+});
+```
+
+Behavior when using endpoint-only mode:
+
+- Keyboard and text input are encoded to VT byte sequences and sent through `ITerminalEndpoint.SendText(...)`.
+- Mouse reporting sequences are sent through `SendText(...)` when mouse modes are enabled (for example DECSET `1000`/`1002`/`1003` with SGR `1006`).
+- Focus in/out (`CSI I` / `CSI O`) is sent through `SendText(...)` when focus mode DECSET `1004` is enabled.
+- `WriteOutput(...)` is safe from background callback threads; `TerminalControl` marshals processing to the UI thread internally.
+- Mode state is normally learned from the stream you feed into `WriteOutput(...)`; if your backend tracks modes separately, expose them via `ITerminalModeSource` (and optionally `ITerminalFocusEventModeSource`).
+
+If you implement `ITerminalInputSink`, fallback byte-sequence encoding is bypassed and your backend receives structured `TerminalKeyEvent` / `TerminalPointerEvent`.
 
 ### 5. Ghostty Native Control (macOS, `RoyalTerminal.Avalonia.Ghostty`)
 
@@ -564,6 +675,13 @@ dotnet add package RoyalTerminal.Terminal.Transport.Ssh.SshNet
 
 # Optional SSH agent auth adapter
 dotnet add package RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent
+```
+
+If you integrate a custom SSH SDK (for example Rebex) via `AttachEndpoint(...)`, you can skip SSH.NET packages and use:
+
+```bash
+dotnet add package RoyalTerminal.Avalonia
+dotnet add package RoyalTerminal.Terminal
 ```
 
 ### Ghostty Embedded Controls (macOS)
