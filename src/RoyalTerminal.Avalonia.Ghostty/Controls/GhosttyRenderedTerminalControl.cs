@@ -3,6 +3,8 @@
 // RoyalTerminal.Avalonia - Terminal control using Ghostty VT processing + custom SkiaSharp rendering.
 
 using System;
+using System.Buffers;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
@@ -43,6 +45,9 @@ namespace RoyalTerminal.Avalonia.Controls;
 [SupportedOSPlatform("macos")]
 public class GhosttyRenderedTerminalControl : Control, IDisposable
 {
+    private const float RendererBackgroundOpacity = 0.82f;
+    private const bool RendererBackgroundOpacityCells = true;
+
     #region Fields
 
     private GhosttyApp? _app;
@@ -69,6 +74,21 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     private uint[]? _graphemeCodepointBuffer;
     private int _lastCols;
     private int _lastRows;
+    private int _lastPointerColumn = -1;
+    private int _lastPointerRow = -1;
+    private int _hoveredLinkSpanRow = -1;
+    private int _hoveredLinkSpanStart = -1;
+    private int _hoveredLinkSpanEnd = -1;
+    private int _hoveredLinkSpanId;
+    private bool _backgroundOpacityEnabled;
+    private string? _hoveredLinkUrl;
+    private string? _searchNeedle;
+    private int _searchTotal;
+    private int _searchSelected = -1;
+    private readonly List<TerminalHighlightSpan> _highlightSpanScratch = [];
+    private readonly List<SearchMatch> _searchMatchScratch = [];
+    private readonly StringBuilder _rowTextScratch = new();
+    private readonly List<int> _rowColumnMapScratch = [];
 
     // Polling timer: the embedded apprt's renderer thread draws directly
     // without dispatching the Render action, so we poll screen state on a timer.
@@ -87,6 +107,9 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     /// <summary>Fired when the surface title changes.</summary>
     public event EventHandler<string>? TitleChanged;
+
+    /// <summary>Fired when the terminal bell rings.</summary>
+    public event EventHandler? Bell;
 
     /// <summary>Fired when the terminal process exits.</summary>
     public event EventHandler<int>? ProcessExited;
@@ -207,6 +230,36 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     public SkiaTerminalRenderer? Renderer => _renderer;
 
     /// <summary>
+    /// Gets or sets whether Ghostty-style background opacity rendering is enabled.
+    /// </summary>
+    public bool BackgroundOpacityEnabled
+    {
+        get => _backgroundOpacityEnabled;
+        set
+        {
+            if (_backgroundOpacityEnabled == value)
+            {
+                return;
+            }
+
+            _backgroundOpacityEnabled = value;
+            UpdateRendererParityStateFromScreen();
+        }
+    }
+
+    /// <summary>Gets the currently hovered hyperlink URL, if known.</summary>
+    public string? HoveredLinkUrl => _hoveredLinkUrl;
+
+    /// <summary>Gets the active search needle used for search highlight spans.</summary>
+    public string? SearchNeedle => _searchNeedle;
+
+    /// <summary>Gets the reported total number of active search matches.</summary>
+    public int SearchTotal => _searchTotal;
+
+    /// <summary>Gets the selected match index for active search highlights.</summary>
+    public int SearchSelected => _searchSelected;
+
+    /// <summary>
     /// Gets or sets the render-target adapter used in <see cref="GhosttyRenderedTerminalRenderingMode.TextureInterop"/> mode.
     /// </summary>
     public IAvaloniaSkiaRenderTargetProvider InteropRenderTargetProvider
@@ -239,9 +292,16 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             title => TitleChanged?.Invoke(this, title),
             exitCode => ProcessExited?.Invoke(this, exitCode),
             () => CloseRequested?.Invoke(this, EventArgs.Empty),
+            () => Bell?.Invoke(this, EventArgs.Empty),
             OnRuntimeColorChanged,
             OnRuntimeConfigChanged,
-            OnRuntimeReloadConfig);
+            OnRuntimeReloadConfig,
+            OnMouseOverLinkChanged,
+            OnSearchStarted,
+            OnSearchEnded,
+            OnSearchTotalChanged,
+            OnSearchSelectedChanged,
+            OnToggleBackgroundOpacityRequested);
         _surfaceLifecycle = new GhosttySurfaceLifecycle(
             () => _surface,
             actionDispatcher,
@@ -249,6 +309,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             () => _app?.Tick(),
             () => CloseRequested?.Invoke(this, EventArgs.Empty));
         _interopRenderTargetProvider.DiagnosticReported += OnInteropRenderTargetProviderDiagnosticReported;
+        RegisterPointerFallbackHandlers();
     }
 
     static GhosttyRenderedTerminalControl()
@@ -273,6 +334,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         _renderer = new SkiaTerminalRenderer(FontFamilyName, TerminalFontSize);
         _screen = new TerminalScreen(80, 24);
         ApplyThemeCore(ResolveActiveTheme(), updateThemeProperty: false, updateGhosttyRuntime: false);
+        UpdateRendererParityStateFromScreen();
     }
 
     #region Lifecycle Overrides
@@ -745,14 +807,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
                 _renderer.CursorColumn = cursor.X;
                 _renderer.CursorRow = cursor.Y;
                 _renderer.CursorVisible = cursor.Visible != 0;
-                _renderer.CursorStyle = cursor.Style switch
-                {
-                    0 => CursorStyle.Block,         // block / default
-                    1 => CursorStyle.Bar,           // bar
-                    2 => CursorStyle.Underline,     // underline
-                    3 => CursorStyle.Block,         // block_hollow (fallback to block)
-                    _ => CursorStyle.Block,
-                };
+                _renderer.CursorStyle = ConvertCursorStyle(cursor.Style);
 
                 lock (_screen.SyncRoot)
                 {
@@ -804,9 +859,13 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
                                 dst.Background = src.HasBg != 0
                                     ? PackArgb(src.BgR, src.BgG, src.BgB)
                                     : defaultBg;
+                                dst.HasBackground = src.HasBg != 0;
                                 dst.Attributes = CellAttributes.None;
                                 dst.UnderlineStyle = TerminalUnderlineStyle.None;
+                                dst.UnderlineColor = 0;
+                                dst.HasUnderlineColor = false;
                                 dst.Decorations = CellDecorations.None;
+                                dst.HyperlinkId = 0;
                                 continue;
                             }
 
@@ -821,9 +880,12 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
                             dst.Background = src.HasBg != 0
                                 ? PackArgb(src.BgR, src.BgG, src.BgB)
                                 : defaultBg;
+                            dst.HasBackground = src.HasBg != 0;
                             dst.Attributes = ConvertAttributes(src.Attrs);
                             dst.UnderlineStyle = ConvertUnderlineStyle(src.Attrs);
+                            ApplyUnderlineColorFallback(ref dst);
                             dst.Decorations = ConvertDecorations(src.Attrs);
+                            dst.HyperlinkId = 0;
                         }
 
                         for (var col = (int)cellCount; col < termRow.Columns; col++)
@@ -833,14 +895,20 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
                             dst.Grapheme = null;
                             dst.Foreground = _screen.DefaultForeground;
                             dst.Background = _screen.DefaultBackground;
+                            dst.HasBackground = true;
                             dst.Attributes = CellAttributes.None;
                             dst.UnderlineStyle = TerminalUnderlineStyle.None;
+                            dst.UnderlineColor = 0;
+                            dst.HasUnderlineColor = false;
                             dst.Decorations = CellDecorations.None;
+                            dst.HyperlinkId = 0;
                             dst.Width = 1;
                         }
 
                         termRow.IsDirty = true;
                     }
+
+                    UpdateRendererParityStateLocked();
                 }
             }
             finally
@@ -945,15 +1013,18 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     private static CellAttributes ConvertAttributes(ushort attrs)
     {
+        // Ghostty surface attrs are exported from Style.Flags bit layout:
+        // 0=bold, 1=italic, 2=faint, 3=blink, 4=inverse, 5=invisible,
+        // 6=strikethrough, 7=overline, bits 8-10=underline style.
         var result = CellAttributes.None;
         if ((attrs & (1 << 0)) != 0) result |= CellAttributes.Bold;
         if ((attrs & (1 << 1)) != 0) result |= CellAttributes.Italic;
         if ((attrs & (1 << 2)) != 0) result |= CellAttributes.Dim;
-        if ((attrs & (1 << 3)) != 0) result |= CellAttributes.Inverse;
-        if ((attrs & (1 << 4)) != 0) result |= CellAttributes.Hidden;
-        if ((attrs & (1 << 5)) != 0) result |= CellAttributes.Strikethrough;
+        if ((attrs & (1 << 3)) != 0) result |= CellAttributes.Blink;
+        if ((attrs & (1 << 4)) != 0) result |= CellAttributes.Inverse;
+        if ((attrs & (1 << 5)) != 0) result |= CellAttributes.Hidden;
+        if ((attrs & (1 << 6)) != 0) result |= CellAttributes.Strikethrough;
         if (ConvertUnderlineStyle(attrs) != TerminalUnderlineStyle.None) result |= CellAttributes.Underline;
-        if ((attrs & (1 << 7)) != 0) result |= CellAttributes.Blink;
         return result;
     }
 
@@ -973,12 +1044,31 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     private static CellDecorations ConvertDecorations(ushort attrs)
     {
         CellDecorations decorations = CellDecorations.None;
-        if ((attrs & (1 << 6)) != 0)
+        if ((attrs & (1 << 7)) != 0)
         {
             decorations |= CellDecorations.Overline;
         }
 
         return decorations;
+    }
+
+    private static CursorStyle ConvertCursorStyle(byte style)
+    {
+        // Ghostty embedded cursor enum order:
+        // 0=bar, 1=block, 2=underline, 3=block_hollow.
+        //
+        // We also map 4/5 to bar for compatibility with older style schemas
+        // that include explicit blink variants.
+        return style switch
+        {
+            0 => CursorStyle.Bar,
+            1 => CursorStyle.Block,
+            2 => CursorStyle.Underline,
+            3 => CursorStyle.BlockHollow,
+            4 => CursorStyle.Bar,
+            5 => CursorStyle.Bar,
+            _ => CursorStyle.Block,
+        };
     }
 
     private void OnThemePropertyChanged()
@@ -1195,9 +1285,698 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         }
     }
 
+    private void OnMouseOverLinkChanged(string? url)
+    {
+        string? normalized = string.IsNullOrWhiteSpace(url) ? null : url;
+        if (string.Equals(_hoveredLinkUrl, normalized, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _hoveredLinkUrl = normalized;
+        UpdateRendererParityStateFromScreen();
+    }
+
+    private void OnSearchStarted(string? needle)
+    {
+        _searchNeedle = string.IsNullOrWhiteSpace(needle) ? null : needle;
+        _searchSelected = -1;
+        _searchTotal = 0;
+        _searchMatchScratch.Clear();
+        UpdateRendererParityStateFromScreen();
+    }
+
+    private void OnSearchEnded()
+    {
+        if (_searchNeedle is null && _searchSelected < 0 && _searchTotal == 0)
+        {
+            return;
+        }
+
+        _searchNeedle = null;
+        _searchSelected = -1;
+        _searchTotal = 0;
+        _searchMatchScratch.Clear();
+        UpdateRendererParityStateFromScreen();
+    }
+
+    private void OnSearchTotalChanged(int total)
+    {
+        _searchTotal = Math.Max(0, total);
+        UpdateRendererParityStateFromScreen();
+    }
+
+    private void OnSearchSelectedChanged(int selected)
+    {
+        _searchSelected = selected;
+        UpdateRendererParityStateFromScreen();
+    }
+
+    private void OnToggleBackgroundOpacityRequested()
+    {
+        _backgroundOpacityEnabled = !_backgroundOpacityEnabled;
+        UpdateRendererParityStateFromScreen();
+    }
+
+    private void UpdateRendererParityStateFromScreen()
+    {
+        if (_screen is null || _renderer is null)
+        {
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            UpdateRendererParityStateLocked();
+        }
+
+        if (_compositionVisual is not null)
+        {
+            if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
+            {
+                SyncTextureInteropFrame();
+            }
+            else
+            {
+                _compositionVisual.SendHandlerMessage(
+                    new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
+            }
+        }
+
+        InvalidateVisual();
+    }
+
+    private void UpdateRendererParityStateLocked()
+    {
+        if (_screen is null || _renderer is null)
+        {
+            return;
+        }
+
+        ApplyHoveredLinkMetadataLocked();
+        _renderer.BackgroundOpacityEnabled = _backgroundOpacityEnabled;
+        _renderer.BackgroundOpacityCells = RendererBackgroundOpacityCells;
+        _renderer.BackgroundOpacity = RendererBackgroundOpacity;
+
+        TerminalHighlightSpan[] spans = BuildHighlightSpansLocked();
+        _renderer.SetHighlightSpans(spans);
+    }
+
+    private TerminalHighlightSpan[] BuildHighlightSpansLocked()
+    {
+        if (_screen is null)
+        {
+            return Array.Empty<TerminalHighlightSpan>();
+        }
+
+        _highlightSpanScratch.Clear();
+        AppendSearchHighlightSpansLocked();
+        AppendHoveredLinkSpanLocked();
+
+        if (_highlightSpanScratch.Count == 0)
+        {
+            return Array.Empty<TerminalHighlightSpan>();
+        }
+
+        return _highlightSpanScratch.ToArray();
+    }
+
+    private void AppendSearchHighlightSpansLocked()
+    {
+        if (_screen is null || string.IsNullOrEmpty(_searchNeedle))
+        {
+            _searchTotal = 0;
+            _searchSelected = -1;
+            _searchMatchScratch.Clear();
+            return;
+        }
+
+        string needle = _searchNeedle;
+        if (needle.Length == 0)
+        {
+            _searchTotal = 0;
+            _searchSelected = -1;
+            _searchMatchScratch.Clear();
+            return;
+        }
+
+        _searchMatchScratch.Clear();
+        for (int row = 0; row < _screen.ViewportRows; row++)
+        {
+            TerminalRow terminalRow = _screen.GetViewportRow(row);
+            if (!TryBuildRowTextColumnMap(terminalRow, out string rowText))
+            {
+                continue;
+            }
+
+            int searchFrom = 0;
+            while (searchFrom <= rowText.Length - needle.Length)
+            {
+                int found = rowText.IndexOf(needle, searchFrom, StringComparison.Ordinal);
+                if (found < 0)
+                {
+                    break;
+                }
+
+                int mapEnd = found + needle.Length - 1;
+                if ((uint)found < (uint)_rowColumnMapScratch.Count &&
+                    (uint)mapEnd < (uint)_rowColumnMapScratch.Count)
+                {
+                    int startColumn = _rowColumnMapScratch[found];
+                    int endColumn = _rowColumnMapScratch[mapEnd];
+                    _searchMatchScratch.Add(new SearchMatch(row, startColumn, endColumn));
+                }
+
+                searchFrom = found + Math.Max(needle.Length, 1);
+            }
+        }
+
+        if (_searchTotal <= 0)
+        {
+            _searchTotal = _searchMatchScratch.Count;
+        }
+
+        if (_searchTotal <= 0)
+        {
+            _searchSelected = -1;
+            return;
+        }
+
+        if (_searchSelected < 0)
+        {
+            _searchSelected = 0;
+        }
+        else if (_searchSelected >= _searchTotal)
+        {
+            _searchSelected = _searchTotal - 1;
+        }
+
+        for (int index = 0; index < _searchMatchScratch.Count; index++)
+        {
+            SearchMatch match = _searchMatchScratch[index];
+            TerminalHighlightKind kind = index == _searchSelected
+                ? TerminalHighlightKind.SearchSelected
+                : TerminalHighlightKind.SearchMatch;
+            _highlightSpanScratch.Add(
+                new TerminalHighlightSpan(
+                    match.Row,
+                    match.StartColumn,
+                    match.EndColumn,
+                    kind));
+        }
+    }
+
+    private void AppendHoveredLinkSpanLocked()
+    {
+        if (_screen is null ||
+            _lastPointerRow < 0 ||
+            _lastPointerColumn < 0)
+        {
+            return;
+        }
+
+        int row = _lastPointerRow;
+        int column = _lastPointerColumn;
+        if ((uint)row >= (uint)_screen.ViewportRows || (uint)column >= (uint)_screen.Columns)
+        {
+            return;
+        }
+
+        if (TryResolveHyperlinkSpanFromPointerLocked(row, column, out TerminalHighlightSpan span))
+        {
+            _highlightSpanScratch.Add(span);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_hoveredLinkUrl))
+        {
+            return;
+        }
+
+        if (TryResolveHoveredLinkSpanLocked(
+                row,
+                column,
+                _hoveredLinkUrl,
+                out span))
+        {
+            _highlightSpanScratch.Add(span);
+        }
+    }
+
+    private bool TryResolveHyperlinkSpanFromPointerLocked(
+        int row,
+        int column,
+        out TerminalHighlightSpan span)
+    {
+        span = default;
+        if (_screen is null)
+        {
+            return false;
+        }
+
+        TerminalHighlightSpan? resolved = ResolveHyperlinkSpanFromPointer(
+            _screen.GetViewportRow(row),
+            row,
+            column);
+        if (resolved is not { } value)
+        {
+            return false;
+        }
+
+        span = value;
+        return true;
+    }
+
+    private static TerminalHighlightSpan? ResolveHyperlinkSpanFromPointer(
+        TerminalRow row,
+        int rowIndex,
+        int column)
+    {
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        if ((uint)column >= (uint)cells.Length)
+        {
+            return null;
+        }
+
+        int hyperlinkId = cells[column].HyperlinkId;
+        if (hyperlinkId <= 0)
+        {
+            return null;
+        }
+
+        int startColumn = column;
+        int endColumn = column;
+        while (startColumn > 0 && cells[startColumn - 1].HyperlinkId == hyperlinkId)
+        {
+            startColumn--;
+        }
+
+        while (endColumn + 1 < cells.Length && cells[endColumn + 1].HyperlinkId == hyperlinkId)
+        {
+            endColumn++;
+        }
+
+        return new TerminalHighlightSpan(
+            rowIndex,
+            startColumn,
+            endColumn,
+            TerminalHighlightKind.HyperlinkHover);
+    }
+
+    private void ApplyHoveredLinkMetadataLocked()
+    {
+        if (_screen is null)
+        {
+            return;
+        }
+
+        ClearHoveredLinkMetadataLocked();
+
+        if (string.IsNullOrEmpty(_hoveredLinkUrl) ||
+            _lastPointerRow < 0 ||
+            _lastPointerColumn < 0 ||
+            (uint)_lastPointerRow >= (uint)_screen.ViewportRows ||
+            (uint)_lastPointerColumn >= (uint)_screen.Columns)
+        {
+            return;
+        }
+
+        if (!TryResolveHoveredLinkSpanLocked(
+                _lastPointerRow,
+                _lastPointerColumn,
+                _hoveredLinkUrl,
+                out TerminalHighlightSpan span))
+        {
+            return;
+        }
+
+        TerminalRow row = _screen.GetViewportRow(span.Row);
+        Span<TerminalCell> cells = row.Cells;
+        if (cells.IsEmpty)
+        {
+            return;
+        }
+
+        int start = Math.Clamp(span.StartColumn, 0, cells.Length - 1);
+        int end = Math.Clamp(span.EndColumn, start, cells.Length - 1);
+        int hyperlinkId = _screen.RegisterHyperlink(_hoveredLinkUrl);
+        for (int col = start; col <= end; col++)
+        {
+            if (cells[col].Width == 0 || (cells[col].Attributes & CellAttributes.Hidden) != 0)
+            {
+                continue;
+            }
+
+            cells[col].HyperlinkId = hyperlinkId;
+        }
+
+        _hoveredLinkSpanRow = span.Row;
+        _hoveredLinkSpanStart = start;
+        _hoveredLinkSpanEnd = end;
+        _hoveredLinkSpanId = hyperlinkId;
+    }
+
+    private void ClearHoveredLinkMetadataLocked()
+    {
+        if (_screen is null ||
+            _hoveredLinkSpanId <= 0 ||
+            _hoveredLinkSpanRow < 0 ||
+            _hoveredLinkSpanStart < 0 ||
+            _hoveredLinkSpanEnd < _hoveredLinkSpanStart ||
+            (uint)_hoveredLinkSpanRow >= (uint)_screen.ViewportRows)
+        {
+            ResetHoveredLinkMetadataTracking();
+            return;
+        }
+
+        TerminalRow row = _screen.GetViewportRow(_hoveredLinkSpanRow);
+        Span<TerminalCell> cells = row.Cells;
+        if (cells.IsEmpty)
+        {
+            ResetHoveredLinkMetadataTracking();
+            return;
+        }
+
+        int start = Math.Clamp(_hoveredLinkSpanStart, 0, cells.Length - 1);
+        int end = Math.Clamp(_hoveredLinkSpanEnd, start, cells.Length - 1);
+        for (int col = start; col <= end; col++)
+        {
+            if (cells[col].HyperlinkId == _hoveredLinkSpanId)
+            {
+                cells[col].HyperlinkId = 0;
+            }
+        }
+
+        ResetHoveredLinkMetadataTracking();
+    }
+
+    private void ResetHoveredLinkMetadataTracking()
+    {
+        _hoveredLinkSpanRow = -1;
+        _hoveredLinkSpanStart = -1;
+        _hoveredLinkSpanEnd = -1;
+        _hoveredLinkSpanId = 0;
+    }
+
+    private static void ApplyUnderlineColorFallback(ref TerminalCell cell)
+    {
+        // Ghostty embedded row-cell API does not expose underline-color transport.
+        // Preserve default semantics by leaving explicit-color bit unset and using
+        // foreground as a stable underline-color snapshot for downstream consumers.
+        bool underlined = cell.UnderlineStyle != TerminalUnderlineStyle.None ||
+                          (cell.Attributes & CellAttributes.Underline) != 0;
+        cell.UnderlineColor = underlined ? cell.Foreground : 0;
+        cell.HasUnderlineColor = false;
+    }
+
+    private bool TryResolveHoveredLinkSpanLocked(
+        int row,
+        int column,
+        string url,
+        out TerminalHighlightSpan span)
+    {
+        span = default;
+
+        if (_screen is null)
+        {
+            return false;
+        }
+
+        TerminalRow terminalRow = _screen.GetViewportRow(row);
+        if (TryBuildRowTextColumnMap(terminalRow, out string rowText))
+        {
+            int searchFrom = 0;
+            while (searchFrom <= rowText.Length - url.Length)
+            {
+                int found = rowText.IndexOf(url, searchFrom, StringComparison.Ordinal);
+                if (found < 0)
+                {
+                    break;
+                }
+
+                int mapEnd = found + url.Length - 1;
+                if ((uint)found < (uint)_rowColumnMapScratch.Count &&
+                    (uint)mapEnd < (uint)_rowColumnMapScratch.Count)
+                {
+                    int startColumn = _rowColumnMapScratch[found];
+                    int endColumn = _rowColumnMapScratch[mapEnd];
+                    if (column >= startColumn && column <= endColumn)
+                    {
+                        span = new TerminalHighlightSpan(
+                            row,
+                            startColumn,
+                            endColumn,
+                            TerminalHighlightKind.HyperlinkHover);
+                        return true;
+                    }
+                }
+
+                searchFrom = found + Math.Max(url.Length, 1);
+            }
+        }
+
+        if (TryResolveLinkTokenSpanLocked(terminalRow, column, out int tokenStart, out int tokenEnd))
+        {
+            span = new TerminalHighlightSpan(
+                row,
+                tokenStart,
+                tokenEnd,
+                TerminalHighlightKind.HyperlinkHover);
+            return true;
+        }
+
+        span = new TerminalHighlightSpan(
+            row,
+            column,
+            column,
+            TerminalHighlightKind.HyperlinkHover);
+        return true;
+    }
+
+    private bool TryBuildRowTextColumnMap(TerminalRow row, out string rowText)
+    {
+        _rowTextScratch.Clear();
+        _rowColumnMapScratch.Clear();
+
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        for (int col = 0; col < cells.Length; col++)
+        {
+            ref readonly TerminalCell cell = ref cells[col];
+            if (cell.Width == 0 || (cell.Attributes & CellAttributes.Hidden) != 0)
+            {
+                continue;
+            }
+
+            string? text = null;
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                text = cell.Grapheme;
+            }
+            else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
+            {
+                text = char.ConvertFromUtf32(cell.Codepoint);
+            }
+
+            if (string.IsNullOrEmpty(text))
+            {
+                continue;
+            }
+
+            int start = _rowTextScratch.Length;
+            _rowTextScratch.Append(text);
+            int end = _rowTextScratch.Length;
+            for (int i = start; i < end; i++)
+            {
+                _rowColumnMapScratch.Add(col);
+            }
+        }
+
+        if (_rowTextScratch.Length == 0)
+        {
+            rowText = string.Empty;
+            return false;
+        }
+
+        rowText = _rowTextScratch.ToString();
+        return true;
+    }
+
+    private static bool TryResolveLinkTokenSpanLocked(
+        TerminalRow row,
+        int column,
+        out int startColumn,
+        out int endColumn)
+    {
+        startColumn = 0;
+        endColumn = 0;
+
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        if ((uint)column >= (uint)cells.Length)
+        {
+            return false;
+        }
+
+        if (!TryGetPrimaryRune(in cells[column], out Rune centerRune) ||
+            !IsLinkTokenRune(centerRune))
+        {
+            return false;
+        }
+
+        int start = column;
+        int end = column;
+
+        while (start > 0 &&
+               TryGetPrimaryRune(in cells[start - 1], out Rune rune) &&
+               IsLinkTokenRune(rune))
+        {
+            start--;
+        }
+
+        while (end + 1 < cells.Length &&
+               TryGetPrimaryRune(in cells[end + 1], out Rune rune) &&
+               IsLinkTokenRune(rune))
+        {
+            end++;
+        }
+
+        startColumn = start;
+        endColumn = end;
+        return true;
+    }
+
+    private static bool TryGetPrimaryRune(ref readonly TerminalCell cell, out Rune rune)
+    {
+        rune = default;
+
+        if (cell.Width == 0 || (cell.Attributes & CellAttributes.Hidden) != 0)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(cell.Grapheme))
+        {
+            return Rune.DecodeFromUtf16(cell.Grapheme.AsSpan(), out rune, out int consumed) == OperationStatus.Done &&
+                   consumed > 0;
+        }
+
+        if (!Rune.IsValid(cell.Codepoint))
+        {
+            return false;
+        }
+
+        rune = new Rune(cell.Codepoint);
+        return true;
+    }
+
+    private static bool IsLinkTokenRune(Rune rune)
+    {
+        if (Rune.IsLetterOrDigit(rune))
+        {
+            return true;
+        }
+
+        return rune.Value switch
+        {
+            '-' or '_' or '.' or '~' or ':' or '/' or '?' or '#' or '[' or ']' or '@' or
+            '!' or '$' or '&' or '\'' or '(' or ')' or '*' or '+' or ',' or ';' or '%' or '=' =>
+                true,
+            _ => false,
+        };
+    }
+
+    private bool SelectSearchMatchRelative(int delta)
+    {
+        if (string.IsNullOrEmpty(_searchNeedle))
+        {
+            return false;
+        }
+
+        UpdateRendererParityStateFromScreen();
+        if (_searchTotal <= 0)
+        {
+            return false;
+        }
+
+        int previousSelection = _searchSelected;
+        int selected = _searchSelected;
+        if (selected < 0 || selected >= _searchTotal)
+        {
+            selected = 0;
+        }
+        else
+        {
+            selected = (selected + delta) % _searchTotal;
+            if (selected < 0)
+            {
+                selected += _searchTotal;
+            }
+        }
+
+        if (selected == previousSelection && _searchTotal == 1)
+        {
+            return false;
+        }
+
+        _searchSelected = selected;
+        UpdateRendererParityStateFromScreen();
+        return true;
+    }
+
     #endregion
 
     #region Input Handling
+
+    private void RegisterPointerFallbackHandlers()
+    {
+        AddHandler(PointerPressedEvent, OnPointerPressedTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerMovedEvent, OnPointerMovedTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerReleasedEvent, OnPointerReleasedTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerWheelChangedEvent, OnPointerWheelChangedTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+    }
+
+    private void OnPointerPressedTunnel(object? sender, PointerPressedEventArgs e)
+    {
+        _ = sender;
+        if (!e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerPressedCore(e);
+    }
+
+    private void OnPointerMovedTunnel(object? sender, PointerEventArgs e)
+    {
+        _ = sender;
+        if (!e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerMovedCore(e);
+    }
+
+    private void OnPointerReleasedTunnel(object? sender, PointerReleasedEventArgs e)
+    {
+        _ = sender;
+        if (!e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerReleasedCore(e);
+    }
+
+    private void OnPointerWheelChangedTunnel(object? sender, PointerWheelEventArgs e)
+    {
+        _ = sender;
+        if (!e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerWheelChangedCore(e);
+    }
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
@@ -1240,6 +2019,17 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
+        if (e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerPressedCore(e);
+    }
+
+    private void HandlePointerPressedCore(PointerPressedEventArgs e)
+    {
+        UpdatePointerCell(e.GetPosition(this));
         if (GhosttyInputPipeline.HandlePointerPressed(this, _surface, e))
         {
             e.Handled = true;
@@ -1249,24 +2039,109 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
+        if (e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerMovedCore(e);
+    }
+
+    private void HandlePointerMovedCore(PointerEventArgs e)
+    {
         GhosttyInputPipeline.HandlePointerMoved(this, _surface, e);
+        UpdatePointerCell(e.GetPosition(this));
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
-        if (GhosttyInputPipeline.HandlePointerReleased(_surface, e))
+        if (e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerReleasedCore(e);
+    }
+
+    private void HandlePointerReleasedCore(PointerReleasedEventArgs e)
+    {
+        UpdatePointerCell(e.GetPosition(this));
+        if (GhosttyInputPipeline.HandlePointerReleased(this, _surface, e))
         {
             e.Handled = true;
+        }
+    }
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+
+        if (_lastPointerColumn >= 0 || _lastPointerRow >= 0)
+        {
+            bool hadLinkState = _hoveredLinkSpanId > 0 || !string.IsNullOrEmpty(_hoveredLinkUrl);
+            _lastPointerColumn = -1;
+            _lastPointerRow = -1;
+            _hoveredLinkUrl = null;
+            if (hadLinkState)
+            {
+                UpdateRendererParityStateFromScreen();
+            }
         }
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
+        if (e.Handled)
+        {
+            return;
+        }
+
+        HandlePointerWheelChangedCore(e);
+    }
+
+    private void HandlePointerWheelChangedCore(PointerWheelEventArgs e)
+    {
         if (GhosttyInputPipeline.HandlePointerWheelChanged(_surface, e))
         {
             e.Handled = true;
+        }
+    }
+
+    private void UpdatePointerCell(Point point)
+    {
+        if (_renderer is null || _screen is null)
+        {
+            return;
+        }
+
+        if (_renderer.CellWidth <= 0f || _renderer.CellHeight <= 0f)
+        {
+            return;
+        }
+
+        if (_screen.Columns <= 0 || _screen.ViewportRows <= 0)
+        {
+            return;
+        }
+
+        int col = (int)Math.Floor(point.X / _renderer.CellWidth);
+        int row = (int)Math.Floor(point.Y / _renderer.CellHeight);
+        col = Math.Clamp(col, 0, _screen.Columns - 1);
+        row = Math.Clamp(row, 0, _screen.ViewportRows - 1);
+
+        if (col == _lastPointerColumn && row == _lastPointerRow)
+        {
+            return;
+        }
+
+        _lastPointerColumn = col;
+        _lastPointerRow = row;
+
+        if (!string.IsNullOrEmpty(_hoveredLinkUrl))
+        {
+            UpdateRendererParityStateFromScreen();
         }
     }
 
@@ -1341,6 +2216,102 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         SetCurrentValue(ThemeProperty, theme);
     }
 
+    /// <summary>
+    /// Updates the hovered hyperlink URL used for hyperlink-hover underline styling.
+    /// </summary>
+    public void SetHoveredLinkUrl(string? url)
+    {
+        string? normalized = string.IsNullOrWhiteSpace(url) ? null : url;
+        if (string.Equals(_hoveredLinkUrl, normalized, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _hoveredLinkUrl = normalized;
+        UpdateRendererParityStateFromScreen();
+    }
+
+    /// <summary>
+    /// Starts a search-highlight session with the specified needle.
+    /// </summary>
+    public void StartSearch(string? needle)
+    {
+        _searchNeedle = string.IsNullOrWhiteSpace(needle) ? null : needle;
+        _searchSelected = 0;
+        _searchTotal = 0;
+        UpdateRendererParityStateFromScreen();
+    }
+
+    /// <summary>
+    /// Ends the current search-highlight session.
+    /// </summary>
+    public void EndSearch()
+    {
+        if (_searchNeedle is null && _searchSelected < 0 && _searchTotal == 0)
+        {
+            return;
+        }
+
+        _searchNeedle = null;
+        _searchSelected = -1;
+        _searchTotal = 0;
+        _searchMatchScratch.Clear();
+        UpdateRendererParityStateFromScreen();
+    }
+
+    /// <summary>
+    /// Updates total match count for the active search-highlight session.
+    /// </summary>
+    public void SetSearchTotal(int total)
+    {
+        int normalized = Math.Max(0, total);
+        if (_searchTotal == normalized)
+        {
+            return;
+        }
+
+        _searchTotal = normalized;
+        UpdateRendererParityStateFromScreen();
+    }
+
+    /// <summary>
+    /// Updates the selected search match index for the active highlight session.
+    /// </summary>
+    public void SetSearchSelected(int selected)
+    {
+        if (_searchSelected == selected)
+        {
+            return;
+        }
+
+        _searchSelected = selected;
+        UpdateRendererParityStateFromScreen();
+    }
+
+    /// <summary>
+    /// Selects the next search result. Returns false when no active matches exist.
+    /// </summary>
+    public bool SelectNextSearchMatch()
+    {
+        return SelectSearchMatchRelative(1);
+    }
+
+    /// <summary>
+    /// Selects the previous search result. Returns false when no active matches exist.
+    /// </summary>
+    public bool SelectPreviousSearchMatch()
+    {
+        return SelectSearchMatchRelative(-1);
+    }
+
+    /// <summary>
+    /// Toggles Ghostty-style background opacity mode.
+    /// </summary>
+    public void ToggleBackgroundOpacity()
+    {
+        BackgroundOpacityEnabled = !BackgroundOpacityEnabled;
+    }
+
     /// <summary>Checks if the terminal has a selection.</summary>
     public bool HasSelection => _surface?.HasSelection ?? false;
 
@@ -1363,6 +2334,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     public void RequestClose() => _surface?.RequestClose();
 
     #endregion
+
+    private readonly record struct SearchMatch(int Row, int StartColumn, int EndColumn);
 
     #region IDisposable
 

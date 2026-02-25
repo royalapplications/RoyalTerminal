@@ -726,7 +726,10 @@ public struct GhosttyCursorInfo
     public ushort X;
     /// <summary>Cursor row (0-based).</summary>
     public ushort Y;
-    /// <summary>Cursor style (block, bar, underline, etc.).</summary>
+    /// <summary>
+    /// Cursor style from Ghostty embedded surface:
+    /// 0=bar, 1=block, 2=underline, 3=block_hollow.
+    /// </summary>
     public byte Style;
     /// <summary>Whether cursor is visible.</summary>
     public byte Visible;
