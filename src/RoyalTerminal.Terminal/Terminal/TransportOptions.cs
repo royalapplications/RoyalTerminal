@@ -75,6 +75,13 @@ public sealed record SshTransportOptions(
     TerminalSessionDimensions Dimensions) : ITerminalTransportOptions
 {
     /// <summary>
+    /// Optional environment variables to set in the remote shell session.
+    /// Applied via POSIX-style <c>export</c> bootstrap commands.
+    /// Keys must be valid shell variable identifiers.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? EnvironmentVariables { get; init; }
+
+    /// <summary>
     /// Optional expected SHA-256 host key fingerprint used for strict host-key pinning.
     /// Accepts values with or without <c>SHA256:</c> prefix.
     /// </summary>

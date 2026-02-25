@@ -97,6 +97,55 @@ public sealed class SshTransportIntegrationTests
         Assert.False(transport.IsRunning);
     }
 
+    [Fact]
+    public async Task StartAsync_WithEnvironmentBootstrap_InitialCommandCanReadExportedVariable()
+    {
+        if (!TryCreateConfiguredSetup(out IntegrationSetup setup))
+        {
+            return;
+        }
+
+        string envMarker = "RT_SSH_ENV_" + Guid.NewGuid().ToString("N");
+        SshTransportOptions options = setup.Options with
+        {
+            InitialCommand = "printf '%s\\n' \"$ROYALTERMINAL_ENV_PROBE\"",
+            EnvironmentVariables = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["ROYALTERMINAL_ENV_PROBE"] = envMarker,
+            },
+        };
+
+        using SshNetTerminalTransport transport = new(
+            credentialProvider: setup.CredentialProvider,
+            hostKeyValidator: new RejectAllSshHostKeyValidator());
+
+        StringBuilder output = new();
+        TaskCompletionSource<bool> markerReceived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        transport.DataReceived += (data, length) =>
+        {
+            string chunk = Encoding.UTF8.GetString(data, 0, length);
+            lock (output)
+            {
+                output.Append(chunk);
+                if (output.ToString().Contains(envMarker, StringComparison.Ordinal))
+                {
+                    markerReceived.TrySetResult(true);
+                }
+            }
+        };
+
+        try
+        {
+            await transport.StartAsync(options);
+            _ = await markerReceived.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        }
+        finally
+        {
+            await transport.StopAsync();
+        }
+    }
+
     private static bool TryCreateConfiguredSetup(out IntegrationSetup setup)
     {
         string? host = Environment.GetEnvironmentVariable(HostEnvVar);

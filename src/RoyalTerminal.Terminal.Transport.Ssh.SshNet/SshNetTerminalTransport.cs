@@ -114,17 +114,18 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
             shell.Closed += OnShellClosed;
             shell.ErrorOccurred += OnShellErrorOccurred;
 
+            string? bootstrapCommand = SshShellBootstrapBuilder.BuildBootstrapCommand(sshOptions);
+            if (!string.IsNullOrWhiteSpace(bootstrapCommand))
+            {
+                shell.WriteLine(bootstrapCommand);
+            }
+
             lock (_sync)
             {
                 _client = client;
                 _shellStream = shell;
                 _options = sshOptions;
                 _exitRaised = 0;
-            }
-
-            if (!string.IsNullOrWhiteSpace(sshOptions.InitialCommand))
-            {
-                shell.WriteLine(sshOptions.InitialCommand);
             }
         }
         catch (Exception ex)
@@ -396,6 +397,8 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
         {
             throw new InvalidOperationException("SSH endpoint username must not be empty.");
         }
+
+        SshShellBootstrapBuilder.ValidateEnvironmentVariables(options.EnvironmentVariables);
     }
 
     private static string NormalizeFingerprint(string? value)
