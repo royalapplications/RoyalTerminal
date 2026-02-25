@@ -64,6 +64,75 @@ public sealed class SshNetTerminalTransportSecurityTests
         Assert.False(credentialProvider.WasResolveCalled);
     }
 
+    [Fact]
+    public async Task StartAsync_ThrowsForInvalidEnvironmentVariableName_BeforeCredentialResolution()
+    {
+        TrackingCredentialProvider credentialProvider = new();
+        using SshNetTerminalTransport transport = new(
+            credentialProvider,
+            new RejectAllSshHostKeyValidator());
+
+        SshTransportOptions options = CreateOptions(host: "localhost", port: 22, username: "user") with
+        {
+            EnvironmentVariables = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["BAD-NAME"] = "value",
+            },
+        };
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transport.StartAsync(options));
+
+        Assert.Contains("invalid identifier", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(credentialProvider.WasResolveCalled);
+    }
+
+    [Fact]
+    public async Task StartAsync_ThrowsForEnvironmentValueWithControlCharacters_BeforeCredentialResolution()
+    {
+        TrackingCredentialProvider credentialProvider = new();
+        using SshNetTerminalTransport transport = new(
+            credentialProvider,
+            new RejectAllSshHostKeyValidator());
+
+        SshTransportOptions options = CreateOptions(host: "localhost", port: 22, username: "user") with
+        {
+            EnvironmentVariables = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["LANG"] = "en_US.UTF-8\nC.UTF-8",
+            },
+        };
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transport.StartAsync(options));
+
+        Assert.Contains("forbidden control characters", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(credentialProvider.WasResolveCalled);
+    }
+
+    [Fact]
+    public async Task StartAsync_ThrowsForNullEnvironmentValue_BeforeCredentialResolution()
+    {
+        TrackingCredentialProvider credentialProvider = new();
+        using SshNetTerminalTransport transport = new(
+            credentialProvider,
+            new RejectAllSshHostKeyValidator());
+
+        SshTransportOptions options = CreateOptions(host: "localhost", port: 22, username: "user") with
+        {
+            EnvironmentVariables = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["LANG"] = null!,
+            },
+        };
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transport.StartAsync(options));
+
+        Assert.Contains("non-null value", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(credentialProvider.WasResolveCalled);
+    }
+
     private static SshTransportOptions CreateOptions(string host, int port, string username)
     {
         return new SshTransportOptions(

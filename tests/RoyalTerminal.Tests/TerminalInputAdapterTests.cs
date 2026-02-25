@@ -84,6 +84,47 @@ public sealed class TerminalInputAdapterTests
     }
 
     [Fact]
+    public void HandleKeyDown_WithEndpointWithoutInputSink_UsesByteFallback()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        ByteOnlyEndpoint endpoint = new();
+        sessionService.AttachEndpoint(endpoint);
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Return,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(endpoint.LastInput);
+        Assert.Equal("\r", Encoding.UTF8.GetString(endpoint.LastInput!));
+    }
+
+    [Fact]
+    public void HandleTextInput_WithEndpointWithoutInputSink_UsesByteFallback()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        ByteOnlyEndpoint endpoint = new();
+        sessionService.AttachEndpoint(endpoint);
+
+        TextInputEventArgs textInputEventArgs = new()
+        {
+            Text = "abc",
+        };
+
+        bool handled = adapter.HandleTextInput(textInputEventArgs, sessionService);
+
+        Assert.True(handled);
+        Assert.NotNull(endpoint.LastInput);
+        Assert.Equal("abc", Encoding.UTF8.GetString(endpoint.LastInput!));
+    }
+
+    [Fact]
     public async Task HandleKeyDown_WithActiveTransport_UsesSessionFallbackWrite()
     {
         DefaultTerminalInputAdapter adapter = new();
@@ -898,6 +939,27 @@ public sealed class TerminalInputAdapterTests
         public void SendText(ReadOnlySpan<byte> utf8)
         {
             _ = utf8;
+        }
+
+        public void SetFocus(bool focused)
+        {
+            _ = focused;
+        }
+
+        public void SetSize(int widthPx, int heightPx)
+        {
+            _ = widthPx;
+            _ = heightPx;
+        }
+    }
+
+    private sealed class ByteOnlyEndpoint : ITerminalEndpoint
+    {
+        public byte[]? LastInput { get; private set; }
+
+        public void SendText(ReadOnlySpan<byte> utf8)
+        {
+            LastInput = utf8.ToArray();
         }
 
         public void SetFocus(bool focused)

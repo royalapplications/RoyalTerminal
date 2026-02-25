@@ -41,6 +41,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const float RendererBackgroundOpacity = 0.82f;
     private const bool RendererBackgroundOpacityCells = true;
     private static readonly TimeSpan CursorBlinkInterval = TimeSpan.FromMilliseconds(530);
+    private const int MaxPendingOutputChunksPerDispatch = 64;
 
     #region Styled Properties
 
@@ -225,6 +226,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private VtProcessorPreference _appliedVtProcessorPreference = VtProcessorPreference.Auto;
     private string? _activeTransportId;
     private readonly TerminalMouseModeTracker _mouseModeTracker = new();
+    private readonly object _pendingTransportOutputSync = new();
+    private readonly Queue<byte[]> _pendingTransportOutput = new();
+    private bool _pendingTransportOutputDrainScheduled;
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -1075,7 +1079,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public void WriteOutput(byte[] data)
     {
         ArgumentNullException.ThrowIfNull(data);
-        WriteOutput((ReadOnlyMemory<byte>)data);
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            EnqueueOutputForUiThread(data.AsSpan().ToArray());
+            return;
+        }
+
+        WriteOutputOnUiThread(data);
     }
 
     /// <summary>
@@ -1084,13 +1094,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void WriteOutput(ReadOnlyMemory<byte> data)
     {
-        WriteOutputCore(data.Span);
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            EnqueueOutputForUiThread(data.Span.ToArray());
+            return;
+        }
 
-        // Raise event without copying when input is already managed memory.
-        DataReceived?.Invoke(this, new TerminalDataEventArgs(data));
-
-        TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
-        UpdateRendererCursorForViewport();
+        WriteOutputOnUiThread(data);
     }
 
     /// <summary>
@@ -1099,10 +1109,27 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void WriteOutput(ReadOnlySpan<byte> data)
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            EnqueueOutputForUiThread(data.ToArray());
+            return;
+        }
+
         WriteOutputCore(data);
 
         // Span input may come from transient memory, so copy to a managed payload for event consumers.
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data.ToArray()));
+
+        TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
+        UpdateRendererCursorForViewport();
+    }
+
+    private void WriteOutputOnUiThread(ReadOnlyMemory<byte> data)
+    {
+        WriteOutputCore(data.Span);
+
+        // Raise event without copying when input is already managed memory.
+        DataReceived?.Invoke(this, new TerminalDataEventArgs(data));
 
         TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
         UpdateRendererCursorForViewport();
@@ -1696,6 +1723,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         ArgumentNullException.ThrowIfNull(options);
 
         EnsureVtProcessorPreferenceApplied();
+        ResetPendingTransportOutputQueue();
         _mouseModeTracker.Reset();
         ResetPointerButtons();
         _isMouseSelecting = false;
@@ -1741,6 +1769,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             .AsTask()
             .GetAwaiter()
             .GetResult();
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            DrainPendingTransportOutput(flushAll: true);
+        }
+        else
+        {
+            Dispatcher.UIThread.InvokeAsync(() => DrainPendingTransportOutput(flushAll: true))
+                .GetAwaiter()
+                .GetResult();
+        }
+        ResetPendingTransportOutputQueue();
         _activeTransportId = null;
         _mouseModeTracker.Reset();
         ResetPointerButtons();
@@ -1781,26 +1820,95 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void OnPtyDataReceived(byte[] data, int length)
     {
+        if (length <= 0)
+        {
+            return;
+        }
+
         // The PTY reader reuses its read buffer, so we must copy before posting
         // to the UI thread — otherwise the buffer may be overwritten by the next read.
-        var copy = data.AsSpan(0, length).ToArray();
-        Dispatcher.UIThread.Post(() =>
+        byte[] copy = data.AsSpan(0, length).ToArray();
+        EnqueueOutputForUiThread(copy);
+    }
+
+    private void EnqueueOutputForUiThread(byte[] copy)
+    {
+        if (copy.Length == 0)
         {
-            WriteOutput(copy);
-        });
+            return;
+        }
+
+        bool scheduleDrain = false;
+        lock (_pendingTransportOutputSync)
+        {
+            _pendingTransportOutput.Enqueue(copy);
+            if (!_pendingTransportOutputDrainScheduled)
+            {
+                _pendingTransportOutputDrainScheduled = true;
+                scheduleDrain = true;
+            }
+        }
+
+        if (scheduleDrain)
+        {
+            Dispatcher.UIThread.Post(DrainPendingTransportOutput);
+        }
     }
 
     private void OnPtyProcessExited(int exitCode)
     {
         Dispatcher.UIThread.Post(() =>
         {
+            DrainPendingTransportOutput(flushAll: true);
             _activeTransportId = null;
             // Write exit message to screen
-            var msg = $"\r\n[Process exited with code {exitCode}]\r\n";
-            var bytes = Encoding.UTF8.GetBytes(msg);
+            string msg = $"\r\n[Process exited with code {exitCode}]\r\n";
+            byte[] bytes = Encoding.UTF8.GetBytes(msg);
             WriteOutput(bytes);
             ProcessExited?.Invoke(this, exitCode);
         });
+    }
+
+    private void DrainPendingTransportOutput()
+    {
+        DrainPendingTransportOutput(flushAll: false);
+    }
+
+    private void DrainPendingTransportOutput(bool flushAll)
+    {
+        int processed = 0;
+        while (true)
+        {
+            byte[] nextChunk;
+            lock (_pendingTransportOutputSync)
+            {
+                if (_pendingTransportOutput.Count == 0)
+                {
+                    _pendingTransportOutputDrainScheduled = false;
+                    return;
+                }
+
+                if (!flushAll && processed >= MaxPendingOutputChunksPerDispatch)
+                {
+                    Dispatcher.UIThread.Post(DrainPendingTransportOutput);
+                    return;
+                }
+
+                nextChunk = _pendingTransportOutput.Dequeue();
+            }
+
+            WriteOutputOnUiThread(nextChunk);
+            processed++;
+        }
+    }
+
+    private void ResetPendingTransportOutputQueue()
+    {
+        lock (_pendingTransportOutputSync)
+        {
+            _pendingTransportOutput.Clear();
+            _pendingTransportOutputDrainScheduled = false;
+        }
     }
 
     #endregion
@@ -1891,6 +1999,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return focusModeSource.FocusEventsEnabled;
         }
 
+        if (TerminalSessionService.ModeSource is ITerminalFocusEventModeSource focusModeFromSource)
+        {
+            return focusModeFromSource.FocusEventsEnabled;
+        }
+
         return false;
     }
 
@@ -1906,6 +2019,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool HasTransportOrDirectPtyInputPath()
     {
+        if (TerminalSessionService.Endpoint is not null)
+        {
+            return true;
+        }
+
         if (TerminalSessionService.HasActiveTransport)
         {
             return true;
