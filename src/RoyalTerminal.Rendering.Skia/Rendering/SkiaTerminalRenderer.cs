@@ -29,6 +29,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const float GridScaleFallbackMax = 1.6f;
     private const float GridClampToleranceRatio = 0.04f;
     private const float GridClampTolerancePx = 0.25f;
+    private const float DefaultBackgroundOpacity = 0.82f;
     private static readonly CultureInfo s_renderCulture = CultureInfo.InvariantCulture;
 
     private readonly GlyphCache _glyphCache;
@@ -52,13 +53,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private long _diagnosticBrailleSpriteCells;
     private long _diagnosticBlockSpriteCells;
     private long _diagnosticScanLineSpriteCells;
+    private TerminalHighlightSpan[] _highlightSpans = Array.Empty<TerminalHighlightSpan>();
 
     // Reusable paint objects to avoid per-frame allocation
     private readonly SKPaint _bgPaint;
     private readonly SKPaint _fgPaint;
     private readonly SKPaint _cursorPaint;
-    private readonly SKPaint _selectionPaint;
     private readonly SKPaint _spritePaint;
+    private readonly SKPath _spritePath;
 
     /// <summary>Cell width in pixels.</summary>
     public float CellWidth => _cellWidth;
@@ -92,6 +94,41 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     /// <summary>Selection highlight color.</summary>
     public SKColor SelectionColor { get; set; } = new(0x40, 0x60, 0xA0, 0x80);
+
+    /// <summary>Search-match highlight color.</summary>
+    public SKColor SearchHighlightColor { get; set; } = new(0xA0, 0x90, 0x20, 0x90);
+
+    /// <summary>Search-selected highlight color.</summary>
+    public SKColor SearchSelectedHighlightColor { get; set; } = new(0xD0, 0x80, 0x20, 0xB0);
+
+    /// <summary>Optional hyperlink-hover underline color override.</summary>
+    public SKColor HyperlinkHoverUnderlineColor { get; set; } = SKColors.Empty;
+
+    /// <summary>
+    /// Whether Ghostty-style background-opacity heuristics are enabled.
+    /// </summary>
+    public bool EnableBackgroundOpacityHeuristics { get; set; } = true;
+
+    /// <summary>
+    /// Whether background opacity mode is currently enabled.
+    /// </summary>
+    public bool BackgroundOpacityEnabled { get; set; }
+
+    /// <summary>
+    /// Whether opacity applies to explicitly colored cells.
+    /// </summary>
+    public bool BackgroundOpacityCells { get; set; }
+
+    /// <summary>
+    /// Background opacity factor used when background-opacity mode is enabled.
+    /// </summary>
+    public float BackgroundOpacity
+    {
+        get => _backgroundOpacity;
+        set => _backgroundOpacity = Math.Clamp(value, 0f, 1f);
+    }
+
+    private float _backgroundOpacity = DefaultBackgroundOpacity;
 
     /// <summary>The glyph cache used by this renderer.</summary>
     public GlyphCache GlyphCache => _glyphCache;
@@ -164,17 +201,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _bgPaint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
         _fgPaint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
         _cursorPaint = new SKPaint { IsAntialias = false, Style = SKPaintStyle.Fill };
-        _selectionPaint = new SKPaint
-        {
-            IsAntialias = false,
-            Style = SKPaintStyle.Fill,
-            Color = SelectionColor,
-        };
         _spritePaint = new SKPaint
         {
             IsAntialias = false,
             Style = SKPaintStyle.Fill,
         };
+        _spritePath = new SKPath();
     }
 
     /// <summary>
@@ -223,6 +255,22 @@ public sealed class SkiaTerminalRenderer : IDisposable
     }
 
     /// <summary>
+    /// Replaces renderer highlight spans used for search/link overlay rendering.
+    /// </summary>
+    public void SetHighlightSpans(ReadOnlySpan<TerminalHighlightSpan> spans)
+    {
+        if (spans.IsEmpty)
+        {
+            _highlightSpans = Array.Empty<TerminalHighlightSpan>();
+            return;
+        }
+
+        TerminalHighlightSpan[] copy = new TerminalHighlightSpan[spans.Length];
+        spans.CopyTo(copy);
+        _highlightSpans = copy;
+    }
+
+    /// <summary>
     /// Renders the terminal screen to the given SKCanvas.
     /// Only re-renders rows marked as dirty unless forceFullRedraw is true.
     /// </summary>
@@ -232,30 +280,46 @@ public sealed class SkiaTerminalRenderer : IDisposable
         ArgumentNullException.ThrowIfNull(screen);
 
         canvas.Save();
+        ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
+        int overlayCapacity = Math.Max(1, screen.Columns);
+        CellOverlayFlags[] overlayBuffer = ArrayPool<CellOverlayFlags>.Shared.Rent(overlayCapacity);
 
-        // Render backgrounds first (batched), then text on top
-        for (var row = 0; row < screen.ViewportRows; row++)
+        try
         {
-            var terminalRow = screen.GetViewportRow(row);
-            if (!forceFullRedraw && !terminalRow.IsDirty) continue;
+            // Render backgrounds first (batched), then text on top
+            for (var row = 0; row < screen.ViewportRows; row++)
+            {
+                var terminalRow = screen.GetViewportRow(row);
+                if (!forceFullRedraw && !terminalRow.IsDirty) continue;
 
-            var y = row * _cellHeight;
+                var y = row * _cellHeight;
+                Span<CellOverlayFlags> rowOverlays = overlayBuffer.AsSpan(0, terminalRow.Columns);
+                rowOverlays.Clear();
+                PopulateRowOverlayFlags(
+                    row,
+                    terminalRow.Columns,
+                    highlights,
+                    rowOverlays);
 
-            // Render background cells
-            RenderRowBackground(canvas, terminalRow, y);
+                // Render background cells
+                RenderRowBackground(canvas, terminalRow, y, rowOverlays);
 
-            // Render text
-            RenderRowText(canvas, terminalRow, y);
+                // Render text
+                RenderRowText(canvas, terminalRow, y, row, rowOverlays);
 
-            terminalRow.IsDirty = false;
+                terminalRow.IsDirty = false;
+            }
         }
-
-        // Render selection overlay
-        RenderSelection(canvas, screen);
+        finally
+        {
+            ArrayPool<CellOverlayFlags>.Shared.Return(
+                overlayBuffer,
+                clearArray: true);
+        }
 
         // Render cursor
         if (CursorVisible)
-            RenderCursor(canvas);
+            RenderCursor(canvas, screen);
 
         canvas.Restore();
     }
@@ -276,39 +340,60 @@ public sealed class SkiaTerminalRenderer : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void RenderRowBackground(SKCanvas canvas, TerminalRow row, float y)
+    private void RenderRowBackground(
+        SKCanvas canvas,
+        TerminalRow row,
+        float y,
+        ReadOnlySpan<CellOverlayFlags> rowOverlays)
     {
         var cells = row.ReadOnlyCells;
         if (cells.IsEmpty) return;
 
         var batchStart = 0;
-        var batchColor = GetEffectiveBackground(in cells[0]);
+        var batchColor = ResolveBackgroundColorForCell(in cells[0], rowOverlays[0]);
 
         for (var col = 1; col <= cells.Length; col++)
         {
-            var currentColor = col < cells.Length ? GetEffectiveBackground(in cells[col]) : uint.MaxValue;
+            bool flush = col == cells.Length;
+            uint currentColor = flush
+                ? 0
+                : ResolveBackgroundColorForCell(in cells[col], rowOverlays[col]);
 
-            if (currentColor != batchColor)
+            if (flush || currentColor != batchColor)
             {
                 // Flush batch
-                _bgPaint.Color = new SKColor(batchColor);
-                var x = batchStart * _cellWidth;
-                var width = (col - batchStart) * _cellWidth;
-                canvas.DrawRect(x, y, width, _cellHeight, _bgPaint);
+                if ((batchColor >> 24) != 0)
+                {
+                    _bgPaint.Color = new SKColor(batchColor);
+                    var x = batchStart * _cellWidth;
+                    var width = (col - batchStart) * _cellWidth;
+                    canvas.DrawRect(x, y, width, _cellHeight, _bgPaint);
+                }
 
-                batchStart = col;
-                batchColor = currentColor;
+                if (!flush)
+                {
+                    batchStart = col;
+                    batchColor = currentColor;
+                }
             }
         }
     }
 
-    private void RenderRowText(SKCanvas canvas, TerminalRow row, float y)
+    private void RenderRowText(
+        SKCanvas canvas,
+        TerminalRow row,
+        float y,
+        int rowIndex,
+        ReadOnlySpan<CellOverlayFlags> rowOverlays)
     {
         ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
         if (cells.IsEmpty)
         {
             return;
         }
+
+        bool splitRunsAroundCursor = CursorVisible && rowIndex == CursorRow;
+        int cursorSplitColumn = CursorColumn;
 
         int col = 0;
         while (col < cells.Length)
@@ -326,6 +411,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 int spriteRunEnd = col + 1;
                 while (spriteRunEnd < cells.Length)
                 {
+                    if (splitRunsAroundCursor && ShouldSplitRunAroundCursor(col, spriteRunEnd, cursorSplitColumn))
+                    {
+                        break;
+                    }
+
                     ref readonly TerminalCell spriteCandidate = ref cells[spriteRunEnd];
                     if (!IsRenderableGlyphCell(in spriteCandidate))
                     {
@@ -347,7 +437,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 }
 
                 DrawSpriteRun(canvas, cells, col, spriteRunEnd, y, spriteColor);
-                DrawRunDecorations(canvas, cells, col, spriteRunEnd, y, spriteColor);
+                DrawRunDecorations(
+                    canvas,
+                    cells,
+                    rowOverlays,
+                    col,
+                    spriteRunEnd,
+                    y,
+                    spriteColor);
                 col = spriteRunEnd;
                 continue;
             }
@@ -361,6 +458,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
             int runEnd = col + 1;
             while (runEnd < cells.Length)
             {
+                if (splitRunsAroundCursor && ShouldSplitRunAroundCursor(col, runEnd, cursorSplitColumn))
+                {
+                    break;
+                }
+
                 ref readonly TerminalCell nextCell = ref cells[runEnd];
                 if (!IsRenderableGlyphCell(in nextCell))
                 {
@@ -413,7 +515,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     runWidth);
             }
 
-            DrawRunDecorations(canvas, cells, col, runEnd, y, runColor);
+            DrawRunDecorations(
+                canvas,
+                cells,
+                rowOverlays,
+                col,
+                runEnd,
+                y,
+                runColor);
             col = runEnd;
         }
     }
@@ -464,9 +573,22 @@ public sealed class SkiaTerminalRenderer : IDisposable
             switch (category)
             {
                 case SpriteCategory.BoxDrawing:
+                    if (TryDrawSpecialBoxDrawingSymbol(canvas, x, y, spriteWidth, spriteHeight, codepoint, color))
+                    {
+                        break;
+                    }
+
                     if (TryGetBoxSegments(codepoint, out BoxSegments segments))
                     {
-                        DrawBoxSegments(canvas, x, y, spriteWidth, spriteHeight, segments, color);
+                        DrawBoxSegments(
+                            canvas,
+                            x,
+                            y,
+                            spriteWidth,
+                            spriteHeight,
+                            segments,
+                            color,
+                            heavyMeansDouble: IsDoubleBoxDrawingCodepoint(codepoint));
                     }
                     break;
 
@@ -492,6 +614,256 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
     }
 
+    private bool TryDrawSpecialBoxDrawingSymbol(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        int codepoint,
+        SKColor color)
+    {
+        if (TryDrawDashedBoxLine(canvas, x, y, width, height, codepoint, color))
+        {
+            return true;
+        }
+
+        if (TryDrawArcBoxLine(canvas, x, y, width, height, codepoint, color))
+        {
+            return true;
+        }
+
+        return TryDrawDiagonalBoxLine(canvas, x, y, width, height, codepoint, color);
+    }
+
+    private bool TryDrawDashedBoxLine(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        int codepoint,
+        SKColor color)
+    {
+        if (!TryGetDashedBoxLineSpec(codepoint, out BoxLineOrientation orientation, out StrokeWeight weight, out int dashCount))
+        {
+            return false;
+        }
+
+        GetStrokeThicknesses(width, height, out float lightThickness, out float heavyThickness);
+        float thickness = weight == StrokeWeight.Heavy ? heavyThickness : lightThickness;
+
+        if (orientation == BoxLineOrientation.Horizontal)
+        {
+            DrawDashedHorizontalLine(canvas, x, y, width, height, dashCount, thickness, color);
+        }
+        else
+        {
+            DrawDashedVerticalLine(canvas, x, y, width, height, dashCount, thickness, color);
+        }
+
+        return true;
+    }
+
+    private void DrawDashedHorizontalLine(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        int dashCount,
+        float thickness,
+        SKColor color)
+    {
+        if (dashCount <= 0 || width <= 0f)
+        {
+            return;
+        }
+
+        int totalPixels = Math.Max(1, (int)MathF.Round(width));
+        int gapSegments = Math.Max(0, dashCount - 1);
+        int gapPixels = gapSegments > 0 ? Math.Max(1, totalPixels / (dashCount * 3)) : 0;
+        int dashPixelsRemaining = totalPixels - (gapSegments * gapPixels);
+        if (dashPixelsRemaining < dashCount)
+        {
+            gapPixels = 0;
+            dashPixelsRemaining = totalPixels;
+        }
+
+        int dashBasePixels = Math.Max(1, dashPixelsRemaining / dashCount);
+        int dashExtraPixels = Math.Max(0, dashPixelsRemaining - (dashBasePixels * dashCount));
+
+        float centerY = y + (height * 0.5f);
+        float halfThickness = thickness * 0.5f;
+
+        _spritePaint.Color = color;
+        int cursorPixels = 0;
+        for (int i = 0; i < dashCount; i++)
+        {
+            if (cursorPixels >= totalPixels)
+            {
+                break;
+            }
+
+            int segmentPixels = dashBasePixels + (i < dashExtraPixels ? 1 : 0);
+            if (segmentPixels > 0)
+            {
+                float segmentX = x + cursorPixels;
+                canvas.DrawRect(segmentX, centerY - halfThickness, segmentPixels, thickness, _spritePaint);
+            }
+
+            cursorPixels += segmentPixels + gapPixels;
+        }
+    }
+
+    private void DrawDashedVerticalLine(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        int dashCount,
+        float thickness,
+        SKColor color)
+    {
+        if (dashCount <= 0 || height <= 0f)
+        {
+            return;
+        }
+
+        int totalPixels = Math.Max(1, (int)MathF.Round(height));
+        int gapSegments = Math.Max(0, dashCount - 1);
+        int gapPixels = gapSegments > 0 ? Math.Max(1, totalPixels / (dashCount * 3)) : 0;
+        int dashPixelsRemaining = totalPixels - (gapSegments * gapPixels);
+        if (dashPixelsRemaining < dashCount)
+        {
+            gapPixels = 0;
+            dashPixelsRemaining = totalPixels;
+        }
+
+        int dashBasePixels = Math.Max(1, dashPixelsRemaining / dashCount);
+        int dashExtraPixels = Math.Max(0, dashPixelsRemaining - (dashBasePixels * dashCount));
+
+        float centerX = x + (width * 0.5f);
+        float halfThickness = thickness * 0.5f;
+
+        _spritePaint.Color = color;
+        int cursorPixels = 0;
+        for (int i = 0; i < dashCount; i++)
+        {
+            if (cursorPixels >= totalPixels)
+            {
+                break;
+            }
+
+            int segmentPixels = dashBasePixels + (i < dashExtraPixels ? 1 : 0);
+            if (segmentPixels > 0)
+            {
+                float segmentY = y + cursorPixels;
+                canvas.DrawRect(centerX - halfThickness, segmentY, thickness, segmentPixels, _spritePaint);
+            }
+
+            cursorPixels += segmentPixels + gapPixels;
+        }
+    }
+
+    private bool TryDrawArcBoxLine(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        int codepoint,
+        SKColor color)
+    {
+        if (!TryGetArcCorner(codepoint, out ArcCorner corner))
+        {
+            return false;
+        }
+
+        DrawArcBoxLine(canvas, x, y, width, height, corner, color);
+        return true;
+    }
+
+    private void DrawArcBoxLine(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        ArcCorner corner,
+        SKColor color)
+    {
+        float centerX = x + (width * 0.5f);
+        float centerY = y + (height * 0.5f);
+        GetStrokeThicknesses(width, height, out float lightThickness, out _);
+
+        SKPoint start;
+        SKPoint control;
+        SKPoint end;
+        switch (corner)
+        {
+            case ArcCorner.DownRight:
+                start = new SKPoint(centerX, y + height);
+                control = new SKPoint(x + width, y + height);
+                end = new SKPoint(x + width, centerY);
+                break;
+
+            case ArcCorner.DownLeft:
+                start = new SKPoint(centerX, y + height);
+                control = new SKPoint(x, y + height);
+                end = new SKPoint(x, centerY);
+                break;
+
+            case ArcCorner.UpLeft:
+                start = new SKPoint(x, centerY);
+                control = new SKPoint(x, y);
+                end = new SKPoint(centerX, y);
+                break;
+
+            case ArcCorner.UpRight:
+            default:
+                start = new SKPoint(centerX, y);
+                control = new SKPoint(x + width, y);
+                end = new SKPoint(x + width, centerY);
+                break;
+        }
+
+        DrawStrokeQuadratic(canvas, start, control, end, lightThickness, color);
+    }
+
+    private bool TryDrawDiagonalBoxLine(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        int codepoint,
+        SKColor color)
+    {
+        if (codepoint is < 0x2571 or > 0x2573)
+        {
+            return false;
+        }
+
+        GetStrokeThicknesses(width, height, out float lightThickness, out _);
+        switch (codepoint)
+        {
+            case 0x2571:
+                DrawStrokeLine(canvas, new SKPoint(x, y + height), new SKPoint(x + width, y), lightThickness, color);
+                break;
+            case 0x2572:
+                DrawStrokeLine(canvas, new SKPoint(x, y), new SKPoint(x + width, y + height), lightThickness, color);
+                break;
+            case 0x2573:
+                DrawStrokeLine(canvas, new SKPoint(x, y + height), new SKPoint(x + width, y), lightThickness, color);
+                DrawStrokeLine(canvas, new SKPoint(x, y), new SKPoint(x + width, y + height), lightThickness, color);
+                break;
+        }
+
+        return true;
+    }
+
     private void DrawBoxSegments(
         SKCanvas canvas,
         float x,
@@ -499,23 +871,58 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float width,
         float height,
         BoxSegments segments,
-        SKColor color)
+        SKColor color,
+        bool heavyMeansDouble = false)
     {
         float centerX = x + (width * 0.5f);
         float centerY = y + (height * 0.5f);
-        float minDimension = MathF.Max(1f, MathF.Min(width, height));
-        float lightThickness = MathF.Max(1f, MathF.Round(minDimension * 0.12f));
-        float heavyThickness = MathF.Max(lightThickness + 1f, MathF.Round(lightThickness * 1.75f));
+        GetStrokeThicknesses(width, height, out float lightThickness, out float heavyThickness);
 
         float leftThickness = segments.Left == StrokeWeight.Heavy ? heavyThickness : lightThickness;
         float rightThickness = segments.Right == StrokeWeight.Heavy ? heavyThickness : lightThickness;
         float upThickness = segments.Up == StrokeWeight.Heavy ? heavyThickness : lightThickness;
         float downThickness = segments.Down == StrokeWeight.Heavy ? heavyThickness : lightThickness;
 
-        DrawHorizontalSegment(canvas, x, centerX + leftThickness, centerY, leftThickness, segments.Left, color);
-        DrawHorizontalSegment(canvas, centerX - rightThickness, x + width, centerY, rightThickness, segments.Right, color);
-        DrawVerticalSegment(canvas, y, centerY + upThickness, centerX, upThickness, segments.Up, color);
-        DrawVerticalSegment(canvas, centerY - downThickness, y + height, centerX, downThickness, segments.Down, color);
+        DrawHorizontalSegment(
+            canvas,
+            x,
+            centerX + leftThickness,
+            centerY,
+            segments.Left,
+            color,
+            lightThickness,
+            heavyThickness,
+            heavyMeansDouble);
+        DrawHorizontalSegment(
+            canvas,
+            centerX - rightThickness,
+            x + width,
+            centerY,
+            segments.Right,
+            color,
+            lightThickness,
+            heavyThickness,
+            heavyMeansDouble);
+        DrawVerticalSegment(
+            canvas,
+            y,
+            centerY + upThickness,
+            centerX,
+            segments.Up,
+            color,
+            lightThickness,
+            heavyThickness,
+            heavyMeansDouble);
+        DrawVerticalSegment(
+            canvas,
+            centerY - downThickness,
+            y + height,
+            centerX,
+            segments.Down,
+            color,
+            lightThickness,
+            heavyThickness,
+            heavyMeansDouble);
     }
 
     private void DrawHorizontalSegment(
@@ -523,15 +930,24 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float startX,
         float endX,
         float centerY,
-        float thickness,
         StrokeWeight weight,
-        SKColor color)
+        SKColor color,
+        float lightThickness,
+        float heavyThickness,
+        bool heavyMeansDouble)
     {
         if (weight == StrokeWeight.None || endX <= startX)
         {
             return;
         }
 
+        if (heavyMeansDouble && weight == StrokeWeight.Heavy)
+        {
+            DrawDoubleHorizontalSegment(canvas, startX, endX, centerY, lightThickness, heavyThickness, color);
+            return;
+        }
+
+        float thickness = weight == StrokeWeight.Heavy ? heavyThickness : lightThickness;
         _spritePaint.Color = color;
         float halfThickness = thickness * 0.5f;
         canvas.DrawRect(startX, centerY - halfThickness, endX - startX, thickness, _spritePaint);
@@ -542,18 +958,131 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float startY,
         float endY,
         float centerX,
-        float thickness,
         StrokeWeight weight,
-        SKColor color)
+        SKColor color,
+        float lightThickness,
+        float heavyThickness,
+        bool heavyMeansDouble)
     {
         if (weight == StrokeWeight.None || endY <= startY)
         {
             return;
         }
 
+        if (heavyMeansDouble && weight == StrokeWeight.Heavy)
+        {
+            DrawDoubleVerticalSegment(canvas, startY, endY, centerX, lightThickness, heavyThickness, color);
+            return;
+        }
+
+        float thickness = weight == StrokeWeight.Heavy ? heavyThickness : lightThickness;
         _spritePaint.Color = color;
         float halfThickness = thickness * 0.5f;
         canvas.DrawRect(centerX - halfThickness, startY, thickness, endY - startY, _spritePaint);
+    }
+
+    private void DrawDoubleHorizontalSegment(
+        SKCanvas canvas,
+        float startX,
+        float endX,
+        float centerY,
+        float lightThickness,
+        float heavyThickness,
+        SKColor color)
+    {
+        float strokeThickness = MathF.Max(1f, MathF.Floor(lightThickness));
+        float pairSpan = MathF.Max((strokeThickness * 2f) + 1f, heavyThickness);
+        float top = centerY - (pairSpan * 0.5f);
+        float bottom = top + pairSpan - strokeThickness;
+
+        _spritePaint.Color = color;
+        canvas.DrawRect(startX, top, endX - startX, strokeThickness, _spritePaint);
+        canvas.DrawRect(startX, bottom, endX - startX, strokeThickness, _spritePaint);
+    }
+
+    private void DrawDoubleVerticalSegment(
+        SKCanvas canvas,
+        float startY,
+        float endY,
+        float centerX,
+        float lightThickness,
+        float heavyThickness,
+        SKColor color)
+    {
+        float strokeThickness = MathF.Max(1f, MathF.Floor(lightThickness));
+        float pairSpan = MathF.Max((strokeThickness * 2f) + 1f, heavyThickness);
+        float left = centerX - (pairSpan * 0.5f);
+        float right = left + pairSpan - strokeThickness;
+
+        _spritePaint.Color = color;
+        canvas.DrawRect(left, startY, strokeThickness, endY - startY, _spritePaint);
+        canvas.DrawRect(right, startY, strokeThickness, endY - startY, _spritePaint);
+    }
+
+    private void DrawStrokeLine(SKCanvas canvas, SKPoint start, SKPoint end, float thickness, SKColor color)
+    {
+        SKPaintStyle previousStyle = _spritePaint.Style;
+        float previousStrokeWidth = _spritePaint.StrokeWidth;
+        bool previousIsAntialias = _spritePaint.IsAntialias;
+        SKColor previousColor = _spritePaint.Color;
+        try
+        {
+            _spritePaint.Style = SKPaintStyle.Stroke;
+            _spritePaint.StrokeWidth = thickness;
+            _spritePaint.IsAntialias = false;
+            _spritePaint.Color = color;
+            canvas.DrawLine(start, end, _spritePaint);
+        }
+        finally
+        {
+            _spritePaint.Style = previousStyle;
+            _spritePaint.StrokeWidth = previousStrokeWidth;
+            _spritePaint.IsAntialias = previousIsAntialias;
+            _spritePaint.Color = previousColor;
+        }
+    }
+
+    private void DrawStrokeQuadratic(
+        SKCanvas canvas,
+        SKPoint start,
+        SKPoint control,
+        SKPoint end,
+        float thickness,
+        SKColor color)
+    {
+        SKPaintStyle previousStyle = _spritePaint.Style;
+        float previousStrokeWidth = _spritePaint.StrokeWidth;
+        bool previousIsAntialias = _spritePaint.IsAntialias;
+        SKColor previousColor = _spritePaint.Color;
+        try
+        {
+            _spritePaint.Style = SKPaintStyle.Stroke;
+            _spritePaint.StrokeWidth = thickness;
+            _spritePaint.IsAntialias = false;
+            _spritePaint.Color = color;
+            _spritePath.Rewind();
+            _spritePath.MoveTo(start);
+            _spritePath.QuadTo(control, end);
+            canvas.DrawPath(_spritePath, _spritePaint);
+        }
+        finally
+        {
+            _spritePaint.Style = previousStyle;
+            _spritePaint.StrokeWidth = previousStrokeWidth;
+            _spritePaint.IsAntialias = previousIsAntialias;
+            _spritePaint.Color = previousColor;
+        }
+    }
+
+    private static void GetStrokeThicknesses(
+        float width,
+        float height,
+        out float lightThickness,
+        out float heavyThickness)
+    {
+        float minDimension = MathF.Max(1f, MathF.Min(width, height));
+        lightThickness = MathF.Max(1f, MathF.Round(minDimension * 0.12f));
+        heavyThickness = MathF.Max(lightThickness + 1f, MathF.Round(lightThickness * 1.75f));
     }
 
     private void DrawBraillePattern(
@@ -760,7 +1289,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return false;
         }
 
-        if (TryGetBoxSegments(codepoint, out _))
+        if (TryGetBoxSegments(codepoint, out _) || IsSpecialBoxDrawingCodepoint(codepoint))
         {
             category = SpriteCategory.BoxDrawing;
             return true;
@@ -803,6 +1332,28 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return TryGetQuadrantMask(codepoint, out _);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsDoubleBoxDrawingCodepoint(int codepoint)
+    {
+        return codepoint >= 0x2550 && codepoint <= 0x256C;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsSpecialBoxDrawingCodepoint(int codepoint)
+    {
+        if (TryGetDashedBoxLineSpec(codepoint, out _, out _, out _))
+        {
+            return true;
+        }
+
+        return codepoint switch
+        {
+            >= 0x256D and <= 0x2570 => true,
+            >= 0x2571 and <= 0x2573 => true,
+            _ => false,
+        };
+    }
+
     private static bool TryGetCellCodepoint(ref readonly TerminalCell cell, out int codepoint)
     {
         codepoint = 0;
@@ -839,6 +1390,46 @@ public sealed class SkiaTerminalRenderer : IDisposable
         };
 
         return ratio > 0f;
+    }
+
+    private static bool TryGetDashedBoxLineSpec(
+        int codepoint,
+        out BoxLineOrientation orientation,
+        out StrokeWeight weight,
+        out int dashCount)
+    {
+        (orientation, weight, dashCount) = codepoint switch
+        {
+            0x2504 => (BoxLineOrientation.Horizontal, StrokeWeight.Light, 3),
+            0x2505 => (BoxLineOrientation.Horizontal, StrokeWeight.Heavy, 3),
+            0x2506 => (BoxLineOrientation.Vertical, StrokeWeight.Light, 3),
+            0x2507 => (BoxLineOrientation.Vertical, StrokeWeight.Heavy, 3),
+            0x2508 => (BoxLineOrientation.Horizontal, StrokeWeight.Light, 4),
+            0x2509 => (BoxLineOrientation.Horizontal, StrokeWeight.Heavy, 4),
+            0x250A => (BoxLineOrientation.Vertical, StrokeWeight.Light, 4),
+            0x250B => (BoxLineOrientation.Vertical, StrokeWeight.Heavy, 4),
+            0x254C => (BoxLineOrientation.Horizontal, StrokeWeight.Light, 2),
+            0x254D => (BoxLineOrientation.Horizontal, StrokeWeight.Heavy, 2),
+            0x254E => (BoxLineOrientation.Vertical, StrokeWeight.Light, 2),
+            0x254F => (BoxLineOrientation.Vertical, StrokeWeight.Heavy, 2),
+            _ => (default, default, 0),
+        };
+
+        return dashCount > 0;
+    }
+
+    private static bool TryGetArcCorner(int codepoint, out ArcCorner corner)
+    {
+        corner = codepoint switch
+        {
+            0x256D => ArcCorner.DownRight,
+            0x256E => ArcCorner.DownLeft,
+            0x256F => ArcCorner.UpLeft,
+            0x2570 => ArcCorner.UpRight,
+            _ => default,
+        };
+
+        return codepoint >= 0x256D && codepoint <= 0x2570;
     }
 
     private static bool TryGetBoxSegments(int codepoint, out BoxSegments segments)
@@ -930,7 +1521,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
             0x254A => new BoxSegments(StrokeWeight.Light, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy),
             0x254B => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.Heavy),
 
-            // Unicode box-drawing "double" variants mapped to heavy strokes.
+            // Unicode box-drawing "double" variants encoded with Heavy markers.
+            // The draw path can reinterpret Heavy as true double strokes for this range.
             0x2550 => new BoxSegments(StrokeWeight.Heavy, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.None),
             0x2551 => new BoxSegments(StrokeWeight.None, StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.Heavy),
             0x2552 => new BoxSegments(StrokeWeight.None, StrokeWeight.Heavy, StrokeWeight.None, StrokeWeight.Light),
@@ -998,6 +1590,19 @@ public sealed class SkiaTerminalRenderer : IDisposable
         };
 
         return mask != QuadrantMask.None;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool ShouldSplitRunAroundCursor(int runStartColumn, int runEndCandidate, int cursorColumn)
+    {
+        if (cursorColumn < 0)
+        {
+            return false;
+        }
+
+        // Force [before cursor], [cursor cell], [after cursor] run boundaries.
+        return (runStartColumn < cursorColumn && runEndCandidate == cursorColumn) ||
+               (runStartColumn == cursorColumn && runEndCandidate == cursorColumn + 1);
     }
 
     private void DrawShapedTextRun(
@@ -1280,13 +1885,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private void DrawRunDecorations(
         SKCanvas canvas,
         ReadOnlySpan<TerminalCell> cells,
+        ReadOnlySpan<CellOverlayFlags> rowOverlays,
         int startCol,
         int endCol,
         float y,
         SKColor color)
     {
-        _fgPaint.Color = color;
-
         for (int col = startCol; col < endCol; col++)
         {
             ref readonly TerminalCell cell = ref cells[col];
@@ -1296,6 +1900,17 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             TerminalUnderlineStyle underlineStyle = GetEffectiveUnderlineStyle(in cell);
+            bool isHyperlinkHover = (rowOverlays[col] & CellOverlayFlags.HyperlinkHover) != 0;
+            if (isHyperlinkHover)
+            {
+                underlineStyle = underlineStyle switch
+                {
+                    TerminalUnderlineStyle.None => TerminalUnderlineStyle.Single,
+                    TerminalUnderlineStyle.Single => TerminalUnderlineStyle.Double,
+                    _ => underlineStyle,
+                };
+            }
+
             bool overline = (cell.Decorations & CellDecorations.Overline) != 0;
             bool strikethrough = (cell.Attributes & CellAttributes.Strikethrough) != 0;
             if (underlineStyle == TerminalUnderlineStyle.None && !strikethrough && !overline)
@@ -1308,17 +1923,20 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
             if (underlineStyle != TerminalUnderlineStyle.None)
             {
+                _fgPaint.Color = ResolveUnderlineColor(in cell, color, isHyperlinkHover);
                 DrawStyledUnderline(canvas, x, y, width, underlineStyle);
             }
 
             if (overline)
             {
+                _fgPaint.Color = color;
                 float overlineY = y + 1f;
                 canvas.DrawLine(x, overlineY, x + width, overlineY, _fgPaint);
             }
 
             if (strikethrough)
             {
+                _fgPaint.Color = color;
                 float stY = y + _cellHeight / 2;
                 canvas.DrawLine(x, stY, x + width, stY, _fgPaint);
             }
@@ -1519,6 +2137,163 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return color;
     }
 
+    private void PopulateRowOverlayFlags(
+        int rowIndex,
+        int columnCount,
+        ReadOnlySpan<TerminalHighlightSpan> highlights,
+        Span<CellOverlayFlags> rowOverlays)
+    {
+        if (columnCount <= 0)
+        {
+            return;
+        }
+
+        if (SelectionStart is not null && SelectionEnd is not null)
+        {
+            int startCol = SelectionStart.Value.Column;
+            int startRow = SelectionStart.Value.Row;
+            int endCol = SelectionEnd.Value.Column;
+            int endRow = SelectionEnd.Value.Row;
+
+            if (startRow > endRow || (startRow == endRow && startCol > endCol))
+            {
+                (startCol, startRow, endCol, endRow) = (endCol, endRow, startCol, startRow);
+            }
+
+            if (rowIndex >= startRow && rowIndex <= endRow)
+            {
+                int left = rowIndex == startRow ? startCol : 0;
+                int rightExclusive = rowIndex == endRow ? endCol : columnCount;
+                left = Math.Clamp(left, 0, columnCount);
+                rightExclusive = Math.Clamp(rightExclusive, 0, columnCount);
+
+                for (int col = left; col < rightExclusive; col++)
+                {
+                    rowOverlays[col] |= CellOverlayFlags.Selection;
+                }
+            }
+        }
+
+        for (int i = 0; i < highlights.Length; i++)
+        {
+            TerminalHighlightSpan span = highlights[i];
+            if (span.Row != rowIndex)
+            {
+                continue;
+            }
+
+            int start = Math.Clamp(span.StartColumn, 0, columnCount - 1);
+            int end = Math.Clamp(span.EndColumn, 0, columnCount - 1);
+            if (end < start)
+            {
+                continue;
+            }
+
+            for (int col = start; col <= end; col++)
+            {
+                switch (span.Kind)
+                {
+                    case TerminalHighlightKind.SearchMatch:
+                        if ((rowOverlays[col] & CellOverlayFlags.SearchSelected) == 0)
+                        {
+                            rowOverlays[col] |= CellOverlayFlags.SearchMatch;
+                        }
+
+                        break;
+
+                    case TerminalHighlightKind.SearchSelected:
+                        rowOverlays[col] &= ~CellOverlayFlags.SearchMatch;
+                        rowOverlays[col] |= CellOverlayFlags.SearchSelected;
+                        break;
+
+                    case TerminalHighlightKind.HyperlinkHover:
+                        rowOverlays[col] |= CellOverlayFlags.HyperlinkHover;
+                        break;
+                }
+            }
+        }
+    }
+
+    private uint ResolveBackgroundColorForCell(
+        ref readonly TerminalCell cell,
+        CellOverlayFlags overlays)
+    {
+        if ((overlays & CellOverlayFlags.Selection) != 0)
+        {
+            return PackColor(SelectionColor);
+        }
+
+        if ((overlays & CellOverlayFlags.SearchSelected) != 0)
+        {
+            return PackColor(SearchSelectedHighlightColor);
+        }
+
+        if ((overlays & CellOverlayFlags.SearchMatch) != 0)
+        {
+            return PackColor(SearchHighlightColor);
+        }
+
+        uint color = GetEffectiveBackground(in cell);
+        byte alpha = ResolveBackgroundAlpha(in cell, overlays);
+        return (color & 0x00FFFFFFu) | ((uint)alpha << 24);
+    }
+
+    private byte ResolveBackgroundAlpha(
+        ref readonly TerminalCell cell,
+        CellOverlayFlags overlays)
+    {
+        if (!EnableBackgroundOpacityHeuristics)
+        {
+            return 0xFF;
+        }
+
+        if ((overlays & (CellOverlayFlags.Selection | CellOverlayFlags.SearchMatch | CellOverlayFlags.SearchSelected)) != 0)
+        {
+            return 0xFF;
+        }
+
+        bool inverse = (cell.Attributes & CellAttributes.Inverse) != 0;
+        if (inverse)
+        {
+            return 0xFF;
+        }
+
+        if (BackgroundOpacityEnabled && BackgroundOpacityCells && cell.HasBackground)
+        {
+            float opacity = Math.Clamp(BackgroundOpacity, 0f, 1f);
+            return (byte)Math.Clamp((int)MathF.Round(opacity * 255f), 0, 255);
+        }
+
+        return cell.HasBackground ? (byte)0xFF : (byte)0;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static uint PackColor(SKColor color)
+    {
+        return ((uint)color.Alpha << 24) |
+               ((uint)color.Red << 16) |
+               ((uint)color.Green << 8) |
+               color.Blue;
+    }
+
+    private SKColor ResolveUnderlineColor(
+        ref readonly TerminalCell cell,
+        SKColor fallbackForeground,
+        bool isHyperlinkHover)
+    {
+        if (cell.HasUnderlineColor)
+        {
+            return new SKColor(cell.UnderlineColor);
+        }
+
+        if (isHyperlinkHover && HyperlinkHoverUnderlineColor != SKColors.Empty)
+        {
+            return HyperlinkHoverUnderlineColor;
+        }
+
+        return fallbackForeground;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static SKColor ApplyDim(SKColor color)
     {
@@ -1535,10 +2310,21 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return (byte)Math.Clamp((int)MathF.Round(value * DimFactor), 0, byte.MaxValue);
     }
 
-    private void RenderCursor(SKCanvas canvas)
+    private void RenderCursor(SKCanvas canvas, TerminalScreen screen)
     {
-        var x = CursorColumn * _cellWidth;
-        var y = CursorRow * _cellHeight;
+        if (!TryResolveCursorCellPlacement(
+                screen,
+                CursorColumn,
+                CursorRow,
+                out int renderColumn,
+                out int renderWidthCells))
+        {
+            return;
+        }
+
+        float x = renderColumn * _cellWidth;
+        float y = CursorRow * _cellHeight;
+        float cursorWidth = Math.Max(_cellWidth, _cellWidth * renderWidthCells);
 
         _cursorPaint.Color = CursorColor;
 
@@ -1547,48 +2333,84 @@ public sealed class SkiaTerminalRenderer : IDisposable
             case CursorStyle.Block:
                 _cursorPaint.Style = SKPaintStyle.Fill;
                 _cursorPaint.BlendMode = SKBlendMode.Difference;
-                canvas.DrawRect(x, y, _cellWidth, _cellHeight, _cursorPaint);
+                canvas.DrawRect(x, y, cursorWidth, _cellHeight, _cursorPaint);
                 _cursorPaint.BlendMode = SKBlendMode.SrcOver;
+                break;
+
+            case CursorStyle.BlockHollow:
+                _cursorPaint.Style = SKPaintStyle.Stroke;
+                _cursorPaint.StrokeWidth = Math.Max(1f, MathF.Round(_cellWidth * 0.08f));
+                canvas.DrawRect(x, y, cursorWidth, _cellHeight, _cursorPaint);
+                _cursorPaint.StrokeWidth = 0f;
                 break;
 
             case CursorStyle.Underline:
                 _cursorPaint.Style = SKPaintStyle.Fill;
-                canvas.DrawRect(x, y + _cellHeight - 2, _cellWidth, 2, _cursorPaint);
+                canvas.DrawRect(x, y + _cellHeight - 2, cursorWidth, 2, _cursorPaint);
                 break;
 
             case CursorStyle.Bar:
                 _cursorPaint.Style = SKPaintStyle.Fill;
-                canvas.DrawRect(x, y, 2, _cellHeight, _cursorPaint);
+                float barWidth = Math.Max(1f, MathF.Round(_cellWidth * 0.16f));
+                canvas.DrawRect(x, y, barWidth, _cellHeight, _cursorPaint);
                 break;
         }
     }
 
-    private void RenderSelection(SKCanvas canvas, TerminalScreen screen)
+    private static bool TryResolveCursorCellPlacement(
+        TerminalScreen screen,
+        int cursorColumn,
+        int cursorRow,
+        out int renderColumn,
+        out int renderWidthCells)
     {
-        if (SelectionStart is null || SelectionEnd is null) return;
+        renderColumn = cursorColumn;
+        renderWidthCells = 1;
 
-        var (startCol, startRow) = SelectionStart.Value;
-        var (endCol, endRow) = SelectionEnd.Value;
-
-        // Normalize so start <= end
-        if (startRow > endRow || (startRow == endRow && startCol > endCol))
+        if ((uint)cursorRow >= (uint)screen.ViewportRows || (uint)cursorColumn >= (uint)screen.Columns)
         {
-            (startCol, startRow, endCol, endRow) = (endCol, endRow, startCol, startRow);
+            return false;
         }
 
-        _selectionPaint.Color = SelectionColor;
-
-        for (var row = startRow; row <= endRow && row < screen.ViewportRows; row++)
+        TerminalRow row = screen.GetViewportRow(cursorRow);
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        if (cells.IsEmpty || (uint)cursorColumn >= (uint)cells.Length)
         {
-            var left = row == startRow ? startCol : 0;
-            var right = row == endRow ? endCol : screen.Columns;
-
-            var x = left * _cellWidth;
-            var y = row * _cellHeight;
-            var width = (right - left) * _cellWidth;
-
-            canvas.DrawRect(x, y, width, _cellHeight, _selectionPaint);
+            return false;
         }
+
+        ref readonly TerminalCell current = ref cells[cursorColumn];
+        if (current.Width > 0)
+        {
+            renderWidthCells = current.Width;
+            return true;
+        }
+
+        // If cursor is on the tail of a wide cell, render over the leading cell.
+        if (cursorColumn > 0)
+        {
+            ref readonly TerminalCell previous = ref cells[cursorColumn - 1];
+            if (previous.Width > 1)
+            {
+                renderColumn = cursorColumn - 1;
+                renderWidthCells = previous.Width;
+                return true;
+            }
+        }
+
+        // Spacer head may appear before a wide cell in some layouts.
+        if (cursorColumn + 1 < cells.Length)
+        {
+            ref readonly TerminalCell next = ref cells[cursorColumn + 1];
+            if (next.Width > 1)
+            {
+                renderColumn = cursorColumn + 1;
+                renderWidthCells = next.Width;
+                return true;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1649,8 +2471,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _bgPaint.Dispose();
         _fgPaint.Dispose();
         _cursorPaint.Dispose();
-        _selectionPaint.Dispose();
         _spritePaint.Dispose();
+        _spritePath.Dispose();
         _textShaper.Dispose();
         _fontResolver.Dispose();
         _shapedRunCache.Clear();
@@ -1733,11 +2555,35 @@ public sealed class SkiaTerminalRenderer : IDisposable
         UnsafeFallback,
     }
 
+    [Flags]
+    private enum CellOverlayFlags : byte
+    {
+        None = 0,
+        Selection = 1 << 0,
+        SearchMatch = 1 << 1,
+        SearchSelected = 1 << 2,
+        HyperlinkHover = 1 << 3,
+    }
+
     private enum StrokeWeight : byte
     {
         None = 0,
         Light = 1,
         Heavy = 2,
+    }
+
+    private enum BoxLineOrientation : byte
+    {
+        Horizontal = 0,
+        Vertical = 1,
+    }
+
+    private enum ArcCorner : byte
+    {
+        DownRight = 0,
+        DownLeft = 1,
+        UpLeft = 2,
+        UpRight = 3,
     }
 
     [Flags]
@@ -1771,6 +2617,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 public enum CursorStyle
 {
     Block,
+    BlockHollow,
     Underline,
     Bar,
 }
