@@ -224,6 +224,146 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_TransportOutputBurst_DrainsAllChunksInOrder()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+
+        object sync = new();
+        List<int> received = [];
+        control.DataReceived += (_, args) =>
+        {
+            ReadOnlySpan<byte> payload = args.Data.Span;
+            if (payload.Length <= 1 || payload[0] != (byte)'#')
+            {
+                return;
+            }
+
+            string token = Encoding.UTF8.GetString(payload[1..]);
+            if (int.TryParse(token, out int sequence))
+            {
+                lock (sync)
+                {
+                    received.Add(sequence);
+                }
+            }
+        };
+
+        const int chunkCount = 512;
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            await Task.Run(() =>
+            {
+                for (int i = 0; i < chunkCount; i++)
+                {
+                    transport.RaiseData(Encoding.UTF8.GetBytes($"#{i}"));
+                }
+            });
+
+            bool drained = await WaitUntilAsync(
+                () =>
+                {
+                    lock (sync)
+                    {
+                        return received.Count == chunkCount;
+                    }
+                },
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(drained, $"Expected {chunkCount} chunks to be drained from queued transport output.");
+            lock (sync)
+            {
+                Assert.Equal(chunkCount, received.Count);
+                for (int i = 0; i < chunkCount; i++)
+                {
+                    Assert.Equal(i, received[i]);
+                }
+            }
+        }
+        finally
+        {
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_StopPty_DrainsPendingOutput_AndNextSessionStartsClean()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+
+        object sync = new();
+        StringBuilder observed = new();
+        control.DataReceived += (_, args) =>
+        {
+            lock (sync)
+            {
+                observed.Append(Encoding.UTF8.GetString(args.Data.Span));
+            }
+        };
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            transport.RaiseData(Encoding.UTF8.GetBytes("OLD-SESSION\n"));
+
+            control.StopPty();
+
+            bool oldSeen = await WaitUntilAsync(
+                () =>
+                {
+                    lock (sync)
+                    {
+                        return observed.ToString().Contains("OLD-SESSION", StringComparison.Ordinal);
+                    }
+                },
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(oldSeen, "Expected pending output to be drained when stopping the session.");
+
+            lock (sync)
+            {
+                observed.Clear();
+            }
+
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            transport.RaiseData(Encoding.UTF8.GetBytes("NEW-SESSION\n"));
+
+            bool newSeen = await WaitUntilAsync(
+                () =>
+                {
+                    lock (sync)
+                    {
+                        return observed.ToString().Contains("NEW-SESSION", StringComparison.Ordinal);
+                    }
+                },
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(newSeen, "Expected output from the restarted session.");
+
+            string allOutput;
+            lock (sync)
+            {
+                allOutput = observed.ToString();
+            }
+
+            Assert.DoesNotContain("OLD-SESSION", allOutput, StringComparison.Ordinal);
+        }
+        finally
+        {
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
     public void Control_RequestClose_RaisesCloseRequested()
     {
         TerminalControl control = new();
@@ -1487,6 +1627,11 @@ public class TerminalControlTests
         public void RaiseProcessExited(int exitCode)
         {
             _processExited?.Invoke(exitCode);
+        }
+
+        public void RaiseData(byte[] data)
+        {
+            _dataReceived?.Invoke(data, data.Length);
         }
 
         public void Dispose()
