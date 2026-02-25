@@ -23,7 +23,7 @@ namespace RoyalTerminal.Terminal;
 /// Falls back to <see cref="BasicVtProcessor"/> when <c>libghostty-terminal</c> is not
 /// available.
 /// </summary>
-public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource
+public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource
 {
     private readonly TerminalScreen _screen;
     private nint _terminal;
@@ -33,6 +33,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
     private int _cursorCol;
     private int _cursorRow;
     private bool _cursorVisible = true;
+    private TerminalCursorStyle _cursorStyle = TerminalCursorStyle.Block;
+    private bool _cursorBlinking = true;
     private bool _applicationCursorKeys;
     private bool _applicationKeypad;
     private bool _alternateScreen;
@@ -52,6 +54,12 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
 
     /// <inheritdoc />
     public bool CursorVisible => _cursorVisible;
+
+    /// <inheritdoc />
+    public TerminalCursorStyle CursorStyle => _cursorStyle;
+
+    /// <inheritdoc />
+    public bool CursorBlinking => _cursorBlinking;
 
     /// <inheritdoc />
     public bool ApplicationCursorKeys => _applicationCursorKeys;
@@ -317,6 +325,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
             _cursorCol = 0;
             _cursorRow = 0;
             _cursorVisible = true;
+            _cursorStyle = TerminalCursorStyle.Block;
+            _cursorBlinking = true;
             _applicationCursorKeys = false;
             _applicationKeypad = false;
             _alternateScreen = false;
@@ -328,10 +338,25 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
         _cursorCol = (int)cursor.Col;
         _cursorRow = (int)cursor.Row;
         _cursorVisible = cursor.Visible != 0;
+        (_cursorStyle, _cursorBlinking) = ConvertCursorStyle(cursor.CursorStyle);
         _applicationCursorKeys = GhosttyTerminalNative.TerminalGetModeAppCursor(_terminal) != 0;
         _applicationKeypad = GhosttyTerminalNative.TerminalGetModeAppKeypad(_terminal) != 0;
         _alternateScreen = GhosttyTerminalNative.TerminalGetModeAltScreen(_terminal) != 0;
         _bracketedPaste = GhosttyTerminalNative.TerminalGetModeBracketedPaste(_terminal) != 0;
+    }
+
+    private static (TerminalCursorStyle Style, bool Blinking) ConvertCursorStyle(byte cursorStyle)
+    {
+        return cursorStyle switch
+        {
+            0 => (TerminalCursorStyle.Block, false),
+            1 => (TerminalCursorStyle.Block, true),
+            2 => (TerminalCursorStyle.Underline, false),
+            3 => (TerminalCursorStyle.Underline, true),
+            4 => (TerminalCursorStyle.Bar, false),
+            5 => (TerminalCursorStyle.Bar, true),
+            _ => (TerminalCursorStyle.Block, true),
+        };
     }
 
     private void RaiseModeChangedIfNeeded(TerminalModeState before)
@@ -432,9 +457,13 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
                         // Fall back to terminal defaults instead of rendering transparent text.
                         cell.Foreground = native.FgColor != 0 ? native.FgColor : _screen.DefaultForeground;
                         cell.Background = native.BgColor != 0 ? native.BgColor : _screen.DefaultBackground;
+                        cell.HasBackground = native.BgColor != 0;
                         cell.Attributes = MapAttributes(native.Attrs);
                         cell.UnderlineStyle = MapUnderlineStyle(native.Attrs);
+                        cell.UnderlineColor = 0;
+                        cell.HasUnderlineColor = false;
                         cell.Decorations = MapDecorations(native.Attrs);
+                        cell.HyperlinkId = 0;
 
                         // Wide char handling
                         if ((native.Attrs & (1 << 16)) != 0)
@@ -453,9 +482,13 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
                         cell.Grapheme = null;
                         cell.Foreground = _screen.DefaultForeground;
                         cell.Background = _screen.DefaultBackground;
+                        cell.HasBackground = true;
                         cell.Attributes = CellAttributes.None;
                         cell.UnderlineStyle = TerminalUnderlineStyle.None;
+                        cell.UnderlineColor = 0;
+                        cell.HasUnderlineColor = false;
                         cell.Decorations = CellDecorations.None;
+                        cell.HyperlinkId = 0;
                         cell.Width = 1;
                     }
 

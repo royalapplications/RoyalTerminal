@@ -23,7 +23,7 @@ namespace RoyalTerminal.Terminal;
 /// of the VT protocol to render typical shell output and full-screen TUI
 /// applications such as Midnight Commander, htop, vim, etc.
 /// </summary>
-public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource
+public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource
 {
     private const int MaxDcsBufferBytes = 4096;
     private const int KittyKeyboardFlagMask = 0x1F;
@@ -36,7 +36,10 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private uint _currentBg;
     private CellAttributes _currentAttrs;
     private TerminalUnderlineStyle _currentUnderlineStyle;
+    private uint _currentUnderlineColor;
+    private bool _currentHasUnderlineColor;
     private CellDecorations _currentDecorations;
+    private int _currentHyperlinkId;
     private TerminalTheme _theme;
 
     // Parser state machine
@@ -56,7 +59,10 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private uint _savedBg;
     private CellAttributes _savedAttrs;
     private TerminalUnderlineStyle _savedUnderlineStyle;
+    private uint _savedUnderlineColor;
+    private bool _savedHasUnderlineColor;
     private CellDecorations _savedDecorations;
+    private int _savedHyperlinkId;
     private bool _savedUseLineDrawing;
 
     // Scroll region (DECSTBM)
@@ -135,6 +141,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
     /// <summary>Whether bracketed paste mode is active.</summary>
     public bool BracketedPaste => _bracketedPaste;
+
+    /// <inheritdoc />
+    public TerminalCursorStyle CursorStyle => MapCursorStyle(_cursorStyle);
+
+    /// <inheritdoc />
+    public bool CursorBlinking => IsCursorStyleBlinking(_cursorStyle);
 
     /// <inheritdoc />
     public int KittyKeyboardFlags => _inAltScreen ? _kittyKeyboardFlagsAlt : _kittyKeyboardFlagsMain;
@@ -457,7 +469,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         cell.Background = _currentBg;
         cell.Attributes = _currentAttrs;
         cell.UnderlineStyle = _currentUnderlineStyle;
+        cell.UnderlineColor = _currentUnderlineColor;
+        cell.HasUnderlineColor = _currentHasUnderlineColor;
         cell.Decorations = _currentDecorations;
+        cell.HasBackground = true;
+        cell.HyperlinkId = _currentHyperlinkId;
         cell.Width = (byte)width;
 
         if (width == 2 && _cursorCol + 1 < row.Columns)
@@ -469,7 +485,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             spacer.Background = _currentBg;
             spacer.Attributes = _currentAttrs;
             spacer.UnderlineStyle = _currentUnderlineStyle;
+            spacer.UnderlineColor = _currentUnderlineColor;
+            spacer.HasUnderlineColor = _currentHasUnderlineColor;
             spacer.Decorations = _currentDecorations;
+            spacer.HasBackground = true;
+            spacer.HyperlinkId = _currentHyperlinkId;
             spacer.Width = 0;
         }
 
@@ -562,7 +582,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             spacer.Background = targetCell.Background;
             spacer.Attributes = targetCell.Attributes;
             spacer.UnderlineStyle = targetCell.UnderlineStyle;
+            spacer.UnderlineColor = targetCell.UnderlineColor;
+            spacer.HasUnderlineColor = targetCell.HasUnderlineColor;
             spacer.Decorations = targetCell.Decorations;
+            spacer.HasBackground = targetCell.HasBackground;
+            spacer.HyperlinkId = targetCell.HyperlinkId;
             spacer.Width = 0;
         }
 
@@ -1043,7 +1067,31 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             case 12:
                 HandleOscDynamicColor(selectorCode, value);
                 break;
+
+            case 8:
+                HandleOscHyperlink(value);
+                break;
         }
+    }
+
+    private void HandleOscHyperlink(string value)
+    {
+        int separator = value.IndexOf(';');
+        if (separator < 0)
+        {
+            return;
+        }
+
+        string uri = separator + 1 < value.Length
+            ? value[(separator + 1)..]
+            : string.Empty;
+        if (string.IsNullOrEmpty(uri))
+        {
+            _currentHyperlinkId = 0;
+            return;
+        }
+
+        _currentHyperlinkId = _screen.RegisterHyperlink(uri);
     }
 
     private void HandleOscPalette(string value)
@@ -1756,6 +1804,21 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         };
     }
 
+    private static TerminalCursorStyle MapCursorStyle(int styleParameter)
+    {
+        return styleParameter switch
+        {
+            3 or 4 => TerminalCursorStyle.Underline,
+            5 or 6 => TerminalCursorStyle.Bar,
+            _ => TerminalCursorStyle.Block,
+        };
+    }
+
+    private static bool IsCursorStyleBlinking(int styleParameter)
+    {
+        return styleParameter is 1 or 3 or 5;
+    }
+
     #endregion
 
     #region DEC Private Modes
@@ -1904,7 +1967,10 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _savedBg = _currentBg;
         _savedAttrs = _currentAttrs;
         _savedUnderlineStyle = _currentUnderlineStyle;
+        _savedUnderlineColor = _currentUnderlineColor;
+        _savedHasUnderlineColor = _currentHasUnderlineColor;
         _savedDecorations = _currentDecorations;
+        _savedHyperlinkId = _currentHyperlinkId;
         _savedUseLineDrawing = _useLineDrawing;
     }
 
@@ -1916,7 +1982,10 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _currentBg = _savedBg;
         _currentAttrs = _savedAttrs;
         _currentUnderlineStyle = _savedUnderlineStyle;
+        _currentUnderlineColor = _savedUnderlineColor;
+        _currentHasUnderlineColor = _savedHasUnderlineColor;
         _currentDecorations = _savedDecorations;
+        _currentHyperlinkId = _savedHyperlinkId;
         _useLineDrawing = _savedUseLineDrawing;
     }
 
@@ -2031,6 +2100,32 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
                         }
                     }
                     break;
+
+                case 58:
+                    if (i + 1 < _params.Count)
+                    {
+                        if (_params[i + 1] == 5 && i + 2 < _params.Count)
+                        {
+                            _currentUnderlineColor = PaletteColor(_params[i + 2]);
+                            _currentHasUnderlineColor = true;
+                            i += 2;
+                        }
+                        else if (_params[i + 1] == 2 && i + 4 < _params.Count)
+                        {
+                            _currentUnderlineColor = 0xFF000000 |
+                                                     ((uint)_params[i + 2] << 16) |
+                                                     ((uint)_params[i + 3] << 8) |
+                                                     (uint)_params[i + 4];
+                            _currentHasUnderlineColor = true;
+                            i += 4;
+                        }
+                    }
+                    break;
+
+                case 59:
+                    _currentUnderlineColor = 0;
+                    _currentHasUnderlineColor = false;
+                    break;
             }
         }
     }
@@ -2041,6 +2136,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _currentBg = _screen.DefaultBackground;
         _currentAttrs = CellAttributes.None;
         _currentUnderlineStyle = TerminalUnderlineStyle.None;
+        _currentUnderlineColor = 0;
+        _currentHasUnderlineColor = false;
         _currentDecorations = CellDecorations.None;
     }
 
@@ -2229,7 +2326,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
                 trailing.Background = cell.Background;
                 trailing.Attributes = cell.Attributes;
                 trailing.UnderlineStyle = cell.UnderlineStyle;
+                trailing.UnderlineColor = cell.UnderlineColor;
+                trailing.HasUnderlineColor = cell.HasUnderlineColor;
                 trailing.Decorations = cell.Decorations;
+                trailing.HasBackground = cell.HasBackground;
+                trailing.HyperlinkId = cell.HyperlinkId;
                 trailing.Width = 0;
                 col++;
                 continue;
@@ -2277,7 +2378,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
         _savedUnderlineStyle = TerminalUnderlineStyle.None;
+        _savedUnderlineColor = 0;
+        _savedHasUnderlineColor = false;
         _savedDecorations = CellDecorations.None;
+        _savedHyperlinkId = 0;
+        _currentHyperlinkId = 0;
         _kittyKeyboardFlagsMain = 0;
         _kittyKeyboardFlagsAlt = 0;
         _kittyKeyboardStackMain.Clear();
@@ -2406,7 +2511,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _shiftOut = false;
         _lastGraphicCodepoint = 0;
         _savedUnderlineStyle = TerminalUnderlineStyle.None;
+        _savedUnderlineColor = 0;
+        _savedHasUnderlineColor = false;
         _savedDecorations = CellDecorations.None;
+        _savedHyperlinkId = 0;
+        _currentHyperlinkId = 0;
         _kittyKeyboardFlagsMain = 0;
         _kittyKeyboardFlagsAlt = 0;
         _kittyKeyboardStackMain.Clear();
