@@ -121,7 +121,7 @@ public class PtyContractTests
             workingDirectory: Environment.CurrentDirectory,
             arguments:
             [
-                "-lc",
+                "-c",
                 $"i=0; while [ $i -lt 5 ]; do printf '{marker}\\n'; i=$((i+1)); sleep 0.2; done",
             ]);
 
