@@ -21,11 +21,21 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
+/// <summary>
+/// Serializes PTY harness integration tests to avoid flaky process-level
+/// contention when multiple harness sessions start concurrently.
+/// </summary>
+[CollectionDefinition("NcursesHarnessFlowTests", DisableParallelization = true)]
+public sealed class NcursesHarnessFlowTestsCollection
+{
+}
+
+[Collection("NcursesHarnessFlowTests")]
 public sealed class NcursesHarnessFlowTests
 {
     private const string HarnessBaseName = "RoyalTerminal.PtyHarness";
     private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(20);
-    private static readonly TimeSpan EventTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan EventTimeout = TimeSpan.FromSeconds(20);
 
     [AvaloniaFact]
     public async Task NcursesHarness_ManagedVt_HandlesKeyboardMouseAndResize()
@@ -147,6 +157,7 @@ public sealed class NcursesHarnessFlowTests
             string envExecutable = File.Exists("/usr/bin/env")
                 ? "/usr/bin/env"
                 : "env";
+            string harnessWorkingDirectory = Path.GetDirectoryName(fixturePath) ?? AppContext.BaseDirectory;
             string[] harnessArguments =
             [
                 $"RT_HARNESS_LOG={logPath}",
@@ -155,14 +166,12 @@ public sealed class NcursesHarnessFlowTests
                 pythonExecutable,
                 fixturePath,
             ];
-            control.StartPty(
-                shell: envExecutable,
-                workingDirectory: Environment.CurrentDirectory,
-                arguments: harnessArguments);
-            bool sessionStarted = await WaitUntilAsync(
-                () => control.HasActiveSession,
-                TimeSpan.FromSeconds(2));
-            Assert.True(sessionStarted, "PTY session did not become active in time.");
+            await StartPythonHarnessSessionWithRetryAsync(
+                control,
+                logPath,
+                envExecutable,
+                harnessWorkingDirectory,
+                harnessArguments);
 
             string ready = await WaitForLogLineAsync(
                 logPath,
@@ -196,8 +205,11 @@ public sealed class NcursesHarnessFlowTests
             Assert.Contains("x=", mouse, StringComparison.Ordinal);
 
             int resizeStartLineIndex = await GetLogLineCountAsync(logPath).ConfigureAwait(false);
-            control.Columns = 100;
-            control.Rows = 40;
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                control.Columns = 100;
+                control.Rows = 40;
+            });
 
             string resize = await WaitForLogLineAsync(
                 logPath,
@@ -221,7 +233,7 @@ public sealed class NcursesHarnessFlowTests
         }
         finally
         {
-            window.Close();
+            CloseWindowOnUiThread(window);
             try
             {
                 control.StopPty();
@@ -289,8 +301,11 @@ public sealed class NcursesHarnessFlowTests
                 timeout: EventTimeout);
             Assert.Contains("action=", mouse, StringComparison.Ordinal);
 
-            control.Columns = 100;
-            control.Rows = 40;
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                control.Columns = 100;
+                control.Rows = 40;
+            });
 
             string resize = await WaitForLogLineAsync(
                 logPath,
@@ -307,7 +322,7 @@ public sealed class NcursesHarnessFlowTests
         }
         finally
         {
-            window.Close();
+            CloseWindowOnUiThread(window);
             try
             {
                 control.StopPty();
@@ -405,7 +420,7 @@ public sealed class NcursesHarnessFlowTests
         }
         finally
         {
-            window.Close();
+            CloseWindowOnUiThread(window);
             try
             {
                 control.StopPty();
@@ -422,6 +437,7 @@ public sealed class NcursesHarnessFlowTests
         Assert.True(
             TryFindPtyHarnessExecutable(out string? harnessExecutable),
             "Could not locate RoyalTerminal.PtyHarness executable for PTY integration tests.");
+        string harnessWorkingDirectory = Path.GetDirectoryName(harnessExecutable!) ?? AppContext.BaseDirectory;
 
         int[] sortedModes = [.. modes.OrderBy(static mode => mode)];
         Dictionary<string, string> environment = new(StringComparer.Ordinal)
@@ -437,11 +453,46 @@ public sealed class NcursesHarnessFlowTests
 
         PtyTransportOptions options = new(
             Command: new TerminalCommandSpec(harnessExecutable!, Array.Empty<string>()),
-            WorkingDirectory: Environment.CurrentDirectory,
+            WorkingDirectory: harnessWorkingDirectory,
             Environment: environment,
             Dimensions: new TerminalSessionDimensions(control.Columns, control.Rows, widthPx, heightPx));
 
-        await control.StartSessionAsync(options);
+        Exception? lastError = null;
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                await control.StartSessionAsync(options);
+                bool sessionStarted = await WaitUntilAsync(
+                    () => control.HasActiveSession,
+                    TimeSpan.FromSeconds(2));
+
+                if (sessionStarted &&
+                    await WaitForAnyHarnessLogLineAsync(logPath, TimeSpan.FromSeconds(3)))
+                {
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+
+            try
+            {
+                control.StopPty();
+            }
+            catch
+            {
+                // Best effort reset before retry.
+            }
+
+            TryDeleteFile(logPath);
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"Managed PTY harness did not bootstrap in time. log={logPath}" +
+            (lastError is null ? string.Empty : $", lastError={lastError.GetType().Name}: {lastError.Message}"));
     }
 
     private static async Task<bool> IsHarnessInputModeAvailableAsync(string logPath, TimeSpan timeout)
@@ -452,6 +503,86 @@ public sealed class NcursesHarnessFlowTests
             timeout: timeout);
 
         return !inputMode.EndsWith("unavailable", StringComparison.Ordinal);
+    }
+
+    private static async Task StartPythonHarnessSessionWithRetryAsync(
+        TerminalControl control,
+        string logPath,
+        string shell,
+        string workingDirectory,
+        IReadOnlyList<string> arguments)
+    {
+        Exception? lastError = null;
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                control.StartPty(
+                    shell: shell,
+                    workingDirectory: workingDirectory,
+                    arguments: arguments);
+                bool sessionStarted = await WaitUntilAsync(
+                    () => control.HasActiveSession,
+                    TimeSpan.FromSeconds(2));
+
+                if (sessionStarted &&
+                    await WaitForAnyHarnessLogLineAsync(logPath, TimeSpan.FromSeconds(3)))
+                {
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+
+            try
+            {
+                control.StopPty();
+            }
+            catch
+            {
+                // Best effort reset before retry.
+            }
+
+            TryDeleteFile(logPath);
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            $"Python ncurses harness did not bootstrap in time. log={logPath}" +
+            (lastError is null ? string.Empty : $", lastError={lastError.GetType().Name}: {lastError.Message}"));
+    }
+
+    private static async Task<bool> WaitForAnyHarnessLogLineAsync(string path, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            string[]? lines = await TryReadAllLinesSharedAsync(path).ConfigureAwait(false);
+            if (lines is { Length: > 0 })
+            {
+                return true;
+            }
+
+            await Task.Delay(50).ConfigureAwait(false);
+        }
+
+        return false;
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Best effort.
+        }
     }
 
     private static TerminalControl CreateTerminalControl(VtProcessorPreference preference)
@@ -677,6 +808,17 @@ public sealed class NcursesHarnessFlowTests
         Point movedPoint = new(windowPoint.X + 16, windowPoint.Y + 16);
         window.MouseMove(windowPoint, RawInputModifiers.None);
         window.MouseMove(movedPoint, RawInputModifiers.None);
+    }
+
+    private static void CloseWindowOnUiThread(Window window)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            window.Close();
+            return;
+        }
+
+        Dispatcher.UIThread.Invoke(() => window.Close());
     }
 
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)

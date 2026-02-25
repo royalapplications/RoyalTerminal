@@ -134,6 +134,24 @@ public sealed class GhosttyComponentTests
     }
 
     [AvaloniaFact]
+    public void GhosttyActionDispatcher_RingBell_PostsCallback()
+    {
+        int bellCount = 0;
+        GhosttyActionDispatcher dispatcher = CreateDispatcher(
+            bellRequested: () => bellCount++);
+
+        dispatcher.HandleAction(
+            CreateAppTarget(),
+            new GhosttyAction
+            {
+                Tag = GhosttyActionTag.RingBell,
+            });
+
+        FlushUiThread();
+        Assert.Equal(1, bellCount);
+    }
+
+    [AvaloniaFact]
     public void GhosttyActionDispatcher_ColorConfigReload_PostCallbacks()
     {
         GhosttyColorChange? capturedColor = null;
@@ -199,6 +217,129 @@ public sealed class GhosttyComponentTests
         Assert.Equal(0x56, capturedColor.Value.B);
         Assert.Equal((nint)0x7777, capturedConfig);
         Assert.True(capturedReloadSoft);
+    }
+
+    [AvaloniaFact]
+    public unsafe void GhosttyActionDispatcher_MouseOverLink_PostsDecodedUrl()
+    {
+        string? capturedUrl = null;
+        GhosttyActionDispatcher dispatcher = CreateDispatcher(
+            mouseOverLinkChanged: url => capturedUrl = url);
+
+        nint urlPtr = Marshal.StringToCoTaskMemUTF8("https://example.com/parity");
+        try
+        {
+            GhosttyAction action = new()
+            {
+                Tag = GhosttyActionTag.MouseOverLink,
+                Action = new GhosttyActionValue
+                {
+                    MouseOverLink = new GhosttyMouseOverLink
+                    {
+                        Url = (byte*)urlPtr,
+                        Len = (nuint)"https://example.com/parity".Length,
+                    }
+                }
+            };
+
+            dispatcher.HandleAction(CreateAppTarget(), action);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(urlPtr);
+        }
+
+        FlushUiThread();
+        Assert.Equal("https://example.com/parity", capturedUrl);
+    }
+
+    [AvaloniaFact]
+    public unsafe void GhosttyActionDispatcher_SearchAndOpacity_PostCallbacks()
+    {
+        string? startedNeedle = null;
+        bool ended = false;
+        int? total = null;
+        int? selected = null;
+        int toggleCount = 0;
+
+        GhosttyActionDispatcher dispatcher = CreateDispatcher(
+            searchStarted: needle => startedNeedle = needle,
+            searchEnded: () => ended = true,
+            searchTotalChanged: value => total = value,
+            searchSelectedChanged: value => selected = value,
+            toggleBackgroundOpacity: () => toggleCount++);
+
+        nint needlePtr = Marshal.StringToCoTaskMemUTF8("TODO");
+        try
+        {
+            dispatcher.HandleAction(
+                CreateAppTarget(),
+                new GhosttyAction
+                {
+                    Tag = GhosttyActionTag.StartSearch,
+                    Action = new GhosttyActionValue
+                    {
+                        StartSearch = new GhosttyStartSearch
+                        {
+                            Needle = (byte*)needlePtr,
+                        }
+                    }
+                });
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(needlePtr);
+        }
+
+        dispatcher.HandleAction(
+            CreateAppTarget(),
+            new GhosttyAction
+            {
+                Tag = GhosttyActionTag.SearchTotal,
+                Action = new GhosttyActionValue
+                {
+                    SearchTotal = new GhosttySearchTotal
+                    {
+                        Total = 17,
+                    }
+                }
+            });
+
+        dispatcher.HandleAction(
+            CreateAppTarget(),
+            new GhosttyAction
+            {
+                Tag = GhosttyActionTag.SearchSelected,
+                Action = new GhosttyActionValue
+                {
+                    SearchSelected = new GhosttySearchSelected
+                    {
+                        Selected = 4,
+                    }
+                }
+            });
+
+        dispatcher.HandleAction(
+            CreateAppTarget(),
+            new GhosttyAction
+            {
+                Tag = GhosttyActionTag.EndSearch,
+            });
+
+        dispatcher.HandleAction(
+            CreateAppTarget(),
+            new GhosttyAction
+            {
+                Tag = GhosttyActionTag.ToggleBackgroundOpacity,
+            });
+
+        FlushUiThread();
+
+        Assert.Equal("TODO", startedNeedle);
+        Assert.True(ended);
+        Assert.Equal(17, total);
+        Assert.Equal(4, selected);
+        Assert.Equal(1, toggleCount);
     }
 
     [AvaloniaFact]
@@ -357,7 +498,7 @@ public sealed class GhosttyComponentTests
     [Fact]
     public void GhosttyRenderedTerminalControl_PrivateMappings_MapOverlineDecoration()
     {
-        const ushort attrs = 1 << 6;
+        const ushort attrs = 1 << 7;
 
         CellDecorations mappedDecorations = InvokePrivateStatic<CellDecorations>(
             typeof(GhosttyRenderedTerminalControl),
@@ -370,6 +511,74 @@ public sealed class GhosttyComponentTests
 
         Assert.True((mappedDecorations & CellDecorations.Overline) != 0);
         Assert.False((mappedAttributes & CellAttributes.Underline) != 0);
+    }
+
+    [Theory]
+    [InlineData(3, CellAttributes.Blink)]
+    [InlineData(4, CellAttributes.Inverse)]
+    [InlineData(5, CellAttributes.Hidden)]
+    [InlineData(6, CellAttributes.Strikethrough)]
+    public void GhosttyRenderedTerminalControl_PrivateMappings_MapCoreAttributeBits(
+        int bit,
+        CellAttributes expectedFlag)
+    {
+        ushort attrs = (ushort)(1 << bit);
+
+        CellAttributes mappedAttributes = InvokePrivateStatic<CellAttributes>(
+            typeof(GhosttyRenderedTerminalControl),
+            "ConvertAttributes",
+            attrs);
+
+        Assert.True((mappedAttributes & expectedFlag) != 0);
+    }
+
+    [Theory]
+    [InlineData(0, CursorStyle.Bar)]
+    [InlineData(1, CursorStyle.Block)]
+    [InlineData(2, CursorStyle.Underline)]
+    [InlineData(3, CursorStyle.BlockHollow)]
+    [InlineData(4, CursorStyle.Bar)]
+    [InlineData(5, CursorStyle.Bar)]
+    [InlineData(255, CursorStyle.Block)]
+    public void GhosttyRenderedTerminalControl_PrivateMappings_MapCursorStyle(
+        byte style,
+        CursorStyle expected)
+    {
+        CursorStyle mapped = InvokePrivateStatic<CursorStyle>(
+            typeof(GhosttyRenderedTerminalControl),
+            "ConvertCursorStyle",
+            style);
+
+        Assert.Equal(expected, mapped);
+    }
+
+    [Fact]
+    public void GhosttyRenderedTerminalControl_PrivateMappings_ResolveHyperlinkSpanFromPointer()
+    {
+        TerminalRow row = new(8);
+        row[2].HyperlinkId = 42;
+        row[3].HyperlinkId = 42;
+        row[4].HyperlinkId = 42;
+
+        TerminalHighlightSpan? resolved = InvokePrivateStaticNullable<TerminalHighlightSpan>(
+            typeof(GhosttyRenderedTerminalControl),
+            "ResolveHyperlinkSpanFromPointer",
+            row,
+            5,
+            3);
+        Assert.NotNull(resolved);
+        Assert.Equal(5, resolved.Value.Row);
+        Assert.Equal(2, resolved.Value.StartColumn);
+        Assert.Equal(4, resolved.Value.EndColumn);
+        Assert.Equal(TerminalHighlightKind.HyperlinkHover, resolved.Value.Kind);
+
+        TerminalHighlightSpan? missing = InvokePrivateStaticNullable<TerminalHighlightSpan>(
+            typeof(GhosttyRenderedTerminalControl),
+            "ResolveHyperlinkSpanFromPointer",
+            row,
+            5,
+            1);
+        Assert.Null(missing);
     }
 
     private static GhosttySurfaceLifecycle CreateLifecycle()
@@ -392,9 +601,16 @@ public sealed class GhosttyComponentTests
         Action<string>? titleChanged = null,
         Action<int>? processExited = null,
         Action? closeRequested = null,
+        Action? bellRequested = null,
         Action<GhosttyColorChange>? colorChanged = null,
         Action<nint>? configChanged = null,
-        Action<bool>? reloadConfig = null)
+        Action<bool>? reloadConfig = null,
+        Action<string?>? mouseOverLinkChanged = null,
+        Action<string?>? searchStarted = null,
+        Action? searchEnded = null,
+        Action<int>? searchTotalChanged = null,
+        Action<int>? searchSelectedChanged = null,
+        Action? toggleBackgroundOpacity = null)
     {
         return new GhosttyActionDispatcher(
             surfaceAccessor ?? (static () => null),
@@ -402,9 +618,16 @@ public sealed class GhosttyComponentTests
             titleChanged ?? (static _ => { }),
             processExited ?? (static _ => { }),
             closeRequested ?? (static () => { }),
+            bellRequested,
             colorChanged,
             configChanged,
-            reloadConfig);
+            reloadConfig,
+            mouseOverLinkChanged,
+            searchStarted,
+            searchEnded,
+            searchTotalChanged,
+            searchSelectedChanged,
+            toggleBackgroundOpacity);
     }
 
     private static GhosttyTarget CreateAppTarget()
@@ -446,6 +669,21 @@ public sealed class GhosttyComponentTests
         object? value = method!.Invoke(null, args);
         Assert.NotNull(value);
         return (T)value!;
+    }
+
+    private static T? InvokePrivateStaticNullable<T>(Type type, string methodName, params object[] args)
+        where T : struct
+    {
+        MethodInfo? method = type.GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        object? value = method!.Invoke(null, args);
+        if (value is null)
+        {
+            return null;
+        }
+
+        return (T)value;
     }
 
     private static void AssertModeStateParity(IVtProcessor processor)
