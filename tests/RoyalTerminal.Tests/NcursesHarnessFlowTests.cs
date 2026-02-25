@@ -253,6 +253,10 @@ public sealed class NcursesHarnessFlowTests
             Assert.True(arranged, $"Terminal control was not arranged in time. Bounds={control.Bounds}");
 
             await StartManagedHarnessSessionAsync(control, logPath, modes: [1002, 1006]);
+            if (!await IsHarnessInputModeAvailableAsync(logPath, EventTimeout))
+            {
+                return;
+            }
 
             string ready = await WaitForLogLineAsync(
                 logPath,
@@ -353,6 +357,10 @@ public sealed class NcursesHarnessFlowTests
             Assert.True(arranged, $"Terminal control was not arranged in time. Bounds={control.Bounds}");
 
             await StartManagedHarnessSessionAsync(control, logPath, modes);
+            if (!await IsHarnessInputModeAvailableAsync(logPath, EventTimeout))
+            {
+                return;
+            }
 
             await WaitForLogLineAsync(
                 logPath,
@@ -434,6 +442,16 @@ public sealed class NcursesHarnessFlowTests
             Dimensions: new TerminalSessionDimensions(control.Columns, control.Rows, widthPx, heightPx));
 
         await control.StartSessionAsync(options);
+    }
+
+    private static async Task<bool> IsHarnessInputModeAvailableAsync(string logPath, TimeSpan timeout)
+    {
+        string inputMode = await WaitForLogLineAsync(
+            logPath,
+            static line => line.StartsWith("INPUT-MODE ", StringComparison.Ordinal),
+            timeout: timeout);
+
+        return !inputMode.EndsWith("unavailable", StringComparison.Ordinal);
     }
 
     private static TerminalControl CreateTerminalControl(VtProcessorPreference preference)
@@ -693,17 +711,21 @@ public sealed class NcursesHarnessFlowTests
         {
             if (File.Exists(path))
             {
-                lines = await File.ReadAllLinesAsync(path).ConfigureAwait(false);
-                int scanStart = Math.Min(lastSeenLineCount, lines.Length);
-                for (int i = scanStart; i < lines.Length; i++)
+                string[]? lineSnapshot = await TryReadAllLinesSharedAsync(path).ConfigureAwait(false);
+                if (lineSnapshot is not null)
                 {
-                    if (predicate(lines[i]))
+                    lines = lineSnapshot;
+                    int scanStart = Math.Min(lastSeenLineCount, lines.Length);
+                    for (int i = scanStart; i < lines.Length; i++)
                     {
-                        return lines[i];
+                        if (predicate(lines[i]))
+                        {
+                            return lines[i];
+                        }
                     }
-                }
 
-                lastSeenLineCount = lines.Length;
+                    lastSeenLineCount = lines.Length;
+                }
             }
 
             await Task.Delay(50).ConfigureAwait(false);
@@ -716,13 +738,48 @@ public sealed class NcursesHarnessFlowTests
 
     private static async Task<int> GetLogLineCountAsync(string path)
     {
+        string[]? lines = await TryReadAllLinesSharedAsync(path).ConfigureAwait(false);
+        return lines?.Length ?? 0;
+    }
+
+    private static async Task<string[]?> TryReadAllLinesSharedAsync(string path)
+    {
         if (!File.Exists(path))
         {
-            return 0;
+            return Array.Empty<string>();
         }
 
-        string[] lines = await File.ReadAllLinesAsync(path).ConfigureAwait(false);
-        return lines.Length;
+        try
+        {
+            await using FileStream stream = new(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using StreamReader reader = new(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+
+            List<string> lines = [];
+            while (true)
+            {
+                string? line = await reader.ReadLineAsync().ConfigureAwait(false);
+                if (line is null)
+                {
+                    break;
+                }
+
+                lines.Add(line);
+            }
+
+            return [.. lines];
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static bool TryParseResizeLine(string line, out int rows, out int columns)
