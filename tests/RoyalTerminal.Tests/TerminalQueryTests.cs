@@ -907,9 +907,207 @@ public class TerminalQueryTests
                 ApplicationCursorKeys: false,
                 ApplicationKeypad: false,
                 AlternateScreen: false,
-                BracketedPaste: false),
+                BracketedPaste: false,
+                Win32InputMode: false),
             processor.ModeState);
         Assert.Equal(2, modeChangedCount);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DecPrivate9001_TracksState_AndRespondsToDecrqm()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[?9001$"u8);
+        processor.Process("p"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?9001;2$y", System.Text.Encoding.ASCII.GetString(response));
+        Assert.False(processor.Win32InputMode);
+
+        processor.Process("\x1b[?9001h"u8);
+        Assert.True(processor.Win32InputMode);
+        Assert.True(processor.ModeState.Win32InputMode);
+
+        processor.Process("\x1b[?9001$p"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?9001;1$y", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[!p"u8); // DECSTR
+        Assert.False(processor.Win32InputMode);
+        Assert.False(processor.ModeState.Win32InputMode);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DecPrivateModeQuery_UnknownMode_ReturnsNotRecognized()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[?7777$p"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?7777;0$y", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DecPrivate66_TogglesApplicationKeypad()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("\x1b[?66h"u8);
+        Assert.True(processor.ApplicationKeypad);
+        Assert.True(processor.ModeState.ApplicationKeypad);
+
+        processor.Process("\x1b[?66l"u8);
+        Assert.False(processor.ApplicationKeypad);
+        Assert.False(processor.ModeState.ApplicationKeypad);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DecPrivateExtendedModes_QueryReflectsDefaultsAndUpdates()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[?1007$p"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?1007;1$y", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[?1004$p"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?1004;2$y", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[?1004h"u8);
+        processor.Process("\x1b[?1004$p"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?1004;1$y", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[?1048$p"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?1048;2$y", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[?1048h"u8);
+        processor.Process("\x1b[?1048$p"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?1048;1$y", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[!p"u8); // DECSTR resets tracked modes to defaults.
+        processor.Process("\x1b[?1004$p"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?1004;2$y", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_AnsiModeQuery_ReportsKnownModeStates()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[12$p"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[12;1$y", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[2h"u8); // KAM on
+        processor.Process("\x1b[2$p"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[2;1$y", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[12l"u8); // SRM off
+        processor.Process("\x1b[12$p"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[12;2$y", System.Text.Encoding.ASCII.GetString(response));
+
+        processor.Process("\x1b[20h"u8); // LNM on
+        processor.Process("\x1b[20$p"u8);
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[20;1$y", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ModeQuery_CoversGhosttyModeCatalog()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        // Source: external/ghostty/src/terminal/modes.zig (ANSI + DEC entries).
+        int[] ansiModes = [2, 4, 12, 20];
+        int[] decModes =
+        [
+            1, 3, 4, 5, 6, 7, 8, 9, 12, 25, 40, 45, 47, 66, 69,
+            1000, 1002, 1003, 1004, 1005, 1006, 1007, 1015, 1016,
+            1035, 1036, 1039, 1045, 1047, 1048, 1049,
+            2004, 2026, 2027, 2031, 2048,
+        ];
+
+        for (int i = 0; i < ansiModes.Length; i++)
+        {
+            int mode = ansiModes[i];
+            response = null;
+            processor.Process(System.Text.Encoding.ASCII.GetBytes($"\x1b[{mode}$p"));
+
+            Assert.NotNull(response);
+            string payload = System.Text.Encoding.ASCII.GetString(response);
+            Assert.Matches($@"^\x1b\[{mode};[12]\$y$", payload);
+        }
+
+        for (int i = 0; i < decModes.Length; i++)
+        {
+            int mode = decModes[i];
+            response = null;
+            processor.Process(System.Text.Encoding.ASCII.GetBytes($"\x1b[?{mode}$p"));
+
+            Assert.NotNull(response);
+            string payload = System.Text.Encoding.ASCII.GetString(response);
+            Assert.Matches($@"^\x1b\[\?{mode};[12]\$y$", payload);
+        }
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ModeQuery_CoversXtermModesSurface()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        // Source: xterm typings IModes interface.
+        int[] ansiModes = [4];
+        int[] decModes = [1, 6, 7, 9, 25, 45, 66, 1000, 1002, 1003, 1004, 2004, 2026, 9001];
+
+        for (int i = 0; i < ansiModes.Length; i++)
+        {
+            int mode = ansiModes[i];
+            response = null;
+            processor.Process(System.Text.Encoding.ASCII.GetBytes($"\x1b[{mode}$p"));
+
+            Assert.NotNull(response);
+            string payload = System.Text.Encoding.ASCII.GetString(response);
+            Assert.Matches($@"^\x1b\[{mode};[12]\$y$", payload);
+        }
+
+        for (int i = 0; i < decModes.Length; i++)
+        {
+            int mode = decModes[i];
+            response = null;
+            processor.Process(System.Text.Encoding.ASCII.GetBytes($"\x1b[?{mode}$p"));
+
+            Assert.NotNull(response);
+            string payload = System.Text.Encoding.ASCII.GetString(response);
+            Assert.Matches($@"^\x1b\[\?{mode};[12]\$y$", payload);
+        }
     }
 
     [Fact]

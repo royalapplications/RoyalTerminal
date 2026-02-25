@@ -517,6 +517,7 @@ public sealed class TerminalSessionServiceTransportTests
         public bool ApplicationKeypad => _modeState.ApplicationKeypad;
         public bool AlternateScreen => _modeState.AlternateScreen;
         public bool BracketedPaste => _modeState.BracketedPaste;
+        public bool Win32InputMode => _modeState.Win32InputMode;
 
         public TerminalModeState ModeState => _modeState;
 

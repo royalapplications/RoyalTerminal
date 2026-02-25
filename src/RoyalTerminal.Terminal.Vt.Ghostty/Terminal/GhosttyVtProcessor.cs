@@ -23,7 +23,7 @@ namespace RoyalTerminal.Terminal;
 /// Falls back to <see cref="BasicVtProcessor"/> when <c>libghostty-terminal</c> is not
 /// available.
 /// </summary>
-public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource
+public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource, ITerminalFocusEventModeSource
 {
     private readonly TerminalScreen _screen;
     private nint _terminal;
@@ -39,6 +39,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
     private bool _applicationKeypad;
     private bool _alternateScreen;
     private bool _bracketedPaste;
+    private bool _win32InputMode;
+    private bool _focusEventMode;
+    private readonly TerminalWin32InputModeTracker _win32InputModeTracker = new();
+    private readonly TerminalUnsupportedWindowsSequenceSanitizer _unsupportedWindowsSequenceSanitizer = new();
 
     /// <summary>
     /// Prevent the native callback delegates from being garbage collected.
@@ -74,6 +78,12 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
     public bool BracketedPaste => _bracketedPaste;
 
     /// <inheritdoc />
+    public bool Win32InputMode => _win32InputMode;
+
+    /// <inheritdoc />
+    public bool FocusEventsEnabled => _focusEventMode;
+
+    /// <inheritdoc />
     public int KittyKeyboardFlags => 0;
 
     /// <inheritdoc />
@@ -82,7 +92,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
         ApplicationCursorKeys,
         ApplicationKeypad,
         AlternateScreen,
-        BracketedPaste);
+        BracketedPaste,
+        Win32InputMode);
 
     /// <inheritdoc />
     public event EventHandler<TerminalModeState>? ModeChanged;
@@ -166,6 +177,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
             return;
 
         TerminalModeState before = ModeState;
+        _win32InputModeTracker.Process(data);
+        _win32InputMode = _win32InputModeTracker.Win32InputMode;
+        _focusEventMode = _win32InputModeTracker.FocusEventMode;
         byte[]? sanitizedBuffer = null;
         int sanitizedLength = 0;
         ReadOnlySpan<byte> input = data;
@@ -175,11 +189,17 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
         // may appear in host PTY output (notably ?9001 and bracketed-paste
         // delimiters). Strip those specific sequences before native processing.
         if (OperatingSystem.IsWindows() &&
-            TryStripKnownUnsupportedWindowsSequences(data, out sanitizedBuffer, out sanitizedLength))
+            _unsupportedWindowsSequenceSanitizer.TrySanitize(data, out sanitizedBuffer, out sanitizedLength))
         {
             input = sanitizedBuffer.AsSpan(0, sanitizedLength);
             if (input.IsEmpty)
             {
+                if (sanitizedBuffer is not null)
+                {
+                    ArrayPool<byte>.Shared.Return(sanitizedBuffer);
+                }
+
+                RaiseModeChangedIfNeeded(before);
                 return;
             }
         }
@@ -209,90 +229,6 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
 
         // Sync native terminal state back into the TerminalScreen for rendering
         SyncScreenFromNative();
-    }
-
-    private static bool TryStripKnownUnsupportedWindowsSequences(
-        ReadOnlySpan<byte> data,
-        out byte[]? sanitizedBuffer,
-        out int sanitizedLength)
-    {
-        sanitizedBuffer = null;
-        sanitizedLength = data.Length;
-
-        if (data.IndexOf((byte)0x1B) < 0)
-        {
-            return false;
-        }
-
-        byte[] rented = ArrayPool<byte>.Shared.Rent(data.Length);
-        int readIndex = 0;
-        int writeIndex = 0;
-        bool removedAny = false;
-
-        while (readIndex < data.Length)
-        {
-            int matchLength = MatchUnsupportedWindowsSequence(data.Slice(readIndex));
-            if (matchLength > 0)
-            {
-                removedAny = true;
-                readIndex += matchLength;
-                continue;
-            }
-
-            rented[writeIndex++] = data[readIndex++];
-        }
-
-        if (!removedAny)
-        {
-            ArrayPool<byte>.Shared.Return(rented);
-            return false;
-        }
-
-        sanitizedBuffer = rented;
-        sanitizedLength = writeIndex;
-        return true;
-    }
-
-    private static int MatchUnsupportedWindowsSequence(ReadOnlySpan<byte> input)
-    {
-        // CSI ? 9001 h / l
-        if (input.Length >= 8 &&
-            input[0] == 0x1B &&
-            input[1] == (byte)'[' &&
-            input[2] == (byte)'?' &&
-            input[3] == (byte)'9' &&
-            input[4] == (byte)'0' &&
-            input[5] == (byte)'0' &&
-            input[6] == (byte)'1' &&
-            (input[7] == (byte)'h' || input[7] == (byte)'l'))
-        {
-            return 8;
-        }
-
-        // CSI 200~ / 201~ (bracketed paste delimiters in output streams)
-        if (input.Length >= 6 &&
-            input[0] == 0x1B &&
-            input[1] == (byte)'[' &&
-            input[2] == (byte)'2' &&
-            input[3] == (byte)'0' &&
-            input[4] == (byte)'0' &&
-            input[5] == (byte)'~')
-        {
-            return 6;
-        }
-
-        if (input.Length >= 6 &&
-            input[0] == 0x1B &&
-            input[1] == (byte)'[' &&
-            input[2] == (byte)'2' &&
-            input[3] == (byte)'0' &&
-            input[4] == (byte)'1' &&
-            input[5] == (byte)'~')
-        {
-            return 6;
-        }
-
-        return 0;
     }
 
     /// <summary>
@@ -401,6 +337,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         TerminalModeState before = ModeState;
+        _win32InputModeTracker.Reset();
+        _unsupportedWindowsSequenceSanitizer.Reset();
+        _win32InputMode = false;
+        _focusEventMode = false;
 
         // Recreate the native terminal (no reset API exposed)
         if (_terminal != nint.Zero)
@@ -442,6 +382,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
             _applicationKeypad = false;
             _alternateScreen = false;
             _bracketedPaste = false;
+            _win32InputMode = false;
+            _focusEventMode = false;
             return;
         }
 
@@ -738,6 +680,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
             _terminal = nint.Zero;
         }
 
+        _unsupportedWindowsSequenceSanitizer.Reset();
         RefreshStateFromNative();
     }
 }

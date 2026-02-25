@@ -12,9 +12,11 @@ namespace RoyalTerminal.Terminal;
 /// <param name="ApplicationKeypad">Whether application keypad mode is active.</param>
 /// <param name="AlternateScreen">Whether alternate screen buffer is active.</param>
 /// <param name="BracketedPaste">Whether bracketed paste mode is active.</param>
+/// <param name="Win32InputMode">Whether DEC private mode 9001 (win32 input mode) is active.</param>
 public readonly record struct TerminalModeState(
     bool CursorVisible,
     bool ApplicationCursorKeys,
     bool ApplicationKeypad,
     bool AlternateScreen,
-    bool BracketedPaste);
+    bool BracketedPaste,
+    bool Win32InputMode = false);
