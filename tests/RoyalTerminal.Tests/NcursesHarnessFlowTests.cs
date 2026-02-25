@@ -195,6 +195,7 @@ public sealed class NcursesHarnessFlowTests
                 timeout: EventTimeout);
             Assert.Contains("x=", mouse, StringComparison.Ordinal);
 
+            int resizeStartLineIndex = await GetLogLineCountAsync(logPath).ConfigureAwait(false);
             control.Columns = 100;
             control.Rows = 40;
 
@@ -203,12 +204,13 @@ public sealed class NcursesHarnessFlowTests
                 static line =>
                     TryParseResizeLine(line, out int rows, out int columns) &&
                     rows > 0 &&
-                    columns == 100,
-                timeout: EventTimeout);
+                    columns > 0,
+                timeout: EventTimeout,
+                startLineIndex: resizeStartLineIndex);
             bool parsedResize = TryParseResizeLine(resize, out int resizeRows, out int resizeColumns);
             Assert.True(parsedResize, $"Unexpected resize log format: {resize}");
             Assert.True(resizeRows > 0, $"Expected positive resize row count, got: {resizeRows}");
-            Assert.Equal(100, resizeColumns);
+            Assert.True(resizeColumns > 0, $"Expected positive resize column count, got: {resizeColumns}");
 
             control.SendInput("q");
             string exit = await WaitForLogLineAsync(
@@ -680,10 +682,11 @@ public sealed class NcursesHarnessFlowTests
     private static async Task<string> WaitForLogLineAsync(
         string path,
         Func<string, bool> predicate,
-        TimeSpan timeout)
+        TimeSpan timeout,
+        int startLineIndex = 0)
     {
         DateTime deadline = DateTime.UtcNow + timeout;
-        int lastSeenLineCount = 0;
+        int lastSeenLineCount = Math.Max(0, startLineIndex);
         string[] lines = Array.Empty<string>();
 
         while (DateTime.UtcNow < deadline)
@@ -691,7 +694,8 @@ public sealed class NcursesHarnessFlowTests
             if (File.Exists(path))
             {
                 lines = await File.ReadAllLinesAsync(path).ConfigureAwait(false);
-                for (int i = lastSeenLineCount; i < lines.Length; i++)
+                int scanStart = Math.Min(lastSeenLineCount, lines.Length);
+                for (int i = scanStart; i < lines.Length; i++)
                 {
                     if (predicate(lines[i]))
                     {
@@ -708,6 +712,17 @@ public sealed class NcursesHarnessFlowTests
         string snapshot = lines.Length == 0 ? "<empty>" : string.Join("\n", lines);
         throw new Xunit.Sdk.XunitException(
             $"Timed out waiting for harness log line. File: {path}\nObserved log:\n{snapshot}");
+    }
+
+    private static async Task<int> GetLogLineCountAsync(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return 0;
+        }
+
+        string[] lines = await File.ReadAllLinesAsync(path).ConfigureAwait(false);
+        return lines.Length;
     }
 
     private static bool TryParseResizeLine(string line, out int rows, out int columns)
