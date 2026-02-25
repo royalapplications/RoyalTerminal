@@ -10,9 +10,21 @@ namespace RoyalTerminal.Tests;
 
 public class CoreWrapperTests
 {
+    private static bool CanRunRealGhosttyNativeTests()
+    {
+        // Upstream Ghostty does not currently provide stable Windows support.
+        // Running real native lifecycle calls on Windows can terminate testhost.
+        return !OperatingSystem.IsWindows();
+    }
+
     [Fact]
     public void NativeLibraryLoader_Initialize_IsIdempotent()
     {
+        if (!CanRunRealGhosttyNativeTests())
+        {
+            return;
+        }
+
         NativeLibraryLoader.Initialize();
         NativeLibraryLoader.Initialize();
     }
@@ -20,6 +32,11 @@ public class CoreWrapperTests
     [Fact]
     public void Ghostty_Initialize_IsIdempotent()
     {
+        if (!CanRunRealGhosttyNativeTests())
+        {
+            return;
+        }
+
         bool first = Ghostty.Initialize();
         bool second = Ghostty.Initialize();
 
@@ -29,6 +46,11 @@ public class CoreWrapperTests
     [Fact]
     public void Ghostty_GetInfo_WhenInitialized_ReturnsVersion()
     {
+        if (!CanRunRealGhosttyNativeTests())
+        {
+            return;
+        }
+
         if (!Ghostty.Initialize())
         {
             return;
@@ -101,6 +123,11 @@ public class CoreWrapperTests
     [Fact]
     public void GhosttyConfig_CreateAndClone_Smoke()
     {
+        if (!CanRunRealGhosttyNativeTests())
+        {
+            return;
+        }
+
         if (!Ghostty.Initialize())
         {
             return;
@@ -116,6 +143,11 @@ public class CoreWrapperTests
     [Fact]
     public void GhosttyApp_CreateAndBasicCalls_Smoke()
     {
+        if (!CanRunRealGhosttyNativeTests())
+        {
+            return;
+        }
+
         if (!Ghostty.Initialize())
         {
             return;

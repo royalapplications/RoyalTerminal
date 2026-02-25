@@ -1049,26 +1049,70 @@ public class RenderingTests
     [Fact]
     public void SkiaTerminalRenderer_ShadeBlockSprites_IncreaseFilledPixelsByDensity()
     {
-        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableTextRenderDiagnostics = true,
+            CursorVisible = false,
+        };
+
         using var surface = CreateRenderSurface(renderer, columns: 3, rows: 1);
         TerminalScreen screen = CreateAsciiScreen(columns: 3, rows: 1, text: "\u2591\u2592\u2593");
 
         surface.Canvas.Clear(SKColors.Black);
         renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
 
         using SKImage snapshot = surface.Snapshot();
         using SKPixmap pixels = snapshot.PeekPixels();
 
-        float cellWidth = renderer.CellWidth;
-        float cellHeight = renderer.CellHeight;
-        int lightPixels = CountNonBackgroundPixels(pixels, startX: 0f, cellWidth, cellHeight);
-        int mediumPixels = CountNonBackgroundPixels(pixels, startX: cellWidth, cellWidth, cellHeight);
-        int darkPixels = CountNonBackgroundPixels(pixels, startX: cellWidth * 2f, cellWidth, cellHeight);
+        int firstCellEnd = pixels.Width / 3;
+        int secondCellEnd = (pixels.Width * 2) / 3;
+
+        int lightPixels = CountNonBackgroundPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: firstCellEnd,
+            startY: 0f,
+            endY: pixels.Height);
+        int mediumPixels = CountNonBackgroundPixelsInRegion(
+            pixels,
+            startX: firstCellEnd,
+            endX: secondCellEnd,
+            startY: 0f,
+            endY: pixels.Height);
+        int darkPixels = CountNonBackgroundPixelsInRegion(
+            pixels,
+            startX: secondCellEnd,
+            endX: pixels.Width,
+            startY: 0f,
+            endY: pixels.Height);
+
+        long lightInk = SumPixelIntensityInRegion(
+            pixels,
+            startX: 0f,
+            endX: firstCellEnd,
+            startY: 0f,
+            endY: pixels.Height);
+        long mediumInk = SumPixelIntensityInRegion(
+            pixels,
+            startX: firstCellEnd,
+            endX: secondCellEnd,
+            startY: 0f,
+            endY: pixels.Height);
+        long darkInk = SumPixelIntensityInRegion(
+            pixels,
+            startX: secondCellEnd,
+            endX: pixels.Width,
+            startY: 0f,
+            endY: pixels.Height);
 
         Assert.True(lightPixels > 0);
         Assert.True(mediumPixels > 0);
         Assert.True(darkPixels > 0);
-        Assert.NotEqual(lightPixels, darkPixels);
+        Assert.True(diagnostics.BlockSpriteCells >= 3);
+        Assert.True(lightInk <= mediumInk, $"Expected medium shade ink >= light shade ink, got {mediumInk} < {lightInk}.");
+        Assert.True(mediumInk <= darkInk, $"Expected dark shade ink >= medium shade ink, got {darkInk} < {mediumInk}.");
+        Assert.True(lightInk < darkInk, $"Expected dark shade ink > light shade ink, got {darkInk} <= {lightInk}.");
     }
 
     [Theory]
@@ -1297,27 +1341,6 @@ public class RenderingTests
         return SKSurface.Create(new SKImageInfo(width, height));
     }
 
-    private static int CountNonBackgroundPixels(SKPixmap pixels, float startX, float cellWidth, float cellHeight)
-    {
-        int count = 0;
-        int minX = Math.Clamp((int)MathF.Floor(startX), 0, pixels.Width);
-        int maxX = Math.Clamp((int)MathF.Ceiling(startX + cellWidth), 0, pixels.Width);
-        int maxY = Math.Clamp((int)MathF.Ceiling(cellHeight), 0, pixels.Height);
-        for (int y = 0; y < maxY; y++)
-        {
-            for (int x = minX; x < maxX; x++)
-            {
-                SKColor pixel = pixels.GetPixelColor(x, y);
-                if (pixel.Red > 0 || pixel.Green > 0 || pixel.Blue > 0)
-                {
-                    count++;
-                }
-            }
-        }
-
-        return count;
-    }
-
     private static int CountNonBackgroundPixelsInRegion(
         SKPixmap pixels,
         float startX,
@@ -1373,6 +1396,31 @@ public class RenderingTests
         }
 
         return count;
+    }
+
+    private static long SumPixelIntensityInRegion(
+        SKPixmap pixels,
+        float startX,
+        float endX,
+        float startY,
+        float endY)
+    {
+        long sum = 0;
+        int minX = Math.Clamp((int)MathF.Floor(startX), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling(endX), 0, pixels.Width);
+        int minY = Math.Clamp((int)MathF.Floor(startY), 0, pixels.Height);
+        int maxY = Math.Clamp((int)MathF.Ceiling(endY), 0, pixels.Height);
+
+        for (int y = minY; y < maxY; y++)
+        {
+            for (int x = minX; x < maxX; x++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                sum += pixel.Red + pixel.Green + pixel.Blue;
+            }
+        }
+
+        return sum;
     }
 
     private static int CountRedDominantPixelsInRegion(

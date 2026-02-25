@@ -166,15 +166,42 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
             return;
 
         TerminalModeState before = ModeState;
+        byte[]? sanitizedBuffer = null;
+        int sanitizedLength = 0;
+        ReadOnlySpan<byte> input = data;
+
+        // On Windows, the current Ghostty native stream can emit warnings and
+        // eventually abort for a small set of unsupported CSI sequences that
+        // may appear in host PTY output (notably ?9001 and bracketed-paste
+        // delimiters). Strip those specific sequences before native processing.
+        if (OperatingSystem.IsWindows() &&
+            TryStripKnownUnsupportedWindowsSequences(data, out sanitizedBuffer, out sanitizedLength))
+        {
+            input = sanitizedBuffer.AsSpan(0, sanitizedLength);
+            if (input.IsEmpty)
+            {
+                return;
+            }
+        }
 
         // Feed raw VT data into the native terminal.
         // The native interactive stream handler will:
         //   1. Process state-modifying sequences (SGR, cursor moves, etc.)
         //   2. Detect query sequences (DSR, DA, DECRQM, etc.) and call
         //      our native callback with the formatted response bytes.
-        fixed (byte* ptr = data)
+        try
         {
-            GhosttyTerminalNative.TerminalProcess(_terminal, ptr, (nuint)data.Length);
+            fixed (byte* ptr = input)
+            {
+                GhosttyTerminalNative.TerminalProcess(_terminal, ptr, (nuint)input.Length);
+            }
+        }
+        finally
+        {
+            if (sanitizedBuffer is not null)
+            {
+                ArrayPool<byte>.Shared.Return(sanitizedBuffer);
+            }
         }
 
         RefreshStateFromNative();
@@ -182,6 +209,90 @@ public sealed class GhosttyVtProcessor : IVtProcessor, ITerminalThemeSink, IKitt
 
         // Sync native terminal state back into the TerminalScreen for rendering
         SyncScreenFromNative();
+    }
+
+    private static bool TryStripKnownUnsupportedWindowsSequences(
+        ReadOnlySpan<byte> data,
+        out byte[]? sanitizedBuffer,
+        out int sanitizedLength)
+    {
+        sanitizedBuffer = null;
+        sanitizedLength = data.Length;
+
+        if (data.IndexOf((byte)0x1B) < 0)
+        {
+            return false;
+        }
+
+        byte[] rented = ArrayPool<byte>.Shared.Rent(data.Length);
+        int readIndex = 0;
+        int writeIndex = 0;
+        bool removedAny = false;
+
+        while (readIndex < data.Length)
+        {
+            int matchLength = MatchUnsupportedWindowsSequence(data.Slice(readIndex));
+            if (matchLength > 0)
+            {
+                removedAny = true;
+                readIndex += matchLength;
+                continue;
+            }
+
+            rented[writeIndex++] = data[readIndex++];
+        }
+
+        if (!removedAny)
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+            return false;
+        }
+
+        sanitizedBuffer = rented;
+        sanitizedLength = writeIndex;
+        return true;
+    }
+
+    private static int MatchUnsupportedWindowsSequence(ReadOnlySpan<byte> input)
+    {
+        // CSI ? 9001 h / l
+        if (input.Length >= 8 &&
+            input[0] == 0x1B &&
+            input[1] == (byte)'[' &&
+            input[2] == (byte)'?' &&
+            input[3] == (byte)'9' &&
+            input[4] == (byte)'0' &&
+            input[5] == (byte)'0' &&
+            input[6] == (byte)'1' &&
+            (input[7] == (byte)'h' || input[7] == (byte)'l'))
+        {
+            return 8;
+        }
+
+        // CSI 200~ / 201~ (bracketed paste delimiters in output streams)
+        if (input.Length >= 6 &&
+            input[0] == 0x1B &&
+            input[1] == (byte)'[' &&
+            input[2] == (byte)'2' &&
+            input[3] == (byte)'0' &&
+            input[4] == (byte)'0' &&
+            input[5] == (byte)'~')
+        {
+            return 6;
+        }
+
+        if (input.Length >= 6 &&
+            input[0] == 0x1B &&
+            input[1] == (byte)'[' &&
+            input[2] == (byte)'2' &&
+            input[3] == (byte)'0' &&
+            input[4] == (byte)'1' &&
+            input[5] == (byte)'~')
+        {
+            return 6;
+        }
+
+        return 0;
     }
 
     /// <summary>
