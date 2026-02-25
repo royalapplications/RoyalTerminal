@@ -2,12 +2,11 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using RoyalTerminal.Terminal;
-using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
 
-public sealed class SshShellBootstrapBuilderTests
+public sealed class SshShellBootstrapCommandBuilderTests
 {
     [Fact]
     public void BuildBootstrapCommand_ReturnsNull_WhenNoEnvironmentAndNoInitialCommand()
@@ -17,7 +16,7 @@ public sealed class SshShellBootstrapBuilderTests
             EnvironmentVariables = null,
         };
 
-        string? command = SshShellBootstrapBuilder.BuildBootstrapCommand(options);
+        string? command = SshShellBootstrapCommandBuilder.Build(options);
 
         Assert.Null(command);
     }
@@ -34,7 +33,7 @@ public sealed class SshShellBootstrapBuilderTests
             },
         };
 
-        string? command = SshShellBootstrapBuilder.BuildBootstrapCommand(options);
+        string? command = SshShellBootstrapCommandBuilder.Build(options);
 
         Assert.NotNull(command);
         Assert.Contains("export LANG='en_US.UTF-8'", command, StringComparison.Ordinal);
@@ -53,7 +52,7 @@ public sealed class SshShellBootstrapBuilderTests
             },
         };
 
-        string? command = SshShellBootstrapBuilder.BuildBootstrapCommand(options);
+        string? command = SshShellBootstrapCommandBuilder.Build(options);
 
         Assert.NotNull(command);
         Assert.Equal("export ROYALTERMINAL_TOKEN='ab'\"'\"'cd'", command);
@@ -71,7 +70,7 @@ public sealed class SshShellBootstrapBuilderTests
         };
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
-            () => SshShellBootstrapBuilder.BuildBootstrapCommand(options));
+            () => SshShellBootstrapCommandBuilder.Build(options));
 
         Assert.Contains("invalid identifier", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -88,7 +87,7 @@ public sealed class SshShellBootstrapBuilderTests
         };
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
-            () => SshShellBootstrapBuilder.BuildBootstrapCommand(options));
+            () => SshShellBootstrapCommandBuilder.Build(options));
 
         Assert.Contains("forbidden control characters", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -105,9 +104,22 @@ public sealed class SshShellBootstrapBuilderTests
         };
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
-            () => SshShellBootstrapBuilder.BuildBootstrapCommand(options));
+            () => SshShellBootstrapCommandBuilder.Build(options));
 
         Assert.Contains("non-null value", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_OverloadWithInitialCommandAndEnvironment_ProducesEquivalentBootstrap()
+    {
+        Dictionary<string, string> environment = new(StringComparer.Ordinal)
+        {
+            ["LANG"] = "en_US.UTF-8",
+        };
+
+        string? command = SshShellBootstrapCommandBuilder.Build("echo ready", environment);
+
+        Assert.Equal("export LANG='en_US.UTF-8'; echo ready", command);
     }
 
     private static SshTransportOptions CreateOptions(string? initialCommand)

@@ -1,14 +1,19 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Terminal.Transport.Ssh.SshNet - Bootstrap command builder for shell env setup.
+// RoyalTerminal.Terminal - SSH shell bootstrap command builder.
 
 using System.Text;
-using RoyalTerminal.Terminal;
 
-namespace RoyalTerminal.Terminal.Transport.Ssh.SshNet;
+namespace RoyalTerminal.Terminal;
 
-internal static class SshShellBootstrapBuilder
+/// <summary>
+/// Builds POSIX-shell bootstrap commands for SSH sessions.
+/// </summary>
+public static class SshShellBootstrapCommandBuilder
 {
+    /// <summary>
+    /// Validates SSH environment-variable names and values.
+    /// </summary>
     public static void ValidateEnvironmentVariables(IReadOnlyDictionary<string, string>? environmentVariables)
     {
         if (environmentVariables is null)
@@ -23,18 +28,30 @@ internal static class SshShellBootstrapBuilder
         }
     }
 
-    public static string? BuildBootstrapCommand(SshTransportOptions options)
+    /// <summary>
+    /// Builds a shell bootstrap command from SSH transport options.
+    /// </summary>
+    public static string? Build(SshTransportOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ValidateEnvironmentVariables(options.EnvironmentVariables);
+        return Build(options.InitialCommand, options.EnvironmentVariables);
+    }
+
+    /// <summary>
+    /// Builds a shell bootstrap command from initial command and optional environment variables.
+    /// </summary>
+    public static string? Build(
+        string? initialCommand,
+        IReadOnlyDictionary<string, string>? environmentVariables)
+    {
+        ValidateEnvironmentVariables(environmentVariables);
 
         StringBuilder? command = null;
 
-        if (options.EnvironmentVariables is not null)
+        if (environmentVariables is not null)
         {
-            foreach ((string key, string value) in options.EnvironmentVariables)
+            foreach ((string key, string value) in environmentVariables)
             {
-                ValidateEnvironmentVariableValue(key, value);
                 command ??= new StringBuilder();
                 if (command.Length > 0)
                 {
@@ -49,7 +66,7 @@ internal static class SshShellBootstrapBuilder
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(options.InitialCommand))
+        if (!string.IsNullOrWhiteSpace(initialCommand))
         {
             command ??= new StringBuilder();
             if (command.Length > 0)
@@ -57,7 +74,7 @@ internal static class SshShellBootstrapBuilder
                 command.Append("; ");
             }
 
-            command.Append(options.InitialCommand.Trim());
+            command.Append(initialCommand.Trim());
         }
 
         return command?.ToString();
