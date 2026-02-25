@@ -637,6 +637,49 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_Decscusr_ExposesCursorStyleAndBlinkingState()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        var cursorStyleSource = Assert.IsAssignableFrom<ITerminalCursorStyleSource>(processor);
+
+        processor.Process("\x1b[2 q"u8); // steady block
+        Assert.Equal(TerminalCursorStyle.Block, cursorStyleSource.CursorStyle);
+        Assert.False(cursorStyleSource.CursorBlinking);
+
+        processor.Process("\x1b[3 q"u8); // blinking underline
+        Assert.Equal(TerminalCursorStyle.Underline, cursorStyleSource.CursorStyle);
+        Assert.True(cursorStyleSource.CursorBlinking);
+
+        processor.Process("\x1b[6 q"u8); // steady bar
+        Assert.Equal(TerminalCursorStyle.Bar, cursorStyleSource.CursorStyle);
+        Assert.False(cursorStyleSource.CursorBlinking);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Osc8_AssignsHyperlinkIds_AndResolvesUrls()
+    {
+        var screen = new TerminalScreen(16, 4, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("\x1b]8;;https://example.com/a\x1b\\AB\x1b]8;;\x1b\\C"u8);
+        processor.Process("\x1b]8;;https://example.com/a\x1b\\D\x1b]8;;\x1b\\"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        int firstId = row[0].HyperlinkId;
+        int secondId = row[1].HyperlinkId;
+        int closedId = row[2].HyperlinkId;
+        int reusedId = row[3].HyperlinkId;
+
+        Assert.True(firstId > 0);
+        Assert.Equal(firstId, secondId);
+        Assert.Equal(0, closedId);
+        Assert.Equal(firstId, reusedId);
+        Assert.True(screen.TryGetHyperlinkUrl(firstId, out string? resolvedUrl));
+        Assert.Equal("https://example.com/a", resolvedUrl);
+    }
+
+    [Fact]
     public void BasicVtProcessor_DcsDecrqss_UnsupportedQuery_ReturnsFailureResponse()
     {
         var screen = new TerminalScreen(80, 24, 0);
@@ -770,6 +813,25 @@ public class TerminalQueryTests
         Assert.Equal('Z', row[0].Codepoint);
         Assert.True((row[0].Attributes & CellAttributes.Underline) != 0);
         Assert.Equal(TerminalUnderlineStyle.Double, row[0].UnderlineStyle);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_SgrUnderlineColor_TracksAndResets()
+    {
+        var screen = new TerminalScreen(8, 2, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("\x1b[4;58;2;255;0;0mX\x1b[59;24mY"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal('X', row[0].Codepoint);
+        Assert.True(row[0].HasUnderlineColor);
+        Assert.Equal(0xFFFF0000u, row[0].UnderlineColor);
+
+        Assert.Equal('Y', row[1].Codepoint);
+        Assert.False(row[1].HasUnderlineColor);
+        Assert.Equal(0u, row[1].UnderlineColor);
+        Assert.Equal(TerminalUnderlineStyle.None, row[1].UnderlineStyle);
     }
 
     [Fact]

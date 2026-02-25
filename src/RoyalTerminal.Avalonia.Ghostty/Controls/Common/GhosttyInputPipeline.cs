@@ -3,6 +3,7 @@
 // RoyalTerminal.Avalonia.Controls - Shared Ghostty input dispatch helpers.
 
 using System.Text;
+using System.Runtime.CompilerServices;
 using System.Runtime.Versioning;
 using Avalonia;
 using Avalonia.Controls;
@@ -22,6 +23,15 @@ internal readonly record struct GhosttyKeyDispatchResult(
 [SupportedOSPlatform("macos")]
 internal static class GhosttyInputPipeline
 {
+    private sealed class PointerButtonState
+    {
+        public bool Left;
+        public bool Middle;
+        public bool Right;
+    }
+
+    private static readonly ConditionalWeakTable<Control, PointerButtonState> s_pointerButtons = new();
+
     public static unsafe bool HandleKeyDown(
         GhosttySurface? surface,
         KeyEventArgs e,
@@ -129,17 +139,22 @@ internal static class GhosttyInputPipeline
             return false;
         }
 
+        PointerButtonState trackedState = s_pointerButtons.GetOrCreateValue(owner);
         Point point = e.GetPosition(owner);
         PointerPointProperties props = e.GetCurrentPoint(owner).Properties;
-        GhosttyMouseButton? button = props.IsLeftButtonPressed ? GhosttyMouseButton.Left
-            : props.IsRightButtonPressed ? GhosttyMouseButton.Right
-            : props.IsMiddleButtonPressed ? GhosttyMouseButton.Middle
-            : null;
+        GhosttyMouseButton? button = ResolvePressedMouseButton(props);
+        if (button is null && IsPrimaryPointer(e.Pointer.Type))
+        {
+            // Some touchpad paths report a press without explicit button metadata.
+            button = GhosttyMouseButton.Left;
+        }
+
         if (button is null)
         {
             return false;
         }
 
+        SetPointerButtonState(trackedState, button.Value, isDown: true);
         GhosttyMods mods = MacKeyMapping.ConvertModifiers(e.KeyModifiers);
         bool accepted = surface.SendMouseButton(GhosttyMouseState.Press, button.Value, mods);
         surface.SendMousePos(point.X, point.Y, mods);
@@ -153,34 +168,50 @@ internal static class GhosttyInputPipeline
             return;
         }
 
+        PointerButtonState trackedState = s_pointerButtons.GetOrCreateValue(owner);
+        PointerPointProperties props = e.GetCurrentPoint(owner).Properties;
+        SyncPointerButtonState(trackedState, props, preserveWhenNoButtons: true);
+
         Point point = e.GetPosition(owner);
         surface.SendMousePos(point.X, point.Y, MacKeyMapping.ConvertModifiers(e.KeyModifiers));
     }
 
-    public static bool HandlePointerReleased(GhosttySurface? surface, PointerReleasedEventArgs e)
+    public static bool HandlePointerReleased(Control owner, GhosttySurface? surface, PointerReleasedEventArgs e)
     {
         if (surface is null)
         {
             return false;
         }
 
-        GhosttyMouseButton? button = e.InitialPressMouseButton switch
+        PointerButtonState trackedState = s_pointerButtons.GetOrCreateValue(owner);
+        PointerPointProperties props = e.GetCurrentPoint(owner).Properties;
+        GhosttyMouseButton? button = ConvertMouseButton(e.InitialPressMouseButton);
+        if (button is null)
         {
-            MouseButton.Left => GhosttyMouseButton.Left,
-            MouseButton.Right => GhosttyMouseButton.Right,
-            MouseButton.Middle => GhosttyMouseButton.Middle,
-            _ => null,
-        };
+            button = ResolveReleasedMouseButton(props);
+        }
+        if (button is null)
+        {
+            button = GetTrackedPressedButton(trackedState);
+        }
+        if (button is null && IsPrimaryPointer(e.Pointer.Type))
+        {
+            button = GhosttyMouseButton.Left;
+        }
 
         if (button is null)
         {
+            SyncPointerButtonState(trackedState, props);
             return false;
         }
 
-        return surface.SendMouseButton(
+        bool accepted = surface.SendMouseButton(
             GhosttyMouseState.Release,
             button.Value,
             MacKeyMapping.ConvertModifiers(e.KeyModifiers));
+
+        SetPointerButtonState(trackedState, button.Value, isDown: false);
+        return accepted;
     }
 
     public static bool HandlePointerWheelChanged(GhosttySurface? surface, PointerWheelEventArgs e)
@@ -192,5 +223,124 @@ internal static class GhosttyInputPipeline
 
         surface.SendMouseScroll(e.Delta.X, e.Delta.Y, (int)MacKeyMapping.ConvertModifiers(e.KeyModifiers));
         return true;
+    }
+
+    private static void SyncPointerButtonState(
+        PointerButtonState trackedState,
+        PointerPointProperties properties,
+        bool preserveWhenNoButtons = false)
+    {
+        bool anyButtonPressed =
+            properties.IsLeftButtonPressed ||
+            properties.IsMiddleButtonPressed ||
+            properties.IsRightButtonPressed;
+        if (preserveWhenNoButtons && !anyButtonPressed)
+        {
+            return;
+        }
+
+        trackedState.Left = properties.IsLeftButtonPressed;
+        trackedState.Middle = properties.IsMiddleButtonPressed;
+        trackedState.Right = properties.IsRightButtonPressed;
+    }
+
+    private static void SetPointerButtonState(PointerButtonState trackedState, GhosttyMouseButton button, bool isDown)
+    {
+        switch (button)
+        {
+            case GhosttyMouseButton.Left:
+                trackedState.Left = isDown;
+                break;
+            case GhosttyMouseButton.Middle:
+                trackedState.Middle = isDown;
+                break;
+            case GhosttyMouseButton.Right:
+                trackedState.Right = isDown;
+                break;
+        }
+    }
+
+    private static GhosttyMouseButton? GetTrackedPressedButton(PointerButtonState trackedState)
+    {
+        if (trackedState.Left)
+        {
+            return GhosttyMouseButton.Left;
+        }
+
+        if (trackedState.Middle)
+        {
+            return GhosttyMouseButton.Middle;
+        }
+
+        if (trackedState.Right)
+        {
+            return GhosttyMouseButton.Right;
+        }
+
+        return null;
+    }
+
+    private static bool IsPrimaryPointer(PointerType pointerType)
+    {
+        return pointerType is PointerType.Mouse or PointerType.Touch;
+    }
+
+    private static GhosttyMouseButton? ResolvePressedMouseButton(PointerPointProperties properties)
+    {
+        GhosttyMouseButton? fromUpdateKind = properties.PointerUpdateKind switch
+        {
+            PointerUpdateKind.LeftButtonPressed => GhosttyMouseButton.Left,
+            PointerUpdateKind.MiddleButtonPressed => GhosttyMouseButton.Middle,
+            PointerUpdateKind.RightButtonPressed => GhosttyMouseButton.Right,
+            _ => null,
+        };
+        if (fromUpdateKind is not null)
+        {
+            return fromUpdateKind;
+        }
+
+        return ConvertPressedMouseButton(properties);
+    }
+
+    private static GhosttyMouseButton? ResolveReleasedMouseButton(PointerPointProperties properties)
+    {
+        return properties.PointerUpdateKind switch
+        {
+            PointerUpdateKind.LeftButtonReleased => GhosttyMouseButton.Left,
+            PointerUpdateKind.MiddleButtonReleased => GhosttyMouseButton.Middle,
+            PointerUpdateKind.RightButtonReleased => GhosttyMouseButton.Right,
+            _ => null,
+        };
+    }
+
+    private static GhosttyMouseButton? ConvertPressedMouseButton(PointerPointProperties properties)
+    {
+        if (properties.IsLeftButtonPressed)
+        {
+            return GhosttyMouseButton.Left;
+        }
+
+        if (properties.IsMiddleButtonPressed)
+        {
+            return GhosttyMouseButton.Middle;
+        }
+
+        if (properties.IsRightButtonPressed)
+        {
+            return GhosttyMouseButton.Right;
+        }
+
+        return null;
+    }
+
+    private static GhosttyMouseButton? ConvertMouseButton(MouseButton button)
+    {
+        return button switch
+        {
+            MouseButton.Left => GhosttyMouseButton.Left,
+            MouseButton.Middle => GhosttyMouseButton.Middle,
+            MouseButton.Right => GhosttyMouseButton.Right,
+            _ => null,
+        };
     }
 }

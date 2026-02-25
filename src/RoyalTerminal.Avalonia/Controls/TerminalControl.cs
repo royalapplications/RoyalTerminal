@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia - Main terminal control.
 
+using System.Buffers;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -37,6 +38,10 @@ namespace RoyalTerminal.Avalonia.Controls;
 /// </summary>
 public class TerminalControl : TemplatedControl, ILogicalScrollable
 {
+    private const float RendererBackgroundOpacity = 0.82f;
+    private const bool RendererBackgroundOpacityCells = true;
+    private static readonly TimeSpan CursorBlinkInterval = TimeSpan.FromMilliseconds(530);
+
     #region Styled Properties
 
     /// <summary>The font family used for terminal text.</summary>
@@ -174,6 +179,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// <summary>Raised when the terminal bell rings.</summary>
     public event EventHandler? Bell;
 
+    /// <summary>Raised when the terminal process exits.</summary>
+    public event EventHandler<int>? ProcessExited;
+
+    /// <summary>Raised when the host/application should close the terminal surface.</summary>
+    public event EventHandler? CloseRequested;
+
     /// <summary>Raised when the terminal is resized (columns, rows).</summary>
     public event EventHandler<TerminalSizeEventArgs>? TerminalResized;
 
@@ -191,6 +202,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private bool _rightPointerDown;
     private bool _suppressGridPropertyApply;
     private bool _suppressLegacyColorThemeBridge;
+    private int _lastPointerColumn = -1;
+    private int _lastPointerRow = -1;
+    private bool _backgroundOpacityEnabled;
+    private string? _hoveredLinkUrl;
+    private string? _searchNeedle;
+    private int _searchTotal;
+    private int _searchSelected = -1;
+    private readonly List<TerminalHighlightSpan> _highlightSpanScratch = [];
+    private readonly List<SearchMatch> _searchMatchScratch = [];
+    private readonly StringBuilder _rowTextScratch = new();
+    private readonly List<int> _rowColumnMapScratch = [];
+    private DispatcherTimer? _cursorBlinkTimer;
+    private bool _cursorBlinkVisiblePhase = true;
+    private int _lastBlinkCursorColumn = -1;
+    private int _lastBlinkCursorRow = -1;
+    private CursorStyle _lastBlinkCursorStyle = CursorStyle.Block;
     private int _lastAppliedColumns = -1;
     private int _lastAppliedRows = -1;
     private int _lastAppliedWidthPx = -1;
@@ -274,6 +301,43 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// <summary>Gets the scroll data.</summary>
     public TerminalScrollData? ScrollData => _scrollData;
 
+    /// <summary>
+    /// Gets or sets whether Ghostty-style background opacity rendering is enabled.
+    /// </summary>
+    public bool BackgroundOpacityEnabled
+    {
+        get => _backgroundOpacityEnabled;
+        set
+        {
+            if (_backgroundOpacityEnabled == value)
+            {
+                return;
+            }
+
+            _backgroundOpacityEnabled = value;
+            UpdateRendererParityStateFromScreen();
+        }
+    }
+
+    /// <summary>Gets the currently hovered hyperlink URL, if known.</summary>
+    public string? HoveredLinkUrl => _hoveredLinkUrl;
+
+    /// <summary>Gets the active search needle used for search highlight spans.</summary>
+    public string? SearchNeedle => _searchNeedle;
+
+    /// <summary>Gets the reported total number of active search matches.</summary>
+    public int SearchTotal => _searchTotal;
+
+    /// <summary>Gets the selected match index for active search highlights.</summary>
+    public int SearchSelected => _searchSelected;
+
+    /// <summary>Gets whether the terminal currently has a text selection.</summary>
+    public bool HasSelection =>
+        (TerminalSessionService.SelectionSource?.HasSelection).GetValueOrDefault() ||
+        (_renderer is not null &&
+         _renderer.SelectionStart is not null &&
+         _renderer.SelectionEnd is not null);
+
     #region ILogicalScrollable
 
     private bool _canHScroll;
@@ -320,6 +384,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 _scrollData.Offset = value.Y;
                 SyncScreenScrollOffsetFromScrollData();
                 UpdateRendererCursorForViewport();
+                UpdateRendererParityStateFromScreen();
                 _presenter?.Invalidate();
                 RaiseScrollInvalidated();
             }
@@ -467,6 +532,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _scrollData.UpdateExtent(_screen.TotalRows, true);
 
         _scrollViewer = new VirtualizedTerminalScrollViewer(_screen, _scrollData);
+        UpdateRendererParityStateFromScreen();
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -550,6 +616,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         lock (_screen.SyncRoot)
         {
             _screen.InvalidateAll();
+            UpdateRendererParityStateLocked();
         }
 
         _presenter?.SetRenderState(nextRenderer, _screen);
@@ -565,6 +632,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             ? TerminalDefaults.DefaultMonoFont
             : FontFamilyName;
         SkiaTerminalRenderer renderer = new(family, (float)TerminalFontSize);
+        renderer.BackgroundOpacityEnabled = _backgroundOpacityEnabled;
+        renderer.BackgroundOpacityCells = RendererBackgroundOpacityCells;
+        renderer.BackgroundOpacity = RendererBackgroundOpacity;
 
         if (previous is null)
         {
@@ -583,6 +653,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         renderer.EnableTextShaping = previous.EnableTextShaping;
         renderer.TextDirectionMode = previous.TextDirectionMode;
         renderer.EnableLigatures = previous.EnableLigatures;
+        renderer.SearchHighlightColor = previous.SearchHighlightColor;
+        renderer.SearchSelectedHighlightColor = previous.SearchSelectedHighlightColor;
+        renderer.HyperlinkHoverUnderlineColor = previous.HyperlinkHoverUnderlineColor;
+        renderer.EnableBackgroundOpacityHeuristics = previous.EnableBackgroundOpacityHeuristics;
+        renderer.BackgroundOpacityEnabled = previous.BackgroundOpacityEnabled;
+        renderer.BackgroundOpacityCells = previous.BackgroundOpacityCells;
+        renderer.BackgroundOpacity = previous.BackgroundOpacity;
         return renderer;
     }
 
@@ -824,6 +901,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _scrollViewer?.UpdateViewport(_scrollData.Viewport, _renderer.CellHeight);
             SyncScreenScrollOffsetFromScrollData();
             UpdateRendererCursorForViewport();
+            UpdateRendererParityStateFromScreen();
         }
 
         Endpoint?.SetSize(widthPx, heightPx);
@@ -871,6 +949,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // TemplatedControl without a template never fires OnApplyTemplate.
         // Create the presenter here as a fallback so rendering always works.
         EnsurePresenter();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        EnsureCursorBlinkTimerRunning(false);
     }
 
     private void EnsurePresenter()
@@ -981,6 +1065,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         TerminalSessionService.DetachEndpoint();
         _mouseModeTracker.Reset();
         ResetPointerButtons();
+        EnsureCursorBlinkTimerRunning(false);
     }
 
     /// <summary>
@@ -1042,14 +1127,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         lock (_screen.SyncRoot)
         {
             _vtProcessor?.Process(data);
-
-            // Update cursor position on the renderer
-            if (_vtProcessor is not null && _renderer is not null)
-            {
-                _renderer.CursorColumn = _vtProcessor.CursorCol;
-                _renderer.CursorRow = _vtProcessor.CursorRow;
-                _renderer.CursorVisible = _vtProcessor.CursorVisible;
-            }
+            TryUpdateHoveredLinkFromPointerLocked();
+            UpdateRendererParityStateLocked();
         }
     }
 
@@ -1175,6 +1254,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         Focus();
 
         var point = e.GetPosition(this);
+        UpdatePointerCell(point);
         var props = e.GetCurrentPoint(this).Properties;
         TerminalMouseButton button = ResolvePressedMouseButton(props);
         if (button == TerminalMouseButton.None &&
@@ -1231,6 +1311,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
 
         var point = e.GetPosition(this);
+        UpdatePointerCell(point);
         var props = e.GetCurrentPoint(this).Properties;
         // Preserve tracked button state when move events omit button flags.
         SyncPointerButtonState(props, preserveWhenNoButtons: true);
@@ -1267,6 +1348,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private void HandlePointerReleasedCore(PointerReleasedEventArgs e)
     {
         var point = e.GetPosition(this);
+        UpdatePointerCell(point);
         var props = e.GetCurrentPoint(this).Properties;
         TerminalMouseButton button = ConvertMouseButton(e.InitialPressMouseButton);
         if (button == TerminalMouseButton.None)
@@ -1315,6 +1397,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         HandlePointerWheelChangedCore(e);
     }
 
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+
+        if (_lastPointerColumn >= 0 || _lastPointerRow >= 0)
+        {
+            _lastPointerColumn = -1;
+            _lastPointerRow = -1;
+            if (_hoveredLinkUrl is not null)
+            {
+                _hoveredLinkUrl = null;
+                UpdateRendererParityStateFromScreen();
+            }
+        }
+    }
+
     private void HandlePointerWheelChangedCore(PointerWheelEventArgs e)
     {
 
@@ -1355,6 +1453,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnGotFocus(e);
         Endpoint?.SetFocus(true);
+        _cursorBlinkVisiblePhase = true;
         UpdateRendererCursorForViewport();
         _presenter?.Invalidate();
     }
@@ -1363,6 +1462,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnLostFocus(e);
         Endpoint?.SetFocus(false);
+        EnsureCursorBlinkTimerRunning(false);
         _renderer?.SetCursorVisible(false);
         _presenter?.Invalidate();
     }
@@ -1400,6 +1500,105 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         TerminalSelectionService.ClearSelection(_screen, _renderer, _presenter);
     }
 
+    /// <summary>
+    /// Updates the hovered hyperlink URL used for hyperlink-hover underline styling.
+    /// </summary>
+    public void SetHoveredLinkUrl(string? url)
+    {
+        string? normalized = string.IsNullOrWhiteSpace(url) ? null : url;
+        if (string.Equals(_hoveredLinkUrl, normalized, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _hoveredLinkUrl = normalized;
+        UpdateRendererParityStateFromScreen();
+    }
+
+    /// <summary>
+    /// Starts a search-highlight session with the specified needle.
+    /// </summary>
+    public void StartSearch(string? needle)
+    {
+        _searchNeedle = string.IsNullOrWhiteSpace(needle) ? null : needle;
+        _searchSelected = 0;
+        _searchTotal = 0;
+        UpdateRendererParityStateFromScreen();
+        _ = ScrollSelectedSearchMatchIntoView();
+        UpdateRendererParityStateFromScreen();
+    }
+
+    /// <summary>
+    /// Ends the current search-highlight session.
+    /// </summary>
+    public void EndSearch()
+    {
+        if (_searchNeedle is null && _searchSelected < 0 && _searchTotal == 0)
+        {
+            return;
+        }
+
+        _searchNeedle = null;
+        _searchSelected = -1;
+        _searchTotal = 0;
+        _searchMatchScratch.Clear();
+        UpdateRendererParityStateFromScreen();
+    }
+
+    /// <summary>
+    /// Updates total match count for the active search-highlight session.
+    /// </summary>
+    public void SetSearchTotal(int total)
+    {
+        int normalized = Math.Max(0, total);
+        if (_searchTotal == normalized)
+        {
+            return;
+        }
+
+        _searchTotal = normalized;
+        UpdateRendererParityStateFromScreen();
+    }
+
+    /// <summary>
+    /// Updates the selected search match index for the active highlight session.
+    /// </summary>
+    public void SetSearchSelected(int selected)
+    {
+        if (_searchSelected == selected)
+        {
+            return;
+        }
+
+        _searchSelected = selected;
+        _ = ScrollSelectedSearchMatchIntoView();
+        UpdateRendererParityStateFromScreen();
+    }
+
+    /// <summary>
+    /// Selects the next search result. Returns false when no active matches exist.
+    /// </summary>
+    public bool SelectNextSearchMatch()
+    {
+        return SelectSearchMatchRelative(1);
+    }
+
+    /// <summary>
+    /// Selects the previous search result. Returns false when no active matches exist.
+    /// </summary>
+    public bool SelectPreviousSearchMatch()
+    {
+        return SelectSearchMatchRelative(-1);
+    }
+
+    /// <summary>
+    /// Toggles Ghostty-style background opacity mode.
+    /// </summary>
+    public void ToggleBackgroundOpacity()
+    {
+        BackgroundOpacityEnabled = !BackgroundOpacityEnabled;
+    }
+
     #endregion
 
     #region Public API
@@ -1429,6 +1628,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         TerminalScrollService.ScrollByRows(rows, _scrollData, _screen, _presenter);
         UpdateRendererCursorForViewport();
+        UpdateRendererParityStateFromScreen();
     }
 
     /// <summary>
@@ -1438,6 +1638,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         TerminalScrollService.ScrollToBottom(_scrollData, _screen, _presenter);
         UpdateRendererCursorForViewport();
+        UpdateRendererParityStateFromScreen();
     }
 
     /// <summary>
@@ -1496,6 +1697,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _mouseModeTracker.Reset();
         ResetPointerButtons();
         _isMouseSelecting = false;
+        EnsureCursorBlinkTimerRunning(false);
 
         await TerminalSessionService.StartSessionAsync(
                 TerminalTransportFactory,
@@ -1541,6 +1743,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _mouseModeTracker.Reset();
         ResetPointerButtons();
         _isMouseSelecting = false;
+        EnsureCursorBlinkTimerRunning(false);
+    }
+
+    /// <summary>Requests the host/application to close the terminal surface.</summary>
+    public void RequestClose()
+    {
+        CloseRequested?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Whether a standalone PTY is active.</summary>
@@ -1588,6 +1797,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             var msg = $"\r\n[Process exited with code {exitCode}]\r\n";
             var bytes = Encoding.UTF8.GetBytes(msg);
             WriteOutput(bytes);
+            ProcessExited?.Invoke(this, exitCode);
         });
     }
 
@@ -1692,6 +1902,571 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         int rowIndex = Math.Max(0, (int)(y / _renderer.CellHeight));
         column = Math.Clamp(col + 1, 1, Columns);
         row = Math.Clamp(rowIndex + 1, 1, Rows);
+        return true;
+    }
+
+    private void UpdatePointerCell(Point point)
+    {
+        if (_renderer is null || _screen is null)
+        {
+            return;
+        }
+
+        if (_renderer.CellWidth <= 0f || _renderer.CellHeight <= 0f)
+        {
+            return;
+        }
+
+        if (_screen.Columns <= 0 || _screen.ViewportRows <= 0)
+        {
+            return;
+        }
+
+        int col = (int)Math.Floor(point.X / _renderer.CellWidth);
+        int row = (int)Math.Floor(point.Y / _renderer.CellHeight);
+        col = Math.Clamp(col, 0, _screen.Columns - 1);
+        row = Math.Clamp(row, 0, _screen.ViewportRows - 1);
+
+        if (col == _lastPointerColumn && row == _lastPointerRow)
+        {
+            return;
+        }
+
+        bool hadHover = _hoveredLinkUrl is not null;
+        _lastPointerColumn = col;
+        _lastPointerRow = row;
+        bool hoverChanged;
+        lock (_screen.SyncRoot)
+        {
+            hoverChanged = TryUpdateHoveredLinkFromPointerLocked();
+        }
+
+        if (hoverChanged || hadHover || _hoveredLinkUrl is not null)
+        {
+            UpdateRendererParityStateFromScreen();
+        }
+    }
+
+    private bool TryUpdateHoveredLinkFromPointerLocked()
+    {
+        if (_screen is null ||
+            _lastPointerColumn < 0 ||
+            _lastPointerRow < 0 ||
+            (uint)_lastPointerColumn >= (uint)_screen.Columns ||
+            (uint)_lastPointerRow >= (uint)_screen.ViewportRows)
+        {
+            return false;
+        }
+
+        TerminalRow row = _screen.GetViewportRow(_lastPointerRow);
+        int hyperlinkId = row[_lastPointerColumn].HyperlinkId;
+        string? nextUrl = null;
+        if (hyperlinkId > 0 && _screen.TryGetHyperlinkUrl(hyperlinkId, out string? resolved))
+        {
+            nextUrl = resolved;
+        }
+
+        if (string.Equals(_hoveredLinkUrl, nextUrl, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        _hoveredLinkUrl = nextUrl;
+        return true;
+    }
+
+    private void UpdateRendererParityStateFromScreen()
+    {
+        if (_screen is null || _renderer is null)
+        {
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            UpdateRendererParityStateLocked();
+        }
+
+        _presenter?.Invalidate();
+    }
+
+    private void UpdateRendererParityStateLocked()
+    {
+        if (_screen is null || _renderer is null)
+        {
+            return;
+        }
+
+        _ = TryUpdateHoveredLinkFromPointerLocked();
+        _renderer.BackgroundOpacityEnabled = _backgroundOpacityEnabled;
+        _renderer.BackgroundOpacityCells = RendererBackgroundOpacityCells;
+        _renderer.BackgroundOpacity = RendererBackgroundOpacity;
+        _renderer.SetHighlightSpans(BuildHighlightSpansLocked());
+    }
+
+    private TerminalHighlightSpan[] BuildHighlightSpansLocked()
+    {
+        if (_screen is null)
+        {
+            return Array.Empty<TerminalHighlightSpan>();
+        }
+
+        _highlightSpanScratch.Clear();
+        AppendSearchHighlightSpansLocked();
+        AppendHoveredLinkSpanLocked();
+
+        if (_highlightSpanScratch.Count == 0)
+        {
+            return Array.Empty<TerminalHighlightSpan>();
+        }
+
+        return _highlightSpanScratch.ToArray();
+    }
+
+    private void AppendSearchHighlightSpansLocked()
+    {
+        if (_screen is null || string.IsNullOrEmpty(_searchNeedle))
+        {
+            _searchTotal = 0;
+            _searchSelected = -1;
+            _searchMatchScratch.Clear();
+            return;
+        }
+
+        string needle = _searchNeedle;
+        if (needle.Length == 0)
+        {
+            _searchTotal = 0;
+            _searchSelected = -1;
+            _searchMatchScratch.Clear();
+            return;
+        }
+
+        _searchMatchScratch.Clear();
+        int viewportTopAbsoluteRow = Math.Max(0, _screen.TotalRows - _screen.ViewportRows - _screen.ScrollOffset);
+        for (int absoluteRow = 0; absoluteRow < _screen.TotalRows; absoluteRow++)
+        {
+            TerminalRow terminalRow = _screen.GetRow(absoluteRow);
+            if (!TryBuildRowTextColumnMap(terminalRow, out string rowText))
+            {
+                continue;
+            }
+
+            int searchFrom = 0;
+            while (searchFrom <= rowText.Length - needle.Length)
+            {
+                int found = rowText.IndexOf(needle, searchFrom, StringComparison.Ordinal);
+                if (found < 0)
+                {
+                    break;
+                }
+
+                int mapEnd = found + needle.Length - 1;
+                if ((uint)found < (uint)_rowColumnMapScratch.Count &&
+                    (uint)mapEnd < (uint)_rowColumnMapScratch.Count)
+                {
+                    int startColumn = _rowColumnMapScratch[found];
+                    int endColumn = _rowColumnMapScratch[mapEnd];
+                    _searchMatchScratch.Add(new SearchMatch(absoluteRow, startColumn, endColumn));
+                }
+                searchFrom = found + Math.Max(needle.Length, 1);
+            }
+        }
+
+        _searchTotal = _searchMatchScratch.Count;
+        if (_searchTotal <= 0)
+        {
+            _searchSelected = -1;
+            return;
+        }
+
+        if (_searchSelected < 0)
+        {
+            _searchSelected = 0;
+        }
+        else if (_searchSelected >= _searchTotal)
+        {
+            _searchSelected = _searchTotal - 1;
+        }
+
+        for (int index = 0; index < _searchMatchScratch.Count; index++)
+        {
+            SearchMatch match = _searchMatchScratch[index];
+            int viewportRow = match.AbsoluteRow - viewportTopAbsoluteRow;
+            if ((uint)viewportRow >= (uint)_screen.ViewportRows)
+            {
+                continue;
+            }
+
+            TerminalHighlightKind kind = index == _searchSelected
+                ? TerminalHighlightKind.SearchSelected
+                : TerminalHighlightKind.SearchMatch;
+            _highlightSpanScratch.Add(
+                new TerminalHighlightSpan(
+                    viewportRow,
+                    match.StartColumn,
+                    match.EndColumn,
+                    kind));
+        }
+    }
+
+    private void AppendHoveredLinkSpanLocked()
+    {
+        if (_screen is null ||
+            _lastPointerRow < 0 ||
+            _lastPointerColumn < 0)
+        {
+            return;
+        }
+
+        int row = _lastPointerRow;
+        int column = _lastPointerColumn;
+        if ((uint)row >= (uint)_screen.ViewportRows || (uint)column >= (uint)_screen.Columns)
+        {
+            return;
+        }
+
+        if (TryResolveHyperlinkSpanFromPointerLocked(row, column, out TerminalHighlightSpan span))
+        {
+            _highlightSpanScratch.Add(span);
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(_hoveredLinkUrl) &&
+            TryResolveHoveredLinkSpanLocked(row, column, _hoveredLinkUrl, out span))
+        {
+            _highlightSpanScratch.Add(span);
+        }
+    }
+
+    private bool TryResolveHyperlinkSpanFromPointerLocked(
+        int row,
+        int column,
+        out TerminalHighlightSpan span)
+    {
+        span = default;
+        if (_screen is null)
+        {
+            return false;
+        }
+
+        TerminalRow terminalRow = _screen.GetViewportRow(row);
+        ReadOnlySpan<TerminalCell> cells = terminalRow.ReadOnlyCells;
+        if ((uint)column >= (uint)cells.Length)
+        {
+            return false;
+        }
+
+        int hyperlinkId = cells[column].HyperlinkId;
+        if (hyperlinkId <= 0)
+        {
+            return false;
+        }
+
+        int startColumn = column;
+        int endColumn = column;
+        while (startColumn > 0 && cells[startColumn - 1].HyperlinkId == hyperlinkId)
+        {
+            startColumn--;
+        }
+
+        while (endColumn + 1 < cells.Length && cells[endColumn + 1].HyperlinkId == hyperlinkId)
+        {
+            endColumn++;
+        }
+
+        span = new TerminalHighlightSpan(
+            row,
+            startColumn,
+            endColumn,
+            TerminalHighlightKind.HyperlinkHover);
+        return true;
+    }
+
+    private bool TryResolveHoveredLinkSpanLocked(
+        int row,
+        int column,
+        string url,
+        out TerminalHighlightSpan span)
+    {
+        span = default;
+
+        if (_screen is null)
+        {
+            return false;
+        }
+
+        TerminalRow terminalRow = _screen.GetViewportRow(row);
+        if (TryBuildRowTextColumnMap(terminalRow, out string rowText))
+        {
+            int searchFrom = 0;
+            while (searchFrom <= rowText.Length - url.Length)
+            {
+                int found = rowText.IndexOf(url, searchFrom, StringComparison.Ordinal);
+                if (found < 0)
+                {
+                    break;
+                }
+
+                int mapEnd = found + url.Length - 1;
+                if ((uint)found < (uint)_rowColumnMapScratch.Count &&
+                    (uint)mapEnd < (uint)_rowColumnMapScratch.Count)
+                {
+                    int startColumn = _rowColumnMapScratch[found];
+                    int endColumn = _rowColumnMapScratch[mapEnd];
+                    if (column >= startColumn && column <= endColumn)
+                    {
+                        span = new TerminalHighlightSpan(
+                            row,
+                            startColumn,
+                            endColumn,
+                            TerminalHighlightKind.HyperlinkHover);
+                        return true;
+                    }
+                }
+
+                searchFrom = found + Math.Max(url.Length, 1);
+            }
+        }
+
+        if (TryResolveLinkTokenSpanLocked(terminalRow, column, out int tokenStart, out int tokenEnd))
+        {
+            span = new TerminalHighlightSpan(
+                row,
+                tokenStart,
+                tokenEnd,
+                TerminalHighlightKind.HyperlinkHover);
+            return true;
+        }
+
+        span = new TerminalHighlightSpan(
+            row,
+            column,
+            column,
+            TerminalHighlightKind.HyperlinkHover);
+        return true;
+    }
+
+    private bool TryBuildRowTextColumnMap(TerminalRow row, out string rowText)
+    {
+        _rowTextScratch.Clear();
+        _rowColumnMapScratch.Clear();
+
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        for (int col = 0; col < cells.Length; col++)
+        {
+            ref readonly TerminalCell cell = ref cells[col];
+            if (cell.Width == 0 || (cell.Attributes & CellAttributes.Hidden) != 0)
+            {
+                continue;
+            }
+
+            string? text = null;
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                text = cell.Grapheme;
+            }
+            else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
+            {
+                text = char.ConvertFromUtf32(cell.Codepoint);
+            }
+
+            if (string.IsNullOrEmpty(text))
+            {
+                continue;
+            }
+
+            int start = _rowTextScratch.Length;
+            _rowTextScratch.Append(text);
+            int end = _rowTextScratch.Length;
+            for (int i = start; i < end; i++)
+            {
+                _rowColumnMapScratch.Add(col);
+            }
+        }
+
+        if (_rowTextScratch.Length == 0)
+        {
+            rowText = string.Empty;
+            return false;
+        }
+
+        rowText = _rowTextScratch.ToString();
+        return true;
+    }
+
+    private static bool TryResolveLinkTokenSpanLocked(
+        TerminalRow row,
+        int column,
+        out int startColumn,
+        out int endColumn)
+    {
+        startColumn = 0;
+        endColumn = 0;
+
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        if ((uint)column >= (uint)cells.Length)
+        {
+            return false;
+        }
+
+        if (!TryGetPrimaryRune(in cells[column], out Rune centerRune) ||
+            !IsLinkTokenRune(centerRune))
+        {
+            return false;
+        }
+
+        int start = column;
+        int end = column;
+
+        while (start > 0 &&
+               TryGetPrimaryRune(in cells[start - 1], out Rune rune) &&
+               IsLinkTokenRune(rune))
+        {
+            start--;
+        }
+
+        while (end + 1 < cells.Length &&
+               TryGetPrimaryRune(in cells[end + 1], out Rune rune) &&
+               IsLinkTokenRune(rune))
+        {
+            end++;
+        }
+
+        startColumn = start;
+        endColumn = end;
+        return true;
+    }
+
+    private static bool TryGetPrimaryRune(ref readonly TerminalCell cell, out Rune rune)
+    {
+        rune = default;
+
+        if (cell.Width == 0 || (cell.Attributes & CellAttributes.Hidden) != 0)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(cell.Grapheme))
+        {
+            return Rune.DecodeFromUtf16(cell.Grapheme.AsSpan(), out rune, out int consumed) == OperationStatus.Done &&
+                   consumed > 0;
+        }
+
+        if (!Rune.IsValid(cell.Codepoint))
+        {
+            return false;
+        }
+
+        rune = new Rune(cell.Codepoint);
+        return true;
+    }
+
+    private static bool IsLinkTokenRune(Rune rune)
+    {
+        if (Rune.IsLetterOrDigit(rune))
+        {
+            return true;
+        }
+
+        return rune.Value switch
+        {
+            '-' or '_' or '.' or '~' or ':' or '/' or '?' or '#' or '[' or ']' or '@' or
+            '!' or '$' or '&' or '\'' or '(' or ')' or '*' or '+' or ',' or ';' or '%' or '=' =>
+                true,
+            _ => false,
+        };
+    }
+
+    private bool SelectSearchMatchRelative(int delta)
+    {
+        if (string.IsNullOrEmpty(_searchNeedle))
+        {
+            return false;
+        }
+
+        UpdateRendererParityStateFromScreen();
+        if (_searchTotal <= 0)
+        {
+            return false;
+        }
+
+        int previousSelection = _searchSelected;
+        int selected = _searchSelected;
+        if (selected < 0 || selected >= _searchTotal)
+        {
+            selected = 0;
+        }
+        else
+        {
+            selected = (selected + delta) % _searchTotal;
+            if (selected < 0)
+            {
+                selected += _searchTotal;
+            }
+        }
+
+        if (selected == previousSelection && _searchTotal == 1)
+        {
+            return false;
+        }
+
+        _searchSelected = selected;
+        bool scrolled = ScrollSelectedSearchMatchIntoView();
+        UpdateRendererParityStateFromScreen();
+        if (scrolled)
+        {
+            RaiseScrollInvalidated();
+        }
+
+        return true;
+    }
+
+    private bool ScrollSelectedSearchMatchIntoView()
+    {
+        if (_screen is null || _searchSelected < 0)
+        {
+            return false;
+        }
+
+        bool changed = false;
+        lock (_screen.SyncRoot)
+        {
+            if ((uint)_searchSelected >= (uint)_searchMatchScratch.Count)
+            {
+                return false;
+            }
+
+            int selectedAbsoluteRow = _searchMatchScratch[_searchSelected].AbsoluteRow;
+            int viewportTopAbsoluteRow = Math.Max(0, _screen.TotalRows - _screen.ViewportRows - _screen.ScrollOffset);
+            int viewportBottomAbsoluteRow = viewportTopAbsoluteRow + _screen.ViewportRows - 1;
+            if (selectedAbsoluteRow >= viewportTopAbsoluteRow && selectedAbsoluteRow <= viewportBottomAbsoluteRow)
+            {
+                return false;
+            }
+
+            int maxTopAbsoluteRow = Math.Max(0, _screen.TotalRows - _screen.ViewportRows);
+            int nextTopAbsoluteRow = selectedAbsoluteRow < viewportTopAbsoluteRow
+                ? selectedAbsoluteRow
+                : selectedAbsoluteRow - _screen.ViewportRows + 1;
+            nextTopAbsoluteRow = Math.Clamp(nextTopAbsoluteRow, 0, maxTopAbsoluteRow);
+            int nextScrollOffset = _screen.TotalRows - _screen.ViewportRows - nextTopAbsoluteRow;
+            nextScrollOffset = Math.Clamp(nextScrollOffset, 0, _screen.MaxScrollOffset);
+            if (_screen.ScrollOffset != nextScrollOffset)
+            {
+                _screen.ScrollOffset = nextScrollOffset;
+                _screen.InvalidateAll();
+                changed = true;
+            }
+        }
+
+        if (!changed)
+        {
+            return false;
+        }
+
+        SyncScrollDataFromScreenOffset();
+        UpdateRendererCursorForViewport();
         return true;
     }
 
@@ -1854,6 +2629,26 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _screen.InvalidateAll();
     }
 
+    private void SyncScrollDataFromScreenOffset()
+    {
+        if (_scrollData is null || _screen is null)
+        {
+            return;
+        }
+
+        int screenMaxOffsetRows = _screen.MaxScrollOffset;
+        if (screenMaxOffsetRows <= 0 || _scrollData.MaxOffset <= 0)
+        {
+            _scrollData.Offset = _scrollData.MaxOffset;
+            return;
+        }
+
+        int topAnchoredRows = screenMaxOffsetRows - _screen.ScrollOffset;
+        topAnchoredRows = Math.Clamp(topAnchoredRows, 0, screenMaxOffsetRows);
+        double scaledOffset = (_scrollData.MaxOffset * topAnchoredRows) / screenMaxOffsetRows;
+        _scrollData.Offset = scaledOffset;
+    }
+
     private void UpdateRendererCursorForViewport()
     {
         if (_renderer is null || _screen is null || _vtProcessor is null)
@@ -1865,12 +2660,93 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         int cursorRow = _vtProcessor.CursorRow + _screen.ScrollOffset;
         _renderer.CursorColumn = cursorColumn;
         _renderer.CursorRow = cursorRow;
+        bool blinkEnabled = UpdateRendererCursorStyleFromVtProcessor();
 
         bool rowVisible = (uint)cursorRow < (uint)_screen.ViewportRows;
         bool columnVisible = (uint)cursorColumn < (uint)_screen.Columns;
         bool atLiveBottom = _screen.ScrollOffset == 0;
-        _renderer.CursorVisible = _vtProcessor.CursorVisible && atLiveBottom && rowVisible && columnVisible;
+        bool baseVisible = _vtProcessor.CursorVisible && atLiveBottom && rowVisible && columnVisible;
+        bool blinkPhaseActive = blinkEnabled && IsFocused;
+
+        if (baseVisible &&
+            blinkPhaseActive &&
+            (_lastBlinkCursorColumn != cursorColumn ||
+             _lastBlinkCursorRow != cursorRow ||
+             _lastBlinkCursorStyle != _renderer.CursorStyle))
+        {
+            _cursorBlinkVisiblePhase = true;
+            _lastBlinkCursorColumn = cursorColumn;
+            _lastBlinkCursorRow = cursorRow;
+            _lastBlinkCursorStyle = _renderer.CursorStyle;
+        }
+
+        EnsureCursorBlinkTimerRunning(baseVisible && blinkPhaseActive);
+        _renderer.CursorVisible = baseVisible && (!blinkPhaseActive || _cursorBlinkVisiblePhase);
     }
+
+    private bool UpdateRendererCursorStyleFromVtProcessor()
+    {
+        if (_renderer is null || _vtProcessor is not ITerminalCursorStyleSource cursorStyleSource)
+        {
+            return false;
+        }
+
+        _renderer.CursorStyle = ConvertCursorStyle(cursorStyleSource.CursorStyle);
+        return cursorStyleSource.CursorBlinking;
+    }
+
+    private void EnsureCursorBlinkTimerRunning(bool enabled)
+    {
+        if (enabled)
+        {
+            _cursorBlinkTimer ??= CreateCursorBlinkTimer();
+            if (!_cursorBlinkTimer.IsEnabled)
+            {
+                _cursorBlinkTimer.Start();
+            }
+
+            return;
+        }
+
+        if (_cursorBlinkTimer is not null && _cursorBlinkTimer.IsEnabled)
+        {
+            _cursorBlinkTimer.Stop();
+        }
+
+        _cursorBlinkVisiblePhase = true;
+    }
+
+    private DispatcherTimer CreateCursorBlinkTimer()
+    {
+        DispatcherTimer timer = new()
+        {
+            Interval = CursorBlinkInterval,
+        };
+        timer.Tick += OnCursorBlinkTick;
+        return timer;
+    }
+
+    private void OnCursorBlinkTick(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        _cursorBlinkVisiblePhase = !_cursorBlinkVisiblePhase;
+        UpdateRendererCursorForViewport();
+        _presenter?.Invalidate();
+    }
+
+    private static CursorStyle ConvertCursorStyle(TerminalCursorStyle style)
+    {
+        return style switch
+        {
+            TerminalCursorStyle.Underline => CursorStyle.Underline,
+            TerminalCursorStyle.Bar => CursorStyle.Bar,
+            TerminalCursorStyle.BlockHollow => CursorStyle.BlockHollow,
+            _ => CursorStyle.Block,
+        };
+    }
+
+    private readonly record struct SearchMatch(int AbsoluteRow, int StartColumn, int EndColumn);
 
     private static Color ArgbToAvaloniaColor(uint argb) =>
         Color.FromArgb(

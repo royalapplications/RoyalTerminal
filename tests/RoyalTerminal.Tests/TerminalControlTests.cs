@@ -10,6 +10,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
+using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
@@ -189,6 +190,66 @@ public class TerminalControlTests
         Assert.False(control.HasActiveSession);
         Assert.Null(control.ActiveTransportId);
         Assert.True(transport.StopCalled);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_TransportExit_RaisesProcessExited()
+    {
+        FakeTransport transport = new();
+        CompositeTerminalTransportFactory factory = new(
+            new ITerminalTransportProvider[]
+            {
+                new FakeTransportProvider(transport),
+            });
+
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            new DefaultVtProcessorFactory(),
+            new DefaultPtyFactory(),
+            new NullSshCredentialProvider(),
+            new RejectAllSshHostKeyValidator(),
+            factory);
+
+        int? exitCode = null;
+        control.ProcessExited += (_, code) => exitCode = code;
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+        transport.RaiseProcessExited(17);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(17, exitCode);
+    }
+
+    [AvaloniaFact]
+    public void Control_RequestClose_RaisesCloseRequested()
+    {
+        TerminalControl control = new();
+        int closeCount = 0;
+        control.CloseRequested += (_, _) => closeCount++;
+
+        control.RequestClose();
+        control.RequestClose();
+
+        Assert.Equal(2, closeCount);
+    }
+
+    [AvaloniaFact]
+    public void Control_HasSelection_ReflectsRendererSelectionState()
+    {
+        TerminalControl control = new();
+        Assert.False(control.HasSelection);
+
+        Assert.NotNull(control.Renderer);
+        control.Renderer!.SelectionStart = (2, 3);
+        control.Renderer.SelectionEnd = (8, 3);
+
+        Assert.True(control.HasSelection);
+
+        control.Renderer.SelectionEnd = null;
+        Assert.False(control.HasSelection);
     }
 
     [AvaloniaFact]
@@ -614,6 +675,134 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_ManagedCursorStyle_UpdatesRendererCursorStyle()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.Renderer);
+        SkiaTerminalRenderer renderer = control.Renderer!;
+
+        control.WriteOutput("\x1b[6 q"u8);
+        Assert.Equal(CursorStyle.Bar, renderer.CursorStyle);
+
+        control.WriteOutput("\x1b[3 q"u8);
+        Assert.Equal(CursorStyle.Underline, renderer.CursorStyle);
+
+        control.WriteOutput("\x1b[1 q"u8);
+        Assert.Equal(CursorStyle.Block, renderer.CursorStyle);
+    }
+
+    [AvaloniaFact]
+    public void Control_BackgroundOpacityToggle_UpdatesRendererState()
+    {
+        TerminalControl control = new();
+        Assert.NotNull(control.Renderer);
+
+        Assert.False(control.BackgroundOpacityEnabled);
+        Assert.False(control.Renderer!.BackgroundOpacityEnabled);
+
+        control.ToggleBackgroundOpacity();
+        Assert.True(control.BackgroundOpacityEnabled);
+        Assert.True(control.Renderer.BackgroundOpacityEnabled);
+        Assert.True(control.Renderer.BackgroundOpacityCells);
+
+        control.BackgroundOpacityEnabled = false;
+        Assert.False(control.BackgroundOpacityEnabled);
+        Assert.False(control.Renderer.BackgroundOpacityEnabled);
+    }
+
+    [AvaloniaFact]
+    public void Control_SearchLifecycle_BuildsMatchesAndSelectionWithoutCallerTotals()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        control.WriteOutput("needle alpha needle\nbeta needle"u8);
+
+        control.StartSearch("needle");
+
+        Assert.Equal("needle", control.SearchNeedle);
+        Assert.Equal(3, control.SearchTotal);
+        Assert.Equal(0, control.SearchSelected);
+
+        Assert.True(control.SelectNextSearchMatch());
+        Assert.Equal(1, control.SearchSelected);
+
+        Assert.True(control.SelectPreviousSearchMatch());
+        Assert.Equal(0, control.SearchSelected);
+
+        control.EndSearch();
+
+        Assert.Null(control.SearchNeedle);
+        Assert.Equal(0, control.SearchTotal);
+        Assert.Equal(-1, control.SearchSelected);
+    }
+
+    [AvaloniaFact]
+    public void Control_HoveredLinkUrl_NormalizesWhitespace()
+    {
+        TerminalControl control = new();
+
+        control.SetHoveredLinkUrl("   ");
+        Assert.Null(control.HoveredLinkUrl);
+
+        control.SetHoveredLinkUrl("https://example.com");
+        Assert.Equal("https://example.com", control.HoveredLinkUrl);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_ManagedCursorBlinking_TogglesVisiblePhase_AndSteadyStyleStopsBlinking()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.Renderer);
+        SkiaTerminalRenderer renderer = control.Renderer!;
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+
+        window.Show();
+        control.Focus();
+        Dispatcher.UIThread.RunJobs();
+
+        try
+        {
+            control.WriteOutput("X"u8);
+            control.WriteOutput("\x1b[1 q"u8); // blinking block
+            Dispatcher.UIThread.RunJobs();
+
+            bool initialVisible = renderer.CursorVisible;
+            bool toggled = await WaitUntilAsync(
+                () => renderer.CursorVisible != initialVisible,
+                TimeSpan.FromSeconds(2));
+            Assert.True(toggled);
+
+            control.WriteOutput("\x1b[2 q"u8); // steady block
+            Dispatcher.UIThread.RunJobs();
+            bool steadyVisible = renderer.CursorVisible;
+
+            await Task.Delay(700);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(steadyVisible, renderer.CursorVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Control_MultipleInstances_AreIndependent()
     {
         var control1 = new TerminalControl { Columns = 80, Rows = 24 };
@@ -926,6 +1115,24 @@ public class TerminalControlTests
         };
     }
 
+    private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            Dispatcher.UIThread.RunJobs();
+            if (predicate())
+            {
+                return true;
+            }
+
+            await Task.Delay(25);
+        }
+
+        Dispatcher.UIThread.RunJobs();
+        return predicate();
+    }
+
     private static uint ColorToArgb(Color c) =>
         ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
 
@@ -1222,6 +1429,11 @@ public class TerminalControlTests
             IsRunning = false;
             _processExited?.Invoke(0);
             return ValueTask.CompletedTask;
+        }
+
+        public void RaiseProcessExited(int exitCode)
+        {
+            _processExited?.Invoke(exitCode);
         }
 
         public void Dispose()

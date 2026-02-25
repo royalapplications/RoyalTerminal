@@ -33,8 +33,24 @@ public struct TerminalCell
     /// <summary>Underline rendering style for this cell.</summary>
     public TerminalUnderlineStyle UnderlineStyle;
 
+    /// <summary>Optional explicit underline color as packed ARGB.</summary>
+    public uint UnderlineColor;
+
+    /// <summary>Whether <see cref="UnderlineColor"/> should be used.</summary>
+    public bool HasUnderlineColor;
+
     /// <summary>Extended decoration flags not represented in <see cref="CellAttributes"/>.</summary>
     public CellDecorations Decorations;
+
+    /// <summary>
+    /// Whether this cell has an explicit background set (vs inherited/default background).
+    /// </summary>
+    public bool HasBackground;
+
+    /// <summary>
+    /// Hyperlink token id for OSC8 links. Zero means no hyperlink.
+    /// </summary>
+    public int HyperlinkId;
 
     /// <summary>Number of columns this character spans (1 for normal, 2 for wide/CJK).</summary>
     public byte Width;
@@ -51,7 +67,11 @@ public struct TerminalCell
         Background = bg,
         Attributes = CellAttributes.None,
         UnderlineStyle = TerminalUnderlineStyle.None,
+        UnderlineColor = 0,
+        HasUnderlineColor = false,
         Decorations = CellDecorations.None,
+        HasBackground = true,
+        HyperlinkId = 0,
         Width = 1,
     };
 }
@@ -94,6 +114,32 @@ public enum CellDecorations : byte
 {
     None = 0,
     Overline = 1 << 0,
+}
+
+/// <summary>
+/// Highlight category for managed renderer overlay spans.
+/// </summary>
+public enum TerminalHighlightKind : byte
+{
+    SearchMatch = 0,
+    SearchSelected = 1,
+    HyperlinkHover = 2,
+}
+
+/// <summary>
+/// Row-local highlight span in viewport coordinates.
+/// </summary>
+public readonly record struct TerminalHighlightSpan(
+    int Row,
+    int StartColumn,
+    int EndColumn,
+    TerminalHighlightKind Kind)
+{
+    /// <summary>Returns true when this span contains the specified cell.</summary>
+    public bool Contains(int row, int column)
+    {
+        return row == Row && column >= StartColumn && column <= EndColumn;
+    }
 }
 
 /// <summary>
@@ -140,6 +186,9 @@ public sealed class TerminalRow
 public sealed class TerminalScreen
 {
     private readonly List<TerminalRow> _rows;
+    private readonly Dictionary<int, string> _hyperlinksById = [];
+    private readonly Dictionary<string, int> _hyperlinkIdsByUrl = new(StringComparer.Ordinal);
+    private int _nextHyperlinkId = 1;
     private int _scrollbackLimit;
     private int _viewportTop;
     private TerminalTheme _theme = TerminalTheme.Dark;
@@ -323,6 +372,50 @@ public sealed class TerminalScreen
     /// Gets a row by absolute index.
     /// </summary>
     public TerminalRow GetRow(int absoluteRow) => _rows[absoluteRow];
+
+    /// <summary>
+    /// Registers a hyperlink URL and returns its stable token id.
+    /// </summary>
+    public int RegisterHyperlink(string url)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(url);
+
+        if (_hyperlinkIdsByUrl.TryGetValue(url, out int existingId))
+        {
+            return existingId;
+        }
+
+        int nextId = _nextHyperlinkId;
+        if (nextId == int.MaxValue)
+        {
+            // Reuse existing registry to avoid integer overflow while keeping currently
+            // active ids stable for already-rendered cells.
+            nextId = 1;
+            while (_hyperlinksById.ContainsKey(nextId))
+            {
+                nextId++;
+            }
+        }
+
+        _nextHyperlinkId = nextId + 1;
+        _hyperlinksById[nextId] = url;
+        _hyperlinkIdsByUrl[url] = nextId;
+        return nextId;
+    }
+
+    /// <summary>
+    /// Resolves an OSC8 hyperlink token id to its URL.
+    /// </summary>
+    public bool TryGetHyperlinkUrl(int hyperlinkId, out string? url)
+    {
+        if (hyperlinkId <= 0)
+        {
+            url = null;
+            return false;
+        }
+
+        return _hyperlinksById.TryGetValue(hyperlinkId, out url);
+    }
 
     /// <summary>
     /// Adds a new row to the bottom, potentially scrolling up.

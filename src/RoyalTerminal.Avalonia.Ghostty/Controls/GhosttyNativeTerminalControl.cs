@@ -149,6 +149,7 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
             title => TitleChanged?.Invoke(this, title),
             exitCode => ProcessExited?.Invoke(this, exitCode),
             () => CloseRequested?.Invoke(this, EventArgs.Empty),
+            null,
             OnRuntimeColorChanged,
             OnRuntimeConfigChanged,
             OnRuntimeReloadConfig);
@@ -491,7 +492,7 @@ public class GhosttyNativeTerminalControl : NativeControlHost, IDisposable
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
-        if (GhosttyInputPipeline.HandlePointerReleased(_surface, e))
+        if (GhosttyInputPipeline.HandlePointerReleased(this, _surface, e))
         {
             e.Handled = true;
         }

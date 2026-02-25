@@ -411,6 +411,52 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
+    public async Task Headless_Osc8Hover_AutoResolvesHoveredLinkUrl_WithoutCallerSetter()
+    {
+        const string url = "https://example.com/parity";
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            preference: VtProcessorPreference.Managed);
+        control.Width = 640;
+        control.Height = 400;
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+
+            control.WriteOutput(Encoding.UTF8.GetBytes($"\x1b]8;;{url}\x1b\\LINK\x1b]8;;\x1b\\ plain"));
+            Dispatcher.UIThread.RunJobs();
+
+            Point linkPoint = await GetCellInteractionPointAsync(control, window, column: 1, row: 0);
+            RaisePointerMove(control, window, linkPoint);
+            bool hovered = await WaitUntilAsync(
+                () => string.Equals(control.HoveredLinkUrl, url, StringComparison.Ordinal),
+                TimeSpan.FromSeconds(2));
+            Assert.True(hovered);
+
+            Point plainPoint = await GetCellInteractionPointAsync(control, window, column: 6, row: 0);
+            RaisePointerMove(control, window, plainPoint);
+            bool cleared = await WaitUntilAsync(
+                () => control.HoveredLinkUrl is null,
+                TimeSpan.FromSeconds(2));
+            Assert.True(cleared);
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Headless_FallbackParity_AutoAndManaged_PreserveKeyboardMousePasteAndResize()
     {
         DefaultVtProcessorFactory vtFactory = new();
@@ -655,6 +701,44 @@ public sealed class TerminalControlHeadlessInteractionTests
         Point? translated = control.TranslatePoint(local, window);
         Assert.True(translated.HasValue, "Failed to translate interaction point to window coordinates.");
         return translated!.Value;
+    }
+
+    private static async Task<Point> GetCellInteractionPointAsync(
+        TerminalControl control,
+        Window window,
+        int column,
+        int row)
+    {
+        bool arranged = await WaitUntilAsync(
+            () => control.Bounds.Width > 1 &&
+                  control.Bounds.Height > 1 &&
+                  control.Renderer is { CellWidth: > 0f, CellHeight: > 0f },
+            TimeSpan.FromSeconds(2));
+        Assert.True(arranged, $"Terminal control was not arranged in time. Bounds={control.Bounds}");
+
+        double x = (column + 0.5) * control.Renderer!.CellWidth;
+        double y = (row + 0.5) * control.Renderer.CellHeight;
+        Point local = new(x, y);
+        Point? translated = control.TranslatePoint(local, window);
+        Assert.True(translated.HasValue, "Failed to translate cell point to window coordinates.");
+        return translated!.Value;
+    }
+
+    private static void RaisePointerMove(TerminalControl control, Window window, Point windowPoint)
+    {
+        Pointer pointer = new(id: 4, PointerType.Mouse, isPrimary: true);
+        ulong timestamp = (ulong)Environment.TickCount64;
+
+        PointerEventArgs move = new(
+            InputElement.PointerMovedEvent,
+            control,
+            pointer,
+            window,
+            windowPoint,
+            timestamp,
+            new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.Other),
+            KeyModifiers.None);
+        control.RaiseEvent(move);
     }
 
     private static void RaiseMouseSequence(TerminalControl control, Window window, Point windowPoint)
