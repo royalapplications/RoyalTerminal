@@ -645,6 +645,13 @@ test -f "${CODEX_HOME:-$HOME/.codex}/skills/royalterminal-development/SKILL.md" 
 | Cross-platform mode | No | No | Yes | Yes |
 | Demo fallback when unavailable | Routed to next supported mode (`Native VT -> Managed VT -> Rendered`) | Routed to next supported mode (`Native VT -> Managed VT -> Rendered`) | Routed to `Managed VT` then `Rendered` | Routed to `Rendered` |
 
+### Ghostty Rendered Parity Notes
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Per-cell `HyperlinkId` transport | Managed fallback | Synthetic ids are assigned for the currently hovered link span (from `MouseOverLink` URL + pointer row/column). Full-grid OSC8 link transport still requires native row-cell export support. |
+| `UnderlineColor` + `HasUnderlineColor` transport | Native blocker | Embedded `ghostty_surface_get_row_cells*` readback does not export explicit underline-color metadata. Managed path preserves underline rendering using foreground fallback with `HasUnderlineColor=false`. |
+
 ## Rendering Interop Contract
 
 `RoyalTerminal.Rendering.Contracts` defines the backend-neutral model:
@@ -703,6 +710,11 @@ are required for Unicode-correct terminal cell readback and rendering.
    Added `ghostty_surface_get_row_cells_with_graphemes` and supporting grapheme-span payloads so managed code can reconstruct full per-cell graphemes (primary codepoint + trailing UTF-32 sequence). This was needed because `codepoint`-only row reads lose combining/emoji cluster data and break HarfBuzz shaping and fallback selection in RoyalTerminal.GhosttySharp.
 2. [`523554136`](https://github.com/wieslawsoltes/ghostty/commit/523554136) `Force unicode grapheme width method for embedded surfaces`
    Forced embedded surfaces to use `grapheme-width-method=unicode`. This was needed to avoid legacy-width behavior that could split regional-indicator flag pairs and other emoji sequences into non-clustered cells, causing incorrect native VT/rendered output despite shaping support in managed code.
+
+Current native parity blockers still pending upstream/submodule API expansion:
+
+- Per-cell hyperlink token export in embedded row-cell payload.
+- Per-cell underline color export (`UnderlineColor` value + explicit-presence bit).
 
 ## PTY Layer
 
@@ -910,7 +922,8 @@ dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csp
 |----------|--------|
 | Initialization/config/app lifecycle | Implemented |
 | Surface lifecycle/input/sizing/focus | Implemented |
-| Screen readback (`surface_screen_lock`, row/cursor reads) | Implemented |
+| Screen readback (`surface_screen_lock`, row/cursor reads) | Implemented (`codepoint`, colors, style attrs, width, grapheme spans) |
+| Per-cell hyperlink/underline-color metadata readback | Not exported by current C API (native blocker) |
 | Inspector and selection actions | Implemented |
 
 ### `libghostty-terminal`
