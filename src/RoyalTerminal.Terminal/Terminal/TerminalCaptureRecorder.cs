@@ -21,9 +21,11 @@ public sealed class TerminalCaptureRecorder
     private int _initialRows = 24;
     private int _lastResizeColumns = 80;
     private int _lastResizeRows = 24;
+    private long _durationMilliseconds;
+    private volatile bool _isCapturing;
 
     /// <summary>Gets whether capture recording is active.</summary>
-    public bool IsCapturing { get; private set; }
+    public bool IsCapturing => _isCapturing;
 
     /// <summary>
     /// Starts a new capture session and clears previously recorded events.
@@ -39,8 +41,9 @@ public sealed class TerminalCaptureRecorder
             _initialRows = Math.Max(1, initialRows);
             _lastResizeColumns = _initialColumns;
             _lastResizeRows = _initialRows;
+            _durationMilliseconds = 0;
             _stopwatch.Restart();
-            IsCapturing = true;
+            _isCapturing = true;
         }
     }
 
@@ -51,10 +54,10 @@ public sealed class TerminalCaptureRecorder
     {
         lock (_sync)
         {
-            if (IsCapturing)
+            if (_isCapturing)
             {
                 _stopwatch.Stop();
-                IsCapturing = false;
+                _isCapturing = false;
             }
 
             return CreateSessionLocked();
@@ -70,7 +73,8 @@ public sealed class TerminalCaptureRecorder
         {
             _events.Clear();
             _stopwatch.Reset();
-            IsCapturing = false;
+            _durationMilliseconds = 0;
+            _isCapturing = false;
             _transportId = null;
             _createdUtc = DateTimeOffset.UtcNow;
         }
@@ -108,9 +112,14 @@ public sealed class TerminalCaptureRecorder
     /// </summary>
     public void CaptureResize(int columns, int rows)
     {
+        if (!_isCapturing)
+        {
+            return;
+        }
+
         lock (_sync)
         {
-            if (!IsCapturing)
+            if (!_isCapturing)
             {
                 return;
             }
@@ -122,38 +131,48 @@ public sealed class TerminalCaptureRecorder
                 return;
             }
 
+            long offsetMilliseconds = _stopwatch.ElapsedMilliseconds;
             _events.Add(new TerminalCaptureEvent
             {
-                OffsetMilliseconds = _stopwatch.ElapsedMilliseconds,
+                OffsetMilliseconds = offsetMilliseconds,
                 Kind = TerminalCaptureEventKind.Resize,
                 Columns = safeColumns,
                 Rows = safeRows,
             });
             _lastResizeColumns = safeColumns;
             _lastResizeRows = safeRows;
+            if (offsetMilliseconds > _durationMilliseconds)
+            {
+                _durationMilliseconds = offsetMilliseconds;
+            }
         }
     }
 
     private void CaptureBinaryEvent(TerminalCaptureEventKind kind, ReadOnlySpan<byte> data)
     {
-        if (data.IsEmpty)
+        if (data.IsEmpty || !_isCapturing)
         {
             return;
         }
 
         lock (_sync)
         {
-            if (!IsCapturing)
+            if (!_isCapturing)
             {
                 return;
             }
 
+            long offsetMilliseconds = _stopwatch.ElapsedMilliseconds;
             _events.Add(new TerminalCaptureEvent
             {
-                OffsetMilliseconds = _stopwatch.ElapsedMilliseconds,
+                OffsetMilliseconds = offsetMilliseconds,
                 Kind = kind,
                 Data = data.ToArray(),
             });
+            if (offsetMilliseconds > _durationMilliseconds)
+            {
+                _durationMilliseconds = offsetMilliseconds;
+            }
         }
     }
 
@@ -178,6 +197,7 @@ public sealed class TerminalCaptureRecorder
             TransportId = _transportId,
             InitialColumns = _initialColumns,
             InitialRows = _initialRows,
+            DurationMilliseconds = _durationMilliseconds,
             Events = snapshotEvents,
         };
     }
