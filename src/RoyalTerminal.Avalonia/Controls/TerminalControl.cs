@@ -213,6 +213,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private readonly List<TerminalHighlightSpan> _highlightSpanScratch = [];
     private readonly List<SearchMatch> _searchMatchScratch = [];
     private readonly StringBuilder _rowTextScratch = new();
+    private readonly StringBuilder _linkTokenScratch = new();
     private readonly List<int> _rowColumnMapScratch = [];
     private DispatcherTimer? _cursorBlinkTimer;
     private bool _cursorBlinkVisiblePhase = true;
@@ -1292,6 +1293,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             button = TerminalMouseButton.Left;
         }
 
+        if ((button == TerminalMouseButton.Left || props.IsLeftButtonPressed) &&
+            TryActivateHyperlinkFromPointer(e.KeyModifiers))
+        {
+            _isMouseSelecting = false;
+            e.Handled = true;
+            return;
+        }
+
         bool pointerSent = false;
         if (button != TerminalMouseButton.None)
         {
@@ -2103,13 +2112,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
-        TerminalRow row = _screen.GetViewportRow(_lastPointerRow);
-        int hyperlinkId = row[_lastPointerColumn].HyperlinkId;
-        string? nextUrl = null;
-        if (hyperlinkId > 0 && _screen.TryGetHyperlinkUrl(hyperlinkId, out string? resolved))
-        {
-            nextUrl = resolved;
-        }
+        string? nextUrl = TryResolveHoveredLinkUrlAtPointerLocked(out string? resolvedUrl)
+            ? resolvedUrl
+            : null;
 
         if (string.Equals(_hoveredLinkUrl, nextUrl, StringComparison.Ordinal))
         {
@@ -2117,6 +2122,196 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _hoveredLinkUrl = nextUrl;
+        return true;
+    }
+
+    private bool TryResolveHoveredLinkUrlAtPointerLocked(out string? resolvedUrl)
+    {
+        resolvedUrl = null;
+
+        if (_screen is null ||
+            _lastPointerColumn < 0 ||
+            _lastPointerRow < 0 ||
+            (uint)_lastPointerColumn >= (uint)_screen.Columns ||
+            (uint)_lastPointerRow >= (uint)_screen.ViewportRows)
+        {
+            return false;
+        }
+
+        TerminalRow row = _screen.GetViewportRow(_lastPointerRow);
+        int hyperlinkId = row[_lastPointerColumn].HyperlinkId;
+        if (hyperlinkId > 0 && _screen.TryGetHyperlinkUrl(hyperlinkId, out string? resolved))
+        {
+            resolvedUrl = resolved;
+            return true;
+        }
+
+        return TryResolveInlineHoveredLinkUrlLocked(row, _lastPointerColumn, out resolvedUrl);
+    }
+
+    private bool TryActivateHyperlinkFromPointer(KeyModifiers modifiers)
+    {
+        if (_screen is null || !HasHyperlinkActivationModifier(modifiers))
+        {
+            return false;
+        }
+
+        string? url;
+        lock (_screen.SyncRoot)
+        {
+            if (!TryResolveHoveredLinkUrlAtPointerLocked(out url) || string.IsNullOrWhiteSpace(url))
+            {
+                return false;
+            }
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri))
+        {
+            return false;
+        }
+
+        return TryActivateHyperlink(uri);
+    }
+
+    /// <summary>
+    /// Activates a hyperlink resolved from terminal content (for example on Ctrl/Cmd+click).
+    /// Override in tests or hosts that need custom navigation behavior.
+    /// </summary>
+    protected virtual bool TryActivateHyperlink(Uri uri)
+    {
+        ArgumentNullException.ThrowIfNull(uri);
+        TopLevel? topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel?.Launcher is null)
+        {
+            return false;
+        }
+
+        _ = LaunchHyperlinkAsync(topLevel, uri);
+        return true;
+    }
+
+    private static async Task LaunchHyperlinkAsync(TopLevel topLevel, Uri uri)
+    {
+        try
+        {
+            _ = await topLevel.Launcher.LaunchUriAsync(uri);
+        }
+        catch
+        {
+            // Swallow launch failures to keep terminal input flow uninterrupted.
+        }
+    }
+
+    private static bool HasHyperlinkActivationModifier(KeyModifiers modifiers) =>
+        modifiers.HasFlag(KeyModifiers.Control) || modifiers.HasFlag(KeyModifiers.Meta);
+
+    private bool TryResolveInlineHoveredLinkUrlLocked(TerminalRow row, int column, out string? url)
+    {
+        url = null;
+
+        if (!TryResolveLinkTokenSpanLocked(row, column, out int tokenStart, out int tokenEnd))
+        {
+            return false;
+        }
+
+        if (!TryReadLinkTokenTextLocked(row, tokenStart, tokenEnd, out string token))
+        {
+            return false;
+        }
+
+        if (!TryNormalizeHoveredLinkToken(token, out string normalized))
+        {
+            return false;
+        }
+
+        url = normalized;
+        return true;
+    }
+
+    private bool TryReadLinkTokenTextLocked(
+        TerminalRow row,
+        int startColumn,
+        int endColumn,
+        out string token)
+    {
+        _linkTokenScratch.Clear();
+
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        if (cells.IsEmpty)
+        {
+            token = string.Empty;
+            return false;
+        }
+
+        int start = Math.Clamp(startColumn, 0, cells.Length - 1);
+        int end = Math.Clamp(endColumn, start, cells.Length - 1);
+        for (int col = start; col <= end; col++)
+        {
+            ref readonly TerminalCell cell = ref cells[col];
+            if (cell.Width == 0 || (cell.Attributes & CellAttributes.Hidden) != 0)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                _linkTokenScratch.Append(cell.Grapheme);
+                continue;
+            }
+
+            if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
+            {
+                _linkTokenScratch.Append(char.ConvertFromUtf32(cell.Codepoint));
+            }
+        }
+
+        if (_linkTokenScratch.Length == 0)
+        {
+            token = string.Empty;
+            return false;
+        }
+
+        token = _linkTokenScratch.ToString();
+        return true;
+    }
+
+    private static bool TryNormalizeHoveredLinkToken(string token, out string normalized)
+    {
+        normalized = string.Empty;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return false;
+        }
+
+        string candidate = token.Trim();
+        candidate = candidate.Trim('"', '\'', '<', '>', '(', ')', '[', ']', '{', '}', '.', ',', ';', '!', '?');
+        if (candidate.Length == 0)
+        {
+            return false;
+        }
+
+        bool hasScheme = candidate.Contains("://", StringComparison.Ordinal);
+        bool startsWithWww = candidate.StartsWith("www.", StringComparison.OrdinalIgnoreCase);
+        if (!hasScheme && !startsWithWww)
+        {
+            return false;
+        }
+
+        string parseCandidate = startsWithWww
+            ? $"https://{candidate}"
+            : candidate;
+        if (!Uri.TryCreate(parseCandidate, UriKind.Absolute, out Uri? uri))
+        {
+            return false;
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        normalized = parseCandidate;
         return true;
     }
 

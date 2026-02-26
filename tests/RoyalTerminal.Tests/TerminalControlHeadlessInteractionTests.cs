@@ -605,6 +605,100 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
+    public async Task Headless_PlainUrlHover_AutoResolvesHoveredLinkUrl_InManagedMode()
+    {
+        const string url = "https://github.com/login/device";
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            preference: VtProcessorPreference.Managed);
+        control.Width = 640;
+        control.Height = 400;
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+
+            control.WriteOutput(Encoding.UTF8.GetBytes($"open {url} now"));
+            Dispatcher.UIThread.RunJobs();
+
+            Point linkPoint = await GetCellInteractionPointAsync(control, window, column: 8, row: 0);
+            RaisePointerMove(control, window, linkPoint);
+            bool hovered = await WaitUntilAsync(
+                () => string.Equals(control.HoveredLinkUrl, url, StringComparison.Ordinal),
+                TimeSpan.FromSeconds(2));
+            Assert.True(hovered);
+
+            Point plainPoint = await GetCellInteractionPointAsync(control, window, column: 1, row: 0);
+            RaisePointerMove(control, window, plainPoint);
+            bool cleared = await WaitUntilAsync(
+                () => control.HoveredLinkUrl is null,
+                TimeSpan.FromSeconds(2));
+            Assert.True(cleared);
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_ModifiedClick_ActivatesHoveredHyperlink_InManagedMode()
+    {
+        const string url = "https://example.com/activate";
+        LinkActivationProbeTerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            Width = 640,
+            Height = 400,
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+
+            control.WriteOutput(Encoding.UTF8.GetBytes($"open {url} now"));
+            Dispatcher.UIThread.RunJobs();
+
+            Point linkPoint = await GetCellInteractionPointAsync(control, window, column: 8, row: 0);
+            RaisePointerMove(control, window, linkPoint);
+
+            RaiseModifiedLeftClick(control, window, linkPoint, KeyModifiers.Control);
+            bool ctrlActivated = await WaitUntilAsync(
+                () => control.ActivatedLinks.Any(static uri => uri.AbsoluteUri == url),
+                TimeSpan.FromSeconds(2));
+            Assert.True(ctrlActivated);
+
+            control.ActivatedLinks.Clear();
+            RaiseModifiedLeftClick(control, window, linkPoint, KeyModifiers.Meta);
+            bool metaActivated = await WaitUntilAsync(
+                () => control.ActivatedLinks.Any(static uri => uri.AbsoluteUri == url),
+                TimeSpan.FromSeconds(2));
+            Assert.True(metaActivated);
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Headless_FallbackParity_AutoAndManaged_PreserveKeyboardMousePasteAndResize()
     {
         DefaultVtProcessorFactory vtFactory = new();
@@ -1000,6 +1094,49 @@ public sealed class TerminalControlHeadlessInteractionTests
         control.RaiseEvent(release);
     }
 
+    private static void RaiseModifiedLeftClick(
+        TerminalControl control,
+        Window window,
+        Point windowPoint,
+        KeyModifiers modifiers)
+    {
+        Pointer pointer = new(id: 5, PointerType.Mouse, isPrimary: true);
+        ulong timestamp = (ulong)Environment.TickCount64;
+
+        PointerEventArgs move = new(
+            InputElement.PointerMovedEvent,
+            control,
+            pointer,
+            window,
+            windowPoint,
+            timestamp++,
+            new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.Other),
+            modifiers);
+        control.RaiseEvent(move);
+
+        PointerPressedEventArgs press = new(
+            control,
+            pointer,
+            window,
+            windowPoint,
+            timestamp++,
+            new PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonPressed),
+            modifiers,
+            clickCount: 1);
+        control.RaiseEvent(press);
+
+        PointerReleasedEventArgs release = new(
+            control,
+            pointer,
+            window,
+            windowPoint,
+            timestamp,
+            new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.LeftButtonReleased),
+            modifiers,
+            MouseButton.Left);
+        control.RaiseEvent(release);
+    }
+
     private static void SendMouseSequenceViaTopLevel(Window window, Point windowPoint)
     {
         window.MouseMove(windowPoint, RawInputModifiers.None);
@@ -1135,6 +1272,17 @@ public sealed class TerminalControlHeadlessInteractionTests
         {
             _ = widthPx;
             _ = heightPx;
+        }
+    }
+
+    private sealed class LinkActivationProbeTerminalControl : TerminalControl
+    {
+        public List<Uri> ActivatedLinks { get; } = [];
+
+        protected override bool TryActivateHyperlink(Uri uri)
+        {
+            ActivatedLinks.Add(uri);
+            return true;
         }
     }
 
