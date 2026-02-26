@@ -71,23 +71,39 @@ public sealed record TerminalCaptureSession
     /// <summary>Ordered captured events.</summary>
     public List<TerminalCaptureEvent> Events { get; init; } = [];
 
-    /// <summary>Total replay duration in milliseconds.</summary>
+    private long _durationMilliseconds = -1;
+
+    /// <summary>
+    /// Total replay duration in milliseconds.
+    /// </summary>
+    /// <remarks>
+    /// When precomputed by the producer, the stored value is used. Otherwise duration is
+    /// computed from event offsets at access time.
+    /// </remarks>
     [JsonIgnore]
     public long DurationMilliseconds
     {
         get
         {
-            long duration = 0;
-            for (int i = 0; i < Events.Count; i++)
+            long cached = _durationMilliseconds;
+            if (cached >= 0)
             {
-                long offset = Events[i].OffsetMilliseconds;
-                if (offset > duration)
+                return cached;
+            }
+
+            long computed = 0;
+            List<TerminalCaptureEvent> events = Events;
+            for (int i = 0; i < events.Count; i++)
+            {
+                long offset = events[i].OffsetMilliseconds;
+                if (offset > computed)
                 {
-                    duration = offset;
+                    computed = offset;
                 }
             }
 
-            return duration;
+            return computed;
         }
+        init => _durationMilliseconds = value < 0 ? -1 : value;
     }
 }

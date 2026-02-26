@@ -105,11 +105,24 @@ public static class TerminalCaptureSessionSerializer
 
         List<TerminalCaptureEvent> sourceEvents = session.Events ?? [];
         List<OrderedCaptureEvent> normalizedEvents = new(sourceEvents.Count);
+        bool requiresSorting = false;
+        long previousOffset = 0;
+        long durationMilliseconds = 0;
         for (int i = 0; i < sourceEvents.Count; i++)
         {
             TerminalCaptureEvent sourceEvent = sourceEvents[i];
             long offset = sourceEvent.OffsetMilliseconds < 0 ? 0 : sourceEvent.OffsetMilliseconds;
             TerminalCaptureEventKind kind = sourceEvent.Kind;
+            if (offset > durationMilliseconds)
+            {
+                durationMilliseconds = offset;
+            }
+
+            if (i > 0 && offset < previousOffset)
+            {
+                requiresSorting = true;
+            }
+            previousOffset = offset;
 
             switch (kind)
             {
@@ -125,7 +138,7 @@ public static class TerminalCaptureSessionSerializer
                         sourceEvent with
                         {
                             OffsetMilliseconds = offset,
-                            Data = sourceEvent.Data.ToArray(),
+                            Data = sourceEvent.Data,
                             Columns = 0,
                             Rows = 0,
                         },
@@ -156,13 +169,16 @@ public static class TerminalCaptureSessionSerializer
             }
         }
 
-        normalizedEvents.Sort(static (left, right) =>
+        if (requiresSorting)
         {
-            int offsetComparison = left.Event.OffsetMilliseconds.CompareTo(right.Event.OffsetMilliseconds);
-            return offsetComparison != 0
-                ? offsetComparison
-                : left.OriginalIndex.CompareTo(right.OriginalIndex);
-        });
+            normalizedEvents.Sort(static (left, right) =>
+            {
+                int offsetComparison = left.Event.OffsetMilliseconds.CompareTo(right.Event.OffsetMilliseconds);
+                return offsetComparison != 0
+                    ? offsetComparison
+                    : left.OriginalIndex.CompareTo(right.OriginalIndex);
+            });
+        }
 
         List<TerminalCaptureEvent> orderedEvents = new(normalizedEvents.Count);
         for (int i = 0; i < normalizedEvents.Count; i++)
@@ -174,6 +190,7 @@ public static class TerminalCaptureSessionSerializer
         {
             InitialColumns = Math.Max(1, session.InitialColumns),
             InitialRows = Math.Max(1, session.InitialRows),
+            DurationMilliseconds = durationMilliseconds,
             Events = orderedEvents,
         };
     }
