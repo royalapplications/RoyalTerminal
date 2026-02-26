@@ -2,7 +2,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Text;
-using RoyalTerminal.Terminal;
 
 namespace RoyalTerminal.ControlCatalog;
 
@@ -15,7 +14,7 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
 
     public string Title => "Interactive live input playground";
 
-    public string Description => "Rendered playground where users interact with mouse/cursor/keyboard/window features.";
+    public string Description => "Rendered TUI playground with live cursor/mouse/keyboard/window interaction simulation.";
 
     public bool IncludeInFullSweep => false;
 
@@ -39,34 +38,26 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
         string lastAction = "initialized";
         string lastMouseSequence = "<none>";
         string lastWheelSequence = "<none>";
-        string lastCursorReport = "<none>";
-        string windowCellReport = "<none>";
-        string windowPixelReport = "<none>";
-        string windowCellPixelReport = "<none>";
+
+        bool cursorVisible = true;
+        bool applicationCursorKeys = false;
+        bool applicationKeypad = false;
+        bool bracketedPaste = false;
+        bool focusEvents = false;
+        bool mouseMode = false;
+        int kittyFlags = 0;
+
+        string cursorReport = BuildCursorReport(cursorColumn, cursorRow);
+        string windowCellReport = BuildWindowCellReport(width, height);
+        string windowPixelReport = BuildWindowPixelReport(width, height);
+        string windowCellPixelReport = BuildWindowCellPixelReport();
 
         try
         {
-            using VtProcessorProbe probe = VtProcessorProbe.CreateManaged(columns: 120, rows: 40);
-            TerminalMouseModeTracker mouseTracker = new();
-
-            UpdateWindowReports(
-                probe,
-                width,
-                height,
-                windowCellReport,
-                windowPixelReport,
-                windowCellPixelReport,
-                out windowCellReport,
-                out windowPixelReport,
-                out windowCellPixelReport);
-            UpdateCursorReport(probe, cursorColumn, cursorRow, out lastCursorReport);
-
             bool running = true;
             while (running)
             {
                 RenderInteractiveFrame(
-                    probe,
-                    mouseTracker,
                     width,
                     height,
                     cursorColumn,
@@ -75,10 +66,17 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
                     lastAction,
                     lastMouseSequence,
                     lastWheelSequence,
-                    lastCursorReport,
+                    cursorReport,
                     windowCellReport,
                     windowPixelReport,
-                    windowCellPixelReport);
+                    windowCellPixelReport,
+                    cursorVisible,
+                    applicationCursorKeys,
+                    applicationKeypad,
+                    bracketedPaste,
+                    focusEvents,
+                    mouseMode,
+                    kittyFlags);
 
                 ConsoleKeyInfo key = Console.ReadKey(intercept: true);
 
@@ -95,16 +93,10 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
                     height = Math.Min(MaxHeight, height + 1);
                     cursorColumn = Math.Min(cursorColumn, width - 1);
                     cursorRow = Math.Min(cursorRow, height - 1);
-                    UpdateWindowReports(
-                        probe,
-                        width,
-                        height,
-                        windowCellReport,
-                        windowPixelReport,
-                        windowCellPixelReport,
-                        out windowCellReport,
-                        out windowPixelReport,
-                        out windowCellPixelReport);
+                    windowCellReport = BuildWindowCellReport(width, height);
+                    windowPixelReport = BuildWindowPixelReport(width, height);
+                    windowCellPixelReport = BuildWindowCellPixelReport();
+                    cursorReport = BuildCursorReport(cursorColumn, cursorRow);
                     lastAction = "window grow";
                     actionCount++;
                     continue;
@@ -116,16 +108,10 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
                     height = Math.Max(MinHeight, height - 1);
                     cursorColumn = Math.Min(cursorColumn, width - 1);
                     cursorRow = Math.Min(cursorRow, height - 1);
-                    UpdateWindowReports(
-                        probe,
-                        width,
-                        height,
-                        windowCellReport,
-                        windowPixelReport,
-                        windowCellPixelReport,
-                        out windowCellReport,
-                        out windowPixelReport,
-                        out windowCellPixelReport);
+                    windowCellReport = BuildWindowCellReport(width, height);
+                    windowPixelReport = BuildWindowPixelReport(width, height);
+                    windowCellPixelReport = BuildWindowCellPixelReport();
+                    cursorReport = BuildCursorReport(cursorColumn, cursorRow);
                     lastAction = "window shrink";
                     actionCount++;
                     continue;
@@ -135,57 +121,47 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
                 {
                     case ConsoleKey.UpArrow:
                         cursorRow = Math.Max(0, cursorRow - 1);
-                        UpdateCursorReport(probe, cursorColumn, cursorRow, out lastCursorReport);
+                        cursorReport = BuildCursorReport(cursorColumn, cursorRow);
                         lastAction = "cursor up";
                         actionCount++;
                         continue;
 
                     case ConsoleKey.DownArrow:
                         cursorRow = Math.Min(height - 1, cursorRow + 1);
-                        UpdateCursorReport(probe, cursorColumn, cursorRow, out lastCursorReport);
+                        cursorReport = BuildCursorReport(cursorColumn, cursorRow);
                         lastAction = "cursor down";
                         actionCount++;
                         continue;
 
                     case ConsoleKey.LeftArrow:
                         cursorColumn = Math.Max(0, cursorColumn - 1);
-                        UpdateCursorReport(probe, cursorColumn, cursorRow, out lastCursorReport);
+                        cursorReport = BuildCursorReport(cursorColumn, cursorRow);
                         lastAction = "cursor left";
                         actionCount++;
                         continue;
 
                     case ConsoleKey.RightArrow:
                         cursorColumn = Math.Min(width - 1, cursorColumn + 1);
-                        UpdateCursorReport(probe, cursorColumn, cursorRow, out lastCursorReport);
+                        cursorReport = BuildCursorReport(cursorColumn, cursorRow);
                         lastAction = "cursor right";
                         actionCount++;
                         continue;
 
                     case ConsoleKey.M:
-                    {
-                        bool enableMouse = mouseTracker.ModeState.TrackingMode == TerminalMouseTrackingMode.None;
-                        _ = mouseTracker.Process(enableMouse ? "\x1b[?1003h\x1b[?1006h"u8 : "\x1b[?1003l\x1b[?1006l"u8);
-                        lastAction = enableMouse ? "mouse mode enabled" : "mouse mode disabled";
+                        mouseMode = !mouseMode;
+                        lastAction = mouseMode ? "mouse mode enabled" : "mouse mode disabled";
                         actionCount++;
                         continue;
-                    }
 
                     case ConsoleKey.Spacebar:
                     {
-                        TerminalPointerEvent clickEvent = new(
-                            Kind: TerminalPointerEventKind.Button,
-                            X: 0,
-                            Y: 0,
-                            Button: TerminalMouseButton.Left,
-                            Action: TerminalInputAction.Press,
-                            Modifiers: TerminalModifiers.None);
-                        lastMouseSequence = TerminalMouseProtocolEncoder.TryEncode(
-                            clickEvent,
-                            mouseTracker.ModeState,
+                        string clickSequence = TuiRuntimeHelpers.EncodeSgrMouseButton(
+                            buttonCode: 0,
                             column: cursorColumn + 1,
                             row: cursorRow + 1,
-                            out byte[] clickSequence)
-                            ? ControlTextFormatter.FormatControl(Encoding.ASCII.GetString(clickSequence))
+                            release: false);
+                        lastMouseSequence = mouseMode
+                            ? ControlTextFormatter.FormatControl(clickSequence)
                             : "<suppressed>";
                         lastAction = "mouse click";
                         actionCount++;
@@ -195,123 +171,61 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
                     case ConsoleKey.PageUp:
                     case ConsoleKey.PageDown:
                     {
-                        double deltaY = key.Key == ConsoleKey.PageUp ? 1d : -1d;
-                        TerminalPointerEvent wheelEvent = new(
-                            Kind: TerminalPointerEventKind.Scroll,
-                            X: 0,
-                            Y: 0,
-                            Button: TerminalMouseButton.None,
-                            Action: TerminalInputAction.Press,
-                            Modifiers: TerminalModifiers.Control,
-                            DeltaX: 0,
-                            DeltaY: deltaY);
-                        lastWheelSequence = TerminalMouseProtocolEncoder.TryEncode(
-                            wheelEvent,
-                            mouseTracker.ModeState,
+                        bool up = key.Key == ConsoleKey.PageUp;
+                        string wheelSequence = TuiRuntimeHelpers.EncodeSgrMouseWheel(
+                            up,
                             column: cursorColumn + 1,
                             row: cursorRow + 1,
-                            out byte[] wheelSequence)
-                            ? ControlTextFormatter.FormatControl(Encoding.ASCII.GetString(wheelSequence))
+                            control: true);
+                        lastWheelSequence = mouseMode
+                            ? ControlTextFormatter.FormatControl(wheelSequence)
                             : "<suppressed>";
-                        lastAction = deltaY > 0 ? "wheel up" : "wheel down";
+                        lastAction = up ? "wheel up" : "wheel down";
                         actionCount++;
                         continue;
                     }
 
                     case ConsoleKey.C:
-                    {
-                        bool nextVisible = !probe.Processor.ModeState.CursorVisible;
-                        probe.Send(nextVisible ? "\x1b[?25h" : "\x1b[?25l");
-                        lastAction = nextVisible ? "cursor shown" : "cursor hidden";
+                        cursorVisible = !cursorVisible;
+                        lastAction = cursorVisible ? "cursor shown" : "cursor hidden";
                         actionCount++;
                         continue;
-                    }
 
                     case ConsoleKey.A:
-                    {
-                        bool enableAppCursor = !probe.Processor.ModeState.ApplicationCursorKeys;
-                        probe.Send(enableAppCursor ? "\x1b[?1h" : "\x1b[?1l");
-                        lastAction = enableAppCursor ? "app-cursor enabled" : "app-cursor disabled";
+                        applicationCursorKeys = !applicationCursorKeys;
+                        lastAction = applicationCursorKeys ? "app-cursor enabled" : "app-cursor disabled";
                         actionCount++;
                         continue;
-                    }
 
                     case ConsoleKey.P:
-                    {
-                        bool enableAppKeypad = !probe.Processor.ModeState.ApplicationKeypad;
-                        probe.Send(enableAppKeypad ? "\x1b=" : "\x1b>");
-                        lastAction = enableAppKeypad ? "app-keypad enabled" : "app-keypad disabled";
+                        applicationKeypad = !applicationKeypad;
+                        lastAction = applicationKeypad ? "app-keypad enabled" : "app-keypad disabled";
                         actionCount++;
                         continue;
-                    }
 
                     case ConsoleKey.B:
-                    {
-                        bool enableBracketedPaste = !probe.Processor.ModeState.BracketedPaste;
-                        probe.Send(enableBracketedPaste ? "\x1b[?2004h" : "\x1b[?2004l");
-                        lastAction = enableBracketedPaste ? "bracketed paste enabled" : "bracketed paste disabled";
+                        bracketedPaste = !bracketedPaste;
+                        lastAction = bracketedPaste ? "bracketed paste enabled" : "bracketed paste disabled";
                         actionCount++;
                         continue;
-                    }
 
                     case ConsoleKey.F:
-                    {
-                        bool focusEnabled = probe.Processor is ITerminalFocusEventModeSource focusSource && focusSource.FocusEventsEnabled;
-                        probe.Send(focusEnabled ? "\x1b[?1004l" : "\x1b[?1004h");
-                        lastAction = focusEnabled ? "focus events disabled" : "focus events enabled";
+                        focusEvents = !focusEvents;
+                        lastAction = focusEvents ? "focus events enabled" : "focus events disabled";
                         actionCount++;
                         continue;
-                    }
 
                     case ConsoleKey.K:
-                    {
-                        if (probe.Processor is IKittyKeyboardStateSource kittySource)
-                        {
-                            if (kittySource.KittyKeyboardFlags == 0)
-                            {
-                                probe.Send("\x1b[=1;1u");
-                                probe.Send("\x1b[=4;2u");
-                            }
-                            else
-                            {
-                                probe.Send("\x1b[=1;3u");
-                                probe.Send("\x1b[=4;3u");
-                            }
-
-                            if (VtCatalogHelpers.TrySingleResponse(
-                                probe,
-                                "\x1b[?u",
-                                static response => response.StartsWith("\x1b[?", StringComparison.Ordinal) && response.EndsWith("u", StringComparison.Ordinal),
-                                out string kittyResponse))
-                            {
-                                lastAction = $"kitty flags={kittySource.KittyKeyboardFlags} rsp={ControlTextFormatter.FormatControl(kittyResponse)}";
-                            }
-                            else
-                            {
-                                lastAction = $"kitty flags={kittySource.KittyKeyboardFlags}";
-                            }
-                        }
-                        else
-                        {
-                            lastAction = "kitty keyboard unsupported";
-                        }
-
+                        kittyFlags = kittyFlags == 0 ? 5 : 4;
+                        lastAction = $"kitty flags={kittyFlags} rsp={ControlTextFormatter.FormatControl($"\\x1b[?{kittyFlags}u")}";
                         actionCount++;
                         continue;
-                    }
 
                     case ConsoleKey.R:
-                        UpdateWindowReports(
-                            probe,
-                            width,
-                            height,
-                            windowCellReport,
-                            windowPixelReport,
-                            windowCellPixelReport,
-                            out windowCellReport,
-                            out windowPixelReport,
-                            out windowCellPixelReport);
-                        UpdateCursorReport(probe, cursorColumn, cursorRow, out lastCursorReport);
+                        cursorReport = BuildCursorReport(cursorColumn, cursorRow);
+                        windowCellReport = BuildWindowCellReport(width, height);
+                        windowPixelReport = BuildWindowPixelReport(width, height);
+                        windowCellPixelReport = BuildWindowCellPixelReport();
                         lastAction = "window/cursor refreshed";
                         actionCount++;
                         continue;
@@ -321,14 +235,13 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
             lines.Add($"Interactive session completed. actions={actionCount}");
             lines.Add($"Final board: {width}x{height} cursor=({cursorColumn + 1},{cursorRow + 1})");
             lines.Add(
-                $"Final modes: cursorVisible={probe.Processor.ModeState.CursorVisible} " +
-                $"appCursor={probe.Processor.ModeState.ApplicationCursorKeys} " +
-                $"appKeypad={probe.Processor.ModeState.ApplicationKeypad} " +
-                $"bracketedPaste={probe.Processor.ModeState.BracketedPaste}");
-            lines.Add($"Mouse tracker: {mouseTracker.ModeState}");
+                $"Final modes: cursorVisible={cursorVisible} " +
+                $"appCursor={applicationCursorKeys} " +
+                $"appKeypad={applicationKeypad} " +
+                $"bracketedPaste={bracketedPaste} focusEvents={focusEvents} mouseMode={mouseMode} kittyFlags={kittyFlags}");
             lines.Add($"Last mouse sequence: {lastMouseSequence}");
             lines.Add($"Last wheel sequence: {lastWheelSequence}");
-            lines.Add($"Cursor report: {lastCursorReport}");
+            lines.Add($"Cursor report: {cursorReport}");
             lines.Add($"Window 18t: {windowCellReport}");
             lines.Add($"Window 14t: {windowPixelReport}");
             lines.Add($"Window 16t: {windowCellPixelReport}");
@@ -347,8 +260,6 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
     }
 
     private static void RenderInteractiveFrame(
-        VtProcessorProbe probe,
-        TerminalMouseModeTracker mouseTracker,
         int width,
         int height,
         int cursorColumn,
@@ -357,14 +268,18 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
         string lastAction,
         string lastMouseSequence,
         string lastWheelSequence,
-        string lastCursorReport,
+        string cursorReport,
         string windowCellReport,
         string windowPixelReport,
-        string windowCellPixelReport)
+        string windowCellPixelReport,
+        bool cursorVisible,
+        bool applicationCursorKeys,
+        bool applicationKeypad,
+        bool bracketedPaste,
+        bool focusEvents,
+        bool mouseMode,
+        int kittyFlags)
     {
-        bool focusEventsEnabled = probe.Processor is ITerminalFocusEventModeSource focusSource && focusSource.FocusEventsEnabled;
-        int kittyFlags = probe.Processor is IKittyKeyboardStateSource kittySource ? kittySource.KittyKeyboardFlags : -1;
-
         StringBuilder frame = new(capacity: 8_192);
         frame.Append("\x1b[H\x1b[2J");
         frame.AppendLine("\x1b[1;35mInteractive live input playground\x1b[0m");
@@ -374,14 +289,12 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
 
         frame.AppendLine($"Board: {width}x{height}  Cursor: ({cursorColumn + 1},{cursorRow + 1})  Actions: {actionCount}");
         frame.AppendLine(
-            $"Modes: cursorVisible={probe.Processor.ModeState.CursorVisible} appCursor={probe.Processor.ModeState.ApplicationCursorKeys} " +
-            $"appKeypad={probe.Processor.ModeState.ApplicationKeypad} bracketedPaste={probe.Processor.ModeState.BracketedPaste} " +
-            $"focusEvents={focusEventsEnabled} kittyFlags={kittyFlags}");
-        frame.AppendLine($"Mouse tracker: {mouseTracker.ModeState}");
+            $"Modes: cursorVisible={cursorVisible} appCursor={applicationCursorKeys} " +
+            $"appKeypad={applicationKeypad} bracketedPaste={bracketedPaste} focusEvents={focusEvents} mouseMode={mouseMode} kittyFlags={kittyFlags}");
         frame.AppendLine($"Last action : {lastAction}");
         frame.AppendLine($"Last mouse  : {lastMouseSequence}");
         frame.AppendLine($"Last wheel  : {lastWheelSequence}");
-        frame.AppendLine($"Cursor DSR  : {lastCursorReport}");
+        frame.AppendLine($"Cursor DSR  : {cursorReport}");
         frame.AppendLine($"Window 18t  : {windowCellReport}");
         frame.AppendLine($"Window 14t  : {windowPixelReport}");
         frame.AppendLine($"Window 16t  : {windowCellPixelReport}");
@@ -395,7 +308,7 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
             {
                 if (row == cursorRow && column == cursorColumn)
                 {
-                    frame.Append(probe.Processor.ModeState.CursorVisible
+                    frame.Append(cursorVisible
                         ? "\x1b[30;46m@\x1b[0m"
                         : "\x1b[30;47mx\x1b[0m");
                     continue;
@@ -411,58 +324,24 @@ internal sealed class InteractiveLiveInputPlaygroundScenario : ICatalogScenario
         Console.Write(frame.ToString());
     }
 
-    private static void UpdateCursorReport(VtProcessorProbe probe, int cursorColumn, int cursorRow, out string cursorReport)
+    private static string BuildCursorReport(int cursorColumn, int cursorRow)
     {
-        probe.Send($"\x1b[{cursorRow + 1};{cursorColumn + 1}H");
-        bool reportOk = VtCatalogHelpers.TrySingleResponse(
-            probe,
-            "\x1b[6n",
-            static response => response.StartsWith("\x1b[", StringComparison.Ordinal) && response.EndsWith("R", StringComparison.Ordinal),
-            out string cursorResponse);
-        cursorReport = reportOk
-            ? ControlTextFormatter.FormatControl(cursorResponse)
-            : "<no response>";
+        return ControlTextFormatter.FormatControl(TuiRuntimeHelpers.CursorReport(cursorRow + 1, cursorColumn + 1));
     }
 
-    private static void UpdateWindowReports(
-        VtProcessorProbe probe,
-        int columns,
-        int rows,
-        string previousCellReport,
-        string previousPixelReport,
-        string previousCellPixelReport,
-        out string cellReport,
-        out string pixelReport,
-        out string cellPixelReport)
+    private static string BuildWindowCellReport(int columns, int rows)
     {
-        probe.NotifyResize(columns, rows, widthPx: columns * 10, heightPx: rows * 20);
+        return ControlTextFormatter.FormatControl(TuiRuntimeHelpers.WindowCellReport(rows, columns));
+    }
 
-        bool cellOk = VtCatalogHelpers.TrySingleResponse(
-            probe,
-            "\x1b[18t",
-            static response => response.StartsWith("\x1b[8;", StringComparison.Ordinal) && response.EndsWith("t", StringComparison.Ordinal),
-            out string cellResponse);
-        cellReport = cellOk
-            ? ControlTextFormatter.FormatControl(cellResponse)
-            : previousCellReport;
+    private static string BuildWindowPixelReport(int columns, int rows)
+    {
+        return ControlTextFormatter.FormatControl(TuiRuntimeHelpers.WindowPixelReport(rows * 20, columns * 10));
+    }
 
-        bool pixelOk = VtCatalogHelpers.TrySingleResponse(
-            probe,
-            "\x1b[14t",
-            static response => response.StartsWith("\x1b[4;", StringComparison.Ordinal) && response.EndsWith("t", StringComparison.Ordinal),
-            out string pixelResponse);
-        pixelReport = pixelOk
-            ? ControlTextFormatter.FormatControl(pixelResponse)
-            : previousPixelReport;
-
-        bool cellPixelOk = VtCatalogHelpers.TrySingleResponse(
-            probe,
-            "\x1b[16t",
-            static response => response.StartsWith("\x1b[6;", StringComparison.Ordinal) && response.EndsWith("t", StringComparison.Ordinal),
-            out string cellPixelResponse);
-        cellPixelReport = cellPixelOk
-            ? ControlTextFormatter.FormatControl(cellPixelResponse)
-            : previousCellPixelReport;
+    private static string BuildWindowCellPixelReport()
+    {
+        return ControlTextFormatter.FormatControl(TuiRuntimeHelpers.CellPixelReport(cellHeightPx: 20, cellWidthPx: 10));
     }
 
     private static bool IsGrowKey(ConsoleKeyInfo key)
