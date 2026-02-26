@@ -100,6 +100,7 @@ public sealed class TerminalCaptureRecorderTests
         Assert.Equal("input", Encoding.UTF8.GetString(restored.Events[1].Data!));
         Assert.Equal(100, restored.Events[2].Columns);
         Assert.Equal(35, restored.Events[2].Rows);
+        Assert.Equal(55, restored.DurationMilliseconds);
     }
 
     [Fact]
@@ -155,5 +156,59 @@ public sealed class TerminalCaptureRecorderTests
         Assert.Equal(2, session.Events.Count);
         Assert.Equal("A", Encoding.UTF8.GetString(session.Events[0].Data!));
         Assert.Equal("B", Encoding.UTF8.GetString(session.Events[1].Data!));
+    }
+
+    [Fact]
+    public void Session_DurationMilliseconds_ComputesWhenNotPrecomputed()
+    {
+        TerminalCaptureSession session = new()
+        {
+            Events =
+            [
+                new TerminalCaptureEvent
+                {
+                    OffsetMilliseconds = 3,
+                    Kind = TerminalCaptureEventKind.Output,
+                    Data = Encoding.UTF8.GetBytes("a"),
+                },
+                new TerminalCaptureEvent
+                {
+                    OffsetMilliseconds = 9,
+                    Kind = TerminalCaptureEventKind.Output,
+                    Data = Encoding.UTF8.GetBytes("b"),
+                },
+            ],
+        };
+
+        Assert.Equal(9, session.DurationMilliseconds);
+        Assert.Equal(9, session.DurationMilliseconds);
+    }
+
+    [Fact]
+    public void Session_DurationMilliseconds_RecomputesWhenDurationIsNotPrecomputed()
+    {
+        TerminalCaptureSession session = new()
+        {
+            Events =
+            [
+                new TerminalCaptureEvent
+                {
+                    OffsetMilliseconds = 2,
+                    Kind = TerminalCaptureEventKind.Output,
+                    Data = Encoding.UTF8.GetBytes("x"),
+                },
+            ],
+        };
+
+        Assert.Equal(2, session.DurationMilliseconds);
+
+        session.Events.Add(new TerminalCaptureEvent
+        {
+            OffsetMilliseconds = 11,
+            Kind = TerminalCaptureEventKind.Output,
+            Data = Encoding.UTF8.GetBytes("y"),
+        });
+
+        Assert.Equal(11, session.DurationMilliseconds);
     }
 }
