@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia - Reusable capture and replay runtime for TerminalControl.
 
+using System.Diagnostics;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Terminal;
@@ -31,7 +32,7 @@ public sealed class TerminalCaptureRuntime : IDisposable
     private int _replayNextEventIndex;
     private long _replayPositionMilliseconds;
     private long _replayStartOffsetMilliseconds;
-    private DateTimeOffset _replayStartUtc;
+    private long _replayStartTimestamp;
     private bool _isReplayPlaying;
     private bool _disposed;
 
@@ -169,7 +170,7 @@ public sealed class TerminalCaptureRuntime : IDisposable
         _replaySession = session;
         _replaySourceLabel = sourceLabel;
         _captureSession = session;
-        SeekReplayInternal(0);
+        SeekReplayInternal(0, forceReset: true);
         RaiseStateChanged();
     }
 
@@ -195,11 +196,11 @@ public sealed class TerminalCaptureRuntime : IDisposable
         long duration = _replaySession.DurationMilliseconds;
         if (_replayPositionMilliseconds >= duration)
         {
-            SeekReplayInternal(0);
+            SeekReplayInternal(0, forceReset: true);
         }
 
         _replayStartOffsetMilliseconds = _replayPositionMilliseconds;
-        _replayStartUtc = DateTimeOffset.UtcNow;
+        _replayStartTimestamp = Stopwatch.GetTimestamp();
         _isReplayPlaying = true;
         if (!_replayTimer.IsEnabled)
         {
@@ -230,7 +231,7 @@ public sealed class TerminalCaptureRuntime : IDisposable
         }
 
         PauseReplayInternal(raiseStateChanged: false);
-        SeekReplayInternal(0);
+        SeekReplayInternal(0, forceReset: true);
         RaiseStateChanged();
     }
 
@@ -269,7 +270,7 @@ public sealed class TerminalCaptureRuntime : IDisposable
         StateChanged = null;
     }
 
-    private void SeekReplayInternal(long targetMilliseconds)
+    private void SeekReplayInternal(long targetMilliseconds, bool forceReset = false)
     {
         if (_replaySession is null)
         {
@@ -281,19 +282,27 @@ public sealed class TerminalCaptureRuntime : IDisposable
 
         long duration = _replaySession.DurationMilliseconds;
         long clampedTarget = Math.Clamp(targetMilliseconds, 0, duration);
+        bool requiresReset = forceReset || clampedTarget < _replayPositionMilliseconds;
 
-        ResetReplaySurface();
-        _replayNextEventIndex = 0;
-        _replayPositionMilliseconds = 0;
+        if (requiresReset)
+        {
+            ResetReplaySurface();
+            _replayNextEventIndex = 0;
+            _replayPositionMilliseconds = 0;
+        }
+
         ApplyEventsUntil(clampedTarget);
         _replayPositionMilliseconds = clampedTarget;
 
         if (wasPlaying)
         {
             _replayStartOffsetMilliseconds = _replayPositionMilliseconds;
-            _replayStartUtc = DateTimeOffset.UtcNow;
+            _replayStartTimestamp = Stopwatch.GetTimestamp();
             _isReplayPlaying = true;
-            _replayTimer.Start();
+            if (!_replayTimer.IsEnabled)
+            {
+                _replayTimer.Start();
+            }
         }
     }
 
@@ -388,7 +397,7 @@ public sealed class TerminalCaptureRuntime : IDisposable
         }
 
         long elapsedMilliseconds = _replayStartOffsetMilliseconds
-            + (long)(DateTimeOffset.UtcNow - _replayStartUtc).TotalMilliseconds;
+            + GetElapsedMilliseconds(_replayStartTimestamp);
         long duration = _replaySession.DurationMilliseconds;
         long targetMilliseconds = Math.Min(elapsedMilliseconds, duration);
 
@@ -407,19 +416,40 @@ public sealed class TerminalCaptureRuntime : IDisposable
     private void OnDataReceived(object? sender, TerminalDataEventArgs e)
     {
         _ = sender;
+        if (!IsCaptureActive)
+        {
+            return;
+        }
+
         _recorder.CaptureOutput(e.DataSpan);
     }
 
     private void OnInputSent(object? sender, TerminalSessionInputEventArgs e)
     {
         _ = sender;
+        if (!IsCaptureActive)
+        {
+            return;
+        }
+
         _recorder.CaptureInput(e.Data.Span);
     }
 
     private void OnTerminalResized(object? sender, TerminalSizeEventArgs e)
     {
         _ = sender;
+        if (!IsCaptureActive)
+        {
+            return;
+        }
+
         _recorder.CaptureResize(e.Columns, e.Rows);
+    }
+
+    private static long GetElapsedMilliseconds(long startTimestamp)
+    {
+        long elapsedTicks = Stopwatch.GetTimestamp() - startTimestamp;
+        return (elapsedTicks * 1000) / Stopwatch.Frequency;
     }
 
     private void RaiseStateChanged()
