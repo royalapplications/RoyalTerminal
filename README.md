@@ -67,6 +67,7 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 - **Sample applications**:
   - Avalonia demo (`samples/RoyalTerminal.Demo`) with transport selector (`PTY`/`Pipe`/`SSH`), shell profile picker, and SSH form fields
   - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`)
+  - VT/PTy control catalog CLI (`samples/RoyalTerminal.ControlCatalog`) with managed/Ghostty VT probes, ncurses/TUI parity scenarios, and rich visual rendering galleries
 
 ## Transport Session Model
 
@@ -965,6 +966,7 @@ RoyalTerminal/
 │   └── RoyalTerminal.GhosttySharp.Native.Win64/
 ├── samples/RoyalTerminal.Demo/
 ├── samples/RoyalTerminal.MacNativeTabbed/
+├── samples/RoyalTerminal.ControlCatalog/
 ├── tests/
 │   ├── RoyalTerminal.Benchmarks/
 │   ├── RoyalTerminal.Tests/
@@ -1008,6 +1010,12 @@ dotnet build RoyalTerminal.sln -c Release
 
 ```bash
 dotnet run --project samples/RoyalTerminal.Demo
+```
+
+### Run Control Catalog CLI
+
+```bash
+dotnet run --project samples/RoyalTerminal.ControlCatalog
 ```
 
 Optional demo toggles:
