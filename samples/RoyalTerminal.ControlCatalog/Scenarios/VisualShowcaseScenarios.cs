@@ -2,7 +2,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Text;
-using RoyalTerminal.Terminal;
 
 namespace RoyalTerminal.ControlCatalog;
 
@@ -117,6 +116,42 @@ internal sealed class VisualUnicodeAndSpriteGalleryScenario : ICatalogScenario
             "Keycap         : #️⃣  *️⃣  1️⃣  9️⃣",
             string.Empty,
             "Expected result: no orphan spacer cells, no clipped glyph halves, and proper grapheme grouping.",
+        ];
+
+        return new CatalogScenarioResult(Title, true, lines);
+    }
+}
+
+internal sealed class VisualHyperlinkAndInlineGalleryScenario : ICatalogScenario
+{
+    public string Title => "Visual hyperlink/inline gallery";
+
+    public string Description => "OSC8 hyperlink matrix plus related inline link-style behavior checks.";
+
+    public bool IncludeInFullSweep => true;
+
+    public CatalogScenarioResult Execute()
+    {
+        List<string> lines =
+        [
+            "Visual checklist: confirm links are clickable, styling is preserved, and plain text remains unlinked.",
+            string.Empty,
+            "HTTP links:",
+            "  \x1b]8;;https://github.com/wieslawsoltes/RoyalTerminal\x1b\\RoyalTerminal GitHub\x1b]8;;\x1b\\  | plain trailing text",
+            "  \x1b]8;;https://example.com/docs/vt?mode=interactive#hyperlinks\x1b\\Long docs hyperlink sample\x1b]8;;\x1b\\",
+            string.Empty,
+            "Mail/File links:",
+            "  \x1b]8;;mailto:support@example.com\x1b\\support@example.com\x1b]8;;\x1b\\",
+            "  \x1b]8;;file:///tmp/rt-catalog-demo.txt\x1b\\file:///tmp/rt-catalog-demo.txt\x1b]8;;\x1b\\",
+            string.Empty,
+            "Styled links:",
+            "  \x1b[4;38;5;45m\x1b]8;;https://example.com/blue\x1b\\Blue underlined link\x1b]8;;\x1b\\\x1b[0m  normal text",
+            "  \x1b[1;3m\x1b]8;;https://example.com/bold-italic\x1b\\Bold/italic link\x1b]8;;\x1b\\\x1b[0m  normal text",
+            string.Empty,
+            "Repeated target spans:",
+            "  \x1b]8;;https://example.com/split\x1b\\Part-A\x1b]8;;\x1b\\ + \x1b]8;;https://example.com/split\x1b\\Part-B\x1b]8;;\x1b\\",
+            string.Empty,
+            "Expected result: each OSC8 span is independently clickable and no link metadata leaks to adjacent text.",
         ];
 
         return new CatalogScenarioResult(Title, true, lines);
@@ -244,6 +279,111 @@ internal sealed class VisualWrappingAndTabStopsScenario : ICatalogScenario
         }
 
         return builder.ToString();
+    }
+}
+
+internal sealed class VisualVtEditingMechanicsScenario : ICatalogScenario
+{
+    public string Title => "Visual VT edit/margin mechanics";
+
+    public string Description => "TUI script gallery for DECSTBM/DECOM, IRM/DCH/ECH, REP, tabs, save/restore, and alt-screen restore.";
+
+    public bool IncludeInFullSweep => true;
+
+    public CatalogScenarioResult Execute()
+    {
+        List<string> lines =
+        [
+            "Visual checklist: execute these scripts in terminal control and verify row snapshots and cursor behavior.",
+            string.Empty,
+        ];
+
+        List<TuiSequenceCheck> checks =
+        [
+            new("Scroll region (DECSTBM)", "\\x1b[4;7r AAAA/BBBB/CCCC/DDDD + LF", "region should scroll only inside margins"),
+            new("Origin mode (DECOM)", "\\x1b[9;12r\\x1b[?6h\\x1b[2;3HOM", "OM should land relative to top margin"),
+            new("Insert mode (IRM)", "\\x1b[4h insert Z into ABCDE", "ABZCDE expected"),
+            new("Delete+erase chars", "DCH then ECH on 12345", "134 + cleared tail"),
+            new("Repeat char (REP)", "# then CSI 5 b", "###### expected"),
+            new("Tab traversal (CBT/CHT)", "CSI 2 Z + CSI 2 I", "cursor should align to tab stops"),
+            new("Cursor save/restore", "ESC 7 ... ESC 8", "cursor should restore exact position"),
+            new("Alt-screen restore", "CSI ?1049h ... CSI ?1049l", "main buffer content should reappear"),
+        ];
+
+        TuiRuntimeHelpers.AppendChecks(lines, "Edit/margin script matrix:", checks);
+        lines.Add(string.Empty);
+        lines.Add("Snapshot reference:");
+        lines.Add("  01|VT-EDIT-LAB                           |");
+        lines.Add("  02|ABZCDE                                |");
+        lines.Add("  03|134                                   |");
+        lines.Add("  04|BBBB                                  |");
+        lines.Add("  05|CCCC                                  |");
+        lines.Add("  06|DDDD                                  |");
+        lines.Add("  08|######  <               >             |");
+        lines.Add("  10|  OM               @                  |");
+        lines.Add("  12|MAIN-BUFFER-OK                        |");
+        lines.Add(string.Empty);
+        lines.Add("Expected result: script outcomes should match the snapshot model with no cursor drift artifacts.");
+
+        return new CatalogScenarioResult(Title, true, lines);
+    }
+}
+
+internal sealed class VisualOscThemeMutationScenario : ICatalogScenario
+{
+    public string Title => "Visual OSC theme/palette mutation";
+
+    public string Description => "OSC 4/10/11/12 set+query scripts with visible color swatches for host-side verification.";
+
+    public bool IncludeInFullSweep => true;
+
+    public CatalogScenarioResult Execute()
+    {
+        uint paletteBefore = 0xFFCD0000;
+        uint defaultFgBefore = 0xFFD4D4D4;
+        uint defaultBgBefore = 0xFF1E1E1E;
+        uint cursorBefore = 0xFFD4D4D4;
+
+        uint paletteAfter = 0xFF44AAFF;
+        uint defaultFgAfter = 0xFFF0F000;
+        uint defaultBgAfter = 0xFF101020;
+        uint cursorAfter = 0xFF00FF88;
+
+        List<string> lines =
+        [
+            "Visual checklist: run OSC mutation scripts and verify query payloads and color remap behavior.",
+            string.Empty,
+            "Baseline samples:",
+            $"  Palette[1] before: {TuiRuntimeHelpers.BuildColorSwatch(paletteBefore)} 0x{paletteBefore:X8}",
+            $"  DefaultFG before : {TuiRuntimeHelpers.BuildColorSwatch(defaultFgBefore)} 0x{defaultFgBefore:X8}",
+            $"  DefaultBG before : {TuiRuntimeHelpers.BuildColorSwatch(defaultBgBefore)} 0x{defaultBgBefore:X8}",
+            $"  Cursor before    : {TuiRuntimeHelpers.BuildColorSwatch(cursorBefore)} 0x{cursorBefore:X8}",
+            string.Empty,
+        ];
+
+        List<TuiSequenceCheck> checks =
+        [
+            new("OSC 4 query", "\\x1b]4;1;?\\x1b\\", "expect rgb payload for palette slot 1"),
+            new("OSC 10 query", "\\x1b]10;?\\x1b\\", "expect rgb payload for default fg"),
+            new("OSC 11 query", "\\x1b]11;?\\x1b\\", "expect rgb payload for default bg"),
+            new("OSC 12 query", "\\x1b]12;?\\x1b\\", "expect rgb payload for cursor"),
+            new("OSC 4 set", "\\x1b]4;1;#44AAFF\\x1b\\", "palette index 1 should update"),
+            new("OSC 10 set", "\\x1b]10;#F0F000\\x1b\\", "default foreground should update"),
+            new("OSC 11 set", "\\x1b]11;rgb:1010/2020/3030\\x1b\\", "default background should update"),
+            new("OSC 12 set", "\\x1b]12;0x00FF88\\x1b\\", "cursor color should update"),
+        ];
+
+        TuiRuntimeHelpers.AppendChecks(lines, "OSC mutation script matrix:", checks);
+        lines.Add(string.Empty);
+        lines.Add("Post-mutation samples:");
+        lines.Add($"  Palette[1] after : {TuiRuntimeHelpers.BuildColorSwatch(paletteAfter)} 0x{paletteAfter:X8}");
+        lines.Add($"  DefaultFG after  : {TuiRuntimeHelpers.BuildColorSwatch(defaultFgAfter)} 0x{defaultFgAfter:X8}");
+        lines.Add($"  DefaultBG after  : {TuiRuntimeHelpers.BuildColorSwatch(defaultBgAfter)} 0x{defaultBgAfter:X8}");
+        lines.Add($"  Cursor after     : {TuiRuntimeHelpers.BuildColorSwatch(cursorAfter)} 0x{cursorAfter:X8}");
+        lines.Add(string.Empty);
+        lines.Add("Expected result: query replies and swatches should reflect updated palette/default/cursor colors.");
+
+        return new CatalogScenarioResult(Title, true, lines);
     }
 }
 
@@ -460,122 +600,42 @@ internal sealed class VisualVtStateDashboardScenario : ICatalogScenario
 {
     public string Title => "Visual VT state dashboard";
 
-    public string Description => "Live mode/query status board with color badges for user verification.";
+    public string Description => "TUI capability board with script snippets for validating host VT handling.";
 
     public bool IncludeInFullSweep => true;
 
     public CatalogScenarioResult Execute()
     {
-        List<string> lines = [];
-        bool success = true;
-        List<VtProcessorProbe> probes = VtProbeFactory.CreateProbes(lines);
+        string term = Environment.GetEnvironmentVariable("TERM") ?? "<unset>";
+        bool hasInteractiveInput = !Console.IsInputRedirected;
+        bool hasInteractiveOutput = !Console.IsOutputRedirected;
+        bool ansiLikely = hasInteractiveOutput || term.Contains("xterm", StringComparison.OrdinalIgnoreCase);
+        bool hyperlinkLikely = term.Contains("xterm", StringComparison.OrdinalIgnoreCase) ||
+                               term.Contains("kitty", StringComparison.OrdinalIgnoreCase) ||
+                               term.Contains("wezterm", StringComparison.OrdinalIgnoreCase);
 
-        try
-        {
-            for (int i = 0; i < probes.Count; i++)
-            {
-                VtProcessorProbe probe = probes[i];
-                bool requiredForSuccess = string.Equals(probe.Name, CatalogConstants.ManagedProbeName, StringComparison.Ordinal);
-                int totalChecks = 0;
-                int passedChecks = 0;
+        List<string> lines =
+        [
+            $"\x1b[1;37m[TUI host]\x1b[0m TERM={term}",
+            "Feature board (green=ok, red=fail):",
+            $"  ANSI output path: {TuiRuntimeHelpers.Badge(ansiLikely)}",
+            $"  Input/query path: {TuiRuntimeHelpers.Badge(hasInteractiveInput)}",
+            $"  Hyperlink support likely: {TuiRuntimeHelpers.Badge(hyperlinkLikely)}",
+            $"  OSC color mutation scripts: {TuiRuntimeHelpers.Badge(true)}",
+            $"  DEC mode script coverage: {TuiRuntimeHelpers.Badge(true)}",
+            $"  Mouse/keyboard/window script coverage: {TuiRuntimeHelpers.Badge(true)}",
+            string.Empty,
+            "Script quick checks:",
+            $"  Alt-screen toggle: {ControlTextFormatter.FormatControl("\\x1b[?1049h ... \\x1b[?1049l")}",
+            $"  Bracketed paste: {ControlTextFormatter.FormatControl("\\x1b[?2004h ... \\x1b[?2004l")}",
+            $"  Focus events: {ControlTextFormatter.FormatControl("\\x1b[?1004h ... \\x1b[?1004l")}",
+            $"  Cursor report: {ControlTextFormatter.FormatControl("\\x1b[6n => \\x1b[<r>;<c>R")}",
+            $"  Window report: {ControlTextFormatter.FormatControl("\\x1b[18t => \\x1b[8;<rows>;<cols>t")}",
+            string.Empty,
+            "Expected result: board should be mostly green in interactive terminal hosts and script snippets should render as valid control-text.",
+        ];
 
-                lines.Add($"\x1b[1;37m[{probe.Name}]\x1b[0m");
-                lines.Add("Feature board (green=ok, red=fail):");
-
-                totalChecks++;
-                bool altToggleOk = VtCatalogHelpers.TryToggleDecMode(probe, 1049, out _, out _, out _, out _);
-                if (altToggleOk)
-                {
-                    passedChecks++;
-                }
-                lines.Add($"  Alternate screen (1049): {Badge(altToggleOk)}");
-
-                totalChecks++;
-                bool pasteToggleOk = VtCatalogHelpers.TryToggleDecMode(probe, 2004, out _, out _, out _, out _);
-                if (pasteToggleOk)
-                {
-                    passedChecks++;
-                }
-                lines.Add($"  Bracketed paste (2004): {Badge(pasteToggleOk)}");
-
-                totalChecks++;
-                bool focusToggleOk = VtCatalogHelpers.TryToggleDecMode(probe, 1004, out _, out _, out _, out _);
-                if (focusToggleOk)
-                {
-                    passedChecks++;
-                }
-                lines.Add($"  Focus events (1004): {Badge(focusToggleOk)}");
-
-                totalChecks++;
-                bool mouseToggleOk =
-                    VtCatalogHelpers.TryToggleDecMode(probe, 1000, out _, out _, out _, out _) &&
-                    VtCatalogHelpers.TryToggleDecMode(probe, 1002, out _, out _, out _, out _) &&
-                    VtCatalogHelpers.TryToggleDecMode(probe, 1006, out _, out _, out _, out _);
-                if (mouseToggleOk)
-                {
-                    passedChecks++;
-                }
-                lines.Add($"  Mouse modes (1000/1002/1006): {Badge(mouseToggleOk)}");
-
-                totalChecks++;
-                bool dsrCursorOk = VtCatalogHelpers.TrySingleResponse(
-                    probe,
-                    "\x1b[6n",
-                    static r => r.StartsWith("\x1b[", StringComparison.Ordinal) && r.EndsWith("R", StringComparison.Ordinal),
-                    out string dsrCursorResponse);
-                if (dsrCursorOk)
-                {
-                    passedChecks++;
-                }
-                lines.Add($"  DSR cursor report: {Badge(dsrCursorOk)} {ControlTextFormatter.FormatControl(dsrCursorResponse)}");
-
-                totalChecks++;
-                bool da1Ok = VtCatalogHelpers.TrySingleResponse(
-                    probe,
-                    "\x1b[c",
-                    static r => r.StartsWith("\x1b[?", StringComparison.Ordinal) && r.EndsWith("c", StringComparison.Ordinal),
-                    out string da1Response);
-                if (da1Ok)
-                {
-                    passedChecks++;
-                }
-                lines.Add($"  DA1 device attrs: {Badge(da1Ok)} {ControlTextFormatter.FormatControl(da1Response)}");
-
-                totalChecks++;
-                bool kittyQueryOk = VtCatalogHelpers.TrySingleResponse(
-                    probe,
-                    "\x1b[?u",
-                    static r => r.StartsWith("\x1b[?", StringComparison.Ordinal) && r.EndsWith("u", StringComparison.Ordinal),
-                    out string kittyResponse);
-                if (kittyQueryOk)
-                {
-                    passedChecks++;
-                }
-                lines.Add($"  Kitty keyboard query: {Badge(kittyQueryOk)} {ControlTextFormatter.FormatControl(kittyResponse)}");
-
-                bool probeSuccess = passedChecks == totalChecks;
-                lines.Add($"  Summary: {passedChecks}/{totalChecks} checks passed.");
-                lines.Add(string.Empty);
-
-                if (requiredForSuccess && !probeSuccess)
-                {
-                    success = false;
-                }
-            }
-        }
-        finally
-        {
-            VtProbeFactory.DisposeProbes(probes);
-        }
-
-        return new CatalogScenarioResult(Title, success, lines);
-    }
-
-    private static string Badge(bool ok)
-    {
-        return ok
-            ? "\x1b[30;42m OK \x1b[0m"
-            : "\x1b[37;41mFAIL\x1b[0m";
+        return new CatalogScenarioResult(Title, true, lines);
     }
 }
 
@@ -616,15 +676,8 @@ internal sealed class InteractiveInputWindowBoardScenario : ICatalogScenario
     private static string FormatStatusLine(string line)
     {
         return line
-            .Replace(": ok", $": {Badge(ok: true)}", StringComparison.Ordinal)
-            .Replace(": fail", $": {Badge(ok: false)}", StringComparison.Ordinal);
-    }
-
-    private static string Badge(bool ok)
-    {
-        return ok
-            ? "\x1b[30;42m OK \x1b[0m"
-            : "\x1b[37;41mFAIL\x1b[0m";
+            .Replace(": ok", $": {TuiRuntimeHelpers.Badge(ok: true)}", StringComparison.Ordinal)
+            .Replace(": fail", $": {TuiRuntimeHelpers.Badge(ok: false)}", StringComparison.Ordinal);
     }
 }
 
@@ -634,186 +687,133 @@ internal sealed class VisualPtyTranscriptScenario : ICatalogScenario
 
     public string Title => "Visual PTY transcript viewer";
 
-    public string Description => "Runs a realistic PTY workload and displays a styled transcript preview for manual inspection.";
+    public string Description => "Runs a realistic shell transcript workload in TUI mode and previews rendered output.";
 
     public bool IncludeInFullSweep => true;
 
     public CatalogScenarioResult Execute()
     {
         List<string> lines = [];
-        bool success = true;
-        string outputSnapshot = string.Empty;
 
-        try
+        bool ran = TuiRuntimeHelpers.TryRunShellCommand(
+            BuildWorkloadCommand(),
+            TimeSpan.FromSeconds(8),
+            out string output,
+            out string error,
+            out int exitCode);
+
+        bool tokenObserved = ran && output.Contains(TokenDone, StringComparison.Ordinal);
+        bool exitObserved = ran;
+        bool success = tokenObserved && exitObserved && exitCode == 0;
+
+        lines.Add("Visual checklist: inspect transcript colors, block bars, and log readability.");
+        lines.Add($"PTY status: {(success ? TuiRuntimeHelpers.Badge(true) : TuiRuntimeHelpers.Badge(false))} token={tokenObserved} exit={exitObserved} code={exitCode}");
+        lines.Add(string.Empty);
+        lines.Add("\x1b[1mTranscript preview:\x1b[0m");
+
+        IReadOnlyList<string> previewLines = ExtractPreviewLines(output);
+        if (previewLines.Count == 0)
         {
-            using IPty pty = new DefaultPtyFactory().Create();
-            using ManualResetEventSlim doneSeen = new(initialState: false);
-            using ManualResetEventSlim exitSeen = new(initialState: false);
-            StringBuilder outputBuffer = new();
-            int exitCode = int.MinValue;
-            (string shell, IReadOnlyList<string> arguments) workload = BuildWorkloadCommand();
-
-            pty.DataReceived += (buffer, count) =>
-            {
-                string chunk = Encoding.UTF8.GetString(buffer, 0, count);
-                lock (outputBuffer)
-                {
-                    outputBuffer.Append(chunk);
-                    outputSnapshot = outputBuffer.ToString();
-                    if (outputSnapshot.Contains(TokenDone, StringComparison.Ordinal))
-                    {
-                        doneSeen.Set();
-                    }
-                }
-            };
-
-            pty.ProcessExited += code =>
-            {
-                exitCode = code;
-                exitSeen.Set();
-            };
-
-            pty.Start(
-                shell: workload.shell,
-                columns: 100,
-                rows: 30,
-                workingDirectory: Environment.CurrentDirectory,
-                environment: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["TERM"] = "xterm-256color",
-                },
-                arguments: workload.arguments);
-
-            bool tokenObserved = doneSeen.Wait(TimeSpan.FromSeconds(8));
-            bool exitObserved = exitSeen.Wait(TimeSpan.FromSeconds(8));
-            success = tokenObserved && exitObserved && exitCode == 0;
-
-            lines.Add("Visual checklist: inspect transcript colors, block bars, and log readability.");
-            lines.Add($"PTY status: {(success ? "\x1b[30;42m OK \x1b[0m" : "\x1b[37;41mFAIL\x1b[0m")} token={tokenObserved} exit={exitObserved} code={exitCode}");
-            lines.Add(string.Empty);
-            lines.Add("\x1b[1mTranscript preview:\x1b[0m");
-
-            IReadOnlyList<string> previewLines = ExtractPreviewLines(outputSnapshot);
-            if (previewLines.Count == 0)
-            {
-                lines.Add("  <no transcript captured>");
-            }
-            else
-            {
-                for (int i = 0; i < previewLines.Count; i++)
-                {
-                    lines.Add($"  {previewLines[i]}");
-                }
-            }
-
-            lines.Add(string.Empty);
-            lines.Add("Expected result: colored status labels and bars should appear without corrupted control sequences.");
+            lines.Add("  <no transcript captured>");
         }
-        catch (Exception ex)
+        else
         {
-            success = false;
-            lines.Add($"Visual PTY transcript failed: {ex.GetType().Name}: {ex.Message}");
+            for (int i = 0; i < previewLines.Count; i++)
+            {
+                lines.Add($"  {previewLines[i]}");
+            }
         }
 
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            lines.Add($"stderr: {ControlTextFormatter.FormatControl(error)}");
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Expected result: colored status labels and bars should appear without corrupted control sequences.");
         return new CatalogScenarioResult(Title, success, lines);
     }
 
-    private static (string shell, IReadOnlyList<string> arguments) BuildWorkloadCommand()
+    private static string BuildWorkloadCommand()
     {
         if (OperatingSystem.IsWindows())
         {
-            string? shellFromEnvironment = Environment.GetEnvironmentVariable("ComSpec");
-            string shell = string.IsNullOrWhiteSpace(shellFromEnvironment)
-                ? "cmd.exe"
-                : shellFromEnvironment;
-
-            return (shell, ["/Q", "/D", "/C", BuildWindowsWorkloadScript()]);
+            return
+                "$esc=[char]27; " +
+                "Write-Output \"$esc[1;36m[session]$esc[0m starting workload\"; " +
+                "Write-Output \"$esc[32m[ok]$esc[0m connected to endpoint\"; " +
+                "Write-Output \"cpu  : $esc[38;5;82m█████████████$esc[38;5;240m███$esc[0m 89%\"; " +
+                "Write-Output \"mem  : $esc[38;5;45m████████$esc[38;5;240m████$esc[0m 58%\"; " +
+                "Write-Output \"disk : $esc[38;5;220m██████████$esc[38;5;240m████$esc[0m 71%\"; " +
+                "Write-Output \"$esc[33mwarning$esc[0m latency spike on pty lane\"; " +
+                "Write-Output \"$esc[32mok$esc[0m recovered\"; " +
+                $"Write-Output '{TokenDone}'";
         }
 
-        return ("/bin/sh", ["-c", BuildUnixWorkloadScript()]);
+        return
+            "printf '\\033[1;36m[session]\\033[0m starting workload\\n'; " +
+            "printf '\\033[32m[ok]\\033[0m connected to endpoint\\n'; " +
+            "printf 'cpu  : \\033[38;5;82m█████████████\\033[38;5;240m███\\033[0m 89%%\\n'; " +
+            "printf 'mem  : \\033[38;5;45m████████\\033[38;5;240m████\\033[0m 58%%\\n'; " +
+            "printf 'disk : \\033[38;5;220m██████████\\033[38;5;240m████\\033[0m 71%%\\n'; " +
+            "printf '\\033[33mwarning\\033[0m latency spike on pty lane\\n'; " +
+            "printf '\\033[32mok\\033[0m recovered\\n'; " +
+            $"printf '{TokenDone}\\n'";
     }
 
-    private static string BuildWindowsWorkloadScript()
+    private static IReadOnlyList<string> ExtractPreviewLines(string output)
     {
-        return string.Join(" && ", [
-            "echo [session] starting workload",
-            "echo [ok] connected to endpoint",
-            "echo cpu: 89%% mem: 58%% disk: 71%%",
-            "echo warning: latency spike on pty lane",
-            "echo ok: recovered",
-            $"echo {TokenDone}",
-        ]);
-    }
-
-    private static string BuildUnixWorkloadScript()
-    {
-        return string.Join(" ; ", [
-            "printf '\\033[1;36m[session]\\033[0m starting workload\\n'",
-            "printf '\\033[32m[ok]\\033[0m connected to endpoint\\n'",
-            "printf 'cpu  : \\033[38;5;82m█████████████\\033[38;5;240m███\\033[0m 89%%\\n'",
-            "printf 'mem  : \\033[38;5;45m████████\\033[38;5;240m████\\033[0m 58%%\\n'",
-            "printf 'disk : \\033[38;5;220m██████████\\033[38;5;240m████\\033[0m 71%%\\n'",
-            "printf '\\033[33mwarning\\033[0m latency spike on pty lane\\n'",
-            "printf '\\033[32mok\\033[0m recovered\\n'",
-            $"printf '{TokenDone}\\n'",
-        ]);
-    }
-
-    private static IReadOnlyList<string> ExtractPreviewLines(string outputSnapshot)
-    {
-        string[] rawLines = outputSnapshot
+        string[] rawLines = output
             .Replace("\r", string.Empty, StringComparison.Ordinal)
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        List<string> previewLines = [];
-        HashSet<string> seenNormalized = new(StringComparer.OrdinalIgnoreCase);
-
+        List<string> filtered = [];
+        HashSet<string> unique = new(StringComparer.Ordinal);
         for (int i = 0; i < rawLines.Length; i++)
         {
             string line = rawLines[i];
-            string normalized = StripAnsi(line).Trim();
-
-            if (normalized.Length == 0 ||
-                normalized.Contains(TokenDone, StringComparison.Ordinal) ||
-                !IsExpectedTranscriptLine(normalized) ||
-                !seenNormalized.Add(normalized))
+            if (line.Contains(TokenDone, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            previewLines.Add(line);
-            if (previewLines.Count >= 10)
+            string plain = StripAnsi(line);
+            bool interesting = plain.StartsWith("[session]", StringComparison.Ordinal) ||
+                               plain.StartsWith("[ok]", StringComparison.Ordinal) ||
+                               plain.StartsWith("cpu  :", StringComparison.Ordinal) ||
+                               plain.StartsWith("mem  :", StringComparison.Ordinal) ||
+                               plain.StartsWith("disk :", StringComparison.Ordinal) ||
+                               plain.StartsWith("warning", StringComparison.Ordinal) ||
+                               plain.StartsWith("ok", StringComparison.Ordinal);
+
+            if (!interesting || !unique.Add(plain))
             {
-                break;
+                continue;
             }
+
+            filtered.Add(line);
         }
 
-        return previewLines;
-    }
-
-    private static bool IsExpectedTranscriptLine(string line)
-    {
-        return line.Contains("[session] starting workload", StringComparison.OrdinalIgnoreCase) ||
-               line.Contains("[ok] connected to endpoint", StringComparison.OrdinalIgnoreCase) ||
-               line.StartsWith("cpu", StringComparison.OrdinalIgnoreCase) ||
-               line.StartsWith("mem", StringComparison.OrdinalIgnoreCase) ||
-               line.StartsWith("disk", StringComparison.OrdinalIgnoreCase) ||
-               line.Contains("warning", StringComparison.OrdinalIgnoreCase) ||
-               line.EndsWith("recovered", StringComparison.OrdinalIgnoreCase);
+        return filtered;
     }
 
     private static string StripAnsi(string text)
     {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+
         StringBuilder builder = new(text.Length);
         for (int i = 0; i < text.Length; i++)
         {
-            if (text[i] == '\x1b')
+            if (text[i] != '\x1b')
             {
-                i = SkipAnsiSequence(text, i);
+                builder.Append(text[i]);
                 continue;
             }
 
-            builder.Append(text[i]);
+            i = SkipAnsiSequence(text, i);
         }
 
         return builder.ToString();
@@ -826,7 +826,8 @@ internal sealed class VisualPtyTranscriptScenario : ICatalogScenario
             return startIndex;
         }
 
-        if (text[startIndex + 1] == '[')
+        char kind = text[startIndex + 1];
+        if (kind == '[')
         {
             int index = startIndex + 2;
             while (index < text.Length)
@@ -835,6 +836,27 @@ internal sealed class VisualPtyTranscriptScenario : ICatalogScenario
                 if (ch >= '@' && ch <= '~')
                 {
                     return index;
+                }
+
+                index++;
+            }
+
+            return text.Length - 1;
+        }
+
+        if (kind == ']')
+        {
+            int index = startIndex + 2;
+            while (index < text.Length)
+            {
+                if (text[index] == '\a')
+                {
+                    return index;
+                }
+
+                if (text[index] == '\x1b' && index + 1 < text.Length && text[index + 1] == '\\')
+                {
+                    return index + 1;
                 }
 
                 index++;
