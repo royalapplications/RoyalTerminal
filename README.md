@@ -85,6 +85,67 @@ Supported transport option models:
 | Pipe | `PipeTransportOptions` | Non-PTY process streams, useful for command/log scenarios |
 | SSH | `SshTransportOptions` | Remote terminal sessions with optional PTY request and host-key checks (OpenSSH `known_hosts` and optional SHA-256 pinning) |
 
+## Terminal Capture and Replay
+
+Capture/replay is available for `TerminalControl` and is designed to be reusable outside the demo app.
+
+- **Captured timeline events**:
+  - terminal output bytes
+  - terminal input bytes sent through session routing
+  - terminal resize events
+- **Persistence**:
+  - JSON file format via `TerminalCaptureSessionSerializer`
+  - recommended extension: `.rtcap.json`
+- **Replay controls**:
+  - play, pause, stop, and seek by timeline position
+  - replay surface reset to captured initial dimensions
+
+### Demo Integration (`samples/RoyalTerminal.Demo`)
+
+The demo toolbar includes:
+
+- `Start Capture` / `Stop Capture`
+- `Save Capture` (writes capture session to file)
+- `Load Replay` (opens a capture file in a replay tab)
+
+When replay is active, the replay timeline bar is shown with play/pause, stop, slider seek, elapsed/total display, and source label.
+
+### Reusable API Surface
+
+- `RoyalTerminal.Avalonia.Capture.TerminalCaptureRuntime`
+  - runtime orchestration for capture + replay against a `TerminalControl`
+- `RoyalTerminal.Terminal.TerminalCaptureRecorder`
+  - event recorder with snapshot/finalize semantics
+- `RoyalTerminal.Terminal.TerminalCaptureSession`
+  - serializable capture payload (metadata + ordered events)
+- `RoyalTerminal.Terminal.TerminalCaptureSessionSerializer`
+  - stream/file load + save helpers
+
+```csharp
+using RoyalTerminal.Avalonia.Capture;
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Terminal;
+
+var terminal = new TerminalControl();
+var captureRuntime = new TerminalCaptureRuntime(terminal);
+
+captureRuntime.StartCapture();
+terminal.SendInput("ls\r");
+terminal.WriteOutput("file1\nfile2\n"u8);
+
+TerminalCaptureSession captured = captureRuntime.StopCapture();
+await TerminalCaptureSessionSerializer.SaveToFileAsync(captured, "session.rtcap.json");
+
+TerminalCaptureSession loaded =
+    await TerminalCaptureSessionSerializer.LoadFromFileAsync("session.rtcap.json");
+
+captureRuntime.LoadReplay(loaded, "session.rtcap.json");
+captureRuntime.PlayReplay();
+captureRuntime.SeekReplay(2.5);
+captureRuntime.PauseReplay();
+captureRuntime.StopReplay();
+```
+
 ## Integration Modes
 
 | Mode | Control | Package Set | VT Engine | Renderer | PTY | Platform | Best For |

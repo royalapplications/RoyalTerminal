@@ -441,6 +441,74 @@ public class MainWindowViewModelFlowTests
         Assert.Equal(2, viewModel.ShellProfiles.Count);
     }
 
+    [Fact]
+    public void CaptureReplay_ToggleCaptureCommand_UsesCurrentCaptureState()
+    {
+        MainWindowViewModel viewModel = new();
+        List<bool> toggles = [];
+        using IDisposable registration = viewModel.ToggleCaptureInteraction.RegisterHandler(context =>
+        {
+            toggles.Add(context.Input);
+            context.SetOutput(Unit.Default);
+        });
+
+        viewModel.ToggleCaptureCommand.Execute().Wait();
+        viewModel.SetCaptureState(isCaptureActive: true, hasCapture: false);
+        viewModel.ToggleCaptureCommand.Execute().Wait();
+
+        Assert.Equal([true, false], toggles);
+    }
+
+    [Fact]
+    public void CaptureReplay_ToggleReplayPlaybackCommand_UsesCurrentPlaybackState()
+    {
+        MainWindowViewModel viewModel = new();
+        List<bool> requests = [];
+        using IDisposable registration = viewModel.SetReplayPlayingInteraction.RegisterHandler(context =>
+        {
+            requests.Add(context.Input);
+            context.SetOutput(Unit.Default);
+        });
+
+        viewModel.SetReplayState(
+            isReplayEnabled: true,
+            isReplayPlaying: false,
+            replayPositionSeconds: 0,
+            replayDurationSeconds: 30,
+            replaySourceLabel: "capture.rtcap.json");
+        viewModel.ToggleReplayPlaybackCommand.Execute().Wait();
+
+        viewModel.SetReplayState(
+            isReplayEnabled: true,
+            isReplayPlaying: true,
+            replayPositionSeconds: 10,
+            replayDurationSeconds: 30,
+            replaySourceLabel: "capture.rtcap.json");
+        viewModel.ToggleReplayPlaybackCommand.Execute().Wait();
+
+        Assert.Equal([true, false], requests);
+    }
+
+    [Fact]
+    public void CaptureReplay_SetReplayState_UpdatesTimelineSurface()
+    {
+        MainWindowViewModel viewModel = new();
+
+        viewModel.SetReplayState(
+            isReplayEnabled: true,
+            isReplayPlaying: false,
+            replayPositionSeconds: 65,
+            replayDurationSeconds: 125,
+            replaySourceLabel: "session.rtcap.json");
+
+        Assert.True(viewModel.IsReplayEnabled);
+        Assert.Equal(125, viewModel.ReplayDurationSeconds);
+        Assert.Equal(65, viewModel.ReplayTimelineValue);
+        Assert.Equal("01:05 / 02:05", viewModel.ReplayTimelineText);
+        Assert.Equal("session.rtcap.json", viewModel.ReplaySourceLabel);
+        Assert.True(viewModel.CanSeekReplay);
+    }
+
     private static TransportModeOption FindTransportMode(MainWindowViewModel viewModel, string transportId)
     {
         for (int i = 0; i < viewModel.TransportModes.Count; i++)

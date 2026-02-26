@@ -64,6 +64,14 @@ public sealed class MainWindowViewModel : ReactiveObject
     private string _sshInitialCommand = string.Empty;
     private bool _sshRequestPty = true;
 
+    private bool _isCaptureActive;
+    private bool _hasCapture;
+    private bool _isReplayEnabled;
+    private bool _isReplayPlaying;
+    private double _replayDurationSeconds;
+    private double _replayTimelineValue;
+    private string _replaySourceLabel = string.Empty;
+
     public MainWindowViewModel()
         : this(TerminalModeResolver.Default, new TerminalThemeCatalog())
     {
@@ -107,6 +115,11 @@ public sealed class MainWindowViewModel : ReactiveObject
         ApplyThemeInteraction = new Interaction<bool, Unit>();
         ApplyThemeModelInteraction = new Interaction<TerminalThemeApplyRequest, Unit>();
         ApplyRenderedBackendInteraction = new Interaction<bool, Unit>();
+        ToggleCaptureInteraction = new Interaction<bool, Unit>();
+        SaveCaptureInteraction = new Interaction<Unit, Unit>();
+        LoadReplayInteraction = new Interaction<Unit, Unit>();
+        SetReplayPlayingInteraction = new Interaction<bool, Unit>();
+        StopReplayInteraction = new Interaction<Unit, Unit>();
 
         NewTabCommand = ReactiveCommand.CreateFromObservable(() => CreateNewTabInteraction.Handle(Unit.Default));
         CloseCurrentTabCommand = ReactiveCommand.CreateFromObservable(() => CloseCurrentTabInteraction.Handle(Unit.Default));
@@ -125,6 +138,11 @@ public sealed class MainWindowViewModel : ReactiveObject
         GenerateThemeCommand = ReactiveCommand.CreateFromObservable(GenerateTheme);
         ToggleRenderedBackendCommand = ReactiveCommand.CreateFromObservable(ToggleRenderedBackend);
         CycleRenderModeCommand = ReactiveCommand.Create(CycleRenderMode);
+        ToggleCaptureCommand = ReactiveCommand.CreateFromObservable(ToggleCapture);
+        SaveCaptureCommand = ReactiveCommand.CreateFromObservable(SaveCapture);
+        LoadReplayCommand = ReactiveCommand.CreateFromObservable(LoadReplay);
+        ToggleReplayPlaybackCommand = ReactiveCommand.CreateFromObservable(ToggleReplayPlayback);
+        StopReplayCommand = ReactiveCommand.CreateFromObservable(StopReplay);
 
         UpdateThemePresetButtonText();
     }
@@ -141,6 +159,11 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<bool, Unit> ApplyThemeInteraction { get; }
     public Interaction<TerminalThemeApplyRequest, Unit> ApplyThemeModelInteraction { get; }
     public Interaction<bool, Unit> ApplyRenderedBackendInteraction { get; }
+    public Interaction<bool, Unit> ToggleCaptureInteraction { get; }
+    public Interaction<Unit, Unit> SaveCaptureInteraction { get; }
+    public Interaction<Unit, Unit> LoadReplayInteraction { get; }
+    public Interaction<bool, Unit> SetReplayPlayingInteraction { get; }
+    public Interaction<Unit, Unit> StopReplayInteraction { get; }
 
     public ReactiveCommand<Unit, Unit> NewTabCommand { get; }
     public ReactiveCommand<Unit, Unit> CloseCurrentTabCommand { get; }
@@ -159,6 +182,11 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> GenerateThemeCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleRenderedBackendCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleRenderModeCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleCaptureCommand { get; }
+    public ReactiveCommand<Unit, Unit> SaveCaptureCommand { get; }
+    public ReactiveCommand<Unit, Unit> LoadReplayCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleReplayPlaybackCommand { get; }
+    public ReactiveCommand<Unit, Unit> StopReplayCommand { get; }
 
     public double FontSize
     {
@@ -291,6 +319,123 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public string RenderedBackendButtonText
         => UseTextureInterop ? "Backend: Interop (Preview)" : "Backend: CPU";
+
+    public bool IsCaptureActive
+    {
+        get => _isCaptureActive;
+        private set
+        {
+            if (_isCaptureActive == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _isCaptureActive, value);
+            this.RaisePropertyChanged(nameof(CaptureToggleButtonText));
+            this.RaisePropertyChanged(nameof(CanSaveCapture));
+        }
+    }
+
+    public bool HasCapture
+    {
+        get => _hasCapture;
+        private set
+        {
+            if (_hasCapture == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _hasCapture, value);
+            this.RaisePropertyChanged(nameof(CanSaveCapture));
+        }
+    }
+
+    public string CaptureToggleButtonText => IsCaptureActive ? "Stop Capture" : "Start Capture";
+
+    public bool CanSaveCapture => HasCapture || IsCaptureActive;
+
+    public bool IsReplayEnabled
+    {
+        get => _isReplayEnabled;
+        private set
+        {
+            if (_isReplayEnabled == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _isReplayEnabled, value);
+            this.RaisePropertyChanged(nameof(CanReplayControl));
+            this.RaisePropertyChanged(nameof(CanSeekReplay));
+            this.RaisePropertyChanged(nameof(ReplayTimelineText));
+        }
+    }
+
+    public bool IsReplayPlaying
+    {
+        get => _isReplayPlaying;
+        private set
+        {
+            if (_isReplayPlaying == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _isReplayPlaying, value);
+            this.RaisePropertyChanged(nameof(ReplayPlayPauseButtonText));
+        }
+    }
+
+    public double ReplayDurationSeconds
+    {
+        get => _replayDurationSeconds;
+        private set
+        {
+            double normalized = Math.Max(0, value);
+            if (Math.Abs(_replayDurationSeconds - normalized) < double.Epsilon)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _replayDurationSeconds, normalized);
+            this.RaisePropertyChanged(nameof(CanSeekReplay));
+            this.RaisePropertyChanged(nameof(ReplayTimelineText));
+        }
+    }
+
+    public double ReplayTimelineValue
+    {
+        get => _replayTimelineValue;
+        set
+        {
+            double clamped = ReplayDurationSeconds > 0
+                ? Math.Clamp(value, 0, ReplayDurationSeconds)
+                : 0;
+            if (Math.Abs(_replayTimelineValue - clamped) < double.Epsilon)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _replayTimelineValue, clamped);
+            this.RaisePropertyChanged(nameof(ReplayTimelineText));
+        }
+    }
+
+    public string ReplaySourceLabel
+    {
+        get => _replaySourceLabel;
+        private set => this.RaiseAndSetIfChanged(ref _replaySourceLabel, value);
+    }
+
+    public string ReplayPlayPauseButtonText => IsReplayPlaying ? "Pause" : "Play";
+
+    public bool CanReplayControl => IsReplayEnabled;
+
+    public bool CanSeekReplay => IsReplayEnabled && ReplayDurationSeconds > 0;
+
+    public string ReplayTimelineText
+        => $"{FormatDuration(ReplayTimelineValue)} / {FormatDuration(ReplayDurationSeconds)}";
 
     public IReadOnlyList<TransportModeOption> TransportModes => _transportModes;
 
@@ -510,6 +655,33 @@ public sealed class MainWindowViewModel : ReactiveObject
         }
     }
 
+    public void SetCaptureState(bool isCaptureActive, bool hasCapture)
+    {
+        IsCaptureActive = isCaptureActive;
+        HasCapture = hasCapture;
+    }
+
+    public void SetReplayState(
+        bool isReplayEnabled,
+        bool isReplayPlaying,
+        double replayPositionSeconds,
+        double replayDurationSeconds,
+        string? replaySourceLabel = null)
+    {
+        IsReplayEnabled = isReplayEnabled;
+        IsReplayPlaying = isReplayPlaying;
+        ReplayDurationSeconds = Math.Max(0, replayDurationSeconds);
+        ReplayTimelineValue = Math.Clamp(replayPositionSeconds, 0, ReplayDurationSeconds);
+        if (replaySourceLabel is not null)
+        {
+            ReplaySourceLabel = replaySourceLabel;
+        }
+        else if (!isReplayEnabled)
+        {
+            ReplaySourceLabel = string.Empty;
+        }
+    }
+
     public void SetStatus(string text)
     {
         StatusText = text;
@@ -620,6 +792,33 @@ public sealed class MainWindowViewModel : ReactiveObject
             .Handle(UseTextureInterop)
             .Do(_ => SetStatus(
                 $"Rendered backend: {(UseTextureInterop ? "TextureInterop (Preview)" : "CPU Cell Renderer")}"));
+    }
+
+    private IObservable<Unit> ToggleCapture()
+    {
+        bool shouldStartCapture = !IsCaptureActive;
+        return ToggleCaptureInteraction.Handle(shouldStartCapture);
+    }
+
+    private IObservable<Unit> SaveCapture()
+    {
+        return SaveCaptureInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> LoadReplay()
+    {
+        return LoadReplayInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> ToggleReplayPlayback()
+    {
+        bool shouldPlay = !IsReplayPlaying;
+        return SetReplayPlayingInteraction.Handle(shouldPlay);
+    }
+
+    private IObservable<Unit> StopReplay()
+    {
+        return StopReplayInteraction.Handle(Unit.Default);
     }
 
     private void CycleRenderMode()
@@ -796,6 +995,17 @@ public sealed class MainWindowViewModel : ReactiveObject
         this.RaisePropertyChanged(nameof(ShowSshPasswordField));
         this.RaisePropertyChanged(nameof(ShowSshPrivateKeyField));
         this.RaisePropertyChanged(nameof(ShowSshAgentHint));
+    }
+
+    private static string FormatDuration(double seconds)
+    {
+        TimeSpan duration = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        if (duration.TotalHours >= 1)
+        {
+            return duration.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
+        }
+
+        return duration.ToString(@"mm\:ss", CultureInfo.InvariantCulture);
     }
 
     private static bool ContainsShellProfile(IReadOnlyList<ShellProfileOption> profiles, string id)

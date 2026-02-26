@@ -357,6 +357,25 @@ public class TerminalAbstractionsTests
     }
 
     [Fact]
+    public void TerminalSessionService_SendInput_RaisesInputSentEvent()
+    {
+        TerminalSessionService service = new();
+        FakeTerminalEndpoint endpoint = new();
+        service.AttachEndpoint(endpoint);
+
+        List<string> payloads = [];
+        service.InputSent += (_, args) =>
+        {
+            payloads.Add(System.Text.Encoding.UTF8.GetString(args.Data.Span));
+        };
+
+        service.SendInput("hello");
+        service.SendInput("world"u8);
+
+        Assert.Equal(["hello", "world"], payloads);
+    }
+
+    [Fact]
     public void TerminalSessionService_DetachEndpoint_RoutesInputBackToPty()
     {
         TerminalSessionService service = new();
