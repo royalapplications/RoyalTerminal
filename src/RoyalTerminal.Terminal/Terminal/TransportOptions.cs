@@ -17,6 +17,15 @@ public static class TerminalTransportIds
 
     /// <summary>SSH transport.</summary>
     public const string Ssh = "ssh";
+
+    /// <summary>Raw TCP socket transport.</summary>
+    public const string RawTcp = "raw-tcp";
+
+    /// <summary>Telnet transport.</summary>
+    public const string Telnet = "telnet";
+
+    /// <summary>Serial line transport.</summary>
+    public const string Serial = "serial";
 }
 
 /// <summary>
@@ -64,6 +73,61 @@ public sealed record SshEndpointOptions(
     string Username);
 
 /// <summary>
+/// Supported SSH proxy types.
+/// </summary>
+public enum SshProxyType
+{
+    None,
+    Socks4,
+    Socks5,
+    Http,
+}
+
+/// <summary>
+/// SSH proxy settings.
+/// </summary>
+public sealed record SshProxyOptions(
+    SshProxyType Type,
+    string Host,
+    int Port,
+    string? Username,
+    string? Password);
+
+/// <summary>
+/// Supported SSH port forwarding modes.
+/// </summary>
+public enum SshPortForwardMode
+{
+    Local,
+    Remote,
+    Dynamic,
+}
+
+/// <summary>
+/// SSH port forwarding rule.
+/// </summary>
+public sealed record SshPortForwardOptions(
+    SshPortForwardMode Mode,
+    string BindAddress,
+    uint SourcePort,
+    string? DestinationHost,
+    uint? DestinationPort);
+
+/// <summary>
+/// SSH X11 forwarding options.
+/// </summary>
+public sealed record SshX11Options(
+    bool Enabled,
+    string Display);
+
+/// <summary>
+/// SSH policy options.
+/// </summary>
+public sealed record SshPolicyOptions(
+    int KeepAliveIntervalSeconds,
+    int ConnectTimeoutSeconds);
+
+/// <summary>
 /// Options for an SSH terminal transport.
 /// </summary>
 public sealed record SshTransportOptions(
@@ -87,6 +151,112 @@ public sealed record SshTransportOptions(
     /// </summary>
     public string? ExpectedHostKeyFingerprintSha256 { get; init; }
 
+    /// <summary>
+    /// Optional SSH proxy settings.
+    /// </summary>
+    public SshProxyOptions? Proxy { get; init; }
+
+    /// <summary>
+    /// Optional SSH port forward rules.
+    /// </summary>
+    public IReadOnlyList<SshPortForwardOptions> PortForwardings { get; init; } = Array.Empty<SshPortForwardOptions>();
+
+    /// <summary>
+    /// Optional X11 forwarding settings.
+    /// </summary>
+    public SshX11Options? X11 { get; init; }
+
+    /// <summary>
+    /// SSH runtime policy settings.
+    /// </summary>
+    public SshPolicyOptions Policy { get; init; } = new(
+        KeepAliveIntervalSeconds: 30,
+        ConnectTimeoutSeconds: 15);
+
     /// <inheritdoc />
     public string TransportId => TerminalTransportIds.Ssh;
+}
+
+/// <summary>
+/// Options for a raw TCP transport.
+/// </summary>
+public sealed record RawTcpTransportOptions(
+    string Host,
+    int Port,
+    TerminalSessionDimensions Dimensions) : ITerminalTransportOptions
+{
+    /// <inheritdoc />
+    public string TransportId => TerminalTransportIds.RawTcp;
+}
+
+/// <summary>
+/// Options for a Telnet transport.
+/// </summary>
+public sealed record TelnetTransportOptions(
+    string Host,
+    int Port,
+    string TerminalType,
+    TerminalSessionDimensions Dimensions) : ITerminalTransportOptions
+{
+    /// <summary>
+    /// Optional startup command sent after the connection is established.
+    /// </summary>
+    public string? InitialCommand { get; init; }
+
+    /// <inheritdoc />
+    public string TransportId => TerminalTransportIds.Telnet;
+}
+
+/// <summary>
+/// Serial parity settings.
+/// </summary>
+public enum TerminalSerialParity
+{
+    None,
+    Odd,
+    Even,
+    Mark,
+    Space,
+}
+
+/// <summary>
+/// Serial stop-bit settings.
+/// </summary>
+public enum TerminalSerialStopBits
+{
+    One,
+    OnePointFive,
+    Two,
+}
+
+/// <summary>
+/// Serial handshake settings.
+/// </summary>
+public enum TerminalSerialHandshake
+{
+    None,
+    XOnXOff,
+    RequestToSend,
+    RequestToSendXOnXOff,
+}
+
+/// <summary>
+/// Options for a serial line transport.
+/// </summary>
+public sealed record SerialTransportOptions(
+    string PortName,
+    int BaudRate,
+    int DataBits,
+    TerminalSerialParity Parity,
+    TerminalSerialStopBits StopBits,
+    TerminalSerialHandshake Handshake,
+    TerminalSessionDimensions Dimensions) : ITerminalTransportOptions
+{
+    /// <summary>
+    /// Newline token used by the backing serial stream.
+    /// </summary>
+    public string NewLine { get; init; } = "\n";
+
+    /// <inheritdoc />
+    public string TransportId => TerminalTransportIds.Serial;
 }

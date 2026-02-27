@@ -1,0 +1,330 @@
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
+
+using RoyalTerminal.Terminal;
+using Xunit;
+
+namespace RoyalTerminal.Tests;
+
+public sealed class TerminalSessionProfileSerializerTests
+{
+    [Fact]
+    public async Task Serializer_RoundTripsDocument_AndAssignsDefaultProfile()
+    {
+        TerminalSessionProfilesDocument document = new()
+        {
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "dev-ssh",
+                    DisplayName = "Dev SSH",
+                    Layout = new TerminalSessionLayoutSettings
+                    {
+                        Columns = 132,
+                        Rows = 43,
+                        WidthPixels = 1320,
+                        HeightPixels = 860,
+                    },
+                    Transport = new TerminalSessionTransportProfile
+                    {
+                        TransportId = TerminalTransportIds.Ssh,
+                        Ssh = new TerminalSessionSshSettings
+                        {
+                            Host = "example.com",
+                            Port = 22,
+                            Username = "alice",
+                            RequestPty = true,
+                            TerminalType = "xterm-256color",
+                            InitialCommand = "uname -a",
+                            ExpectedHostKeyFingerprintSha256 = "SHA256:test",
+                            Environment = new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["LANG"] = "en_US.UTF-8",
+                            },
+                            Authentication = new TerminalSessionSshAuthenticationSettings
+                            {
+                                UsePassword = true,
+                                PasswordSecretId = "ssh/dev/password",
+                                PrivateKeySecretIds = ["ssh/dev/key"],
+                            },
+                        },
+                    },
+                },
+            ],
+        };
+
+        await using MemoryStream stream = new();
+        await TerminalSessionProfileSerializer.SaveAsync(document, stream);
+        stream.Position = 0;
+
+        TerminalSessionProfilesDocument restored = await TerminalSessionProfileSerializer.LoadAsync(stream);
+
+        Assert.Equal(TerminalSessionProfilesDocument.CurrentFormatVersion, restored.FormatVersion);
+        Assert.Equal("dev-ssh", restored.DefaultProfileId);
+        Assert.Single(restored.Profiles);
+
+        TerminalSessionProfile profile = restored.Profiles[0];
+        Assert.Equal("dev-ssh", profile.Id);
+        Assert.Equal(TerminalTransportIds.Ssh, profile.Transport.TransportId);
+        Assert.Equal("example.com", profile.Transport.Ssh.Host);
+        Assert.Equal("alice", profile.Transport.Ssh.Username);
+        Assert.True(profile.Transport.Ssh.Authentication.UsePassword);
+        Assert.Equal("ssh/dev/password", profile.Transport.Ssh.Authentication.PasswordSecretId);
+        Assert.Single(profile.Transport.Ssh.Authentication.PrivateKeySecretIds);
+    }
+
+    [Fact]
+    public async Task Serializer_LoadAsync_RejectsDuplicateProfileIds()
+    {
+        const string json = """
+                            {
+                              "formatVersion": 1,
+                              "profiles": [
+                                { "id": "dup", "displayName": "One" },
+                                { "id": "DUP", "displayName": "Two" }
+                              ]
+                            }
+                            """;
+
+        await using MemoryStream stream = new(System.Text.Encoding.UTF8.GetBytes(json));
+        await Assert.ThrowsAsync<InvalidDataException>(
+            async () => await TerminalSessionProfileSerializer.LoadAsync(stream));
+    }
+
+    [Fact]
+    public void Mapper_MapsSshProfileToTransportOptions_AndBack()
+    {
+        TerminalSessionProfile profile = new()
+        {
+            Id = "ssh-prod",
+            DisplayName = "SSH Prod",
+            Layout = new TerminalSessionLayoutSettings
+            {
+                Columns = 100,
+                Rows = 30,
+                WidthPixels = 1000,
+                HeightPixels = 720,
+            },
+            Transport = new TerminalSessionTransportProfile
+            {
+                TransportId = TerminalTransportIds.Ssh,
+                Ssh = new TerminalSessionSshSettings
+                {
+                    Host = "prod.example.com",
+                    Port = 2222,
+                    Username = "root",
+                    RequestPty = false,
+                    TerminalType = "xterm",
+                    InitialCommand = "echo ready",
+                    ExpectedHostKeyFingerprintSha256 = "SHA256:abc",
+                    Environment = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["TERM"] = "xterm",
+                    },
+                    Authentication = new TerminalSessionSshAuthenticationSettings
+                    {
+                        UsePassword = false,
+                        PasswordSecretId = null,
+                        PrivateKeySecretIds = ["ssh/prod/key"],
+                        UseAgent = true,
+                    },
+                },
+            },
+        };
+
+        ITerminalTransportOptions mapped = TerminalSessionProfileMapper.ToTransportOptions(profile);
+        SshTransportOptions ssh = Assert.IsType<SshTransportOptions>(mapped);
+
+        Assert.Equal("prod.example.com", ssh.Endpoint.Host);
+        Assert.Equal(2222, ssh.Endpoint.Port);
+        Assert.Equal("root", ssh.Endpoint.Username);
+        Assert.False(ssh.RequestPty);
+        Assert.Equal("xterm", ssh.TerminalType);
+        Assert.Equal("echo ready", ssh.InitialCommand);
+        Assert.Equal("SHA256:abc", ssh.ExpectedHostKeyFingerprintSha256);
+        Assert.True(ssh.Authentication.UseAgent);
+        Assert.Single(ssh.Authentication.PrivateKeySecretIds);
+
+        TerminalSessionProfile roundTripped = TerminalSessionProfileMapper.FromTransportOptions(
+            "from-options",
+            "From Options",
+            ssh);
+        Assert.Equal("from-options", roundTripped.Id);
+        Assert.Equal(TerminalTransportIds.Ssh, roundTripped.Transport.TransportId);
+        Assert.Equal("prod.example.com", roundTripped.Transport.Ssh.Host);
+        Assert.Equal(2222, roundTripped.Transport.Ssh.Port);
+        Assert.Equal("root", roundTripped.Transport.Ssh.Username);
+    }
+
+    [Fact]
+    public void Mapper_MapsRawTelnetAndSerialProfiles()
+    {
+        TerminalSessionDimensions dimensions = new(80, 24, 640, 480);
+
+        TerminalSessionProfile rawProfile = new()
+        {
+            Id = "raw",
+            DisplayName = "Raw",
+            Transport = new TerminalSessionTransportProfile
+            {
+                TransportId = TerminalTransportIds.RawTcp,
+                RawTcp = new TerminalSessionRawTcpSettings
+                {
+                    Host = "127.0.0.1",
+                    Port = 2323,
+                },
+            },
+        };
+        RawTcpTransportOptions raw = Assert.IsType<RawTcpTransportOptions>(
+            TerminalSessionProfileMapper.ToTransportOptions(rawProfile));
+        Assert.Equal("127.0.0.1", raw.Host);
+        Assert.Equal(2323, raw.Port);
+
+        TerminalSessionProfile telnetProfile = new()
+        {
+            Id = "telnet",
+            DisplayName = "Telnet",
+            Transport = new TerminalSessionTransportProfile
+            {
+                TransportId = TerminalTransportIds.Telnet,
+                Telnet = new TerminalSessionTelnetSettings
+                {
+                    Host = "localhost",
+                    Port = 23,
+                    TerminalType = "xterm",
+                },
+            },
+        };
+        TelnetTransportOptions telnet = Assert.IsType<TelnetTransportOptions>(
+            TerminalSessionProfileMapper.ToTransportOptions(telnetProfile));
+        Assert.Equal("localhost", telnet.Host);
+        Assert.Equal(23, telnet.Port);
+
+        TerminalSessionProfile serialProfile = new()
+        {
+            Id = "serial",
+            DisplayName = "Serial",
+            Transport = new TerminalSessionTransportProfile
+            {
+                TransportId = TerminalTransportIds.Serial,
+                Serial = new TerminalSessionSerialSettings
+                {
+                    PortName = "COM1",
+                    BaudRate = 115200,
+                    DataBits = 8,
+                    Parity = TerminalSerialParity.None,
+                    StopBits = TerminalSerialStopBits.One,
+                    Handshake = TerminalSerialHandshake.None,
+                },
+            },
+        };
+        SerialTransportOptions serial = Assert.IsType<SerialTransportOptions>(
+            TerminalSessionProfileMapper.ToTransportOptions(serialProfile));
+        Assert.Equal("COM1", serial.PortName);
+        Assert.Equal(115200, serial.BaudRate);
+
+        TerminalSessionProfile mappedBack = TerminalSessionProfileMapper.FromTransportOptions("mapped", "Mapped", new RawTcpTransportOptions("example.com", 4000, dimensions));
+        Assert.Equal(TerminalTransportIds.RawTcp, mappedBack.Transport.TransportId);
+        Assert.Equal("example.com", mappedBack.Transport.RawTcp.Host);
+    }
+
+    [Fact]
+    public void Mapper_MapsSshAdvancedSettings()
+    {
+        TerminalSessionProfile profile = new()
+        {
+            Id = "ssh-advanced",
+            DisplayName = "SSH Advanced",
+            Transport = new TerminalSessionTransportProfile
+            {
+                TransportId = TerminalTransportIds.Ssh,
+                Ssh = new TerminalSessionSshSettings
+                {
+                    Host = "advanced.example.com",
+                    Port = 22,
+                    Username = "alice",
+                    Proxy = new SshProxyOptions(
+                        Type: SshProxyType.Socks5,
+                        Host: "proxy.example.com",
+                        Port: 1080,
+                        Username: "proxy-user",
+                        Password: "proxy-pass"),
+                    PortForwardings =
+                    [
+                        new SshPortForwardOptions(
+                            Mode: SshPortForwardMode.Local,
+                            BindAddress: "127.0.0.1",
+                            SourcePort: 15432,
+                            DestinationHost: "db.internal",
+                            DestinationPort: 5432),
+                    ],
+                    X11 = new SshX11Options(
+                        Enabled: true,
+                        Display: ":0"),
+                    Policy = new SshPolicyOptions(
+                        KeepAliveIntervalSeconds: 20,
+                        ConnectTimeoutSeconds: 12),
+                },
+            },
+        };
+
+        SshTransportOptions options = Assert.IsType<SshTransportOptions>(
+            TerminalSessionProfileMapper.ToTransportOptions(profile));
+
+        Assert.NotNull(options.Proxy);
+        Assert.Equal(SshProxyType.Socks5, options.Proxy!.Type);
+        Assert.Single(options.PortForwardings);
+        Assert.Equal(SshPortForwardMode.Local, options.PortForwardings[0].Mode);
+        Assert.NotNull(options.X11);
+        Assert.True(options.X11!.Enabled);
+        Assert.Equal(":0", options.X11.Display);
+        Assert.Equal(20, options.Policy.KeepAliveIntervalSeconds);
+        Assert.Equal(12, options.Policy.ConnectTimeoutSeconds);
+    }
+
+    [Fact]
+    public async Task JsonFileStore_SaveThenLoad_RoundTripsDocument()
+    {
+        string filePath = Path.Combine(Path.GetTempPath(), "royalterminal-tests", Guid.NewGuid() + ".profiles.json");
+
+        try
+        {
+            JsonFileTerminalSessionProfileStore store = new(filePath);
+
+            TerminalSessionProfilesDocument document = new()
+            {
+                Profiles =
+                [
+                    new TerminalSessionProfile
+                    {
+                        Id = "local",
+                        DisplayName = "Local",
+                        Transport = new TerminalSessionTransportProfile
+                        {
+                            TransportId = TerminalTransportIds.Pty,
+                            Pty = new TerminalSessionPtySettings
+                            {
+                                ShellPath = "/bin/bash",
+                            },
+                        },
+                    },
+                ],
+            };
+
+            await store.SaveAsync(document);
+            TerminalSessionProfilesDocument restored = await store.LoadAsync();
+
+            Assert.Single(restored.Profiles);
+            Assert.Equal("local", restored.Profiles[0].Id);
+            Assert.Equal(TerminalTransportIds.Pty, restored.Profiles[0].Transport.TransportId);
+        }
+        finally
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+    }
+}

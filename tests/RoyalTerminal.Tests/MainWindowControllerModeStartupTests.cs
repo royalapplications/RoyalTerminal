@@ -8,6 +8,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Media;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.Terminal;
@@ -210,6 +211,52 @@ public sealed class MainWindowControllerModeStartupTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task Controller_TerminalBehaviorSettings_AreAppliedAndUpdated()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo behavior-settings";
+        viewModel.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.BlockUnsafe;
+        viewModel.EnableTextShaping = false;
+        viewModel.EnableLigatures = true;
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            skipEmbeddedGhosttyInitialization: true);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            List<TerminalControl> controls = GetStandaloneControls(terminalHost);
+            Assert.NotEmpty(controls);
+            AssertTerminalBehaviorSettings(controls, TerminalPasteSafetyPolicy.BlockUnsafe, enableTextShaping: false, enableLigatures: true);
+
+            viewModel.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.SanitizeControlSequences;
+            viewModel.EnableTextShaping = true;
+            viewModel.EnableLigatures = false;
+            Dispatcher.UIThread.RunJobs();
+
+            AssertTerminalBehaviorSettings(controls, TerminalPasteSafetyPolicy.SanitizeControlSequences, enableTextShaping: true, enableLigatures: false);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
     private static Window CreateControllerHostWindow(MainWindowViewModel viewModel, out Grid terminalHost)
     {
         StackPanel tabStrip = new()
@@ -329,6 +376,41 @@ public sealed class MainWindowControllerModeStartupTests
 
         throw new InvalidOperationException(
             $"Unsupported terminal host container type '{container.GetType().FullName}'.");
+    }
+
+    private static List<TerminalControl> GetStandaloneControls(Grid terminalHost)
+    {
+        List<TerminalControl> controls = [];
+        for (int i = 0; i < terminalHost.Children.Count; i++)
+        {
+            switch (terminalHost.Children[i])
+            {
+                case TerminalControl direct:
+                    controls.Add(direct);
+                    break;
+                case ScrollViewer { Content: TerminalControl wrapped }:
+                    controls.Add(wrapped);
+                    break;
+            }
+        }
+
+        return controls;
+    }
+
+    private static void AssertTerminalBehaviorSettings(
+        IReadOnlyList<TerminalControl> controls,
+        TerminalPasteSafetyPolicy expectedPastePolicy,
+        bool enableTextShaping,
+        bool enableLigatures)
+    {
+        for (int i = 0; i < controls.Count; i++)
+        {
+            TerminalControl control = controls[i];
+            Assert.Equal(expectedPastePolicy, control.PasteSafetyPolicy);
+            Assert.NotNull(control.Renderer);
+            Assert.Equal(enableTextShaping, control.Renderer!.EnableTextShaping);
+            Assert.Equal(enableLigatures, control.Renderer.EnableLigatures);
+        }
     }
 
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)

@@ -21,6 +21,7 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
     private readonly object _sync = new();
     private SshClient? _client;
     private ShellStream? _shellStream;
+    private readonly List<ForwardedPort> _forwardedPorts = [];
     private SshTransportOptions? _options;
     private string? _lastHostKeyValidationError;
     private bool _disposed;
@@ -81,15 +82,12 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
             throw new InvalidOperationException("No SSH authentication methods are available for the session.");
         }
 
-        ConnectionInfo connectionInfo = new(
-            sshOptions.Endpoint.Host,
-            sshOptions.Endpoint.Port,
-            sshOptions.Endpoint.Username,
-            methods.ToArray());
+        ConnectionInfo connectionInfo = CreateConnectionInfo(sshOptions, methods);
+        connectionInfo.Timeout = TimeSpan.FromSeconds(sshOptions.Policy.ConnectTimeoutSeconds);
 
         SshClient client = new(connectionInfo)
         {
-            KeepAliveInterval = TimeSpan.FromSeconds(30),
+            KeepAliveInterval = TimeSpan.FromSeconds(sshOptions.Policy.KeepAliveIntervalSeconds),
         };
         _lastHostKeyValidationError = null;
         client.HostKeyReceived += (_, e) => OnHostKeyReceived(sshOptions, e);
@@ -97,6 +95,7 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
         try
         {
             await Task.Run(client.Connect, cancellationToken).ConfigureAwait(false);
+            ConfigurePortForwardings(client, sshOptions);
 
             ShellStream shell = sshOptions.RequestPty
                 ? client.CreateShellStream(
@@ -190,19 +189,55 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
     {
         ShellStream? shell;
         SshClient? client;
+        List<ForwardedPort> forwardedPorts;
 
         lock (_sync)
         {
             shell = _shellStream;
             client = _client;
+            forwardedPorts = new List<ForwardedPort>(_forwardedPorts);
             _shellStream = null;
             _client = null;
             _options = null;
+            _forwardedPorts.Clear();
         }
 
-        if (shell is null && client is null)
+        if (shell is null && client is null && forwardedPorts.Count == 0)
         {
             return ValueTask.CompletedTask;
+        }
+
+        for (int i = 0; i < forwardedPorts.Count; i++)
+        {
+            try
+            {
+                forwardedPorts[i].Stop();
+            }
+            catch
+            {
+                // Best effort only.
+            }
+
+            if (client is not null)
+            {
+                try
+                {
+                    client.RemoveForwardedPort(forwardedPorts[i]);
+                }
+                catch
+                {
+                    // Best effort only.
+                }
+            }
+
+            try
+            {
+                forwardedPorts[i].Dispose();
+            }
+            catch
+            {
+                // Best effort only.
+            }
         }
 
         if (shell is not null)
@@ -282,6 +317,126 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
         }
 
         return methods;
+    }
+
+    private static ConnectionInfo CreateConnectionInfo(
+        SshTransportOptions options,
+        List<AuthenticationMethod> methods)
+    {
+        SshProxyOptions? proxy = options.Proxy;
+        if (proxy is not null && proxy.Type != SshProxyType.None)
+        {
+            return new ConnectionInfo(
+                options.Endpoint.Host,
+                options.Endpoint.Port,
+                options.Endpoint.Username,
+                MapProxyType(proxy.Type),
+                proxy.Host,
+                proxy.Port,
+                proxy.Username ?? string.Empty,
+                proxy.Password ?? string.Empty,
+                methods.ToArray());
+        }
+
+        return new ConnectionInfo(
+            options.Endpoint.Host,
+            options.Endpoint.Port,
+            options.Endpoint.Username,
+            methods.ToArray());
+    }
+
+    private void ConfigurePortForwardings(SshClient client, SshTransportOptions options)
+    {
+        if (options.PortForwardings.Count == 0)
+        {
+            return;
+        }
+
+        List<ForwardedPort> created = new(options.PortForwardings.Count);
+        try
+        {
+            for (int i = 0; i < options.PortForwardings.Count; i++)
+            {
+                ForwardedPort forwardedPort = CreateForwardedPort(options.PortForwardings[i]);
+                client.AddForwardedPort(forwardedPort);
+                forwardedPort.Start();
+                created.Add(forwardedPort);
+            }
+
+            lock (_sync)
+            {
+                _forwardedPorts.AddRange(created);
+            }
+        }
+        catch
+        {
+            for (int i = 0; i < created.Count; i++)
+            {
+                try
+                {
+                    created[i].Stop();
+                }
+                catch
+                {
+                    // Best effort cleanup.
+                }
+
+                try
+                {
+                    client.RemoveForwardedPort(created[i]);
+                }
+                catch
+                {
+                    // Best effort cleanup.
+                }
+
+                try
+                {
+                    created[i].Dispose();
+                }
+                catch
+                {
+                    // Best effort cleanup.
+                }
+            }
+
+            throw;
+        }
+    }
+
+    private static ForwardedPort CreateForwardedPort(SshPortForwardOptions options)
+    {
+        return options.Mode switch
+        {
+            SshPortForwardMode.Local => new ForwardedPortLocal(
+                options.BindAddress,
+                options.SourcePort,
+                options.DestinationHost ?? throw new InvalidOperationException("Local SSH port forwarding requires DestinationHost."),
+                options.DestinationPort ?? throw new InvalidOperationException("Local SSH port forwarding requires DestinationPort.")),
+
+            SshPortForwardMode.Remote => new ForwardedPortRemote(
+                options.BindAddress,
+                options.SourcePort,
+                options.DestinationHost ?? throw new InvalidOperationException("Remote SSH port forwarding requires DestinationHost."),
+                options.DestinationPort ?? throw new InvalidOperationException("Remote SSH port forwarding requires DestinationPort.")),
+
+            SshPortForwardMode.Dynamic => new ForwardedPortDynamic(
+                options.BindAddress,
+                options.SourcePort),
+
+            _ => throw new InvalidOperationException($"Unsupported SSH port forwarding mode '{options.Mode}'."),
+        };
+    }
+
+    private static ProxyTypes MapProxyType(SshProxyType proxyType)
+    {
+        return proxyType switch
+        {
+            SshProxyType.Http => ProxyTypes.Http,
+            SshProxyType.Socks4 => ProxyTypes.Socks4,
+            SshProxyType.Socks5 => ProxyTypes.Socks5,
+            _ => ProxyTypes.None,
+        };
     }
 
     private static IPrivateKeySource CreatePrivateKeySource(string keySource)
@@ -399,6 +554,87 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
         }
 
         SshShellBootstrapCommandBuilder.ValidateEnvironmentVariables(options.EnvironmentVariables);
+        ValidateProxyOptions(options.Proxy);
+        ValidatePortForwardings(options.PortForwardings);
+        ValidatePolicy(options.Policy);
+        ValidateX11(options.X11);
+    }
+
+    private static void ValidateProxyOptions(SshProxyOptions? proxy)
+    {
+        if (proxy is null || proxy.Type == SshProxyType.None)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(proxy.Host))
+        {
+            throw new InvalidOperationException("SSH proxy host must not be empty when proxy is enabled.");
+        }
+
+        if (proxy.Port is < 1 or > 65_535)
+        {
+            throw new InvalidOperationException("SSH proxy port must be in range 1-65535.");
+        }
+    }
+
+    private static void ValidatePortForwardings(IReadOnlyList<SshPortForwardOptions> forwardings)
+    {
+        for (int i = 0; i < forwardings.Count; i++)
+        {
+            SshPortForwardOptions forward = forwardings[i];
+            if (string.IsNullOrWhiteSpace(forward.BindAddress))
+            {
+                throw new InvalidOperationException("SSH port forwarding BindAddress must not be empty.");
+            }
+
+            if (forward.SourcePort > 65_535)
+            {
+                throw new InvalidOperationException("SSH port forwarding SourcePort must be <= 65535.");
+            }
+
+            if (forward.Mode is SshPortForwardMode.Local or SshPortForwardMode.Remote)
+            {
+                if (string.IsNullOrWhiteSpace(forward.DestinationHost))
+                {
+                    throw new InvalidOperationException("SSH local/remote forwarding requires DestinationHost.");
+                }
+
+                if (forward.DestinationPort is null || forward.DestinationPort > 65_535 || forward.DestinationPort == 0)
+                {
+                    throw new InvalidOperationException("SSH local/remote forwarding requires a DestinationPort in range 1-65535.");
+                }
+            }
+        }
+    }
+
+    private static void ValidatePolicy(SshPolicyOptions policy)
+    {
+        if (policy.KeepAliveIntervalSeconds <= 0)
+        {
+            throw new InvalidOperationException("SSH KeepAliveIntervalSeconds must be greater than zero.");
+        }
+
+        if (policy.ConnectTimeoutSeconds <= 0)
+        {
+            throw new InvalidOperationException("SSH ConnectTimeoutSeconds must be greater than zero.");
+        }
+    }
+
+    private static void ValidateX11(SshX11Options? x11)
+    {
+        if (x11 is null || !x11.Enabled)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(x11.Display))
+        {
+            throw new InvalidOperationException("SSH X11 forwarding requires a display value.");
+        }
+
+        throw new NotSupportedException(
+            "SSH X11 forwarding is configured but not yet supported by the SSH.NET transport backend.");
     }
 
     private static string NormalizeFingerprint(string? value)

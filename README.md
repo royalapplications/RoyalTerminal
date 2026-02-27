@@ -50,9 +50,10 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
   - `RoyalTerminal.Avalonia`: backend-neutral control and services.
   - `RoyalTerminal.Avalonia.Ghostty`: Ghostty-native/rendered controls and adapters.
 - **Backend-neutral endpoint contracts** (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`) for control reuse across backends.
-- **Pluggable transport runtime** (`ITerminalTransportFactory`) supporting PTY, process pipe, and SSH sessions.
+- **Pluggable transport runtime** (`ITerminalTransportFactory`) supporting PTY, process pipe, SSH, raw TCP, Telnet, and serial sessions.
 - **Shared SSH bootstrap helper** (`SshShellBootstrapCommandBuilder`) for consistent POSIX `export` command composition across SSH backends.
 - **Pluggable SSH secret persistence** via `ISshSecretStore` + `ISshSecretProtector` with cross-platform secure defaults (`SshSecretProtectionFactory`).
+- **Session profiles + persistent settings model** via `TerminalSessionProfile*` contracts, `TerminalSessionProfileSerializer`, and `JsonFileTerminalSessionProfileStore`.
 - **Thread-safe output ingestion**: `TerminalControl.WriteOutput(...)` can be called from background SSH/network callbacks (marshaled to UI thread internally).
 - **Preference-based VT selection** via `VtProcessorPreference` (`Auto`, `Managed`, `Native`).
 - **Five integration modes** with explicit trade-offs between fidelity, portability, and native dependencies.
@@ -65,7 +66,7 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 - **Grapheme-aware cell model** in managed VT and native VT/surface readback paths.
 - **Terminal session service split** (`Terminal.Services.Contracts` and `Terminal.Services`).
 - **Sample applications**:
-  - Avalonia demo (`samples/RoyalTerminal.Demo`) with transport selector (`PTY`/`Pipe`/`SSH`), shell profile picker, and SSH form fields
+  - Avalonia demo (`samples/RoyalTerminal.Demo`) with structured settings categories (`Session`/`Connection`/`Terminal`/`Appearance`/`SSH`/`Logging`), transport forms (`PTY`/`Pipe`/`Raw TCP`/`Telnet`/`Serial`/`SSH`), session/event logging, and terminal behavior toggles (copy-on-select, bell notifications, backspace mode, paste safety, text shaping/ligatures)
   - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`)
   - VT/PTy control catalog CLI (`samples/RoyalTerminal.ControlCatalog`) with managed/Ghostty VT probes, ncurses/TUI parity scenarios, and rich visual rendering galleries
 
@@ -85,6 +86,9 @@ Supported transport option models:
 | PTY | `PtyTransportOptions` | Interactive local shell semantics (ConPTY/forkpty) |
 | Pipe | `PipeTransportOptions` | Non-PTY process streams, useful for command/log scenarios |
 | SSH | `SshTransportOptions` | Remote terminal sessions with optional PTY request and host-key checks (OpenSSH `known_hosts` and optional SHA-256 pinning) |
+| Raw TCP | `RawTcpTransportOptions` | Unframed TCP byte stream sessions |
+| Telnet | `TelnetTransportOptions` | Telnet remote sessions with option negotiation handling |
+| Serial | `SerialTransportOptions` | Direct serial line sessions (baud/parity/stop bits/handshake) |
 
 ## Terminal Capture and Replay
 
@@ -372,6 +376,34 @@ Environment-variable validation rules:
 - Value must be non-null.
 - Value must not contain `CR`, `LF`, or `NUL`.
 
+### 1c.0 Advanced SSH configuration surface (proxy, forwarding, policy)
+
+```csharp
+options = options with
+{
+    Proxy = new SshProxyOptions(
+        Type: SshProxyType.Socks5,
+        Host: "proxy.example.com",
+        Port: 1080,
+        Username: "proxy-user",
+        Password: "proxy-password"),
+    PortForwardings =
+    [
+        new SshPortForwardOptions(
+            Mode: SshPortForwardMode.Local,
+            BindAddress: "127.0.0.1",
+            SourcePort: 15432,
+            DestinationHost: "db.internal",
+            DestinationPort: 5432),
+    ],
+    Policy = new SshPolicyOptions(
+        KeepAliveIntervalSeconds: 30,
+        ConnectTimeoutSeconds: 15),
+};
+```
+
+`X11` has an options surface (`SshX11Options`) but is currently not supported by the SSH.NET backend transport and will throw when enabled.
+
 ### 1c.1 Reuse SSH Bootstrap Composition in Custom Backends (Rebex, etc.)
 
 If you run SSH with a custom backend instead of `RoyalTerminal.Terminal.Transport.Ssh.SshNet`, use the same bootstrap helper for consistent behavior:
@@ -469,6 +501,49 @@ await secretStore.SaveSecretAsync("ssh/password", "my-password");
 await secretStore.SaveSecretAsync("ssh/key/main", "/home/user/.ssh/id_ed25519");
 
 ISshCredentialProvider credentialProvider = new SecretStoreSshCredentialProvider(secretStore);
+```
+
+### 1g. Session Profiles and Persistent Settings
+
+```csharp
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Terminal;
+
+TerminalSessionProfilesDocument profiles = new()
+{
+    Profiles =
+    [
+        new TerminalSessionProfile
+        {
+            Id = "dev-ssh",
+            DisplayName = "Dev SSH",
+            Transport = new TerminalSessionTransportProfile
+            {
+                TransportId = TerminalTransportIds.Ssh,
+                Ssh = new TerminalSessionSshSettings
+                {
+                    Host = "example.com",
+                    Port = 22,
+                    Username = "alice",
+                    Authentication = new TerminalSessionSshAuthenticationSettings
+                    {
+                        UsePassword = true,
+                        PasswordSecretId = "ssh/dev/password",
+                    },
+                },
+            },
+        },
+    ],
+};
+
+ITerminalSessionProfileStore store = TerminalSessionProfileStoreFactory.CreateDefault();
+await store.SaveAsync(profiles);
+
+TerminalSessionProfilesDocument loaded = await store.LoadAsync();
+ITerminalTransportOptions options = TerminalSessionProfileMapper.ToTransportOptions(loaded.Profiles[0]);
+
+var terminal = new TerminalControl();
+await terminal.StartSessionAsync(options);
 ```
 
 ### 2. Core Control with Native VT Provider (`libghostty-terminal`)

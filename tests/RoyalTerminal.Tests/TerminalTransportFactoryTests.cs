@@ -4,8 +4,11 @@
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Transport.Pipe;
 using RoyalTerminal.Terminal.Transport.Pty;
+using RoyalTerminal.Terminal.Transport.Raw;
+using RoyalTerminal.Terminal.Transport.Serial;
 using RoyalTerminal.Terminal.Transport.Ssh;
 using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
+using RoyalTerminal.Terminal.Transport.Telnet;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -20,6 +23,9 @@ public sealed class TerminalTransportFactoryTests
             {
                 new PtyTerminalTransportProvider(ptyFactory: new DefaultPtyFactory()),
                 new PipeTerminalTransportProvider(),
+                new RawTcpTerminalTransportProvider(),
+                new TelnetTerminalTransportProvider(),
+                new SerialTerminalTransportProvider(),
                 new SshNetTerminalTransportProvider(
                     credentialProvider: new NullSshCredentialProvider(),
                     hostKeyValidator: new RejectAllSshHostKeyValidator()),
@@ -52,10 +58,33 @@ public sealed class TerminalTransportFactoryTests
                     PrivateKeySecretIds: Array.Empty<string>(),
                     UseAgent: false),
                 Dimensions: dimensions));
+        using ITerminalTransport rawTransport = factory.Create(
+            new RawTcpTransportOptions(
+                Host: "localhost",
+                Port: 23,
+                Dimensions: dimensions));
+        using ITerminalTransport telnetTransport = factory.Create(
+            new TelnetTransportOptions(
+                Host: "localhost",
+                Port: 23,
+                TerminalType: "xterm",
+                Dimensions: dimensions));
+        using ITerminalTransport serialTransport = factory.Create(
+            new SerialTransportOptions(
+                PortName: "COM1",
+                BaudRate: 9600,
+                DataBits: 8,
+                Parity: TerminalSerialParity.None,
+                StopBits: TerminalSerialStopBits.One,
+                Handshake: TerminalSerialHandshake.None,
+                Dimensions: dimensions));
 
         Assert.IsType<PtyTerminalTransport>(ptyTransport);
         Assert.IsType<PipeTerminalTransport>(pipeTransport);
         Assert.IsType<SshNetTerminalTransport>(sshTransport);
+        Assert.IsType<RawTcpTerminalTransport>(rawTransport);
+        Assert.IsType<TelnetTerminalTransport>(telnetTransport);
+        Assert.IsType<SerialTerminalTransport>(serialTransport);
     }
 
     [Fact]

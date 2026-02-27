@@ -311,26 +311,30 @@ public static partial class GhosttyTerminalNative
     /// </summary>
     public static bool IsAvailable()
     {
-        try
-        {
-            var handle = TerminalNew(1, 1, 0);
-            if (handle != nint.Zero)
-                TerminalFree(handle);
-            return true;
-        }
-        catch (DllNotFoundException)
+        if (ShouldSkipNativeAvailabilityProbe())
         {
             return false;
         }
-        catch (EntryPointNotFoundException)
+
+        return s_nativeLibraryHandle != nint.Zero;
+    }
+
+    private static bool ShouldSkipNativeAvailabilityProbe()
+    {
+        string? disableProbe = Environment.GetEnvironmentVariable("ROYALTERMINAL_DISABLE_GHOSTTY_PROBE");
+        if (string.Equals(disableProbe, "1", StringComparison.Ordinal) ||
+            string.Equals(disableProbe, "true", StringComparison.OrdinalIgnoreCase))
         {
-            return false;
-        }
-        catch
-        {
-            // Symbol exists but call may have failed — library is available.
             return true;
         }
+
+        bool runningInCi =
+            string.Equals(Environment.GetEnvironmentVariable("CI"), "1", StringComparison.Ordinal) ||
+            string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "1", StringComparison.Ordinal) ||
+            string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
+
+        return runningInCi && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux());
     }
 
     private static nint LoadNativeLibraryHandle()

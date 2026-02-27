@@ -20,6 +20,7 @@ using SkiaSharp;
 using RoyalTerminal.Avalonia.Diagnostics;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
+using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Internal.Theme;
 using RoyalTerminal.Rendering.Contracts;
@@ -219,6 +220,11 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         get => _logger;
         set => _logger = value ?? NullGhosttyLogger.Instance;
     }
+
+    /// <summary>
+    /// Gets or sets keyboard shortcut bindings for clipboard/select-all actions.
+    /// </summary>
+    public TerminalShortcutConfiguration ShortcutConfiguration { get; set; } = TerminalShortcutConfiguration.Default;
 
     /// <summary>Gets the underlying Ghostty surface.</summary>
     public GhosttySurface? Surface => _surface;
@@ -1981,6 +1987,20 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (TerminalShortcutDispatcher.TryHandleCommonShortcut(
+                e.Key,
+                e.KeyModifiers,
+                hasSelection: HasSelection,
+                copyAction: () => _ = CopySelectionAsync(),
+                pasteAction: () => _ = PasteAsync(),
+                cutAction: () => _ = CutSelectionAsync(),
+                selectAllAction: SelectAll,
+                configuration: ShortcutConfiguration))
+        {
+            e.Handled = true;
+            return;
+        }
+
         bool handled = GhosttyInputPipeline.HandleKeyDown(
             _surface,
             e,
@@ -2325,6 +2345,28 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     public async Task PasteAsync()
     {
         await _clipboardAdapter.PasteAsync(_surface);
+    }
+
+    /// <summary>
+    /// Copies selection text and clears active selection when supported by the backend.
+    /// </summary>
+    public async Task CutSelectionAsync()
+    {
+        if (!HasSelection)
+        {
+            return;
+        }
+
+        await CopySelectionAsync();
+        _surface?.ExecuteBindingAction("clear_selection");
+    }
+
+    /// <summary>
+    /// Selects all text via Ghostty binding actions when available.
+    /// </summary>
+    public void SelectAll()
+    {
+        _surface?.ExecuteBindingAction("select_all");
     }
 
     /// <summary>Sends text to the terminal.</summary>
