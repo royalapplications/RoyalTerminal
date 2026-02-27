@@ -314,7 +314,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             ArrayPool<CellOverlayFlags>.Shared.Return(
                 overlayBuffer,
-                clearArray: true);
+                clearArray: false);
         }
 
         // Render cursor
