@@ -2,15 +2,16 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="RoyalTerminal.Demo.App"
              RequestedThemeVariant="Dark">
-    <Application.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <ResourceInclude Source="avares://RoyalTerminal.Demo/Styles/Theme.axaml" />
-            </ResourceDictionary.MergedDictionaries>
-        </ResourceDictionary>
-    </Application.Resources>
-    <Application.Styles>
-        <FluentTheme />
-        <StyleInclude Source="avares://RoyalTerminal.Demo/Styles/Tabs.axaml" />
-    </Application.Styles>
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://RoyalTerminal.Demo/Styles/Theme.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+  <Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://RoyalTerminal.Avalonia/Settings/TerminalSettingsPanel.axaml" />
+    <StyleInclude Source="avares://RoyalTerminal.Demo/Styles/Tabs.axaml" />
+  </Application.Styles>
 </Application>
