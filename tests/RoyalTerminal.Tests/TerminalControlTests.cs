@@ -567,6 +567,115 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_Arrange_TinyBounds_DoesNotCollapseGrid()
+    {
+        TerminalControl control = new();
+
+        control.Measure(new Size(960, 640));
+        control.Arrange(new Rect(0, 0, 960, 640));
+
+        Assert.NotNull(control.Screen);
+        int columnsBefore = control.Screen!.Columns;
+        int rowsBefore = control.Screen.ViewportRows;
+        Assert.True(columnsBefore > 1);
+        Assert.True(rowsBefore > 1);
+
+        control.Measure(new Size(1, 1));
+        control.Arrange(new Rect(0, 0, 1, 1));
+
+        Assert.Equal(columnsBefore, control.Screen.Columns);
+        Assert.Equal(rowsBefore, control.Screen.ViewportRows);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_Arrange_PixelOnlyResize_DoesNotPropagateTransportResize()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            control.Measure(new Size(960, 640));
+            control.Arrange(new Rect(0, 0, 960, 640));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.NotNull(control.Renderer);
+            double cellWidth = control.Renderer!.CellWidth;
+            double cellHeight = control.Renderer.CellHeight;
+            int columnsBefore = control.Columns;
+            int rowsBefore = control.Rows;
+            int resizeCountBefore = transport.Resizes.Count;
+            Size pixelOnlySize = new(
+                (columnsBefore * cellWidth) + (cellWidth * 0.5),
+                (rowsBefore * cellHeight) + (cellHeight * 0.5));
+
+            control.Measure(pixelOnlySize);
+            control.Arrange(new Rect(pixelOnlySize));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(columnsBefore, control.Columns);
+            Assert.Equal(rowsBefore, control.Rows);
+            Assert.Equal(resizeCountBefore, transport.Resizes.Count);
+        }
+        finally
+        {
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Control_Arrange_PixelOnlyResize_NotifiesVtProcessorWithUpdatedPixels()
+    {
+        ResizeTrackingVtProcessorFactory factory = new();
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            factory,
+            new DefaultPtyFactory())
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        control.Measure(new Size(960, 640));
+        control.Arrange(new Rect(0, 0, 960, 640));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.NotNull(factory.LastProcessor);
+        ResizeTrackingVtProcessor processor = factory.LastProcessor!;
+        int resizeCountBefore = processor.ResizeNotifications.Count;
+
+        Assert.NotNull(control.Renderer);
+        double cellWidth = control.Renderer!.CellWidth;
+        double cellHeight = control.Renderer.CellHeight;
+        int columnsBefore = control.Columns;
+        int rowsBefore = control.Rows;
+        Size pixelOnlySize = new(
+            (columnsBefore * cellWidth) + (cellWidth * 0.5),
+            (rowsBefore * cellHeight) + (cellHeight * 0.5));
+
+        control.Measure(pixelOnlySize);
+        control.Arrange(new Rect(pixelOnlySize));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(columnsBefore, control.Columns);
+        Assert.Equal(rowsBefore, control.Rows);
+        Assert.True(processor.ResizeNotifications.Count > resizeCountBefore);
+
+        TerminalSessionDimensions lastResize = processor.ResizeNotifications[^1];
+        Assert.Equal(columnsBefore, lastResize.Columns);
+        Assert.Equal(rowsBefore, lastResize.Rows);
+        Assert.Equal(Math.Max(1, (int)Math.Round(pixelOnlySize.Width)), lastResize.WidthPixels);
+        Assert.Equal(Math.Max(1, (int)Math.Round(pixelOnlySize.Height)), lastResize.HeightPixels);
+    }
+
+    [AvaloniaFact]
     public void Control_RuntimeAutoScrollEnable_ScrollsToBottom()
     {
         var control = new TerminalControl
@@ -1475,6 +1584,74 @@ public class TerminalControlTests
         }
     }
 
+    private sealed class ResizeTrackingVtProcessorFactory : IVtProcessorFactory
+    {
+        public ResizeTrackingVtProcessor? LastProcessor { get; private set; }
+
+        public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
+        {
+            _ = screen;
+            _ = preference;
+            ResizeTrackingVtProcessor processor = new();
+            LastProcessor = processor;
+            return processor;
+        }
+    }
+
+    private sealed class ResizeTrackingVtProcessor : IVtProcessor
+    {
+        public int CursorCol => 0;
+        public int CursorRow => 0;
+        public bool CursorVisible => true;
+        public bool ApplicationCursorKeys => false;
+        public bool ApplicationKeypad => false;
+        public bool AlternateScreen => false;
+        public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
+        public TerminalModeState ModeState => new(
+            CursorVisible,
+            ApplicationCursorKeys,
+            ApplicationKeypad,
+            AlternateScreen,
+            BracketedPaste,
+            Win32InputMode);
+
+        public List<TerminalSessionDimensions> ResizeNotifications { get; } = [];
+
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Action<byte[]>? ResponseCallback { get; set; }
+        public Action? BellCallback { get; set; }
+        public Action<string>? TitleCallback { get; set; }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            _ = data;
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            ResizeNotifications.Add(new TerminalSessionDimensions(columns, rows, WidthPixels: 0, HeightPixels: 0));
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            ResizeNotifications.Add(new TerminalSessionDimensions(columns, rows, widthPx, heightPx));
+        }
+
+        public void Reset()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
     private sealed class ThemeTrackingVtProcessorFactory : IVtProcessorFactory
     {
         public ThemeTrackingVtProcessor? LastProcessor { get; private set; }
@@ -1643,6 +1820,7 @@ public class TerminalControlTests
         public bool IsRunning { get; private set; }
         public bool StopCalled { get; private set; }
         public List<byte[]> SentInputs { get; } = [];
+        public List<TerminalSessionDimensions> Resizes { get; } = [];
 
         public ValueTask StartAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
         {
@@ -1661,7 +1839,7 @@ public class TerminalControlTests
 
         public void Resize(TerminalSessionDimensions dimensions)
         {
-            _ = dimensions;
+            Resizes.Add(dimensions);
         }
 
         public ValueTask StopAsync()
