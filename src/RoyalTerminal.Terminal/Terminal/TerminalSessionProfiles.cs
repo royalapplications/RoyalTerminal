@@ -113,6 +113,11 @@ public sealed record TerminalSessionProfile
     public TerminalSessionAppearanceSettings Appearance { get; init; } = new();
 
     /// <summary>
+    /// Terminal interaction and behavior preferences.
+    /// </summary>
+    public TerminalSessionBehaviorSettings Behavior { get; init; } = new();
+
+    /// <summary>
     /// Transport and endpoint settings.
     /// </summary>
     public TerminalSessionTransportProfile Transport { get; init; } = new();
@@ -183,6 +188,42 @@ public sealed record TerminalSessionAppearanceSettings
     /// Whether background opacity rendering is enabled.
     /// </summary>
     public bool BackgroundOpacityEnabled { get; init; }
+}
+
+/// <summary>
+/// Terminal interaction behavior preferences for a session profile.
+/// </summary>
+public sealed record TerminalSessionBehaviorSettings
+{
+    /// <summary>
+    /// Whether selecting text copies it to the clipboard.
+    /// </summary>
+    public bool CopyOnSelectEnabled { get; init; }
+
+    /// <summary>
+    /// Whether bell notifications are enabled.
+    /// </summary>
+    public bool EnableBellNotifications { get; init; } = true;
+
+    /// <summary>
+    /// Whether Backspace sends Ctrl-H.
+    /// </summary>
+    public bool BackspaceSendsControlH { get; init; }
+
+    /// <summary>
+    /// Whether text shaping is enabled.
+    /// </summary>
+    public bool EnableTextShaping { get; init; } = true;
+
+    /// <summary>
+    /// Whether ligatures are enabled.
+    /// </summary>
+    public bool EnableLigatures { get; init; }
+
+    /// <summary>
+    /// Paste safety policy for clipboard pastes.
+    /// </summary>
+    public string PasteSafetyPolicy { get; init; } = "None";
 }
 
 /// <summary>
@@ -489,6 +530,11 @@ public sealed record TerminalSessionLoggingSettings
     /// Whether writes should be flushed frequently.
     /// </summary>
     public bool FlushFrequently { get; init; }
+
+    /// <summary>
+    /// Whether the in-app event log surface is enabled.
+    /// </summary>
+    public bool EventLogEnabled { get; init; } = true;
 }
 
 /// <summary>

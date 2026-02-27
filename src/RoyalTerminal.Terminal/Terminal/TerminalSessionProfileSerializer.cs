@@ -143,6 +143,7 @@ public static class TerminalSessionProfileSerializer
             string displayName = NormalizeOptional(source.DisplayName) ?? id;
             TerminalSessionLayoutSettings layout = NormalizeLayout(source.Layout);
             TerminalSessionAppearanceSettings appearance = NormalizeAppearance(source.Appearance);
+            TerminalSessionBehaviorSettings behavior = NormalizeBehavior(source.Behavior);
             TerminalSessionTransportProfile transport = NormalizeTransport(source.Transport, i);
             TerminalSessionLoggingSettings logging = NormalizeLogging(source.Logging);
             TerminalSessionProxySettings proxy = NormalizeProxy(source.Proxy);
@@ -153,6 +154,7 @@ public static class TerminalSessionProfileSerializer
                 DisplayName = displayName,
                 Layout = layout,
                 Appearance = appearance,
+                Behavior = behavior,
                 Transport = transport,
                 Logging = logging,
                 Proxy = proxy,
@@ -196,6 +198,14 @@ public static class TerminalSessionProfileSerializer
         {
             FontFamilyName = NormalizeOptional(appearance.FontFamilyName) ?? TerminalSessionProfileDefaults.DefaultMonoFont,
             FontSize = appearance.FontSize > 0 ? appearance.FontSize : 14.0,
+        };
+    }
+
+    private static TerminalSessionBehaviorSettings NormalizeBehavior(TerminalSessionBehaviorSettings behavior)
+    {
+        return behavior with
+        {
+            PasteSafetyPolicy = NormalizePasteSafetyPolicy(behavior.PasteSafetyPolicy),
         };
     }
 
@@ -572,6 +582,31 @@ public static class TerminalSessionProfileSerializer
         }
 
         return normalized;
+    }
+
+    private static string NormalizePasteSafetyPolicy(string? policy)
+    {
+        if (string.Equals(policy, "None", StringComparison.OrdinalIgnoreCase))
+        {
+            return "None";
+        }
+
+        if (string.Equals(policy, "ConfirmUnsafe", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ConfirmUnsafe";
+        }
+
+        if (string.Equals(policy, "BlockUnsafe", StringComparison.OrdinalIgnoreCase))
+        {
+            return "BlockUnsafe";
+        }
+
+        if (string.Equals(policy, "SanitizeControlSequences", StringComparison.OrdinalIgnoreCase))
+        {
+            return "SanitizeControlSequences";
+        }
+
+        return "None";
     }
 
     private static string NormalizeTransportId(string? transportId)
