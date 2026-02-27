@@ -16,6 +16,9 @@
     <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia.Ghostty\RoyalTerminal.Avalonia.Ghostty.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Pty\RoyalTerminal.Terminal.Transport.Pty.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Pipe\RoyalTerminal.Terminal.Transport.Pipe.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Raw\RoyalTerminal.Terminal.Transport.Raw.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Telnet\RoyalTerminal.Terminal.Transport.Telnet.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Serial\RoyalTerminal.Terminal.Transport.Serial.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Ssh.Abstractions\RoyalTerminal.Terminal.Transport.Ssh.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Ssh.SshNet\RoyalTerminal.Terminal.Transport.Ssh.SshNet.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent\RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent.csproj" />

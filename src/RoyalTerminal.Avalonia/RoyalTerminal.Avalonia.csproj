@@ -23,6 +23,9 @@
     <ProjectReference Include="..\RoyalTerminal.Terminal.Pty.Platform\RoyalTerminal.Terminal.Pty.Platform.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Pty\RoyalTerminal.Terminal.Transport.Pty.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Pipe\RoyalTerminal.Terminal.Transport.Pipe.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Raw\RoyalTerminal.Terminal.Transport.Raw.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Telnet\RoyalTerminal.Terminal.Transport.Telnet.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Serial\RoyalTerminal.Terminal.Transport.Serial.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Ssh.Abstractions\RoyalTerminal.Terminal.Transport.Ssh.Abstractions.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Ssh.SshNet\RoyalTerminal.Terminal.Transport.Ssh.SshNet.csproj" />
   </ItemGroup>

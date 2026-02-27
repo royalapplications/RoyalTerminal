@@ -23,6 +23,7 @@
         <KeyBinding Gesture="Ctrl+Shift+R" Command="{Binding ToggleRenderedBackendCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+C" Command="{Binding CopySelectionCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+V" Command="{Binding PasteClipboardCommand}" />
+        <KeyBinding Gesture="Ctrl+Shift+A" Command="{Binding SelectAllCommand}" />
         <KeyBinding Gesture="Ctrl+D1" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="0" />
         <KeyBinding Gesture="Ctrl+D2" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="1" />
         <KeyBinding Gesture="Ctrl+D3" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="2" />
@@ -99,11 +100,28 @@
                 BorderThickness="0,0,0,1"
                 Padding="6,4"
                 IsVisible="{Binding ShowSessionTransportPicker}">
-            <StackPanel Spacing="4">
+            <StackPanel Spacing="6">
                 <WrapPanel Orientation="Horizontal">
+                    <TextBlock Text="Category" Margin="0,4,6,0"
+                               Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                    <ComboBox Width="150" Margin="0,0,8,0"
+                              ItemsSource="{Binding SettingsCategories}"
+                              SelectedItem="{Binding SelectedSettingsCategory}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:SettingsCategoryOption">
+                                <TextBlock Text="{Binding DisplayName}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <TextBlock Text="Session" Margin="0,4,6,0"
+                               Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                    <TextBox Width="180" Margin="0,0,8,0"
+                             Text="{Binding SessionName}" />
+
                     <TextBlock Text="Transport" Margin="0,4,6,0"
                                Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-                    <ComboBox Width="120" Margin="0,0,8,0"
+                    <ComboBox Width="130" Margin="0,0,8,0"
                               ItemsSource="{Binding TransportModes}"
                               SelectedItem="{Binding SelectedTransportMode}">
                         <ComboBox.ItemTemplate>
@@ -112,108 +130,379 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-
-                    <TextBlock Text="Shell" Margin="0,4,6,0"
-                               Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                               IsVisible="{Binding ShowLocalSessionFields}" />
-                    <ComboBox Width="200" Margin="0,0,8,0"
-                              ItemsSource="{Binding ShellProfiles}"
-                              SelectedItem="{Binding SelectedShellProfile}"
-                              IsVisible="{Binding ShowLocalSessionFields}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="vm:ShellProfileOption">
-                                <TextBlock Text="{Binding DisplayName}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-
-                    <TextBlock Text="Working Dir" Margin="0,4,6,0"
-                               Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                               IsVisible="{Binding ShowLocalSessionFields}" />
-                    <TextBox Width="260" Margin="0,0,8,0"
-                             Text="{Binding WorkingDirectory}"
-                             IsVisible="{Binding ShowLocalSessionFields}" />
-
-                    <TextBlock Text="Pipe Cmd" Margin="0,4,6,0"
-                               Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                               IsVisible="{Binding IsPipeTransportSelected}" />
-                    <TextBox Width="280" Margin="0,0,8,0"
-                             Text="{Binding PipeCommandText}"
-                             IsVisible="{Binding IsPipeTransportSelected}" />
-                    <CheckBox Content="Merge stderr"
-                              Margin="0,2,8,0"
-                              IsChecked="{Binding PipeMergeStdErrIntoStdOut}"
-                              IsVisible="{Binding IsPipeTransportSelected}" />
                 </WrapPanel>
 
-                <TextBlock Text="Transport settings are shown here. They are used when creating non-Ghostty standalone tabs."
+                <TextBlock Text="Transport settings are used when creating non-Ghostty standalone tabs."
                            Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
                            IsVisible="{Binding ShowSessionTransportHint}" />
 
-                <WrapPanel Orientation="Horizontal" IsVisible="{Binding ShowSshSessionFields}">
-                    <TextBlock Text="Host" Margin="0,4,6,0"
+                <StackPanel Spacing="4" IsVisible="{Binding ShowSessionSettingsCategory}">
+                    <TextBlock Text="Session defaults for new tabs."
                                Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-                    <TextBox Width="140" Margin="0,0,8,0" Text="{Binding SshHost}" />
+                    <WrapPanel Orientation="Horizontal">
+                        <TextBlock Text="Name" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="220" Margin="0,0,8,0"
+                                 Text="{Binding SessionName}" />
+                        <TextBlock Text="Active Transport" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBlock Margin="0,4,0,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                   Text="{Binding SelectedTransportMode.DisplayName}" />
+                    </WrapPanel>
+                </StackPanel>
 
-                    <TextBlock Text="Port" Margin="0,4,6,0"
-                               Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-                    <TextBox Width="60" Margin="0,0,8,0" Text="{Binding SshPort}" />
+                <StackPanel Spacing="4" IsVisible="{Binding ShowConnectionSettingsCategory}">
+                    <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsPtyTransportSelected}">
+                        <TextBlock Text="Shell" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <ComboBox Width="240" Margin="0,0,8,0"
+                                  ItemsSource="{Binding ShellProfiles}"
+                                  SelectedItem="{Binding SelectedShellProfile}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ShellProfileOption">
+                                    <TextBlock Text="{Binding DisplayName}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <TextBlock Text="Working Dir" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="280" Margin="0,0,8,0"
+                                 Text="{Binding WorkingDirectory}" />
+                    </WrapPanel>
 
-                    <TextBlock Text="User" Margin="0,4,6,0"
-                               Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-                    <TextBox Width="120" Margin="0,0,8,0" Text="{Binding SshUsername}" />
+                    <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsPipeTransportSelected}">
+                        <TextBlock Text="Working Dir" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="240" Margin="0,0,8,0"
+                                 Text="{Binding WorkingDirectory}" />
+                        <TextBlock Text="Pipe Cmd" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="280" Margin="0,0,8,0"
+                                 Text="{Binding PipeCommandText}" />
+                        <CheckBox Content="Merge stderr"
+                                  Margin="0,2,8,0"
+                                  IsChecked="{Binding PipeMergeStdErrIntoStdOut}" />
+                    </WrapPanel>
 
-                    <TextBlock Text="Auth" Margin="0,4,6,0"
-                               Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-                    <ComboBox Width="150" Margin="0,0,8,0"
-                              ItemsSource="{Binding SshAuthModes}"
-                              SelectedItem="{Binding SelectedSshAuthMode}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="vm:SshAuthModeOption">
-                                <TextBlock Text="{Binding DisplayName}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
+                    <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsRawTcpTransportSelected}">
+                        <TextBlock Text="Host" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="180" Margin="0,0,8,0"
+                                 Text="{Binding RawTcpHost}" />
+                        <TextBlock Text="Port" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="80" Margin="0,0,8,0"
+                                 Text="{Binding RawTcpPort}" />
+                    </WrapPanel>
 
-                    <CheckBox Content="Request PTY"
-                              Margin="0,2,8,0"
-                              IsChecked="{Binding SshRequestPty}" />
-                </WrapPanel>
+                    <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsTelnetTransportSelected}">
+                        <TextBlock Text="Host" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="180" Margin="0,0,8,0"
+                                 Text="{Binding TelnetHost}" />
+                        <TextBlock Text="Port" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="80" Margin="0,0,8,0"
+                                 Text="{Binding TelnetPort}" />
+                    </WrapPanel>
 
-                <WrapPanel Orientation="Horizontal" IsVisible="{Binding ShowSshSessionFields}">
-                    <TextBlock Text="Password" Margin="0,4,6,0"
+                    <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsSerialTransportSelected}">
+                        <TextBlock Text="Port" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="120" Margin="0,0,8,0"
+                                 Text="{Binding SerialPortName}" />
+                        <TextBlock Text="Baud" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="90" Margin="0,0,8,0"
+                                 Text="{Binding SerialBaudRate}" />
+                        <TextBlock Text="Data Bits" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="70" Margin="0,0,8,0"
+                                 Text="{Binding SerialDataBits}" />
+                        <TextBlock Text="Parity" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <ComboBox Width="120" Margin="0,0,8,0"
+                                  ItemsSource="{Binding SerialParityOptions}"
+                                  SelectedItem="{Binding SelectedSerialParity}" />
+                        <TextBlock Text="Stop Bits" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <ComboBox Width="120" Margin="0,0,8,0"
+                                  ItemsSource="{Binding SerialStopBitsOptions}"
+                                  SelectedItem="{Binding SelectedSerialStopBits}" />
+                        <TextBlock Text="Handshake" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <ComboBox Width="170" Margin="0,0,8,0"
+                                  ItemsSource="{Binding SerialHandshakeOptions}"
+                                  SelectedItem="{Binding SelectedSerialHandshake}" />
+                        <TextBlock Text="NewLine" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="80" Margin="0,0,8,0"
+                                 Text="{Binding SerialNewLine}" />
+                    </WrapPanel>
+
+                    <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsSshTransportSelected}">
+                        <TextBlock Text="Host" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="180" Margin="0,0,8,0" Text="{Binding SshHost}" />
+                        <TextBlock Text="Port" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="80" Margin="0,0,8,0" Text="{Binding SshPort}" />
+                        <TextBlock Text="User" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="140" Margin="0,0,8,0" Text="{Binding SshUsername}" />
+                    </WrapPanel>
+                </StackPanel>
+
+                <StackPanel Spacing="4" IsVisible="{Binding ShowTerminalSettingsCategory}">
+                    <WrapPanel Orientation="Horizontal">
+                        <CheckBox Content="Copy on Select"
+                                  Margin="0,2,8,0"
+                                  IsChecked="{Binding CopyOnSelectEnabled}" />
+                        <CheckBox Content="Bell Notifications"
+                                  Margin="0,2,8,0"
+                                  IsChecked="{Binding EnableBellNotifications}" />
+                        <CheckBox Content="Backspace sends Ctrl-H"
+                                  Margin="0,2,8,0"
+                                  IsChecked="{Binding BackspaceSendsControlH}" />
+                    </WrapPanel>
+                    <WrapPanel Orientation="Horizontal">
+                        <CheckBox Content="Enable Text Shaping"
+                                  Margin="0,2,8,0"
+                                  IsChecked="{Binding EnableTextShaping}" />
+                        <CheckBox Content="Enable Ligatures"
+                                  Margin="0,2,8,0"
+                                  IsChecked="{Binding EnableLigatures}" />
+                        <TextBlock Text="Paste Safety" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <ComboBox Width="220" Margin="0,0,8,0"
+                                  ItemsSource="{Binding PasteSafetyPolicies}"
+                                  SelectedItem="{Binding SelectedPasteSafetyPolicy}" />
+                    </WrapPanel>
+                    <WrapPanel Orientation="Horizontal" IsVisible="{Binding ShowTerminalSshFields}">
+                        <CheckBox Content="Request PTY"
+                                  Margin="0,2,8,0"
+                                  IsChecked="{Binding SshRequestPty}" />
+                        <TextBlock Text="Terminal" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="140" Margin="0,0,8,0" Text="{Binding SshTerminalType}" />
+                        <TextBlock Text="Initial Cmd" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="260" Margin="0,0,8,0" Text="{Binding SshInitialCommand}" />
+                    </WrapPanel>
+
+                    <WrapPanel Orientation="Horizontal" IsVisible="{Binding ShowTerminalTelnetFields}">
+                        <TextBlock Text="Terminal" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="140" Margin="0,0,8,0" Text="{Binding TelnetTerminalType}" />
+                        <TextBlock Text="Initial Cmd" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="260" Margin="0,0,8,0" Text="{Binding TelnetInitialCommand}" />
+                    </WrapPanel>
+
+                    <TextBlock Text="No protocol-specific terminal options are available for the selected transport."
                                Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                               IsVisible="{Binding ShowSshPasswordField}" />
-                    <TextBox Width="140" Margin="0,0,8,0"
-                             Text="{Binding SshPassword}"
-                             PasswordChar="*"
-                             IsVisible="{Binding ShowSshPasswordField}" />
+                               IsVisible="{Binding ShowTerminalSettingsHint}" />
+                </StackPanel>
 
-                    <TextBlock Text="Private Key(s)" Margin="0,4,6,0"
+                <StackPanel Spacing="4" IsVisible="{Binding ShowAppearanceSettingsCategory}">
+                    <WrapPanel Orientation="Horizontal">
+                        <TextBlock Text="Font Size" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <Button Content="A-" Width="28" Height="24"
+                                FontSize="10" Padding="2"
+                                Command="{Binding DecreaseFontSizeCommand}" />
+                        <TextBlock Text="{Binding FontSizeDisplay}" Margin="6,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <Button Content="A+" Width="28" Height="24"
+                                FontSize="10" Padding="2"
+                                Command="{Binding IncreaseFontSizeCommand}" />
+                        <Button Content="Reset" Height="24"
+                                FontSize="10" Padding="8,2" Margin="8,0,0,0"
+                                Command="{Binding ResetFontSizeCommand}" />
+                    </WrapPanel>
+                    <WrapPanel Orientation="Horizontal">
+                        <Button Content="{Binding ThemePresetButtonText}" Height="24"
+                                FontSize="10" Padding="8,2"
+                                Command="{Binding CycleThemePresetCommand}" />
+                        <Button Content="Generate Theme" Height="24"
+                                FontSize="10" Padding="8,2" Margin="8,0,0,0"
+                                Command="{Binding GenerateThemeCommand}" />
+                    </WrapPanel>
+                </StackPanel>
+
+                <StackPanel Spacing="4" IsVisible="{Binding ShowSshSettingsCategory}">
+                    <TextBlock Text="Select SSH transport in Connection to configure SSH-specific settings."
                                Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                               IsVisible="{Binding ShowSshPrivateKeyField}" />
-                    <TextBox Width="220" Margin="0,0,8,0"
-                             Text="{Binding SshPrivateKeyPath}"
-                             Watermark="Path or PEM; separate multiple with comma/semicolon/newline"
-                             IsVisible="{Binding ShowSshPrivateKeyField}" />
+                               IsVisible="{Binding ShowSshSettingsUnavailableHint}" />
 
-                    <TextBlock Text="Agent credentials are resolved from your SSH agent socket."
-                               Margin="0,4,8,0"
-                               Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                               IsVisible="{Binding ShowSshAgentHint}" />
+                    <StackPanel Spacing="4" IsVisible="{Binding ShowSshSettingsFields}">
+                        <WrapPanel Orientation="Horizontal">
+                            <TextBlock Text="Auth" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                            <ComboBox Width="150" Margin="0,0,8,0"
+                                      ItemsSource="{Binding SshAuthModes}"
+                                      SelectedItem="{Binding SelectedSshAuthMode}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:SshAuthModeOption">
+                                        <TextBlock Text="{Binding DisplayName}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
 
-                    <TextBlock Text="Host Key SHA256 (optional pin)" Margin="0,4,6,0"
+                            <TextBlock Text="Password" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshPasswordField}" />
+                            <TextBox Width="140" Margin="0,0,8,0"
+                                     Text="{Binding SshPassword}"
+                                     PasswordChar="*"
+                                     IsVisible="{Binding ShowSshPasswordField}" />
+
+                            <TextBlock Text="Private Key(s)" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshPrivateKeyField}" />
+                            <TextBox Width="220" Margin="0,0,8,0"
+                                     Text="{Binding SshPrivateKeyPath}"
+                                     Watermark="Path or PEM; separate multiple with comma/semicolon/newline"
+                                     IsVisible="{Binding ShowSshPrivateKeyField}" />
+
+                            <TextBlock Text="Agent credentials are resolved from your SSH agent socket."
+                                       Margin="0,4,8,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshAgentHint}" />
+                        </WrapPanel>
+
+                        <WrapPanel Orientation="Horizontal">
+                            <TextBlock Text="Host Key SHA256 (optional pin)" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                            <TextBox Width="240" Margin="0,0,8,0" Text="{Binding SshExpectedHostKeyFingerprintSha256}" />
+                        </WrapPanel>
+
+                        <WrapPanel Orientation="Horizontal">
+                            <TextBlock Text="Proxy" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                            <ComboBox Width="120" Margin="0,0,8,0"
+                                      ItemsSource="{Binding SshProxyTypes}"
+                                      SelectedItem="{Binding SelectedSshProxyType}" />
+                            <TextBlock Text="Host" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshProxyFields}" />
+                            <TextBox Width="160" Margin="0,0,8,0"
+                                     Text="{Binding SshProxyHost}"
+                                     IsVisible="{Binding ShowSshProxyFields}" />
+                            <TextBlock Text="Port" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshProxyFields}" />
+                            <TextBox Width="80" Margin="0,0,8,0"
+                                     Text="{Binding SshProxyPort}"
+                                     IsVisible="{Binding ShowSshProxyFields}" />
+                            <TextBlock Text="User" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshProxyFields}" />
+                            <TextBox Width="120" Margin="0,0,8,0"
+                                     Text="{Binding SshProxyUsername}"
+                                     IsVisible="{Binding ShowSshProxyFields}" />
+                            <TextBlock Text="Password" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshProxyFields}" />
+                            <TextBox Width="120" Margin="0,0,8,0"
+                                     Text="{Binding SshProxyPassword}"
+                                     PasswordChar="*"
+                                     IsVisible="{Binding ShowSshProxyFields}" />
+                        </WrapPanel>
+
+                        <WrapPanel Orientation="Horizontal">
+                            <CheckBox Content="Local Port Forward"
+                                      Margin="0,2,8,0"
+                                      IsChecked="{Binding SshLocalPortForwardEnabled}" />
+                            <TextBlock Text="Bind" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshPortForwardFields}" />
+                            <TextBox Width="120" Margin="0,0,8,0"
+                                     Text="{Binding SshLocalPortForwardBindAddress}"
+                                     IsVisible="{Binding ShowSshPortForwardFields}" />
+                            <TextBlock Text="Source" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshPortForwardFields}" />
+                            <TextBox Width="80" Margin="0,0,8,0"
+                                     Text="{Binding SshLocalPortForwardSourcePort}"
+                                     IsVisible="{Binding ShowSshPortForwardFields}" />
+                            <TextBlock Text="Destination Host" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshPortForwardFields}" />
+                            <TextBox Width="160" Margin="0,0,8,0"
+                                     Text="{Binding SshLocalPortForwardDestinationHost}"
+                                     IsVisible="{Binding ShowSshPortForwardFields}" />
+                            <TextBlock Text="Destination Port" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshPortForwardFields}" />
+                            <TextBox Width="80" Margin="0,0,8,0"
+                                     Text="{Binding SshLocalPortForwardDestinationPort}"
+                                     IsVisible="{Binding ShowSshPortForwardFields}" />
+                        </WrapPanel>
+
+                        <WrapPanel Orientation="Horizontal">
+                            <CheckBox Content="Enable X11"
+                                      Margin="0,2,8,0"
+                                      IsChecked="{Binding SshX11Enabled}" />
+                            <TextBlock Text="Display" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                       IsVisible="{Binding ShowSshX11DisplayField}" />
+                            <TextBox Width="100" Margin="0,0,8,0"
+                                     Text="{Binding SshX11Display}"
+                                     IsVisible="{Binding ShowSshX11DisplayField}" />
+                            <TextBlock Text="KeepAlive (s)" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                            <TextBox Width="90" Margin="0,0,8,0"
+                                     Text="{Binding SshKeepAliveIntervalSeconds}" />
+                            <TextBlock Text="Connect Timeout (s)" Margin="0,4,6,0"
+                                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                            <TextBox Width="90" Margin="0,0,8,0"
+                                     Text="{Binding SshConnectTimeoutSeconds}" />
+                        </WrapPanel>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Spacing="4" IsVisible="{Binding ShowLoggingSettingsCategory}">
+                    <WrapPanel Orientation="Horizontal">
+                        <CheckBox Content="Enable Session Log"
+                                  Margin="0,2,8,0"
+                                  IsChecked="{Binding SessionLoggingEnabled}" />
+                        <TextBlock Text="Format" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <ComboBox Width="140" Margin="0,0,8,0"
+                                  ItemsSource="{Binding SessionLogFormats}"
+                                  SelectedItem="{Binding SelectedSessionLogFormat}" />
+                        <CheckBox Content="Flush Frequently"
+                                  Margin="0,2,8,0"
+                                  IsChecked="{Binding SessionLogFlushFrequently}" />
+                        <CheckBox Content="Enable Event Log"
+                                  Margin="0,2,8,0"
+                                  IsChecked="{Binding EventLogEnabled}" />
+                        <Button Content="Clear Event Log"
+                                Height="24"
+                                FontSize="10"
+                                Padding="8,2"
+                                Command="{Binding ClearEventLogCommand}"
+                                IsEnabled="{Binding HasEventLogEntries}" />
+                        <TextBlock Margin="8,4,0,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
+                                   Text="{Binding EventLogEntryCountText}" />
+                    </WrapPanel>
+                    <WrapPanel Orientation="Horizontal">
+                        <TextBlock Text="Session Log File" Margin="0,4,6,0"
+                                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
+                        <TextBox Width="620" Margin="0,0,8,0"
+                                 Text="{Binding SessionLogFilePath}" />
+                    </WrapPanel>
+                    <TextBlock Text="Event timeline for connection lifecycle and runtime notifications."
                                Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-                    <TextBox Width="220" Margin="0,0,8,0" Text="{Binding SshExpectedHostKeyFingerprintSha256}" />
-
-                    <TextBlock Text="Terminal" Margin="0,4,6,0"
-                               Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-                    <TextBox Width="120" Margin="0,0,8,0" Text="{Binding SshTerminalType}" />
-
-                    <TextBlock Text="Initial Cmd" Margin="0,4,6,0"
-                               Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-                    <TextBox Width="220" Margin="0,0,8,0" Text="{Binding SshInitialCommand}" />
-                </WrapPanel>
+                    <TextBox Height="140"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             Text="{Binding EventLogText}" />
+                </StackPanel>
             </StackPanel>
         </Border>
 
@@ -272,7 +561,7 @@
             <MenuItem Header="_Copy" InputGesture="Ctrl+Shift+C" Command="{Binding CopySelectionCommand}" />
             <MenuItem Header="_Paste" InputGesture="Ctrl+Shift+V" Command="{Binding PasteClipboardCommand}" />
             <Separator />
-            <MenuItem Header="Select _All" InputGesture="Ctrl+Shift+A" IsEnabled="False" />
+            <MenuItem Header="Select _All" InputGesture="Ctrl+Shift+A" Command="{Binding SelectAllCommand}" />
             <Separator />
             <MenuItem Header="_New Tab" InputGesture="Ctrl+T" Command="{Binding NewTabCommand}" />
             <MenuItem Header="C_lose Tab" InputGesture="Ctrl+W" Command="{Binding CloseCurrentTabCommand}" />

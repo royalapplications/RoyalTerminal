@@ -8,6 +8,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
@@ -90,6 +91,7 @@ public class MainWindowViewModelFlowTests
         Window window = CreateWindow(viewModel);
         using var copyCalled = new ManualResetEventSlim(false);
         using var pasteCalled = new ManualResetEventSlim(false);
+        using var selectAllCalled = new ManualResetEventSlim(false);
 
         try
         {
@@ -103,6 +105,11 @@ public class MainWindowViewModelFlowTests
                 context.SetOutput(Unit.Default);
                 pasteCalled.Set();
             });
+            using var selectAllRegistration = viewModel.SelectAllInteraction.RegisterHandler(context =>
+            {
+                context.SetOutput(Unit.Default);
+                selectAllCalled.Set();
+            });
 
             window.KeyBindings.Add(new KeyBinding
             {
@@ -114,6 +121,11 @@ public class MainWindowViewModelFlowTests
                 Gesture = new KeyGesture(Key.V, KeyModifiers.Control | KeyModifiers.Shift),
                 Command = viewModel.PasteClipboardCommand,
             });
+            window.KeyBindings.Add(new KeyBinding
+            {
+                Gesture = new KeyGesture(Key.A, KeyModifiers.Control | KeyModifiers.Shift),
+                Command = viewModel.SelectAllCommand,
+            });
 
             window.KeyPressQwerty(PhysicalKey.C, RawInputModifiers.Control | RawInputModifiers.Shift);
             Assert.True(copyCalled.Wait(TimeSpan.FromSeconds(2)));
@@ -122,6 +134,10 @@ public class MainWindowViewModelFlowTests
             window.KeyPressQwerty(PhysicalKey.V, RawInputModifiers.Control | RawInputModifiers.Shift);
             Assert.True(pasteCalled.Wait(TimeSpan.FromSeconds(2)));
             Assert.Equal("Pasted from clipboard", viewModel.StatusText);
+
+            window.KeyPressQwerty(PhysicalKey.A, RawInputModifiers.Control | RawInputModifiers.Shift);
+            Assert.True(selectAllCalled.Wait(TimeSpan.FromSeconds(2)));
+            Assert.Equal("Selected all text", viewModel.StatusText);
         }
         finally
         {
@@ -427,6 +443,94 @@ public class MainWindowViewModelFlowTests
     }
 
     [Fact]
+    public void SessionTransport_IncludesRawTelnetAndSerialModes()
+    {
+        MainWindowViewModel viewModel = new();
+
+        Assert.Equal(TerminalTransportIds.RawTcp, FindTransportMode(viewModel, TerminalTransportIds.RawTcp).Id);
+        Assert.Equal(TerminalTransportIds.Telnet, FindTransportMode(viewModel, TerminalTransportIds.Telnet).Id);
+        Assert.Equal(TerminalTransportIds.Serial, FindTransportMode(viewModel, TerminalTransportIds.Serial).Id);
+    }
+
+    [Fact]
+    public void SettingsCategories_DefaultsToSessionCategory()
+    {
+        MainWindowViewModel viewModel = new();
+
+        Assert.Equal(SettingsCategoryOption.SessionCategoryId, viewModel.SelectedSettingsCategory.Id);
+        Assert.True(viewModel.ShowSessionSettingsCategory);
+        Assert.False(viewModel.ShowConnectionSettingsCategory);
+        Assert.False(viewModel.ShowTerminalSettingsCategory);
+        Assert.False(viewModel.ShowAppearanceSettingsCategory);
+        Assert.False(viewModel.ShowSshSettingsCategory);
+        Assert.False(viewModel.ShowLoggingSettingsCategory);
+    }
+
+    [Fact]
+    public void SettingsCategories_SshCategory_ShowsSshFieldsOnlyForSshTransport()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedSettingsCategory = FindSettingsCategory(viewModel, SettingsCategoryOption.SshCategoryId);
+
+        Assert.True(viewModel.ShowSshSettingsCategory);
+        Assert.True(viewModel.ShowSshSettingsUnavailableHint);
+        Assert.False(viewModel.ShowSshSettingsFields);
+
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Ssh);
+        viewModel.SelectedSshProxyType = SshProxyType.Socks5;
+
+        Assert.False(viewModel.ShowSshSettingsUnavailableHint);
+        Assert.True(viewModel.ShowSshSettingsFields);
+        Assert.True(viewModel.ShowSshProxyFields);
+    }
+
+    [Fact]
+    public void SettingsCategories_LoggingCategory_ExposesLoggingSurface()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedSettingsCategory = FindSettingsCategory(viewModel, SettingsCategoryOption.LoggingCategoryId);
+
+        Assert.True(viewModel.ShowLoggingSettingsCategory);
+        Assert.Contains(TerminalSessionLogFormat.PlainText, viewModel.SessionLogFormats);
+        Assert.Contains(TerminalSessionLogFormat.RawBytes, viewModel.SessionLogFormats);
+        Assert.False(viewModel.SessionLoggingEnabled);
+    }
+
+    [Fact]
+    public void SettingsCategories_TerminalCategory_ExposesBehaviorOptions()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedSettingsCategory = FindSettingsCategory(viewModel, SettingsCategoryOption.TerminalCategoryId);
+
+        Assert.True(viewModel.ShowTerminalSettingsCategory);
+        Assert.False(viewModel.CopyOnSelectEnabled);
+        Assert.True(viewModel.EnableBellNotifications);
+        Assert.False(viewModel.BackspaceSendsControlH);
+        Assert.True(viewModel.EnableTextShaping);
+        Assert.False(viewModel.EnableLigatures);
+        Assert.Equal(TerminalPasteSafetyPolicy.None, viewModel.SelectedPasteSafetyPolicy);
+        Assert.Contains(TerminalPasteSafetyPolicy.BlockUnsafe, viewModel.PasteSafetyPolicies);
+    }
+
+    [Fact]
+    public void Logging_EventLogAppendAndClear_UpdatesSurface()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.AppendEventLogEntry("Connected.");
+        viewModel.AppendEventLogEntry("Host key accepted.");
+
+        Assert.True(viewModel.HasEventLogEntries);
+        Assert.Equal("2 event(s)", viewModel.EventLogEntryCountText);
+        Assert.Contains("Connected.", viewModel.EventLogText, StringComparison.Ordinal);
+
+        viewModel.ClearEventLogCommand.Execute().Wait();
+
+        Assert.False(viewModel.HasEventLogEntries);
+        Assert.Equal("0 event(s)", viewModel.EventLogEntryCountText);
+        Assert.Equal(string.Empty, viewModel.EventLogText);
+    }
+
+    [Fact]
     public void SetShellProfiles_UpdatesSelection()
     {
         MainWindowViewModel viewModel = new();
@@ -533,6 +637,19 @@ public class MainWindowViewModelFlowTests
         }
 
         throw new InvalidOperationException($"SSH auth mode '{authModeId}' was not found.");
+    }
+
+    private static SettingsCategoryOption FindSettingsCategory(MainWindowViewModel viewModel, string categoryId)
+    {
+        for (int i = 0; i < viewModel.SettingsCategories.Count; i++)
+        {
+            if (string.Equals(viewModel.SettingsCategories[i].Id, categoryId, StringComparison.Ordinal))
+            {
+                return viewModel.SettingsCategories[i];
+            }
+        }
+
+        throw new InvalidOperationException($"Settings category '{categoryId}' was not found.");
     }
 
     private static Window CreateWindow(object dataContext)

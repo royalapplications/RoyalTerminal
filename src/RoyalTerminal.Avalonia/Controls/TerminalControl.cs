@@ -21,8 +21,11 @@ using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
 using RoyalTerminal.Terminal.Transport.Pipe;
 using RoyalTerminal.Terminal.Transport.Pty;
+using RoyalTerminal.Terminal.Transport.Raw;
+using RoyalTerminal.Terminal.Transport.Serial;
 using RoyalTerminal.Terminal.Transport.Ssh;
 using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
+using RoyalTerminal.Terminal.Transport.Telnet;
 
 namespace RoyalTerminal.Avalonia.Controls;
 
@@ -277,6 +280,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// <see cref="TerminalPasteSafetyPolicy.ConfirmUnsafe"/>.
     /// </summary>
     public TerminalUnsafePasteHandler? UnsafePasteHandler { get; set; }
+
+    /// <summary>
+    /// Gets or sets keyboard shortcut bindings for clipboard/select-all actions.
+    /// </summary>
+    public TerminalShortcutConfiguration ShortcutConfiguration { get; set; } = TerminalShortcutConfiguration.Default;
 
     /// <summary>
     /// Gets the SSH credential provider used by the default SSH transport provider.
@@ -1184,6 +1192,20 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnKeyDown(e);
 
+        if (TerminalShortcutDispatcher.TryHandleCommonShortcut(
+                e.Key,
+                e.KeyModifiers,
+                hasSelection: HasSelection,
+                copyAction: () => _ = CopySelectionAsync(),
+                pasteAction: () => _ = PasteAsync(),
+                cutAction: () => _ = CutSelectionAsync(),
+                selectAllAction: SelectAll,
+                configuration: ShortcutConfiguration))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (TerminalInputAdapter.HandleKeyDown(e, TerminalSessionService, _vtProcessor))
         {
             e.Handled = true;
@@ -1531,6 +1553,36 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
+    /// Copies selection text and clears selection state.
+    /// </summary>
+    public async Task CutSelectionAsync()
+    {
+        if (!HasSelection)
+        {
+            return;
+        }
+
+        await CopySelectionAsync();
+        ClearSelection();
+    }
+
+    /// <summary>
+    /// Selects all visible terminal content.
+    /// </summary>
+    public void SelectAll()
+    {
+        if (_renderer is null || _screen is null || _screen.Columns <= 0 || _screen.ViewportRows <= 0)
+        {
+            return;
+        }
+
+        _renderer.SelectionStart = (0, 0);
+        _renderer.SelectionEnd = (_screen.Columns - 1, _screen.ViewportRows - 1);
+        _screen.InvalidateAll();
+        _presenter?.Invalidate();
+    }
+
+    /// <summary>
     /// Clears the current text selection.
     /// </summary>
     public void ClearSelection()
@@ -1770,6 +1822,30 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
+    /// Starts a raw TCP transport-backed terminal session.
+    /// </summary>
+    public ValueTask StartRawTcpAsync(RawTcpTransportOptions options, CancellationToken cancellationToken = default)
+    {
+        return StartSessionAsync(options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts a Telnet transport-backed terminal session.
+    /// </summary>
+    public ValueTask StartTelnetAsync(TelnetTransportOptions options, CancellationToken cancellationToken = default)
+    {
+        return StartSessionAsync(options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts a serial transport-backed terminal session.
+    /// </summary>
+    public ValueTask StartSerialAsync(SerialTransportOptions options, CancellationToken cancellationToken = default)
+    {
+        return StartSessionAsync(options, cancellationToken);
+    }
+
+    /// <summary>
     /// Stops the PTY and kills the child shell process.
     /// </summary>
     public void StopPty()
@@ -1934,6 +2010,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             {
                 new PtyTerminalTransportProvider(ptyFactory),
                 new PipeTerminalTransportProvider(),
+                new RawTcpTerminalTransportProvider(),
+                new TelnetTerminalTransportProvider(),
+                new SerialTerminalTransportProvider(),
                 new SshNetTerminalTransportProvider(sshCredentialProvider, sshHostKeyValidator),
             });
     }

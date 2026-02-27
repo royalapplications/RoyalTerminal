@@ -133,6 +133,103 @@ public sealed class SshNetTerminalTransportSecurityTests
         Assert.False(credentialProvider.WasResolveCalled);
     }
 
+    [Fact]
+    public async Task StartAsync_ThrowsForInvalidProxy_BeforeCredentialResolution()
+    {
+        TrackingCredentialProvider credentialProvider = new();
+        using SshNetTerminalTransport transport = new(
+            credentialProvider,
+            new RejectAllSshHostKeyValidator());
+
+        SshTransportOptions options = CreateOptions(host: "localhost", port: 22, username: "user") with
+        {
+            Proxy = new SshProxyOptions(
+                Type: SshProxyType.Socks5,
+                Host: " ",
+                Port: 1080,
+                Username: null,
+                Password: null),
+        };
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transport.StartAsync(options));
+
+        Assert.Contains("proxy host", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(credentialProvider.WasResolveCalled);
+    }
+
+    [Fact]
+    public async Task StartAsync_ThrowsForInvalidPortForwarding_BeforeCredentialResolution()
+    {
+        TrackingCredentialProvider credentialProvider = new();
+        using SshNetTerminalTransport transport = new(
+            credentialProvider,
+            new RejectAllSshHostKeyValidator());
+
+        SshTransportOptions options = CreateOptions(host: "localhost", port: 22, username: "user") with
+        {
+            PortForwardings =
+            [
+                new SshPortForwardOptions(
+                    Mode: SshPortForwardMode.Local,
+                    BindAddress: "127.0.0.1",
+                    SourcePort: 8080,
+                    DestinationHost: "",
+                    DestinationPort: 80),
+            ],
+        };
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transport.StartAsync(options));
+
+        Assert.Contains("DestinationHost", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(credentialProvider.WasResolveCalled);
+    }
+
+    [Fact]
+    public async Task StartAsync_ThrowsForUnsupportedX11_BeforeCredentialResolution()
+    {
+        TrackingCredentialProvider credentialProvider = new();
+        using SshNetTerminalTransport transport = new(
+            credentialProvider,
+            new RejectAllSshHostKeyValidator());
+
+        SshTransportOptions options = CreateOptions(host: "localhost", port: 22, username: "user") with
+        {
+            X11 = new SshX11Options(
+                Enabled: true,
+                Display: ":0"),
+        };
+
+        NotSupportedException exception = await Assert.ThrowsAsync<NotSupportedException>(
+            async () => await transport.StartAsync(options));
+
+        Assert.Contains("X11", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(credentialProvider.WasResolveCalled);
+    }
+
+    [Fact]
+    public async Task StartAsync_ThrowsForInvalidPolicy_BeforeCredentialResolution()
+    {
+        TrackingCredentialProvider credentialProvider = new();
+        using SshNetTerminalTransport transport = new(
+            credentialProvider,
+            new RejectAllSshHostKeyValidator());
+
+        SshTransportOptions options = CreateOptions(host: "localhost", port: 22, username: "user") with
+        {
+            Policy = new SshPolicyOptions(
+                KeepAliveIntervalSeconds: 0,
+                ConnectTimeoutSeconds: 10),
+        };
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await transport.StartAsync(options));
+
+        Assert.Contains("KeepAliveIntervalSeconds", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(credentialProvider.WasResolveCalled);
+    }
+
     private static SshTransportOptions CreateOptions(string host, int port, string username)
     {
         return new SshTransportOptions(

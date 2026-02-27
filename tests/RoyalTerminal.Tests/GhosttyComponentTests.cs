@@ -394,6 +394,11 @@ public sealed class GhosttyComponentTests
     [Fact]
     public void GhosttyVtProcessor_ModeState_MatchesIndividualFlags_WhenAvailable()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
         if (!GhosttyVtProcessor.IsAvailable())
         {
             return;

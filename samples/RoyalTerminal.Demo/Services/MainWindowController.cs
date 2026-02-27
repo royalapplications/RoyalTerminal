@@ -4,15 +4,19 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Reactive;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -30,9 +34,12 @@ using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
 using RoyalTerminal.Terminal.Transport.Pipe;
 using RoyalTerminal.Terminal.Transport.Pty;
+using RoyalTerminal.Terminal.Transport.Raw;
+using RoyalTerminal.Terminal.Transport.Serial;
 using RoyalTerminal.Terminal.Transport.Ssh;
 using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
 using RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent;
+using RoyalTerminal.Terminal.Transport.Telnet;
 using ReactiveUI;
 
 namespace RoyalTerminal.Demo.Services;
@@ -56,6 +63,7 @@ internal sealed class MainWindowController
     private readonly List<TerminalTab> _tabs = [];
     private readonly HashSet<TerminalControl> _startingStandaloneControls = [];
     private readonly Dictionary<TerminalControl, TerminalCaptureRuntime> _captureRuntimes = [];
+    private readonly Dictionary<TerminalControl, SessionLogWriter> _sessionLogWriters = [];
     private readonly ITerminalModeCapabilityResolver _modeCapabilityResolver;
     private readonly ITerminalModeResolver _modeResolver;
     private readonly bool _skipEmbeddedGhosttyInitialization;
@@ -186,6 +194,12 @@ internal sealed class MainWindowController
             context.SetOutput(Unit.Default);
         }));
 
+        disposables.Add(_viewModel.SelectAllInteraction.RegisterHandler(context =>
+        {
+            SelectAll();
+            context.SetOutput(Unit.Default);
+        }));
+
         disposables.Add(_viewModel.ApplyFontSizeInteraction.RegisterHandler(context =>
         {
             ApplyFontSize(context.Input);
@@ -244,6 +258,13 @@ internal sealed class MainWindowController
             .WhenAnyValue(model => model.ReplayTimelineValue)
             .Skip(1)
             .Subscribe(SeekReplayFromViewModel));
+
+        disposables.Add(_viewModel
+            .WhenAnyValue(
+                model => model.SelectedPasteSafetyPolicy,
+                model => model.EnableTextShaping,
+                model => model.EnableLigatures)
+            .Subscribe(_ => ApplyTerminalBehaviorSettingsToAllStandaloneTabs()));
     }
 
     private bool TryInitializeGhostty()
@@ -407,6 +428,7 @@ internal sealed class MainWindowController
 
         SwitchToTab(_tabs.Count - 1);
         UpdateStatus(BuildTabOpenedStatus(tabName, finalizedModeSelection));
+        AppendEventLog($"[{tabName}] Tab opened ({tabMode.Name}).");
     }
 
     private void CreateReplayTab(TerminalCaptureSession session, string sourceLabel)
@@ -456,6 +478,7 @@ internal sealed class MainWindowController
 
         SwitchToTab(_tabs.Count - 1);
         UpdateStatus($"Loaded replay '{sourceLabel}'.");
+        AppendEventLog($"[{tabName}] Replay loaded from '{sourceLabel}'.");
     }
 
     private TerminalModeSelection ResolveModeSelectionForNewTab()
@@ -558,13 +581,19 @@ internal sealed class MainWindowController
         {
             TerminalTab? tab = _tabs.Find(t => t.Control == renderedControl);
             tab?.UpdateTitle(title);
+            AppendEventLog($"[{tab?.Title ?? "Rendered"}] Title changed to '{title}'.");
         };
-        renderedControl.ProcessExited += (_, code) => UpdateStatus($"Process exited: {code}");
+        renderedControl.ProcessExited += (_, code) =>
+        {
+            UpdateStatus($"Process exited: {code}");
+            AppendEventLog($"[Rendered] Process exited with code {code}.");
+        };
         renderedControl.CloseRequested += (_, _) =>
         {
             TerminalTab? tab = _tabs.Find(t => t.Control == renderedControl);
             if (tab is not null)
             {
+                AppendEventLog($"[{tab.Title}] Close requested.");
                 CloseTab(tab);
             }
         };
@@ -600,13 +629,19 @@ internal sealed class MainWindowController
         {
             TerminalTab? tab = _tabs.Find(t => t.Control == nativeControl);
             tab?.UpdateTitle(title);
+            AppendEventLog($"[{tab?.Title ?? "Native"}] Title changed to '{title}'.");
         };
-        nativeControl.ProcessExited += (_, code) => UpdateStatus($"Process exited: {code}");
+        nativeControl.ProcessExited += (_, code) =>
+        {
+            UpdateStatus($"Process exited: {code}");
+            AppendEventLog($"[Native] Process exited with code {code}.");
+        };
         nativeControl.CloseRequested += (_, _) =>
         {
             TerminalTab? tab = _tabs.Find(t => t.Control == nativeControl);
             if (tab is not null)
             {
+                AppendEventLog($"[{tab.Title}] Close requested.");
                 CloseTab(tab);
             }
         };
@@ -633,17 +668,60 @@ internal sealed class MainWindowController
         standaloneControl.VtProcessorPreference = ResolveVtProcessorPreference(mode);
         standaloneControl.ApplyTheme(theme);
         ConfigureRenderer(standaloneControl.Renderer);
+        ApplyTerminalBehaviorSettings(standaloneControl);
 
         standaloneControl.DataReceived += (_, args) =>
         {
             UpdateStatus($"Received {args.Data.Length} bytes");
+            WriteSessionLogOutput(standaloneControl, args.Data);
+        };
+        standaloneControl.TitleChanged += (_, title) =>
+        {
+            AppendEventLog($"[{GetTabDisplayName(standaloneControl)}] Title changed to '{title}'.");
+        };
+        standaloneControl.Bell += (_, _) =>
+        {
+            if (!_viewModel.EnableBellNotifications)
+            {
+                return;
+            }
+
+            UpdateStatus($"Bell from {GetTabDisplayName(standaloneControl)}");
+            AppendEventLog($"[{GetTabDisplayName(standaloneControl)}] Bell.");
+        };
+        standaloneControl.ProcessExited += (_, code) =>
+        {
+            AppendEventLog($"[{GetTabDisplayName(standaloneControl)}] Process exited with code {code}.");
         };
         standaloneControl.TerminalResized += (_, args) =>
         {
             UpdateDimensions(args.Columns, args.Rows);
+            AppendEventLog($"[{GetTabDisplayName(standaloneControl)}] Resized to {args.Columns}x{args.Rows}.");
         };
+        standaloneControl.TerminalSessionService.InputSent += (_, args) =>
+        {
+            WriteSessionLogInput(standaloneControl, args.Data);
+        };
+        standaloneControl.PointerReleased += async (_, e) =>
+        {
+            if (!_viewModel.CopyOnSelectEnabled ||
+                e.InitialPressMouseButton != MouseButton.Left ||
+                !standaloneControl.HasSelection)
+            {
+                return;
+            }
+
+            await standaloneControl.CopySelectionAsync();
+            AppendEventLog($"[{GetTabDisplayName(standaloneControl)}] Copied selection.");
+        };
+        standaloneControl.AddHandler(
+            InputElement.KeyDownEvent,
+            (_, e) => HandleStandaloneKeyDown(standaloneControl, e),
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
 
         EnsureCaptureRuntime(standaloneControl);
+        EnsureSessionLogWriter(standaloneControl);
         QueueStandaloneSessionStart(standaloneControl);
 
         return standaloneControl;
@@ -663,6 +741,7 @@ internal sealed class MainWindowController
         standaloneControl.VtProcessorPreference = VtProcessorPreference.Managed;
         standaloneControl.ApplyTheme(theme);
         ConfigureRenderer(standaloneControl.Renderer);
+        ApplyTerminalBehaviorSettings(standaloneControl);
 
         standaloneControl.TerminalResized += (_, args) =>
         {
@@ -706,6 +785,7 @@ internal sealed class MainWindowController
             catch (Exception ex)
             {
                 UpdateStatus($"Failed to start session: {ex.Message}");
+                AppendEventLog($"[{GetTabDisplayName(standaloneControl)}] Failed to start session: {ex.Message}");
             }
             finally
             {
@@ -930,6 +1010,9 @@ internal sealed class MainWindowController
             {
                 new PtyTerminalTransportProvider(ptyFactory),
                 new PipeTerminalTransportProvider(),
+                new RawTcpTerminalTransportProvider(),
+                new TelnetTerminalTransportProvider(),
+                new SerialTerminalTransportProvider(),
                 new SshNetTerminalTransportProvider(
                     credentialProvider,
                     hostKeyValidator,
@@ -955,6 +1038,7 @@ internal sealed class MainWindowController
     {
         string workingDirectory = ResolveWorkingDirectory();
         string transportId = _viewModel.SelectedTransportMode.Id;
+        string tabName = GetTabDisplayName(standaloneControl);
 
         if (string.Equals(transportId, TerminalTransportIds.Pty, StringComparison.OrdinalIgnoreCase))
         {
@@ -969,7 +1053,9 @@ internal sealed class MainWindowController
                 workingDirectory: workingDirectory);
 
             string shellDisplay = _viewModel.SelectedShellProfile?.DisplayName ?? "Default shell";
+            AppendEventLog($"[{tabName}] Starting PTY session ({shellDisplay}).");
             UpdateSessionStartedStatus(standaloneControl, $"Started PTY session ({shellDisplay})");
+            AppendEventLog($"[{tabName}] PTY session started.");
             return;
         }
 
@@ -978,6 +1064,7 @@ internal sealed class MainWindowController
         if (string.Equals(transportId, TerminalTransportIds.Pipe, StringComparison.OrdinalIgnoreCase))
         {
             TerminalCommandSpec command = BuildPipeCommand(_viewModel.SelectedShellProfile);
+            AppendEventLog($"[{tabName}] Starting Pipe session ({command.FileName}).");
             PipeTransportOptions options = new(
                 Command: command,
                 WorkingDirectory: workingDirectory,
@@ -987,16 +1074,49 @@ internal sealed class MainWindowController
 
             await standaloneControl.StartPipeAsync(options);
             UpdateSessionStartedStatus(standaloneControl, $"Started Pipe session ({command.FileName})");
+            AppendEventLog($"[{tabName}] Pipe session started.");
+            return;
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.RawTcp, StringComparison.OrdinalIgnoreCase))
+        {
+            RawTcpTransportOptions options = BuildRawTcpOptions(dimensions);
+            AppendEventLog($"[{tabName}] Starting Raw TCP session {options.Host}:{options.Port}.");
+            await standaloneControl.StartRawTcpAsync(options);
+            UpdateSessionStartedStatus(standaloneControl, $"Started Raw TCP session {options.Host}:{options.Port}");
+            AppendEventLog($"[{tabName}] Raw TCP session started.");
+            return;
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.Telnet, StringComparison.OrdinalIgnoreCase))
+        {
+            TelnetTransportOptions options = BuildTelnetOptions(dimensions);
+            AppendEventLog($"[{tabName}] Starting Telnet session {options.Host}:{options.Port}.");
+            await standaloneControl.StartTelnetAsync(options);
+            UpdateSessionStartedStatus(standaloneControl, $"Started Telnet session {options.Host}:{options.Port}");
+            AppendEventLog($"[{tabName}] Telnet session started.");
+            return;
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.Serial, StringComparison.OrdinalIgnoreCase))
+        {
+            SerialTransportOptions options = BuildSerialOptions(dimensions);
+            AppendEventLog($"[{tabName}] Starting Serial session {options.PortName} ({options.BaudRate}).");
+            await standaloneControl.StartSerialAsync(options);
+            UpdateSessionStartedStatus(standaloneControl, $"Started Serial session {options.PortName} ({options.BaudRate})");
+            AppendEventLog($"[{tabName}] Serial session started.");
             return;
         }
 
         if (string.Equals(transportId, TerminalTransportIds.Ssh, StringComparison.OrdinalIgnoreCase))
         {
             SshTransportOptions options = BuildSshOptions(dimensions);
+            AppendEventLog($"[{tabName}] Starting SSH session {options.Endpoint.Username}@{options.Endpoint.Host}:{options.Endpoint.Port}.");
             await standaloneControl.StartSshAsync(options);
             UpdateSessionStartedStatus(
                 standaloneControl,
                 $"Started SSH session {_viewModel.SshUsername}@{_viewModel.SshHost}:{_viewModel.SshPort}");
+            AppendEventLog($"[{tabName}] SSH session started.");
             return;
         }
 
@@ -1017,11 +1137,7 @@ internal sealed class MainWindowController
             throw new InvalidOperationException("SSH username is required.");
         }
 
-        if (!int.TryParse(_viewModel.SshPort, out int port) || port < 1 || port > 65535)
-        {
-            throw new InvalidOperationException("SSH port must be a valid number in range 1-65535.");
-        }
-
+        int port = ParsePort(_viewModel.SshPort, "SSH port");
         string expectedHostKeyFingerprint = _viewModel.SshExpectedHostKeyFingerprintSha256.Trim();
 
         SshAuthenticationOptions authentication = BuildSshAuthenticationOptions();
@@ -1036,6 +1152,13 @@ internal sealed class MainWindowController
                 : _viewModel.SshInitialCommand.Trim(),
             Authentication: authentication,
             Dimensions: dimensions);
+        options = options with
+        {
+            Proxy = BuildSshProxyOptions(),
+            PortForwardings = BuildSshPortForwardings(),
+            X11 = BuildSshX11Options(),
+            Policy = BuildSshPolicyOptions(),
+        };
 
         if (!string.IsNullOrWhiteSpace(expectedHostKeyFingerprint))
         {
@@ -1043,6 +1166,145 @@ internal sealed class MainWindowController
         }
 
         return options;
+    }
+
+    private RawTcpTransportOptions BuildRawTcpOptions(TerminalSessionDimensions dimensions)
+    {
+        string host = _viewModel.RawTcpHost.Trim();
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            throw new InvalidOperationException("Raw TCP host is required.");
+        }
+
+        int port = ParsePort(_viewModel.RawTcpPort, "Raw TCP port");
+        return new RawTcpTransportOptions(host, port, dimensions);
+    }
+
+    private TelnetTransportOptions BuildTelnetOptions(TerminalSessionDimensions dimensions)
+    {
+        string host = _viewModel.TelnetHost.Trim();
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            throw new InvalidOperationException("Telnet host is required.");
+        }
+
+        int port = ParsePort(_viewModel.TelnetPort, "Telnet port");
+        return new TelnetTransportOptions(
+            Host: host,
+            Port: port,
+            TerminalType: string.IsNullOrWhiteSpace(_viewModel.TelnetTerminalType)
+                ? "xterm"
+                : _viewModel.TelnetTerminalType.Trim(),
+            Dimensions: dimensions)
+        {
+            InitialCommand = NullIfWhiteSpace(_viewModel.TelnetInitialCommand),
+        };
+    }
+
+    private SerialTransportOptions BuildSerialOptions(TerminalSessionDimensions dimensions)
+    {
+        string portName = _viewModel.SerialPortName.Trim();
+        if (string.IsNullOrWhiteSpace(portName))
+        {
+            throw new InvalidOperationException("Serial port name is required.");
+        }
+
+        int baudRate = ParsePositiveInt(_viewModel.SerialBaudRate, "Serial baud rate");
+        int dataBits = ParseIntInRange(_viewModel.SerialDataBits, 5, 8, "Serial data bits");
+        string newline = string.IsNullOrEmpty(_viewModel.SerialNewLine)
+            ? "\n"
+            : _viewModel.SerialNewLine;
+
+        return new SerialTransportOptions(
+            PortName: portName,
+            BaudRate: baudRate,
+            DataBits: dataBits,
+            Parity: _viewModel.SelectedSerialParity,
+            StopBits: _viewModel.SelectedSerialStopBits,
+            Handshake: _viewModel.SelectedSerialHandshake,
+            Dimensions: dimensions)
+        {
+            NewLine = newline,
+        };
+    }
+
+    private SshProxyOptions? BuildSshProxyOptions()
+    {
+        if (_viewModel.SelectedSshProxyType == SshProxyType.None)
+        {
+            return null;
+        }
+
+        string host = _viewModel.SshProxyHost.Trim();
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            throw new InvalidOperationException("SSH proxy host is required when proxy is enabled.");
+        }
+
+        int port = ParsePort(_viewModel.SshProxyPort, "SSH proxy port");
+        return new SshProxyOptions(
+            Type: _viewModel.SelectedSshProxyType,
+            Host: host,
+            Port: port,
+            Username: NullIfWhiteSpace(_viewModel.SshProxyUsername),
+            Password: NullIfWhiteSpace(_viewModel.SshProxyPassword));
+    }
+
+    private IReadOnlyList<SshPortForwardOptions> BuildSshPortForwardings()
+    {
+        if (!_viewModel.SshLocalPortForwardEnabled)
+        {
+            return Array.Empty<SshPortForwardOptions>();
+        }
+
+        string bindAddress = string.IsNullOrWhiteSpace(_viewModel.SshLocalPortForwardBindAddress)
+            ? "127.0.0.1"
+            : _viewModel.SshLocalPortForwardBindAddress.Trim();
+        string destinationHost = _viewModel.SshLocalPortForwardDestinationHost.Trim();
+        if (string.IsNullOrWhiteSpace(destinationHost))
+        {
+            throw new InvalidOperationException("SSH local forwarding destination host is required.");
+        }
+
+        int sourcePort = ParsePort(_viewModel.SshLocalPortForwardSourcePort, "SSH local forwarding source port");
+        int destinationPort = ParsePort(_viewModel.SshLocalPortForwardDestinationPort, "SSH local forwarding destination port");
+
+        return
+        [
+            new SshPortForwardOptions(
+                Mode: SshPortForwardMode.Local,
+                BindAddress: bindAddress,
+                SourcePort: (uint)sourcePort,
+                DestinationHost: destinationHost,
+                DestinationPort: (uint)destinationPort),
+        ];
+    }
+
+    private SshX11Options? BuildSshX11Options()
+    {
+        if (!_viewModel.SshX11Enabled)
+        {
+            return null;
+        }
+
+        string display = _viewModel.SshX11Display.Trim();
+        if (string.IsNullOrWhiteSpace(display))
+        {
+            throw new InvalidOperationException("SSH X11 display is required when X11 forwarding is enabled.");
+        }
+
+        return new SshX11Options(
+            Enabled: true,
+            Display: display);
+    }
+
+    private SshPolicyOptions BuildSshPolicyOptions()
+    {
+        int keepAlive = ParsePositiveInt(_viewModel.SshKeepAliveIntervalSeconds, "SSH keepalive interval");
+        int connectTimeout = ParsePositiveInt(_viewModel.SshConnectTimeoutSeconds, "SSH connect timeout");
+        return new SshPolicyOptions(
+            KeepAliveIntervalSeconds: keepAlive,
+            ConnectTimeoutSeconds: connectTimeout);
     }
 
     private SshAuthenticationOptions BuildSshAuthenticationOptions()
@@ -1110,6 +1372,43 @@ internal sealed class MainWindowController
         }
 
         return new TerminalCommandSpec(shellPath, ["-lc", commandText]);
+    }
+
+    private static int ParsePort(string value, string fieldName)
+    {
+        if (!int.TryParse(value, out int parsed) || parsed < 1 || parsed > 65535)
+        {
+            throw new InvalidOperationException($"{fieldName} must be a valid number in range 1-65535.");
+        }
+
+        return parsed;
+    }
+
+    private static int ParsePositiveInt(string value, string fieldName)
+    {
+        if (!int.TryParse(value, out int parsed) || parsed <= 0)
+        {
+            throw new InvalidOperationException($"{fieldName} must be a valid number greater than zero.");
+        }
+
+        return parsed;
+    }
+
+    private static int ParseIntInRange(string value, int min, int max, string fieldName)
+    {
+        if (!int.TryParse(value, out int parsed) || parsed < min || parsed > max)
+        {
+            throw new InvalidOperationException($"{fieldName} must be a valid number in range {min}-{max}.");
+        }
+
+        return parsed;
+    }
+
+    private static string? NullIfWhiteSpace(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 
     private string ResolveWorkingDirectory()
@@ -1256,6 +1555,7 @@ internal sealed class MainWindowController
         }
 
         UpdateStatus($"Closed {tab.Title}");
+        AppendEventLog($"[{tab.Title}] Tab closed.");
         SyncCaptureReplayState();
     }
 
@@ -1629,6 +1929,28 @@ internal sealed class MainWindowController
         }
     }
 
+    private void SelectAll()
+    {
+        TerminalTab? tab = GetActiveTab();
+        if (tab is null)
+        {
+            return;
+        }
+
+        if (tab.Control is GhosttyNativeTerminalControl native)
+        {
+            native.SelectAll();
+        }
+        else if (tab.Control is GhosttyRenderedTerminalControl rendered)
+        {
+            rendered.SelectAll();
+        }
+        else if (tab.Control is TerminalControl standalone)
+        {
+            standalone.SelectAll();
+        }
+    }
+
     #endregion
 
     #region Font And Theme
@@ -1779,6 +2101,98 @@ internal sealed class MainWindowController
 
     #region Status
 
+    private void ApplyTerminalBehaviorSettingsToAllStandaloneTabs()
+    {
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            if (_tabs[i].Control is TerminalControl standaloneControl)
+            {
+                ApplyTerminalBehaviorSettings(standaloneControl);
+            }
+        }
+    }
+
+    private void ApplyTerminalBehaviorSettings(TerminalControl control)
+    {
+        control.PasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
+        SkiaTerminalRenderer? renderer = control.Renderer;
+        if (renderer is not null)
+        {
+            renderer.EnableTextShaping = _viewModel.EnableTextShaping;
+            renderer.EnableLigatures = _viewModel.EnableLigatures;
+        }
+    }
+
+    private void HandleStandaloneKeyDown(TerminalControl control, KeyEventArgs e)
+    {
+        if (e.Handled ||
+            !_viewModel.BackspaceSendsControlH ||
+            e.Key != Key.Back)
+        {
+            return;
+        }
+
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            return;
+        }
+
+        control.SendInput("\b");
+        e.Handled = true;
+    }
+
+    private void AppendEventLog(string message)
+    {
+        _viewModel.AppendEventLogEntry(message);
+    }
+
+    private SessionLogWriter EnsureSessionLogWriter(TerminalControl control)
+    {
+        if (_sessionLogWriters.TryGetValue(control, out SessionLogWriter? writer))
+        {
+            return writer;
+        }
+
+        writer = new SessionLogWriter();
+        _sessionLogWriters[control] = writer;
+        return writer;
+    }
+
+    private void WriteSessionLogOutput(TerminalControl control, ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty)
+        {
+            return;
+        }
+
+        EnsureSessionLogWriter(control).WriteOutput(
+            _viewModel.GetSessionLoggingSettings(),
+            data);
+    }
+
+    private void WriteSessionLogInput(TerminalControl control, ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty)
+        {
+            return;
+        }
+
+        EnsureSessionLogWriter(control).WriteInput(
+            _viewModel.GetSessionLoggingSettings(),
+            data);
+    }
+
+    private string GetTabDisplayName(Control control)
+    {
+        TerminalTab? tab = _tabs.Find(next => ReferenceEquals(next.Control, control));
+        if (tab is not null)
+        {
+            return tab.Title;
+        }
+
+        return "Terminal";
+    }
+
     private void UpdateStatus(string text)
     {
         _viewModel.SetStatus(text);
@@ -1808,6 +2222,11 @@ internal sealed class MainWindowController
         }
         _tabs.Clear();
         _captureRuntimes.Clear();
+        foreach (SessionLogWriter writer in _sessionLogWriters.Values)
+        {
+            writer.Dispose();
+        }
+        _sessionLogWriters.Clear();
 
         _ghosttyApp?.Dispose();
         _ghosttyConfig?.Dispose();
@@ -1821,6 +2240,10 @@ internal sealed class MainWindowController
             {
                 runtime.StateChanged -= OnCaptureRuntimeStateChanged;
                 runtime.Dispose();
+            }
+            if (_sessionLogWriters.Remove(standaloneControl, out SessionLogWriter? sessionLogWriter))
+            {
+                sessionLogWriter.Dispose();
             }
 
             standaloneControl.StopPty();
@@ -1837,6 +2260,190 @@ internal sealed class MainWindowController
         if (control is GhosttyNativeTerminalControl nativeControl)
         {
             nativeControl.Dispose();
+        }
+    }
+
+    private sealed class SessionLogWriter : IDisposable
+    {
+        private readonly object _sync = new();
+        private FileStream? _stream;
+        private StreamWriter? _textWriter;
+        private bool _enabled;
+        private string? _filePath;
+        private TerminalSessionLogFormat _format;
+        private bool _flushFrequently;
+
+        public void WriteOutput(TerminalSessionLoggingSettings settings, ReadOnlyMemory<byte> data)
+        {
+            if (data.IsEmpty)
+            {
+                return;
+            }
+
+            lock (_sync)
+            {
+                EnsureConfigured(settings);
+                if (!_enabled || _stream is null)
+                {
+                    return;
+                }
+
+                if (_format == TerminalSessionLogFormat.RawBytes)
+                {
+                    _stream.Write(data.Span);
+                    if (_flushFrequently)
+                    {
+                        _stream.Flush(flushToDisk: true);
+                    }
+
+                    return;
+                }
+
+                string printable = ToPrintableText(data.Span);
+                if (printable.Length == 0)
+                {
+                    return;
+                }
+
+                string timestamp = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss.fff zzz", CultureInfo.InvariantCulture);
+                _textWriter!.WriteLine($"[{timestamp}] {printable}");
+                if (_flushFrequently)
+                {
+                    _textWriter.Flush();
+                }
+            }
+        }
+
+        public void WriteInput(TerminalSessionLoggingSettings settings, ReadOnlyMemory<byte> data)
+        {
+            if (data.IsEmpty)
+            {
+                return;
+            }
+
+            lock (_sync)
+            {
+                EnsureConfigured(settings);
+                if (!_enabled || _stream is null || _format == TerminalSessionLogFormat.RawBytes)
+                {
+                    return;
+                }
+
+                string printable = ToPrintableText(data.Span);
+                if (printable.Length == 0)
+                {
+                    return;
+                }
+
+                string timestamp = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss.fff zzz", CultureInfo.InvariantCulture);
+                _textWriter!.WriteLine($"[{timestamp}] [input] {printable}");
+                if (_flushFrequently)
+                {
+                    _textWriter.Flush();
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_sync)
+            {
+                CloseCurrentWriter();
+            }
+        }
+
+        private void EnsureConfigured(TerminalSessionLoggingSettings settings)
+        {
+            string? normalizedPath = string.IsNullOrWhiteSpace(settings.FilePath)
+                ? null
+                : settings.FilePath.Trim();
+
+            bool changed =
+                _enabled != settings.Enabled ||
+                !string.Equals(_filePath, normalizedPath, StringComparison.Ordinal) ||
+                _format != settings.Format ||
+                _flushFrequently != settings.FlushFrequently;
+            if (!changed)
+            {
+                return;
+            }
+
+            CloseCurrentWriter();
+
+            _enabled = settings.Enabled && !string.IsNullOrWhiteSpace(normalizedPath);
+            _filePath = normalizedPath;
+            _format = settings.Format;
+            _flushFrequently = settings.FlushFrequently;
+
+            if (!_enabled || _filePath is null)
+            {
+                return;
+            }
+
+            string? directoryPath = Path.GetDirectoryName(_filePath);
+            if (!string.IsNullOrWhiteSpace(directoryPath))
+            {
+                Directory.CreateDirectory(directoryPath);
+            }
+
+            _stream = new FileStream(
+                _filePath,
+                FileMode.Append,
+                FileAccess.Write,
+                FileShare.ReadWrite);
+            if (_format == TerminalSessionLogFormat.PlainText)
+            {
+                _textWriter = new StreamWriter(_stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), leaveOpen: true);
+            }
+        }
+
+        private void CloseCurrentWriter()
+        {
+            if (_textWriter is not null)
+            {
+                try
+                {
+                    _textWriter.Flush();
+                }
+                catch
+                {
+                    // Best effort cleanup.
+                }
+
+                _textWriter.Dispose();
+                _textWriter = null;
+            }
+
+            if (_stream is not null)
+            {
+                _stream.Dispose();
+                _stream = null;
+            }
+        }
+
+        private static string ToPrintableText(ReadOnlySpan<byte> bytes)
+        {
+            string text = Encoding.UTF8.GetString(bytes);
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new(text.Length);
+            for (int i = 0; i < text.Length; i++)
+            {
+                char value = text[i];
+                if (value == '\r' || value == '\n' || value == '\t' || !char.IsControl(value))
+                {
+                    builder.Append(value);
+                    continue;
+                }
+
+                builder.Append("\\x");
+                builder.Append(((int)value).ToString("X2", CultureInfo.InvariantCulture));
+            }
+
+            return builder.ToString();
         }
     }
 
