@@ -11,7 +11,7 @@
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />
-    <StyleInclude Source="avares://RoyalTerminal.Avalonia/Settings/TerminalSettingsPanel.axaml" />
+    <StyleInclude Source="avares://RoyalTerminal.Avalonia.Settings/Settings/TerminalSettingsPanel.axaml" />
     <StyleInclude Source="avares://RoyalTerminal.Demo/Styles/Tabs.axaml" />
   </Application.Styles>
 </Application>
