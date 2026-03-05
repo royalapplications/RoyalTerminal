@@ -73,7 +73,13 @@ public class TerminalPresenter : Control
     private void UpdateVisualSize()
     {
         if (_compositionVisual is null) return;
-        _compositionVisual.Size = new Vector(Bounds.Width, Bounds.Height);
+        Vector nextSize = new(Bounds.Width, Bounds.Height);
+        if (_compositionVisual.Size == nextSize)
+        {
+            return;
+        }
+
+        _compositionVisual.Size = nextSize;
     }
 
     /// <summary>
@@ -134,7 +140,7 @@ public class TerminalPresenter : Control
     public void NotifyResize(Size newSize)
     {
         _compositionVisual?.SendHandlerMessage(
-            new TerminalDrawHandler.ResizeMessage(newSize));
+            new TerminalDrawHandler.ResizeMessage());
         UpdateVisualSize();
     }
 }

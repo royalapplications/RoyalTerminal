@@ -2,7 +2,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia - Avalonia composition draw handler.
 
-using Avalonia;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Rendering.Composition;
@@ -27,8 +26,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     /// Message types for communicating with the handler from the UI thread.
     /// </summary>
     public record UpdateMessage(SkiaTerminalRenderer Renderer, TerminalScreen Screen);
-    public record InvalidateMessage();
-    public record ResizeMessage(Size NewSize);
+    public readonly record struct InvalidateMessage();
+    public readonly record struct ResizeMessage();
 
     public override void OnMessage(object message)
     {
@@ -37,18 +36,15 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             case UpdateMessage update:
                 _renderer = update.Renderer;
                 _screen = update.Screen;
-                _pendingRender = true;
-                RegisterForNextAnimationFrameUpdate();
+                RequestRender();
                 break;
 
             case InvalidateMessage:
-                _pendingRender = true;
-                RegisterForNextAnimationFrameUpdate();
+                RequestRender();
                 break;
 
             case ResizeMessage:
-                _pendingRender = true;
-                RegisterForNextAnimationFrameUpdate();
+                RequestRender();
                 break;
         }
     }
@@ -99,5 +95,16 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         {
             _pendingRender = false;
         }
+    }
+
+    private void RequestRender()
+    {
+        if (_pendingRender)
+        {
+            return;
+        }
+
+        _pendingRender = true;
+        RegisterForNextAnimationFrameUpdate();
     }
 }

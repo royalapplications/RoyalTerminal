@@ -398,7 +398,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 SyncScreenScrollOffsetFromScrollData();
                 UpdateRendererCursorForViewport();
                 UpdateRendererParityStateFromScreen();
-                _presenter?.Invalidate();
                 RaiseScrollInvalidated();
             }
         }
@@ -886,25 +885,31 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             ? Math.Max(1, (int)Math.Round(height))
             : Math.Max(1, (int)Math.Ceiling(safeRows * _renderer.CellHeight));
 
-        if (!force &&
-            safeColumns == _lastAppliedColumns &&
-            safeRows == _lastAppliedRows &&
-            widthPx == _lastAppliedWidthPx &&
-            heightPx == _lastAppliedHeightPx)
+        bool gridChanged = safeColumns != _lastAppliedColumns || safeRows != _lastAppliedRows;
+        bool pixelSizeChanged = widthPx != _lastAppliedWidthPx || heightPx != _lastAppliedHeightPx;
+
+        if (!force && !gridChanged && !pixelSizeChanged)
         {
             return;
         }
 
-        if (_screen is not null)
+        if (_screen is not null && (force || gridChanged || pixelSizeChanged))
         {
             lock (_screen.SyncRoot)
             {
-                _screen.Resize(safeColumns, safeRows);
+                if (force || gridChanged)
+                {
+                    _screen.Resize(safeColumns, safeRows);
+                }
+
                 _vtProcessor?.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
             }
         }
 
-        _scrollData?.UpdateExtent(_screen?.TotalRows ?? 0, AutoScroll);
+        if (force || gridChanged)
+        {
+            _scrollData?.UpdateExtent(_screen?.TotalRows ?? 0, AutoScroll);
+        }
 
         if (_scrollData is not null)
         {
@@ -917,10 +922,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             UpdateRendererParityStateFromScreen();
         }
 
-        Endpoint?.SetSize(widthPx, heightPx);
-        TerminalSessionService.ResizeSession(safeColumns, safeRows, widthPx, heightPx);
+        if (force || gridChanged)
+        {
+            Endpoint?.SetSize(widthPx, heightPx);
+            TerminalSessionService.ResizeSession(safeColumns, safeRows, widthPx, heightPx);
+        }
 
-        bool gridChanged = safeColumns != _lastAppliedColumns || safeRows != _lastAppliedRows;
         _lastAppliedColumns = safeColumns;
         _lastAppliedRows = safeRows;
         _lastAppliedWidthPx = widthPx;
@@ -1016,6 +1023,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // Recalculate grid dimensions based on actual size
         if (_renderer is not null && _renderer.CellWidth > 0 && _renderer.CellHeight > 0)
         {
+            if (finalSize.Width < _renderer.CellWidth || finalSize.Height < _renderer.CellHeight)
+            {
+                // Avoid collapsing terminal state to a destructive 1x1 grid when a full cell
+                // cannot be displayed during transient tiny layout bounds.
+                _presenter?.NotifyResize(finalSize);
+                return finalSize;
+            }
+
             var newCols = Math.Max(1, (int)(finalSize.Width / _renderer.CellWidth));
             var newRows = Math.Max(1, (int)(finalSize.Height / _renderer.CellHeight));
 
