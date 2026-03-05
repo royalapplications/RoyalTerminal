@@ -1924,7 +1924,39 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     private void OnVtProcessorResponse(byte[] data)
     {
+        if (data.Length == 0)
+        {
+            return;
+        }
+
+        // During sustained output floods (for example binary streams like /dev/urandom),
+        // random bytes can accidentally form VT query sequences. Responding to every such
+        // query can backpressure the PTY input path and delay user control bytes.
+        if (ShouldSuppressVtProcessorResponseUnderOutputBacklog())
+        {
+            return;
+        }
+
         TerminalSessionService.SendInput(data);
+    }
+
+    private bool ShouldSuppressVtProcessorResponseUnderOutputBacklog()
+    {
+        if (TerminalSessionService.Endpoint is not null)
+        {
+            return false;
+        }
+
+        if (!TerminalSessionService.HasActiveTransport && !TerminalSessionService.HasPty)
+        {
+            return false;
+        }
+
+        lock (_pendingTransportOutputSync)
+        {
+            return _pendingTransportOutputBytes >= ResumePendingOutputQueueBytes ||
+                   _pendingTransportOutput.Count >= ResumePendingOutputQueueChunks;
+        }
     }
 
     private void OnVtProcessorBell()
