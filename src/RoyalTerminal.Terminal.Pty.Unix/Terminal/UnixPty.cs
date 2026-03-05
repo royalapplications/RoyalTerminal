@@ -353,10 +353,17 @@ public sealed class UnixPty : IPty
     {
         if (_childPid <= 0) return -1;
 
-        var result = Waitpid(_childPid, out var status, WNOHANG);
-        if (result == _childPid)
+        try
         {
-            return (status >> 8) & 0xFF; // WEXITSTATUS
+            var result = Waitpid(_childPid, out var status, WNOHANG);
+            if (result == _childPid)
+            {
+                return (status >> 8) & 0xFF; // WEXITSTATUS
+            }
+        }
+        catch
+        {
+            // Best effort only; reader thread must not crash the process.
         }
 
         return -1;
