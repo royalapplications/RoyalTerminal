@@ -217,6 +217,74 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
+    public async Task Headless_VtQueryResponses_AreSuppressed_WhenOutputBacklogIsHigh()
+    {
+        RecordingTransport transport = new();
+        ResponseStormVtProcessorFactory vtProcessorFactory = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            vtProcessorFactory,
+            VtProcessorPreference.Managed);
+        Window window = new()
+        {
+            Width = 960,
+            Height = 640,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            byte[] floodChunk = new byte[8 * 1024];
+            Array.Fill(floodChunk, (byte)'x');
+            Task producer = Task.Run(() =>
+            {
+                for (int i = 0; i < 4096; i++)
+                {
+                    transport.RaiseData(floodChunk);
+                }
+            });
+
+            // Give the producer a short head-start before the UI pumps,
+            // so backlog-triggered response suppression is exercised deterministically.
+            Thread.Sleep(150);
+
+            bool producerCompleted = await WaitUntilAsync(
+                () => producer.IsCompleted,
+                TimeSpan.FromSeconds(10));
+            Assert.True(producerCompleted, "Expected flood producer to complete after UI drain catches up.");
+            await producer;
+
+            bool suppressionObserved = await WaitUntilAsync(
+                () =>
+                {
+                    ResponseStormVtProcessor? processor = vtProcessorFactory.LastProcessor;
+                    if (processor is null)
+                    {
+                        return false;
+                    }
+
+                    return processor.ProcessCallCount > transport.GetInputCount();
+                },
+                TimeSpan.FromSeconds(5));
+
+            int processCount = vtProcessorFactory.LastProcessor?.ProcessCallCount ?? 0;
+            int sentInputCount = transport.GetInputCount();
+            Assert.True(
+                suppressionObserved,
+                $"Expected VT query responses to be suppressed under output backlog. ProcessCount={processCount}, SentInputCount={sentInputCount}.");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Headless_KeyboardInput_UsesAttachedEndpointSink()
     {
         RecordingEndpoint endpoint = new();
@@ -1416,6 +1484,14 @@ public sealed class TerminalControlHeadlessInteractionTests
             }
         }
 
+        public int GetInputCount()
+        {
+            lock (_inputSync)
+            {
+                return Inputs.Count;
+            }
+        }
+
         public void Resize(TerminalSessionDimensions dimensions)
         {
             Resizes.Add(dimensions);
@@ -1431,6 +1507,81 @@ public sealed class TerminalControlHeadlessInteractionTests
         public void Dispose()
         {
             IsRunning = false;
+        }
+    }
+
+    private sealed class ResponseStormVtProcessorFactory : IVtProcessorFactory
+    {
+        public ResponseStormVtProcessor? LastProcessor { get; private set; }
+
+        public IVtProcessor Create(global::RoyalTerminal.Avalonia.Rendering.TerminalScreen screen, VtProcessorPreference preference)
+        {
+            _ = screen;
+            _ = preference;
+            ResponseStormVtProcessor processor = new();
+            LastProcessor = processor;
+            return processor;
+        }
+    }
+
+    private sealed class ResponseStormVtProcessor : IVtProcessor
+    {
+        private int _processCallCount;
+
+        public int ProcessCallCount => Volatile.Read(ref _processCallCount);
+        public int CursorCol => 0;
+        public int CursorRow => 0;
+        public bool CursorVisible => true;
+        public bool ApplicationCursorKeys => false;
+        public bool ApplicationKeypad => false;
+        public bool AlternateScreen => false;
+        public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
+        public TerminalModeState ModeState => new(
+            CursorVisible,
+            ApplicationCursorKeys,
+            ApplicationKeypad,
+            AlternateScreen,
+            BracketedPaste,
+            Win32InputMode);
+
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Action<byte[]>? ResponseCallback { get; set; }
+        public Action? BellCallback { get; set; }
+        public Action<string>? TitleCallback { get; set; }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            _ = data;
+            Interlocked.Increment(ref _processCallCount);
+            ResponseCallback?.Invoke("\x1b[0n"u8.ToArray());
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            _ = columns;
+            _ = rows;
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            _ = columns;
+            _ = rows;
+            _ = widthPx;
+            _ = heightPx;
+        }
+
+        public void Reset()
+        {
+        }
+
+        public void Dispose()
+        {
         }
     }
 
