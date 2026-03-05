@@ -1036,6 +1036,47 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_ManagedTransportOutput_ParsesOffUiThread_WhileDataReceivedRemainsOnUiThread()
+    {
+        FakeTransport transport = new();
+        ThreadTrackingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            factory,
+            VtProcessorPreference.Managed);
+
+        int uiThreadId = Environment.CurrentManagedThreadId;
+        int? dataReceivedThreadId = null;
+        control.DataReceived += (_, _) => dataReceivedThreadId = Environment.CurrentManagedThreadId;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            await Task.Run(() => transport.RaiseData(Encoding.UTF8.GetBytes("thread-check\n")));
+
+            bool processed = await WaitUntilAsync(
+                () => factory.LastProcessor is not null && factory.LastProcessor.HasRecordedThread,
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(processed, "Expected managed transport output to reach the VT processor.");
+            Assert.NotNull(factory.LastProcessor);
+
+            bool eventRaised = await WaitUntilAsync(
+                () => dataReceivedThreadId.HasValue,
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(eventRaised, "Expected DataReceived to be raised for managed transport output.");
+            Assert.NotEqual(uiThreadId, factory.LastProcessor!.LastProcessThreadId);
+            Assert.Equal(uiThreadId, dataReceivedThreadId);
+        }
+        finally
+        {
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
     public void Control_WriteOutput_UpdatesScrollExtent_WithoutResize()
     {
         TerminalControl control = new()
@@ -1807,6 +1848,83 @@ public class TerminalControlTests
         public void Process(ReadOnlySpan<byte> data)
         {
             _ = data;
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            _ = columns;
+            _ = rows;
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            _ = columns;
+            _ = rows;
+            _ = widthPx;
+            _ = heightPx;
+        }
+
+        public void Reset()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class ThreadTrackingVtProcessorFactory : IVtProcessorFactory
+    {
+        public ThreadTrackingVtProcessor? LastProcessor { get; private set; }
+
+        public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
+        {
+            _ = screen;
+            _ = preference;
+            ThreadTrackingVtProcessor processor = new();
+            LastProcessor = processor;
+            return processor;
+        }
+    }
+
+    private sealed class ThreadTrackingVtProcessor : IVtProcessor
+    {
+        private int _lastProcessThreadId = -1;
+
+        public int CursorCol => 0;
+        public int CursorRow => 0;
+        public bool CursorVisible => true;
+        public bool ApplicationCursorKeys => false;
+        public bool ApplicationKeypad => false;
+        public bool AlternateScreen => false;
+        public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
+        public TerminalModeState ModeState => new(
+            CursorVisible,
+            ApplicationCursorKeys,
+            ApplicationKeypad,
+            AlternateScreen,
+            BracketedPaste,
+            Win32InputMode);
+
+        public bool HasRecordedThread => Volatile.Read(ref _lastProcessThreadId) >= 0;
+
+        public int LastProcessThreadId => Volatile.Read(ref _lastProcessThreadId);
+
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Action<byte[]>? ResponseCallback { get; set; }
+        public Action? BellCallback { get; set; }
+        public Action<string>? TitleCallback { get; set; }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            _ = data;
+            Volatile.Write(ref _lastProcessThreadId, Environment.CurrentManagedThreadId);
         }
 
         public void NotifyResize(int columns, int rows)
