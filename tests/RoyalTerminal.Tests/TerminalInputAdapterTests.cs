@@ -84,6 +84,32 @@ public sealed class TerminalInputAdapterTests
     }
 
     [Fact]
+    public void HandleKeyDown_WithInputSink_CtrlC_RoutesToKeySink()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeEndpoint endpoint = new()
+        {
+            KeyResult = false,
+        };
+        sessionService.AttachEndpoint(endpoint);
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.C,
+            KeyModifiers = KeyModifiers.Control,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.False(handled);
+        Assert.Equal(1, endpoint.KeyCallCount);
+        Assert.Null(endpoint.LastUtf8Input);
+        Assert.Equal(Key.C, (Key)endpoint.LastKeyEvent!.Value.KeyCode);
+        Assert.Equal(TerminalModifiers.Control, endpoint.LastKeyEvent.Value.Modifiers);
+    }
+
+    [Fact]
     public void HandleKeyDown_WithEndpointWithoutInputSink_UsesByteFallback()
     {
         DefaultTerminalInputAdapter adapter = new();
@@ -326,6 +352,52 @@ public sealed class TerminalInputAdapterTests
 
         Assert.True(handled);
         Assert.Null(transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithWindowsWin32InputMode_CtrlC_EncodesWin32InputRecord()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetModeState(vtProcessor.ModeState with { Win32InputMode = true });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.C,
+            KeyModifiers = KeyModifiers.Control,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.NotEqual(new byte[] { 0x03 }, transport.LastInput);
+        string[] fields = ParseWin32InputFields(transport.LastInput!);
+        Assert.Equal("67", fields[0]); // VK_C
+        Assert.Equal("1", fields[3]);  // key down
 
         await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
     }
@@ -623,6 +695,88 @@ public sealed class TerminalInputAdapterTests
     }
 
     [Fact]
+    public async Task HandleKeyDown_WithKittyKeyboardDisambiguation_CtrlC_UsesEncoderOutput()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetKittyKeyboardFlags(1);
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.C,
+            KeyModifiers = KeyModifiers.Control,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        string encoded = Encoding.UTF8.GetString(transport.LastInput!);
+        Assert.StartsWith("\x1B[", encoded, StringComparison.Ordinal);
+        Assert.EndsWith("u", encoded, StringComparison.Ordinal);
+        Assert.DoesNotContain("\x03", encoded, StringComparison.Ordinal);
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithKittyKeyboardDisambiguation_CtrlZ_UsesEncoderOutput()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetKittyKeyboardFlags(1);
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Z,
+            KeyModifiers = KeyModifiers.Control,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        string encoded = Encoding.UTF8.GetString(transport.LastInput!);
+        Assert.StartsWith("\x1B[", encoded, StringComparison.Ordinal);
+        Assert.EndsWith("u", encoded, StringComparison.Ordinal);
+        Assert.DoesNotContain("\x1A", encoded, StringComparison.Ordinal);
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
     public async Task HandleKeyDown_WithActiveTransport_EncodesAltControlChord()
     {
         DefaultTerminalInputAdapter adapter = new();
@@ -915,6 +1069,7 @@ public sealed class TerminalInputAdapterTests
         public TerminalKeyEvent? LastKeyEvent { get; private set; }
 
         public string? LastTextInput { get; private set; }
+        public byte[]? LastUtf8Input { get; private set; }
 
         public bool SendKey(TerminalKeyEvent keyEvent)
         {
@@ -938,7 +1093,7 @@ public sealed class TerminalInputAdapterTests
 
         public void SendText(ReadOnlySpan<byte> utf8)
         {
-            _ = utf8;
+            LastUtf8Input = utf8.ToArray();
         }
 
         public void SetFocus(bool focused)
