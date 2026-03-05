@@ -243,6 +243,65 @@ public class PtyContractTests
     }
 
     [Fact]
+    public void UnixPty_Write_DoesNotBlockCaller_WhenChildNotReadingInput()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        using UnixPty pty = new();
+        try
+        {
+            pty.Start(shell: "/bin/sh", columns: 80, rows: 24, workingDirectory: Environment.CurrentDirectory);
+            pty.Write("while :; do :; done\n");
+            Thread.Sleep(150);
+
+            byte[] largeInput = new byte[8 * 1024 * 1024];
+            Array.Fill(largeInput, (byte)'x');
+
+            Exception? writeException = null;
+            using ManualResetEventSlim writeCompleted = new(false);
+            void PerformWrite()
+            {
+                try
+                {
+                    if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                    {
+                        pty.Write(largeInput, 0, largeInput.Length);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    writeException = ex;
+                }
+                finally
+                {
+                    writeCompleted.Set();
+                }
+            }
+
+            Stopwatch writeLatency = Stopwatch.StartNew();
+            Thread writeThread = new(PerformWrite)
+            {
+                IsBackground = true,
+                Name = "UnixPty-Write-Latency-Probe",
+            };
+            writeThread.Start();
+            bool completedQuickly = writeCompleted.Wait(TimeSpan.FromMilliseconds(750));
+
+            Assert.True(
+                completedQuickly,
+                $"Expected UnixPty.Write caller path to return promptly even under backpressure. Elapsed={writeLatency.Elapsed}.");
+            Assert.Null(writeException);
+        }
+        finally
+        {
+            pty.Stop();
+        }
+    }
+
+    [Fact]
     public void WindowsPty_StartWriteReadExit_Contract()
     {
         if (!OperatingSystem.IsWindows())

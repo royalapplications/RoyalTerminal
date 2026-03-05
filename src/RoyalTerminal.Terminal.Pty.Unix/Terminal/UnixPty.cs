@@ -25,7 +25,10 @@ public sealed class UnixPty : IPty
     private int _childPid = -1;
     private string? _slavePtyPath;
     private volatile bool _disposed;
+    private readonly object _pendingWritesSync = new();
+    private readonly Queue<PendingWrite> _pendingWrites = new();
     private Thread? _readThread;
+    private Thread? _writeThread;
 
     /// <summary>Raised when data is received from the PTY.</summary>
     public event Action<byte[], int>? DataReceived;
@@ -158,6 +161,15 @@ public sealed class UnixPty : IPty
         FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, nativeArguments, envPairs);
         _slavePtyPath = TryGetSlavePtyPath(_masterFd);
 
+        // Start writing to the master FD on a dedicated worker so UI/key handling
+        // callers never block on back-pressured PTY input.
+        _writeThread = new Thread(WriteLoop)
+        {
+            IsBackground = true,
+            Name = "PTY-Writer",
+        };
+        _writeThread.Start();
+
         // Start reading from the master FD
         _readThread = new Thread(ReadLoop)
         {
@@ -172,40 +184,18 @@ public sealed class UnixPty : IPty
     /// </summary>
     public void Write(ReadOnlySpan<byte> data)
     {
-        if (_masterFd < 0 || _disposed) return;
+        if (_masterFd < 0 || _disposed || data.IsEmpty) return;
 
-        unsafe
+        byte[] copy = data.ToArray();
+        lock (_pendingWritesSync)
         {
-            fixed (byte* ptr = data)
+            if (_masterFd < 0 || _disposed)
             {
-                nuint remaining = (nuint)data.Length;
-                byte* cursor = ptr;
-                while (remaining > 0 && !_disposed && _masterFd >= 0)
-                {
-                    nint written = PosixWrite(_masterFd, cursor, remaining);
-                    if (written > 0)
-                    {
-                        cursor += written;
-                        remaining -= (nuint)written;
-                        continue;
-                    }
-
-                    if (written == 0)
-                    {
-                        Thread.Yield();
-                        continue;
-                    }
-
-                    int error = Marshal.GetLastPInvokeError();
-                    if (error == ErrnoInterrupted || error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
-                    {
-                        Thread.Yield();
-                        continue;
-                    }
-
-                    break;
-                }
+                return;
             }
+
+            _pendingWrites.Enqueue(new PendingWrite(copy));
+            Monitor.PulseAll(_pendingWritesSync);
         }
     }
 
@@ -369,6 +359,78 @@ public sealed class UnixPty : IPty
         return -1;
     }
 
+    private void WriteLoop()
+    {
+        try
+        {
+            while (true)
+            {
+                PendingWrite pending;
+                lock (_pendingWritesSync)
+                {
+                    while (!_disposed && _pendingWrites.Count == 0)
+                    {
+                        Monitor.Wait(_pendingWritesSync);
+                    }
+
+                    if (_disposed && _pendingWrites.Count == 0)
+                    {
+                        return;
+                    }
+
+                    pending = _pendingWrites.Dequeue();
+                }
+
+                WritePending(ref pending);
+            }
+        }
+        catch
+        {
+            // Writer thread must never crash the process on unexpected runtime/PInvoke errors.
+        }
+    }
+
+    private unsafe void WritePending(ref PendingWrite pending)
+    {
+        while (!_disposed && pending.Offset < pending.Buffer.Length)
+        {
+            int fd = _masterFd;
+            if (fd < 0)
+            {
+                return;
+            }
+
+            nint written;
+            fixed (byte* ptr = pending.Buffer)
+            {
+                byte* cursor = ptr + pending.Offset;
+                nuint remaining = (nuint)(pending.Buffer.Length - pending.Offset);
+                written = PosixWrite(fd, cursor, remaining);
+            }
+
+            if (written > 0)
+            {
+                pending.Offset += (int)written;
+                continue;
+            }
+
+            if (written == 0)
+            {
+                Thread.Yield();
+                continue;
+            }
+
+            int error = Marshal.GetLastPInvokeError();
+            if (error == ErrnoInterrupted || error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
+            {
+                Thread.Yield();
+                continue;
+            }
+
+            return;
+        }
+    }
+
     /// <summary>
     /// Stops the PTY and kills the child process. Same as Dispose.
     /// </summary>
@@ -378,6 +440,11 @@ public sealed class UnixPty : IPty
     {
         if (_disposed) return;
         _disposed = true;
+        lock (_pendingWritesSync)
+        {
+            _pendingWrites.Clear();
+            Monitor.PulseAll(_pendingWritesSync);
+        }
 
         // Signal child to terminate first
         var pid = _childPid;
@@ -397,6 +464,7 @@ public sealed class UnixPty : IPty
 
         // Wait for read thread (don't block too long)
         _readThread?.Join(TimeSpan.FromMilliseconds(500));
+        _writeThread?.Join(TimeSpan.FromMilliseconds(500));
 
         // Reap child process (non-blocking to avoid hanging the UI thread)
         if (pid > 0)
@@ -575,6 +643,18 @@ public sealed class UnixPty : IPty
         public ushort ws_col;
         public ushort ws_xpixel;
         public ushort ws_ypixel;
+    }
+
+    private struct PendingWrite
+    {
+        public PendingWrite(byte[] buffer)
+        {
+            Buffer = buffer;
+            Offset = 0;
+        }
+
+        public byte[] Buffer;
+        public int Offset;
     }
 
     private static int ForkPty(out int masterFd, ref WinSize winSize)
