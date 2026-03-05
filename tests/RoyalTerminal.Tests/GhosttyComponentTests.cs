@@ -38,6 +38,33 @@ public sealed class GhosttyComponentTests
     }
 
     [AvaloniaFact]
+    public void GhosttyActionDispatcher_Render_CoalescesBurstToSingleUiDispatch()
+    {
+        int renderCount = 0;
+        GhosttyActionDispatcher dispatcher = CreateDispatcher(
+            renderRequested: () => renderCount++);
+
+        GhosttyAction action = new()
+        {
+            Tag = GhosttyActionTag.Render,
+        };
+
+        for (int i = 0; i < 128; i++)
+        {
+            dispatcher.HandleAction(CreateAppTarget(), action);
+        }
+
+        FlushUiThread();
+
+        Assert.Equal(1, renderCount);
+
+        dispatcher.HandleAction(CreateAppTarget(), action);
+        FlushUiThread();
+
+        Assert.Equal(2, renderCount);
+    }
+
+    [AvaloniaFact]
     public unsafe void GhosttyActionDispatcher_SetTitle_DecodesBeforeDispatch()
     {
         string? capturedTitle = null;
