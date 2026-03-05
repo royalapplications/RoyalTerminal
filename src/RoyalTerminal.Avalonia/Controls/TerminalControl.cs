@@ -45,11 +45,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const float RendererBackgroundOpacity = 0.82f;
     private const bool RendererBackgroundOpacityCells = true;
     private static readonly TimeSpan CursorBlinkInterval = TimeSpan.FromMilliseconds(530);
-    private const int MaxPendingOutputChunksPerDispatch = 8;
-    private const int MaxPendingOutputBytesPerDispatch = 128 * 1024;
-    private static readonly TimeSpan MaxPendingOutputDispatchDuration = TimeSpan.FromMilliseconds(3);
-    private const int MaxPendingOutputQueueBytes = 256 * 1024;
+    private const int MaxQueuedOutputChunkBytes = 1024;
+    private const int MaxPendingOutputChunksPerDispatch = 4;
+    private const int MaxPendingOutputBytesPerDispatch = 64 * 1024;
+    private static readonly TimeSpan MaxPendingOutputDispatchDuration = TimeSpan.FromMilliseconds(2);
+    private const int MaxPendingOutputQueueBytes = 64 * 1024;
     private const int ResumePendingOutputQueueBytes = MaxPendingOutputQueueBytes / 2;
+    private const int MaxPendingOutputQueueChunks = 96;
+    private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
+    private static readonly DispatcherPriority PendingOutputDrainPriority = DispatcherPriority.ContextIdle;
 
     #region Styled Properties
 
@@ -1942,8 +1946,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         // The PTY reader reuses its read buffer, so we must copy before posting
         // to the UI thread — otherwise the buffer may be overwritten by the next read.
-        byte[] copy = data.AsSpan(0, length).ToArray();
-        EnqueueOutputForUiThread(copy);
+        // Split large PTY reads to bound per-dispatch UI work and keep input responsive.
+        int offset = 0;
+        while (offset < length)
+        {
+            int chunkLength = Math.Min(MaxQueuedOutputChunkBytes, length - offset);
+            byte[] copy = data.AsSpan(offset, chunkLength).ToArray();
+            EnqueueOutputForUiThread(copy);
+            offset += chunkLength;
+        }
     }
 
     private void EnqueueOutputForUiThread(byte[] copy)
@@ -1958,7 +1969,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         lock (_pendingTransportOutputSync)
         {
             while (canBlockForCapacity &&
-                   _pendingTransportOutputBytes >= MaxPendingOutputQueueBytes)
+                   (_pendingTransportOutputBytes >= MaxPendingOutputQueueBytes ||
+                    _pendingTransportOutput.Count >= MaxPendingOutputQueueChunks))
             {
                 Monitor.Wait(_pendingTransportOutputSync);
             }
@@ -1974,7 +1986,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (scheduleDrain)
         {
-            Dispatcher.UIThread.Post(DrainPendingTransportOutput, DispatcherPriority.Background);
+            Dispatcher.UIThread.Post(DrainPendingTransportOutput, PendingOutputDrainPriority);
         }
     }
 
@@ -2002,6 +2014,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         int processedChunks = 0;
         int processedBytes = 0;
         bool scheduleContinuation = false;
+        List<byte[]>? pendingBatch = flushAll ? null : [];
         Stopwatch? dispatchStopwatch = flushAll ? null : Stopwatch.StartNew();
 
         while (true)
@@ -2030,15 +2043,29 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
                 nextChunk = _pendingTransportOutput.Dequeue();
                 _pendingTransportOutputBytes = Math.Max(0, _pendingTransportOutputBytes - nextChunk.Length);
-                if (_pendingTransportOutputBytes <= ResumePendingOutputQueueBytes)
+                if (_pendingTransportOutputBytes <= ResumePendingOutputQueueBytes &&
+                    _pendingTransportOutput.Count <= ResumePendingOutputQueueChunks)
                 {
                     Monitor.PulseAll(_pendingTransportOutputSync);
                 }
             }
 
-            WriteOutputOnUiThread(nextChunk, finalizeOutputBatch: false);
+            if (flushAll)
+            {
+                WriteOutputOnUiThread(nextChunk, finalizeOutputBatch: false);
+            }
+            else
+            {
+                pendingBatch!.Add(nextChunk);
+            }
+
             processedChunks++;
             processedBytes += nextChunk.Length;
+        }
+
+        if (!flushAll && processedChunks > 0)
+        {
+            WriteOutputBatchOnUiThread(pendingBatch!, processedBytes);
         }
 
         if (processedChunks > 0)
@@ -2048,7 +2075,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (scheduleContinuation)
         {
-            Dispatcher.UIThread.Post(DrainPendingTransportOutput, DispatcherPriority.Background);
+            Dispatcher.UIThread.Post(DrainPendingTransportOutput, PendingOutputDrainPriority);
         }
     }
 
@@ -2064,6 +2091,38 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         return elapsed >= MaxPendingOutputDispatchDuration;
+    }
+
+    private void WriteOutputBatchOnUiThread(List<byte[]> chunks, int totalBytes)
+    {
+        if (chunks.Count == 1)
+        {
+            WriteOutputOnUiThread(chunks[0], finalizeOutputBatch: false);
+            return;
+        }
+
+        byte[] mergedBuffer = ArrayPool<byte>.Shared.Rent(totalBytes);
+        int offset = 0;
+        try
+        {
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                byte[] chunk = chunks[i];
+                Buffer.BlockCopy(chunk, 0, mergedBuffer, offset, chunk.Length);
+                offset += chunk.Length;
+            }
+
+            WriteOutputCore(mergedBuffer.AsSpan(0, totalBytes));
+
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                DataReceived?.Invoke(this, new TerminalDataEventArgs(chunks[i]));
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(mergedBuffer);
+        }
     }
 
     private void ResetPendingTransportOutputQueue()
