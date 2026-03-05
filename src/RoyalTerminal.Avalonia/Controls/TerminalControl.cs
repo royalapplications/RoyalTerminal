@@ -243,6 +243,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private readonly Queue<byte[]> _pendingTransportOutput = new();
     private int _pendingTransportOutputBytes;
     private bool _pendingTransportOutputDrainScheduled;
+    private bool _acceptPendingTransportOutput = true;
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -1818,6 +1819,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         ArgumentNullException.ThrowIfNull(options);
 
         EnsureVtProcessorPreferenceApplied();
+        SetPendingTransportOutputAcceptance(acceptOutput: true);
         ResetPendingTransportOutputQueue();
         _mouseModeTracker.Reset();
         ResetPointerButtons();
@@ -1884,6 +1886,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void StopPty()
     {
+        SetPendingTransportOutputAcceptance(acceptOutput: false);
         TerminalSessionService.StopSessionAsync(_vtProcessor, OnPtyDataReceived, OnPtyProcessExited)
             .AsTask()
             .GetAwaiter()
@@ -2001,10 +2004,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         lock (_pendingTransportOutputSync)
         {
             while (canBlockForCapacity &&
+                   _acceptPendingTransportOutput &&
                    (_pendingTransportOutputBytes >= MaxPendingOutputQueueBytes ||
                     _pendingTransportOutput.Count >= MaxPendingOutputQueueChunks))
             {
                 Monitor.Wait(_pendingTransportOutputSync);
+            }
+
+            if (!_acceptPendingTransportOutput)
+            {
+                return;
             }
 
             _pendingTransportOutput.Enqueue(copy);
@@ -2164,6 +2173,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _pendingTransportOutput.Clear();
             _pendingTransportOutputBytes = 0;
             _pendingTransportOutputDrainScheduled = false;
+            Monitor.PulseAll(_pendingTransportOutputSync);
+        }
+    }
+
+    private void SetPendingTransportOutputAcceptance(bool acceptOutput)
+    {
+        lock (_pendingTransportOutputSync)
+        {
+            _acceptPendingTransportOutput = acceptOutput;
             Monitor.PulseAll(_pendingTransportOutputSync);
         }
     }
