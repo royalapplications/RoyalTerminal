@@ -45,8 +45,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const float RendererBackgroundOpacity = 0.82f;
     private const bool RendererBackgroundOpacityCells = true;
     private static readonly TimeSpan CursorBlinkInterval = TimeSpan.FromMilliseconds(530);
-    // Managed VT parsing runs on the UI thread, so keep each drain slice and
-    // queued backlog small enough that keyboard input can preempt output floods.
+    // Managed VT transport output is parsed off the UI thread, but UI finalize
+    // work still stays bounded so input and layout can preempt output floods.
     private const int MaxQueuedOutputChunkBytes = 1024;
     private const int MaxPendingOutputChunksPerDispatch = 4;
     private const int MaxPendingOutputBytesPerDispatch = 8 * 1024;
@@ -242,9 +242,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private string? _activeTransportId;
     private readonly TerminalMouseModeTracker _mouseModeTracker = new();
     private readonly object _pendingTransportOutputSync = new();
+    private readonly object _pendingTransportOutputDrainExecutionSync = new();
     private readonly Queue<byte[]> _pendingTransportOutput = new();
+    private readonly Queue<PendingTransportUiBatch> _pendingTransportUiBatches = new();
     private int _pendingTransportOutputBytes;
+    private int _pendingTransportUiBatchBytes;
+    private int _pendingTransportUiBatchChunks;
     private bool _pendingTransportOutputDrainScheduled;
+    private bool _pendingTransportUiDrainScheduled;
     private bool _acceptPendingTransportOutput = true;
 
     /// <summary>
@@ -1152,7 +1157,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        WriteOutputCore(data);
+        bool resetMouseSelection = ProcessOutputCore(data);
+        if (resetMouseSelection)
+        {
+            ApplyMouseModeSelectionResetOnUiThread();
+        }
 
         // Span input may come from transient memory, so copy to a managed payload for event consumers.
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data.ToArray()));
@@ -1162,7 +1171,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void WriteOutputOnUiThread(ReadOnlyMemory<byte> data, bool finalizeOutputBatch = true)
     {
-        WriteOutputCore(data.Span);
+        bool resetMouseSelection = ProcessOutputCore(data.Span);
+        if (resetMouseSelection)
+        {
+            ApplyMouseModeSelectionResetOnUiThread();
+        }
 
         // Raise event without copying when input is already managed memory.
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data));
@@ -1177,32 +1190,63 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void FinalizeOutputBatchOnUiThread()
     {
-        TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
-        UpdateRendererCursorForViewport();
+        if (_screen is null)
+        {
+            TerminalScrollService.HandleOutput(_scrollData, null, AutoScroll, _presenter, RaiseScrollInvalidated);
+            UpdateRendererCursorForViewport();
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            TerminalScrollService.HandleOutput(
+                _scrollData,
+                _screen,
+                AutoScroll,
+                presenter: null,
+                raiseScrollInvalidated: static () => { });
+            UpdateRendererCursorForViewportLocked();
+        }
+
+        _presenter?.Invalidate();
+        RaiseScrollInvalidated();
     }
 
-    private void WriteOutputCore(ReadOnlySpan<byte> data)
+    private bool ProcessOutputCore(ReadOnlySpan<byte> data)
+    {
+        if (_screen is null)
+        {
+            return false;
+        }
+
+        bool resetMouseSelection = false;
+        // Lock screen during VT processing — composition thread reads cells concurrently
+        lock (_screen.SyncRoot)
+        {
+            bool mouseModeChanged = _mouseModeTracker.Process(data);
+            if (mouseModeChanged && IsMouseReportingActiveForInput())
+            {
+                resetMouseSelection = true;
+            }
+
+            _vtProcessor?.Process(data);
+            TryUpdateHoveredLinkFromPointerLocked();
+            UpdateRendererParityStateLocked();
+        }
+
+        return resetMouseSelection;
+    }
+
+    private void ApplyMouseModeSelectionResetOnUiThread()
     {
         if (_screen is null)
         {
             return;
         }
 
-        bool mouseModeChanged = _mouseModeTracker.Process(data);
-        if (mouseModeChanged && IsMouseReportingActiveForInput())
-        {
-            ResetPointerButtons();
-            _isMouseSelecting = false;
-            TerminalSelectionService.ClearSelection(_screen, _renderer, _presenter);
-        }
-
-        // Lock screen during VT processing — composition thread reads cells concurrently
-        lock (_screen.SyncRoot)
-        {
-            _vtProcessor?.Process(data);
-            TryUpdateHoveredLinkFromPointerLocked();
-            UpdateRendererParityStateLocked();
-        }
+        ResetPointerButtons();
+        _isMouseSelecting = false;
+        TerminalSelectionService.ClearSelection(_screen, _renderer, _presenter);
     }
 
     /// <summary>
@@ -1896,10 +1940,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (Dispatcher.UIThread.CheckAccess())
         {
             DrainPendingTransportOutput(flushAll: true);
+            DrainPendingTransportOutputUiBatches(flushAll: true);
         }
         else
         {
-            Dispatcher.UIThread.InvokeAsync(() => DrainPendingTransportOutput(flushAll: true))
+            Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    DrainPendingTransportOutput(flushAll: true);
+                    DrainPendingTransportOutputUiBatches(flushAll: true);
+                })
                 .GetAwaiter()
                 .GetResult();
         }
@@ -1954,8 +2003,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         lock (_pendingTransportOutputSync)
         {
-            return _pendingTransportOutputBytes >= ResumePendingOutputQueueBytes ||
-                   _pendingTransportOutput.Count >= ResumePendingOutputQueueChunks;
+            return GetPendingTransportBacklogBytesLocked() >= ResumePendingOutputQueueBytes ||
+                   GetPendingTransportBacklogChunksLocked() >= ResumePendingOutputQueueChunks;
         }
     }
 
@@ -1976,9 +2025,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        // The PTY reader reuses its read buffer, so we must copy before posting
-        // to the UI thread — otherwise the buffer may be overwritten by the next read.
-        // Split large PTY reads to bound per-dispatch UI work and keep input responsive.
+        // The PTY reader reuses its read buffer, so we must copy before queueing
+        // output for managed/background processing.
+        // Split large PTY reads to bound per-dispatch parse work and UI finalization.
         int offset = 0;
         while (offset < length)
         {
@@ -2002,8 +2051,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             while (canBlockForCapacity &&
                    _acceptPendingTransportOutput &&
-                   (_pendingTransportOutputBytes >= MaxPendingOutputQueueBytes ||
-                    _pendingTransportOutput.Count >= MaxPendingOutputQueueChunks))
+                   IsPendingTransportBacklogAtCapacityLocked())
             {
                 Monitor.Wait(_pendingTransportOutputSync);
             }
@@ -2024,7 +2072,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (scheduleDrain)
         {
-            Dispatcher.UIThread.Post(DrainPendingTransportOutput, PendingOutputDrainPriority);
+            SchedulePendingTransportOutputDrain();
         }
     }
 
@@ -2033,6 +2081,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         Dispatcher.UIThread.Post(() =>
         {
             DrainPendingTransportOutput(flushAll: true);
+            DrainPendingTransportOutputUiBatches(flushAll: true);
             _activeTransportId = null;
             // Write exit message to screen
             string msg = $"\r\n[Process exited with code {exitCode}]\r\n";
@@ -2048,6 +2097,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     private void DrainPendingTransportOutput(bool flushAll)
+    {
+        if (ShouldUseBackgroundManagedOutputPipeline())
+        {
+            DrainPendingTransportOutputInBackground(flushAll);
+            return;
+        }
+
+        DrainPendingTransportOutputOnUiThread(flushAll);
+    }
+
+    private void DrainPendingTransportOutputOnUiThread(bool flushAll)
     {
         int processedChunks = 0;
         int processedBytes = 0;
@@ -2113,7 +2173,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (scheduleContinuation)
         {
-            Dispatcher.UIThread.Post(DrainPendingTransportOutput, PendingOutputDrainPriority);
+            SchedulePendingTransportOutputDrain();
         }
     }
 
@@ -2129,6 +2189,188 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         return elapsed >= MaxPendingOutputDispatchDuration;
+    }
+
+    private void DrainPendingTransportOutputInBackground(bool flushAll)
+    {
+        lock (_pendingTransportOutputDrainExecutionSync)
+        {
+            while (TryDequeuePendingTransportOutputBatch(flushAll, out List<byte[]>? chunks, out int totalBytes))
+            {
+                PendingTransportUiBatch pendingBatch = ProcessPendingTransportOutputBatch(chunks!, totalBytes);
+                EnqueuePendingTransportUiBatch(pendingBatch);
+
+                if (!flushAll)
+                {
+                    SchedulePendingTransportOutputDrainIfNeeded();
+                    return;
+                }
+            }
+        }
+    }
+
+    private bool TryDequeuePendingTransportOutputBatch(
+        bool flushAll,
+        out List<byte[]>? chunks,
+        out int totalBytes)
+    {
+        chunks = null;
+        totalBytes = 0;
+
+        lock (_pendingTransportOutputSync)
+        {
+            if (_pendingTransportOutput.Count == 0)
+            {
+                _pendingTransportOutputDrainScheduled = false;
+                Monitor.PulseAll(_pendingTransportOutputSync);
+                return false;
+            }
+
+            chunks = [];
+            Stopwatch? batchStopwatch = flushAll ? null : Stopwatch.StartNew();
+            while (_pendingTransportOutput.Count > 0)
+            {
+                if (!flushAll &&
+                    chunks.Count > 0 &&
+                    batchStopwatch is not null &&
+                    ShouldYieldPendingOutputDrain(
+                        chunks.Count,
+                        totalBytes,
+                        batchStopwatch.Elapsed))
+                {
+                    break;
+                }
+
+                byte[] nextChunk = _pendingTransportOutput.Dequeue();
+                _pendingTransportOutputBytes = Math.Max(0, _pendingTransportOutputBytes - nextChunk.Length);
+                chunks.Add(nextChunk);
+                totalBytes += nextChunk.Length;
+            }
+
+            _pendingTransportOutputDrainScheduled = false;
+            return chunks.Count > 0;
+        }
+    }
+
+    private PendingTransportUiBatch ProcessPendingTransportOutputBatch(List<byte[]> chunks, int totalBytes)
+    {
+        if (chunks.Count == 1)
+        {
+            bool resetMouseSelection = ProcessOutputCore(chunks[0]);
+            return new PendingTransportUiBatch(chunks, totalBytes, resetMouseSelection);
+        }
+
+        byte[] mergedBuffer = ArrayPool<byte>.Shared.Rent(totalBytes);
+        int offset = 0;
+        try
+        {
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                byte[] chunk = chunks[i];
+                Buffer.BlockCopy(chunk, 0, mergedBuffer, offset, chunk.Length);
+                offset += chunk.Length;
+            }
+
+            bool resetMouseSelection = ProcessOutputCore(mergedBuffer.AsSpan(0, totalBytes));
+            return new PendingTransportUiBatch(chunks, totalBytes, resetMouseSelection);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(mergedBuffer);
+        }
+    }
+
+    private void EnqueuePendingTransportUiBatch(PendingTransportUiBatch batch)
+    {
+        bool scheduleUiDrain = false;
+        lock (_pendingTransportOutputSync)
+        {
+            _pendingTransportUiBatches.Enqueue(batch);
+            _pendingTransportUiBatchBytes += batch.TotalBytes;
+            _pendingTransportUiBatchChunks += batch.ChunkCount;
+            if (!_pendingTransportUiDrainScheduled)
+            {
+                _pendingTransportUiDrainScheduled = true;
+                scheduleUiDrain = true;
+            }
+        }
+
+        if (scheduleUiDrain)
+        {
+            Dispatcher.UIThread.Post(DrainPendingTransportOutputUiBatches, PendingOutputDrainPriority);
+        }
+    }
+
+    private void DrainPendingTransportOutputUiBatches()
+    {
+        DrainPendingTransportOutputUiBatches(flushAll: false);
+    }
+
+    private void DrainPendingTransportOutputUiBatches(bool flushAll)
+    {
+        int processedChunks = 0;
+        int processedBytes = 0;
+        bool scheduleContinuation = false;
+        bool mouseSelectionResetApplied = false;
+        Stopwatch? dispatchStopwatch = flushAll ? null : Stopwatch.StartNew();
+
+        while (true)
+        {
+            PendingTransportUiBatch nextBatch;
+            lock (_pendingTransportOutputSync)
+            {
+                if (_pendingTransportUiBatches.Count == 0)
+                {
+                    _pendingTransportUiDrainScheduled = false;
+                    Monitor.PulseAll(_pendingTransportOutputSync);
+                    break;
+                }
+
+                if (!flushAll &&
+                    processedChunks > 0 &&
+                    dispatchStopwatch is not null &&
+                    ShouldYieldPendingOutputDrain(
+                        processedChunks,
+                        processedBytes,
+                        dispatchStopwatch.Elapsed))
+                {
+                    scheduleContinuation = true;
+                    break;
+                }
+
+                nextBatch = _pendingTransportUiBatches.Dequeue();
+                _pendingTransportUiBatchBytes = Math.Max(0, _pendingTransportUiBatchBytes - nextBatch.TotalBytes);
+                _pendingTransportUiBatchChunks = Math.Max(0, _pendingTransportUiBatchChunks - nextBatch.ChunkCount);
+                if (CanResumePendingTransportBacklogLocked())
+                {
+                    Monitor.PulseAll(_pendingTransportOutputSync);
+                }
+            }
+
+            if (nextBatch.ResetMouseSelection && !mouseSelectionResetApplied)
+            {
+                ApplyMouseModeSelectionResetOnUiThread();
+                mouseSelectionResetApplied = true;
+            }
+
+            for (int i = 0; i < nextBatch.Chunks.Count; i++)
+            {
+                DataReceived?.Invoke(this, new TerminalDataEventArgs(nextBatch.Chunks[i]));
+            }
+
+            processedChunks += nextBatch.ChunkCount;
+            processedBytes += nextBatch.TotalBytes;
+        }
+
+        if (processedChunks > 0)
+        {
+            FinalizeOutputBatchOnUiThread();
+        }
+
+        if (scheduleContinuation)
+        {
+            Dispatcher.UIThread.Post(DrainPendingTransportOutputUiBatches, PendingOutputDrainPriority);
+        }
     }
 
     private void WriteOutputBatchOnUiThread(List<byte[]> chunks, int totalBytes)
@@ -2150,7 +2392,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 offset += chunk.Length;
             }
 
-            WriteOutputCore(mergedBuffer.AsSpan(0, totalBytes));
+            bool resetMouseSelection = ProcessOutputCore(mergedBuffer.AsSpan(0, totalBytes));
+            if (resetMouseSelection)
+            {
+                ApplyMouseModeSelectionResetOnUiThread();
+            }
 
             for (int i = 0; i < chunks.Count; i++)
             {
@@ -2168,8 +2414,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         lock (_pendingTransportOutputSync)
         {
             _pendingTransportOutput.Clear();
+            _pendingTransportUiBatches.Clear();
             _pendingTransportOutputBytes = 0;
+            _pendingTransportUiBatchBytes = 0;
+            _pendingTransportUiBatchChunks = 0;
             _pendingTransportOutputDrainScheduled = false;
+            _pendingTransportUiDrainScheduled = false;
             Monitor.PulseAll(_pendingTransportOutputSync);
         }
     }
@@ -2181,6 +2431,85 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _acceptPendingTransportOutput = acceptOutput;
             Monitor.PulseAll(_pendingTransportOutputSync);
         }
+    }
+
+    private void SchedulePendingTransportOutputDrain()
+    {
+        if (ShouldUseBackgroundManagedOutputPipeline())
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(
+                static state => ((TerminalControl)state!).DrainPendingTransportOutput(),
+                this);
+            return;
+        }
+
+        Dispatcher.UIThread.Post(DrainPendingTransportOutput, PendingOutputDrainPriority);
+    }
+
+    private void SchedulePendingTransportOutputDrainIfNeeded()
+    {
+        bool scheduleDrain = false;
+        lock (_pendingTransportOutputSync)
+        {
+            if (_pendingTransportOutput.Count == 0 || _pendingTransportOutputDrainScheduled)
+            {
+                return;
+            }
+
+            _pendingTransportOutputDrainScheduled = true;
+            scheduleDrain = true;
+        }
+
+        if (scheduleDrain)
+        {
+            SchedulePendingTransportOutputDrain();
+        }
+    }
+
+    private bool ShouldUseBackgroundManagedOutputPipeline()
+    {
+        return _appliedVtProcessorPreference == VtProcessorPreference.Managed ||
+               _vtProcessor is BasicVtProcessor;
+    }
+
+    private int GetPendingTransportBacklogBytesLocked()
+    {
+        return _pendingTransportOutputBytes + _pendingTransportUiBatchBytes;
+    }
+
+    private int GetPendingTransportBacklogChunksLocked()
+    {
+        return _pendingTransportOutput.Count + _pendingTransportUiBatchChunks;
+    }
+
+    private bool IsPendingTransportBacklogAtCapacityLocked()
+    {
+        return GetPendingTransportBacklogBytesLocked() >= MaxPendingOutputQueueBytes ||
+               GetPendingTransportBacklogChunksLocked() >= MaxPendingOutputQueueChunks;
+    }
+
+    private bool CanResumePendingTransportBacklogLocked()
+    {
+        return GetPendingTransportBacklogBytesLocked() <= ResumePendingOutputQueueBytes &&
+               GetPendingTransportBacklogChunksLocked() <= ResumePendingOutputQueueChunks;
+    }
+
+    private sealed class PendingTransportUiBatch
+    {
+        public PendingTransportUiBatch(List<byte[]> chunks, int totalBytes, bool resetMouseSelection)
+        {
+            Chunks = chunks;
+            TotalBytes = totalBytes;
+            ResetMouseSelection = resetMouseSelection;
+        }
+
+        public List<byte[]> Chunks { get; }
+
+        public int TotalBytes { get; }
+
+        public bool ResetMouseSelection { get; }
+
+        public int ChunkCount => Chunks.Count;
     }
 
     #endregion
@@ -3256,6 +3585,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     private void UpdateRendererCursorForViewport()
+    {
+        if (_screen is null)
+        {
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            UpdateRendererCursorForViewportLocked();
+        }
+    }
+
+    private void UpdateRendererCursorForViewportLocked()
     {
         if (_renderer is null || _screen is null || _vtProcessor is null)
         {
