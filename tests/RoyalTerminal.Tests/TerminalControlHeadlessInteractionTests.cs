@@ -212,71 +212,51 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
-    public async Task Headless_VtQueryResponses_AreSuppressed_WhenOutputBacklogIsHigh()
+    public async Task Headless_ManagedPty_KeyDownCtrlC_InterruptsAnsiFloodWithinLatencyBudget()
     {
-        RecordingTransport transport = new();
-        ResponseStormVtProcessorFactory vtProcessorFactory = new();
-        TerminalControl control = CreateControlWithTransport(
-            transport,
-            vtProcessorFactory,
-            VtProcessorPreference.Managed);
-        Window window = new()
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
-            Width = 960,
-            Height = 640,
-            Content = control,
-        };
-        window.Show();
-
-        try
-        {
-            await StabilizeWindowAsync(window, control);
-            await control.StartSessionAsync(new FakeTransportOptions("fake"));
-
-            byte[] floodChunk = new byte[8 * 1024];
-            Array.Fill(floodChunk, (byte)'x');
-            Task producer = Task.Run(() =>
-            {
-                for (int i = 0; i < 1024; i++)
-                {
-                    transport.RaiseData(floodChunk);
-                }
-            });
-
-            // Give the producer a short head-start before the UI pumps,
-            // so backlog-triggered response suppression is exercised deterministically.
-            Thread.Sleep(150);
-
-            bool producerCompleted = await WaitUntilAsync(
-                () => producer.IsCompleted,
-                TimeSpan.FromSeconds(10));
-            Assert.True(producerCompleted, "Expected flood producer to complete after UI drain catches up.");
-            await producer;
-
-            bool suppressionObserved = await WaitUntilAsync(
-                () =>
-                {
-                    ResponseStormVtProcessor? processor = vtProcessorFactory.LastProcessor;
-                    if (processor is null)
-                    {
-                        return false;
-                    }
-
-                    return processor.ProcessCallCount > transport.GetInputCount();
-                },
-                TimeSpan.FromSeconds(5));
-
-            int processCount = vtProcessorFactory.LastProcessor?.ProcessCallCount ?? 0;
-            int sentInputCount = transport.GetInputCount();
-            Assert.True(
-                suppressionObserved,
-                $"Expected VT query responses to be suppressed under output backlog. ProcessCount={processCount}, SentInputCount={sentInputCount}.");
+            return;
         }
-        finally
+
+        await VerifyManagedPtyControlCharacterKeyDownInterruptsAnsiFloodAsync(
+            PhysicalKey.C,
+            "__ROYALTERMINAL_AFTER_KEYDOWN_CTRL_C__",
+            "Ctrl+C",
+            0x03);
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_ManagedPty_KeyDownCtrlZ_SuspendsAnsiFloodWithinLatencyBudget()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
-            window.Close();
-            control.StopPty();
+            return;
         }
+
+        await VerifyManagedPtyControlCharacterKeyDownInterruptsAnsiFloodAsync(
+            PhysicalKey.Z,
+            "__ROYALTERMINAL_AFTER_KEYDOWN_CTRL_Z__",
+            "Ctrl+Z",
+            0x1A);
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_VtQueryResponses_AreSuppressed_ForPtyBackedSessions_WhenOutputBacklogIsHigh()
+    {
+        await VerifyVtQueryResponseBehaviorUnderOutputBacklogAsync(
+            new RecordingPtyTransport(),
+            expectSuppression: true,
+            expectationLabel: "PTY-backed sessions should suppress VT query responses under backlog.");
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_VtQueryResponses_AreNotSuppressed_ForNonPtyTransports_WhenOutputBacklogIsHigh()
+    {
+        await VerifyVtQueryResponseBehaviorUnderOutputBacklogAsync(
+            new RecordingTransport(),
+            expectSuppression: false,
+            expectationLabel: "Non-PTY transports should continue sending VT query responses under backlog.");
     }
 
     [AvaloniaFact]
@@ -921,7 +901,7 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     private static TerminalControl CreateControlWithTransport(
-        RecordingTransport transport,
+        ITerminalTransport transport,
         IVtProcessorFactory? vtProcessorFactory = null,
         VtProcessorPreference preference = VtProcessorPreference.Auto)
     {
@@ -1083,6 +1063,187 @@ public sealed class TerminalControlHeadlessInteractionTests
         return predicate();
     }
 
+    private static async Task VerifyVtQueryResponseBehaviorUnderOutputBacklogAsync(
+        RecordingTransport transport,
+        bool expectSuppression,
+        string expectationLabel)
+    {
+        ResponseStormVtProcessorFactory vtProcessorFactory = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            vtProcessorFactory,
+            VtProcessorPreference.Managed);
+        Window window = new()
+        {
+            Width = 960,
+            Height = 640,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            byte[] floodChunk = new byte[8 * 1024];
+            Array.Fill(floodChunk, (byte)'x');
+            Task producer = Task.Run(() =>
+            {
+                for (int i = 0; i < 1024; i++)
+                {
+                    transport.RaiseData(floodChunk);
+                }
+            });
+
+            // Give the producer a short head-start before the UI pumps,
+            // so backlog-triggered response behavior is exercised deterministically.
+            Thread.Sleep(150);
+
+            bool producerCompleted = await WaitUntilAsync(
+                () => producer.IsCompleted,
+                TimeSpan.FromSeconds(10));
+            Assert.True(producerCompleted, "Expected flood producer to complete after UI drain catches up.");
+            await producer;
+
+            bool expectedBehaviorObserved = await WaitUntilAsync(
+                () =>
+                {
+                    ResponseStormVtProcessor? processor = vtProcessorFactory.LastProcessor;
+                    if (processor is null || processor.ProcessCallCount == 0)
+                    {
+                        return false;
+                    }
+
+                    int processCount = processor.ProcessCallCount;
+                    int sentInputCount = transport.GetInputCount();
+                    return expectSuppression
+                        ? processCount > sentInputCount
+                        : processCount == sentInputCount;
+                },
+                TimeSpan.FromSeconds(5));
+
+            int finalProcessCount = vtProcessorFactory.LastProcessor?.ProcessCallCount ?? 0;
+            int finalSentInputCount = transport.GetInputCount();
+            Assert.True(
+                expectedBehaviorObserved,
+                $"{expectationLabel} ProcessCount={finalProcessCount}, SentInputCount={finalSentInputCount}.");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    private static async Task VerifyManagedPtyControlCharacterKeyDownInterruptsAnsiFloodAsync(
+        PhysicalKey physicalKey,
+        string postInterruptMarker,
+        string controlCharacterLabel,
+        byte expectedInputByte)
+    {
+        const string readyMarker = "__ROYALTERMINAL_KEYDOWN_CTRL_READY__";
+        const string floodNeedle = "Build step";
+
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new()
+        {
+            Width = 960,
+            Height = 640,
+            Content = control,
+        };
+
+        object outputSync = new();
+        StringBuilder output = new();
+        object inputSync = new();
+        List<byte[]> inputs = [];
+        control.DataReceived += (_, args) =>
+        {
+            lock (outputSync)
+            {
+                output.Append(Encoding.UTF8.GetString(args.Data.Span));
+                if (output.Length > 131072)
+                {
+                    output.Remove(0, output.Length - 65536);
+                }
+            }
+        };
+        control.TerminalSessionService.InputSent += (_, args) =>
+        {
+            lock (inputSync)
+            {
+                inputs.Add(args.Data.ToArray());
+            }
+        };
+
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            string? shell = ResolveManagedPtyControlTestShell(requireJobControl: physicalKey == PhysicalKey.Z);
+            Assert.True(shell is not null, $"Expected a job-control capable shell for {controlCharacterLabel} managed PTY test.");
+            control.StartPty(shell: shell, workingDirectory: Environment.CurrentDirectory);
+
+            control.SendInput($"echo {readyMarker}\n");
+            bool readySeen = await WaitUntilAsync(
+                () => ContainsOutput(outputSync, output, readyMarker),
+                TimeSpan.FromSeconds(5));
+            Assert.True(readySeen, $"Did not observe PTY ready marker. Output: {SnapshotOutput(outputSync, output)}");
+
+            control.SendInput(
+                "i=1; while [ \"$i\" -le 200000 ]; do " +
+                "printf '\\033[32mINFO\\033[0m Build step %d completed\\n' \"$i\"; " +
+                "printf '\\033[33mWARN\\033[0m Something suspicious\\n'; " +
+                "printf '\\033[31mERROR\\033[0m Something failed\\n'; " +
+                "i=$((i+1)); " +
+                "done\n");
+
+            bool floodSeen = await WaitUntilAsync(
+                () => ContainsOutput(outputSync, output, floodNeedle),
+                TimeSpan.FromSeconds(5));
+            Assert.True(floodSeen, $"Did not observe ANSI flood output before interrupt. Output: {SnapshotOutput(outputSync, output)}");
+
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            Stopwatch totalLatency = Stopwatch.StartNew();
+            Stopwatch keyDispatchLatency = Stopwatch.StartNew();
+            window.KeyPressQwerty(physicalKey, RawInputModifiers.Control);
+            keyDispatchLatency.Stop();
+
+            Stopwatch inputObservationLatency = Stopwatch.StartNew();
+            bool expectedInputObserved = await WaitUntilAsync(
+                () => ContainsInputByte(inputSync, inputs, expectedInputByte),
+                TimeSpan.FromSeconds(2));
+            inputObservationLatency.Stop();
+            Assert.True(
+                expectedInputObserved,
+                $"Did not observe expected PTY input byte 0x{expectedInputByte:X2} after {controlCharacterLabel}. Inputs: {SnapshotInputs(inputSync, inputs)}");
+
+            Stopwatch postInterruptLatency = Stopwatch.StartNew();
+            control.SendInput($"echo {postInterruptMarker}\n");
+
+            bool interrupted = await WaitUntilAsync(
+                () => ContainsOutput(outputSync, output, postInterruptMarker),
+                TimeSpan.FromSeconds(5));
+            postInterruptLatency.Stop();
+            Assert.True(interrupted, $"Did not observe post-interrupt marker after {controlCharacterLabel}. Output: {SnapshotOutput(outputSync, output)}");
+            Assert.True(
+                totalLatency.Elapsed < TimeSpan.FromSeconds(3),
+                $"Expected managed PTY {controlCharacterLabel} keydown interrupt to be prompt under ANSI flood. " +
+                $"Total={totalLatency.Elapsed}, KeyDispatch={keyDispatchLatency.Elapsed}, InputObserved={inputObservationLatency.Elapsed}, " +
+                $"PostInterrupt={postInterruptLatency.Elapsed}.");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
     private static async Task VerifyControlCharacterDispatchUnderOutputFloodAsync(
         PhysicalKey physicalKey,
         byte expectedByte,
@@ -1175,12 +1336,55 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
+    private static bool ContainsInputByte(object sync, List<byte[]> inputs, byte expectedByte)
+    {
+        lock (sync)
+        {
+            for (int i = 0; i < inputs.Count; i++)
+            {
+                if (inputs[i].Contains(expectedByte))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     private static string SnapshotOutput(object sync, StringBuilder output)
     {
         lock (sync)
         {
             return output.ToString();
         }
+    }
+
+    private static string SnapshotInputs(object sync, List<byte[]> inputs)
+    {
+        lock (sync)
+        {
+            return string.Join(
+                " | ",
+                inputs.Select(static input => BitConverter.ToString(input)));
+        }
+    }
+
+    private static string? ResolveManagedPtyControlTestShell(bool requireJobControl)
+    {
+        if (File.Exists("/bin/zsh"))
+        {
+            return "/bin/zsh";
+        }
+
+        if (File.Exists("/bin/bash"))
+        {
+            return "/bin/bash";
+        }
+
+        return requireJobControl
+            ? null
+            : "/bin/sh";
     }
 
     private static async Task StabilizeWindowAsync(Window window, TerminalControl control)
@@ -1415,9 +1619,9 @@ public sealed class TerminalControlHeadlessInteractionTests
 
     private sealed class RecordingTransportProvider : ITerminalTransportProvider
     {
-        private readonly RecordingTransport _transport;
+        private readonly ITerminalTransport _transport;
 
-        public RecordingTransportProvider(RecordingTransport transport)
+        public RecordingTransportProvider(ITerminalTransport transport)
         {
             _transport = transport;
         }
@@ -1435,7 +1639,7 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    private sealed class RecordingTransport : ITerminalTransport
+    private class RecordingTransport : ITerminalTransport
     {
         public event Action<byte[], int>? DataReceived;
         public event Action<int>? ProcessExited;
@@ -1506,6 +1710,71 @@ public sealed class TerminalControlHeadlessInteractionTests
         public void Dispose()
         {
             IsRunning = false;
+        }
+    }
+
+    private sealed class RecordingPtyTransport : RecordingTransport, ITerminalPtyTransport
+    {
+        public IPty Pty { get; } = new StubPty();
+    }
+
+    private sealed class StubPty : IPty
+    {
+        public event Action<byte[], int>? DataReceived
+        {
+            add { }
+            remove { }
+        }
+
+        public event Action<int>? ProcessExited
+        {
+            add { }
+            remove { }
+        }
+
+        public bool IsRunning => true;
+        public int ChildPid => -1;
+
+        public void Start(
+            string? shell = null,
+            int columns = 80,
+            int rows = 24,
+            string? workingDirectory = null,
+            Dictionary<string, string>? environment = null,
+            IReadOnlyList<string>? arguments = null)
+        {
+            _ = shell;
+            _ = columns;
+            _ = rows;
+            _ = workingDirectory;
+            _ = environment;
+            _ = arguments;
+        }
+
+        public void Write(string text)
+        {
+            _ = text;
+        }
+
+        public void Write(byte[] data, int offset, int count)
+        {
+            _ = data;
+            _ = offset;
+            _ = count;
+        }
+
+        public void Resize(int columns, int rows)
+        {
+            _ = columns;
+            _ = rows;
+        }
+
+        public void Stop()
+        {
+        }
+
+        public void Dispose()
+        {
         }
     }
 
