@@ -25,6 +25,7 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource, ITerminalFocusEventModeSource
 {
+    private const int MaxOscBufferBytes = 4096;
     private const int MaxDcsBufferBytes = 4096;
     private const int KittyKeyboardFlagMask = 0x1F;
     private const int KittyKeyboardMaxStackDepth = 32;
@@ -86,6 +87,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private char _intermediateChar;
     private readonly List<byte> _oscBuffer = [];
     private readonly List<byte> _dcsBuffer = [];
+    private bool _isDiscardingOscPayload;
     private bool _isDiscardingDcsPayload;
 
     // Saved cursor state (for DECSC/DECRC — ESC 7 / ESC 8)
@@ -258,6 +260,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         {
             var b = data[i];
 
+            if (TryHandleAnywhereCancelControl(b))
+            {
+                continue;
+            }
+
             switch (_state)
             {
                 case ParserState.Ground:
@@ -310,6 +317,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     {
         _state = ParserState.OscString;
         _oscBuffer.Clear();
+        _isDiscardingOscPayload = false;
     }
 
     private void EnterDcsState()
@@ -1029,7 +1037,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             return;
         }
 
-        _oscBuffer.Add(b);
+        if (TryAbortBrokenControlStringOnControl(b))
+        {
+            return;
+        }
+
+        AppendOscByteOrDiscard(b);
     }
 
     private void ProcessOscEscape(byte b)
@@ -1041,8 +1054,13 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             return;
         }
 
+        if (TryAbortBrokenControlStringOnControl(b))
+        {
+            return;
+        }
+
         // False alarm: preserve ESC as payload and continue OSC parsing.
-        _oscBuffer.Add(0x1B);
+        AppendOscByteOrDiscard(0x1B);
 
         if (b == 0x1B)
         {
@@ -1064,12 +1082,19 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             return;
         }
 
-        _oscBuffer.Add(b);
+        AppendOscByteOrDiscard(b);
         _state = ParserState.OscString;
     }
 
     private void HandleOscString()
     {
+        if (_isDiscardingOscPayload)
+        {
+            _oscBuffer.Clear();
+            _isDiscardingOscPayload = false;
+            return;
+        }
+
         if (_oscBuffer.Count == 0)
         {
             return;
@@ -1250,6 +1275,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             return;
         }
 
+        if (TryAbortBrokenControlStringOnControl(b))
+        {
+            return;
+        }
+
         AppendDcsByteOrDiscard(b);
     }
 
@@ -1259,6 +1289,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         {
             HandleDcsString();
             _state = ParserState.Ground;
+            return;
+        }
+
+        if (TryAbortBrokenControlStringOnControl(b))
+        {
             return;
         }
 
@@ -1322,6 +1357,84 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         }
 
         _dcsBuffer.Add(b);
+    }
+
+    private void AppendOscByteOrDiscard(byte b)
+    {
+        if (_isDiscardingOscPayload)
+        {
+            return;
+        }
+
+        if (_oscBuffer.Count >= MaxOscBufferBytes)
+        {
+            _oscBuffer.Clear();
+            _isDiscardingOscPayload = true;
+            return;
+        }
+
+        _oscBuffer.Add(b);
+    }
+
+    private bool TryHandleAnywhereCancelControl(byte b)
+    {
+        if (b is not 0x18 and not 0x1A)
+        {
+            return false;
+        }
+
+        AbortActiveControlString();
+        return true;
+    }
+
+    private bool TryAbortBrokenControlStringOnControl(byte b)
+    {
+        if (_state is not ParserState.OscString and
+            not ParserState.OscEscape and
+            not ParserState.DcsString and
+            not ParserState.DcsEscape)
+        {
+            return false;
+        }
+
+        if (!IsBrokenStringTerminatorControl(b))
+        {
+            return false;
+        }
+
+        // Recover from malformed OSC/DCS strings in binary streams so shell
+        // prompt control bytes can return the parser to ground.
+        AbortActiveControlString();
+        ProcessGround(b);
+        return true;
+    }
+
+    private void AbortActiveControlString()
+    {
+        _params.Clear();
+        _currentParam = 0;
+        _hasParam = false;
+        _csiPrivateMarker = '\0';
+        _intermediateChar = '\0';
+        _utf8Codepoint = 0;
+        _utf8Remaining = 0;
+        _oscBuffer.Clear();
+        _dcsBuffer.Clear();
+        _isDiscardingOscPayload = false;
+        _isDiscardingDcsPayload = false;
+        _state = ParserState.Ground;
+    }
+
+    private static bool IsBrokenStringTerminatorControl(byte b)
+    {
+        return b is 0x08 or // BS
+            0x09 or // HT
+            0x0A or // LF
+            0x0B or // VT
+            0x0C or // FF
+            0x0D or // CR
+            0x0E or // SO
+            0x0F;   // SI
     }
 
     private void HandleDecRequestStatusString(string request)
@@ -2622,6 +2735,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _g1IsLineDrawing = false;
         _shiftOut = false;
         _lastGraphicCodepoint = 0;
+        _oscBuffer.Clear();
+        _isDiscardingOscPayload = false;
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
         _savedUnderlineStyle = TerminalUnderlineStyle.None;
@@ -2739,6 +2854,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _csiPrivateMarker = '\0';
         _intermediateChar = '\0';
         _oscBuffer.Clear();
+        _isDiscardingOscPayload = false;
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
         _scrollTop = 0;
