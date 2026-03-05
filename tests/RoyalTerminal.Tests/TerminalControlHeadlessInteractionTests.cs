@@ -13,6 +13,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
@@ -203,6 +204,77 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(
                 interruptLatency.Elapsed < TimeSpan.FromSeconds(3),
                 $"Expected managed PTY Ctrl+C interrupt to be prompt under flood. Latency={interruptLatency.Elapsed}.");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_ManagedPty_CtrlC_RecoversVisibleScreenAfterUnterminatedOscFlood()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        const string readyMarker = "__ROYALTERMINAL_OSC_READY__";
+        const string visibleRecoveryMarker = "__ROYALTERMINAL_OSC_VISIBLE_RECOVERY__";
+
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new()
+        {
+            Width = 960,
+            Height = 640,
+            Content = control,
+        };
+
+        object outputSync = new();
+        StringBuilder output = new();
+        control.DataReceived += (_, args) =>
+        {
+            lock (outputSync)
+            {
+                output.Append(Encoding.ASCII.GetString(args.Data.Span));
+                if (output.Length > 131072)
+                {
+                    output.Remove(0, output.Length - 65536);
+                }
+            }
+        };
+
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            control.StartPty(shell: "/bin/sh", workingDirectory: Environment.CurrentDirectory);
+
+            control.SendInput($"echo {readyMarker}\n");
+            bool readySeen = await WaitUntilAsync(
+                () => ContainsOutput(outputSync, output, readyMarker),
+                TimeSpan.FromSeconds(5));
+            Assert.True(readySeen, $"Did not observe PTY ready marker. Output: {SnapshotOutput(outputSync, output)}");
+
+            control.SendInput("printf '\\033]2;broken'; while :; do printf x; done\n");
+            bool oscFloodSeen = await WaitUntilAsync(
+                () => SnapshotOutput(outputSync, output).Length >= 4096,
+                TimeSpan.FromSeconds(5));
+            Assert.True(oscFloodSeen, $"Did not observe OSC flood output before interrupt. Output: {SnapshotOutput(outputSync, output)}");
+
+            control.SendInput(new byte[] { 0x03 });
+            control.SendInput($"printf '{visibleRecoveryMarker}\\n'\n");
+
+            bool visibleRecoverySeen = await WaitUntilAsync(
+                () => ContainsScreenText(control, visibleRecoveryMarker),
+                TimeSpan.FromSeconds(5));
+            Assert.True(
+                visibleRecoverySeen,
+                $"Did not observe visible post-interrupt marker on the managed VT screen. Output: {SnapshotOutput(outputSync, output)}");
         }
         finally
         {
@@ -1336,6 +1408,25 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
+    private static bool ContainsScreenText(TerminalControl control, string needle)
+    {
+        TerminalScreen? screen = control.Screen;
+        if (screen is null)
+        {
+            return false;
+        }
+
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            if (ReadVisibleAsciiRow(screen, row).Contains(needle, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool ContainsInputByte(object sync, List<byte[]> inputs, byte expectedByte)
     {
         lock (sync)
@@ -1368,6 +1459,19 @@ public sealed class TerminalControlHeadlessInteractionTests
                 " | ",
                 inputs.Select(static input => BitConverter.ToString(input)));
         }
+    }
+
+    private static string ReadVisibleAsciiRow(TerminalScreen screen, int row)
+    {
+        TerminalRow terminalRow = screen.GetViewportRow(row);
+        char[] chars = new char[terminalRow.Columns];
+        for (int col = 0; col < terminalRow.Columns; col++)
+        {
+            int codepoint = terminalRow[col].Codepoint;
+            chars[col] = codepoint <= 0 ? ' ' : codepoint <= 0x7F ? (char)codepoint : '?';
+        }
+
+        return new string(chars);
     }
 
     private static string? ResolveManagedPtyControlTestShell(bool requireJobControl)
