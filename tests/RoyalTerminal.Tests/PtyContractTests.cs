@@ -145,10 +145,12 @@ public class PtyContractTests
         }
 
         const string readyMarker = "__ROYALTERMINAL_UNIX_BUSY_READY__";
-        const string interruptedMarker = "__ROYALTERMINAL_UNIX_BUSY_INTERRUPTED__";
+        const string postInterruptMarker = "__ROYALTERMINAL_UNIX_BUSY_AFTER_CTRL_C__";
+        const string floodNeedle = "busy-output";
         using UnixPty pty = new();
         using ManualResetEventSlim sawReady = new(false);
-        using ManualResetEventSlim sawInterrupted = new(false);
+        using ManualResetEventSlim sawFlood = new(false);
+        using ManualResetEventSlim sawPostInterrupt = new(false);
         object sync = new();
         StringBuilder output = new();
 
@@ -169,9 +171,14 @@ public class PtyContractTests
                     sawReady.Set();
                 }
 
-                if (!sawInterrupted.IsSet && snapshot.Contains(interruptedMarker, StringComparison.Ordinal))
+                if (!sawFlood.IsSet && snapshot.Contains(floodNeedle, StringComparison.Ordinal))
                 {
-                    sawInterrupted.Set();
+                    sawFlood.Set();
+                }
+
+                if (!sawPostInterrupt.IsSet && snapshot.Contains(postInterruptMarker, StringComparison.Ordinal))
+                {
+                    sawPostInterrupt.Set();
                 }
             }
         };
@@ -183,16 +190,16 @@ public class PtyContractTests
             sawReady.Wait(TimeSpan.FromSeconds(5)),
             "Did not observe Unix PTY readiness marker before starting busy loop.");
 
-        // Trap SIGINT and then emit a marker so the test can assert interrupt delivery latency.
-        pty.Write($"trap 'echo {interruptedMarker}' INT\n");
-        pty.Write("while :; do printf 'busy-output-busy-output-busy-output-busy-output-busy-output\\n'; done\n");
-
-        Thread.Sleep(250);
+        pty.Write("while :; do printf 'busy-output\\n'; done\n");
+        Assert.True(
+            sawFlood.Wait(TimeSpan.FromSeconds(5)),
+            "Did not observe Unix PTY flood output before sending Ctrl+C.");
 
         Stopwatch interruptLatency = Stopwatch.StartNew();
         pty.Write(new byte[] { 0x03 }, 0, 1);
+        pty.Write($"echo {postInterruptMarker}\n");
 
-        bool interrupted = sawInterrupted.Wait(TimeSpan.FromSeconds(3));
+        bool interrupted = sawPostInterrupt.Wait(TimeSpan.FromSeconds(3));
         if (!interrupted)
         {
             string recentOutput;
@@ -201,7 +208,7 @@ public class PtyContractTests
                 recentOutput = output.ToString();
             }
 
-            Assert.Fail($"Did not observe interrupt marker within timeout. Recent output: {recentOutput}");
+            Assert.Fail($"Did not observe post-interrupt marker within timeout. Recent output: {recentOutput}");
         }
 
         Assert.True(
