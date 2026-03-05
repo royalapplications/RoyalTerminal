@@ -3,6 +3,7 @@
 // RoyalTerminal.Tests — Headless interaction tests for TerminalControl.
 
 using System.Text;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -93,7 +94,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             control.Focus();
             Dispatcher.UIThread.RunJobs();
 
-            transport.Inputs.Clear();
+            transport.ClearInputs();
 
             window.KeyPressQwerty(PhysicalKey.Enter, RawInputModifiers.None);
             bool enterSent = await WaitUntilAsync(
@@ -108,6 +109,105 @@ public sealed class TerminalControlHeadlessInteractionTests
                 () => transport.Inputs.Any(static input => input.Length == 1 && input[0] == (byte)'x'),
                 TimeSpan.FromSeconds(2));
             Assert.True(textSent);
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_KeyboardInterrupt_UnderOutputFlood_SendsCtrlCImmediately()
+    {
+        await VerifyControlCharacterDispatchUnderOutputFloodAsync(
+            physicalKey: PhysicalKey.C,
+            expectedByte: 0x03,
+            controlCharacterLabel: "Ctrl+C");
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_KeyboardSuspend_UnderOutputFlood_SendsCtrlZImmediately()
+    {
+        await VerifyControlCharacterDispatchUnderOutputFloodAsync(
+            physicalKey: PhysicalKey.Z,
+            expectedByte: 0x1A,
+            controlCharacterLabel: "Ctrl+Z");
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_ManagedPty_CtrlC_InterruptsFloodedShellWithinLatencyBudget()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        const string readyMarker = "__ROYALTERMINAL_CTRL_READY__";
+        const string interruptedMarker = "__ROYALTERMINAL_CTRL_INTERRUPTED__";
+        const string floodNeedle = "Build step";
+
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new()
+        {
+            Width = 960,
+            Height = 640,
+            Content = control,
+        };
+
+        object outputSync = new();
+        StringBuilder output = new();
+        control.DataReceived += (_, args) =>
+        {
+            lock (outputSync)
+            {
+                output.Append(Encoding.UTF8.GetString(args.Data.Span));
+                if (output.Length > 131072)
+                {
+                    output.Remove(0, output.Length - 65536);
+                }
+            }
+        };
+
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            control.StartPty(shell: "/bin/sh", workingDirectory: Environment.CurrentDirectory);
+
+            control.SendInput($"echo {readyMarker}\n");
+            bool readySeen = await WaitUntilAsync(
+                () => ContainsOutput(outputSync, output, readyMarker),
+                TimeSpan.FromSeconds(5));
+            Assert.True(readySeen, $"Did not observe PTY ready marker. Output: {SnapshotOutput(outputSync, output)}");
+
+            control.SendInput($"trap 'echo {interruptedMarker}' INT\n");
+            control.SendInput(
+                "i=1; while [ $i -le 200000 ]; do " +
+                "printf '\\033[32mINFO\\033[0m Build step %d completed\\n' \"$i\"; " +
+                "printf '\\033[33mWARN\\033[0m Something suspicious\\n'; " +
+                "printf '\\033[31mERROR\\033[0m Something failed\\n'; " +
+                "i=$((i+1)); " +
+                "done\n");
+
+            bool floodSeen = await WaitUntilAsync(
+                () => ContainsOutput(outputSync, output, floodNeedle),
+                TimeSpan.FromSeconds(5));
+            Assert.True(floodSeen, $"Did not observe flood output before interrupt. Output: {SnapshotOutput(outputSync, output)}");
+
+            Stopwatch interruptLatency = Stopwatch.StartNew();
+            control.SendInput(new byte[] { 0x03 });
+
+            bool interrupted = await WaitUntilAsync(
+                () => ContainsOutput(outputSync, output, interruptedMarker),
+                TimeSpan.FromSeconds(5));
+            Assert.True(interrupted, $"Did not observe interrupt marker. Output: {SnapshotOutput(outputSync, output)}");
+            Assert.True(
+                interruptLatency.Elapsed < TimeSpan.FromSeconds(2),
+                $"Expected managed PTY Ctrl+C interrupt to be prompt under flood. Latency={interruptLatency.Elapsed}.");
         }
         finally
         {
@@ -920,6 +1020,102 @@ public sealed class TerminalControlHeadlessInteractionTests
         return predicate();
     }
 
+    private static async Task VerifyControlCharacterDispatchUnderOutputFloodAsync(
+        PhysicalKey physicalKey,
+        byte expectedByte,
+        string controlCharacterLabel)
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            transport.ClearInputs();
+
+            byte[] floodChunk = Encoding.UTF8.GetBytes(
+                "\u001b[32mINFO\u001b[0m Build step completed\n" +
+                "\u001b[33mWARN\u001b[0m Something suspicious\n" +
+                "\u001b[31mERROR\u001b[0m Something failed\n");
+
+            Task floodProducer = Task.Run(() =>
+            {
+                for (int i = 0; i < 20_000; i++)
+                {
+                    transport.RaiseData(floodChunk);
+                }
+            });
+
+            try
+            {
+                Stopwatch keyDispatchLatency = Stopwatch.StartNew();
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    KeyEventArgs keyDown = new()
+                    {
+                        RoutedEvent = InputElement.KeyDownEvent,
+                        Source = control,
+                        Key = MapPhysicalKey(physicalKey),
+                        KeyModifiers = KeyModifiers.Control,
+                    };
+                    control.RaiseEvent(keyDown);
+                }, DispatcherPriority.Input);
+                keyDispatchLatency.Stop();
+                bool immediateMatch = transport.HasInput(input => input.Length == 1 && input[0] == expectedByte);
+
+                Assert.True(
+                    immediateMatch,
+                    $"Expected {controlCharacterLabel} ({expectedByte}) to be sent synchronously while output flood is active. keyDispatch={keyDispatchLatency.Elapsed}.");
+            }
+            finally
+            {
+                _ = await Task.WhenAny(floodProducer, Task.Delay(TimeSpan.FromSeconds(2)));
+            }
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    private static Key MapPhysicalKey(PhysicalKey physicalKey)
+    {
+        return physicalKey switch
+        {
+            PhysicalKey.C => Key.C,
+            PhysicalKey.Z => Key.Z,
+            _ => throw new ArgumentOutOfRangeException(nameof(physicalKey), physicalKey, "Only C and Z are supported in flood interrupt tests."),
+        };
+    }
+
+    private static bool ContainsOutput(object sync, StringBuilder output, string needle)
+    {
+        lock (sync)
+        {
+            return output.ToString().Contains(needle, StringComparison.Ordinal);
+        }
+    }
+
+    private static string SnapshotOutput(object sync, StringBuilder output)
+    {
+        lock (sync)
+        {
+            return output.ToString();
+        }
+    }
+
     private static async Task StabilizeWindowAsync(Window window, TerminalControl control)
     {
         Assert.True(window.IsVisible);
@@ -1176,6 +1372,7 @@ public sealed class TerminalControlHeadlessInteractionTests
     {
         public event Action<byte[], int>? DataReceived;
         public event Action<int>? ProcessExited;
+        private readonly object _inputSync = new();
 
         public bool IsRunning { get; private set; }
         public List<byte[]> Inputs { get; } = [];
@@ -1191,8 +1388,32 @@ public sealed class TerminalControlHeadlessInteractionTests
 
         public void SendInput(ReadOnlySpan<byte> utf8)
         {
-            Inputs.Add(utf8.ToArray());
+            lock (_inputSync)
+            {
+                Inputs.Add(utf8.ToArray());
+            }
             _ = DataReceived;
+        }
+
+        public void RaiseData(byte[] data)
+        {
+            DataReceived?.Invoke(data, data.Length);
+        }
+
+        public void ClearInputs()
+        {
+            lock (_inputSync)
+            {
+                Inputs.Clear();
+            }
+        }
+
+        public bool HasInput(Func<byte[], bool> predicate)
+        {
+            lock (_inputSync)
+            {
+                return Inputs.Any(predicate);
+            }
         }
 
         public void Resize(TerminalSessionDimensions dimensions)
