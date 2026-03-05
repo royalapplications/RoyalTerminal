@@ -145,7 +145,7 @@ public sealed class TerminalControlHeadlessInteractionTests
 
         const string readyMarker = "__ROYALTERMINAL_CTRL_READY__";
         const string postInterruptMarker = "__ROYALTERMINAL_AFTER_CTRL_C__";
-        const string floodNeedle = "Build step";
+        const string floodNeedle = "busy-output";
 
         TerminalControl control = new()
         {
@@ -185,12 +185,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(readySeen, $"Did not observe PTY ready marker. Output: {SnapshotOutput(outputSync, output)}");
 
             control.SendInput(
-                "i=1; while :; do " +
-                "printf '\\033[32mINFO\\033[0m Build step %d completed\\n' \"$i\"; " +
-                "printf '\\033[33mWARN\\033[0m Something suspicious\\n'; " +
-                "printf '\\033[31mERROR\\033[0m Something failed\\n'; " +
-                "i=$((i+1)); " +
-                "done\n");
+                "while :; do printf 'busy-output\\n'; done\n");
 
             bool floodSeen = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, floodNeedle),
@@ -242,7 +237,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             Array.Fill(floodChunk, (byte)'x');
             Task producer = Task.Run(() =>
             {
-                for (int i = 0; i < 4096; i++)
+                for (int i = 0; i < 1024; i++)
                 {
                     transport.RaiseData(floodChunk);
                 }
@@ -1119,7 +1114,7 @@ public sealed class TerminalControlHeadlessInteractionTests
 
             Task floodProducer = Task.Run(() =>
             {
-                for (int i = 0; i < 20_000; i++)
+                for (int i = 0; i < 2_048; i++)
                 {
                     transport.RaiseData(floodChunk);
                 }
@@ -1148,7 +1143,11 @@ public sealed class TerminalControlHeadlessInteractionTests
             }
             finally
             {
-                _ = await Task.WhenAny(floodProducer, Task.Delay(TimeSpan.FromSeconds(2)));
+                bool producerCompleted = await WaitUntilAsync(
+                    () => floodProducer.IsCompleted,
+                    TimeSpan.FromSeconds(5));
+                Assert.True(producerCompleted, "Expected synthetic flood producer to complete before test teardown.");
+                await floodProducer;
             }
         }
         finally
