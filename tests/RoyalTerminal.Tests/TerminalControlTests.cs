@@ -811,8 +811,10 @@ public class TerminalControlTests
         TerminalSessionDimensions lastResize = processor.ResizeNotifications[^1];
         Assert.Equal(columnsBefore, lastResize.Columns);
         Assert.Equal(rowsBefore, lastResize.Rows);
-        Assert.Equal(Math.Max(1, (int)Math.Round(pixelOnlySize.Width)), lastResize.WidthPixels);
-        Assert.Equal(Math.Max(1, (int)Math.Round(pixelOnlySize.Height)), lastResize.HeightPixels);
+        int expectedWidthPixels = Math.Max(1, (int)Math.Round(control.Bounds.Width));
+        int expectedHeightPixels = Math.Max(1, (int)Math.Round(control.Bounds.Height));
+        Assert.Equal(expectedWidthPixels, lastResize.WidthPixels);
+        Assert.Equal(expectedHeightPixels, lastResize.HeightPixels);
     }
 
     [AvaloniaFact]
