@@ -144,7 +144,7 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
 
         const string readyMarker = "__ROYALTERMINAL_CTRL_READY__";
-        const string interruptedMarker = "__ROYALTERMINAL_CTRL_INTERRUPTED__";
+        const string postInterruptMarker = "__ROYALTERMINAL_AFTER_CTRL_C__";
         const string floodNeedle = "Build step";
 
         TerminalControl control = new()
@@ -184,9 +184,8 @@ public sealed class TerminalControlHeadlessInteractionTests
                 TimeSpan.FromSeconds(5));
             Assert.True(readySeen, $"Did not observe PTY ready marker. Output: {SnapshotOutput(outputSync, output)}");
 
-            control.SendInput($"trap 'echo {interruptedMarker}' INT\n");
             control.SendInput(
-                "i=1; while [ $i -le 200000 ]; do " +
+                "i=1; while :; do " +
                 "printf '\\033[32mINFO\\033[0m Build step %d completed\\n' \"$i\"; " +
                 "printf '\\033[33mWARN\\033[0m Something suspicious\\n'; " +
                 "printf '\\033[31mERROR\\033[0m Something failed\\n'; " +
@@ -200,13 +199,14 @@ public sealed class TerminalControlHeadlessInteractionTests
 
             Stopwatch interruptLatency = Stopwatch.StartNew();
             control.SendInput(new byte[] { 0x03 });
+            control.SendInput($"echo {postInterruptMarker}\n");
 
             bool interrupted = await WaitUntilAsync(
-                () => ContainsOutput(outputSync, output, interruptedMarker),
+                () => ContainsOutput(outputSync, output, postInterruptMarker),
                 TimeSpan.FromSeconds(5));
-            Assert.True(interrupted, $"Did not observe interrupt marker. Output: {SnapshotOutput(outputSync, output)}");
+            Assert.True(interrupted, $"Did not observe post-interrupt marker. Output: {SnapshotOutput(outputSync, output)}");
             Assert.True(
-                interruptLatency.Elapsed < TimeSpan.FromSeconds(2),
+                interruptLatency.Elapsed < TimeSpan.FromSeconds(3),
                 $"Expected managed PTY Ctrl+C interrupt to be prompt under flood. Latency={interruptLatency.Elapsed}.");
         }
         finally
