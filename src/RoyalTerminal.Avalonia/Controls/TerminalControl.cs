@@ -3,6 +3,7 @@
 // RoyalTerminal.Avalonia - Main terminal control.
 
 using System.Buffers;
+using System.Diagnostics;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -44,7 +45,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const float RendererBackgroundOpacity = 0.82f;
     private const bool RendererBackgroundOpacityCells = true;
     private static readonly TimeSpan CursorBlinkInterval = TimeSpan.FromMilliseconds(530);
-    private const int MaxPendingOutputChunksPerDispatch = 64;
+    private const int MaxPendingOutputChunksPerDispatch = 8;
+    private const int MaxPendingOutputBytesPerDispatch = 128 * 1024;
+    private static readonly TimeSpan MaxPendingOutputDispatchDuration = TimeSpan.FromMilliseconds(3);
+    private const int MaxPendingOutputQueueBytes = 256 * 1024;
+    private const int ResumePendingOutputQueueBytes = MaxPendingOutputQueueBytes / 2;
 
     #region Styled Properties
 
@@ -232,6 +237,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private readonly TerminalMouseModeTracker _mouseModeTracker = new();
     private readonly object _pendingTransportOutputSync = new();
     private readonly Queue<byte[]> _pendingTransportOutput = new();
+    private int _pendingTransportOutputBytes;
     private bool _pendingTransportOutputDrainScheduled;
 
     /// <summary>
@@ -1144,17 +1150,26 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // Span input may come from transient memory, so copy to a managed payload for event consumers.
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data.ToArray()));
 
-        TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
-        UpdateRendererCursorForViewport();
+        FinalizeOutputBatchOnUiThread();
     }
 
-    private void WriteOutputOnUiThread(ReadOnlyMemory<byte> data)
+    private void WriteOutputOnUiThread(ReadOnlyMemory<byte> data, bool finalizeOutputBatch = true)
     {
         WriteOutputCore(data.Span);
 
         // Raise event without copying when input is already managed memory.
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data));
 
+        if (!finalizeOutputBatch)
+        {
+            return;
+        }
+
+        FinalizeOutputBatchOnUiThread();
+    }
+
+    private void FinalizeOutputBatchOnUiThread()
+    {
         TerminalScrollService.HandleOutput(_scrollData, _screen, AutoScroll, _presenter, RaiseScrollInvalidated);
         UpdateRendererCursorForViewport();
     }
@@ -1939,9 +1954,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         bool scheduleDrain = false;
+        bool canBlockForCapacity = !Dispatcher.UIThread.CheckAccess();
         lock (_pendingTransportOutputSync)
         {
+            while (canBlockForCapacity &&
+                   _pendingTransportOutputBytes >= MaxPendingOutputQueueBytes)
+            {
+                Monitor.Wait(_pendingTransportOutputSync);
+            }
+
             _pendingTransportOutput.Enqueue(copy);
+            _pendingTransportOutputBytes += copy.Length;
             if (!_pendingTransportOutputDrainScheduled)
             {
                 _pendingTransportOutputDrainScheduled = true;
@@ -1951,7 +1974,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (scheduleDrain)
         {
-            Dispatcher.UIThread.Post(DrainPendingTransportOutput);
+            Dispatcher.UIThread.Post(DrainPendingTransportOutput, DispatcherPriority.Background);
         }
     }
 
@@ -1976,7 +1999,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void DrainPendingTransportOutput(bool flushAll)
     {
-        int processed = 0;
+        int processedChunks = 0;
+        int processedBytes = 0;
+        bool scheduleContinuation = false;
+        Stopwatch? dispatchStopwatch = flushAll ? null : Stopwatch.StartNew();
+
         while (true)
         {
             byte[] nextChunk;
@@ -1985,21 +2012,58 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 if (_pendingTransportOutput.Count == 0)
                 {
                     _pendingTransportOutputDrainScheduled = false;
-                    return;
+                    Monitor.PulseAll(_pendingTransportOutputSync);
+                    break;
                 }
 
-                if (!flushAll && processed >= MaxPendingOutputChunksPerDispatch)
+                if (!flushAll &&
+                    processedChunks > 0 &&
+                    dispatchStopwatch is not null &&
+                    ShouldYieldPendingOutputDrain(
+                        processedChunks,
+                        processedBytes,
+                        dispatchStopwatch.Elapsed))
                 {
-                    Dispatcher.UIThread.Post(DrainPendingTransportOutput);
-                    return;
+                    scheduleContinuation = true;
+                    break;
                 }
 
                 nextChunk = _pendingTransportOutput.Dequeue();
+                _pendingTransportOutputBytes = Math.Max(0, _pendingTransportOutputBytes - nextChunk.Length);
+                if (_pendingTransportOutputBytes <= ResumePendingOutputQueueBytes)
+                {
+                    Monitor.PulseAll(_pendingTransportOutputSync);
+                }
             }
 
-            WriteOutputOnUiThread(nextChunk);
-            processed++;
+            WriteOutputOnUiThread(nextChunk, finalizeOutputBatch: false);
+            processedChunks++;
+            processedBytes += nextChunk.Length;
         }
+
+        if (processedChunks > 0)
+        {
+            FinalizeOutputBatchOnUiThread();
+        }
+
+        if (scheduleContinuation)
+        {
+            Dispatcher.UIThread.Post(DrainPendingTransportOutput, DispatcherPriority.Background);
+        }
+    }
+
+    private static bool ShouldYieldPendingOutputDrain(
+        int processedChunks,
+        int processedBytes,
+        TimeSpan elapsed)
+    {
+        if (processedChunks >= MaxPendingOutputChunksPerDispatch ||
+            processedBytes >= MaxPendingOutputBytesPerDispatch)
+        {
+            return true;
+        }
+
+        return elapsed >= MaxPendingOutputDispatchDuration;
     }
 
     private void ResetPendingTransportOutputQueue()
@@ -2007,7 +2071,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         lock (_pendingTransportOutputSync)
         {
             _pendingTransportOutput.Clear();
+            _pendingTransportOutputBytes = 0;
             _pendingTransportOutputDrainScheduled = false;
+            Monitor.PulseAll(_pendingTransportOutputSync);
         }
     }
 

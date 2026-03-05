@@ -8,11 +8,13 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Scrolling;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
@@ -356,6 +358,144 @@ public class TerminalControlTests
             }
 
             Assert.DoesNotContain("OLD-SESSION", allOutput, StringComparison.Ordinal);
+        }
+        finally
+        {
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_TransportOutputBurst_BatchesScrollPostProcessing()
+    {
+        FakeTransport transport = new();
+        CountingTerminalScrollService scrollService = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            scrollService);
+
+        int receivedCount = 0;
+        control.DataReceived += (_, _) => Interlocked.Increment(ref receivedCount);
+
+        const int chunkCount = 512;
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            await Task.Run(() =>
+            {
+                for (int i = 0; i < chunkCount; i++)
+                {
+                    transport.RaiseData(Encoding.UTF8.GetBytes($"chunk-{i}\n"));
+                }
+            });
+
+            bool drained = await WaitUntilAsync(
+                () => Volatile.Read(ref receivedCount) == chunkCount,
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(drained, $"Expected {chunkCount} chunks to drain from queued transport output.");
+            Assert.True(scrollService.HandleOutputCallCount > 0);
+            Assert.True(
+                scrollService.HandleOutputCallCount < chunkCount,
+                $"Expected batched post-processing. HandleOutputCallCount={scrollService.HandleOutputCallCount}, chunks={chunkCount}.");
+        }
+        finally
+        {
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_TransportOutputBurst_YieldsAcrossUiDispatches()
+    {
+        FakeTransport transport = new();
+        CountingTerminalScrollService scrollService = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            scrollService);
+
+        int receivedCount = 0;
+        control.DataReceived += (_, _) => Interlocked.Increment(ref receivedCount);
+
+        const int chunkCount = 64;
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            await Task.Run(() =>
+            {
+                for (int i = 0; i < chunkCount; i++)
+                {
+                    transport.RaiseData(Encoding.UTF8.GetBytes($"yield-{i}\n"));
+                }
+            });
+
+            bool drained = await WaitUntilAsync(
+                () => Volatile.Read(ref receivedCount) == chunkCount,
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(drained, $"Expected {chunkCount} chunks to drain from queued transport output.");
+            Assert.True(
+                scrollService.HandleOutputCallCount > 1,
+                $"Expected output draining to yield across multiple UI callbacks. HandleOutputCallCount={scrollService.HandleOutputCallCount}.");
+        }
+        finally
+        {
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_TransportOutputBurst_BackpressuresProducer_WhenUiThreadCannotDrain()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+
+        byte[] chunk = new byte[64 * 1024];
+        Array.Fill(chunk, (byte)'x');
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            int sentCount = 0;
+            Task producer = Task.Run(() =>
+            {
+                for (int i = 0; i < 64; i++)
+                {
+                    Interlocked.Increment(ref sentCount);
+                    transport.RaiseData(chunk);
+                }
+            });
+
+            Assert.True(
+                SpinWait.SpinUntil(() => Volatile.Read(ref sentCount) > 0, millisecondsTimeout: 1000),
+                "Expected producer to start sending transport chunks.");
+
+            // Simulate the UI thread being occupied so queued output cannot drain immediately.
+            Thread.Sleep(150);
+
+            Assert.False(
+                producer.IsCompleted,
+                "Expected producer to block when pending output reaches backpressure watermark.");
+            Assert.True(
+                Volatile.Read(ref sentCount) < 64,
+                "Expected producer to stall before sending the full burst while UI draining is blocked.");
+
+            bool completedAfterDrain = await WaitUntilAsync(
+                () => producer.IsCompleted,
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(completedAfterDrain, "Expected producer to complete once UI drain catches up.");
+            await producer;
         }
         finally
         {
@@ -1438,7 +1578,8 @@ public class TerminalControlTests
     private static TerminalControl CreateControlWithTransport(
         FakeTransport transport,
         IVtProcessorFactory vtProcessorFactory,
-        VtProcessorPreference preference)
+        VtProcessorPreference preference,
+        ITerminalScrollService? scrollService = null)
     {
         CompositeTerminalTransportFactory factory = new(
             new ITerminalTransportProvider[]
@@ -1450,7 +1591,7 @@ public class TerminalControlTests
             new TerminalSessionService(),
             new DefaultTerminalInputAdapter(),
             new DefaultTerminalSelectionService(),
-            new DefaultTerminalScrollService(),
+            scrollService ?? new DefaultTerminalScrollService(),
             vtProcessorFactory,
             new DefaultPtyFactory(),
             new NullSshCredentialProvider(),
@@ -1477,6 +1618,52 @@ public class TerminalControlTests
 
         Dispatcher.UIThread.RunJobs();
         return predicate();
+    }
+
+    private sealed class CountingTerminalScrollService : ITerminalScrollService
+    {
+        private readonly DefaultTerminalScrollService _inner = new();
+        private int _handleOutputCallCount;
+
+        public int HandleOutputCallCount => Volatile.Read(ref _handleOutputCallCount);
+
+        public void HandleOutput(
+            TerminalScrollData? scrollData,
+            TerminalScreen? screen,
+            bool autoScroll,
+            TerminalPresenter? presenter,
+            Action raiseScrollInvalidated)
+        {
+            Interlocked.Increment(ref _handleOutputCallCount);
+            _inner.HandleOutput(scrollData, screen, autoScroll, presenter, raiseScrollInvalidated);
+        }
+
+        public void ScrollByRows(
+            int rows,
+            TerminalScrollData? scrollData,
+            TerminalScreen? screen,
+            TerminalPresenter? presenter)
+        {
+            _inner.ScrollByRows(rows, scrollData, screen, presenter);
+        }
+
+        public void ScrollToBottom(
+            TerminalScrollData? scrollData,
+            TerminalScreen? screen,
+            TerminalPresenter? presenter)
+        {
+            _inner.ScrollToBottom(scrollData, screen, presenter);
+        }
+
+        public void HandlePointerWheel(
+            PointerWheelEventArgs e,
+            VirtualizedTerminalScrollViewer? scrollViewer,
+            ITerminalSessionService sessionService,
+            TerminalPresenter? presenter,
+            Action raiseScrollInvalidated)
+        {
+            _inner.HandlePointerWheel(e, scrollViewer, sessionService, presenter, raiseScrollInvalidated);
+        }
     }
 
     private static uint ColorToArgb(Color c) =>
