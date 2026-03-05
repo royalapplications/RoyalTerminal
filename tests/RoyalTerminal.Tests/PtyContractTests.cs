@@ -192,9 +192,18 @@ public class PtyContractTests
         Stopwatch interruptLatency = Stopwatch.StartNew();
         pty.Write(new byte[] { 0x03 }, 0, 1);
 
-        Assert.True(
-            sawInterrupted.Wait(TimeSpan.FromSeconds(3)),
-            $"Did not observe interrupt marker within timeout. Recent output: {output}");
+        bool interrupted = sawInterrupted.Wait(TimeSpan.FromSeconds(3));
+        if (!interrupted)
+        {
+            string recentOutput;
+            lock (sync)
+            {
+                recentOutput = output.ToString();
+            }
+
+            Assert.Fail($"Did not observe interrupt marker within timeout. Recent output: {recentOutput}");
+        }
+
         Assert.True(
             interruptLatency.Elapsed < TimeSpan.FromSeconds(2),
             $"Expected Ctrl+C to interrupt promptly, observed latency {interruptLatency.Elapsed}.");

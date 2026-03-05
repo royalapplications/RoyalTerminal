@@ -24,7 +24,7 @@ public sealed class UnixPty : IPty
     private int _masterFd = -1;
     private int _childPid = -1;
     private string? _slavePtyPath;
-    private bool _disposed;
+    private volatile bool _disposed;
     private Thread? _readThread;
 
     /// <summary>Raised when data is received from the PTY.</summary>
@@ -284,48 +284,55 @@ public sealed class UnixPty : IPty
     {
         var buffer = new byte[8192];
 
-        while (!_disposed)
+        try
         {
-            int bytesRead;
-            unsafe
+            while (!_disposed)
             {
-                fixed (byte* ptr = buffer)
+                int bytesRead;
+                unsafe
                 {
-                    bytesRead = (int)PosixRead(_masterFd, ptr, (nuint)buffer.Length);
-                }
-            }
-
-            if (_disposed)
-            {
-                break;
-            }
-
-            if (bytesRead < 0)
-            {
-                int error = Marshal.GetLastPInvokeError();
-                if (error == ErrnoInterrupted || error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
-                {
-                    Thread.Yield();
-                    continue;
+                    fixed (byte* ptr = buffer)
+                    {
+                        bytesRead = (int)PosixRead(_masterFd, ptr, (nuint)buffer.Length);
+                    }
                 }
 
-                break;
-            }
+                if (_disposed)
+                {
+                    break;
+                }
 
-            if (bytesRead == 0)
-            {
-                // EOF — child process likely exited or PTY was closed.
-                break;
-            }
+                if (bytesRead < 0)
+                {
+                    int error = Marshal.GetLastPInvokeError();
+                    if (error == ErrnoInterrupted || error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
+                    {
+                        Thread.Yield();
+                        continue;
+                    }
 
-            try
-            {
-                DataReceived?.Invoke(buffer, bytesRead);
+                    break;
+                }
+
+                if (bytesRead == 0)
+                {
+                    // EOF — child process likely exited or PTY was closed.
+                    break;
+                }
+
+                try
+                {
+                    DataReceived?.Invoke(buffer, bytesRead);
+                }
+                catch
+                {
+                    // Don't let subscriber exceptions kill the read loop
+                }
             }
-            catch
-            {
-                // Don't let subscriber exceptions kill the read loop
-            }
+        }
+        catch
+        {
+            // Reader thread must never crash the process on unexpected runtime/PInvoke errors.
         }
 
         if (_disposed) return;
