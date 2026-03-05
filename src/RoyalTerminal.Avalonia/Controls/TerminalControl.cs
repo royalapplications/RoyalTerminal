@@ -45,15 +45,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const float RendererBackgroundOpacity = 0.82f;
     private const bool RendererBackgroundOpacityCells = true;
     private static readonly TimeSpan CursorBlinkInterval = TimeSpan.FromMilliseconds(530);
+    // Managed VT parsing runs on the UI thread, so keep each drain slice and
+    // queued backlog small enough that keyboard input can preempt output floods.
     private const int MaxQueuedOutputChunkBytes = 1024;
     private const int MaxPendingOutputChunksPerDispatch = 4;
-    private const int MaxPendingOutputBytesPerDispatch = 64 * 1024;
+    private const int MaxPendingOutputBytesPerDispatch = 8 * 1024;
     private static readonly TimeSpan MaxPendingOutputDispatchDuration = TimeSpan.FromMilliseconds(2);
-    private const int MaxPendingOutputQueueBytes = 64 * 1024;
+    private const int MaxPendingOutputQueueBytes = 8 * 1024;
     private const int ResumePendingOutputQueueBytes = MaxPendingOutputQueueBytes / 2;
-    private const int MaxPendingOutputQueueChunks = 96;
+    private const int MaxPendingOutputQueueChunks = 16;
     private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
-    private static readonly DispatcherPriority PendingOutputDrainPriority = DispatcherPriority.ContextIdle;
+    private static readonly DispatcherPriority PendingOutputDrainPriority = DispatcherPriority.SystemIdle;
 
     #region Styled Properties
 
@@ -1945,12 +1947,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool ShouldSuppressVtProcessorResponseUnderOutputBacklog()
     {
-        if (TerminalSessionService.Endpoint is not null)
-        {
-            return false;
-        }
-
-        if (!TerminalSessionService.HasActiveTransport && !TerminalSessionService.HasPty)
+        if (TerminalSessionService.Pty is null)
         {
             return false;
         }

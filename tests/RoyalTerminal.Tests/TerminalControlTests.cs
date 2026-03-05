@@ -493,9 +493,9 @@ public class TerminalControlTests
 
             bool completedAfterDrain = await WaitUntilAsync(
                 () => producer.IsCompleted,
-                TimeSpan.FromSeconds(5));
+                TimeSpan.FromSeconds(10));
 
-            Assert.True(completedAfterDrain, "Expected producer to complete once UI drain catches up.");
+            Assert.True(completedAfterDrain, "Expected producer to complete once UI drain catches up under the tighter managed output backlog limits.");
             await producer;
         }
         finally
