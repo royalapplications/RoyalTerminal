@@ -405,7 +405,8 @@ public sealed class UnixPty : IPty
             {
                 byte* cursor = ptr + pending.Offset;
                 nuint remaining = (nuint)(pending.Buffer.Length - pending.Offset);
-                written = PosixWrite(fd, cursor, remaining);
+                nuint chunkLength = remaining > 4096 ? 4096 : remaining;
+                written = PosixWrite(fd, cursor, chunkLength);
             }
 
             if (written > 0)

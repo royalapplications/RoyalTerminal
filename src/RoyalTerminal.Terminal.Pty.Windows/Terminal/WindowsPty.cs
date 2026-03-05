@@ -26,9 +26,11 @@ public sealed class WindowsPty : IPty
     private FileStream? _inputStream;
     private Process? _process;
     private Thread? _readThread;
+    private Thread? _writeThread;
     private bool _disposed;
     private readonly CancellationTokenSource _cts = new();
-    private readonly object _writeSync = new();
+    private readonly object _pendingWritesSync = new();
+    private readonly Queue<PendingWrite> _pendingWrites = new();
 
     /// <summary>Raised when data is received from the PTY.</summary>
     public event Action<byte[], int>? DataReceived;
@@ -94,7 +96,16 @@ public sealed class WindowsPty : IPty
         // Launch the shell process attached to the ConPTY
         _process = LaunchProcess(shell, arguments, workingDirectory, environment);
 
-        // Start reading from the PTY output
+        // Start writing to the PTY input on a dedicated worker so caller
+        // threads never block on back-pressured stdin.
+        _writeThread = new Thread(WriteLoop)
+        {
+            IsBackground = true,
+            Name = "WindowsPty-Write",
+        };
+        _writeThread.Start();
+
+        // Start reading from the PTY output.
         _readThread = new Thread(ReadLoop)
         {
             IsBackground = true,
@@ -108,7 +119,7 @@ public sealed class WindowsPty : IPty
     /// </summary>
     public void Write(string text)
     {
-        if (_disposed || _pipeIn is null) return;
+        if (_disposed || _pipeIn is null || string.IsNullOrEmpty(text)) return;
         var bytes = Encoding.UTF8.GetBytes(text);
         Write(bytes, 0, bytes.Length);
     }
@@ -118,11 +129,18 @@ public sealed class WindowsPty : IPty
     /// </summary>
     public void Write(byte[] data, int offset, int count)
     {
-        if (_disposed || _inputStream is null) return;
-        lock (_writeSync)
+        if (_disposed || _inputStream is null || count <= 0) return;
+        byte[] copy = data.AsSpan(offset, count).ToArray();
+
+        lock (_pendingWritesSync)
         {
-            _inputStream.Write(data, offset, count);
-            _inputStream.Flush();
+            if (_disposed || _inputStream is null)
+            {
+                return;
+            }
+
+            _pendingWrites.Enqueue(new PendingWrite(copy));
+            Monitor.PulseAll(_pendingWritesSync);
         }
     }
 
@@ -139,11 +157,19 @@ public sealed class WindowsPty : IPty
     /// <summary>
     /// Stops the PTY and kills the child process.
     /// </summary>
-    public void Stop()
+    public void Stop() => Dispose();
+
+    public void Dispose()
     {
         if (_disposed) return;
+        _disposed = true;
 
         _cts.Cancel();
+        lock (_pendingWritesSync)
+        {
+            _pendingWrites.Clear();
+            Monitor.PulseAll(_pendingWritesSync);
+        }
 
         try { _process?.Kill(entireProcessTree: true); } catch { /* best effort */ }
 
@@ -162,36 +188,107 @@ public sealed class WindowsPty : IPty
             _ptyHandle = 0;
         }
 
+        _writeThread?.Join(TimeSpan.FromSeconds(2));
         _readThread?.Join(TimeSpan.FromSeconds(2));
+        _writeThread = null;
+        _readThread = null;
+
         _process?.Dispose();
         _process = null;
-    }
 
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        Stop();
         _cts.Dispose();
     }
 
     #region Private Implementation
+
+    private void WriteLoop()
+    {
+        try
+        {
+            while (true)
+            {
+                PendingWrite pending;
+                lock (_pendingWritesSync)
+                {
+                    while (!_disposed && _pendingWrites.Count == 0)
+                    {
+                        Monitor.Wait(_pendingWritesSync);
+                    }
+
+                    if (_disposed && _pendingWrites.Count == 0)
+                    {
+                        return;
+                    }
+
+                    pending = _pendingWrites.Dequeue();
+                }
+
+                WritePending(ref pending);
+            }
+        }
+        catch
+        {
+            // Writer thread must never crash the process on unexpected runtime/IO errors.
+        }
+    }
+
+    private void WritePending(ref PendingWrite pending)
+    {
+        while (!_disposed && pending.Offset < pending.Buffer.Length)
+        {
+            FileStream? stream = _inputStream;
+            if (stream is null)
+            {
+                return;
+            }
+
+            int remaining = pending.Buffer.Length - pending.Offset;
+            int chunkLength = Math.Min(remaining, 4096);
+
+            try
+            {
+                stream.Write(pending.Buffer, pending.Offset, chunkLength);
+                pending.Offset += chunkLength;
+            }
+            catch (IOException)
+            {
+                return;
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+        }
+    }
 
     private void ReadLoop()
     {
         var buffer = new byte[4096];
         try
         {
-            using var stream = new FileStream(_pipeOut!, FileAccess.Read, bufferSize: 0, isAsync: false);
-            while (!_cts.IsCancellationRequested)
+            SafeFileHandle? pipeOut = _pipeOut;
+            if (pipeOut is not null && !pipeOut.IsInvalid && !pipeOut.IsClosed)
             {
-                var bytesRead = stream.Read(buffer, 0, buffer.Length);
-                if (bytesRead <= 0) break;
-                DataReceived?.Invoke(buffer, bytesRead);
+                using var stream = new FileStream(pipeOut, FileAccess.Read, bufferSize: 0, isAsync: false);
+                while (!_cts.IsCancellationRequested)
+                {
+                    var bytesRead = stream.Read(buffer, 0, buffer.Length);
+                    if (bytesRead <= 0) break;
+
+                    try
+                    {
+                        DataReceived?.Invoke(buffer, bytesRead);
+                    }
+                    catch
+                    {
+                        // Don't let subscriber exceptions kill the read loop.
+                    }
+                }
             }
         }
         catch (IOException) { /* pipe closed */ }
         catch (ObjectDisposedException) { /* handle disposed */ }
+        catch (ArgumentException) { /* invalid handle */ }
 
         // Report process exit
         try
@@ -201,6 +298,18 @@ public sealed class WindowsPty : IPty
             ProcessExited?.Invoke(exitCode);
         }
         catch { ProcessExited?.Invoke(-1); }
+    }
+
+    private struct PendingWrite
+    {
+        public PendingWrite(byte[] buffer)
+        {
+            Buffer = buffer;
+            Offset = 0;
+        }
+
+        public byte[] Buffer;
+        public int Offset;
     }
 
     private static string DetectShell()
