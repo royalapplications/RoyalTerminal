@@ -528,6 +528,39 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_OscOversizePayload_IsDiscarded_AndParserRecovers()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        string? title = null;
+        processor.TitleCallback = value => title = value;
+
+        string largePayload = "2;" + new string('A', 5000);
+        processor.Process(System.Text.Encoding.ASCII.GetBytes($"\x1b]{largePayload}\x1b\\"));
+
+        Assert.Null(title);
+
+        processor.Process("\x1b]2;recovered\x1b\\"u8);
+
+        Assert.Equal("recovered", title);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_UnterminatedOsc_AbortsOnPromptControlBytes_AndRendersFollowingPrompt()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        string? title = null;
+        processor.TitleCallback = value => title = value;
+
+        processor.Process("\x1b]2;broken-title"u8);
+        processor.Process("\r\n$ ready\r\n"u8);
+
+        Assert.Null(title);
+        Assert.Contains("$ ready", ReadAsciiPrefix(screen, 1, 16));
+    }
+
+    [Fact]
     public void TerminalScreen_ApplyTheme_RemapsExistingDefaultAndIndexedColors()
     {
         var screen = new TerminalScreen(80, 24, 0);
@@ -726,6 +759,21 @@ public class TerminalQueryTests
         processor.Process("\x1bP$qr\x1b\\"u8);
         Assert.NotNull(response);
         Assert.Equal("\x1bP1$r1;24r\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_UnterminatedDcs_AbortsOnPromptControlBytes_AndRendersFollowingPrompt()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1bP$qbroken-request"u8);
+        processor.Process("\r\n$ ready\r\n"u8);
+
+        Assert.Null(response);
+        Assert.Contains("$ ready", ReadAsciiPrefix(screen, 1, 16));
     }
 
     [Fact]
