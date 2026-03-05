@@ -137,6 +137,103 @@ public class PtyContractTests
     }
 
     [Fact]
+    public void UnixPty_CtrlC_InterruptsBusyLoop_WithinLatencyBudget()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        const string readyMarker = "__ROYALTERMINAL_UNIX_BUSY_READY__";
+        const string interruptedMarker = "__ROYALTERMINAL_UNIX_BUSY_INTERRUPTED__";
+        using UnixPty pty = new();
+        using ManualResetEventSlim sawReady = new(false);
+        using ManualResetEventSlim sawInterrupted = new(false);
+        object sync = new();
+        StringBuilder output = new();
+
+        pty.DataReceived += (data, length) =>
+        {
+            string text = Encoding.UTF8.GetString(data, 0, length);
+            lock (sync)
+            {
+                output.Append(text);
+                if (output.Length > 16384)
+                {
+                    output.Remove(0, output.Length - 8192);
+                }
+
+                string snapshot = output.ToString();
+                if (!sawReady.IsSet && snapshot.Contains(readyMarker, StringComparison.Ordinal))
+                {
+                    sawReady.Set();
+                }
+
+                if (!sawInterrupted.IsSet && snapshot.Contains(interruptedMarker, StringComparison.Ordinal))
+                {
+                    sawInterrupted.Set();
+                }
+            }
+        };
+
+        pty.Start(shell: "/bin/sh", columns: 80, rows: 24, workingDirectory: Environment.CurrentDirectory);
+
+        pty.Write($"echo {readyMarker}\n");
+        Assert.True(
+            sawReady.Wait(TimeSpan.FromSeconds(5)),
+            "Did not observe Unix PTY readiness marker before starting busy loop.");
+
+        // Trap SIGINT and then emit a marker so the test can assert interrupt delivery latency.
+        pty.Write($"trap 'echo {interruptedMarker}' INT\n");
+        pty.Write("while :; do printf 'busy-output-busy-output-busy-output-busy-output-busy-output\\n'; done\n");
+
+        Thread.Sleep(250);
+
+        Stopwatch interruptLatency = Stopwatch.StartNew();
+        pty.Write(new byte[] { 0x03 }, 0, 1);
+
+        Assert.True(
+            sawInterrupted.Wait(TimeSpan.FromSeconds(3)),
+            $"Did not observe interrupt marker within timeout. Recent output: {output}");
+        Assert.True(
+            interruptLatency.Elapsed < TimeSpan.FromSeconds(2),
+            $"Expected Ctrl+C to interrupt promptly, observed latency {interruptLatency.Elapsed}.");
+
+        pty.Write("exit\n");
+        pty.Stop();
+    }
+
+    [Fact]
+    public void UnixPty_Stop_DuringContinuousOutput_DoesNotThrow()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        using UnixPty pty = new();
+        using ManualResetEventSlim sawOutput = new(false);
+
+        pty.DataReceived += (_, length) =>
+        {
+            if (length > 0)
+            {
+                sawOutput.Set();
+            }
+        };
+
+        pty.Start(shell: "/bin/sh", columns: 80, rows: 24, workingDirectory: Environment.CurrentDirectory);
+        pty.Write("while :; do printf 'x'; done\n");
+
+        Assert.True(sawOutput.Wait(TimeSpan.FromSeconds(3)), "Expected to observe continuous PTY output.");
+
+        pty.Stop();
+
+        // Give the reader thread a short window to finish after stop.
+        Thread.Sleep(200);
+    }
+
+    [Fact]
     public void WindowsPty_StartWriteReadExit_Contract()
     {
         if (!OperatingSystem.IsWindows())

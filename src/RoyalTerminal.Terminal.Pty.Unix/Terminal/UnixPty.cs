@@ -26,7 +26,6 @@ public sealed class UnixPty : IPty
     private string? _slavePtyPath;
     private bool _disposed;
     private Thread? _readThread;
-    private readonly CancellationTokenSource _cts = new();
 
     /// <summary>Raised when data is received from the PTY.</summary>
     public event Action<byte[], int>? DataReceived;
@@ -179,7 +178,33 @@ public sealed class UnixPty : IPty
         {
             fixed (byte* ptr = data)
             {
-                PosixWrite(_masterFd, ptr, (nuint)data.Length);
+                nuint remaining = (nuint)data.Length;
+                byte* cursor = ptr;
+                while (remaining > 0 && !_disposed && _masterFd >= 0)
+                {
+                    nint written = PosixWrite(_masterFd, cursor, remaining);
+                    if (written > 0)
+                    {
+                        cursor += written;
+                        remaining -= (nuint)written;
+                        continue;
+                    }
+
+                    if (written == 0)
+                    {
+                        Thread.Yield();
+                        continue;
+                    }
+
+                    int error = Marshal.GetLastPInvokeError();
+                    if (error == ErrnoInterrupted || error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
+                    {
+                        Thread.Yield();
+                        continue;
+                    }
+
+                    break;
+                }
             }
         }
     }
@@ -259,7 +284,7 @@ public sealed class UnixPty : IPty
     {
         var buffer = new byte[8192];
 
-        while (!_cts.Token.IsCancellationRequested && !_disposed)
+        while (!_disposed)
         {
             int bytesRead;
             unsafe
@@ -270,9 +295,26 @@ public sealed class UnixPty : IPty
                 }
             }
 
-            if (bytesRead <= 0 || _disposed)
+            if (_disposed)
             {
-                // EOF or error — child process likely exited or PTY was closed
+                break;
+            }
+
+            if (bytesRead < 0)
+            {
+                int error = Marshal.GetLastPInvokeError();
+                if (error == ErrnoInterrupted || error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
+                {
+                    Thread.Yield();
+                    continue;
+                }
+
+                break;
+            }
+
+            if (bytesRead == 0)
+            {
+                // EOF — child process likely exited or PTY was closed.
                 break;
             }
 
@@ -323,8 +365,6 @@ public sealed class UnixPty : IPty
         if (_disposed) return;
         _disposed = true;
 
-        _cts.Cancel();
-
         // Signal child to terminate first
         var pid = _childPid;
         if (pid > 0)
@@ -359,8 +399,6 @@ public sealed class UnixPty : IPty
             catch { }
             _childPid = -1;
         }
-
-        try { _cts.Dispose(); } catch { }
     }
 
     #region Helpers
@@ -512,6 +550,9 @@ public sealed class UnixPty : IPty
 
     private const int WNOHANG = 1;
     private const int SIGWINCH = 28;
+    private const int ErrnoInterrupted = 4;
+    private const int ErrnoWouldBlockLinux = 11;
+    private const int ErrnoWouldBlockBsd = 35;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WinSize
