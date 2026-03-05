@@ -9,6 +9,7 @@ using System.IO;
 using System.Reactive;
 using System.Reactive.Linq;
 using RoyalTerminal.Avalonia.Services;
+using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
@@ -39,6 +40,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private readonly ITerminalThemeCatalog _themeCatalog;
     private readonly IReadOnlyList<TerminalThemePreset> _themePresets;
     private readonly Dictionary<TerminalRenderMode, ModeThemeState> _modeThemes = [];
+    private TerminalSettingsPanelState? _settingsPanelState;
 
     private IReadOnlyList<ShellProfileOption> _shellProfiles =
     [
@@ -187,6 +189,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         LoadReplayInteraction = new Interaction<Unit, Unit>();
         SetReplayPlayingInteraction = new Interaction<bool, Unit>();
         StopReplayInteraction = new Interaction<Unit, Unit>();
+        PrepareSettingsPanelInteraction = new Interaction<Unit, Unit>();
 
         NewTabCommand = ReactiveCommand.CreateFromObservable(() => CreateNewTabInteraction.Handle(Unit.Default));
         CloseCurrentTabCommand = ReactiveCommand.CreateFromObservable(() => CloseCurrentTabInteraction.Handle(Unit.Default));
@@ -211,6 +214,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         LoadReplayCommand = ReactiveCommand.CreateFromObservable(LoadReplay);
         ToggleReplayPlaybackCommand = ReactiveCommand.CreateFromObservable(ToggleReplayPlayback);
         StopReplayCommand = ReactiveCommand.CreateFromObservable(StopReplay);
+        PrepareSettingsPanelCommand = ReactiveCommand.CreateFromObservable(PrepareSettingsPanel);
         ClearEventLogCommand = ReactiveCommand.Create(ClearEventLog);
 
         UpdateThemePresetButtonText();
@@ -234,6 +238,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<Unit, Unit> LoadReplayInteraction { get; }
     public Interaction<bool, Unit> SetReplayPlayingInteraction { get; }
     public Interaction<Unit, Unit> StopReplayInteraction { get; }
+    public Interaction<Unit, Unit> PrepareSettingsPanelInteraction { get; }
 
     public ReactiveCommand<Unit, Unit> NewTabCommand { get; }
     public ReactiveCommand<Unit, Unit> CloseCurrentTabCommand { get; }
@@ -258,7 +263,10 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> LoadReplayCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleReplayPlaybackCommand { get; }
     public ReactiveCommand<Unit, Unit> StopReplayCommand { get; }
+    public ReactiveCommand<Unit, Unit> PrepareSettingsPanelCommand { get; }
     public ReactiveCommand<Unit, Unit> ClearEventLogCommand { get; }
+
+    public TerminalSettingsPanelState SettingsPanelState => _settingsPanelState ??= new TerminalSettingsPanelState();
 
     public double FontSize
     {
@@ -1129,6 +1137,11 @@ public sealed class MainWindowViewModel : ReactiveObject
         DimensionsText = $"{columns}x{rows}";
     }
 
+    public void SetFontSizeFromSettings(double fontSize)
+    {
+        FontSize = Math.Clamp(fontSize, 8, 72);
+    }
+
     public TerminalSessionLoggingSettings GetSessionLoggingSettings()
     {
         return new TerminalSessionLoggingSettings
@@ -1139,6 +1152,7 @@ public sealed class MainWindowViewModel : ReactiveObject
                 : SessionLogFilePath.Trim(),
             Format = SelectedSessionLogFormat,
             FlushFrequently = SessionLogFlushFrequently,
+            EventLogEnabled = EventLogEnabled,
         };
     }
 
@@ -1293,6 +1307,11 @@ public sealed class MainWindowViewModel : ReactiveObject
     private IObservable<Unit> StopReplay()
     {
         return StopReplayInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> PrepareSettingsPanel()
+    {
+        return PrepareSettingsPanelInteraction.Handle(Unit.Default);
     }
 
     private void ClearEventLog()

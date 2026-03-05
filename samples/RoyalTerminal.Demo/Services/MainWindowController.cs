@@ -26,6 +26,7 @@ using RoyalTerminal.Avalonia.Capture;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
+using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
@@ -66,8 +67,10 @@ internal sealed class MainWindowController
     private readonly Dictionary<TerminalControl, SessionLogWriter> _sessionLogWriters = [];
     private readonly ITerminalModeCapabilityResolver _modeCapabilityResolver;
     private readonly ITerminalModeResolver _modeResolver;
+    private readonly ITerminalSessionProfileStore _settingsProfileStore;
     private readonly bool _skipEmbeddedGhosttyInitialization;
     private bool _suppressReplayTimelineSeek;
+    private bool _settingsProfilesLoaded;
 
     private TerminalTab? _activeTab;
     private int _tabCounter;
@@ -92,7 +95,8 @@ internal sealed class MainWindowController
         MainWindowViewModel viewModel,
         ITerminalModeCapabilityResolver modeCapabilityResolver,
         ITerminalModeResolver modeResolver,
-        bool skipEmbeddedGhosttyInitialization)
+        bool skipEmbeddedGhosttyInitialization,
+        ITerminalSessionProfileStore? settingsProfileStore = null)
     {
         _window = window ?? throw new ArgumentNullException(nameof(window));
         _viewModel = viewModel;
@@ -100,6 +104,7 @@ internal sealed class MainWindowController
             ?? throw new ArgumentNullException(nameof(modeCapabilityResolver));
         _modeResolver = modeResolver ?? throw new ArgumentNullException(nameof(modeResolver));
         _skipEmbeddedGhosttyInitialization = skipEmbeddedGhosttyInitialization;
+        _settingsProfileStore = settingsProfileStore ?? TerminalSessionProfileStoreFactory.CreateDefault();
         _terminalHost = _window.FindControl<Grid>("TerminalHost")
             ?? throw new InvalidOperationException("TerminalHost was not found in MainWindow.");
         _tabStrip = _window.FindControl<StackPanel>("TabStrip")
@@ -252,6 +257,22 @@ internal sealed class MainWindowController
         {
             StopReplay();
             context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.PrepareSettingsPanelInteraction.RegisterHandler(async context =>
+        {
+            await PrepareSettingsPanelAsync();
+            context.SetOutput(Unit.Default);
+        }));
+
+        EventHandler applySettingsHandler = (_, _) => ApplySettingsPanelState();
+        EventHandler saveSettingsHandler = (_, _) => _ = SaveSettingsPanelStateAsync();
+        _viewModel.SettingsPanelState.ApplyRequested += applySettingsHandler;
+        _viewModel.SettingsPanelState.SaveRequested += saveSettingsHandler;
+        disposables.Add(Disposable.Create(() =>
+        {
+            _viewModel.SettingsPanelState.ApplyRequested -= applySettingsHandler;
+            _viewModel.SettingsPanelState.SaveRequested -= saveSettingsHandler;
         }));
 
         disposables.Add(_viewModel
@@ -2098,6 +2119,262 @@ internal sealed class MainWindowController
     }
 
     #endregion
+
+    private async Task PrepareSettingsPanelAsync()
+    {
+        TerminalSettingsPanelState state = _viewModel.SettingsPanelState;
+        bool alreadyLoaded = _settingsProfilesLoaded;
+        if (!_settingsProfilesLoaded)
+        {
+            TerminalSessionProfilesDocument document = await _settingsProfileStore.LoadAsync();
+            if (document.Profiles.Count == 0)
+            {
+                SyncSettingsStateFromViewModel(state);
+                document = state.BuildDocument();
+                state.MarkSaved("Initialized settings profiles from current runtime values.");
+            }
+
+            state.LoadDocument(document);
+            _settingsProfilesLoaded = true;
+        }
+
+        if (alreadyLoaded && !state.IsDirty)
+        {
+            SyncSettingsStateFromViewModel(state);
+        }
+    }
+
+    private void SyncSettingsStateFromViewModel(TerminalSettingsPanelState state)
+    {
+        state.UpdateFromRuntime(current =>
+        {
+            current.SessionName = _viewModel.SessionName;
+            current.SelectedTransportMode = ResolveSettingsTransportMode(
+                current,
+                _viewModel.SelectedTransportMode.Id);
+            current.WorkingDirectory = _viewModel.WorkingDirectory;
+            current.ShellPath = _viewModel.SelectedShellProfile?.CommandPath ?? string.Empty;
+            current.PipeCommandText = _viewModel.PipeCommandText;
+            current.PipeMergeStdErrIntoStdOut = _viewModel.PipeMergeStdErrIntoStdOut;
+
+            current.RawTcpHost = _viewModel.RawTcpHost;
+            current.RawTcpPort = _viewModel.RawTcpPort;
+            current.TelnetHost = _viewModel.TelnetHost;
+            current.TelnetPort = _viewModel.TelnetPort;
+            current.TelnetTerminalType = _viewModel.TelnetTerminalType;
+            current.TelnetInitialCommand = _viewModel.TelnetInitialCommand;
+
+            current.SerialPortName = _viewModel.SerialPortName;
+            current.SerialBaudRate = _viewModel.SerialBaudRate;
+            current.SerialDataBits = _viewModel.SerialDataBits;
+            current.SelectedSerialParity = _viewModel.SelectedSerialParity;
+            current.SelectedSerialStopBits = _viewModel.SelectedSerialStopBits;
+            current.SelectedSerialHandshake = _viewModel.SelectedSerialHandshake;
+            current.SerialNewLine = _viewModel.SerialNewLine;
+
+            current.SshHost = _viewModel.SshHost;
+            current.SshPort = _viewModel.SshPort;
+            current.SshUsername = _viewModel.SshUsername;
+            current.SelectedSshAuthMode = ResolveSettingsSshAuthMode(current, _viewModel.SelectedSshAuthMode.Id);
+            current.SshPassword = _viewModel.SshPassword;
+            current.SshPrivateKeyPath = _viewModel.SshPrivateKeyPath;
+            current.SshExpectedHostKeyFingerprintSha256 = _viewModel.SshExpectedHostKeyFingerprintSha256;
+            current.SshRequestPty = _viewModel.SshRequestPty;
+            current.SshTerminalType = _viewModel.SshTerminalType;
+            current.SshInitialCommand = _viewModel.SshInitialCommand;
+            current.SelectedSshProxyType = _viewModel.SelectedSshProxyType;
+            current.SshProxyHost = _viewModel.SshProxyHost;
+            current.SshProxyPort = _viewModel.SshProxyPort;
+            current.SshProxyUsername = _viewModel.SshProxyUsername;
+            current.SshProxyPassword = _viewModel.SshProxyPassword;
+            current.SshLocalPortForwardEnabled = _viewModel.SshLocalPortForwardEnabled;
+            current.SshLocalPortForwardBindAddress = _viewModel.SshLocalPortForwardBindAddress;
+            current.SshLocalPortForwardSourcePort = _viewModel.SshLocalPortForwardSourcePort;
+            current.SshLocalPortForwardDestinationHost = _viewModel.SshLocalPortForwardDestinationHost;
+            current.SshLocalPortForwardDestinationPort = _viewModel.SshLocalPortForwardDestinationPort;
+            current.SshX11Enabled = _viewModel.SshX11Enabled;
+            current.SshX11Display = _viewModel.SshX11Display;
+            current.SshKeepAliveIntervalSeconds = _viewModel.SshKeepAliveIntervalSeconds;
+            current.SshConnectTimeoutSeconds = _viewModel.SshConnectTimeoutSeconds;
+
+            current.CopyOnSelectEnabled = _viewModel.CopyOnSelectEnabled;
+            current.EnableBellNotifications = _viewModel.EnableBellNotifications;
+            current.BackspaceSendsControlH = _viewModel.BackspaceSendsControlH;
+            current.EnableTextShaping = _viewModel.EnableTextShaping;
+            current.EnableLigatures = _viewModel.EnableLigatures;
+            current.SelectedPasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
+
+            current.FontSize = _viewModel.FontSize;
+            current.FontFamilyName = MonoFont;
+            current.AutoScroll = true;
+            current.BackgroundOpacityEnabled = false;
+
+            current.SessionLoggingEnabled = _viewModel.SessionLoggingEnabled;
+            current.SessionLogFilePath = _viewModel.SessionLogFilePath;
+            current.SelectedSessionLogFormat = _viewModel.SelectedSessionLogFormat;
+            current.SessionLogFlushFrequently = _viewModel.SessionLogFlushFrequently;
+            current.EventLogEnabled = _viewModel.EventLogEnabled;
+        });
+    }
+
+    private static TerminalSettingsTransportModeOption ResolveSettingsTransportMode(
+        TerminalSettingsPanelState state,
+        string transportId)
+    {
+        for (int i = 0; i < state.TransportModes.Count; i++)
+        {
+            if (string.Equals(state.TransportModes[i].Id, transportId, StringComparison.Ordinal))
+            {
+                return state.TransportModes[i];
+            }
+        }
+
+        return state.TransportModes[0];
+    }
+
+    private static TerminalSettingsSshAuthModeOption ResolveSettingsSshAuthMode(
+        TerminalSettingsPanelState state,
+        string authModeId)
+    {
+        for (int i = 0; i < state.SshAuthModes.Count; i++)
+        {
+            if (string.Equals(state.SshAuthModes[i].Id, authModeId, StringComparison.Ordinal))
+            {
+                return state.SshAuthModes[i];
+            }
+        }
+
+        return state.SshAuthModes[0];
+    }
+
+    private void ApplySettingsPanelState()
+    {
+        TerminalSettingsPanelState state = _viewModel.SettingsPanelState;
+
+        _viewModel.SessionName = state.SessionName;
+        _viewModel.SelectedTransportMode = ResolveViewModelTransportMode(state.SelectedTransportMode?.Id);
+        _viewModel.WorkingDirectory = state.WorkingDirectory;
+        _viewModel.PipeCommandText = state.PipeCommandText;
+        _viewModel.PipeMergeStdErrIntoStdOut = state.PipeMergeStdErrIntoStdOut;
+
+        _viewModel.RawTcpHost = state.RawTcpHost;
+        _viewModel.RawTcpPort = state.RawTcpPort;
+        _viewModel.TelnetHost = state.TelnetHost;
+        _viewModel.TelnetPort = state.TelnetPort;
+        _viewModel.TelnetTerminalType = state.TelnetTerminalType;
+        _viewModel.TelnetInitialCommand = state.TelnetInitialCommand;
+
+        _viewModel.SerialPortName = state.SerialPortName;
+        _viewModel.SerialBaudRate = state.SerialBaudRate;
+        _viewModel.SerialDataBits = state.SerialDataBits;
+        _viewModel.SelectedSerialParity = state.SelectedSerialParity;
+        _viewModel.SelectedSerialStopBits = state.SelectedSerialStopBits;
+        _viewModel.SelectedSerialHandshake = state.SelectedSerialHandshake;
+        _viewModel.SerialNewLine = state.SerialNewLine;
+
+        _viewModel.SshHost = state.SshHost;
+        _viewModel.SshPort = state.SshPort;
+        _viewModel.SshUsername = state.SshUsername;
+        _viewModel.SelectedSshAuthMode = ResolveViewModelSshAuthMode(state.SelectedSshAuthMode?.Id);
+        _viewModel.SshPassword = state.SshPassword;
+        _viewModel.SshPrivateKeyPath = state.SshPrivateKeyPath;
+        _viewModel.SshExpectedHostKeyFingerprintSha256 = state.SshExpectedHostKeyFingerprintSha256;
+        _viewModel.SshRequestPty = state.SshRequestPty;
+        _viewModel.SshTerminalType = state.SshTerminalType;
+        _viewModel.SshInitialCommand = state.SshInitialCommand;
+        _viewModel.SelectedSshProxyType = state.SelectedSshProxyType;
+        _viewModel.SshProxyHost = state.SshProxyHost;
+        _viewModel.SshProxyPort = state.SshProxyPort;
+        _viewModel.SshProxyUsername = state.SshProxyUsername;
+        _viewModel.SshProxyPassword = state.SshProxyPassword;
+        _viewModel.SshLocalPortForwardEnabled = state.SshLocalPortForwardEnabled;
+        _viewModel.SshLocalPortForwardBindAddress = state.SshLocalPortForwardBindAddress;
+        _viewModel.SshLocalPortForwardSourcePort = state.SshLocalPortForwardSourcePort;
+        _viewModel.SshLocalPortForwardDestinationHost = state.SshLocalPortForwardDestinationHost;
+        _viewModel.SshLocalPortForwardDestinationPort = state.SshLocalPortForwardDestinationPort;
+        _viewModel.SshX11Enabled = state.SshX11Enabled;
+        _viewModel.SshX11Display = state.SshX11Display;
+        _viewModel.SshKeepAliveIntervalSeconds = state.SshKeepAliveIntervalSeconds;
+        _viewModel.SshConnectTimeoutSeconds = state.SshConnectTimeoutSeconds;
+
+        _viewModel.CopyOnSelectEnabled = state.CopyOnSelectEnabled;
+        _viewModel.EnableBellNotifications = state.EnableBellNotifications;
+        _viewModel.BackspaceSendsControlH = state.BackspaceSendsControlH;
+        _viewModel.EnableTextShaping = state.EnableTextShaping;
+        _viewModel.EnableLigatures = state.EnableLigatures;
+        _viewModel.SelectedPasteSafetyPolicy = state.SelectedPasteSafetyPolicy;
+
+        _viewModel.SessionLoggingEnabled = state.SessionLoggingEnabled;
+        _viewModel.SessionLogFilePath = state.SessionLogFilePath;
+        _viewModel.SelectedSessionLogFormat = state.SelectedSessionLogFormat;
+        _viewModel.SessionLogFlushFrequently = state.SessionLogFlushFrequently;
+        _viewModel.EventLogEnabled = state.EventLogEnabled;
+
+        double fontSize = Math.Clamp(state.FontSize, 8, 72);
+        _viewModel.SetFontSizeFromSettings(fontSize);
+        ApplyFontSize(fontSize);
+
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            if (_tabs[i].Control is TerminalControl standaloneControl)
+            {
+                standaloneControl.FontFamilyName = string.IsNullOrWhiteSpace(state.FontFamilyName)
+                    ? MonoFont
+                    : state.FontFamilyName;
+                standaloneControl.AutoScroll = state.AutoScroll;
+                standaloneControl.BackgroundOpacityEnabled = state.BackgroundOpacityEnabled;
+            }
+        }
+
+        ApplyTerminalBehaviorSettingsToAllStandaloneTabs();
+        state.SetStatus("Applied settings to demo runtime.");
+    }
+
+    private async Task SaveSettingsPanelStateAsync()
+    {
+        try
+        {
+            TerminalSessionProfilesDocument document = _viewModel.SettingsPanelState.BuildDocument();
+            await _settingsProfileStore.SaveAsync(document);
+
+            string storeLabel = _settingsProfileStore is JsonFileTerminalSessionProfileStore fileStore
+                ? fileStore.FilePath
+                : "configured profile store";
+            _viewModel.SettingsPanelState.MarkSaved($"Saved profile document to '{storeLabel}'.");
+            UpdateStatus("Saved settings profiles.");
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SettingsPanelState.SetStatus($"Save failed: {ex.Message}");
+            UpdateStatus($"Failed to save settings profiles: {ex.Message}");
+        }
+    }
+
+    private TransportModeOption ResolveViewModelTransportMode(string? transportId)
+    {
+        for (int i = 0; i < _viewModel.TransportModes.Count; i++)
+        {
+            if (string.Equals(_viewModel.TransportModes[i].Id, transportId, StringComparison.Ordinal))
+            {
+                return _viewModel.TransportModes[i];
+            }
+        }
+
+        return _viewModel.TransportModes[0];
+    }
+
+    private SshAuthModeOption ResolveViewModelSshAuthMode(string? authModeId)
+    {
+        for (int i = 0; i < _viewModel.SshAuthModes.Count; i++)
+        {
+            if (string.Equals(_viewModel.SshAuthModes[i].Id, authModeId, StringComparison.Ordinal))
+            {
+                return _viewModel.SshAuthModes[i];
+            }
+        }
+
+        return _viewModel.SshAuthModes[0];
+    }
 
     #region Status
 

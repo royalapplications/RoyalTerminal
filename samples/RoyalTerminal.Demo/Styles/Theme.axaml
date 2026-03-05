@@ -1,15 +1,15 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#1E1E1E" />
-    <SolidColorBrush x:Key="ToolbarBackgroundBrush" Color="#333333" />
-    <SolidColorBrush x:Key="ToolbarDividerBrush" Color="#555555" />
-    <SolidColorBrush x:Key="ToolbarForegroundBrush" Color="#CCCCCC" />
-    <SolidColorBrush x:Key="TabStripBackgroundBrush" Color="#252526" />
-    <SolidColorBrush x:Key="StatusBarBackgroundBrush" Color="#007ACC" />
-    <SolidColorBrush x:Key="StatusBarForegroundBrush" Color="#FFFFFF" />
+  <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#1E1E1E" />
+  <SolidColorBrush x:Key="ToolbarBackgroundBrush" Color="#333333" />
+  <SolidColorBrush x:Key="ToolbarDividerBrush" Color="#555555" />
+  <SolidColorBrush x:Key="ToolbarForegroundBrush" Color="#CCCCCC" />
+  <SolidColorBrush x:Key="TabStripBackgroundBrush" Color="#252526" />
+  <SolidColorBrush x:Key="StatusBarBackgroundBrush" Color="#007ACC" />
+  <SolidColorBrush x:Key="StatusBarForegroundBrush" Color="#FFFFFF" />
 
-    <SolidColorBrush x:Key="TabHeaderBackgroundBrush" Color="#2D2D2D" />
-    <SolidColorBrush x:Key="TabHeaderForegroundBrush" Color="#969696" />
-    <SolidColorBrush x:Key="TabHeaderActiveBackgroundBrush" Color="#1E1E1E" />
-    <SolidColorBrush x:Key="TabHeaderActiveForegroundBrush" Color="#FFFFFF" />
+  <SolidColorBrush x:Key="TabHeaderBackgroundBrush" Color="#2D2D2D" />
+  <SolidColorBrush x:Key="TabHeaderForegroundBrush" Color="#969696" />
+  <SolidColorBrush x:Key="TabHeaderActiveBackgroundBrush" Color="#1E1E1E" />
+  <SolidColorBrush x:Key="TabHeaderActiveForegroundBrush" Color="#FFFFFF" />
 </ResourceDictionary>

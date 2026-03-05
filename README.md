@@ -66,7 +66,7 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 - **Grapheme-aware cell model** in managed VT and native VT/surface readback paths.
 - **Terminal session service split** (`Terminal.Services.Contracts` and `Terminal.Services`).
 - **Sample applications**:
-  - Avalonia demo (`samples/RoyalTerminal.Demo`) with structured settings categories (`Session`/`Connection`/`Terminal`/`Appearance`/`SSH`/`Logging`), transport forms (`PTY`/`Pipe`/`Raw TCP`/`Telnet`/`Serial`/`SSH`), session/event logging, and terminal behavior toggles (copy-on-select, bell notifications, backspace mode, paste safety, text shaping/ligatures)
+  - Avalonia demo (`samples/RoyalTerminal.Demo`) with structured settings categories (`Session`/`Connection`/`Terminal`/`Appearance`/`SSH`/`Logging`), transport forms (`PTY`/`Pipe`/`Raw TCP`/`Telnet`/`Serial`/`SSH`), a tabbed Settings flyout with profile CRUD (`new`/`duplicate`/`delete`/`set default`) and explicit apply/save, session/event logging, and terminal behavior toggles (copy-on-select, bell notifications, backspace mode, paste safety, text shaping/ligatures)
   - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`)
   - VT/PTy control catalog CLI (`samples/RoyalTerminal.ControlCatalog`) with managed/Ghostty VT probes, ncurses/TUI parity scenarios, and rich visual rendering galleries
 
@@ -112,6 +112,7 @@ The demo toolbar includes:
 - `Start Capture` / `Stop Capture`
 - `Save Capture` (writes capture session to file)
 - `Load Replay` (opens a capture file in a replay tab)
+- `Settings` (opens tabbed session/profile editor with explicit `Apply` and `Save`)
 
 When replay is active, the replay timeline bar is shown with play/pause, stop, slider seek, elapsed/total display, and source label.
 

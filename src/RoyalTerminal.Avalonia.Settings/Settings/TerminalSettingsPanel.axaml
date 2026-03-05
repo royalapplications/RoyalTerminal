@@ -1,0 +1,453 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:settings="using:RoyalTerminal.Avalonia.Settings">
+  <Styles.Resources>
+    <ResourceDictionary>
+      <ControlTheme x:Key="{x:Type settings:TerminalSettingsPanel}" TargetType="settings:TerminalSettingsPanel">
+        <Setter Property="Template">
+          <ControlTemplate TargetType="settings:TerminalSettingsPanel">
+            <Border Padding="12"
+                    DataContext="{Binding DataContext, RelativeSource={RelativeSource TemplatedParent}}"
+                    x:DataType="settings:TerminalSettingsPanelState">
+              <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Top" Spacing="10">
+                  <Grid ColumnDefinitions="Auto,*"
+                        RowDefinitions="Auto,Auto,Auto"
+                        ColumnSpacing="10"
+                        RowSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,4,0,0" Text="Profile" />
+                    <ComboBox Grid.Row="0"
+                              Grid.Column="1"
+                              ItemsSource="{Binding Profiles}"
+                              SelectedItem="{Binding SelectedProfile}">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="settings:TerminalSettingsProfileItem">
+                          <TextBlock Text="{Binding DisplayName}" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <WrapPanel Grid.Row="1"
+                               Grid.ColumnSpan="2"
+                               Orientation="Horizontal">
+                      <Button Content="New" Margin="0,0,6,0"
+                              Command="{Binding NewProfileCommand}" />
+                      <Button Content="Duplicate" Margin="0,0,6,0"
+                              Command="{Binding DuplicateProfileCommand}" />
+                      <Button Content="Delete" Margin="0,0,6,0"
+                              Command="{Binding DeleteProfileCommand}" />
+                      <Button Content="Set Default" Command="{Binding SetDefaultProfileCommand}" />
+                    </WrapPanel>
+                    <WrapPanel Grid.Row="2"
+                               Grid.ColumnSpan="2"
+                               Orientation="Horizontal">
+                      <TextBlock Margin="0,4,8,0"
+                                 Text="{Binding DefaultProfileId, StringFormat='Default: {0}'}" />
+                      <TextBlock Margin="0,4,0,0"
+                                 Text="{Binding IsDirty, StringFormat='Unsaved: {0}'}" />
+                    </WrapPanel>
+                  </Grid>
+                </StackPanel>
+
+                <Border DockPanel.Dock="Bottom" Margin="0,10,0,0" Padding="0,8,0,0">
+                  <DockPanel>
+                    <TextBlock Margin="0,4,8,0" Text="{Binding LastOperationStatus}" />
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                      <Button Content="Apply" Command="{Binding ApplyCommand}" />
+                      <Button Content="Save" Command="{Binding SaveCommand}" />
+                    </StackPanel>
+                  </DockPanel>
+                </Border>
+
+                <TabControl TabStripPlacement="Left" Margin="0,4,0,0">
+                  <TabItem Header="Session">
+                    <ScrollViewer>
+                      <settings:TerminalSettingsSessionPanel DataContext="{Binding Session}" />
+                    </ScrollViewer>
+                  </TabItem>
+
+                  <TabItem Header="Connection">
+                    <ScrollViewer>
+                      <settings:TerminalSettingsConnectionPanel
+                        DataContext="{Binding Connection}" />
+                    </ScrollViewer>
+                  </TabItem>
+
+                  <TabItem Header="Terminal">
+                    <ScrollViewer>
+                      <settings:TerminalSettingsTerminalPanel
+                        DataContext="{Binding TerminalBehavior}" />
+                    </ScrollViewer>
+                  </TabItem>
+
+                  <TabItem Header="Appearance">
+                    <ScrollViewer>
+                      <settings:TerminalSettingsAppearancePanel
+                        DataContext="{Binding Appearance}" />
+                    </ScrollViewer>
+                  </TabItem>
+
+                  <TabItem Header="SSH">
+                    <ScrollViewer>
+                      <settings:TerminalSettingsSshPanel DataContext="{Binding Ssh}" />
+                    </ScrollViewer>
+                  </TabItem>
+
+                  <TabItem Header="Logging">
+                    <ScrollViewer>
+                      <settings:TerminalSettingsLoggingPanel DataContext="{Binding Logging}" />
+                    </ScrollViewer>
+                  </TabItem>
+                </TabControl>
+              </DockPanel>
+            </Border>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+
+      <ControlTheme x:Key="{x:Type settings:TerminalSettingsSessionPanel}"
+                    TargetType="settings:TerminalSettingsSessionPanel">
+        <Setter Property="Template">
+          <ControlTemplate TargetType="settings:TerminalSettingsSessionPanel">
+            <StackPanel
+              DataContext="{Binding DataContext, RelativeSource={RelativeSource TemplatedParent}}"
+              x:DataType="settings:TerminalSettingsSessionState"
+              Spacing="12"
+              Margin="0,10,0,0">
+              <StackPanel Spacing="4">
+                <TextBlock Text="Session Name" Margin="0,4,6,0" />
+                <TextBox Text="{Binding SessionName}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Text="Transport" Margin="0,4,6,0" />
+                <ComboBox
+                  ItemsSource="{Binding TransportModes}"
+                  SelectedItem="{Binding SelectedTransportMode}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="settings:TerminalSettingsTransportModeOption">
+                      <TextBlock Text="{Binding DisplayName}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+              </StackPanel>
+            </StackPanel>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+
+      <ControlTheme x:Key="{x:Type settings:TerminalSettingsConnectionPanel}"
+                    TargetType="settings:TerminalSettingsConnectionPanel">
+        <Setter Property="Template">
+          <ControlTemplate TargetType="settings:TerminalSettingsConnectionPanel">
+            <StackPanel
+              DataContext="{Binding DataContext, RelativeSource={RelativeSource TemplatedParent}}"
+              x:DataType="settings:TerminalSettingsConnectionState"
+              Spacing="12"
+              Margin="0,10,0,0">
+              <TextBlock Text="PTY / Pipe" FontWeight="Bold" />
+              <StackPanel Spacing="4">
+                <TextBlock Text="Working Dir" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding WorkingDirectory}" />
+                <TextBlock Text="Shell Path" Margin="0,4,6,0" />
+                <TextBox Text="{Binding ShellPath}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Text="Pipe Cmd" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding PipeCommandText}" />
+                <CheckBox Content="Merge stderr"
+                          Margin="0,2,0,0"
+                          IsChecked="{Binding PipeMergeStdErrIntoStdOut}" />
+              </StackPanel>
+
+              <TextBlock Text="Raw TCP" FontWeight="Bold" />
+              <StackPanel Spacing="4">
+                <TextBlock Text="Host" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding RawTcpHost}" />
+                <TextBlock Text="Port" Margin="0,4,6,0" />
+                <TextBox Text="{Binding RawTcpPort}" />
+              </StackPanel>
+
+              <TextBlock Text="Telnet" FontWeight="Bold" />
+              <StackPanel Spacing="4">
+                <TextBlock Text="Host" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding TelnetHost}" />
+                <TextBlock Text="Port" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding TelnetPort}" />
+                <TextBlock Text="Terminal" Margin="0,4,6,0" />
+                <TextBox Text="{Binding TelnetTerminalType}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Text="Initial Cmd" Margin="0,4,6,0" />
+                <TextBox Text="{Binding TelnetInitialCommand}" />
+              </StackPanel>
+
+              <TextBlock Text="Serial" FontWeight="Bold" />
+              <StackPanel Spacing="4">
+                <TextBlock Text="Port" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SerialPortName}" />
+                <TextBlock Text="Baud" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SerialBaudRate}" />
+                <TextBlock Text="Data Bits" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SerialDataBits}" />
+                <TextBlock Text="NewLine" Margin="0,4,6,0" />
+                <TextBox Text="{Binding SerialNewLine}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Text="Parity" Margin="0,4,6,0" />
+                <ComboBox
+                  Margin="0,0,8,0"
+                  ItemsSource="{Binding SerialParityOptions}"
+                  SelectedItem="{Binding SelectedSerialParity}" />
+                <TextBlock Text="Stop Bits" Margin="0,4,6,0" />
+                <ComboBox
+                  Margin="0,0,8,0"
+                  ItemsSource="{Binding SerialStopBitsOptions}"
+                  SelectedItem="{Binding SelectedSerialStopBits}" />
+                <TextBlock Text="Handshake" Margin="0,4,6,0" />
+                <ComboBox
+                  ItemsSource="{Binding SerialHandshakeOptions}"
+                  SelectedItem="{Binding SelectedSerialHandshake}" />
+              </StackPanel>
+
+              <TextBlock Text="SSH Endpoint" FontWeight="Bold" />
+              <StackPanel Spacing="4">
+                <TextBlock Text="Host" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SshHost}" />
+                <TextBlock Text="Port" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SshPort}" />
+                <TextBlock Text="User" Margin="0,4,6,0" />
+                <TextBox Text="{Binding SshUsername}" />
+              </StackPanel>
+            </StackPanel>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+
+      <ControlTheme x:Key="{x:Type settings:TerminalSettingsTerminalPanel}"
+                    TargetType="settings:TerminalSettingsTerminalPanel">
+        <Setter Property="Template">
+          <ControlTemplate TargetType="settings:TerminalSettingsTerminalPanel">
+            <StackPanel
+              DataContext="{Binding DataContext, RelativeSource={RelativeSource TemplatedParent}}"
+              x:DataType="settings:TerminalSettingsTerminalBehaviorState"
+              Spacing="12"
+              Margin="0,10,0,0">
+              <StackPanel Spacing="4">
+                <CheckBox Content="Copy on Select"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding CopyOnSelectEnabled}" />
+                <CheckBox Content="Bell Notifications"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding EnableBellNotifications}" />
+                <CheckBox Content="Backspace sends Ctrl-H"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding BackspaceSendsControlH}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <CheckBox Content="Enable Text Shaping"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding EnableTextShaping}" />
+                <CheckBox Content="Enable Ligatures"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding EnableLigatures}" />
+                <TextBlock Text="Paste Safety" Margin="0,4,6,0" />
+                <ComboBox
+                  ItemsSource="{Binding PasteSafetyPolicies}"
+                  SelectedItem="{Binding SelectedPasteSafetyPolicy}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <CheckBox Content="SSH Request PTY"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding SshRequestPty}" />
+                <TextBlock Text="SSH Terminal" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SshTerminalType}" />
+                <TextBlock Text="SSH Initial Cmd" Margin="0,4,6,0" />
+                <TextBox Text="{Binding SshInitialCommand}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Text="Telnet Terminal" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding TelnetTerminalType}" />
+                <TextBlock Text="Telnet Initial Cmd" Margin="0,4,6,0" />
+                <TextBox Text="{Binding TelnetInitialCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+
+      <ControlTheme x:Key="{x:Type settings:TerminalSettingsAppearancePanel}"
+                    TargetType="settings:TerminalSettingsAppearancePanel">
+        <Setter Property="Template">
+          <ControlTemplate TargetType="settings:TerminalSettingsAppearancePanel">
+            <StackPanel
+              DataContext="{Binding DataContext, RelativeSource={RelativeSource TemplatedParent}}"
+              x:DataType="settings:TerminalSettingsAppearanceState"
+              Spacing="12"
+              Margin="0,10,0,0">
+              <StackPanel Spacing="4">
+                <TextBlock Text="Font Family" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding FontFamilyName}" />
+                <TextBlock Text="Font Size" Margin="0,4,6,0" />
+                <NumericUpDown
+                  Minimum="8"
+                  Maximum="72"
+                  Increment="1"
+                  Value="{Binding FontSize}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <CheckBox Content="Auto Scroll"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding AutoScroll}" />
+                <CheckBox Content="Background Opacity"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding BackgroundOpacityEnabled}" />
+              </StackPanel>
+            </StackPanel>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+
+      <ControlTheme x:Key="{x:Type settings:TerminalSettingsSshPanel}"
+                    TargetType="settings:TerminalSettingsSshPanel">
+        <Setter Property="Template">
+          <ControlTemplate TargetType="settings:TerminalSettingsSshPanel">
+            <StackPanel
+              DataContext="{Binding DataContext, RelativeSource={RelativeSource TemplatedParent}}"
+              x:DataType="settings:TerminalSettingsSshState"
+              Spacing="12"
+              Margin="0,10,0,0">
+              <StackPanel Spacing="4">
+                <TextBlock Text="Auth" Margin="0,4,6,0" />
+                <ComboBox
+                  Margin="0,0,8,0"
+                  ItemsSource="{Binding SshAuthModes}"
+                  SelectedItem="{Binding SelectedSshAuthMode}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="settings:TerminalSettingsSshAuthModeOption">
+                      <TextBlock Text="{Binding DisplayName}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Text="Password" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" PasswordChar="*" Text="{Binding SshPassword}" />
+                <TextBlock Text="Private Key(s)" Margin="0,4,6,0" />
+                <TextBox Text="{Binding SshPrivateKeyPath}" />
+              </StackPanel>
+
+              <StackPanel Spacing="4">
+                <TextBlock Text="Host Key SHA256" Margin="0,4,6,0" />
+                <TextBox Text="{Binding SshExpectedHostKeyFingerprintSha256}" />
+              </StackPanel>
+
+              <TextBlock Text="Proxy" FontWeight="Bold" />
+              <StackPanel Spacing="4">
+                <TextBlock Text="Type" Margin="0,4,6,0" />
+                <ComboBox
+                  Margin="0,0,8,0"
+                  ItemsSource="{Binding SshProxyTypes}"
+                  SelectedItem="{Binding SelectedSshProxyType}" />
+                <TextBlock Text="Host" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SshProxyHost}" />
+                <TextBlock Text="Port" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SshProxyPort}" />
+                <TextBlock Text="User" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SshProxyUsername}" />
+                <TextBlock Text="Password" Margin="0,4,6,0" />
+                <TextBox PasswordChar="*" Text="{Binding SshProxyPassword}" />
+              </StackPanel>
+
+              <TextBlock Text="Local Port Forward" FontWeight="Bold" />
+              <StackPanel Spacing="4">
+                <CheckBox Content="Enabled"
+                          Margin="0,2,8,0"
+                          IsChecked="{Binding SshLocalPortForwardEnabled}" />
+                <TextBlock Text="Bind" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SshLocalPortForwardBindAddress}" />
+                <TextBlock Text="Source" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SshLocalPortForwardSourcePort}" />
+                <TextBlock Text="Dest Host" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SshLocalPortForwardDestinationHost}" />
+                <TextBlock Text="Dest Port" Margin="0,4,6,0" />
+                <TextBox Text="{Binding SshLocalPortForwardDestinationPort}" />
+              </StackPanel>
+
+              <TextBlock Text="X11 / Policy" FontWeight="Bold" />
+              <StackPanel Spacing="4">
+                <CheckBox Content="Enable X11"
+                          Margin="0,2,8,0"
+                          IsChecked="{Binding SshX11Enabled}" />
+                <TextBlock Text="Display" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SshX11Display}" />
+                <TextBlock Text="KeepAlive (s)" Margin="0,4,6,0" />
+                <TextBox Margin="0,0,8,0" Text="{Binding SshKeepAliveIntervalSeconds}" />
+                <TextBlock Text="Connect Timeout (s)" Margin="0,4,6,0" />
+                <TextBox Text="{Binding SshConnectTimeoutSeconds}" />
+              </StackPanel>
+            </StackPanel>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+
+      <ControlTheme x:Key="{x:Type settings:TerminalSettingsLoggingPanel}"
+                    TargetType="settings:TerminalSettingsLoggingPanel">
+        <Setter Property="Template">
+          <ControlTemplate TargetType="settings:TerminalSettingsLoggingPanel">
+            <StackPanel
+              DataContext="{Binding DataContext, RelativeSource={RelativeSource TemplatedParent}}"
+              x:DataType="settings:TerminalSettingsLoggingState"
+              Spacing="12"
+              Margin="0,10,0,0">
+              <StackPanel Spacing="4">
+                <CheckBox Content="Enable Session Log"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding SessionLoggingEnabled}" />
+                <TextBlock Text="Format" Margin="0,4,6,0" />
+                <ComboBox
+                  Margin="0,0,8,0"
+                  ItemsSource="{Binding SessionLogFormats}"
+                  SelectedItem="{Binding SelectedSessionLogFormat}" />
+                <CheckBox Content="Flush Frequently"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding SessionLogFlushFrequently}" />
+                <CheckBox Content="Enable Event Log"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding EventLogEnabled}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Text="Session Log File" Margin="0,4,6,0" />
+                <TextBox Text="{Binding SessionLogFilePath}" />
+              </StackPanel>
+            </StackPanel>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+    </ResourceDictionary>
+  </Styles.Resources>
+
+  <Style Selector="settings|TerminalSettingsPanel">
+    <Setter Property="Theme" Value="{StaticResource {x:Type settings:TerminalSettingsPanel}}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsSessionPanel">
+    <Setter Property="Theme" Value="{StaticResource {x:Type settings:TerminalSettingsSessionPanel}}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsConnectionPanel">
+    <Setter Property="Theme" Value="{StaticResource {x:Type settings:TerminalSettingsConnectionPanel}}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsTerminalPanel">
+    <Setter Property="Theme" Value="{StaticResource {x:Type settings:TerminalSettingsTerminalPanel}}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsAppearancePanel">
+    <Setter Property="Theme" Value="{StaticResource {x:Type settings:TerminalSettingsAppearancePanel}}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsSshPanel">
+    <Setter Property="Theme" Value="{StaticResource {x:Type settings:TerminalSettingsSshPanel}}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsLoggingPanel">
+    <Setter Property="Theme" Value="{StaticResource {x:Type settings:TerminalSettingsLoggingPanel}}" />
+  </Style>
+</Styles>
