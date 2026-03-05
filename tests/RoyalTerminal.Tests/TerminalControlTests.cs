@@ -4,6 +4,7 @@
 
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -500,6 +501,64 @@ public class TerminalControlTests
         finally
         {
             control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_StopPty_UnblocksProducer_WhenBackpressureWaitIsActive()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+
+        byte[] chunk = new byte[64 * 1024];
+        Array.Fill(chunk, (byte)'x');
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            int sentCount = 0;
+            Task producer = Task.Run(() =>
+            {
+                for (int i = 0; i < 64; i++)
+                {
+                    Interlocked.Increment(ref sentCount);
+                    transport.RaiseData(chunk);
+                }
+            });
+
+            Assert.True(
+                SpinWait.SpinUntil(() => Volatile.Read(ref sentCount) > 0, millisecondsTimeout: 1000),
+                "Expected producer to start sending transport chunks.");
+
+            Thread.Sleep(150);
+            Assert.False(
+                producer.IsCompleted,
+                "Expected producer to be backpressured before StopPty.");
+
+            Stopwatch stopLatency = Stopwatch.StartNew();
+            control.StopPty();
+            stopLatency.Stop();
+
+            bool producerUnblocked = await Task.WhenAny(producer, Task.Delay(TimeSpan.FromSeconds(2))) == producer;
+            Assert.True(producerUnblocked, "Expected StopPty to unblock any producer waiting in output backpressure.");
+            Assert.True(
+                stopLatency.Elapsed < TimeSpan.FromSeconds(3),
+                $"Expected StopPty to complete promptly while producer is blocked. Elapsed={stopLatency.Elapsed}.");
+        }
+        finally
+        {
+            try
+            {
+                control.StopPty();
+            }
+            catch
+            {
+                // Best effort cleanup in tests.
+            }
         }
     }
 
