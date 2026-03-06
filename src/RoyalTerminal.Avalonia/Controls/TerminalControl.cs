@@ -60,6 +60,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const int MaxPendingOutputQueueChunks = 256;
     private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
     private static readonly DispatcherPriority PendingOutputDrainPriority = DispatcherPriority.SystemIdle;
+    private static readonly long PtyVtResponseSuppressionWindowTicks =
+        (long)(TimeSpan.FromSeconds(1).TotalSeconds * Stopwatch.Frequency);
 
     #region Styled Properties
 
@@ -253,6 +255,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _pendingTransportUiBatchBytes;
     private int _pendingTransportUiBatchChunks;
     private int _pendingOutputUiNotificationScheduled;
+    private long _suppressPtyVtResponsesUntilTimestamp;
     private bool _pendingTransportOutputDrainScheduled;
     private bool _pendingTransportUiDrainScheduled;
     private bool _acceptPendingTransportOutput = true;
@@ -1264,6 +1267,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void SendInput(ReadOnlySpan<byte> data)
     {
+        if (IsUrgentPtyControlInput(data))
+        {
+            ArmPtyVtResponseSuppressionWindow();
+        }
+
         TerminalSessionService.SendInput(data);
     }
 
@@ -1274,6 +1282,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+
+        if (IsUrgentPtyControlChord(e.Key, e.KeyModifiers))
+        {
+            ArmPtyVtResponseSuppressionWindow();
+        }
 
         if (TerminalShortcutDispatcher.TryHandleCommonShortcut(
                 e.Key,
@@ -1988,7 +2001,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // During sustained output floods (for example binary streams like /dev/urandom),
         // random bytes can accidentally form VT query sequences. Responding to every such
         // query can backpressure the PTY input path and delay user control bytes.
-        if (ShouldSuppressVtProcessorResponseUnderOutputBacklog())
+        if (ShouldSuppressVtProcessorResponse())
         {
             return;
         }
@@ -1996,11 +2009,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         TerminalSessionService.SendInput(data);
     }
 
-    private bool ShouldSuppressVtProcessorResponseUnderOutputBacklog()
+    private bool ShouldSuppressVtProcessorResponse()
     {
         if (TerminalSessionService.Pty is null)
         {
             return false;
+        }
+
+        if (IsPtyVtResponseSuppressionWindowActive())
+        {
+            return true;
         }
 
         lock (_pendingTransportOutputSync)
@@ -2008,6 +2026,43 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return GetPendingTransportBacklogBytesLocked() >= ResumePendingOutputQueueBytes ||
                    GetPendingTransportBacklogChunksLocked() >= ResumePendingOutputQueueChunks;
         }
+    }
+
+    private void ArmPtyVtResponseSuppressionWindow()
+    {
+        if (TerminalSessionService.Pty is null)
+        {
+            return;
+        }
+
+        long suppressUntil = Stopwatch.GetTimestamp() + PtyVtResponseSuppressionWindowTicks;
+        Interlocked.Exchange(ref _suppressPtyVtResponsesUntilTimestamp, suppressUntil);
+    }
+
+    private bool IsPtyVtResponseSuppressionWindowActive()
+    {
+        long suppressUntil = Volatile.Read(ref _suppressPtyVtResponsesUntilTimestamp);
+        return suppressUntil > 0 && Stopwatch.GetTimestamp() < suppressUntil;
+    }
+
+    private static bool IsUrgentPtyControlChord(Key key, KeyModifiers modifiers)
+    {
+        if (!modifiers.HasFlag(KeyModifiers.Control))
+        {
+            return false;
+        }
+
+        if (modifiers.HasFlag(KeyModifiers.Alt) || modifiers.HasFlag(KeyModifiers.Meta))
+        {
+            return false;
+        }
+
+        return key is Key.C or Key.Z or Key.OemBackslash;
+    }
+
+    private static bool IsUrgentPtyControlInput(ReadOnlySpan<byte> payload)
+    {
+        return payload.Length == 1 && payload[0] is 0x03 or 0x1A or 0x1C;
     }
 
     private void OnVtProcessorBell()
