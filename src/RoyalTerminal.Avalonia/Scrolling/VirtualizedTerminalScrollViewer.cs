@@ -136,7 +136,7 @@ public class VirtualizedTerminalScrollViewer : Control, ILogicalScrollable
         }
 
         _screen.ScrollOffset = nextOffset;
-        _screen.InvalidateAll();
+        _screen.InvalidateViewport();
     }
 
     private void InvalidateScrollInfo()

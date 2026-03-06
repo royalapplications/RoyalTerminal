@@ -159,7 +159,14 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
 
         renderer.SelectionStart = null;
         renderer.SelectionEnd = null;
-        screen?.InvalidateAll();
+        if (screen is not null)
+        {
+            lock (screen.SyncRoot)
+            {
+                screen.InvalidateViewport();
+            }
+        }
+
         presenter?.Invalidate();
     }
 
@@ -179,49 +186,52 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         }
 
         StringBuilder sb = new();
-        for (int row = startRow; row <= endRow; row++)
+        lock (screen.SyncRoot)
         {
-            if (row < 0 || row >= screen.ViewportRows)
+            for (int row = startRow; row <= endRow; row++)
             {
-                continue;
-            }
-
-            TerminalRow termRow = screen.GetViewportRow(row);
-            int colStart = row == startRow ? startCol : 0;
-            int colEnd = row == endRow ? endCol : screen.Columns - 1;
-            if (colEnd < 0 || colStart >= screen.Columns)
-            {
-                continue;
-            }
-
-            colStart = Math.Max(0, colStart);
-            colEnd = Math.Min(screen.Columns - 1, colEnd);
-
-            for (int col = colStart; col <= colEnd; col++)
-            {
-                ref TerminalCell cell = ref termRow[col];
-                if (cell.Width == 0)
+                if (row < 0 || row >= screen.ViewportRows)
                 {
                     continue;
                 }
 
-                if (!string.IsNullOrEmpty(cell.Grapheme))
+                TerminalRow termRow = screen.GetViewportRow(row);
+                int colStart = row == startRow ? startCol : 0;
+                int colEnd = row == endRow ? endCol : screen.Columns - 1;
+                if (colEnd < 0 || colStart >= screen.Columns)
                 {
-                    sb.Append(cell.Grapheme);
+                    continue;
                 }
-                else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
-                {
-                    sb.Append(char.ConvertFromUtf32(cell.Codepoint));
-                }
-                else
-                {
-                    sb.Append(' ');
-                }
-            }
 
-            if (row < endRow)
-            {
-                sb.AppendLine();
+                colStart = Math.Max(0, colStart);
+                colEnd = Math.Min(screen.Columns - 1, colEnd);
+
+                for (int col = colStart; col <= colEnd; col++)
+                {
+                    ref TerminalCell cell = ref termRow[col];
+                    if (cell.Width == 0)
+                    {
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(cell.Grapheme))
+                    {
+                        sb.Append(cell.Grapheme);
+                    }
+                    else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
+                    {
+                        sb.Append(char.ConvertFromUtf32(cell.Codepoint));
+                    }
+                    else
+                    {
+                        sb.Append(' ');
+                    }
+                }
+
+                if (row < endRow)
+                {
+                    sb.AppendLine();
+                }
             }
         }
 

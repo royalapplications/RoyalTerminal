@@ -474,8 +474,27 @@ public sealed class TerminalScreen
     /// </summary>
     public void InvalidateAll()
     {
-        foreach (var row in _rows)
-            row.IsDirty = true;
+        lock (SyncRoot)
+        {
+            for (var i = 0; i < _rows.Count; i++)
+                _rows[i].IsDirty = true;
+        }
+    }
+
+    /// <summary>
+    /// Marks only the currently visible viewport rows as dirty.
+    /// </summary>
+    public void InvalidateViewport()
+    {
+        lock (SyncRoot)
+        {
+            int viewportStart = Math.Max(0, TotalRows - ViewportRows - _viewportTop);
+            int viewportEnd = Math.Min(TotalRows, viewportStart + ViewportRows);
+            for (int rowIndex = viewportStart; rowIndex < viewportEnd; rowIndex++)
+            {
+                _rows[rowIndex].IsDirty = true;
+            }
+        }
     }
 
     /// <summary>
@@ -483,11 +502,15 @@ public sealed class TerminalScreen
     /// </summary>
     public bool HasDirtyRows()
     {
-        for (var i = 0; i < ViewportRows && i < TotalRows; i++)
+        lock (SyncRoot)
         {
-            if (GetViewportRow(i).IsDirty)
-                return true;
+            for (var i = 0; i < ViewportRows && i < TotalRows; i++)
+            {
+                if (GetViewportRow(i).IsDirty)
+                    return true;
+            }
         }
+
         return false;
     }
 }

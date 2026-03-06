@@ -51,9 +51,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const int MaxPendingOutputChunksPerDispatch = 4;
     private const int MaxPendingOutputBytesPerDispatch = 8 * 1024;
     private static readonly TimeSpan MaxPendingOutputDispatchDuration = TimeSpan.FromMilliseconds(2);
-    private const int MaxPendingOutputQueueBytes = 8 * 1024;
+    // Keep substantially more PTY output buffered than we render per UI slice.
+    // Native terminals keep draining the PTY aggressively under flood; blocking
+    // after only a few kilobytes can leave shell loops stuck in write syscalls
+    // and degrade Ctrl+C/Ctrl+Z responsiveness over repeated runs.
+    private const int MaxPendingOutputQueueBytes = 256 * 1024;
     private const int ResumePendingOutputQueueBytes = MaxPendingOutputQueueBytes / 2;
-    private const int MaxPendingOutputQueueChunks = 16;
+    private const int MaxPendingOutputQueueChunks = 256;
     private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
     private static readonly DispatcherPriority PendingOutputDrainPriority = DispatcherPriority.SystemIdle;
 
@@ -248,6 +252,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _pendingTransportOutputBytes;
     private int _pendingTransportUiBatchBytes;
     private int _pendingTransportUiBatchChunks;
+    private int _pendingOutputUiNotificationScheduled;
     private bool _pendingTransportOutputDrainScheduled;
     private bool _pendingTransportUiDrainScheduled;
     private bool _acceptPendingTransportOutput = true;
@@ -768,7 +773,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
         }
 
-        _screen?.InvalidateAll();
+        InvalidateScreen();
         _presenter?.Invalidate(fullRedraw: true);
     }
 
@@ -1207,9 +1212,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 raiseScrollInvalidated: static () => { });
             UpdateRendererCursorForViewportLocked();
         }
-
-        _presenter?.Invalidate();
-        RaiseScrollInvalidated();
     }
 
     private bool ProcessOutputCore(ReadOnlySpan<byte> data)
@@ -1428,7 +1430,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             var row = (int)(point.Y / _renderer.CellHeight);
             _renderer.SelectionStart = (col, row);
             _renderer.SelectionEnd = (col, row);
-            _screen?.InvalidateAll();
+            InvalidateScreen();
             _presenter?.Invalidate();
         }
 
@@ -1468,7 +1470,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             var col = (int)(point.X / _renderer.CellWidth);
             var row = (int)(point.Y / _renderer.CellHeight);
             _renderer.SelectionEnd = (col, row);
-            _screen?.InvalidateAll();
+            InvalidateScreen();
             _presenter?.Invalidate();
         }
     }
@@ -1659,7 +1661,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         _renderer.SelectionStart = (0, 0);
         _renderer.SelectionEnd = (_screen.Columns - 1, _screen.ViewportRows - 1);
-        _screen.InvalidateAll();
+        InvalidateScreen();
         _presenter?.Invalidate();
     }
 
@@ -1788,7 +1790,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void InvalidateTerminal()
     {
-        _screen?.InvalidateAll();
+        InvalidateScreen();
         _presenter?.Invalidate(fullRedraw: true);
     }
 
@@ -2371,6 +2373,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             Dispatcher.UIThread.Post(DrainPendingTransportOutputUiBatches, PendingOutputDrainPriority);
         }
+
+        if (processedChunks > 0)
+        {
+            ScheduleOutputUiNotifications();
+        }
     }
 
     private void WriteOutputBatchOnUiThread(List<byte[]> chunks, int totalBytes)
@@ -2422,6 +2429,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _pendingTransportUiDrainScheduled = false;
             Monitor.PulseAll(_pendingTransportOutputSync);
         }
+
+        Interlocked.Exchange(ref _pendingOutputUiNotificationScheduled, 0);
     }
 
     private void SetPendingTransportOutputAcceptance(bool acceptOutput)
@@ -2492,6 +2501,23 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         return GetPendingTransportBacklogBytesLocked() <= ResumePendingOutputQueueBytes &&
                GetPendingTransportBacklogChunksLocked() <= ResumePendingOutputQueueChunks;
+    }
+
+    private void ScheduleOutputUiNotifications()
+    {
+        if (Interlocked.CompareExchange(ref _pendingOutputUiNotificationScheduled, 1, 0) != 0)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(DispatchOutputUiNotifications, PendingOutputDrainPriority);
+    }
+
+    private void DispatchOutputUiNotifications()
+    {
+        Interlocked.Exchange(ref _pendingOutputUiNotificationScheduled, 0);
+        _presenter?.Invalidate();
+        RaiseScrollInvalidated();
     }
 
     private sealed class PendingTransportUiBatch
@@ -3390,7 +3416,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             if (_screen.ScrollOffset != nextScrollOffset)
             {
                 _screen.ScrollOffset = nextScrollOffset;
-                _screen.InvalidateAll();
+                _screen.InvalidateViewport();
                 changed = true;
             }
         }
@@ -3547,6 +3573,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private static uint ColorToArgb(Color c) =>
         ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
 
+    private void InvalidateScreen()
+    {
+        if (_screen is null)
+        {
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            _screen.InvalidateAll();
+        }
+    }
+
     private void SyncScreenScrollOffsetFromScrollData()
     {
         if (_scrollData is null || _screen is null)
@@ -3554,14 +3593,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        int nextOffset = _scrollData.ToScreenScrollOffsetRows(_screen.MaxScrollOffset);
-        if (_screen.ScrollOffset == nextOffset)
+        lock (_screen.SyncRoot)
         {
-            return;
-        }
+            int nextOffset = _scrollData.ToScreenScrollOffsetRows(_screen.MaxScrollOffset);
+            if (_screen.ScrollOffset == nextOffset)
+            {
+                return;
+            }
 
-        _screen.ScrollOffset = nextOffset;
-        _screen.InvalidateAll();
+            _screen.ScrollOffset = nextOffset;
+            _screen.InvalidateViewport();
+        }
     }
 
     private void SyncScrollDataFromScreenOffset()
@@ -3571,14 +3613,21 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        int screenMaxOffsetRows = _screen.MaxScrollOffset;
+        int screenMaxOffsetRows;
+        int scrollOffset;
+        lock (_screen.SyncRoot)
+        {
+            screenMaxOffsetRows = _screen.MaxScrollOffset;
+            scrollOffset = _screen.ScrollOffset;
+        }
+
         if (screenMaxOffsetRows <= 0 || _scrollData.MaxOffset <= 0)
         {
             _scrollData.Offset = _scrollData.MaxOffset;
             return;
         }
 
-        int topAnchoredRows = screenMaxOffsetRows - _screen.ScrollOffset;
+        int topAnchoredRows = screenMaxOffsetRows - scrollOffset;
         topAnchoredRows = Math.Clamp(topAnchoredRows, 0, screenMaxOffsetRows);
         double scaledOffset = (_scrollData.MaxOffset * topAnchoredRows) / screenMaxOffsetRows;
         _scrollData.Offset = scaledOffset;

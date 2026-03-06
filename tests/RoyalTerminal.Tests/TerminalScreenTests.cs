@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests — Terminal screen and cell model tests.
 
+using System.Collections.Concurrent;
 using RoyalTerminal.Avalonia.Rendering;
 using Xunit;
 
@@ -154,6 +155,77 @@ public class TerminalScreenTests
 
         screen.InvalidateAll();
         Assert.True(screen.HasDirtyRows());
+    }
+
+    [Fact]
+    public async Task TerminalScreen_InvalidateAll_DoesNotThrow_WhenRowsChangeUnderScreenLock()
+    {
+        TerminalScreen screen = new(80, 24, scrollbackLimit: 4);
+        ConcurrentQueue<Exception> failures = new();
+
+        Task producer = Task.Run(() =>
+        {
+            try
+            {
+                for (int i = 0; i < 10_000; i++)
+                {
+                    lock (screen.SyncRoot)
+                    {
+                        screen.AddRow();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                failures.Enqueue(ex);
+            }
+        });
+
+        try
+        {
+            for (int i = 0; i < 10_000; i++)
+            {
+                screen.InvalidateAll();
+            }
+        }
+        catch (Exception ex)
+        {
+            failures.Enqueue(ex);
+        }
+
+        await producer;
+
+        Assert.Empty(failures);
+    }
+
+    [Fact]
+    public void TerminalScreen_InvalidateViewport_MarksOnlyVisibleRowsDirty()
+    {
+        TerminalScreen screen = new(80, 4, scrollbackLimit: 32);
+        for (int i = 0; i < 12; i++)
+        {
+            screen.AddRow();
+        }
+
+        screen.ScrollOffset = 3;
+
+        for (int row = 0; row < screen.TotalRows; row++)
+        {
+            screen.GetRow(row).IsDirty = false;
+        }
+
+        screen.InvalidateViewport();
+
+        int dirtyRows = 0;
+        for (int row = 0; row < screen.TotalRows; row++)
+        {
+            if (screen.GetRow(row).IsDirty)
+            {
+                dirtyRows++;
+            }
+        }
+
+        Assert.Equal(screen.ViewportRows, dirtyRows);
     }
 
     [Fact]

@@ -410,6 +410,49 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_TransportOutputBurst_CoalescesScrollInvalidatedNotifications()
+    {
+        FakeTransport transport = new();
+        CountingTerminalScrollService scrollService = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            scrollService);
+
+        int scrollInvalidatedCount = 0;
+        ((ILogicalScrollable)control).ScrollInvalidated += (_, _) => Interlocked.Increment(ref scrollInvalidatedCount);
+
+        const int chunkCount = 512;
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            await Task.Run(() =>
+            {
+                for (int i = 0; i < chunkCount; i++)
+                {
+                    transport.RaiseData(Encoding.UTF8.GetBytes($"chunk-{i}\n"));
+                }
+            });
+
+            bool notificationsObserved = await WaitUntilAsync(
+                () => scrollService.HandleOutputCallCount > 0 && Volatile.Read(ref scrollInvalidatedCount) > 0,
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(notificationsObserved, "Expected transport output to trigger scroll invalidation notifications.");
+            Assert.True(
+                Volatile.Read(ref scrollInvalidatedCount) < scrollService.HandleOutputCallCount,
+                $"Expected scroll invalidation notifications to be coalesced beyond output finalize batches. " +
+                $"ScrollInvalidated={Volatile.Read(ref scrollInvalidatedCount)}, HandleOutput={scrollService.HandleOutputCallCount}.");
+        }
+        finally
+        {
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_TransportOutputBurst_YieldsAcrossUiDispatches()
     {
         FakeTransport transport = new();
@@ -1211,6 +1254,45 @@ public class TerminalControlTests
         }
 
         Assert.True(hasDirtyRow);
+    }
+
+    [AvaloniaFact]
+    public void Control_OffsetScroll_DoesNotDirtyEntireScrollback()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.ScrollData);
+        Assert.NotNull(control.Screen);
+        TerminalScreen screen = control.Screen!;
+
+        for (int i = 0; i < 512; i++)
+        {
+            control.WriteOutput("line\n"u8);
+        }
+
+        Assert.True(control.ScrollData!.MaxOffset > 0);
+        Assert.True(screen.TotalRows > screen.ViewportRows * 2);
+
+        for (int row = 0; row < screen.TotalRows; row++)
+        {
+            screen.GetRow(row).IsDirty = false;
+        }
+
+        ((IScrollable)control).Offset = new Vector(0, 0);
+
+        int dirtyRows = 0;
+        for (int row = 0; row < screen.TotalRows; row++)
+        {
+            if (screen.GetRow(row).IsDirty)
+            {
+                dirtyRows++;
+            }
+        }
+
+        Assert.InRange(dirtyRows, 1, screen.ViewportRows);
     }
 
     [AvaloniaFact]
