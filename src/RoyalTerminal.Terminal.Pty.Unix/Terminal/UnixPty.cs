@@ -26,6 +26,7 @@ public sealed class UnixPty : IPty
     private string? _slavePtyPath;
     private volatile bool _disposed;
     private readonly object _pendingWritesSync = new();
+    private readonly Queue<PendingWrite> _priorityWrites = new();
     private readonly Queue<PendingWrite> _pendingWrites = new();
     private Thread? _readThread;
     private Thread? _writeThread;
@@ -109,6 +110,8 @@ public sealed class UnixPty : IPty
         // On Linux, soname availability can vary by distro/container image,
         // so probe a small set of common candidates.
         var libc = LoadLibcHandle();
+        var pSignal = (delegate* unmanaged[Cdecl]<int, nint, nint>)
+            NativeLibrary.GetExport(libc, "signal");
         var pChdir = (delegate* unmanaged[Cdecl]<byte*, int>)
             NativeLibrary.GetExport(libc, "chdir");
         var pSetenv = (delegate* unmanaged[Cdecl]<byte*, byte*, int, int>)
@@ -117,6 +120,7 @@ public sealed class UnixPty : IPty
             NativeLibrary.GetExport(libc, "execvp");
         var pExit = (delegate* unmanaged[Cdecl]<int, void>)
             NativeLibrary.GetExport(libc, "_exit");
+        int[] signalsToReset = GetSignalsToResetForExec();
 
         // ---- Fork ----
         var winSize = new WinSize
@@ -138,6 +142,15 @@ public sealed class UnixPty : IPty
             // ---- CHILD PROCESS ----
             // Only raw native calls via resolved function pointers.
             // No .NET runtime: no GC, no P/Invoke marshaling, no allocations.
+
+            // Child processes inherit ignored signal dispositions across exec.
+            // Reset the standard terminal-control signals so interactive shells
+            // and shell builtins receive Ctrl+C/Ctrl+Z the same way they do in
+            // native terminals such as Ghostty/xterm.
+            for (int i = 0; i < signalsToReset.Length; i++)
+            {
+                pSignal(signalsToReset[i], 0);
+            }
 
             if (nativeCwd != IntPtr.Zero)
                 pChdir((byte*)nativeCwd);
@@ -194,7 +207,10 @@ public sealed class UnixPty : IPty
                 return;
             }
 
-            _pendingWrites.Enqueue(new PendingWrite(copy));
+            Queue<PendingWrite> queue = IsPriorityControlWrite(copy)
+                ? _priorityWrites
+                : _pendingWrites;
+            queue.Enqueue(new PendingWrite(copy));
             Monitor.PulseAll(_pendingWritesSync);
         }
     }
@@ -368,17 +384,19 @@ public sealed class UnixPty : IPty
                 PendingWrite pending;
                 lock (_pendingWritesSync)
                 {
-                    while (!_disposed && _pendingWrites.Count == 0)
+                    while (!_disposed && _priorityWrites.Count == 0 && _pendingWrites.Count == 0)
                     {
                         Monitor.Wait(_pendingWritesSync);
                     }
 
-                    if (_disposed && _pendingWrites.Count == 0)
+                    if (_disposed && _priorityWrites.Count == 0 && _pendingWrites.Count == 0)
                     {
                         return;
                     }
 
-                    pending = _pendingWrites.Dequeue();
+                    pending = _priorityWrites.Count > 0
+                        ? _priorityWrites.Dequeue()
+                        : _pendingWrites.Dequeue();
                 }
 
                 WritePending(ref pending);
@@ -432,6 +450,11 @@ public sealed class UnixPty : IPty
         }
     }
 
+    private static bool IsPriorityControlWrite(byte[] payload)
+    {
+        return payload.Length == 1 && payload[0] is 0x03 or 0x1A or 0x1C;
+    }
+
     /// <summary>
     /// Stops the PTY and kills the child process. Same as Dispose.
     /// </summary>
@@ -443,6 +466,7 @@ public sealed class UnixPty : IPty
         _disposed = true;
         lock (_pendingWritesSync)
         {
+            _priorityWrites.Clear();
             _pendingWrites.Clear();
             Monitor.PulseAll(_pendingWritesSync);
         }
@@ -519,6 +543,38 @@ public sealed class UnixPty : IPty
         if (File.Exists("/bin/zsh")) return "/bin/zsh";
         if (File.Exists("/bin/bash")) return "/bin/bash";
         return "/bin/sh";
+    }
+
+    private static int[] GetSignalsToResetForExec()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return
+            [
+                1,  // SIGHUP
+                2,  // SIGINT
+                3,  // SIGQUIT
+                13, // SIGPIPE
+                15, // SIGTERM
+                18, // SIGTSTP
+                20, // SIGCHLD
+                21, // SIGTTIN
+                22, // SIGTTOU
+            ];
+        }
+
+        return
+        [
+            1,  // SIGHUP
+            2,  // SIGINT
+            3,  // SIGQUIT
+            13, // SIGPIPE
+            15, // SIGTERM
+            17, // SIGCHLD
+            20, // SIGTSTP
+            21, // SIGTTIN
+            22, // SIGTTOU
+        ];
     }
 
     private static IntPtr AllocNativeString(string s)

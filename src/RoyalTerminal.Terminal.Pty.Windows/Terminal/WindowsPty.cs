@@ -30,6 +30,7 @@ public sealed class WindowsPty : IPty
     private bool _disposed;
     private readonly CancellationTokenSource _cts = new();
     private readonly object _pendingWritesSync = new();
+    private readonly Queue<PendingWrite> _priorityWrites = new();
     private readonly Queue<PendingWrite> _pendingWrites = new();
 
     /// <summary>Raised when data is received from the PTY.</summary>
@@ -139,7 +140,10 @@ public sealed class WindowsPty : IPty
                 return;
             }
 
-            _pendingWrites.Enqueue(new PendingWrite(copy));
+            Queue<PendingWrite> queue = IsPriorityControlWrite(copy)
+                ? _priorityWrites
+                : _pendingWrites;
+            queue.Enqueue(new PendingWrite(copy));
             Monitor.PulseAll(_pendingWritesSync);
         }
     }
@@ -167,6 +171,7 @@ public sealed class WindowsPty : IPty
         _cts.Cancel();
         lock (_pendingWritesSync)
         {
+            _priorityWrites.Clear();
             _pendingWrites.Clear();
             Monitor.PulseAll(_pendingWritesSync);
         }
@@ -210,17 +215,19 @@ public sealed class WindowsPty : IPty
                 PendingWrite pending;
                 lock (_pendingWritesSync)
                 {
-                    while (!_disposed && _pendingWrites.Count == 0)
+                    while (!_disposed && _priorityWrites.Count == 0 && _pendingWrites.Count == 0)
                     {
                         Monitor.Wait(_pendingWritesSync);
                     }
 
-                    if (_disposed && _pendingWrites.Count == 0)
+                    if (_disposed && _priorityWrites.Count == 0 && _pendingWrites.Count == 0)
                     {
                         return;
                     }
 
-                    pending = _pendingWrites.Dequeue();
+                    pending = _priorityWrites.Count > 0
+                        ? _priorityWrites.Dequeue()
+                        : _pendingWrites.Dequeue();
                 }
 
                 WritePending(ref pending);
@@ -259,6 +266,11 @@ public sealed class WindowsPty : IPty
                 return;
             }
         }
+    }
+
+    private static bool IsPriorityControlWrite(byte[] payload)
+    {
+        return payload.Length == 1 && payload[0] is 0x03 or 0x1A or 0x1C;
     }
 
     private void ReadLoop()

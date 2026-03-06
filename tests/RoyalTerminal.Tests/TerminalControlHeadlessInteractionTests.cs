@@ -314,6 +314,54 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
+    public async Task Headless_ManagedPty_RepeatedKeyDownCtrlC_InterruptsBase64FloodAcrossCycles()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        await VerifyManagedPtyControlCharacterKeyDownSurvivesRepeatedFloodCyclesAsync(
+            PhysicalKey.C,
+            "Ctrl+C",
+            0x03,
+            cycleCount: 6,
+            RepeatedFloodScenario.Base64);
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_ManagedPty_RepeatedKeyDownCtrlC_InterruptsAnsiFloodAcrossCycles()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        await VerifyManagedPtyControlCharacterKeyDownSurvivesRepeatedFloodCyclesAsync(
+            PhysicalKey.C,
+            "Ctrl+C",
+            0x03,
+            cycleCount: 6,
+            RepeatedFloodScenario.Ansi);
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_ManagedPty_RepeatedKeyDownCtrlZ_SuspendsBase64FloodAcrossCycles()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        await VerifyManagedPtyControlCharacterKeyDownSurvivesRepeatedFloodCyclesAsync(
+            PhysicalKey.Z,
+            "Ctrl+Z",
+            0x1A,
+            cycleCount: 6,
+            RepeatedFloodScenario.Base64);
+    }
+
+    [AvaloniaFact]
     public async Task Headless_VtQueryResponses_AreSuppressed_ForPtyBackedSessions_WhenOutputBacklogIsHigh()
     {
         await VerifyVtQueryResponseBehaviorUnderOutputBacklogAsync(
@@ -1316,6 +1364,132 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
+    private static async Task VerifyManagedPtyControlCharacterKeyDownSurvivesRepeatedFloodCyclesAsync(
+        PhysicalKey physicalKey,
+        string controlCharacterLabel,
+        byte expectedInputByte,
+        int cycleCount,
+        RepeatedFloodScenario scenario)
+    {
+        const string readyMarker = "__ROYALTERMINAL_REPEAT_CTRL_READY__";
+
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new()
+        {
+            Width = 960,
+            Height = 640,
+            Content = control,
+        };
+
+        object outputSync = new();
+        StringBuilder output = new();
+        object inputSync = new();
+        List<byte[]> inputs = [];
+        control.DataReceived += (_, args) =>
+        {
+            lock (outputSync)
+            {
+                output.Append(Encoding.UTF8.GetString(args.Data.Span));
+                if (output.Length > 262144)
+                {
+                    output.Remove(0, output.Length - 131072);
+                }
+            }
+        };
+        control.TerminalSessionService.InputSent += (_, args) =>
+        {
+            lock (inputSync)
+            {
+                inputs.Add(args.Data.ToArray());
+            }
+        };
+
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            string? shell = ResolveManagedPtyControlTestShell(requireJobControl: physicalKey == PhysicalKey.Z);
+            Assert.True(shell is not null, $"Expected a job-control capable shell for repeated {controlCharacterLabel} managed PTY test.");
+            control.StartPty(shell: shell, workingDirectory: Environment.CurrentDirectory);
+
+            control.SendInput($"echo {readyMarker}\n");
+            bool readySeen = await WaitUntilAsync(
+                () => ContainsOutput(outputSync, output, readyMarker),
+                TimeSpan.FromSeconds(5));
+            Assert.True(readySeen, $"Did not observe PTY ready marker. Output: {SnapshotOutput(outputSync, output)}");
+
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            for (int cycle = 1; cycle <= cycleCount; cycle++)
+            {
+                ClearOutput(outputSync, output);
+                int inputCountBefore = GetInputCount(inputSync, inputs);
+
+                control.SendInput(BuildRepeatedFloodCommand(scenario));
+
+                bool floodSeen = await WaitUntilAsync(
+                    () => IsRepeatedFloodObserved(scenario, outputSync, output),
+                    TimeSpan.FromSeconds(5));
+                Assert.True(
+                    floodSeen,
+                    $"Cycle {cycle}: Did not observe {scenario} flood before {controlCharacterLabel}. " +
+                    $"Mode={SnapshotModeState(control.TerminalSessionService.ModeSource)}, Kitty={SnapshotKittyKeyboardFlags(control.TerminalSessionService.ModeSource)}, " +
+                    $"Output={SnapshotOutput(outputSync, output)}");
+
+                Assert.True(
+                    control.IsKeyboardFocusWithin,
+                    $"Cycle {cycle}: Terminal lost keyboard focus before {controlCharacterLabel}.");
+
+                window.KeyPressQwerty(physicalKey, RawInputModifiers.Control);
+
+                bool expectedInputObserved = await WaitUntilAsync(
+                    () => ContainsInputByteAfterIndex(inputSync, inputs, expectedInputByte, inputCountBefore),
+                    TimeSpan.FromSeconds(2));
+                Assert.True(
+                    expectedInputObserved,
+                    $"Cycle {cycle}: Did not observe expected PTY input byte 0x{expectedInputByte:X2} after {controlCharacterLabel}. " +
+                    $"Mode={SnapshotModeState(control.TerminalSessionService.ModeSource)}, Kitty={SnapshotKittyKeyboardFlags(control.TerminalSessionService.ModeSource)}, " +
+                    $"Inputs={SnapshotInputs(inputSync, inputs)}");
+
+                string cycleMarker = $"__ROYALTERMINAL_REPEAT_{physicalKey}_{cycle}__";
+                control.SendInput($"echo {cycleMarker}\n");
+
+                bool promptRecovered = await WaitUntilAsync(
+                    () => ContainsOutput(outputSync, output, cycleMarker),
+                    TimeSpan.FromSeconds(5));
+                Assert.True(
+                    promptRecovered,
+                    $"Cycle {cycle}: Did not observe prompt recovery marker after {controlCharacterLabel}. " +
+                    $"Mode={SnapshotModeState(control.TerminalSessionService.ModeSource)}, Kitty={SnapshotKittyKeyboardFlags(control.TerminalSessionService.ModeSource)}, " +
+                    $"Output={SnapshotOutput(outputSync, output)}");
+
+                if (physicalKey == PhysicalKey.Z)
+                {
+                    control.SendInput("for job in $(jobs -p 2>/dev/null); do kill \"$job\" >/dev/null 2>&1; done\n");
+                    control.SendInput("wait >/dev/null 2>&1\n");
+                    string cleanupMarker = $"__ROYALTERMINAL_REPEAT_CLEANUP_{cycle}__";
+                    control.SendInput($"echo {cleanupMarker}\n");
+                    bool cleanupCompleted = await WaitUntilAsync(
+                        () => ContainsOutput(outputSync, output, cleanupMarker),
+                        TimeSpan.FromSeconds(5));
+                    Assert.True(
+                        cleanupCompleted,
+                        $"Cycle {cycle}: Did not observe cleanup marker after {controlCharacterLabel}. " +
+                        $"Output={SnapshotOutput(outputSync, output)}");
+                }
+            }
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
     private static async Task VerifyControlCharacterDispatchUnderOutputFloodAsync(
         PhysicalKey physicalKey,
         byte expectedByte,
@@ -1443,12 +1617,67 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
+    private static bool ContainsInputByteAfterIndex(object sync, List<byte[]> inputs, byte expectedByte, int startIndex)
+    {
+        lock (sync)
+        {
+            for (int i = startIndex; i < inputs.Count; i++)
+            {
+                if (inputs[i].Contains(expectedByte))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    private static int GetInputCount(object sync, List<byte[]> inputs)
+    {
+        lock (sync)
+        {
+            return inputs.Count;
+        }
+    }
+
+    private static void ClearOutput(object sync, StringBuilder output)
+    {
+        lock (sync)
+        {
+            output.Clear();
+        }
+    }
+
+    private static bool IsRepeatedFloodObserved(RepeatedFloodScenario scenario, object sync, StringBuilder output)
+    {
+        lock (sync)
+        {
+            return scenario switch
+            {
+                RepeatedFloodScenario.Base64 => output.Length >= 2048,
+                RepeatedFloodScenario.Ansi => output.ToString().Contains("Build step", StringComparison.Ordinal),
+                _ => false,
+            };
+        }
+    }
+
     private static string SnapshotOutput(object sync, StringBuilder output)
     {
         lock (sync)
         {
             return output.ToString();
         }
+    }
+
+    private static TerminalModeState SnapshotModeState(ITerminalModeSource? modeSource)
+    {
+        return modeSource?.ModeState ?? default;
+    }
+
+    private static int SnapshotKittyKeyboardFlags(ITerminalModeSource? modeSource)
+    {
+        return modeSource is IKittyKeyboardStateSource kitty ? kitty.KittyKeyboardFlags : 0;
     }
 
     private static string SnapshotInputs(object sync, List<byte[]> inputs)
@@ -1489,6 +1718,23 @@ public sealed class TerminalControlHeadlessInteractionTests
         return requireJobControl
             ? null
             : "/bin/sh";
+    }
+
+    private static string BuildRepeatedFloodCommand(RepeatedFloodScenario scenario)
+    {
+        return scenario switch
+        {
+            RepeatedFloodScenario.Base64 =>
+                "while :; do head -c 10000 /dev/urandom | base64 | head -n 40; done\n",
+            RepeatedFloodScenario.Ansi =>
+                "i=1; while [ \"$i\" -le 200000 ]; do " +
+                "printf '\\033[32mINFO\\033[0m Build step %d completed\\n' \"$i\"; " +
+                "printf '\\033[33mWARN\\033[0m Something suspicious\\n'; " +
+                "printf '\\033[31mERROR\\033[0m Something failed\\n'; " +
+                "i=$((i+1)); " +
+                "done\n",
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "Unknown repeated flood scenario."),
+        };
     }
 
     private static async Task StabilizeWindowAsync(Window window, TerminalControl control)
@@ -2036,4 +2282,10 @@ public sealed class TerminalControlHeadlessInteractionTests
         bool MouseSent,
         bool PasteSent,
         bool ResizeSent);
+
+    private enum RepeatedFloodScenario
+    {
+        Base64,
+        Ansi,
+    }
 }
