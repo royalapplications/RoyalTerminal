@@ -121,7 +121,44 @@ jobs:
         run: dotnet build -c Release --no-restore
 
       - name: Test (Unit)
+        if: matrix.os != 'ubuntu-latest'
         run: dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory ./test-results
+
+      - name: Test (Unit - Linux slices)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+
+          slice_names=(
+            "test-results-linux-slice-1"
+            "test-results-linux-slice-2"
+            "test-results-linux-slice-3"
+            "test-results-linux-slice-4"
+          )
+
+          slice_filters=(
+            "(FullyQualifiedName~RoyalTerminal.Tests.CoreWrapperTests.)|(FullyQualifiedName~RoyalTerminal.Tests.GhosttyComponentTests.)|(FullyQualifiedName~RoyalTerminal.Tests.GhosttyUnsupportedWindowsSequenceSanitizerTests.)|(FullyQualifiedName~RoyalTerminal.Tests.HeadlessSkiaRenderingTests.)|(FullyQualifiedName~RoyalTerminal.Tests.NativeEnumTests.)|(FullyQualifiedName~RoyalTerminal.Tests.NativeTerminalControlTests.)|(FullyQualifiedName~RoyalTerminal.Tests.NcursesHarnessFlowTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalQueryTests.)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.)|(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerSettingsPanelTests.)|(FullyQualifiedName~RoyalTerminal.Tests.MainWindowViewModelFlowTests.)|(FullyQualifiedName~RoyalTerminal.Tests.PackageBoundaryTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingAvaloniaAdapterTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingContractsTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingInteropTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingSkiaInteropTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalScreenTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalScrollDataTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalSettingsPanelStateTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalThemeTests.)|(FullyQualifiedName~RoyalTerminal.Tests.UnicodeWidthTests.)|(FullyQualifiedName~RoyalTerminal.Tests.WindowsArm64NativePackagingTests.)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.KnownHostsSshHostKeyValidatorTests.)|(FullyQualifiedName~RoyalTerminal.Tests.PipeTerminalTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.PtyContractTests.)|(FullyQualifiedName~RoyalTerminal.Tests.PtyTerminalTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RawTcpTerminalTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SerialTerminalTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SshCredentialProvidersTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SshHostKeyValidationTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SshNetAgentAuthenticationMethodContributorTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SshNetTerminalTransportSecurityTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SshShellBootstrapCommandBuilderTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TelnetTerminalTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalSessionProfileSerializerTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalSessionServiceTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalTransportFactoryTests.)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalAbstractionsTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalBufferTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalCaptureRecorderTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalCaptureRuntimeTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalDataProcessorTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalInputAdapterTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalModeResolverTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalMouseProtocolTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalShortcutDispatcherTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalWin32InputModeTrackerTests.)"
+          )
+
+          for i in "${!slice_names[@]}"; do
+            name="${slice_names[$i]}"
+            filter="${slice_filters[$i]}"
+            dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj \
+              -c Release \
+              --no-build \
+              --filter "$filter" \
+              --blame-crash \
+              --blame-hang \
+              --blame-hang-timeout 5m \
+              --diag "./test-results/${name}.diag.log" \
+              --logger "trx;LogFileName=${name}.trx" \
+              --results-directory ./test-results
+          done
 
       - name: Test (Mode Startup Smoke)
         run: dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --no-build --filter "(FullyQualifiedName~TerminalModeResolverTests)|(FullyQualifiedName~MainWindowControllerModeStartupTests)|(FullyQualifiedName~Headless_FallbackParity_AutoAndManaged_PreserveKeyboardMousePasteAndResize_WhenHostedInScrollViewer)" --logger "trx;LogFileName=mode-startup-smoke-results.trx" --results-directory ./test-results
