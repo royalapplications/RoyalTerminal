@@ -1564,7 +1564,9 @@ public sealed class TerminalControlHeadlessInteractionTests
                 ClearOutput(outputSync, output);
                 int inputCountBefore = GetInputCount(inputSync, inputs);
 
-                control.SendInput(BuildRepeatedFloodCommand(scenario));
+                control.SendInput(BuildRepeatedFloodCommand(
+                    scenario,
+                    launchAsChildJob: physicalKey == PhysicalKey.Z));
 
                 bool floodSeen = await WaitUntilAsync(
                     () => IsRepeatedFloodObserved(scenario, outputSync, output),
@@ -1883,16 +1885,28 @@ public sealed class TerminalControlHeadlessInteractionTests
             : $"{loopCommand}\n";
     }
 
-    private static string BuildRepeatedFloodCommand(RepeatedFloodScenario scenario)
+    private static string BuildRepeatedFloodCommand(RepeatedFloodScenario scenario, bool launchAsChildJob)
     {
         return scenario switch
         {
             RepeatedFloodScenario.Base64 =>
-                "while :; do head -c 10000 /dev/urandom | base64 | head -n 40; done\n",
+                BuildBase64FloodCommand(launchAsChildJob),
             RepeatedFloodScenario.Ansi =>
-                BuildAnsiFloodCommand(launchAsChildJob: false),
+                BuildAnsiFloodCommand(launchAsChildJob),
             _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "Unknown repeated flood scenario."),
         };
+    }
+
+    private static string BuildBase64FloodCommand(bool launchAsChildJob)
+    {
+        const string loopCommand =
+            "while :; do " +
+            "head -c 10000 /dev/urandom | base64 | head -n 40; " +
+            "done";
+
+        return launchAsChildJob
+            ? $"/bin/sh -c '{EscapeSingleQuoted(loopCommand)}'\n"
+            : $"{loopCommand}\n";
     }
 
     private static string EscapeSingleQuoted(string value)
