@@ -85,24 +85,30 @@ public sealed class UnixPty : IPty
         int argvLength = argumentCount + 2;
         var argv = (byte**)Marshal.AllocHGlobal(argvLength * IntPtr.Size);
         argv[0] = (byte*)nativeShell;
-        List<IntPtr> nativeArguments = new(argumentCount);
+        IntPtr[] nativeArguments = argumentCount == 0
+            ? Array.Empty<IntPtr>()
+            : new IntPtr[argumentCount];
         for (int i = 0; i < argumentCount; i++)
         {
             string argument = arguments![i] ?? string.Empty;
             IntPtr nativeArgument = AllocNativeString(argument);
-            nativeArguments.Add(nativeArgument);
+            nativeArguments[i] = nativeArgument;
             argv[i + 1] = (byte*)nativeArgument;
         }
 
         argv[argvLength - 1] = null;
 
         // Build env key=value pairs for additional environment variables
-        var envPairs = new List<(IntPtr key, IntPtr val)>();
+        int environmentCount = environment?.Count ?? 0;
+        (IntPtr key, IntPtr val)[] envPairs = environmentCount == 0
+            ? Array.Empty<(IntPtr key, IntPtr val)>()
+            : new (IntPtr key, IntPtr val)[environmentCount];
         if (environment is not null)
         {
+            int envIndex = 0;
             foreach (var (key, value) in environment)
             {
-                envPairs.Add((AllocNativeString(key), AllocNativeString(value)));
+                envPairs[envIndex++] = (AllocNativeString(key), AllocNativeString(value));
             }
         }
 
@@ -159,8 +165,11 @@ public sealed class UnixPty : IPty
             pSetenv((byte*)nativeTermName, (byte*)nativeTermValue, 1);
 
             // Set additional environment variables
-            foreach (var (key, val) in envPairs)
-                pSetenv((byte*)key, (byte*)val, 1);
+            for (int i = 0; i < envPairs.Length; i++)
+            {
+                (IntPtr key, IntPtr val) pair = envPairs[i];
+                pSetenv((byte*)pair.key, (byte*)pair.val, 1);
+            }
 
             // Replace this process with the shell
             pExecvp((byte*)nativeShell, argv);
@@ -588,21 +597,22 @@ public sealed class UnixPty : IPty
 
     private static unsafe void FreeNative(
         IntPtr shell, IntPtr cwd, IntPtr termName, IntPtr termValue,
-        byte** argv, List<IntPtr> nativeArguments, List<(IntPtr key, IntPtr val)> envPairs)
+        byte** argv, IntPtr[] nativeArguments, (IntPtr key, IntPtr val)[] envPairs)
     {
         Marshal.FreeHGlobal(shell);
         if (cwd != IntPtr.Zero) Marshal.FreeHGlobal(cwd);
         Marshal.FreeHGlobal(termName);
         Marshal.FreeHGlobal(termValue);
-        for (int i = 0; i < nativeArguments.Count; i++)
+        for (int i = 0; i < nativeArguments.Length; i++)
         {
             Marshal.FreeHGlobal(nativeArguments[i]);
         }
         Marshal.FreeHGlobal((IntPtr)argv);
-        foreach (var (key, val) in envPairs)
+        for (int i = 0; i < envPairs.Length; i++)
         {
-            Marshal.FreeHGlobal(key);
-            Marshal.FreeHGlobal(val);
+            (IntPtr key, IntPtr val) pair = envPairs[i];
+            Marshal.FreeHGlobal(pair.key);
+            Marshal.FreeHGlobal(pair.val);
         }
     }
 
