@@ -17,6 +17,7 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
+[Collection("MainWindowControllerHeadlessTests")]
 public class MainWindowViewModelFlowTests
 {
     [AvaloniaFact]

@@ -17,6 +17,7 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
+[Collection("MainWindowControllerHeadlessTests")]
 public sealed class MainWindowControllerModeStartupTests
 {
     [AvaloniaFact]
@@ -63,7 +64,8 @@ public sealed class MainWindowControllerModeStartupTests
     public async Task Controller_Startup_StandaloneModeIndicators_UseDistinctColors()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pty);
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo startup-mode-indicators";
 
         Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
         MainWindowController controller = new(
