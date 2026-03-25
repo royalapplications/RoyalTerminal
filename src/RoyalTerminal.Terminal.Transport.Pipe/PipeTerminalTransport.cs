@@ -16,6 +16,7 @@ public sealed class PipeTerminalTransport : ITerminalTransport
 
     private Process? _process;
     private Stream? _stdin;
+    private TransportWritePump? _writePump;
     private CancellationTokenSource? _readerCts;
     private Task? _stdoutReaderTask;
     private Task? _stderrReaderTask;
@@ -98,6 +99,10 @@ public sealed class PipeTerminalTransport : ITerminalTransport
         _stdin = process.StandardInput.BaseStream;
         _stdoutReaderTask = Task.Run(() => ReadLoopAsync(process.StandardOutput.BaseStream, emitOutput: true, _readerCts.Token));
         _stderrReaderTask = Task.Run(() => ReadLoopAsync(process.StandardError.BaseStream, emitOutput: _emitStdErr, _readerCts.Token));
+        _writePump = new TransportWritePump(
+            "RoyalTerminal.Pipe.Transport.Write",
+            WriteInputDirect,
+            OnWritePumpFaulted);
 
         lock (_sync)
         {
@@ -116,17 +121,7 @@ public sealed class PipeTerminalTransport : ITerminalTransport
             return;
         }
 
-        lock (_sync)
-        {
-            if (_stdin is null)
-            {
-                return;
-            }
-
-            byte[] copy = utf8.ToArray();
-            _stdin.Write(copy, 0, copy.Length);
-            _stdin.Flush();
-        }
+        _writePump?.TryEnqueue(utf8);
     }
 
     /// <inheritdoc />
@@ -144,6 +139,7 @@ public sealed class PipeTerminalTransport : ITerminalTransport
         Task? stdoutTask;
         Task? stderrTask;
         Stream? stdin;
+        TransportWritePump? writePump;
 
         lock (_sync)
         {
@@ -152,12 +148,14 @@ public sealed class PipeTerminalTransport : ITerminalTransport
             stdoutTask = _stdoutReaderTask;
             stderrTask = _stderrReaderTask;
             stdin = _stdin;
+            writePump = _writePump;
 
             _process = null;
             _readerCts = null;
             _stdoutReaderTask = null;
             _stderrReaderTask = null;
             _stdin = null;
+            _writePump = null;
         }
 
         if (process is null)
@@ -167,6 +165,7 @@ public sealed class PipeTerminalTransport : ITerminalTransport
 
         try
         {
+            writePump?.RequestStop(discardPendingWrites: true);
             cts?.Cancel();
 
             if (!process.HasExited)
@@ -196,6 +195,7 @@ public sealed class PipeTerminalTransport : ITerminalTransport
             int exitCode = process.HasExited ? process.ExitCode : -1;
 
             stdin?.Dispose();
+            _ = writePump?.Join(TimeSpan.FromSeconds(5));
             process.Exited -= OnProcessExited;
             process.Dispose();
             cts?.Dispose();
@@ -311,6 +311,28 @@ public sealed class PipeTerminalTransport : ITerminalTransport
         }
 
         ProcessExited?.Invoke(exitCode);
+    }
+
+    private void WriteInputDirect(byte[] payload)
+    {
+        lock (_sync)
+        {
+            Stream? stdin = _stdin;
+            if (stdin is null)
+            {
+                return;
+            }
+
+            stdin.Write(payload, 0, payload.Length);
+            stdin.Flush();
+        }
+    }
+
+    private void OnWritePumpFaulted(Exception exception)
+    {
+        _ = exception;
+        RaiseProcessExitedOnce(-1);
+        _ = Task.Run(async () => await StopAsync().ConfigureAwait(false));
     }
 
     private static async Task SuppressReadExceptionsAsync(Task task)

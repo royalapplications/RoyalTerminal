@@ -30,6 +30,7 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
     private readonly object _sync = new();
     private TcpClient? _client;
     private NetworkStream? _stream;
+    private TransportWritePump? _writePump;
     private CancellationTokenSource? _readerCts;
     private Task? _readerTask;
     private bool _disposed;
@@ -110,11 +111,16 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
         NetworkStream stream = client.GetStream();
         CancellationTokenSource readerCts = new();
         Task readerTask = Task.Run(() => ReadLoopAsync(stream, readerCts.Token));
+        TransportWritePump writePump = new(
+            "RoyalTerminal.Telnet.Transport.Write",
+            WriteInputDirect,
+            OnWritePumpFaulted);
 
         lock (_sync)
         {
             _client = client;
             _stream = stream;
+            _writePump = writePump;
             _readerCts = readerCts;
             _readerTask = readerTask;
             _exitRaised = 0;
@@ -135,23 +141,8 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
             return;
         }
 
-        NetworkStream? stream = _stream;
-        if (stream is null)
-        {
-            return;
-        }
-
         byte[] escaped = EscapeIac(utf8);
-        lock (_sync)
-        {
-            if (_stream is null)
-            {
-                return;
-            }
-
-            stream.Write(escaped, 0, escaped.Length);
-            stream.Flush();
-        }
+        _writePump?.TryEnqueue(escaped);
     }
 
     /// <inheritdoc />
@@ -175,6 +166,7 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
     {
         TcpClient? client;
         NetworkStream? stream;
+        TransportWritePump? writePump;
         CancellationTokenSource? readerCts;
         Task? readerTask;
 
@@ -182,11 +174,13 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
         {
             client = _client;
             stream = _stream;
+            writePump = _writePump;
             readerCts = _readerCts;
             readerTask = _readerTask;
 
             _client = null;
             _stream = null;
+            _writePump = null;
             _readerCts = null;
             _readerTask = null;
         }
@@ -198,6 +192,7 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
 
         try
         {
+            writePump?.RequestStop(discardPendingWrites: true);
             readerCts?.Cancel();
             stream?.Dispose();
             client.Dispose();
@@ -209,6 +204,7 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
         }
         finally
         {
+            _ = writePump?.Join(TimeSpan.FromSeconds(5));
             readerCts?.Dispose();
             RaiseProcessExitedOnce(0);
         }
@@ -485,16 +481,7 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
         }
 
         byte[] payload = bytes.ToArray();
-        lock (_sync)
-        {
-            if (_stream is null)
-            {
-                return;
-            }
-
-            stream.Write(payload, 0, payload.Length);
-            stream.Flush();
-        }
+        WriteInputDirect(payload);
     }
 
     private static byte[] EscapeIac(ReadOnlySpan<byte> input)
@@ -536,6 +523,28 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
         }
 
         ProcessExited?.Invoke(exitCode);
+    }
+
+    private void WriteInputDirect(byte[] payload)
+    {
+        lock (_sync)
+        {
+            NetworkStream? stream = _stream;
+            if (stream is null)
+            {
+                return;
+            }
+
+            stream.Write(payload, 0, payload.Length);
+            stream.Flush();
+        }
+    }
+
+    private void OnWritePumpFaulted(Exception exception)
+    {
+        _ = exception;
+        RaiseProcessExitedOnce(-1);
+        _ = Task.Run(async () => await StopAsync().ConfigureAwait(false));
     }
 
     private static async Task SuppressReadExceptionsAsync(Task task)

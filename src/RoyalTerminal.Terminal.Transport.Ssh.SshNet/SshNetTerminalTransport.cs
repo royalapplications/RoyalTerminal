@@ -21,6 +21,7 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
     private readonly object _sync = new();
     private SshClient? _client;
     private ShellStream? _shellStream;
+    private TransportWritePump? _writePump;
     private readonly List<ForwardedPort> _forwardedPorts = [];
     private SshTransportOptions? _options;
     private string? _lastHostKeyValidationError;
@@ -119,10 +120,16 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
                 shell.WriteLine(bootstrapCommand);
             }
 
+            TransportWritePump writePump = new(
+                "RoyalTerminal.Ssh.Transport.Write",
+                WriteInputDirect,
+                OnWritePumpFaulted);
+
             lock (_sync)
             {
                 _client = client;
                 _shellStream = shell;
+                _writePump = writePump;
                 _options = sshOptions;
                 _exitRaised = 0;
             }
@@ -155,15 +162,7 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
             return;
         }
 
-        ShellStream? shell = _shellStream;
-        if (shell is null)
-        {
-            return;
-        }
-
-        byte[] copy = utf8.ToArray();
-        shell.Write(copy, 0, copy.Length);
-        shell.Flush();
+        _writePump?.TryEnqueue(utf8);
     }
 
     /// <inheritdoc />
@@ -189,23 +188,28 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
     {
         ShellStream? shell;
         SshClient? client;
+        TransportWritePump? writePump;
         List<ForwardedPort> forwardedPorts;
 
         lock (_sync)
         {
             shell = _shellStream;
             client = _client;
+            writePump = _writePump;
             forwardedPorts = new List<ForwardedPort>(_forwardedPorts);
             _shellStream = null;
             _client = null;
+            _writePump = null;
             _options = null;
             _forwardedPorts.Clear();
         }
 
-        if (shell is null && client is null && forwardedPorts.Count == 0)
+        if (shell is null && client is null && writePump is null && forwardedPorts.Count == 0)
         {
             return ValueTask.CompletedTask;
         }
+
+        writePump?.RequestStop(discardPendingWrites: true);
 
         for (int i = 0; i < forwardedPorts.Count; i++)
         {
@@ -258,6 +262,7 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
             client.Dispose();
         }
 
+        _ = writePump?.Join(TimeSpan.FromSeconds(5));
         RaiseProcessExitedOnce(0);
         return ValueTask.CompletedTask;
     }
@@ -520,6 +525,28 @@ public sealed class SshNetTerminalTransport : ITerminalTransport
         _ = sender;
         _ = e;
         RaiseProcessExitedOnce(-1);
+    }
+
+    private void WriteInputDirect(byte[] payload)
+    {
+        lock (_sync)
+        {
+            ShellStream? shell = _shellStream;
+            if (shell is null)
+            {
+                return;
+            }
+
+            shell.Write(payload, 0, payload.Length);
+            shell.Flush();
+        }
+    }
+
+    private void OnWritePumpFaulted(Exception exception)
+    {
+        _ = exception;
+        RaiseProcessExitedOnce(-1);
+        _ = Task.Run(async () => await StopAsync().ConfigureAwait(false));
     }
 
     private void RaiseProcessExitedOnce(int exitCode)
