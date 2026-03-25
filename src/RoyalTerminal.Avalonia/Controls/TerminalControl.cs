@@ -60,7 +60,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const int MaxPendingOutputQueueChunks = 256;
     private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
     private static readonly DispatcherPriority PendingOutputDrainPriority = DispatcherPriority.SystemIdle;
-    private static readonly long PtyVtResponseSuppressionWindowTicks =
+    private static readonly long UrgentControlVtResponseSuppressionWindowTicks =
         (long)(TimeSpan.FromSeconds(1).TotalSeconds * Stopwatch.Frequency);
 
     #region Styled Properties
@@ -255,7 +255,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _pendingTransportUiBatchBytes;
     private int _pendingTransportUiBatchChunks;
     private int _pendingOutputUiNotificationScheduled;
-    private long _suppressPtyVtResponsesUntilTimestamp;
+    private long _suppressTransportVtResponsesUntilTimestamp;
     private bool _pendingTransportOutputDrainScheduled;
     private bool _pendingTransportUiDrainScheduled;
     private bool _acceptPendingTransportOutput = true;
@@ -1267,9 +1267,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void SendInput(ReadOnlySpan<byte> data)
     {
-        if (IsUrgentPtyControlInput(data))
+        if (IsUrgentTransportControlInput(data))
         {
-            ArmPtyVtResponseSuppressionWindow();
+            ArmUrgentControlVtResponseSuppressionWindow();
         }
 
         TerminalSessionService.SendInput(data);
@@ -1283,9 +1283,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnKeyDown(e);
 
-        if (IsUrgentPtyControlChord(e.Key, e.KeyModifiers))
+        if (IsUrgentTransportControlChord(e.Key, e.KeyModifiers))
         {
-            ArmPtyVtResponseSuppressionWindow();
+            ArmUrgentControlVtResponseSuppressionWindow();
         }
 
         if (TerminalShortcutDispatcher.TryHandleCommonShortcut(
@@ -2011,14 +2011,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool ShouldSuppressVtProcessorResponse()
     {
-        if (TerminalSessionService.Pty is null)
+        if (TerminalSessionService.Transport is null && TerminalSessionService.Pty is null)
         {
             return false;
         }
 
-        if (IsPtyVtResponseSuppressionWindowActive())
+        if (IsUrgentControlVtResponseSuppressionWindowActive())
         {
             return true;
+        }
+
+        if (TerminalSessionService.Pty is null)
+        {
+            return false;
         }
 
         lock (_pendingTransportOutputSync)
@@ -2028,24 +2033,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
     }
 
-    private void ArmPtyVtResponseSuppressionWindow()
+    private void ArmUrgentControlVtResponseSuppressionWindow()
     {
-        if (TerminalSessionService.Pty is null)
+        if (TerminalSessionService.Transport is null && TerminalSessionService.Pty is null)
         {
             return;
         }
 
-        long suppressUntil = Stopwatch.GetTimestamp() + PtyVtResponseSuppressionWindowTicks;
-        Interlocked.Exchange(ref _suppressPtyVtResponsesUntilTimestamp, suppressUntil);
+        long suppressUntil = Stopwatch.GetTimestamp() + UrgentControlVtResponseSuppressionWindowTicks;
+        Interlocked.Exchange(ref _suppressTransportVtResponsesUntilTimestamp, suppressUntil);
     }
 
-    private bool IsPtyVtResponseSuppressionWindowActive()
+    private bool IsUrgentControlVtResponseSuppressionWindowActive()
     {
-        long suppressUntil = Volatile.Read(ref _suppressPtyVtResponsesUntilTimestamp);
+        long suppressUntil = Volatile.Read(ref _suppressTransportVtResponsesUntilTimestamp);
         return suppressUntil > 0 && Stopwatch.GetTimestamp() < suppressUntil;
     }
 
-    private static bool IsUrgentPtyControlChord(Key key, KeyModifiers modifiers)
+    private static bool IsUrgentTransportControlChord(Key key, KeyModifiers modifiers)
     {
         if (!modifiers.HasFlag(KeyModifiers.Control))
         {
@@ -2060,7 +2065,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return key is Key.C or Key.Z or Key.OemBackslash;
     }
 
-    private static bool IsUrgentPtyControlInput(ReadOnlySpan<byte> payload)
+    private static bool IsUrgentTransportControlInput(ReadOnlySpan<byte> payload)
     {
         return payload.Length == 1 && payload[0] is 0x03 or 0x1A or 0x1C;
     }

@@ -469,6 +469,84 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
+    public async Task Headless_ManagedTransport_DaResponse_IsForwardedWithoutUrgentControlSuppression()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport, preference: VtProcessorPreference.Managed);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            transport.ClearInputs();
+            transport.RaiseData("\x1b[c"u8.ToArray());
+
+            bool daResponseObserved = await WaitUntilAsync(
+                () => transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;22c"),
+                TimeSpan.FromSeconds(2));
+
+            Assert.True(daResponseObserved, "Expected DA response to be forwarded for transport sessions when no urgent control suppression is active.");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_ManagedTransport_CtrlC_SuppressesLateDaResponseAtPromptBoundary()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport, preference: VtProcessorPreference.Managed);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            transport.ClearInputs();
+            control.SendInput(new byte[] { 0x03 });
+
+            bool ctrlCObserved = await WaitUntilAsync(
+                () => transport.HasInput(static input => input.Length == 1 && input[0] == 0x03),
+                TimeSpan.FromSeconds(2));
+            Assert.True(ctrlCObserved, "Expected Ctrl+C to reach the active transport before testing late DA suppression.");
+
+            int inputCountAfterCtrlC = transport.GetInputCount();
+            transport.RaiseData("\x1b[c"u8.ToArray());
+
+            await Task.Delay(150);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(inputCountAfterCtrlC, transport.GetInputCount());
+            Assert.False(
+                transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;22c"),
+                "Did not expect a late DA response to be injected into the transport after Ctrl+C.");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Headless_KeyboardInput_UsesAttachedEndpointSink()
     {
         RecordingEndpoint endpoint = new();
