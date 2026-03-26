@@ -64,6 +64,7 @@ internal sealed class MainWindowController
     private readonly List<TerminalTab> _tabs = [];
     private readonly HashSet<TerminalControl> _startingStandaloneControls = [];
     private readonly Dictionary<TerminalControl, TerminalCaptureRuntime> _captureRuntimes = [];
+    private readonly Dictionary<TerminalControl, EventHandler<TerminalDataEventArgs>> _sessionLogOutputHandlers = [];
     private readonly Dictionary<TerminalControl, SessionLogWriter> _sessionLogWriters = [];
     private readonly ITerminalModeCapabilityResolver _modeCapabilityResolver;
     private readonly ITerminalModeResolver _modeResolver;
@@ -286,6 +287,10 @@ internal sealed class MainWindowController
                 model => model.EnableTextShaping,
                 model => model.EnableLigatures)
             .Subscribe(_ => ApplyTerminalBehaviorSettingsToAllStandaloneTabs()));
+
+        disposables.Add(_viewModel
+            .WhenAnyValue(model => model.SessionLoggingEnabled)
+            .Subscribe(_ => ApplySessionLoggingSubscriptionsToAllStandaloneTabs()));
     }
 
     private bool TryInitializeGhostty()
@@ -691,11 +696,6 @@ internal sealed class MainWindowController
         ConfigureRenderer(standaloneControl.Renderer);
         ApplyTerminalBehaviorSettings(standaloneControl);
 
-        standaloneControl.DataReceived += (_, args) =>
-        {
-            UpdateStatus($"Received {args.Data.Length} bytes");
-            WriteSessionLogOutput(standaloneControl, args.Data);
-        };
         standaloneControl.TitleChanged += (_, title) =>
         {
             AppendEventLog($"[{GetTabDisplayName(standaloneControl)}] Title changed to '{title}'.");
@@ -741,8 +741,7 @@ internal sealed class MainWindowController
             RoutingStrategies.Tunnel,
             handledEventsToo: true);
 
-        EnsureCaptureRuntime(standaloneControl);
-        EnsureSessionLogWriter(standaloneControl);
+        UpdateSessionLoggingSubscription(standaloneControl);
         QueueStandaloneSessionStart(standaloneControl);
 
         return standaloneControl;
@@ -772,7 +771,6 @@ internal sealed class MainWindowController
             }
         };
 
-        EnsureCaptureRuntime(standaloneControl);
         return standaloneControl;
     }
 
@@ -1656,7 +1654,7 @@ internal sealed class MainWindowController
         return runtime;
     }
 
-    private TerminalCaptureRuntime? GetActiveCaptureRuntime()
+    private TerminalCaptureRuntime? GetActiveCaptureRuntime(bool createIfMissing = false)
     {
         if (_activeTab?.Control is not TerminalControl control)
         {
@@ -1665,12 +1663,14 @@ internal sealed class MainWindowController
 
         return _captureRuntimes.TryGetValue(control, out TerminalCaptureRuntime? runtime)
             ? runtime
-            : EnsureCaptureRuntime(control);
+            : createIfMissing
+                ? EnsureCaptureRuntime(control)
+                : null;
     }
 
     private void ToggleCapture(bool shouldStartCapture)
     {
-        TerminalCaptureRuntime? runtime = GetActiveCaptureRuntime();
+        TerminalCaptureRuntime? runtime = GetActiveCaptureRuntime(createIfMissing: true);
         if (runtime is null)
         {
             _viewModel.SetCaptureState(false, false);
@@ -2389,6 +2389,42 @@ internal sealed class MainWindowController
         }
     }
 
+    private void ApplySessionLoggingSubscriptionsToAllStandaloneTabs()
+    {
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            if (_tabs[i].Control is TerminalControl standaloneControl)
+            {
+                UpdateSessionLoggingSubscription(standaloneControl);
+            }
+        }
+    }
+
+    private void UpdateSessionLoggingSubscription(TerminalControl control)
+    {
+        if (_viewModel.SessionLoggingEnabled)
+        {
+            if (_sessionLogOutputHandlers.ContainsKey(control))
+            {
+                return;
+            }
+
+            EventHandler<TerminalDataEventArgs> handler = (_, args) =>
+            {
+                WriteSessionLogOutput(control, args.Data);
+            };
+
+            control.DataReceived += handler;
+            _sessionLogOutputHandlers[control] = handler;
+            return;
+        }
+
+        if (_sessionLogOutputHandlers.Remove(control, out EventHandler<TerminalDataEventArgs>? existingHandler))
+        {
+            control.DataReceived -= existingHandler;
+        }
+    }
+
     private void ApplyTerminalBehaviorSettings(TerminalControl control)
     {
         control.PasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
@@ -2437,7 +2473,7 @@ internal sealed class MainWindowController
 
     private void WriteSessionLogOutput(TerminalControl control, ReadOnlyMemory<byte> data)
     {
-        if (data.IsEmpty)
+        if (data.IsEmpty || !_viewModel.SessionLoggingEnabled)
         {
             return;
         }
@@ -2449,7 +2485,7 @@ internal sealed class MainWindowController
 
     private void WriteSessionLogInput(TerminalControl control, ReadOnlyMemory<byte> data)
     {
-        if (data.IsEmpty)
+        if (data.IsEmpty || !_viewModel.SessionLoggingEnabled)
         {
             return;
         }

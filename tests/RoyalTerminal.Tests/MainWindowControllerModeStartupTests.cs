@@ -3,6 +3,7 @@
 // RoyalTerminal.Tests — startup/fallback smoke coverage for demo controller mode routing.
 
 using System.Reactive.Linq;
+using System.Text;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media;
@@ -16,6 +17,7 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
+[Collection("MainWindowControllerHeadlessTests")]
 public sealed class MainWindowControllerModeStartupTests
 {
     [AvaloniaFact]
@@ -62,7 +64,8 @@ public sealed class MainWindowControllerModeStartupTests
     public async Task Controller_Startup_StandaloneModeIndicators_UseDistinctColors()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pty);
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo startup-mode-indicators";
 
         Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
         MainWindowController controller = new(
@@ -249,6 +252,50 @@ public sealed class MainWindowControllerModeStartupTests
             Dispatcher.UIThread.RunJobs();
 
             AssertTerminalBehaviorSettings(controls, TerminalPasteSafetyPolicy.SanitizeControlSequences, enableTextShaping: true, enableLigatures: false);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_StandaloneTerminalOutput_DoesNotSpamStatusBar()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo status-spam-check";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            skipEmbeddedGhosttyInitialization: true);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            List<TerminalControl> controls = GetStandaloneControls(terminalHost);
+            Assert.NotEmpty(controls);
+            TerminalControl control = controls[0];
+
+            viewModel.SetStatus("status-marker");
+            Dispatcher.UIThread.RunJobs();
+
+            control.WriteOutput(Encoding.UTF8.GetBytes("demo-output\n"));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal("status-marker", viewModel.StatusText);
         }
         finally
         {

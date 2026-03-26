@@ -13,6 +13,7 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
+[Collection("MainWindowControllerHeadlessTests")]
 public sealed class MainWindowControllerSettingsPanelTests
 {
     [AvaloniaFact]

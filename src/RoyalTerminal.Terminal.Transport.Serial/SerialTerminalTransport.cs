@@ -14,6 +14,7 @@ public sealed class SerialTerminalTransport : ITerminalTransport
 {
     private readonly object _sync = new();
     private SerialPort? _serialPort;
+    private TransportWritePump? _writePump;
     private CancellationTokenSource? _readerCts;
     private Task? _readerTask;
     private bool _disposed;
@@ -87,10 +88,15 @@ public sealed class SerialTerminalTransport : ITerminalTransport
 
         CancellationTokenSource readerCts = new();
         Task readerTask = Task.Run(() => ReadLoopAsync(serialPort.BaseStream, readerCts.Token));
+        TransportWritePump writePump = new(
+            "RoyalTerminal.Serial.Transport.Write",
+            WriteInputDirect,
+            OnWritePumpFaulted);
 
         lock (_sync)
         {
             _serialPort = serialPort;
+            _writePump = writePump;
             _readerCts = readerCts;
             _readerTask = readerTask;
             _exitRaised = 0;
@@ -107,24 +113,7 @@ public sealed class SerialTerminalTransport : ITerminalTransport
             return;
         }
 
-        SerialPort? serialPort = _serialPort;
-        if (serialPort is null || !serialPort.IsOpen)
-        {
-            return;
-        }
-
-        byte[] copy = utf8.ToArray();
-        lock (_sync)
-        {
-            if (_serialPort is null || !_serialPort.IsOpen)
-            {
-                return;
-            }
-
-            Stream stream = serialPort.BaseStream;
-            stream.Write(copy, 0, copy.Length);
-            stream.Flush();
-        }
+        _writePump?.TryEnqueue(utf8);
     }
 
     /// <inheritdoc />
@@ -138,16 +127,19 @@ public sealed class SerialTerminalTransport : ITerminalTransport
     public async ValueTask StopAsync()
     {
         SerialPort? serialPort;
+        TransportWritePump? writePump;
         CancellationTokenSource? readerCts;
         Task? readerTask;
 
         lock (_sync)
         {
             serialPort = _serialPort;
+            writePump = _writePump;
             readerCts = _readerCts;
             readerTask = _readerTask;
 
             _serialPort = null;
+            _writePump = null;
             _readerCts = null;
             _readerTask = null;
         }
@@ -159,6 +151,7 @@ public sealed class SerialTerminalTransport : ITerminalTransport
 
         try
         {
+            writePump?.RequestStop(discardPendingWrites: true);
             readerCts?.Cancel();
             if (serialPort.IsOpen)
             {
@@ -173,6 +166,7 @@ public sealed class SerialTerminalTransport : ITerminalTransport
         finally
         {
             serialPort.Dispose();
+            _ = writePump?.Join(TimeSpan.FromSeconds(5));
             readerCts?.Dispose();
             RaiseProcessExitedOnce(0);
         }
@@ -240,6 +234,29 @@ public sealed class SerialTerminalTransport : ITerminalTransport
         }
 
         ProcessExited?.Invoke(exitCode);
+    }
+
+    private void WriteInputDirect(byte[] payload)
+    {
+        lock (_sync)
+        {
+            SerialPort? serialPort = _serialPort;
+            if (serialPort is null || !serialPort.IsOpen)
+            {
+                return;
+            }
+
+            Stream stream = serialPort.BaseStream;
+            stream.Write(payload, 0, payload.Length);
+            stream.Flush();
+        }
+    }
+
+    private void OnWritePumpFaulted(Exception exception)
+    {
+        _ = exception;
+        RaiseProcessExitedOnce(-1);
+        _ = Task.Run(async () => await StopAsync().ConfigureAwait(false));
     }
 
     private static async Task SuppressReadExceptionsAsync(Task task)

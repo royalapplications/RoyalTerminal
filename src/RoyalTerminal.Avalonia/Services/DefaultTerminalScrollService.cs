@@ -108,13 +108,16 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
             return;
         }
 
-        int nextOffset = scrollData.ToScreenScrollOffsetRows(screen.MaxScrollOffset);
-        if (screen.ScrollOffset == nextOffset)
+        lock (screen.SyncRoot)
         {
-            return;
-        }
+            int nextOffset = scrollData.ToScreenScrollOffsetRows(screen.MaxScrollOffset);
+            if (screen.ScrollOffset == nextOffset)
+            {
+                return;
+            }
 
-        screen.ScrollOffset = nextOffset;
-        screen.InvalidateAll();
+            screen.ScrollOffset = nextOffset;
+            screen.InvalidateViewport();
+        }
     }
 }

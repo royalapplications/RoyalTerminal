@@ -137,6 +137,251 @@ public class PtyContractTests
     }
 
     [Fact]
+    public void UnixPty_CtrlC_InterruptsBusyLoop_WithinLatencyBudget()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        const string readyMarker = "__ROYALTERMINAL_UNIX_BUSY_READY__";
+        const string postInterruptMarker = "__ROYALTERMINAL_UNIX_BUSY_AFTER_CTRL_C__";
+        const string floodNeedle = "busy-output";
+        using UnixPty pty = new();
+        using ManualResetEventSlim sawReady = new(false);
+        using ManualResetEventSlim sawFlood = new(false);
+        using ManualResetEventSlim sawPostInterrupt = new(false);
+        object sync = new();
+        StringBuilder output = new();
+
+        pty.DataReceived += (data, length) =>
+        {
+            string text = Encoding.UTF8.GetString(data, 0, length);
+            lock (sync)
+            {
+                output.Append(text);
+                if (output.Length > 16384)
+                {
+                    output.Remove(0, output.Length - 8192);
+                }
+
+                string snapshot = output.ToString();
+                if (!sawReady.IsSet && snapshot.Contains(readyMarker, StringComparison.Ordinal))
+                {
+                    sawReady.Set();
+                }
+
+                if (!sawFlood.IsSet && snapshot.Contains(floodNeedle, StringComparison.Ordinal))
+                {
+                    sawFlood.Set();
+                }
+
+                if (!sawPostInterrupt.IsSet && snapshot.Contains(postInterruptMarker, StringComparison.Ordinal))
+                {
+                    sawPostInterrupt.Set();
+                }
+            }
+        };
+
+        pty.Start(shell: "/bin/sh", columns: 80, rows: 24, workingDirectory: Environment.CurrentDirectory);
+
+        pty.Write($"echo {readyMarker}\n");
+        Assert.True(
+            sawReady.Wait(TimeSpan.FromSeconds(5)),
+            "Did not observe Unix PTY readiness marker before starting busy loop.");
+
+        pty.Write("while :; do printf 'busy-output\\n'; done\n");
+        Assert.True(
+            sawFlood.Wait(TimeSpan.FromSeconds(5)),
+            "Did not observe Unix PTY flood output before sending Ctrl+C.");
+
+        Stopwatch interruptLatency = Stopwatch.StartNew();
+        pty.Write(new byte[] { 0x03 }, 0, 1);
+        pty.Write($"echo {postInterruptMarker}\n");
+
+        bool interrupted = sawPostInterrupt.Wait(TimeSpan.FromSeconds(3));
+        if (!interrupted)
+        {
+            string recentOutput;
+            lock (sync)
+            {
+                recentOutput = output.ToString();
+            }
+
+            Assert.Fail($"Did not observe post-interrupt marker within timeout. Recent output: {recentOutput}");
+        }
+
+        Assert.True(
+            interruptLatency.Elapsed < TimeSpan.FromSeconds(2),
+            $"Expected Ctrl+C to interrupt promptly, observed latency {interruptLatency.Elapsed}.");
+
+        pty.Write("exit\n");
+        pty.Stop();
+    }
+
+    [Fact]
+    public void UnixPty_Stop_DuringContinuousOutput_DoesNotThrow()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        using UnixPty pty = new();
+        using ManualResetEventSlim sawOutput = new(false);
+
+        pty.DataReceived += (_, length) =>
+        {
+            if (length > 0)
+            {
+                sawOutput.Set();
+            }
+        };
+
+        pty.Start(shell: "/bin/sh", columns: 80, rows: 24, workingDirectory: Environment.CurrentDirectory);
+        pty.Write("while :; do printf 'x'; done\n");
+
+        Assert.True(sawOutput.Wait(TimeSpan.FromSeconds(3)), "Expected to observe continuous PTY output.");
+
+        pty.Stop();
+
+        // Give the reader thread a short window to finish after stop.
+        Thread.Sleep(200);
+    }
+
+    [Fact]
+    public void UnixPty_Write_DoesNotBlockCaller_WhenChildNotReadingInput()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        using UnixPty pty = new();
+        try
+        {
+            pty.Start(shell: "/bin/sh", columns: 80, rows: 24, workingDirectory: Environment.CurrentDirectory);
+            pty.Write("while :; do :; done\n");
+            Thread.Sleep(150);
+
+            byte[] largeInput = new byte[8 * 1024 * 1024];
+            Array.Fill(largeInput, (byte)'x');
+
+            Exception? writeException = null;
+            using ManualResetEventSlim writeCompleted = new(false);
+            void PerformWrite()
+            {
+                try
+                {
+                    if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                    {
+                        pty.Write(largeInput, 0, largeInput.Length);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    writeException = ex;
+                }
+                finally
+                {
+                    writeCompleted.Set();
+                }
+            }
+
+            Stopwatch writeLatency = Stopwatch.StartNew();
+            Thread writeThread = new(PerformWrite)
+            {
+                IsBackground = true,
+                Name = "UnixPty-Write-Latency-Probe",
+            };
+            writeThread.Start();
+            bool completedQuickly = writeCompleted.Wait(TimeSpan.FromMilliseconds(750));
+
+            Assert.True(
+                completedQuickly,
+                $"Expected UnixPty.Write caller path to return promptly even under backpressure. Elapsed={writeLatency.Elapsed}.");
+            Assert.Null(writeException);
+        }
+        finally
+        {
+            pty.Stop();
+        }
+    }
+
+    [Fact]
+    public void WindowsPty_Write_DoesNotBlockCaller_WhenChildNotReadingInput()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        if (!TryGetWindowsContractCmdPath(out string? cmdPath))
+        {
+            return;
+        }
+
+        using WindowsPty pty = new();
+        try
+        {
+            pty.Start(
+                shell: cmdPath,
+                columns: 80,
+                rows: 24,
+                workingDirectory: Environment.CurrentDirectory,
+                arguments:
+                [
+                    "/d",
+                    "/c",
+                    "ping -t 127.0.0.1 >nul",
+                ]);
+            Thread.Sleep(150);
+
+            byte[] largeInput = new byte[8 * 1024 * 1024];
+            Array.Fill(largeInput, (byte)'x');
+
+            Exception? writeException = null;
+            using ManualResetEventSlim writeCompleted = new(false);
+            void PerformWrite()
+            {
+                try
+                {
+                    if (OperatingSystem.IsWindows())
+                    {
+                        pty.Write(largeInput, 0, largeInput.Length);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    writeException = ex;
+                }
+                finally
+                {
+                    writeCompleted.Set();
+                }
+            }
+
+            Stopwatch writeLatency = Stopwatch.StartNew();
+            Thread writeThread = new(PerformWrite)
+            {
+                IsBackground = true,
+                Name = "WindowsPty-Write-Latency-Probe",
+            };
+            writeThread.Start();
+            bool completedQuickly = writeCompleted.Wait(TimeSpan.FromMilliseconds(750));
+
+            Assert.True(
+                completedQuickly,
+                $"Expected WindowsPty.Write caller path to return promptly even under backpressure. Elapsed={writeLatency.Elapsed}.");
+            Assert.Null(writeException);
+        }
+        finally
+        {
+            pty.Stop();
+        }
+    }
+
+    [Fact]
     public void WindowsPty_StartWriteReadExit_Contract()
     {
         if (!OperatingSystem.IsWindows())

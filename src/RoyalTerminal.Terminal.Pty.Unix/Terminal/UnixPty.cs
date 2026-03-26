@@ -24,9 +24,12 @@ public sealed class UnixPty : IPty
     private int _masterFd = -1;
     private int _childPid = -1;
     private string? _slavePtyPath;
-    private bool _disposed;
+    private volatile bool _disposed;
+    private readonly object _pendingWritesSync = new();
+    private readonly Queue<PendingWrite> _priorityWrites = new();
+    private readonly Queue<PendingWrite> _pendingWrites = new();
     private Thread? _readThread;
-    private readonly CancellationTokenSource _cts = new();
+    private Thread? _writeThread;
 
     /// <summary>Raised when data is received from the PTY.</summary>
     public event Action<byte[], int>? DataReceived;
@@ -82,24 +85,30 @@ public sealed class UnixPty : IPty
         int argvLength = argumentCount + 2;
         var argv = (byte**)Marshal.AllocHGlobal(argvLength * IntPtr.Size);
         argv[0] = (byte*)nativeShell;
-        List<IntPtr> nativeArguments = new(argumentCount);
+        IntPtr[] nativeArguments = argumentCount == 0
+            ? Array.Empty<IntPtr>()
+            : new IntPtr[argumentCount];
         for (int i = 0; i < argumentCount; i++)
         {
             string argument = arguments![i] ?? string.Empty;
             IntPtr nativeArgument = AllocNativeString(argument);
-            nativeArguments.Add(nativeArgument);
+            nativeArguments[i] = nativeArgument;
             argv[i + 1] = (byte*)nativeArgument;
         }
 
         argv[argvLength - 1] = null;
 
         // Build env key=value pairs for additional environment variables
-        var envPairs = new List<(IntPtr key, IntPtr val)>();
+        int environmentCount = environment?.Count ?? 0;
+        (IntPtr key, IntPtr val)[] envPairs = environmentCount == 0
+            ? Array.Empty<(IntPtr key, IntPtr val)>()
+            : new (IntPtr key, IntPtr val)[environmentCount];
         if (environment is not null)
         {
+            int envIndex = 0;
             foreach (var (key, value) in environment)
             {
-                envPairs.Add((AllocNativeString(key), AllocNativeString(value)));
+                envPairs[envIndex++] = (AllocNativeString(key), AllocNativeString(value));
             }
         }
 
@@ -107,6 +116,8 @@ public sealed class UnixPty : IPty
         // On Linux, soname availability can vary by distro/container image,
         // so probe a small set of common candidates.
         var libc = LoadLibcHandle();
+        var pSignal = (delegate* unmanaged[Cdecl]<int, nint, nint>)
+            NativeLibrary.GetExport(libc, "signal");
         var pChdir = (delegate* unmanaged[Cdecl]<byte*, int>)
             NativeLibrary.GetExport(libc, "chdir");
         var pSetenv = (delegate* unmanaged[Cdecl]<byte*, byte*, int, int>)
@@ -115,6 +126,7 @@ public sealed class UnixPty : IPty
             NativeLibrary.GetExport(libc, "execvp");
         var pExit = (delegate* unmanaged[Cdecl]<int, void>)
             NativeLibrary.GetExport(libc, "_exit");
+        int[] signalsToReset = GetSignalsToResetForExec();
 
         // ---- Fork ----
         var winSize = new WinSize
@@ -137,6 +149,15 @@ public sealed class UnixPty : IPty
             // Only raw native calls via resolved function pointers.
             // No .NET runtime: no GC, no P/Invoke marshaling, no allocations.
 
+            // Child processes inherit ignored signal dispositions across exec.
+            // Reset the standard terminal-control signals so interactive shells
+            // and shell builtins receive Ctrl+C/Ctrl+Z the same way they do in
+            // native terminals such as Ghostty/xterm.
+            for (int i = 0; i < signalsToReset.Length; i++)
+            {
+                pSignal(signalsToReset[i], 0);
+            }
+
             if (nativeCwd != IntPtr.Zero)
                 pChdir((byte*)nativeCwd);
 
@@ -144,8 +165,11 @@ public sealed class UnixPty : IPty
             pSetenv((byte*)nativeTermName, (byte*)nativeTermValue, 1);
 
             // Set additional environment variables
-            foreach (var (key, val) in envPairs)
-                pSetenv((byte*)key, (byte*)val, 1);
+            for (int i = 0; i < envPairs.Length; i++)
+            {
+                (IntPtr key, IntPtr val) pair = envPairs[i];
+                pSetenv((byte*)pair.key, (byte*)pair.val, 1);
+            }
 
             // Replace this process with the shell
             pExecvp((byte*)nativeShell, argv);
@@ -158,6 +182,15 @@ public sealed class UnixPty : IPty
         // Free the native memory (child has its own copy after fork)
         FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, nativeArguments, envPairs);
         _slavePtyPath = TryGetSlavePtyPath(_masterFd);
+
+        // Start writing to the master FD on a dedicated worker so UI/key handling
+        // callers never block on back-pressured PTY input.
+        _writeThread = new Thread(WriteLoop)
+        {
+            IsBackground = true,
+            Name = "PTY-Writer",
+        };
+        _writeThread.Start();
 
         // Start reading from the master FD
         _readThread = new Thread(ReadLoop)
@@ -173,14 +206,21 @@ public sealed class UnixPty : IPty
     /// </summary>
     public void Write(ReadOnlySpan<byte> data)
     {
-        if (_masterFd < 0 || _disposed) return;
+        if (_masterFd < 0 || _disposed || data.IsEmpty) return;
 
-        unsafe
+        byte[] copy = data.ToArray();
+        lock (_pendingWritesSync)
         {
-            fixed (byte* ptr = data)
+            if (_masterFd < 0 || _disposed)
             {
-                PosixWrite(_masterFd, ptr, (nuint)data.Length);
+                return;
             }
+
+            Queue<PendingWrite> queue = IsPriorityControlWrite(copy)
+                ? _priorityWrites
+                : _pendingWrites;
+            queue.Enqueue(new PendingWrite(copy));
+            Monitor.PulseAll(_pendingWritesSync);
         }
     }
 
@@ -259,31 +299,55 @@ public sealed class UnixPty : IPty
     {
         var buffer = new byte[8192];
 
-        while (!_cts.Token.IsCancellationRequested && !_disposed)
+        try
         {
-            int bytesRead;
-            unsafe
+            while (!_disposed)
             {
-                fixed (byte* ptr = buffer)
+                int bytesRead;
+                unsafe
                 {
-                    bytesRead = (int)PosixRead(_masterFd, ptr, (nuint)buffer.Length);
+                    fixed (byte* ptr = buffer)
+                    {
+                        bytesRead = (int)PosixRead(_masterFd, ptr, (nuint)buffer.Length);
+                    }
+                }
+
+                if (_disposed)
+                {
+                    break;
+                }
+
+                if (bytesRead < 0)
+                {
+                    int error = Marshal.GetLastPInvokeError();
+                    if (error == ErrnoInterrupted || error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
+                    {
+                        Thread.Yield();
+                        continue;
+                    }
+
+                    break;
+                }
+
+                if (bytesRead == 0)
+                {
+                    // EOF — child process likely exited or PTY was closed.
+                    break;
+                }
+
+                try
+                {
+                    DataReceived?.Invoke(buffer, bytesRead);
+                }
+                catch
+                {
+                    // Don't let subscriber exceptions kill the read loop
                 }
             }
-
-            if (bytesRead <= 0 || _disposed)
-            {
-                // EOF or error — child process likely exited or PTY was closed
-                break;
-            }
-
-            try
-            {
-                DataReceived?.Invoke(buffer, bytesRead);
-            }
-            catch
-            {
-                // Don't let subscriber exceptions kill the read loop
-            }
+        }
+        catch
+        {
+            // Reader thread must never crash the process on unexpected runtime/PInvoke errors.
         }
 
         if (_disposed) return;
@@ -304,13 +368,100 @@ public sealed class UnixPty : IPty
     {
         if (_childPid <= 0) return -1;
 
-        var result = Waitpid(_childPid, out var status, WNOHANG);
-        if (result == _childPid)
+        try
         {
-            return (status >> 8) & 0xFF; // WEXITSTATUS
+            var result = Waitpid(_childPid, out var status, WNOHANG);
+            if (result == _childPid)
+            {
+                return (status >> 8) & 0xFF; // WEXITSTATUS
+            }
+        }
+        catch
+        {
+            // Best effort only; reader thread must not crash the process.
         }
 
         return -1;
+    }
+
+    private void WriteLoop()
+    {
+        try
+        {
+            while (true)
+            {
+                PendingWrite pending;
+                lock (_pendingWritesSync)
+                {
+                    while (!_disposed && _priorityWrites.Count == 0 && _pendingWrites.Count == 0)
+                    {
+                        Monitor.Wait(_pendingWritesSync);
+                    }
+
+                    if (_disposed && _priorityWrites.Count == 0 && _pendingWrites.Count == 0)
+                    {
+                        return;
+                    }
+
+                    pending = _priorityWrites.Count > 0
+                        ? _priorityWrites.Dequeue()
+                        : _pendingWrites.Dequeue();
+                }
+
+                WritePending(ref pending);
+            }
+        }
+        catch
+        {
+            // Writer thread must never crash the process on unexpected runtime/PInvoke errors.
+        }
+    }
+
+    private unsafe void WritePending(ref PendingWrite pending)
+    {
+        while (!_disposed && pending.Offset < pending.Buffer.Length)
+        {
+            int fd = _masterFd;
+            if (fd < 0)
+            {
+                return;
+            }
+
+            nint written;
+            fixed (byte* ptr = pending.Buffer)
+            {
+                byte* cursor = ptr + pending.Offset;
+                nuint remaining = (nuint)(pending.Buffer.Length - pending.Offset);
+                nuint chunkLength = remaining > 4096 ? 4096 : remaining;
+                written = PosixWrite(fd, cursor, chunkLength);
+            }
+
+            if (written > 0)
+            {
+                pending.Offset += (int)written;
+                continue;
+            }
+
+            if (written == 0)
+            {
+                Thread.Yield();
+                continue;
+            }
+
+            int error = Marshal.GetLastPInvokeError();
+            if (error == ErrnoInterrupted || error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
+            {
+                Thread.Yield();
+                continue;
+            }
+
+            return;
+        }
+    }
+
+    private static bool IsPriorityControlWrite(byte[] payload)
+    {
+        return payload.Length == 1 && payload[0] is 0x03 or 0x1A or 0x1C;
     }
 
     /// <summary>
@@ -322,8 +473,12 @@ public sealed class UnixPty : IPty
     {
         if (_disposed) return;
         _disposed = true;
-
-        _cts.Cancel();
+        lock (_pendingWritesSync)
+        {
+            _priorityWrites.Clear();
+            _pendingWrites.Clear();
+            Monitor.PulseAll(_pendingWritesSync);
+        }
 
         // Signal child to terminate first
         var pid = _childPid;
@@ -343,6 +498,7 @@ public sealed class UnixPty : IPty
 
         // Wait for read thread (don't block too long)
         _readThread?.Join(TimeSpan.FromMilliseconds(500));
+        _writeThread?.Join(TimeSpan.FromMilliseconds(500));
 
         // Reap child process (non-blocking to avoid hanging the UI thread)
         if (pid > 0)
@@ -359,8 +515,6 @@ public sealed class UnixPty : IPty
             catch { }
             _childPid = -1;
         }
-
-        try { _cts.Dispose(); } catch { }
     }
 
     #region Helpers
@@ -400,6 +554,38 @@ public sealed class UnixPty : IPty
         return "/bin/sh";
     }
 
+    private static int[] GetSignalsToResetForExec()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return
+            [
+                1,  // SIGHUP
+                2,  // SIGINT
+                3,  // SIGQUIT
+                13, // SIGPIPE
+                15, // SIGTERM
+                18, // SIGTSTP
+                20, // SIGCHLD
+                21, // SIGTTIN
+                22, // SIGTTOU
+            ];
+        }
+
+        return
+        [
+            1,  // SIGHUP
+            2,  // SIGINT
+            3,  // SIGQUIT
+            13, // SIGPIPE
+            15, // SIGTERM
+            17, // SIGCHLD
+            20, // SIGTSTP
+            21, // SIGTTIN
+            22, // SIGTTOU
+        ];
+    }
+
     private static IntPtr AllocNativeString(string s)
     {
         var bytes = Encoding.UTF8.GetBytes(s);
@@ -411,21 +597,22 @@ public sealed class UnixPty : IPty
 
     private static unsafe void FreeNative(
         IntPtr shell, IntPtr cwd, IntPtr termName, IntPtr termValue,
-        byte** argv, List<IntPtr> nativeArguments, List<(IntPtr key, IntPtr val)> envPairs)
+        byte** argv, IntPtr[] nativeArguments, (IntPtr key, IntPtr val)[] envPairs)
     {
         Marshal.FreeHGlobal(shell);
         if (cwd != IntPtr.Zero) Marshal.FreeHGlobal(cwd);
         Marshal.FreeHGlobal(termName);
         Marshal.FreeHGlobal(termValue);
-        for (int i = 0; i < nativeArguments.Count; i++)
+        for (int i = 0; i < nativeArguments.Length; i++)
         {
             Marshal.FreeHGlobal(nativeArguments[i]);
         }
         Marshal.FreeHGlobal((IntPtr)argv);
-        foreach (var (key, val) in envPairs)
+        for (int i = 0; i < envPairs.Length; i++)
         {
-            Marshal.FreeHGlobal(key);
-            Marshal.FreeHGlobal(val);
+            (IntPtr key, IntPtr val) pair = envPairs[i];
+            Marshal.FreeHGlobal(pair.key);
+            Marshal.FreeHGlobal(pair.val);
         }
     }
 
@@ -512,6 +699,9 @@ public sealed class UnixPty : IPty
 
     private const int WNOHANG = 1;
     private const int SIGWINCH = 28;
+    private const int ErrnoInterrupted = 4;
+    private const int ErrnoWouldBlockLinux = 11;
+    private const int ErrnoWouldBlockBsd = 35;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WinSize
@@ -520,6 +710,18 @@ public sealed class UnixPty : IPty
         public ushort ws_col;
         public ushort ws_xpixel;
         public ushort ws_ypixel;
+    }
+
+    private struct PendingWrite
+    {
+        public PendingWrite(byte[] buffer)
+        {
+            Buffer = buffer;
+            Offset = 0;
+        }
+
+        public byte[] Buffer;
+        public int Offset;
     }
 
     private static int ForkPty(out int masterFd, ref WinSize winSize)

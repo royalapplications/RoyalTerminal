@@ -26,6 +26,8 @@ internal sealed class GhosttyActionDispatcher
     private readonly Action<int>? _searchTotalChanged;
     private readonly Action<int>? _searchSelectedChanged;
     private readonly Action? _toggleBackgroundOpacity;
+    private int _renderDispatchScheduled;
+    private int _renderDispatchDirty;
 
     public GhosttyActionDispatcher(
         Func<GhosttySurface?> surfaceAccessor,
@@ -91,7 +93,7 @@ internal sealed class GhosttyActionDispatcher
                 }
 
                 case GhosttyActionTag.Render:
-                    Dispatcher.UIThread.Post(_renderRequested);
+                    RequestRenderDispatch();
                     break;
 
                 case GhosttyActionTag.MouseOverLink:
@@ -239,5 +241,41 @@ internal sealed class GhosttyActionDispatcher
             < int.MinValue => int.MinValue,
             _ => (int)number,
         };
+    }
+
+    private void RequestRenderDispatch()
+    {
+        Volatile.Write(ref _renderDispatchDirty, 1);
+        if (Interlocked.CompareExchange(ref _renderDispatchScheduled, 1, 0) != 0)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(ProcessRenderDispatch, DispatcherPriority.Background);
+    }
+
+    private void ProcessRenderDispatch()
+    {
+        bool scheduleContinuation = false;
+        try
+        {
+            Volatile.Write(ref _renderDispatchDirty, 0);
+            _renderRequested();
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _renderDispatchScheduled, 0);
+
+            if (Volatile.Read(ref _renderDispatchDirty) != 0 &&
+                Interlocked.CompareExchange(ref _renderDispatchScheduled, 1, 0) == 0)
+            {
+                scheduleContinuation = true;
+            }
+        }
+
+        if (scheduleContinuation)
+        {
+            Dispatcher.UIThread.Post(ProcessRenderDispatch, DispatcherPriority.Background);
+        }
     }
 }

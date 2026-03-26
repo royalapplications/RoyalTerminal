@@ -144,6 +144,66 @@ public sealed class TerminalMouseProtocolTests
     }
 
     [Fact]
+    public void Encoder_SgrButtonMotion_UsesMotionOffset()
+    {
+        TerminalMouseModeState mode = new(
+            TerminalMouseTrackingMode.ButtonMotion,
+            TerminalMouseEncoding.Sgr);
+        TerminalPointerEvent pointerEvent = new(
+            Kind: TerminalPointerEventKind.Move,
+            X: 0,
+            Y: 0,
+            Button: TerminalMouseButton.Left,
+            Action: TerminalInputAction.Press,
+            Modifiers: TerminalModifiers.None);
+
+        bool encoded = TerminalMouseProtocolEncoder.TryEncode(pointerEvent, mode, column: 8, row: 6, out byte[] sequence);
+
+        Assert.True(encoded);
+        Assert.Equal("\x1b[<32;8;6M", Encoding.ASCII.GetString(sequence));
+    }
+
+    [Fact]
+    public void Encoder_SgrAnyMotionWithoutButton_UsesNoButtonMotionCode()
+    {
+        TerminalMouseModeState mode = new(
+            TerminalMouseTrackingMode.AnyMotion,
+            TerminalMouseEncoding.Sgr);
+        TerminalPointerEvent pointerEvent = new(
+            Kind: TerminalPointerEventKind.Move,
+            X: 0,
+            Y: 0,
+            Button: TerminalMouseButton.None,
+            Action: TerminalInputAction.Press,
+            Modifiers: TerminalModifiers.None);
+
+        bool encoded = TerminalMouseProtocolEncoder.TryEncode(pointerEvent, mode, column: 9, row: 6, out byte[] sequence);
+
+        Assert.True(encoded);
+        Assert.Equal("\x1b[<35;9;6M", Encoding.ASCII.GetString(sequence));
+    }
+
+    [Fact]
+    public void Encoder_UrxvtPress_UsesDecimalEncoding()
+    {
+        TerminalMouseModeState mode = new(
+            TerminalMouseTrackingMode.PressRelease,
+            TerminalMouseEncoding.Urxvt);
+        TerminalPointerEvent pointerEvent = new(
+            Kind: TerminalPointerEventKind.Button,
+            X: 0,
+            Y: 0,
+            Button: TerminalMouseButton.Left,
+            Action: TerminalInputAction.Press,
+            Modifiers: TerminalModifiers.None);
+
+        bool encoded = TerminalMouseProtocolEncoder.TryEncode(pointerEvent, mode, column: 10, row: 4, out byte[] sequence);
+
+        Assert.True(encoded);
+        Assert.Equal("\x1b[32;10;4M", Encoding.ASCII.GetString(sequence));
+    }
+
+    [Fact]
     public void Encoder_DefaultProtocol_ClampsCoordinatesToLegacyLimit()
     {
         TerminalMouseModeState mode = new(
