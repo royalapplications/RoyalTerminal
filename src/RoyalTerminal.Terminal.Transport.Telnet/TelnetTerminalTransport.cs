@@ -246,7 +246,10 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
 
                 if (responses.Count > 0)
                 {
-                    WriteTelnetBytes(responses);
+                    // The peer can negotiate immediately after accept/connect. Use the
+                    // live read-loop stream so early replies are not dropped before the
+                    // transport fields are fully published on StartAsync.
+                    WriteTelnetBytes(stream, responses);
                 }
 
                 if (output.Count > 0)
@@ -484,6 +487,17 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
         WriteInputDirect(payload);
     }
 
+    private void WriteTelnetBytes(NetworkStream stream, List<byte> bytes)
+    {
+        if (bytes.Count == 0)
+        {
+            return;
+        }
+
+        byte[] payload = bytes.ToArray();
+        WriteInputDirect(stream, payload);
+    }
+
     private static byte[] EscapeIac(ReadOnlySpan<byte> input)
     {
         int escapeCount = 0;
@@ -535,6 +549,15 @@ public sealed class TelnetTerminalTransport : ITerminalTransport
                 return;
             }
 
+            stream.Write(payload, 0, payload.Length);
+            stream.Flush();
+        }
+    }
+
+    private void WriteInputDirect(NetworkStream stream, byte[] payload)
+    {
+        lock (_sync)
+        {
             stream.Write(payload, 0, payload.Length);
             stream.Flush();
         }
