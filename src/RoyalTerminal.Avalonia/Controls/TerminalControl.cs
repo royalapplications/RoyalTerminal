@@ -13,6 +13,7 @@ using Avalonia.Input.TextInput;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using SkiaSharp;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
@@ -259,6 +260,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private bool _pendingTransportOutputDrainScheduled;
     private bool _pendingTransportUiDrainScheduled;
     private bool _acceptPendingTransportOutput = true;
+    private readonly List<SuspendedAncestorKeyBinding> _suspendedAncestorKeyBindings = [];
+    private bool _reservedAncestorKeyBindingsSuppressed;
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -527,6 +530,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             .WithCursorColor(ColorToArgb(DefaultForeground));
 
         InitializeTerminal();
+        RegisterKeyboardFallbackHandlers();
         RegisterPointerFallbackHandlers();
     }
 
@@ -1001,6 +1005,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnDetachedFromVisualTree(e);
         EnsureCursorBlinkTimerRunning(false);
+        RestoreReservedAncestorKeyBindings();
     }
 
     private void EnsurePresenter()
@@ -1279,13 +1284,65 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     #region Keyboard Input
 
+    private void RegisterKeyboardFallbackHandlers()
+    {
+        AddHandler(KeyDownEvent, OnKeyDownTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(KeyUpEvent, OnKeyUpTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(TextInputEvent, OnTextInputTunnel, RoutingStrategies.Tunnel, handledEventsToo: true);
+    }
+
+    private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
+    {
+        _ = sender;
+        if (!e.Handled)
+        {
+            return;
+        }
+
+        HandleKeyDownCore(e);
+    }
+
+    private void OnKeyUpTunnel(object? sender, KeyEventArgs e)
+    {
+        _ = sender;
+        if (!e.Handled)
+        {
+            return;
+        }
+
+        HandleKeyUpCore(e);
+    }
+
+    private void OnTextInputTunnel(object? sender, TextInputEventArgs e)
+    {
+        _ = sender;
+        if (!e.Handled)
+        {
+            return;
+        }
+
+        HandleTextInputCore(e);
+    }
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        base.OnKeyDown(e);
-
-        if (IsUrgentTransportControlChord(e.Key, e.KeyModifiers))
+        if (e.Handled)
         {
-            ArmUrgentControlVtResponseSuppressionWindow();
+            return;
+        }
+
+        HandleKeyDownCore(e);
+        if (!e.Handled)
+        {
+            base.OnKeyDown(e);
+        }
+    }
+
+    private void HandleKeyDownCore(KeyEventArgs e)
+    {
+        if (TryHandleUrgentTransportControlKeyDown(e))
+        {
+            return;
         }
 
         if (TerminalShortcutDispatcher.TryHandleCommonShortcut(
@@ -1308,10 +1365,45 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
     }
 
+    private bool TryHandleUrgentTransportControlKeyDown(KeyEventArgs e)
+    {
+        if (!IsUrgentTransportControlChord(e.Key, e.KeyModifiers))
+        {
+            return false;
+        }
+
+        ArmUrgentControlVtResponseSuppressionWindow();
+
+        if (!HasTransportOrDirectPtyInputPath() && TerminalSessionService.InputSink is null)
+        {
+            return false;
+        }
+
+        if (!TerminalInputAdapter.HandleKeyDown(e, TerminalSessionService, _vtProcessor))
+        {
+            return false;
+        }
+
+        e.Handled = true;
+        return true;
+    }
+
     protected override void OnKeyUp(KeyEventArgs e)
     {
-        base.OnKeyUp(e);
+        if (e.Handled)
+        {
+            return;
+        }
 
+        HandleKeyUpCore(e);
+        if (!e.Handled)
+        {
+            base.OnKeyUp(e);
+        }
+    }
+
+    private void HandleKeyUpCore(KeyEventArgs e)
+    {
         if (TerminalInputAdapter.HandleKeyUp(e, TerminalSessionService))
         {
             e.Handled = true;
@@ -1320,8 +1412,20 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     protected override void OnTextInput(TextInputEventArgs e)
     {
-        base.OnTextInput(e);
+        if (e.Handled)
+        {
+            return;
+        }
 
+        HandleTextInputCore(e);
+        if (!e.Handled)
+        {
+            base.OnTextInput(e);
+        }
+    }
+
+    private void HandleTextInputCore(TextInputEventArgs e)
+    {
         if (TerminalInputAdapter.HandleTextInput(e, TerminalSessionService))
         {
             e.Handled = true;
@@ -1606,6 +1710,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnGotFocus(GotFocusEventArgs e)
     {
         base.OnGotFocus(e);
+        SuppressReservedAncestorKeyBindings();
         Endpoint?.SetFocus(true);
         SendFocusEventIfNeeded(focused: true);
         _cursorBlinkVisiblePhase = true;
@@ -1616,6 +1721,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnLostFocus(RoutedEventArgs e)
     {
         base.OnLostFocus(e);
+        RestoreReservedAncestorKeyBindings();
         Endpoint?.SetFocus(false);
         SendFocusEventIfNeeded(focused: false);
         EnsureCursorBlinkTimerRunning(false);
@@ -2070,10 +2176,102 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return payload.Length == 1 && payload[0] is 0x03 or 0x1A or 0x1C;
     }
 
+    private void SuppressReservedAncestorKeyBindings()
+    {
+        if (_reservedAncestorKeyBindingsSuppressed)
+        {
+            return;
+        }
+
+        _suspendedAncestorKeyBindings.Clear();
+
+        foreach (Visual visual in this.GetVisualAncestors())
+        {
+            if (visual is not InputElement inputElement)
+            {
+                continue;
+            }
+
+            IList<KeyBinding> keyBindings = inputElement.KeyBindings;
+            for (int index = keyBindings.Count - 1; index >= 0; index--)
+            {
+                KeyBinding keyBinding = keyBindings[index];
+                if (!IsReservedTerminalKeyBinding(keyBinding))
+                {
+                    continue;
+                }
+
+                _suspendedAncestorKeyBindings.Add(new SuspendedAncestorKeyBinding(inputElement, keyBinding, index));
+                keyBindings.RemoveAt(index);
+            }
+        }
+
+        _reservedAncestorKeyBindingsSuppressed = true;
+    }
+
+    private void RestoreReservedAncestorKeyBindings()
+    {
+        if (!_reservedAncestorKeyBindingsSuppressed)
+        {
+            return;
+        }
+
+        for (int i = _suspendedAncestorKeyBindings.Count - 1; i >= 0; i--)
+        {
+            SuspendedAncestorKeyBinding suspended = _suspendedAncestorKeyBindings[i];
+            IList<KeyBinding> keyBindings = suspended.Owner.KeyBindings;
+            if (keyBindings.Contains(suspended.Binding))
+            {
+                continue;
+            }
+
+            int restoreIndex = Math.Min(suspended.Index, keyBindings.Count);
+            keyBindings.Insert(restoreIndex, suspended.Binding);
+        }
+
+        _suspendedAncestorKeyBindings.Clear();
+        _reservedAncestorKeyBindingsSuppressed = false;
+    }
+
+    private bool IsReservedTerminalKeyBinding(KeyBinding keyBinding)
+    {
+        if (keyBinding.Gesture is not KeyGesture gesture)
+        {
+            return false;
+        }
+
+        return IsUrgentTransportControlChord(gesture.Key, gesture.KeyModifiers) ||
+               IsConfiguredTerminalShortcutGesture(ShortcutConfiguration.CopyGestures, gesture) ||
+               IsConfiguredTerminalShortcutGesture(ShortcutConfiguration.PasteGestures, gesture) ||
+               IsConfiguredTerminalShortcutGesture(ShortcutConfiguration.CutGestures, gesture) ||
+               IsConfiguredTerminalShortcutGesture(ShortcutConfiguration.SelectAllGestures, gesture);
+    }
+
+    private static bool IsConfiguredTerminalShortcutGesture(
+        IReadOnlyList<TerminalShortcutGesture> gestures,
+        KeyGesture gesture)
+    {
+        for (int i = 0; i < gestures.Count; i++)
+        {
+            TerminalShortcutGesture configured = gestures[i];
+            if (configured.Key == gesture.Key && configured.Modifiers == gesture.KeyModifiers)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void OnVtProcessorBell()
     {
         Dispatcher.UIThread.Post(() => Bell?.Invoke(this, EventArgs.Empty));
     }
+
+    private readonly record struct SuspendedAncestorKeyBinding(
+        InputElement Owner,
+        KeyBinding Binding,
+        int Index);
 
     private void OnVtProcessorTitleChanged(string title)
     {
