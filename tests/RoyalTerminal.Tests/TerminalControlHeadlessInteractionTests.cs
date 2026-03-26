@@ -4,6 +4,7 @@
 
 using System.Text;
 using System.Diagnostics;
+using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -110,6 +111,224 @@ public sealed class TerminalControlHeadlessInteractionTests
                 () => transport.Inputs.Any(static input => input.Length == 1 && input[0] == (byte)'x'),
                 TimeSpan.FromSeconds(2));
             Assert.True(textSent);
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_KeyboardInterrupt_FromHandledTunnelRouting_StillReachesTransportFallback()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            window.AddHandler(
+                InputElement.KeyDownEvent,
+                (_, e) =>
+                {
+                    if (e.Key == Key.C && e.KeyModifiers == KeyModifiers.Control)
+                    {
+                        e.Handled = true;
+                    }
+                },
+                RoutingStrategies.Tunnel,
+                handledEventsToo: false);
+
+            transport.ClearInputs();
+            window.KeyPressQwerty(PhysicalKey.C, RawInputModifiers.Control);
+
+            bool ctrlCSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(static input => input.Length == 1 && input[0] == 0x03),
+                TimeSpan.FromSeconds(2));
+            Assert.True(ctrlCSent);
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_TextInput_FromHandledTunnelRouting_StillReachesTransportFallback()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            window.AddHandler(
+                InputElement.TextInputEvent,
+                (_, e) =>
+                {
+                    if (string.Equals(e.Text, "x", StringComparison.Ordinal))
+                    {
+                        e.Handled = true;
+                    }
+                },
+                RoutingStrategies.Tunnel,
+                handledEventsToo: false);
+
+            transport.ClearInputs();
+            window.KeyTextInput("x");
+
+            bool textSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(static input => input.Length == 1 && input[0] == (byte)'x'),
+                TimeSpan.FromSeconds(2));
+            Assert.True(textSent);
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_KeyboardInterrupt_WithWindowScopedKeyBinding_StillReachesTransportFallback()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        bool keyBindingExecuted = false;
+        window.KeyBindings.Add(new KeyBinding
+        {
+            Gesture = new KeyGesture(Key.C, KeyModifiers.Control),
+            Command = new RecordingCommand(() => keyBindingExecuted = true),
+        });
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            transport.ClearInputs();
+            window.KeyPressQwerty(PhysicalKey.C, RawInputModifiers.Control);
+
+            bool ctrlCSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(static input => input.Length == 1 && input[0] == 0x03),
+                TimeSpan.FromSeconds(2));
+            Assert.True(ctrlCSent);
+            Assert.False(keyBindingExecuted, "Terminal input should preempt window-scoped key bindings for Ctrl+C when focused.");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_KeyboardSuspend_WithWindowScopedKeyBinding_StillReachesTransportFallback()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        bool keyBindingExecuted = false;
+        window.KeyBindings.Add(new KeyBinding
+        {
+            Gesture = new KeyGesture(Key.Z, KeyModifiers.Control),
+            Command = new RecordingCommand(() => keyBindingExecuted = true),
+        });
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            transport.ClearInputs();
+            window.KeyPressQwerty(PhysicalKey.Z, RawInputModifiers.Control);
+
+            bool ctrlZSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(static input => input.Length == 1 && input[0] == 0x1A),
+                TimeSpan.FromSeconds(2));
+            Assert.True(ctrlZSent);
+            Assert.False(keyBindingExecuted, "Terminal input should preempt window-scoped key bindings for Ctrl+Z when focused.");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_KeyboardInterrupt_WithActiveSelection_StillReachesTransportFallback()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.NotNull(control.Renderer);
+            control.Renderer!.SelectionStart = (1, 1);
+            control.Renderer.SelectionEnd = (4, 1);
+            Assert.True(control.HasSelection);
+
+            transport.ClearInputs();
+            window.KeyPressQwerty(PhysicalKey.C, RawInputModifiers.Control);
+
+            bool ctrlCSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(static input => input.Length == 1 && input[0] == 0x03),
+                TimeSpan.FromSeconds(2));
+            Assert.True(ctrlCSent);
         }
         finally
         {
@@ -2559,6 +2778,35 @@ public sealed class TerminalControlHeadlessInteractionTests
         {
             ActivatedLinks.Add(uri);
             return true;
+        }
+    }
+
+    private sealed class RecordingCommand : ICommand
+    {
+        private readonly Action _execute;
+
+        public RecordingCommand(Action execute)
+        {
+            _execute = execute;
+        }
+
+        public event EventHandler? CanExecuteChanged;
+
+        public bool CanExecute(object? parameter)
+        {
+            _ = parameter;
+            return true;
+        }
+
+        public void Execute(object? parameter)
+        {
+            _ = parameter;
+            _execute();
+        }
+
+        public void RaiseCanExecuteChanged()
+        {
+            CanExecuteChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
