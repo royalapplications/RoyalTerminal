@@ -2828,13 +2828,28 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
         }
 
-        if (!_mouseModeTracker.ModeState.IsMouseReportingEnabled ||
-            !HasTransportOrDirectPtyInputPath())
+        if (!HasTransportOrDirectPtyInputPath())
         {
             return false;
         }
 
-        if (!TryResolvePointerCell(pointerEvent.X, pointerEvent.Y, out int column, out int row))
+        if (_vtProcessor is ITerminalPointerSequenceEncoderSource nativeEncoder &&
+            _renderer is not null &&
+            nativeEncoder.TryEncodePointer(
+                pointerEvent,
+                new TerminalPointerEncodingContext(
+                    ScreenWidthPx: Math.Max(1, (int)Math.Round(Bounds.Width)),
+                    ScreenHeightPx: Math.Max(1, (int)Math.Round(Bounds.Height)),
+                    CellWidthPx: Math.Max(1, (int)Math.Ceiling(_renderer.CellWidth)),
+                    CellHeightPx: Math.Max(1, (int)Math.Ceiling(_renderer.CellHeight))),
+                out byte[] nativeEncoded))
+        {
+            TerminalSessionService.SendInput(nativeEncoded);
+            return true;
+        }
+
+        if (!_mouseModeTracker.ModeState.IsMouseReportingEnabled ||
+            !TryResolvePointerCell(pointerEvent.X, pointerEvent.Y, out int column, out int row))
         {
             return false;
         }
@@ -2855,6 +2870,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool IsMouseReportingActiveForInput()
     {
+        if (_vtProcessor is ITerminalMouseReportingStateSource nativeSource &&
+            nativeSource.MouseReportingEnabled)
+        {
+            return TerminalSessionService.InputSink is not null ||
+                HasTransportOrDirectPtyInputPath();
+        }
+
         if (!_mouseModeTracker.ModeState.IsMouseReportingEnabled)
         {
             return false;

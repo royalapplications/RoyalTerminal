@@ -45,6 +45,20 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
             }
 
             int kittyKeyboardFlags = ResolveKittyKeyboardFlags(sessionService, vtProcessor);
+            if (!ShouldPreferTextInputForKeyDown(e, modeState, kittyKeyboardFlags) &&
+                ResolveKeySequenceEncoderSource(sessionService, vtProcessor) is ITerminalKeySequenceEncoderSource nativeEncoder &&
+                nativeEncoder.TryEncodeKey(
+                    new TerminalKeyEncodingRequest(
+                        e.Key.ToString(),
+                        TerminalInputAction.Press,
+                        e.KeySymbol,
+                        ConvertTerminalModifiers(e.KeyModifiers)),
+                    out byte[] nativeSequence))
+            {
+                sessionService.SendInput(nativeSequence);
+                return true;
+            }
+
             if (TerminalKeySequenceEncoder.TryEncode(e.Key, e.KeyModifiers, modeState, kittyKeyboardFlags, out string sequence))
             {
                 sessionService.SendInput(sequence);
@@ -73,6 +87,19 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
                         out string win32Sequence))
                 {
                     sessionService.SendInput(win32Sequence);
+                    return true;
+                }
+
+                if (ResolveKeySequenceEncoderSource(sessionService, vtProcessor: null) is ITerminalKeySequenceEncoderSource nativeEncoder &&
+                    nativeEncoder.TryEncodeKey(
+                        new TerminalKeyEncodingRequest(
+                            e.Key.ToString(),
+                            TerminalInputAction.Release,
+                            null,
+                            ConvertTerminalModifiers(e.KeyModifiers)),
+                        out byte[] nativeSequence))
+                {
+                    sessionService.SendInput(nativeSequence);
                     return true;
                 }
             }
@@ -170,6 +197,18 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         return 0;
     }
 
+    private static ITerminalKeySequenceEncoderSource? ResolveKeySequenceEncoderSource(
+        ITerminalSessionService sessionService,
+        IVtProcessor? vtProcessor)
+    {
+        if (vtProcessor is ITerminalKeySequenceEncoderSource encoderFromProcessor)
+        {
+            return encoderFromProcessor;
+        }
+
+        return sessionService.ModeSource as ITerminalKeySequenceEncoderSource;
+    }
+
     private static bool ShouldUseWin32InputMode(in TerminalModeState modeState)
     {
         return OperatingSystem.IsWindows() && modeState.Win32InputMode;
@@ -180,5 +219,30 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         return sessionService.Endpoint is not null ||
                sessionService.HasActiveTransport ||
                sessionService.HasPty;
+    }
+
+    private static bool ShouldPreferTextInputForKeyDown(
+        KeyEventArgs e,
+        in TerminalModeState modeState,
+        int kittyKeyboardFlags)
+    {
+        if (string.IsNullOrEmpty(e.KeySymbol))
+        {
+            return false;
+        }
+
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) ||
+            e.KeyModifiers.HasFlag(KeyModifiers.Alt) ||
+            e.KeyModifiers.HasFlag(KeyModifiers.Meta))
+        {
+            return false;
+        }
+
+        return !TerminalKeySequenceEncoder.TryEncode(
+            e.Key,
+            e.KeyModifiers,
+            modeState,
+            kittyKeyboardFlags,
+            out _);
     }
 }

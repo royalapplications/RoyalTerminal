@@ -476,6 +476,138 @@ public sealed class TerminalInputAdapterTests
     }
 
     [Fact]
+    public async Task HandleKeyDown_WithNativeKeyEncoder_UsesNativeSequence()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new()
+        {
+            EncodedKeySequence = "native-down"u8.ToArray(),
+        };
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Up,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.Equal("native-down", Encoding.UTF8.GetString(transport.LastInput!));
+        Assert.Single(vtProcessor.EncodedKeyRequests);
+        Assert.Equal("Up", vtProcessor.EncodedKeyRequests[0].KeyId);
+        Assert.Equal(TerminalInputAction.Press, vtProcessor.EncodedKeyRequests[0].Action);
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyUp_WithNativeKeyEncoder_UsesModeSourceDelegate()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new()
+        {
+            EncodedKeySequence = "native-up"u8.ToArray(),
+        };
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.A,
+            KeyModifiers = KeyModifiers.Shift,
+        };
+
+        bool handled = adapter.HandleKeyUp(keyEventArgs, sessionService);
+
+        Assert.True(handled);
+        Assert.Equal("native-up", Encoding.UTF8.GetString(transport.LastInput!));
+        Assert.Single(vtProcessor.EncodedKeyRequests);
+        Assert.Equal("A", vtProcessor.EncodedKeyRequests[0].KeyId);
+        Assert.Equal(TerminalInputAction.Release, vtProcessor.EncodedKeyRequests[0].Action);
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithNativeKeyEncoder_PlainPrintableKey_DefersToTextInput()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new()
+        {
+            EncodedKeySequence = "native-a"u8.ToArray(),
+        };
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.A,
+            KeyModifiers = KeyModifiers.None,
+            KeySymbol = "a",
+        };
+
+        bool keyHandled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.False(keyHandled);
+        Assert.Empty(vtProcessor.EncodedKeyRequests);
+        Assert.Null(transport.LastInput);
+
+        TextInputEventArgs textInputEventArgs = new()
+        {
+            Text = "a",
+        };
+
+        bool textHandled = adapter.HandleTextInput(textInputEventArgs, sessionService);
+
+        Assert.True(textHandled);
+        Assert.Equal("a", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
     public async Task HandleKeyDown_ApplicationCursorMode_WithModifiers_UsesCsiEncoding()
     {
         DefaultTerminalInputAdapter adapter = new();
@@ -1215,7 +1347,7 @@ public sealed class TerminalInputAdapterTests
         }
     }
 
-    private sealed class FakeVtProcessor : IVtProcessor, IKittyKeyboardStateSource
+    private sealed class FakeVtProcessor : IVtProcessor, IKittyKeyboardStateSource, ITerminalKeySequenceEncoderSource
     {
         private TerminalModeState _modeState = new(
             CursorVisible: true,
@@ -1224,6 +1356,8 @@ public sealed class TerminalInputAdapterTests
             AlternateScreen: false,
             BracketedPaste: false);
         private int _kittyKeyboardFlags;
+        public List<TerminalKeyEncodingRequest> EncodedKeyRequests { get; } = [];
+        public byte[]? EncodedKeySequence { get; init; }
 
         public int CursorCol => 0;
         public int CursorRow => 0;
@@ -1272,6 +1406,19 @@ public sealed class TerminalInputAdapterTests
         public void SetKittyKeyboardFlags(int flags)
         {
             _kittyKeyboardFlags = flags < 0 ? 0 : flags;
+        }
+
+        public bool TryEncodeKey(in TerminalKeyEncodingRequest request, out byte[] sequence)
+        {
+            EncodedKeyRequests.Add(request);
+            if (EncodedKeySequence is not null)
+            {
+                sequence = EncodedKeySequence;
+                return true;
+            }
+
+            sequence = [];
+            return false;
         }
 
         public void Dispose()
