@@ -1,4 +1,4 @@
 [submodule "external/ghostty"]
 	path = external/ghostty
 	url = https://github.com/wieslawsoltes/ghostty.git
-	branch = ghosttysharp/screen-api
+	branch = royalterminal-ghostty-upstream-vt-migration
