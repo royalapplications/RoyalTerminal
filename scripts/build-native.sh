@@ -10,8 +10,10 @@
 #   - Zig 0.15.2+ (https://ziglang.org/download/)
 #   - Git submodule initialized: git submodule update --init
 #
-# The script builds libghostty, libghostty-terminal, and libghostty-renderer-capi
-# and copies them to the correct NuGet runtime package location.
+# The script builds libghostty plus the official libghostty-vt API library,
+# and also builds the transitional libghostty-terminal and
+# libghostty-renderer-capi libraries used by compatibility and renderer interop
+# paths. Artifacts are copied to the native NuGet runtime package location.
 
 set -euo pipefail
 
@@ -164,6 +166,32 @@ fi
 
 info "Built library: $BUILT_LIB"
 
+# Locate the official libghostty-vt shared library emitted by the upstream build.
+VT_LIB_NAME=""
+case "$PLATFORM" in
+    osx) VT_LIB_NAME="libghostty-vt.dylib" ;;
+    linux) VT_LIB_NAME="libghostty-vt.so" ;;
+esac
+
+VT_LIB=""
+if [ -n "$VT_LIB_NAME" ]; then
+    if [ -f "zig-out/lib/$VT_LIB_NAME" ]; then
+        VT_LIB="zig-out/lib/$VT_LIB_NAME"
+    else
+        VT_FOUND=$(find zig-out -name "$VT_LIB_NAME" 2>/dev/null | head -1)
+        if [ -n "$VT_FOUND" ]; then
+            VT_LIB="$VT_FOUND"
+        fi
+    fi
+fi
+
+if [ -z "$VT_LIB" ]; then
+    warn "Official libghostty-vt artifact not found in zig-out/."
+    warn "Managed wrappers for GhosttyTerminal/GhosttyRenderState will require manual native library setup."
+else
+    info "Built official VT library: $VT_LIB"
+fi
+
 # Copy to NuGet native package directory
 case "$PLATFORM" in
     osx) NATIVE_RUNTIME_DIR="$ROOT_DIR/src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/$RID/native" ;;
@@ -179,12 +207,27 @@ mkdir -p "$NATIVE_OUT_DIR/$RID"
 cp "$BUILT_LIB" "$NATIVE_OUT_DIR/$RID/"
 info "Copied to: $NATIVE_OUT_DIR/$RID/$LIB_NAME"
 
+if [ -n "$VT_LIB" ]; then
+    cp -L "$VT_LIB" "$NATIVE_RUNTIME_DIR/$VT_LIB_NAME"
+    info "Copied to: $NATIVE_RUNTIME_DIR/$VT_LIB_NAME"
+
+    cp -L "$VT_LIB" "$NATIVE_OUT_DIR/$RID/$VT_LIB_NAME"
+    info "Copied to: $NATIVE_OUT_DIR/$RID/$VT_LIB_NAME"
+fi
+
 # Copy header
 HEADER_DEST="$NATIVE_OUT_DIR/include"
 mkdir -p "$HEADER_DEST"
 if [ -f "include/ghostty.h" ]; then
     cp "include/ghostty.h" "$HEADER_DEST/"
     info "Copied header: $HEADER_DEST/ghostty.h"
+fi
+
+if [ -d "include/ghostty/vt" ]; then
+    mkdir -p "$HEADER_DEST/ghostty"
+    rm -rf "$HEADER_DEST/ghostty/vt"
+    cp -R "include/ghostty/vt" "$HEADER_DEST/ghostty/"
+    info "Copied official VT headers: $HEADER_DEST/ghostty/vt"
 fi
 
 # Build static library too if requested

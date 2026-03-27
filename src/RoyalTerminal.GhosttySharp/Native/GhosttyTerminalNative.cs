@@ -6,6 +6,9 @@
 // It provides full terminal emulation (VT parsing, screen state, cursor, modes)
 // without requiring the macOS-only embedding surface.
 //
+// This library remains a transitional compatibility layer while callers migrate
+// to the official libghostty-vt GhosttyTerminal + GhosttyRenderState APIs.
+//
 // Build the native library: native/ghostty-terminal/build.sh release
 
 using System.Runtime.InteropServices;
@@ -339,6 +342,7 @@ public static partial class GhosttyTerminalNative
 
     private static nint LoadNativeLibraryHandle()
     {
+        NativeLibraryLoader.Initialize();
         return NativeLibrary.TryLoad(
             LibName,
             typeof(GhosttyTerminalNative).Assembly,

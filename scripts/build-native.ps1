@@ -11,8 +11,10 @@
 #   - Git submodule initialized: git submodule update --init
 #   - Windows symlink support (Developer Mode enabled or elevated shell)
 #
-# The script builds libghostty, libghostty-terminal, and ghostty-renderer-capi as shared libraries
-# and copies them to the correct NuGet runtime package location.
+# The script builds the Ghostty shared library plus the official ghostty-vt API
+# library, and also builds the transitional ghostty-terminal and
+# ghostty-renderer-capi shared libraries. Artifacts are copied to the correct
+# NuGet runtime package location.
 #
 # NOTE: Ghostty currently does not officially support Windows builds.
 # This script is provided for future compatibility.
@@ -309,6 +311,15 @@ try {
 
     Write-Info "Built library: $builtLib"
 
+    $vtLibName = "ghostty-vt.dll"
+    $vtLib = Resolve-ZigArtifactPath -FileName $vtLibName
+    if ($vtLib) {
+        Write-Info "Built official VT library: $vtLib"
+    } else {
+        Write-Warn "Official ghostty-vt.dll artifact not found under zig-out\."
+        Write-Warn "Managed wrappers for GhosttyTerminal/GhosttyRenderState will require manual native library setup."
+    }
+
     # Copy to NuGet directory
     $nativeRuntimeDir = Join-Path $RootDir "src\RoyalTerminal.GhosttySharp.Native.Win64\runtimes\$RID\native"
     New-Item -ItemType Directory -Force -Path $nativeRuntimeDir | Out-Null
@@ -321,6 +332,14 @@ try {
     Copy-Item $builtLib $outputDir
     Write-Info "Copied to: $outputDir\$LibName"
 
+    if ($vtLib) {
+        Copy-Item $vtLib (Join-Path $nativeRuntimeDir $vtLibName)
+        Write-Info "Copied to: $nativeRuntimeDir\$vtLibName"
+
+        Copy-Item $vtLib (Join-Path $outputDir $vtLibName)
+        Write-Info "Copied to: $outputDir\$vtLibName"
+    }
+
     # Copy header
     $headerSrc = Join-Path $GhosttyDir "include\ghostty.h"
     $headerDest = Join-Path $NativeOutDir "include"
@@ -328,6 +347,19 @@ try {
         New-Item -ItemType Directory -Force -Path $headerDest | Out-Null
         Copy-Item $headerSrc $headerDest
         Write-Info "Copied header: $headerDest\ghostty.h"
+    }
+
+    $vtHeadersSrc = Join-Path $GhosttyDir "include\ghostty\vt"
+    if (Test-Path $vtHeadersSrc) {
+        $ghosttyHeaderDest = Join-Path $headerDest "ghostty"
+        $vtHeaderDest = Join-Path $ghosttyHeaderDest "vt"
+        New-Item -ItemType Directory -Force -Path $ghosttyHeaderDest | Out-Null
+        if (Test-Path $vtHeaderDest) {
+            Remove-Item -Path $vtHeaderDest -Recurse -Force
+        }
+
+        Copy-Item $vtHeadersSrc $ghosttyHeaderDest -Recurse
+        Write-Info "Copied official VT headers: $vtHeaderDest"
     }
 
     # ═══════════════════════════════════════════════════════════════════

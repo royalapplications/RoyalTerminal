@@ -25,6 +25,10 @@ public static partial class GhosttyVtNative
         OutOfMemory = -1,
         /// <summary><c>InvalidValue</c> enum value.</summary>
         InvalidValue = -2,
+        /// <summary><c>OutOfSpace</c> enum value.</summary>
+        OutOfSpace = -3,
+        /// <summary><c>NoValue</c> enum value.</summary>
+        NoValue = -4,
     }
 
     // ──────────────────────────── Key Action ────────────────────────
@@ -206,6 +210,130 @@ public static partial class GhosttyVtNative
         ArrowRight,
         /// <summary><c>ArrowUp</c> enum value.</summary>
         ArrowUp,
+        /// <summary><c>NumLock</c> enum value.</summary>
+        NumLock,
+        /// <summary><c>Numpad0</c> enum value.</summary>
+        Numpad0,
+        /// <summary><c>Numpad1</c> enum value.</summary>
+        Numpad1,
+        /// <summary><c>Numpad2</c> enum value.</summary>
+        Numpad2,
+        /// <summary><c>Numpad3</c> enum value.</summary>
+        Numpad3,
+        /// <summary><c>Numpad4</c> enum value.</summary>
+        Numpad4,
+        /// <summary><c>Numpad5</c> enum value.</summary>
+        Numpad5,
+        /// <summary><c>Numpad6</c> enum value.</summary>
+        Numpad6,
+        /// <summary><c>Numpad7</c> enum value.</summary>
+        Numpad7,
+        /// <summary><c>Numpad8</c> enum value.</summary>
+        Numpad8,
+        /// <summary><c>Numpad9</c> enum value.</summary>
+        Numpad9,
+        /// <summary><c>NumpadAdd</c> enum value.</summary>
+        NumpadAdd,
+        /// <summary><c>NumpadBackspace</c> enum value.</summary>
+        NumpadBackspace,
+        /// <summary><c>NumpadClear</c> enum value.</summary>
+        NumpadClear,
+        /// <summary><c>NumpadClearEntry</c> enum value.</summary>
+        NumpadClearEntry,
+        /// <summary><c>NumpadComma</c> enum value.</summary>
+        NumpadComma,
+        /// <summary><c>NumpadDecimal</c> enum value.</summary>
+        NumpadDecimal,
+        /// <summary><c>NumpadDivide</c> enum value.</summary>
+        NumpadDivide,
+        /// <summary><c>NumpadEnter</c> enum value.</summary>
+        NumpadEnter,
+        /// <summary><c>NumpadEqual</c> enum value.</summary>
+        NumpadEqual,
+        /// <summary><c>NumpadMemoryAdd</c> enum value.</summary>
+        NumpadMemoryAdd,
+        /// <summary><c>NumpadMemoryClear</c> enum value.</summary>
+        NumpadMemoryClear,
+        /// <summary><c>NumpadMemoryRecall</c> enum value.</summary>
+        NumpadMemoryRecall,
+        /// <summary><c>NumpadMemoryStore</c> enum value.</summary>
+        NumpadMemoryStore,
+        /// <summary><c>NumpadMemorySubtract</c> enum value.</summary>
+        NumpadMemorySubtract,
+        /// <summary><c>NumpadMultiply</c> enum value.</summary>
+        NumpadMultiply,
+        /// <summary><c>NumpadParenLeft</c> enum value.</summary>
+        NumpadParenLeft,
+        /// <summary><c>NumpadParenRight</c> enum value.</summary>
+        NumpadParenRight,
+        /// <summary><c>NumpadSubtract</c> enum value.</summary>
+        NumpadSubtract,
+        /// <summary><c>NumpadSeparator</c> enum value.</summary>
+        NumpadSeparator,
+        /// <summary><c>NumpadUp</c> enum value.</summary>
+        NumpadUp,
+        /// <summary><c>NumpadDown</c> enum value.</summary>
+        NumpadDown,
+        /// <summary><c>NumpadRight</c> enum value.</summary>
+        NumpadRight,
+        /// <summary><c>NumpadLeft</c> enum value.</summary>
+        NumpadLeft,
+        /// <summary><c>NumpadBegin</c> enum value.</summary>
+        NumpadBegin,
+        /// <summary><c>NumpadHome</c> enum value.</summary>
+        NumpadHome,
+        /// <summary><c>NumpadEnd</c> enum value.</summary>
+        NumpadEnd,
+        /// <summary><c>NumpadInsert</c> enum value.</summary>
+        NumpadInsert,
+        /// <summary><c>NumpadDelete</c> enum value.</summary>
+        NumpadDelete,
+        /// <summary><c>NumpadPageUp</c> enum value.</summary>
+        NumpadPageUp,
+        /// <summary><c>NumpadPageDown</c> enum value.</summary>
+        NumpadPageDown,
+        /// <summary><c>Escape</c> enum value.</summary>
+        Escape,
+        /// <summary><c>F1</c> enum value.</summary>
+        F1,
+        /// <summary><c>F2</c> enum value.</summary>
+        F2,
+        /// <summary><c>F3</c> enum value.</summary>
+        F3,
+        /// <summary><c>F4</c> enum value.</summary>
+        F4,
+        /// <summary><c>F5</c> enum value.</summary>
+        F5,
+        /// <summary><c>F6</c> enum value.</summary>
+        F6,
+        /// <summary><c>F7</c> enum value.</summary>
+        F7,
+        /// <summary><c>F8</c> enum value.</summary>
+        F8,
+        /// <summary><c>F9</c> enum value.</summary>
+        F9,
+        /// <summary><c>F10</c> enum value.</summary>
+        F10,
+        /// <summary><c>F11</c> enum value.</summary>
+        F11,
+        /// <summary><c>F12</c> enum value.</summary>
+        F12,
+        /// <summary><c>F13</c> enum value.</summary>
+        F13,
+        /// <summary><c>F14</c> enum value.</summary>
+        F14,
+        /// <summary><c>F15</c> enum value.</summary>
+        F15,
+        /// <summary><c>F16</c> enum value.</summary>
+        F16,
+        /// <summary><c>F17</c> enum value.</summary>
+        F17,
+        /// <summary><c>F18</c> enum value.</summary>
+        F18,
+        /// <summary><c>F19</c> enum value.</summary>
+        F19,
+        /// <summary><c>F20</c> enum value.</summary>
+        F20,
     }
 
     // ──────────────────────────── Mods ───────────────────────────────
@@ -386,7 +514,6 @@ public static partial class GhosttyVtNative
     public static partial GhosttyVtMods KeyEventGetConsumedMods(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_composing")]
-    [return: MarshalAs(UnmanagedType.U1)]
     public static partial void KeyEventSetComposing(nint keyEvent, [MarshalAs(UnmanagedType.U1)] bool composing);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_composing")]
@@ -415,6 +542,9 @@ public static partial class GhosttyVtNative
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_setopt")]
     public static unsafe partial void KeyEncoderSetopt(nint encoder, int option, void* value);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_setopt_from_terminal")]
+    public static partial void KeyEncoderSetoptFromTerminal(nint encoder, nint terminal);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_encode")]
     public static unsafe partial GhosttyResult KeyEncoderEncode(

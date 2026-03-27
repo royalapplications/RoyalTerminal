@@ -16,6 +16,12 @@ public static class NativeLibraryLoader
 {
     private static bool s_initialized;
     private static readonly object s_lock = new();
+    private static readonly Dictionary<string, string> s_libraryFileNames = new(StringComparer.Ordinal)
+    {
+        [GhosttyNative.LibraryName] = GetLibraryFileName(GhosttyNative.LibraryName),
+        ["ghostty-vt"] = GetLibraryFileName("ghostty-vt"),
+        ["ghostty-terminal"] = GetLibraryFileName("ghostty-terminal"),
+    };
 
     /// <summary>
     /// Initializes the native library resolver. Safe to call multiple times.
@@ -35,7 +41,7 @@ public static class NativeLibraryLoader
 
     private static nint ResolveLibrary(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
-        if (libraryName != GhosttyNative.LibraryName)
+        if (!s_libraryFileNames.TryGetValue(libraryName, out string? libraryFileName))
             return nint.Zero;
 
         // Try standard resolution first
@@ -44,7 +50,6 @@ public static class NativeLibraryLoader
 
         // Try platform-specific paths
         var rid = GetRuntimeIdentifier();
-        var libraryFileName = GetLibraryFileName();
 
         // Search paths in priority order
         string[] searchPaths =
@@ -100,12 +105,12 @@ public static class NativeLibraryLoader
         return "unknown";
     }
 
-    private static string GetLibraryFileName()
+    private static string GetLibraryFileName(string libraryName)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            return "ghostty.dll";
+            return $"{libraryName}.dll";
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            return "libghostty.dylib";
-        return "libghostty.so";
+            return $"lib{libraryName}.dylib";
+        return $"lib{libraryName}.so";
     }
 }
