@@ -453,6 +453,74 @@ public sealed class GhosttyComponentTests
         AssertModeStateParity(processor);
     }
 
+    [Fact]
+    public void GhosttyVtProcessor_TryEncodeKey_UsesOfficialNativeEncoder()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(80, 24, 0);
+        using GhosttyVtProcessor processor = new(screen);
+
+        processor.Process("\x1b[?1h"u8);
+
+        bool encoded = processor.TryEncodeKey(
+            new TerminalKeyEncodingRequest(
+                KeyId: "Up",
+                Action: TerminalInputAction.Press,
+                Text: null,
+                Modifiers: TerminalModifiers.None),
+            out byte[] sequence);
+
+        Assert.True(encoded);
+        Assert.Equal("\x1BOA", System.Text.Encoding.ASCII.GetString(sequence));
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_TryEncodePointer_SupportsSgrPixelsMode()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(80, 24, 0);
+        using GhosttyVtProcessor processor = new(screen);
+
+        processor.Process("\x1b[?1000h\x1b[?1016h"u8);
+
+        bool encoded = processor.TryEncodePointer(
+            new TerminalPointerEvent(
+                Kind: TerminalPointerEventKind.Button,
+                X: 10,
+                Y: 20,
+                Button: TerminalMouseButton.Left,
+                Action: TerminalInputAction.Press,
+                Modifiers: TerminalModifiers.None),
+            new TerminalPointerEncodingContext(
+                ScreenWidthPx: 640,
+                ScreenHeightPx: 384,
+                CellWidthPx: 8,
+                CellHeightPx: 16),
+            out byte[] sequence);
+
+        Assert.True(encoded);
+        Assert.Equal("\x1b[<0;10;20M", System.Text.Encoding.ASCII.GetString(sequence));
+        Assert.True(processor.MouseReportingEnabled);
+    }
+
     [Theory]
     [InlineData(0, TerminalUnderlineStyle.None, false)]
     [InlineData(1, TerminalUnderlineStyle.Single, true)]
