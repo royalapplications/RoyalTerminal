@@ -139,7 +139,7 @@ const InteractiveHandler = struct {
         self: *InteractiveHandler,
         comptime action: Action.Tag,
         value: Action.Value(action),
-    ) !void {
+    ) void {
         switch (action) {
             // ── Query actions that need responses ──────────────────
             .enquiry => {}, // Ghostty default: no enquiry response
@@ -155,11 +155,11 @@ const InteractiveHandler = struct {
             .bell => self.notifyBell(),
             .window_title => {
                 self.notifyTitle(value.title);
-                try self.readonly.vt(action, value);
+                self.readonly.vt(action, value);
             },
 
             // ── Terminal-modifying actions — delegate to readonly ──
-            else => try self.readonly.vt(action, value),
+            else => self.readonly.vt(action, value),
         }
     }
 
@@ -386,7 +386,7 @@ export fn ghostty_terminal_process(handle: ?*TerminalHandle, data: ?[*]const u8,
     const d = data orelse return;
     if (len == 0) return;
 
-    h.stream.nextSlice(d[0..len]) catch {};
+    h.stream.nextSlice(d[0..len]);
 }
 
 /// Returns the number of columns.
@@ -684,7 +684,7 @@ export fn ghostty_terminal_self_test() u32 {
 
     // Test 1: Process complete SGR sequence + text in one chunk
     const test1 = "\x1B[37mHello";
-    handle.stream.nextSlice(test1) catch {};
+    handle.stream.nextSlice(test1);
 
     // Read cell contents from row 0
     const screen = handle.terminal.screens.active;
@@ -720,12 +720,12 @@ export fn ghostty_terminal_self_test() u32 {
 
     // Test 2: Split sequence across two chunks
     // Reset cursor to next row
-    handle.stream.nextSlice("\r\n") catch {};
+    handle.stream.nextSlice("\r\n");
 
     // Send ESC [ in first chunk
-    handle.stream.nextSlice("\x1B[") catch {};
+    handle.stream.nextSlice("\x1B[");
     // Send 31m + text in second chunk
-    handle.stream.nextSlice("31mRed") catch {};
+    handle.stream.nextSlice("31mRed");
 
     // Read row 1
     const pin2 = screen.pages.pin(.{ .viewport = .{ .x = 0, .y = 1 } }) orelse {
