@@ -8,10 +8,12 @@ using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
@@ -1656,6 +1658,58 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_NativeTransportEcho_RendersImmediately_AfterTypedInput()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(nativeProviders),
+            VtProcessorPreference.Native);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            byte[] before = CaptureFramePng(window);
+
+            window.KeyTextInput("x");
+
+            bool echoed = await WaitUntilAsync(
+                () => ContainsScreenText(control, "x"),
+                TimeSpan.FromSeconds(2));
+            Assert.True(echoed);
+
+            byte[] after = CaptureFramePng(window);
+            Assert.False(
+                before.AsSpan().SequenceEqual(after),
+                "Expected typed native transport echo to trigger a visible frame update immediately.");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_PasteAsync_BlockUnsafePolicy_BlocksMultilinePaste()
     {
         FakeTransport transport = new();
@@ -1786,6 +1840,17 @@ public class TerminalControlTests
         };
     }
 
+    private static byte[] CaptureFramePng(Window window)
+    {
+        Dispatcher.UIThread.RunJobs();
+        Bitmap? frame = window.CaptureRenderedFrame();
+        Assert.NotNull(frame);
+
+        using MemoryStream stream = new();
+        frame!.Save(stream);
+        return stream.ToArray();
+    }
+
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
     {
         DateTime deadline = DateTime.UtcNow + timeout;
@@ -1802,6 +1867,33 @@ public class TerminalControlTests
 
         Dispatcher.UIThread.RunJobs();
         return predicate();
+    }
+
+    private static bool ContainsScreenText(TerminalControl control, string needle)
+    {
+        TerminalScreen? screen = control.Screen;
+        if (screen is null)
+        {
+            return false;
+        }
+
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            TerminalRow terminalRow = screen.GetViewportRow(row);
+            char[] chars = new char[terminalRow.Columns];
+            for (int col = 0; col < terminalRow.Columns; col++)
+            {
+                int codepoint = terminalRow[col].Codepoint;
+                chars[col] = codepoint <= 0 ? ' ' : codepoint <= 0x7F ? (char)codepoint : '?';
+            }
+
+            if (new string(chars).Contains(needle, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private sealed class CountingTerminalScrollService : ITerminalScrollService
