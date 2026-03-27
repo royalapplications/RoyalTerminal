@@ -60,7 +60,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const int ResumePendingOutputQueueBytes = MaxPendingOutputQueueBytes / 2;
     private const int MaxPendingOutputQueueChunks = 256;
     private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
-    private static readonly DispatcherPriority PendingOutputDrainPriority = DispatcherPriority.SystemIdle;
+    private static readonly DispatcherPriority ManagedPendingOutputDrainPriority = DispatcherPriority.SystemIdle;
+    private static readonly DispatcherPriority NativePendingOutputDrainPriority = DispatcherPriority.Background;
     private static readonly long UrgentControlVtResponseSuppressionWindowTicks =
         (long)(TimeSpan.FromSeconds(1).TotalSeconds * Stopwatch.Frequency);
 
@@ -255,7 +256,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _pendingTransportOutputBytes;
     private int _pendingTransportUiBatchBytes;
     private int _pendingTransportUiBatchChunks;
-    private int _pendingOutputUiNotificationScheduled;
     private long _suppressTransportVtResponsesUntilTimestamp;
     private bool _pendingTransportOutputDrainScheduled;
     private bool _pendingTransportUiDrainScheduled;
@@ -1207,6 +1207,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             TerminalScrollService.HandleOutput(_scrollData, null, AutoScroll, _presenter, RaiseScrollInvalidated);
             UpdateRendererCursorForViewport();
+            NotifyOutputUiUpdatedOnUiThread();
             return;
         }
 
@@ -1220,6 +1221,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 raiseScrollInvalidated: static () => { });
             UpdateRendererCursorForViewportLocked();
         }
+
+        NotifyOutputUiUpdatedOnUiThread();
     }
 
     private bool ProcessOutputCore(ReadOnlySpan<byte> data)
@@ -2557,7 +2560,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (scheduleUiDrain)
         {
-            Dispatcher.UIThread.Post(DrainPendingTransportOutputUiBatches, PendingOutputDrainPriority);
+            Dispatcher.UIThread.Post(DrainPendingTransportOutputUiBatches, ManagedPendingOutputDrainPriority);
         }
     }
 
@@ -2629,12 +2632,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (scheduleContinuation)
         {
-            Dispatcher.UIThread.Post(DrainPendingTransportOutputUiBatches, PendingOutputDrainPriority);
-        }
-
-        if (processedChunks > 0)
-        {
-            ScheduleOutputUiNotifications();
+            Dispatcher.UIThread.Post(DrainPendingTransportOutputUiBatches, ManagedPendingOutputDrainPriority);
         }
     }
 
@@ -2687,8 +2685,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _pendingTransportUiDrainScheduled = false;
             Monitor.PulseAll(_pendingTransportOutputSync);
         }
-
-        Interlocked.Exchange(ref _pendingOutputUiNotificationScheduled, 0);
     }
 
     private void SetPendingTransportOutputAcceptance(bool acceptOutput)
@@ -2710,7 +2706,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        Dispatcher.UIThread.Post(DrainPendingTransportOutput, PendingOutputDrainPriority);
+        Dispatcher.UIThread.Post(DrainPendingTransportOutput, NativePendingOutputDrainPriority);
     }
 
     private void SchedulePendingTransportOutputDrainIfNeeded()
@@ -2761,19 +2757,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                GetPendingTransportBacklogChunksLocked() <= ResumePendingOutputQueueChunks;
     }
 
-    private void ScheduleOutputUiNotifications()
+    private void NotifyOutputUiUpdatedOnUiThread()
     {
-        if (Interlocked.CompareExchange(ref _pendingOutputUiNotificationScheduled, 1, 0) != 0)
-        {
-            return;
-        }
-
-        Dispatcher.UIThread.Post(DispatchOutputUiNotifications, PendingOutputDrainPriority);
-    }
-
-    private void DispatchOutputUiNotifications()
-    {
-        Interlocked.Exchange(ref _pendingOutputUiNotificationScheduled, 0);
         _presenter?.Invalidate();
         RaiseScrollInvalidated();
     }
