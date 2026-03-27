@@ -77,7 +77,6 @@ jobs:
         run: |
           set -euo pipefail
           required=(
-            "libghostty.dylib"
             "libghostty-vt.dylib"
             "libghostty-terminal.dylib"
             "libghostty-renderer-capi.dylib"
@@ -405,9 +404,9 @@ jobs:
           }
 
           check_files "src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-arm64/native" \
-            "libghostty.dylib" "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
+            "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
           check_files "src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-x64/native" \
-            "libghostty.dylib" "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
+            "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
           check_files "src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-x64/native" \
             "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
           check_files "src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-arm64/native" \
