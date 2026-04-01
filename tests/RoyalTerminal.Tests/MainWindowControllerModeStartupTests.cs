@@ -170,7 +170,7 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
-    public async Task Controller_GhosttyRenderedCpuBackend_UsesStandaloneNativeVtControl()
+    public async Task Controller_GhosttyRenderedCpuBackend_UsesStandaloneVtControl()
     {
         MainWindowViewModel viewModel = new();
         viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
@@ -212,7 +212,10 @@ public sealed class MainWindowControllerModeStartupTests
             Control newContainer = terminalHost.Children[^1];
             ScrollViewer scrollViewer = Assert.IsType<ScrollViewer>(newContainer);
             TerminalControl standalone = Assert.IsType<TerminalControl>(scrollViewer.Content);
-            Assert.Equal(VtProcessorPreference.Native, standalone.VtProcessorPreference);
+            VtProcessorPreference expectedPreference = viewModel.NativeVtAvailable
+                ? VtProcessorPreference.Native
+                : VtProcessorPreference.Managed;
+            Assert.Equal(expectedPreference, standalone.VtProcessorPreference);
 
             StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
