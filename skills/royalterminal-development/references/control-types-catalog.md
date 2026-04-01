@@ -60,7 +60,7 @@ Key responsibilities:
 
 - base: `Control, IDisposable`
 - file: `src/RoyalTerminal.Avalonia.Ghostty/Controls/GhosttyRenderedTerminalControl.cs`
-- role: composited Ghostty rendered mode (`CpuCellRenderer` or `TextureInterop`)
+- role: composited Ghostty rendered mode (texture interop only)
 
 ## Demo Window Host
 
@@ -90,7 +90,7 @@ Key responsibilities:
 Ghostty-specific controls:
 - require embedded Ghostty app initialization path
 - should be capability-gated in sample/host logic
-- rendered control can switch between CPU and interop rendering modes
+- rendered control is texture-interop only; CPU Ghostty-backed rendering is handled through `TerminalControl` + native VT
 
 MVVM rule reminder:
 - keep code-behind minimal and route behavior through view-model interactions/services

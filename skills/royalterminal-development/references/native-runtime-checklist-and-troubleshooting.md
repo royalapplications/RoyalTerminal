@@ -45,7 +45,7 @@ If one feature fails while others work, focus on that feature-specific native li
 | `DllNotFoundException` | missing file or probe-path miss | runtime folder contents + probe order |
 | `EntryPointNotFoundException` | binary/API version mismatch | stale native library in output |
 | `BadImageFormatException` | architecture mismatch | process RID/arch vs native binary arch |
-| native VT unavailable | `ghostty-terminal` missing or incompatible | `native/<rid>/` + runtime copy targets |
+| native VT unavailable | `ghostty-vt` missing or incompatible | `native/<rid>/` + runtime copy targets |
 | texture interop unavailable | `ghostty-renderer-capi` unresolved | renderer env override path |
 | SSH/transport unaffected but embedded mode missing | only `ghostty` load failing | core loader resolution path |
 

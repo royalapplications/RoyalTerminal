@@ -138,20 +138,14 @@ mkdir -p \
 )
 
 (
-  cd native/ghostty-terminal
-  zig build -Doptimize=ReleaseFast
-)
-
-(
   cd native/ghostty-renderer-capi
   zig build -Doptimize=ReleaseFast
 )
 
 find external/ghostty/zig-out -name "libghostty*.so*" -exec cp -L {} artifacts/linux-x64/native/ \;
-find native/ghostty-terminal/zig-out -name "libghostty-terminal.so*" -exec cp -L {} artifacts/linux-x64/native/ \; || true
 find native/ghostty-renderer-capi/zig-out -name "libghostty-renderer-capi.so*" -exec cp -L {} artifacts/linux-x64/native/ \; || true
 
-for base in libghostty libghostty-vt libghostty-terminal libghostty-renderer-capi; do
+for base in libghostty libghostty-vt libghostty-renderer-capi; do
   if [ ! -f "artifacts/linux-x64/native/${base}.so" ]; then
     candidate="$(find artifacts/linux-x64/native -maxdepth 1 -type f -name "${base}.so*" | head -n1 || true)"
     if [ -n "${candidate}" ]; then

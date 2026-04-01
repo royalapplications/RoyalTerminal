@@ -376,6 +376,7 @@ public sealed class MainWindowViewModel : ReactiveObject
 
             this.RaiseAndSetIfChanged(ref _useTextureInterop, value);
             this.RaisePropertyChanged(nameof(RenderedBackendButtonText));
+            RaiseSessionConfigurationVisibilityChanged();
         }
     }
 
@@ -399,6 +400,8 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public string RenderedBackendButtonText
         => UseTextureInterop ? "Backend: Interop (Preview)" : "Backend: CPU";
+
+    public bool CanToggleRenderedBackend => GhosttyAvailable;
 
     public bool IsCaptureActive
     {
@@ -603,7 +606,7 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public bool ShowSessionTransportPicker => true;
 
-    public bool IsSessionTransportConfigEnabled => !UseRenderedControl && !UseNativeControl;
+    public bool IsSessionTransportConfigEnabled => !UsesEmbeddedSessionRuntime;
 
     public bool ShowSessionTransportHint => !IsSessionTransportConfigEnabled;
 
@@ -859,6 +862,8 @@ public sealed class MainWindowViewModel : ReactiveObject
         => ShowSshSessionFields &&
            string.Equals(SelectedSshAuthMode.Id, SshAuthModeOption.AgentModeId, StringComparison.Ordinal);
 
+    private bool UsesEmbeddedSessionRuntime => UseNativeControl || (UseRenderedControl && UseTextureInterop);
+
     public string SshHost
     {
         get => _sshHost;
@@ -1037,9 +1042,14 @@ public sealed class MainWindowViewModel : ReactiveObject
     internal void SetTerminalCapabilities(TerminalModeCapabilities capabilities)
     {
         _terminalCapabilities = capabilities;
-        GhosttyAvailable = capabilities.EmbeddedGhosttyNativeAvailable
-            || capabilities.EmbeddedGhosttyRenderedAvailable;
+        GhosttyAvailable = capabilities.EmbeddedGhosttyNativeAvailable;
         NativeVtAvailable = capabilities.NativeVtAvailable;
+        if (!GhosttyAvailable && UseTextureInterop)
+        {
+            UseTextureInterop = false;
+        }
+
+        this.RaisePropertyChanged(nameof(CanToggleRenderedBackend));
         SetRenderMode(_activeRenderMode);
     }
 
@@ -1275,6 +1285,12 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private IObservable<Unit> ToggleRenderedBackend()
     {
+        if (!CanToggleRenderedBackend)
+        {
+            SetStatus("TextureInterop backend requires embedded Ghostty support.");
+            return Observable.Return(Unit.Default);
+        }
+
         UseTextureInterop = !UseTextureInterop;
         return ApplyRenderedBackendInteraction
             .Handle(UseTextureInterop)

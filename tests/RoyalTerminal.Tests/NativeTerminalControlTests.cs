@@ -71,6 +71,19 @@ public class NativeTerminalControlTests
     }
 
     [AvaloniaFact]
+    public void RenderedControl_RenderingMode_DefaultsToTextureInterop()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        GhosttyRenderedTerminalControl control = new();
+
+        Assert.Equal(GhosttyRenderedTerminalRenderingMode.TextureInterop, control.RenderingMode);
+    }
+
+    [AvaloniaFact]
     public async Task NativeControl_PublicApi_WithoutSurface_DoesNotThrow()
     {
         if (!OperatingSystem.IsMacOS())

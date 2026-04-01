@@ -63,11 +63,10 @@ Enum:
 - `src/RoyalTerminal.Avalonia.Ghostty/Controls/Common/GhosttyRenderedTerminalRenderingMode.cs`
 
 Values:
-- `CpuCellRenderer`
 - `TextureInterop`
 
 Demo toggle mapping:
-- `UseTextureInterop=false` -> `CpuCellRenderer`
+- `UseTextureInterop=false` -> CPU-rendered Ghostty-backed `TerminalControl` path
 - `UseTextureInterop=true` -> `TextureInterop`
 
 Runtime label mapping in demo:
@@ -173,7 +172,7 @@ terminal.VtProcessorPreference = VtProcessorPreference.Native;
 
 ```csharp
 _viewModel.ToggleRenderedBackendCommand.Execute().Subscribe();
-// switches between CpuCellRenderer and TextureInterop for new rendered tabs
+// switches between the CPU Ghostty VT path and TextureInterop for new rendered tabs
 ```
 
 ### Environment toggle usage

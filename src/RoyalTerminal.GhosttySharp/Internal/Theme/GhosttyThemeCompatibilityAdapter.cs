@@ -26,20 +26,11 @@ internal static class GhosttyThemeCompatibilityAdapter
             try
             {
                 string overrideText = BuildGhosttyThemeOverrides(theme);
-                string tempPath = Path.Combine(
-                    Path.GetTempPath(),
-                    $"royalterminal-theme-{Guid.NewGuid():N}.ghostty");
-
-                try
-                {
-                    File.WriteAllText(tempPath, overrideText, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-                    merged.LoadFile(tempPath);
-                    merged.Finalize_();
-                }
-                finally
-                {
-                    TryDeleteTempFile(tempPath);
-                }
+                GhosttyConfigOverlay.ApplyText(
+                    merged,
+                    overrideText,
+                    filePrefix: "royalterminal-theme");
+                merged.Finalize_();
 
                 return merged;
             }
@@ -184,20 +175,5 @@ internal static class GhosttyThemeCompatibilityAdapter
         byte g = (byte)((color >> 8) & 0xFF);
         byte b = (byte)(color & 0xFF);
         return $"#{r:X2}{g:X2}{b:X2}";
-    }
-
-    private static void TryDeleteTempFile(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch
-        {
-            // Ignore temp cleanup errors.
-        }
     }
 }

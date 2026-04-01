@@ -37,14 +37,16 @@ Type:
 - `src/RoyalTerminal.Terminal.Vt.Ghostty/Terminal/GhosttyVtProcessor.cs`
 
 Native bridge:
-- `GhosttyTerminalNative`
-- `src/RoyalTerminal.GhosttySharp/Native/GhosttyTerminalNative.cs`
+- `GhosttyTerminal`
+- `GhosttyRenderState`
+- `src/RoyalTerminal.GhosttySharp/GhosttyTerminal.cs`
+- `src/RoyalTerminal.GhosttySharp/GhosttyRenderState.cs`
 
 Characteristics:
-- wraps `libghostty-terminal` native processor
-- uses native callback function pointers for response/bell/title
-- synchronizes native state back into managed `TerminalScreen`
-- supports pixel-aware resize via native API
+- wraps official `libghostty-vt` terminal and render-state APIs
+- uses official native effect/response callbacks
+- synchronizes native render state back into managed `TerminalScreen`
+- supports pixel-aware resize and viewport/state queries via upstream APIs
 
 Availability probe:
 - `GhosttyVtProcessor.IsAvailable()` delegates to native availability checks
@@ -74,11 +76,11 @@ IVtProcessorFactory factory = new DefaultVtProcessorFactory(providers);
 
 | Aspect | `BasicVtProcessor` | `GhosttyVtProcessor` |
 |---|---|---|
-| dependency | managed only | requires `libghostty-terminal` |
+| dependency | managed only | requires `libghostty-vt` |
 | availability | always | platform/native-library dependent |
 | mode flags source | managed parser state | native terminal state query |
-| response generation | managed logic | native callback from ghostty terminal |
-| screen sync | direct managed writes | native readback into managed screen |
+| response generation | managed logic | official native effect/response callbacks |
+| screen sync | direct managed writes | official render-state readback into managed screen |
 
 ## Performance And Reliability Notes
 

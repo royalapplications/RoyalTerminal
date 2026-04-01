@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>RoyalTerminal.GhosttySharp.Native.Win64</PackageId>
-    <Description>Native Ghostty libraries for Windows (x64 and arm64). Provides ghostty.dll, ghostty-vt.dll, ghostty-terminal.dll, and ghostty-renderer-capi.dll shared libraries required by RoyalTerminal.GhosttySharp on Windows.</Description>
+    <Description>Native Ghostty libraries for Windows (x64 and arm64). Provides ghostty.dll, ghostty-vt.dll, and ghostty-renderer-capi.dll shared libraries required by RoyalTerminal.GhosttySharp on Windows.</Description>
     <PackageTags>ghostty;terminal;native;windows;x64;arm64</PackageTags>
 
     <!-- This is a native-only package, no managed assembly -->

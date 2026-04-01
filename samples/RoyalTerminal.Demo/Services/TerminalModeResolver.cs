@@ -6,7 +6,7 @@ namespace RoyalTerminal.Demo.Services;
 
 internal readonly record struct TerminalModeCapabilities(
     bool EmbeddedGhosttyNativeAvailable,
-    bool EmbeddedGhosttyRenderedAvailable,
+    bool GhosttyRenderedAvailable,
     bool NativeVtAvailable,
     bool ManagedVtAvailable)
 {
@@ -14,7 +14,7 @@ internal readonly record struct TerminalModeCapabilities(
     {
         return new TerminalModeCapabilities(
             EmbeddedGhosttyNativeAvailable: embeddedGhosttyAvailable,
-            EmbeddedGhosttyRenderedAvailable: embeddedGhosttyAvailable,
+            GhosttyRenderedAvailable: embeddedGhosttyAvailable || nativeVtAvailable,
             NativeVtAvailable: nativeVtAvailable,
             ManagedVtAvailable: true);
     }
@@ -91,7 +91,7 @@ internal sealed class TerminalModeResolver : ITerminalModeResolver
     {
         return mode switch
         {
-            TerminalRenderMode.GhosttyRendered => capabilities.EmbeddedGhosttyRenderedAvailable,
+            TerminalRenderMode.GhosttyRendered => capabilities.GhosttyRenderedAvailable,
             TerminalRenderMode.GhosttyNative => capabilities.EmbeddedGhosttyNativeAvailable,
             TerminalRenderMode.NativeVt => capabilities.NativeVtAvailable,
             TerminalRenderMode.ManagedVt => capabilities.ManagedVtAvailable,

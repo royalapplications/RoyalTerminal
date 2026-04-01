@@ -233,6 +233,45 @@ public class GhosttyVtTerminalTests
         Assert.EndsWith("M", encoded);
     }
 
+    [Fact]
+    public void OfficialTerminal_SplitEscapeSequenceAcrossWrites_DoesNotLeakControlBytes()
+    {
+        if (!GhosttyVtNative.IsAvailable())
+        {
+            return;
+        }
+
+        using GhosttyTerminal terminal = new(80, 24);
+        using GhosttyRenderState renderState = new();
+
+        terminal.Write("\u001b["u8);
+        terminal.Write("31mRed"u8);
+        renderState.Update(terminal);
+
+        Assert.Equal("Red", ReadLeadingRowText(renderState, 3));
+    }
+
+    [Fact]
+    public void OfficialTerminal_Resize_PreservesCellsAndAcceptsAdditionalWrites()
+    {
+        if (!GhosttyVtNative.IsAvailable())
+        {
+            return;
+        }
+
+        using GhosttyTerminal terminal = new(80, 24);
+        using GhosttyRenderState renderState = new();
+
+        terminal.Write("Before"u8);
+        terminal.Resize(120, 40);
+        terminal.Write(" After"u8);
+        renderState.Update(terminal);
+
+        Assert.Equal((ushort)120, terminal.GetColumns());
+        Assert.Equal((ushort)40, terminal.GetRows());
+        Assert.Equal("Before After", ReadLeadingRowText(renderState, 12));
+    }
+
     private static unsafe uint GetCellCodepoint(ulong cell)
     {
         uint codepoint = 0;

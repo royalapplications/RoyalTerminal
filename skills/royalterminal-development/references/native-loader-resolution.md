@@ -75,8 +75,7 @@ No equivalent explicit override variable is currently defined for `ghostty` core
 
 Availability APIs:
 - `Ghostty.Initialize()` (returns `false` on not found/incompatible native lib)
-- `GhosttyTerminalNative.IsAvailable()`
-- `GhosttyVtProcessor.IsAvailable()` (wraps terminal native availability)
+- `GhosttyVtProcessor.IsAvailable()` (wraps official `libghostty-vt` availability)
 
 Common exception signals before graceful fallbacks:
 - `DllNotFoundException`

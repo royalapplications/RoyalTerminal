@@ -197,14 +197,8 @@ jobs:
             zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-xcframework=false -Demit-macos-app=false -Dtarget=x86_64-macos
           fi
 
-      - name: Build ghostty-terminal
-        working-directory: native/ghostty-terminal
-        run: |
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            zig build -Doptimize=ReleaseFast
-          else
-            zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos
-          fi
+      - name: Materialize libghostty.dylib
+        run: ./scripts/ensure-macos-libghostty.sh external/ghostty
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
@@ -219,9 +213,6 @@ jobs:
         run: |
           mkdir -p artifacts/osx-${{ matrix.arch }}/native
           find external/ghostty/zig-out -name "*.dylib" -exec cp -L {} artifacts/osx-${{ matrix.arch }}/native/ \;
-          if [ -f native/ghostty-terminal/zig-out/lib/libghostty-terminal.dylib ]; then
-            cp -L native/ghostty-terminal/zig-out/lib/libghostty-terminal.dylib artifacts/osx-${{ matrix.arch }}/native/
-          fi
           if [ -f native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib ]; then
             cp -L native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib artifacts/osx-${{ matrix.arch }}/native/
           fi
@@ -232,8 +223,8 @@ jobs:
           set -euo pipefail
           artifact_dir="artifacts/osx-${{ matrix.arch }}/native"
           required=(
+            "libghostty.dylib"
             "libghostty-vt.dylib"
-            "libghostty-terminal.dylib"
             "libghostty-renderer-capi.dylib"
           )
           for file in "${required[@]}"; do
@@ -305,10 +296,6 @@ jobs:
             -fsys=glslang \
             -fsys=spirv-cross
 
-      - name: Build ghostty-terminal
-        working-directory: native/ghostty-terminal
-        run: zig build -Doptimize=ReleaseFast
-
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
         run: zig build -Doptimize=ReleaseFast
@@ -317,9 +304,8 @@ jobs:
         run: |
           mkdir -p artifacts/linux-${{ matrix.arch }}/native
           find external/ghostty/zig-out -name "libghostty*.so*" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \;
-          find native/ghostty-terminal/zig-out -name "libghostty-terminal.so*" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \; || true
           find native/ghostty-renderer-capi/zig-out -name "libghostty-renderer-capi.so*" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \; || true
-          for base in libghostty libghostty-vt libghostty-terminal libghostty-renderer-capi; do
+          for base in libghostty libghostty-vt libghostty-renderer-capi; do
             if [ ! -f "artifacts/linux-${{ matrix.arch }}/native/${base}.so" ]; then
               candidate="$(find "artifacts/linux-${{ matrix.arch }}/native" -maxdepth 1 -type f -name "${base}.so*" | head -n1 || true)"
               if [ -n "${candidate}" ]; then
@@ -336,7 +322,6 @@ jobs:
           required=(
             "libghostty.so"
             "libghostty-vt.so"
-            "libghostty-terminal.so"
             "libghostty-renderer-capi.so"
           )
           for file in "${required[@]}"; do
@@ -380,16 +365,6 @@ jobs:
           fi
           zig build -Doptimize=ReleaseFast -Dapp-runtime=none ${target}
 
-      - name: Build ghostty-terminal
-        working-directory: native/ghostty-terminal
-        shell: bash
-        run: |
-          target=""
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            target="-Dtarget=aarch64-windows"
-          fi
-          zig build -Doptimize=ReleaseFast ${target}
-
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
         shell: bash
@@ -407,11 +382,9 @@ jobs:
           find external/ghostty/zig-out -name "*.dll" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \;
           find external/ghostty/zig-out -name "*.lib" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \;
           find external/ghostty/zig-out -name "libghostty.so" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \; || true
-          find native/ghostty-terminal/zig-out -name "*ghostty-terminal*.dll" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \; || true
-          find native/ghostty-terminal/zig-out -name "*ghostty-terminal*.lib" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \; || true
           find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.dll" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \; || true
           find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.lib" -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \; || true
-          for base in ghostty ghostty-vt ghostty-terminal ghostty-renderer-capi; do
+          for base in ghostty ghostty-vt ghostty-renderer-capi; do
             if [ ! -f "artifacts/win-${{ matrix.arch }}/native/${base}.dll" ] && [ -f "artifacts/win-${{ matrix.arch }}/native/lib${base}.dll" ]; then
               cp -f "artifacts/win-${{ matrix.arch }}/native/lib${base}.dll" "artifacts/win-${{ matrix.arch }}/native/${base}.dll"
             fi
@@ -429,7 +402,6 @@ jobs:
           required=(
             "ghostty.dll"
             "ghostty-vt.dll"
-            "ghostty-terminal.dll"
             "ghostty-renderer-capi.dll"
           )
           for file in "${required[@]}"; do
@@ -560,17 +532,17 @@ jobs:
           }
 
           check_files "src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-arm64/native" \
-            "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
+            "libghostty-vt.dylib" "libghostty-renderer-capi.dylib"
           check_files "src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-x64/native" \
-            "libghostty-vt.dylib" "libghostty-terminal.dylib" "libghostty-renderer-capi.dylib"
+            "libghostty-vt.dylib" "libghostty-renderer-capi.dylib"
           check_files "src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-x64/native" \
-            "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
+            "libghostty.so" "libghostty-vt.so" "libghostty-renderer-capi.so"
           check_files "src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-arm64/native" \
-            "libghostty.so" "libghostty-vt.so" "libghostty-terminal.so" "libghostty-renderer-capi.so"
+            "libghostty.so" "libghostty-vt.so" "libghostty-renderer-capi.so"
           check_files "src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-x64/native" \
-            "ghostty.dll" "ghostty-vt.dll" "ghostty-terminal.dll" "ghostty-renderer-capi.dll"
+            "ghostty.dll" "ghostty-vt.dll" "ghostty-renderer-capi.dll"
           check_files "src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-arm64/native" \
-            "ghostty.dll" "ghostty-vt.dll" "ghostty-terminal.dll" "ghostty-renderer-capi.dll"
+            "ghostty.dll" "ghostty-vt.dll" "ghostty-renderer-capi.dll"
 
       # Pack managed packages
       - name: Pack RoyalTerminal.GhosttySharp

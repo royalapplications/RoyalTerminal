@@ -19,16 +19,15 @@ Primary scripts:
 Top-level responsibilities:
 - verify prerequisites (`zig`, initialized submodule)
 - build `ghostty` shared lib from `external/ghostty`
-- build standalone `ghostty-terminal`
+- build `ghostty-vt` from the same upstream Ghostty build graph
 - build `ghostty-renderer-capi`
-- do not build `libghostty-vt` (built via dedicated integration/validation scripts)
 - copy artifacts to runtime package directories and central `native/<rid>/`
 - copy native headers into `native/include/`
+- materialize macOS `libghostty.dylib` into `zig-out/lib` when upstream leaves it in `.zig-cache`
 
 ## Subcomponent Build Scripts
 
 Direct build entrypoints:
-- `native/ghostty-terminal/build.sh`
 - `native/ghostty-renderer-capi/build.sh`
 
 Supported modes (script-dependent):
@@ -44,6 +43,8 @@ Use direct scripts for focused component iteration; use top-level scripts for fu
 ## libghostty-vt Build Path
 
 Current repository scripts that build `libghostty-vt`:
+- `scripts/build-native.sh`
+- `scripts/build-native.ps1`
 - `scripts/run-integration-tests.sh` (`zig build lib-vt -Doptimize=ReleaseFast`)
 - `scripts/validate-macos.sh` (`zig build lib-vt -Doptimize=ReleaseFast`)
 
@@ -53,22 +54,19 @@ Output behavior in these scripts:
 - verify symbols and test usage through integration test runs
 
 Important:
-- top-level `scripts/build-native.sh` / `scripts/build-native.ps1` currently do not produce `libghostty-vt`.
-- when VT utility APIs or integration tests are in scope, run one of the scripts above (or equivalent manual `zig build lib-vt` flow) in addition to top-level native build scripts.
+- top-level `scripts/build-native.sh` / `scripts/build-native.ps1` now copy `libghostty-vt` into runtime/package folders.
+- when VT utility APIs or integration tests are in scope, still run one of the dedicated scripts above because they validate the VT library in addition to building it.
 
 ## What Gets Built
 
 Core output groups from top-level build scripts:
 - Ghostty embedded library (`ghostty`)
-- standalone terminal library (`ghostty-terminal`)
+- official VT library (`ghostty-vt`)
 - renderer interop library (`ghostty-renderer-capi`)
-
-Additional library from VT-focused script paths:
-- VT utility library (`ghostty-vt`)
 
 Header outputs copied to `native/include/` include:
 - `ghostty.h`
-- `ghostty_terminal.h`
+- `ghostty/vt/*`
 - `ghostty_renderer.h`
 
 ## Where Artifacts Are Copied
@@ -86,8 +84,8 @@ Top-level scripts copy each built library to:
 This dual copy supports both direct development checks and NuGet runtime packaging.
 
 `libghostty-vt` copy behavior:
-- `scripts/run-integration-tests.sh` and `scripts/validate-macos.sh` copy to `native/<rid>/`.
-- package runtime-folder copy for `libghostty-vt` is not handled by top-level build scripts today.
+- top-level native build scripts copy it into both `native/<rid>/` and runtime package folders
+- `scripts/run-integration-tests.sh` and `scripts/validate-macos.sh` also validate VT-specific behavior
 
 ## Platform Notes
 
@@ -125,11 +123,10 @@ bash scripts/build-native.sh --clean --release
 ### Component-only iteration loop
 
 ```bash
-cd native/ghostty-terminal
-bash build.sh release
-bash build.sh test
+cd external/ghostty
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none
 
-cd ../ghostty-renderer-capi
+cd ../../native/ghostty-renderer-capi
 bash build.sh release
 bash build.sh test
 ```

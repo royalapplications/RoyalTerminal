@@ -50,8 +50,7 @@ Enum: `VtProcessorPreference`
 Enum: `GhosttyRenderedTerminalRenderingMode`
 - file: `src/RoyalTerminal.Avalonia.Ghostty/Controls/Common/GhosttyRenderedTerminalRenderingMode.cs`
 - values:
-  - `CpuCellRenderer = 0`
-  - `TextureInterop = 1`
+  - `TextureInterop = 0`
 
 ### Transport Mode Selectors (constant IDs)
 

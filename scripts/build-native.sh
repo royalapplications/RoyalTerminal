@@ -11,9 +11,8 @@
 #   - Git submodule initialized: git submodule update --init
 #
 # The script builds libghostty plus the official libghostty-vt API library,
-# and also builds the transitional libghostty-terminal and
-# libghostty-renderer-capi libraries used by compatibility and renderer interop
-# paths. Artifacts are copied to the native NuGet runtime package location.
+# and also builds libghostty-renderer-capi for texture interop. Artifacts are
+# copied to the native NuGet runtime package location.
 
 set -euo pipefail
 
@@ -124,8 +123,8 @@ if [ "$CLEAN" = true ]; then
     rm -rf zig-out .zig-cache
 fi
 
-# Build shared library
-info "Building libghostty shared library..."
+# Build shared libraries
+info "Building libghostty and libghostty-vt..."
 info "Command: zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none"
 
 zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none 2>&1 || {
@@ -135,6 +134,11 @@ zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none 2>&1 || {
     warn "On Linux, ensure GTK4/libadwaita dev packages are installed."
     exit 1
 }
+
+if [ "$PLATFORM" = "osx" ] && [ ! -f "zig-out/lib/$LIB_NAME" ]; then
+    info "Materializing missing macOS embed dylib from Ghostty build cache..."
+    "$ROOT_DIR/scripts/ensure-macos-libghostty.sh" "$GHOSTTY_DIR"
+fi
 
 # Locate the built library
 BUILT_LIB=""
@@ -242,66 +246,6 @@ if [ "$BUILD_STATIC" = true ]; then
         cp "$STATIC_LIB" "$NATIVE_OUT_DIR/$RID/"
         info "Static library: $NATIVE_OUT_DIR/$RID/$(basename $STATIC_LIB)"
     fi
-fi
-
-# ═══════════════════════════════════════════════════════════════════════
-# Build libghostty-terminal (standalone terminal C API library)
-# ═══════════════════════════════════════════════════════════════════════
-
-TERMINAL_DIR="$ROOT_DIR/native/ghostty-terminal"
-
-if [ -f "$TERMINAL_DIR/build.zig" ]; then
-    info ""
-    info "Building libghostty-terminal..."
-
-    cd "$TERMINAL_DIR"
-
-    if [ "$CLEAN" = true ]; then
-        rm -rf zig-out .zig-cache
-    fi
-
-    case "$PLATFORM" in
-        osx) TERMINAL_LIB_NAME="libghostty-terminal.dylib" ;;
-        linux) TERMINAL_LIB_NAME="libghostty-terminal.so" ;;
-    esac
-
-    zig build $OPTIMIZE 2>&1 || {
-        warn "libghostty-terminal build failed — skipping."
-        warn "Native VT mode will not be available."
-        TERMINAL_LIB_NAME=""
-    }
-
-    if [ -n "$TERMINAL_LIB_NAME" ]; then
-        # Find the built library (follow symlinks)
-        TERMINAL_LIB=""
-        if [ -e "zig-out/lib/$TERMINAL_LIB_NAME" ]; then
-            TERMINAL_LIB="zig-out/lib/$TERMINAL_LIB_NAME"
-        fi
-
-        if [ -n "$TERMINAL_LIB" ]; then
-            info "Built: $TERMINAL_LIB"
-
-            # Copy to NuGet native package directory (same runtimes dir as libghostty)
-            cp -L "$TERMINAL_LIB" "$NATIVE_RUNTIME_DIR/"
-            info "Copied to: $NATIVE_RUNTIME_DIR/$TERMINAL_LIB_NAME"
-
-            # Copy to central output dir
-            cp -L "$TERMINAL_LIB" "$NATIVE_OUT_DIR/$RID/"
-            info "Copied to: $NATIVE_OUT_DIR/$RID/$TERMINAL_LIB_NAME"
-
-            # Copy header
-            if [ -f "include/ghostty_terminal.h" ]; then
-                cp "include/ghostty_terminal.h" "$HEADER_DEST/"
-                info "Copied header: $HEADER_DEST/ghostty_terminal.h"
-            fi
-        else
-            warn "libghostty-terminal not found in zig-out/lib/"
-        fi
-    fi
-
-    cd "$GHOSTTY_DIR"
-else
-    warn "native/ghostty-terminal not found — skipping libghostty-terminal build."
 fi
 
 # ═══════════════════════════════════════════════════════════════════════

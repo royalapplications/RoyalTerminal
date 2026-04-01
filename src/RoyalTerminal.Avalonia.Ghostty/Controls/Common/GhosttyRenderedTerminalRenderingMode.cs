@@ -10,12 +10,7 @@ namespace RoyalTerminal.Avalonia.Controls;
 public enum GhosttyRenderedTerminalRenderingMode
 {
     /// <summary>
-    /// Existing rendered control path: Ghostty screen cell reads + Skia cell renderer.
+    /// Renderer C-API through Skia bridge with GPU target plus CPU RGBA fallback.
     /// </summary>
-    CpuCellRenderer = 0,
-
-    /// <summary>
-    /// New interop path: renderer C-API through Skia bridge with GPU target + CPU fallback.
-    /// </summary>
-    TextureInterop = 1,
+    TextureInterop = 0,
 }

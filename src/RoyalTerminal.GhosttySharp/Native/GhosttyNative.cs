@@ -15,36 +15,6 @@ namespace RoyalTerminal.GhosttySharp.Native;
 public static unsafe partial class GhosttyNative
 {
     public const string LibraryName = "ghostty";
-    private const string SurfaceGetRowCellsWithGraphemesSymbol = "ghostty_surface_get_row_cells_with_graphemes";
-
-    private static readonly nint s_nativeLibraryHandle = LoadNativeLibraryHandle();
-    private static readonly nint s_surfaceGetRowCellsWithGraphemesExport =
-        ResolveOptionalExport(SurfaceGetRowCellsWithGraphemesSymbol);
-
-    /// <summary>
-    /// Returns true when the native Ghostty library exposes grapheme-aware row-cell reading.
-    /// </summary>
-    public static bool SupportsSurfaceRowCellGraphemes => s_surfaceGetRowCellsWithGraphemesExport != nint.Zero;
-
-    private static nint LoadNativeLibraryHandle()
-    {
-        NativeLibraryLoader.Initialize();
-        return NativeLibrary.TryLoad(LibraryName, typeof(GhosttyNative).Assembly, null, out nint handle)
-            ? handle
-            : nint.Zero;
-    }
-
-    private static nint ResolveOptionalExport(string symbol)
-    {
-        if (s_nativeLibraryHandle == nint.Zero)
-        {
-            return nint.Zero;
-        }
-
-        return NativeLibrary.TryGetExport(s_nativeLibraryHandle, symbol, out nint export)
-            ? export
-            : nint.Zero;
-    }
 
     // -------------------------------------------------------------------
     // Initialization
@@ -341,87 +311,6 @@ public static unsafe partial class GhosttyNative
     [LibraryImport(LibraryName, EntryPoint = "ghostty_surface_free_text")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial void SurfaceFreeText(nint surface, GhosttyText* text);
-
-    // -------------------------------------------------------------------
-    // Screen State Reading (Custom Rendering)
-    // -------------------------------------------------------------------
-
-    [LibraryImport(LibraryName, EntryPoint = "ghostty_surface_screen_lock")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial void SurfaceScreenLock(nint surface);
-
-    [LibraryImport(LibraryName, EntryPoint = "ghostty_surface_screen_unlock")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial void SurfaceScreenUnlock(nint surface);
-
-    [LibraryImport(LibraryName, EntryPoint = "ghostty_surface_cursor_info")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial void SurfaceCursorInfo(nint surface, GhosttyCursorInfo* info);
-
-    [LibraryImport(LibraryName, EntryPoint = "ghostty_surface_get_row_cells")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial uint SurfaceGetRowCells(nint surface, uint row, GhosttyCellInfo* cells, uint maxCells);
-
-    /// <summary>
-    /// Reads row cells with optional flattened grapheme payload.
-    /// Falls back to <see cref="SurfaceGetRowCells"/> when the native symbol
-    /// is unavailable in the loaded Ghostty library.
-    /// </summary>
-    public static uint SurfaceGetRowCellsWithGraphemes(
-        nint surface,
-        uint row,
-        GhosttyCellInfo* cells,
-        uint maxCells,
-        GhosttyCellGraphemeSpan* graphemeSpans,
-        uint maxSpans,
-        uint* graphemeCodepoints,
-        uint maxGraphemeCodepoints,
-        uint* graphemeCodepointsWritten)
-    {
-        if (s_surfaceGetRowCellsWithGraphemesExport == nint.Zero)
-        {
-            uint filled = SurfaceGetRowCells(surface, row, cells, maxCells);
-
-            if (graphemeSpans != null)
-            {
-                uint spanCount = filled < maxSpans ? filled : maxSpans;
-                for (uint i = 0; i < spanCount; i++)
-                {
-                    graphemeSpans[i] = default;
-                }
-            }
-
-            if (graphemeCodepointsWritten != null)
-            {
-                *graphemeCodepointsWritten = 0;
-            }
-
-            return filled;
-        }
-
-        var fn = (delegate* unmanaged[Cdecl]<
-            nint,
-            uint,
-            GhosttyCellInfo*,
-            uint,
-            GhosttyCellGraphemeSpan*,
-            uint,
-            uint*,
-            uint,
-            uint*,
-            uint>)s_surfaceGetRowCellsWithGraphemesExport;
-
-        return fn(
-            surface,
-            row,
-            cells,
-            maxCells,
-            graphemeSpans,
-            maxSpans,
-            graphemeCodepoints,
-            maxGraphemeCodepoints,
-            graphemeCodepointsWritten);
-    }
 
     // -------------------------------------------------------------------
     // Inspector

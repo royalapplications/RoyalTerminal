@@ -49,6 +49,7 @@ internal sealed class MainWindowController
 {
     private const string DisableTextShapingEnvVar = "ROYALTERMINAL_DISABLE_TEXT_SHAPING";
     private const string EnableRenderDiagnosticsEnvVar = "ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS";
+    private const string EmbeddedGhosttyConfigOverlay = "grapheme-width-method = unicode\n";
 
     private static readonly string MonoFont =
         RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "Menlo" :
@@ -137,7 +138,7 @@ internal sealed class MainWindowController
             : _viewModel.UseNativeControl
                 ? "Ghostty native terminal ready"
                 : _viewModel.UseNativeVtControl
-                    ? "Native VT (libghostty-terminal) ready"
+                    ? "Native VT (libghostty-vt) ready"
                     : _viewModel.UseManagedVtControl
                         ? "Managed VT (BasicVtProcessor) ready"
                         : "Terminal ready - Rendered (Custom PTY) mode";
@@ -311,6 +312,10 @@ internal sealed class MainWindowController
 
             _ghosttyConfig = new GhosttyConfig();
             _ghosttyConfig.LoadDefaultFiles();
+            GhosttyConfigOverlay.ApplyText(
+                _ghosttyConfig,
+                EmbeddedGhosttyConfigOverlay,
+                filePrefix: "royalterminal-embedded");
             _ghosttyConfig.Finalize_();
 
             _ghosttyApp = new GhosttyApp(_ghosttyConfig);
@@ -348,7 +353,7 @@ internal sealed class MainWindowController
             _terminalCapabilities = _terminalCapabilities with
             {
                 EmbeddedGhosttyNativeAvailable = true,
-                EmbeddedGhosttyRenderedAvailable = true,
+                GhosttyRenderedAvailable = true,
             };
             _viewModel.SetTerminalCapabilities(_terminalCapabilities);
         }
@@ -440,7 +445,8 @@ internal sealed class MainWindowController
             container,
             _tabCounter,
             tabMode.Name,
-            autoStartSession: terminal is TerminalControl);
+            autoStartSession: terminal is TerminalControl,
+            resolvedMode: finalizedModeSelection.ResolvedMode);
         tab.CloseButton.Command = _viewModel.CloseTabCommand;
         tab.CloseButton.CommandParameter = tab.Index;
         headerButton.Command = _viewModel.ActivateTabCommand;
@@ -486,7 +492,8 @@ internal sealed class MainWindowController
             container,
             _tabCounter,
             tabMode.Name,
-            autoStartSession: false);
+            autoStartSession: false,
+            resolvedMode: TerminalRenderMode.RenderedAuto);
         if (!string.IsNullOrWhiteSpace(sourceLabel))
         {
             tab.UpdateTitle($"Replay: {sourceLabel}");
@@ -530,7 +537,7 @@ internal sealed class MainWindowController
     {
         return mode switch
         {
-            TerminalRenderMode.GhosttyRendered => CreateGhosttyRenderedControl(),
+            TerminalRenderMode.GhosttyRendered => CreateGhosttyRenderedModeControl(),
             TerminalRenderMode.GhosttyNative => CreateGhosttyNativeControl(),
             TerminalRenderMode.NativeVt => CreateStandaloneTerminalControl(TerminalRenderMode.NativeVt),
             TerminalRenderMode.ManagedVt => CreateStandaloneTerminalControl(TerminalRenderMode.ManagedVt),
@@ -634,6 +641,36 @@ internal sealed class MainWindowController
         return renderedControl;
     }
 
+    private Control CreateGhosttyRenderedModeControl()
+    {
+        // The CPU-rendered Ghostty mode can stay on the official libghostty-vt
+        // path. Only texture interop still depends on the embedded surface.
+        bool nativeVtAvailable = GhosttyVtProcessor.IsAvailable();
+        if (!_viewModel.UseTextureInterop && nativeVtAvailable)
+        {
+            return CreateStandaloneTerminalControl(
+                TerminalRenderMode.GhosttyRendered,
+                VtProcessorPreference.Native);
+        }
+
+        if (_viewModel.UseTextureInterop)
+        {
+            if (_terminalCapabilities.EmbeddedGhosttyNativeAvailable)
+            {
+                return CreateGhosttyRenderedControl();
+            }
+
+            if (nativeVtAvailable)
+            {
+                return CreateStandaloneTerminalControl(
+                    TerminalRenderMode.GhosttyRendered,
+                    VtProcessorPreference.Native);
+            }
+        }
+
+        return CreateGhosttyRenderedControl();
+    }
+
     private GhosttyNativeTerminalControl CreateGhosttyNativeControl()
     {
         if (!EnsureEmbeddedGhosttyInitialized())
@@ -683,6 +720,11 @@ internal sealed class MainWindowController
     }
 
     private TerminalControl CreateStandaloneTerminalControl(TerminalRenderMode mode)
+        => CreateStandaloneTerminalControl(mode, ResolveVtProcessorPreference(mode));
+
+    private TerminalControl CreateStandaloneTerminalControl(
+        TerminalRenderMode mode,
+        VtProcessorPreference vtProcessorPreference)
     {
         TerminalTheme theme = _viewModel.ActiveTheme;
         TerminalControl standaloneControl = CreateStandaloneControl();
@@ -691,7 +733,7 @@ internal sealed class MainWindowController
         standaloneControl.Columns = 80;
         standaloneControl.Rows = 24;
         standaloneControl.ScrollbackLimit = 10_000;
-        standaloneControl.VtProcessorPreference = ResolveVtProcessorPreference(mode);
+        standaloneControl.VtProcessorPreference = vtProcessorPreference;
         standaloneControl.ApplyTheme(theme);
         ConfigureRenderer(standaloneControl.Renderer);
         ApplyTerminalBehaviorSettings(standaloneControl);
@@ -866,7 +908,7 @@ internal sealed class MainWindowController
     {
         return requestedMode switch
         {
-            TerminalRenderMode.GhosttyRendered => "embedded Ghostty rendered mode is unavailable",
+            TerminalRenderMode.GhosttyRendered => "Ghostty rendered mode is unavailable",
             TerminalRenderMode.GhosttyNative => "embedded Ghostty native mode is unavailable",
             TerminalRenderMode.NativeVt => "native VT provider is unavailable",
             TerminalRenderMode.ManagedVt => "managed VT mode is unavailable",
@@ -880,8 +922,8 @@ internal sealed class MainWindowController
     {
         switch (mode)
         {
-            case TerminalRenderMode.GhosttyRendered when capabilities.EmbeddedGhosttyRenderedAvailable:
-                capabilities = capabilities with { EmbeddedGhosttyRenderedAvailable = false };
+            case TerminalRenderMode.GhosttyRendered when capabilities.GhosttyRenderedAvailable:
+                capabilities = capabilities with { GhosttyRenderedAvailable = false };
                 return true;
             case TerminalRenderMode.GhosttyNative when capabilities.EmbeddedGhosttyNativeAvailable:
                 capabilities = capabilities with { EmbeddedGhosttyNativeAvailable = false };
@@ -935,6 +977,14 @@ internal sealed class MainWindowController
                 new SolidColorBrush(Color.FromRgb(0x56, 0x9C, 0xD6)));
         }
 
+        if (terminal is TerminalControl && mode == TerminalRenderMode.GhosttyRendered)
+        {
+            return new TabVisualMode(
+                "Rendered (Ghostty VT + CPU Cell Renderer)",
+                "\u25CB",
+                new SolidColorBrush(Color.FromRgb(0x56, 0x9C, 0xD6)));
+        }
+
         if (terminal is GhosttyNativeTerminalControl)
         {
             return new TabVisualMode(
@@ -963,9 +1013,7 @@ internal sealed class MainWindowController
     }
 
     private static GhosttyRenderedTerminalRenderingMode GetRenderedRenderingMode(bool useTextureInterop)
-        => useTextureInterop
-            ? GhosttyRenderedTerminalRenderingMode.TextureInterop
-            : GhosttyRenderedTerminalRenderingMode.CpuCellRenderer;
+        => GhosttyRenderedTerminalRenderingMode.TextureInterop;
 
     private static string CreateStandaloneModeGlyph(TerminalRenderMode mode)
     {
@@ -999,7 +1047,7 @@ internal sealed class MainWindowController
             return null;
         }
 
-        if (_terminalCapabilities.EmbeddedGhosttyRenderedAvailable || _terminalCapabilities.NativeVtAvailable)
+        if (_terminalCapabilities.GhosttyRenderedAvailable || _terminalCapabilities.NativeVtAvailable)
         {
             return null;
         }
@@ -2026,24 +2074,41 @@ internal sealed class MainWindowController
     private void ApplyRenderedBackend(bool useTextureInterop)
     {
         GhosttyRenderedTerminalRenderingMode renderingMode = GetRenderedRenderingMode(useTextureInterop);
+        bool renderedCpuTabsRemainOnStandalonePath = false;
         foreach (TerminalTab tab in _tabs)
         {
-            if (tab.Control is not GhosttyRenderedTerminalControl rendered)
+            if (tab.ResolvedMode != TerminalRenderMode.GhosttyRendered)
             {
                 continue;
             }
 
-            rendered.RenderingMode = renderingMode;
-
-            TabVisualMode tabMode = ResolveTabMode(rendered, TerminalRenderMode.GhosttyRendered);
-            ToolTip.SetTip(tab.HeaderButton, tabMode.Name);
-            if (tab.HeaderButton.Content is StackPanel headerContent
-                && headerContent.Children.Count > 0
-                && headerContent.Children[0] is TextBlock modeIndicator)
+            if (tab.Control is GhosttyRenderedTerminalControl rendered)
             {
-                modeIndicator.Text = tabMode.Glyph;
-                modeIndicator.Foreground = tabMode.GlyphBrush;
+                rendered.RenderingMode = renderingMode;
             }
+            else if (tab.Control is TerminalControl)
+            {
+                renderedCpuTabsRemainOnStandalonePath = useTextureInterop;
+            }
+
+            UpdateTabHeaderVisual(tab, ResolveTabMode(tab.Control, tab.ResolvedMode));
+        }
+
+        if (renderedCpuTabsRemainOnStandalonePath)
+        {
+            UpdateStatus("Rendered backend switched for new tabs; existing CPU-rendered Ghostty VT tabs keep the standalone renderer until reopened.");
+        }
+    }
+
+    private static void UpdateTabHeaderVisual(TerminalTab tab, TabVisualMode tabMode)
+    {
+        ToolTip.SetTip(tab.HeaderButton, tabMode.Name);
+        if (tab.HeaderButton.Content is StackPanel headerContent
+            && headerContent.Children.Count > 0
+            && headerContent.Children[0] is TextBlock modeIndicator)
+        {
+            modeIndicator.Text = tabMode.Glyph;
+            modeIndicator.Foreground = tabMode.GlyphBrush;
         }
     }
 
@@ -2829,7 +2894,8 @@ internal sealed class MainWindowController
             Control container,
             int index,
             string modeName,
-            bool autoStartSession)
+            bool autoStartSession,
+            TerminalRenderMode resolvedMode)
         {
             HeaderButton = headerButton;
             Control = control;
@@ -2837,6 +2903,7 @@ internal sealed class MainWindowController
             Index = index;
             ModeName = modeName;
             AutoStartSession = autoStartSession;
+            ResolvedMode = resolvedMode;
             CloseButton = headerButton.Tag as Button
                 ?? throw new InvalidOperationException("Tab header close button is missing.");
             TitleText = ((headerButton.Content as StackPanel)?.Children[1] as TextBlock)
@@ -2851,6 +2918,7 @@ internal sealed class MainWindowController
         public int Index { get; }
         public string ModeName { get; }
         public bool AutoStartSession { get; }
+        public TerminalRenderMode ResolvedMode { get; }
         public string Title => TitleText.Text ?? $"Terminal {Index}";
 
         public void UpdateTitle(string title)

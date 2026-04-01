@@ -121,6 +121,16 @@ public class CoreWrapperTests
     }
 
     [Fact]
+    public void GhosttyConfigOverlay_ApplyText_InvalidArguments_Throw()
+    {
+        using GhosttyConfig config = new((nint)0x1001, ownsHandle: false);
+
+        Assert.Throws<ArgumentException>(() => GhosttyConfigOverlay.ApplyText(config, ""));
+        Assert.Throws<ArgumentException>(() => GhosttyConfigOverlay.ApplyText(config, "   "));
+        Assert.Throws<ArgumentNullException>(() => GhosttyConfigOverlay.ApplyText(null!, "foreground = #112233\n"));
+    }
+
+    [Fact]
     public void GhosttyConfig_CreateAndClone_Smoke()
     {
         if (!CanRunRealGhosttyNativeTests())

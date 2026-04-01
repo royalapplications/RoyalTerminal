@@ -38,10 +38,9 @@ namespace RoyalTerminal.Avalonia.Controls;
 /// emulation with full control over the rendering pipeline.
 ///
 /// Architecture:
-/// - Ghostty handles: VT parsing, screen state, PTY, input encoding
-/// - This control handles: Reading screen state via C API, rendering via SkiaSharp
-/// - In <see cref="GhosttyRenderedTerminalRenderingMode.CpuCellRenderer"/>, a hidden NSView backs the Ghostty surface.
-/// - In <see cref="GhosttyRenderedTerminalRenderingMode.TextureInterop"/>, rendering runs through renderer interop APIs.
+/// - Ghostty handles: VT parsing, PTY, input encoding, and renderer output.
+/// - This control handles: embedded surface hosting, theme/config wiring, and interop presentation.
+/// - The legacy CPU cell-renderer mode has been retired; this control now renders through texture interop only.
 /// </summary>
 [SupportedOSPlatform("macos")]
 public class GhosttyRenderedTerminalControl : Control, IDisposable
@@ -69,10 +68,6 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     private SkiaTerminalRenderer? _renderer;
     private TerminalScreen? _screen;
 
-    // Cell buffer for reading from Ghostty
-    private GhosttyCellInfo[]? _cellBuffer;
-    private GhosttyCellGraphemeSpan[]? _graphemeSpanBuffer;
-    private uint[]? _graphemeCodepointBuffer;
     private int _lastCols;
     private int _lastRows;
     private int _lastPointerColumn = -1;
@@ -91,12 +86,9 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     private readonly StringBuilder _rowTextScratch = new();
     private readonly List<int> _rowColumnMapScratch = [];
 
-    // Polling timer: the embedded apprt's renderer thread draws directly
-    // without dispatching the Render action, so we poll screen state on a timer.
+    // Polling timer: keep geometry and the interop frame fresh even when the
+    // embedded runtime does not surface a managed render callback for every draw.
     private DispatcherTimer? _renderTimer;
-
-    // Set to true after a fatal error in SyncScreenFromGhostty to stop retrying.
-    private bool _syncFailed;
     private IGhosttyLogger _logger = NullGhosttyLogger.Instance;
     private IAvaloniaSkiaRenderTargetProvider _interopRenderTargetProvider = new AvaloniaSkiaRenderTargetProvider();
     private readonly GhosttyClipboardAdapter _clipboardAdapter;
@@ -140,7 +132,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     public static readonly StyledProperty<GhosttyRenderedTerminalRenderingMode> RenderingModeProperty =
         AvaloniaProperty.Register<GhosttyRenderedTerminalControl, GhosttyRenderedTerminalRenderingMode>(
             nameof(RenderingMode),
-            GhosttyRenderedTerminalRenderingMode.CpuCellRenderer);
+            GhosttyRenderedTerminalRenderingMode.TextureInterop);
 
     public static new readonly DirectProperty<GhosttyRenderedTerminalControl, TerminalTheme?> ThemeProperty =
         AvaloniaProperty.RegisterDirect<GhosttyRenderedTerminalControl, TerminalTheme?>(
@@ -230,8 +222,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     public GhosttySurface? Surface => _surface;
 
     /// <summary>
-    /// Gets the managed Skia renderer used in <see cref="GhosttyRenderedTerminalRenderingMode.CpuCellRenderer"/>.
-    /// Available after <see cref="Initialize"/> is called.
+    /// Gets the compatibility Skia renderer instance maintained for shared theming and sizing state.
+    /// The control itself renders through texture interop rather than this renderer.
     /// </summary>
     public SkiaTerminalRenderer? Renderer => _renderer;
 
@@ -369,7 +361,6 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         DestroyGhosttySurface();
         ElementComposition.SetElementChildVisual(this, null);
         _compositionVisual = null;
-        _syncFailed = false;
         CreateGhosttySurface();
         TryInitializeComposition();
     }
@@ -426,13 +417,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
             _surface.SetContentScale(scale, scale);
             _surface.SetFocus(IsFocused);
-
-            if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
-            {
-                // Keep the embedded Ghostty surface active in interop mode so screen state,
-                // input, title, clipboard, and process events remain wired.
-                CreateTextureInteropSurface();
-            }
+            CreateTextureInteropSurface();
 
             ApplyThemeCore(ResolveActiveTheme(), updateThemeProperty: false, updateGhosttyRuntime: true);
 
@@ -585,14 +570,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     private void OnRenderTimerTick(object? sender, EventArgs e)
     {
-        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
-        {
-            SyncScreenFromGhostty();
-            SyncTextureInteropFrame();
-            return;
-        }
-
-        SyncScreenFromGhostty();
+        SyncGeometryFromSurface();
+        SyncTextureInteropFrame();
     }
 
     private void UpdateSurfaceSize(Rect bounds)
@@ -620,12 +599,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             _surface.SetSize((uint)pixelSize.Width, (uint)pixelSize.Height);
         }
 
-        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
-        {
-            _interopSurface?.SetSize(pixelSize.Width, pixelSize.Height);
-            _compositionVisual?.SendHandlerMessage(new TerminalTextureInteropDrawHandler.ResizeMessage(pixelSize));
-            return;
-        }
+        _interopSurface?.SetSize(pixelSize.Width, pixelSize.Height);
+        _compositionVisual?.SendHandlerMessage(new TerminalTextureInteropDrawHandler.ResizeMessage(pixelSize));
     }
 
     private static PixelSize GetPixelSize(Rect bounds, double scale)
@@ -655,8 +630,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
         UpdateSurfaceSize(new Rect(0, 0, finalSize.Width, finalSize.Height));
 
-        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
-            SyncTextureInteropFrame();
+        SyncGeometryFromSurface();
+        SyncTextureInteropFrame();
 
         return finalSize;
     }
@@ -673,25 +648,16 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         if (elementVisual is null) return;
 
         var compositor = elementVisual.Compositor;
-        _compositionVisual = RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop
-            ? compositor.CreateCustomVisual(new TerminalTextureInteropDrawHandler())
-            : compositor.CreateCustomVisual(new TerminalDrawHandler());
+        _compositionVisual = compositor.CreateCustomVisual(new TerminalTextureInteropDrawHandler());
         ElementComposition.SetElementChildVisual(this, _compositionVisual);
         _compositionVisual.Size = new Vector(Bounds.Width, Bounds.Height);
 
         Logger.Debug(
             $"[GhosttyRendered] Composition initialized: bounds={Bounds.Width:F0}x{Bounds.Height:F0}");
 
-        // Send initial render state
-        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
-        {
-            SyncTextureInteropFrame();
-        }
-        else if (_renderer is not null && _screen is not null)
-        {
-            _compositionVisual.SendHandlerMessage(
-                new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
-        }
+        // Send initial render state.
+        SyncGeometryFromSurface();
+        SyncTextureInteropFrame();
     }
 
     #endregion
@@ -700,8 +666,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     private void SyncTextureInteropFrame()
     {
-        if (RenderingMode != GhosttyRenderedTerminalRenderingMode.TextureInterop ||
-            _interopRenderer is null)
+        if (_interopRenderer is null)
         {
             return;
         }
@@ -729,9 +694,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             new TerminalTextureInteropDrawHandler.UpdateMessage(
                 _interopRenderer,
                 _interopRenderTargetProvider,
-                pixelSize,
-                _renderer,
-                _screen));
+                pixelSize));
     }
 
     private void OnInteropRenderTargetProviderDiagnosticReported(object? sender, string diagnostic)
@@ -739,206 +702,37 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         Logger.Debug($"[GhosttyRendered] TextureInterop target provider diagnostic: {diagnostic}");
     }
 
-    /// <summary>
-    /// Reads the current screen state from Ghostty and updates the TerminalScreen.
-    /// Called in response to Ghostty's Render action.
-    /// </summary>
-    private int _syncLogCounter;
-
-    private unsafe void SyncScreenFromGhostty()
+    private void SyncGeometryFromSurface()
     {
-        if (_surface is null || _screen is null || _renderer is null || _syncFailed) return;
-
-        try
+        if (_surface is null || _screen is null || _renderer is null)
         {
-            // Get grid dimensions from Ghostty
-            var size = _surface.Size;
-            var cols = (int)size.Columns;
-            var rows = (int)size.Rows;
-            UpdateRendererCellMetrics(size, cols, rows);
-
-            // Periodic diagnostics
-            if (++_syncLogCounter % 300 == 1) // ~every 5 seconds at 60fps
-            {
-                Logger.Debug(
-                    $"[GhosttyRendered] SyncScreen: grid={cols}x{rows}, px={size.WidthPx}x{size.HeightPx}, cell={size.CellWidthPx}x{size.CellHeightPx}");
-            }
-
-            if (cols <= 0 || rows <= 0) return;
-
-            // Resize screen if needed
-            if (cols != _lastCols || rows != _lastRows)
-            {
-                lock (_screen.SyncRoot)
-                {
-                    _screen.Resize(cols, rows);
-                }
-                _lastCols = cols;
-                _lastRows = rows;
-                TerminalResized?.Invoke(this, new TerminalSizeEventArgs(cols, rows));
-            }
-
-            // Ensure cell buffer is large enough
-            if (_cellBuffer is null || _cellBuffer.Length < cols)
-                _cellBuffer = new GhosttyCellInfo[cols];
-            bool supportsSurfaceRowCellGraphemes = GhosttyNative.SupportsSurfaceRowCellGraphemes;
-            if (supportsSurfaceRowCellGraphemes)
-            {
-                if (_graphemeSpanBuffer is null || _graphemeSpanBuffer.Length < cols)
-                    _graphemeSpanBuffer = new GhosttyCellGraphemeSpan[cols];
-
-                int graphemeCapacity = Math.Max(cols * 8, cols);
-                if (_graphemeCodepointBuffer is null || _graphemeCodepointBuffer.Length < graphemeCapacity)
-                    _graphemeCodepointBuffer = new uint[graphemeCapacity];
-            }
-
-            GhosttyCellInfo[] cellBuffer = _cellBuffer;
-            GhosttyCellGraphemeSpan[] graphemeSpanBuffer =
-                supportsSurfaceRowCellGraphemes && _graphemeSpanBuffer is not null
-                    ? _graphemeSpanBuffer
-                    : Array.Empty<GhosttyCellGraphemeSpan>();
-            uint[] graphemeCodepointBuffer =
-                supportsSurfaceRowCellGraphemes && _graphemeCodepointBuffer is not null
-                    ? _graphemeCodepointBuffer
-                    : Array.Empty<uint>();
-
-            var defaultBg = _screen.DefaultBackground;
-
-            // Lock Ghostty's screen state and read cells
-            _surface.ScreenLock();
-            try
-            {
-                // Read cursor info and apply to renderer
-                var cursor = _surface.GetCursorInfo();
-                _renderer.CursorColumn = cursor.X;
-                _renderer.CursorRow = cursor.Y;
-                _renderer.CursorVisible = cursor.Visible != 0;
-                _renderer.CursorStyle = ConvertCursorStyle(cursor.Style);
-
-                lock (_screen.SyncRoot)
-                {
-                    // Read each viewport row
-                    for (var row = 0; row < rows && row < _screen.ViewportRows; row++)
-                    {
-                        uint cellCount;
-                        ReadOnlySpan<uint> graphemeCodepoints = ReadOnlySpan<uint>.Empty;
-                        if (supportsSurfaceRowCellGraphemes)
-                        {
-                            cellCount = _surface.GetRowCellsWithGraphemes(
-                                (uint)row,
-                                cellBuffer,
-                                graphemeSpanBuffer,
-                                graphemeCodepointBuffer,
-                                out uint graphemeCodepointsWritten);
-
-                            int graphemeLength = (int)Math.Min(graphemeCodepointsWritten, (uint)graphemeCodepointBuffer.Length);
-                            graphemeCodepoints = graphemeCodepointBuffer.AsSpan(0, graphemeLength);
-                        }
-                        else
-                        {
-                            cellCount = _surface.GetRowCells((uint)row, cellBuffer);
-                        }
-                        var termRow = _screen.GetViewportRow(row);
-
-                        for (var col = 0; col < (int)cellCount && col < termRow.Columns; col++)
-                        {
-                            ref var src = ref cellBuffer[col];
-                            ref var dst = ref termRow.Cells[col];
-
-                            // Wide cell mapping:
-                            // 0=narrow, 1=wide, 2=spacer_tail, 3=spacer_head
-                            dst.Width = src.Wide switch
-                            {
-                                0 => 1, // narrow — single-column character
-                                1 => 2, // wide — double-column character
-                                2 => 0, // spacer_tail — continuation of wide char, skip rendering
-                                3 => 0, // spacer_head — pad before wide char, skip rendering
-                                _ => 1,
-                            };
-
-                            // For spacer cells, clear content so they aren't rendered
-                            if (dst.Width == 0)
-                            {
-                                dst.Codepoint = 0;
-                                dst.Grapheme = null;
-                                dst.Foreground = PackArgb(src.FgR, src.FgG, src.FgB);
-                                dst.Background = src.HasBg != 0
-                                    ? PackArgb(src.BgR, src.BgG, src.BgB)
-                                    : defaultBg;
-                                dst.HasBackground = src.HasBg != 0;
-                                dst.Attributes = CellAttributes.None;
-                                dst.UnderlineStyle = TerminalUnderlineStyle.None;
-                                dst.UnderlineColor = 0;
-                                dst.HasUnderlineColor = false;
-                                dst.Decorations = CellDecorations.None;
-                                dst.HyperlinkId = 0;
-                                continue;
-                            }
-
-                            dst.Codepoint = (int)src.Codepoint;
-                            dst.Grapheme = supportsSurfaceRowCellGraphemes
-                                ? TryBuildCellGrapheme(
-                                    src.Codepoint,
-                                    graphemeSpanBuffer[col],
-                                    graphemeCodepoints)
-                                : null;
-                            dst.Foreground = PackArgb(src.FgR, src.FgG, src.FgB);
-                            dst.Background = src.HasBg != 0
-                                ? PackArgb(src.BgR, src.BgG, src.BgB)
-                                : defaultBg;
-                            dst.HasBackground = src.HasBg != 0;
-                            dst.Attributes = ConvertAttributes(src.Attrs);
-                            dst.UnderlineStyle = ConvertUnderlineStyle(src.Attrs);
-                            ApplyUnderlineColorFallback(ref dst);
-                            dst.Decorations = ConvertDecorations(src.Attrs);
-                            dst.HyperlinkId = 0;
-                        }
-
-                        for (var col = (int)cellCount; col < termRow.Columns; col++)
-                        {
-                            ref var dst = ref termRow.Cells[col];
-                            dst.Codepoint = 0;
-                            dst.Grapheme = null;
-                            dst.Foreground = _screen.DefaultForeground;
-                            dst.Background = _screen.DefaultBackground;
-                            dst.HasBackground = true;
-                            dst.Attributes = CellAttributes.None;
-                            dst.UnderlineStyle = TerminalUnderlineStyle.None;
-                            dst.UnderlineColor = 0;
-                            dst.HasUnderlineColor = false;
-                            dst.Decorations = CellDecorations.None;
-                            dst.HyperlinkId = 0;
-                            dst.Width = 1;
-                        }
-
-                        termRow.IsDirty = true;
-                    }
-
-                    UpdateRendererParityStateLocked();
-                }
-            }
-            finally
-            {
-                _surface.ScreenUnlock();
-            }
-
-            // Trigger re-render — retry composition init if needed,
-            // then send update to the draw handler.
-            if (_compositionVisual is null)
-                TryInitializeComposition();
-
-            if (_compositionVisual is not null)
-            {
-                _compositionVisual.SendHandlerMessage(
-                    new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
-            }
+            return;
         }
-        catch (Exception ex)
+
+        GhosttySurfaceSize size = _surface.Size;
+        int cols = (int)size.Columns;
+        int rows = (int)size.Rows;
+        UpdateRendererCellMetrics(size, cols, rows);
+
+        if (cols <= 0 || rows <= 0)
         {
-            Logger.Error($"[GhosttyRendered] SyncScreenFromGhostty FATAL: {ex.GetType().Name}: {ex.Message}", ex);
-            // Stop retrying — the error is likely permanent (e.g. missing native symbol)
-            _syncFailed = true;
+            return;
         }
+
+        if (cols == _lastCols && rows == _lastRows)
+        {
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            _screen.Resize(cols, rows);
+            _screen.InvalidateAll();
+        }
+
+        _lastCols = cols;
+        _lastRows = rows;
+        TerminalResized?.Invoke(this, new TerminalSizeEventArgs(cols, rows));
     }
 
     private void UpdateRendererCellMetrics(GhosttySurfaceSize size, int cols, int rows)
@@ -974,107 +768,6 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         }
 
         _renderer.SetCellSize(cellWidth, cellHeight);
-    }
-
-    private static uint PackArgb(byte r, byte g, byte b) => 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | b;
-
-    private static string? TryBuildCellGrapheme(
-        uint primaryCodepoint,
-        GhosttyCellGraphemeSpan span,
-        ReadOnlySpan<uint> graphemeCodepoints)
-    {
-        if (span.Length == 0 || span.Offset > int.MaxValue || span.Length > int.MaxValue)
-        {
-            return null;
-        }
-
-        int offset = (int)span.Offset;
-        int length = (int)span.Length;
-        if (offset < 0 || length < 0 || offset > graphemeCodepoints.Length - length)
-        {
-            return null;
-        }
-
-        if (!Rune.IsValid((int)primaryCodepoint))
-        {
-            return null;
-        }
-
-        StringBuilder sb = new();
-        sb.Append(char.ConvertFromUtf32((int)primaryCodepoint));
-        ReadOnlySpan<uint> trailing = graphemeCodepoints.Slice(offset, length);
-        for (int i = 0; i < trailing.Length; i++)
-        {
-            uint cp = trailing[i];
-            if (!Rune.IsValid((int)cp))
-            {
-                return null;
-            }
-
-            sb.Append(char.ConvertFromUtf32((int)cp));
-        }
-
-        return sb.ToString();
-    }
-
-    private static CellAttributes ConvertAttributes(ushort attrs)
-    {
-        // Ghostty surface attrs are exported from Style.Flags bit layout:
-        // 0=bold, 1=italic, 2=faint, 3=blink, 4=inverse, 5=invisible,
-        // 6=strikethrough, 7=overline, bits 8-10=underline style.
-        var result = CellAttributes.None;
-        if ((attrs & (1 << 0)) != 0) result |= CellAttributes.Bold;
-        if ((attrs & (1 << 1)) != 0) result |= CellAttributes.Italic;
-        if ((attrs & (1 << 2)) != 0) result |= CellAttributes.Dim;
-        if ((attrs & (1 << 3)) != 0) result |= CellAttributes.Blink;
-        if ((attrs & (1 << 4)) != 0) result |= CellAttributes.Inverse;
-        if ((attrs & (1 << 5)) != 0) result |= CellAttributes.Hidden;
-        if ((attrs & (1 << 6)) != 0) result |= CellAttributes.Strikethrough;
-        if (ConvertUnderlineStyle(attrs) != TerminalUnderlineStyle.None) result |= CellAttributes.Underline;
-        return result;
-    }
-
-    private static TerminalUnderlineStyle ConvertUnderlineStyle(ushort attrs)
-    {
-        return ((attrs >> 8) & 0x7) switch
-        {
-            1 => TerminalUnderlineStyle.Single,
-            2 => TerminalUnderlineStyle.Double,
-            3 => TerminalUnderlineStyle.Curly,
-            4 => TerminalUnderlineStyle.Dotted,
-            5 => TerminalUnderlineStyle.Dashed,
-            _ => TerminalUnderlineStyle.None,
-        };
-    }
-
-    private static CellDecorations ConvertDecorations(ushort attrs)
-    {
-        CellDecorations decorations = CellDecorations.None;
-        if ((attrs & (1 << 7)) != 0)
-        {
-            decorations |= CellDecorations.Overline;
-        }
-
-        return decorations;
-    }
-
-    private static CursorStyle ConvertCursorStyle(byte style)
-    {
-        // Ghostty embedded cursor enum order:
-        // 0=bar, 1=block, 2=underline, 3=block_hollow.
-        //
-        // We also map 4/5 to bar for compatibility with older style schemas
-        // that include explicit blink variants.
-        return style switch
-        {
-            0 => CursorStyle.Bar,
-            1 => CursorStyle.Block,
-            2 => CursorStyle.Underline,
-            3 => CursorStyle.BlockHollow,
-            4 => CursorStyle.Bar,
-            5 => CursorStyle.Bar,
-            _ => CursorStyle.Block,
-        };
     }
 
     private void OnThemePropertyChanged()
@@ -1182,17 +875,9 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
             ApplyThemeToGhosttySurface(theme);
         }
 
-        if (_compositionVisual is not null && _renderer is not null && _screen is not null)
+        if (_compositionVisual is not null)
         {
-            if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
-            {
-                SyncTextureInteropFrame();
-            }
-            else
-            {
-                _compositionVisual.SendHandlerMessage(
-                    new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
-            }
+            SyncTextureInteropFrame();
         }
 
         InvalidateVisual();
@@ -1226,6 +911,11 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     {
         _appliedThemeConfig?.Dispose();
         _appliedThemeConfig = null;
+    }
+
+    private static uint PackArgb(byte r, byte g, byte b)
+    {
+        return 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | b;
     }
 
     private void OnRuntimeColorChanged(GhosttyColorChange change)
@@ -1281,14 +971,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
     private void OnRuntimeReloadConfig(bool soft)
     {
         Logger.Debug($"[GhosttyRendered] ReloadConfig action received (soft={soft}).");
-        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
-        {
-            SyncTextureInteropFrame();
-        }
-        else
-        {
-            SyncScreenFromGhostty();
-        }
+        SyncGeometryFromSurface();
+        SyncTextureInteropFrame();
     }
 
     private void OnMouseOverLinkChanged(string? url)
@@ -1358,15 +1042,7 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
         if (_compositionVisual is not null)
         {
-            if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
-            {
-                SyncTextureInteropFrame();
-            }
-            else
-            {
-                _compositionVisual.SendHandlerMessage(
-                    new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
-            }
+            SyncTextureInteropFrame();
         }
 
         InvalidateVisual();
@@ -1682,17 +1358,6 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
         _hoveredLinkSpanStart = -1;
         _hoveredLinkSpanEnd = -1;
         _hoveredLinkSpanId = 0;
-    }
-
-    private static void ApplyUnderlineColorFallback(ref TerminalCell cell)
-    {
-        // Ghostty embedded row-cell API does not expose underline-color transport.
-        // Preserve default semantics by leaving explicit-color bit unset and using
-        // foreground as a stable underline-color snapshot for downstream consumers.
-        bool underlined = cell.UnderlineStyle != TerminalUnderlineStyle.None ||
-                          (cell.Attributes & CellAttributes.Underline) != 0;
-        cell.UnderlineColor = underlined ? cell.Foreground : 0;
-        cell.HasUnderlineColor = false;
     }
 
     private bool TryResolveHoveredLinkSpanLocked(
@@ -2202,16 +1867,8 @@ public class GhosttyRenderedTerminalControl : Control, IDisposable
 
     private void OnRenderRequested()
     {
-        // Instead of calling _surface.Draw() (Metal), we read screen state
-        // and render with SkiaSharp or texture interop mode.
-        if (RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop)
-        {
-            SyncScreenFromGhostty();
-            SyncTextureInteropFrame();
-            return;
-        }
-
-        SyncScreenFromGhostty();
+        SyncGeometryFromSurface();
+        SyncTextureInteropFrame();
     }
 
     #endregion

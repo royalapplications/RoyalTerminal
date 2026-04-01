@@ -20,7 +20,6 @@ public static class NativeLibraryLoader
     {
         [GhosttyNative.LibraryName] = GetLibraryFileName(GhosttyNative.LibraryName),
         ["ghostty-vt"] = GetLibraryFileName("ghostty-vt"),
-        ["ghostty-terminal"] = GetLibraryFileName("ghostty-terminal"),
     };
 
     /// <summary>

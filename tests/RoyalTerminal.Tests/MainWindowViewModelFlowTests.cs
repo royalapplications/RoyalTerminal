@@ -245,11 +245,17 @@ public class MainWindowViewModelFlowTests
     }
 
     [Fact]
-    public void ModeSwitching_NoGhostty_WithNativeVt_SkipsUnavailableModes()
+    public void ModeSwitching_NativeVtOnly_StillCyclesThroughGhosttyRendered()
     {
         MainWindowViewModel viewModel = new();
         viewModel.SetTerminalCapabilities(ghosttyAvailable: false, nativeVtAvailable: true);
         viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+
+        viewModel.CycleRenderModeCommand.Execute().Wait();
+        Assert.True(viewModel.UseRenderedControl);
+        Assert.False(viewModel.UseNativeControl);
+        Assert.False(viewModel.UseNativeVtControl);
+        Assert.Equal("Ghostty Rendered", viewModel.ModeButtonText);
 
         viewModel.CycleRenderModeCommand.Execute().Wait();
         Assert.True(viewModel.UseNativeVtControl);
@@ -268,17 +274,17 @@ public class MainWindowViewModelFlowTests
     }
 
     [Fact]
-    public void ModeSwitching_RequestUnavailableGhosttyMode_FallsBackToSupportedMode()
+    public void ModeSwitching_RequestGhosttyRendered_WithNativeVtOnly_PreservesRenderedMode()
     {
         MainWindowViewModel viewModel = new();
         viewModel.SetTerminalCapabilities(ghosttyAvailable: false, nativeVtAvailable: true);
 
         viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: false, useNativeVtControl: false);
 
-        Assert.False(viewModel.UseRenderedControl);
+        Assert.True(viewModel.UseRenderedControl);
         Assert.False(viewModel.UseNativeControl);
-        Assert.True(viewModel.UseNativeVtControl);
-        Assert.Equal("Native VT", viewModel.ModeButtonText);
+        Assert.False(viewModel.UseNativeVtControl);
+        Assert.Equal("Ghostty Rendered", viewModel.ModeButtonText);
     }
 
     [Fact]
@@ -389,15 +395,72 @@ public class MainWindowViewModelFlowTests
     }
 
     [Fact]
-    public void SessionTransport_GhosttyRenderedMode_ShowsPanelWithHint()
+    public void SessionTransport_GhosttyRenderedCpuBackend_KeepsTransportConfigEnabled()
     {
         MainWindowViewModel viewModel = new();
         viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
-        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: true, useNativeVtControl: false);
+        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: false, useNativeVtControl: false);
+
+        Assert.True(viewModel.ShowSessionTransportPicker);
+        Assert.True(viewModel.IsSessionTransportConfigEnabled);
+        Assert.False(viewModel.ShowSessionTransportHint);
+    }
+
+    [Fact]
+    public void SessionTransport_GhosttyRenderedTextureInterop_ShowsPanelWithHint()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: false, useNativeVtControl: false);
+
+        using var registration = viewModel.ApplyRenderedBackendInteraction.RegisterHandler(context =>
+        {
+            context.SetOutput(Unit.Default);
+        });
+
+        viewModel.ToggleRenderedBackendCommand.Execute().Wait();
 
         Assert.True(viewModel.ShowSessionTransportPicker);
         Assert.False(viewModel.IsSessionTransportConfigEnabled);
         Assert.True(viewModel.ShowSessionTransportHint);
+    }
+
+    [Fact]
+    public void RenderedBackend_ToggleWithoutEmbeddedGhostty_StaysOnCpuAndReportsStatus()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: false, nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: false, useNativeVtControl: false);
+
+        viewModel.ToggleRenderedBackendCommand.Execute().Wait();
+
+        Assert.False(viewModel.UseTextureInterop);
+        Assert.False(viewModel.CanToggleRenderedBackend);
+        Assert.Equal("Backend: CPU", viewModel.RenderedBackendButtonText);
+        Assert.Equal("TextureInterop backend requires embedded Ghostty support.", viewModel.StatusText);
+    }
+
+    [Fact]
+    public void RenderedBackend_EmbeddedCapabilityLoss_ResetsToCpu()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: false, useNativeVtControl: false);
+
+        using var registration = viewModel.ApplyRenderedBackendInteraction.RegisterHandler(context =>
+        {
+            context.SetOutput(Unit.Default);
+        });
+
+        viewModel.ToggleRenderedBackendCommand.Execute().Wait();
+        Assert.True(viewModel.UseTextureInterop);
+        Assert.True(viewModel.CanToggleRenderedBackend);
+
+        viewModel.SetTerminalCapabilities(ghosttyAvailable: false, nativeVtAvailable: true);
+
+        Assert.False(viewModel.UseTextureInterop);
+        Assert.False(viewModel.CanToggleRenderedBackend);
+        Assert.Equal("Backend: CPU", viewModel.RenderedBackendButtonText);
     }
 
     [Fact]

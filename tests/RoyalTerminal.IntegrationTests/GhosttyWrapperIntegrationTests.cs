@@ -68,6 +68,31 @@ public class GhosttyWrapperIntegrationTests
     }
 
     [Fact]
+    public void GhosttyConfigOverlay_ApplyText_LoadsOverrides()
+    {
+        if (!Ghostty.Initialize())
+        {
+            return;
+        }
+
+        using GhosttyConfig config = new();
+        config.LoadDefaultFiles();
+        GhosttyConfigOverlay.ApplyText(
+            config,
+            """
+            foreground = #112233
+            grapheme-width-method = unicode
+            """,
+            filePrefix: "royalterminal-test");
+        config.Finalize_();
+
+        Assert.True(config.TryGet("foreground", out GhosttyConfigColor foreground));
+        Assert.Equal((byte)0x11, foreground.R);
+        Assert.Equal((byte)0x22, foreground.G);
+        Assert.Equal((byte)0x33, foreground.B);
+    }
+
+    [Fact]
     public unsafe void GhosttySurfaceAndInspector_OnMac_CanCreateAndDispose()
     {
         if (!OperatingSystem.IsMacOS())

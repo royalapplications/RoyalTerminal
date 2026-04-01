@@ -130,6 +130,8 @@ public sealed class MainWindowControllerModeStartupTests
                 embeddedGhosttyAvailable: viewModel.GhosttyAvailable,
                 nativeVtAvailable: viewModel.NativeVtAvailable);
             TerminalModeResolver resolver = TerminalModeResolver.Default;
+            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
 
             TerminalRenderMode[] requestedModes =
             [
@@ -154,10 +156,70 @@ public sealed class MainWindowControllerModeStartupTests
                 Assert.True(created, $"Controller did not create tab for requested mode '{requestedMode}'.");
 
                 Control newContainer = terminalHost.Children[^1];
-                TerminalRenderMode actualMode = ResolveModeFromContainer(newContainer);
+                Button newHeader = Assert.IsType<Button>(tabStrip.Children[^1]);
+                TerminalRenderMode actualMode = ResolveModeFromContainer(newContainer, newHeader);
                 TerminalRenderMode expectedMode = resolver.ResolveSupportedMode(requestedMode, capabilities);
                 Assert.Equal(expectedMode, actualMode);
             }
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_GhosttyRenderedCpuBackend_UsesStandaloneNativeVtControl()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo rendered-cpu-native-vt";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new FixedTerminalModeCapabilityResolver(TerminalModeCapabilities.Create(
+                embeddedGhosttyAvailable: true,
+                nativeVtAvailable: true)),
+            TerminalModeResolver.Default,
+            skipEmbeddedGhosttyInitialization: true);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.SetRenderMode(
+                useRenderedControl: true,
+                useNativeControl: false,
+                useNativeVtControl: false);
+
+            int countBefore = terminalHost.Children.Count;
+            viewModel.NewTabCommand.Execute().Wait();
+
+            bool created = await WaitUntilAsync(
+                () => terminalHost.Children.Count == countBefore + 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(created);
+
+            Control newContainer = terminalHost.Children[^1];
+            ScrollViewer scrollViewer = Assert.IsType<ScrollViewer>(newContainer);
+            TerminalControl standalone = Assert.IsType<TerminalControl>(scrollViewer.Content);
+            Assert.Equal(VtProcessorPreference.Native, standalone.VtProcessorPreference);
+
+            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
+            Button headerButton = Assert.IsType<Button>(tabStrip.Children[^1]);
+            Assert.Equal(
+                "Rendered (Ghostty VT + CPU Cell Renderer)",
+                ToolTip.GetTip(headerButton) as string);
         }
         finally
         {
@@ -389,7 +451,7 @@ public sealed class MainWindowControllerModeStartupTests
         return TerminalRenderMode.RenderedAuto;
     }
 
-    private static TerminalRenderMode ResolveModeFromContainer(Control container)
+    private static TerminalRenderMode ResolveModeFromContainer(Control container, Button? headerButton = null)
     {
         if (container is GhosttyRenderedTerminalControl)
         {
@@ -403,6 +465,11 @@ public sealed class MainWindowControllerModeStartupTests
 
         if (container is ScrollViewer scrollViewer && scrollViewer.Content is TerminalControl standalone)
         {
+            if (IsGhosttyRenderedHeader(headerButton))
+            {
+                return TerminalRenderMode.GhosttyRendered;
+            }
+
             return standalone.VtProcessorPreference switch
             {
                 VtProcessorPreference.Native => TerminalRenderMode.NativeVt,
@@ -413,6 +480,11 @@ public sealed class MainWindowControllerModeStartupTests
 
         if (container is TerminalControl directStandalone)
         {
+            if (IsGhosttyRenderedHeader(headerButton))
+            {
+                return TerminalRenderMode.GhosttyRendered;
+            }
+
             return directStandalone.VtProcessorPreference switch
             {
                 VtProcessorPreference.Native => TerminalRenderMode.NativeVt,
@@ -423,6 +495,15 @@ public sealed class MainWindowControllerModeStartupTests
 
         throw new InvalidOperationException(
             $"Unsupported terminal host container type '{container.GetType().FullName}'.");
+    }
+
+    private static bool IsGhosttyRenderedHeader(Button? headerButton)
+    {
+        string? tip = headerButton is null
+            ? null
+            : ToolTip.GetTip(headerButton) as string;
+        return !string.IsNullOrWhiteSpace(tip)
+            && tip.StartsWith("Rendered (Ghostty VT + ", StringComparison.Ordinal);
     }
 
     private static List<TerminalControl> GetStandaloneControls(Grid terminalHost)
@@ -585,5 +666,20 @@ public sealed class MainWindowControllerModeStartupTests
         }
 
         return glyphs;
+    }
+
+    private sealed class FixedTerminalModeCapabilityResolver : ITerminalModeCapabilityResolver
+    {
+        private readonly TerminalModeCapabilities _capabilities;
+
+        public FixedTerminalModeCapabilityResolver(TerminalModeCapabilities capabilities)
+        {
+            _capabilities = capabilities;
+        }
+
+        public TerminalModeCapabilities Resolve(bool embeddedGhosttyAvailable, bool nativeVtAvailable)
+        {
+            return _capabilities;
+        }
     }
 }
