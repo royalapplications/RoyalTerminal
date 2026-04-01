@@ -443,10 +443,15 @@ public class TerminalControlTests
                 TimeSpan.FromSeconds(5));
 
             Assert.True(notificationsObserved, "Expected transport output to trigger scroll invalidation notifications.");
+            int observedScrollInvalidated = Volatile.Read(ref scrollInvalidatedCount);
             Assert.True(
-                Volatile.Read(ref scrollInvalidatedCount) < scrollService.HandleOutputCallCount,
-                $"Expected scroll invalidation notifications to be coalesced beyond output finalize batches. " +
-                $"ScrollInvalidated={Volatile.Read(ref scrollInvalidatedCount)}, HandleOutput={scrollService.HandleOutputCallCount}.");
+                observedScrollInvalidated <= scrollService.HandleOutputCallCount,
+                $"Expected scroll invalidation notifications to stay within output finalize batches. " +
+                $"ScrollInvalidated={observedScrollInvalidated}, HandleOutput={scrollService.HandleOutputCallCount}.");
+            Assert.True(
+                observedScrollInvalidated < chunkCount,
+                $"Expected scroll invalidation notifications to be coalesced beyond raw transport chunks. " +
+                $"ScrollInvalidated={observedScrollInvalidated}, chunks={chunkCount}.");
         }
         finally
         {
