@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 namespace RoyalTerminal.GhosttySharp.Native;
 
 /// <summary>
-/// Handles cross-platform native library resolution for the Ghostty native library.
+/// Handles cross-platform native library resolution for the official Ghostty VT library.
 /// Registers a custom <see cref="NativeLibrary"/> resolver that searches platform-specific
 /// runtime directories following the NuGet native package convention.
 /// </summary>
@@ -18,7 +18,6 @@ public static class NativeLibraryLoader
     private static readonly object s_lock = new();
     private static readonly Dictionary<string, string> s_libraryFileNames = new(StringComparer.Ordinal)
     {
-        [GhosttyNative.LibraryName] = GetLibraryFileName(GhosttyNative.LibraryName),
         ["ghostty-vt"] = GetLibraryFileName("ghostty-vt"),
     };
 
@@ -33,7 +32,7 @@ public static class NativeLibraryLoader
         {
             if (s_initialized) return;
 
-            NativeLibrary.SetDllImportResolver(typeof(GhosttyNative).Assembly, ResolveLibrary);
+            NativeLibrary.SetDllImportResolver(typeof(GhosttyVtNative).Assembly, ResolveLibrary);
             s_initialized = true;
         }
     }
