@@ -32,26 +32,21 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
         {
             lifetime = controller.Activate();
 
-            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-                embeddedGhosttyAvailable: viewModel.GhosttyAvailable,
-                nativeVtAvailable: viewModel.NativeVtAvailable);
+            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(viewModel.NativeVtAvailable);
             TerminalModeResolver resolver = TerminalModeResolver.Default;
             int expectedStartupTabs = CountSupportedModes(resolver, capabilities);
 
             bool createdExpectedTabs = await WaitUntilAsync(
                 () => terminalHost.Children.Count == expectedStartupTabs,
                 TimeSpan.FromSeconds(2));
-            Assert.True(
-                createdExpectedTabs,
-                $"Expected {expectedStartupTabs} startup tabs but found {terminalHost.Children.Count}.");
+            Assert.True(createdExpectedTabs);
         }
         finally
         {
@@ -72,8 +67,7 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
@@ -90,7 +84,7 @@ public sealed class MainWindowControllerModeStartupTests
             Dictionary<string, Color> standaloneModeColors = GetStandaloneModeIndicatorColors(tabStrip);
             Dictionary<string, string> standaloneModeGlyphs = GetStandaloneModeIndicatorGlyphs(tabStrip);
 
-            Assert.True(standaloneModeColors.Count >= 2, "Expected at least two standalone startup modes.");
+            Assert.True(standaloneModeColors.Count >= 2);
             Assert.Equal(standaloneModeColors.Count, standaloneModeColors.Values.Distinct().Count());
             Assert.Equal(standaloneModeGlyphs.Count, standaloneModeGlyphs.Values.Distinct().Count());
         }
@@ -113,8 +107,7 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
@@ -124,19 +117,15 @@ public sealed class MainWindowControllerModeStartupTests
             bool initialTabCreated = await WaitUntilAsync(
                 () => terminalHost.Children.Count > 0,
                 TimeSpan.FromSeconds(2));
-            Assert.True(initialTabCreated, "Controller did not create an initial tab.");
+            Assert.True(initialTabCreated);
 
-            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-                embeddedGhosttyAvailable: viewModel.GhosttyAvailable,
-                nativeVtAvailable: viewModel.NativeVtAvailable);
+            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(viewModel.NativeVtAvailable);
             TerminalModeResolver resolver = TerminalModeResolver.Default;
             StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
 
             TerminalRenderMode[] requestedModes =
             [
-                TerminalRenderMode.GhosttyRendered,
-                TerminalRenderMode.GhosttyNative,
                 TerminalRenderMode.NativeVt,
                 TerminalRenderMode.ManagedVt,
                 TerminalRenderMode.RenderedAuto,
@@ -153,7 +142,7 @@ public sealed class MainWindowControllerModeStartupTests
                 bool created = await WaitUntilAsync(
                     () => terminalHost.Children.Count > countBefore,
                     TimeSpan.FromSeconds(2));
-                Assert.True(created, $"Controller did not create tab for requested mode '{requestedMode}'.");
+                Assert.True(created);
 
                 Control newContainer = terminalHost.Children[^1];
                 Button newHeader = Assert.IsType<Button>(tabStrip.Children[^1]);
@@ -170,21 +159,18 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
-    public async Task Controller_GhosttyRenderedCpuBackend_UsesStandaloneVtControl()
+    public async Task Controller_RenderedAuto_UsesStandaloneVtControl()
     {
         MainWindowViewModel viewModel = new();
         viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
-        viewModel.PipeCommandText = "echo rendered-cpu-native-vt";
+        viewModel.PipeCommandText = "echo rendered-auto";
 
         Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
         MainWindowController controller = new(
             window,
             viewModel,
-            new FixedTerminalModeCapabilityResolver(TerminalModeCapabilities.Create(
-                embeddedGhosttyAvailable: true,
-                nativeVtAvailable: true)),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            new FixedTerminalModeCapabilityResolver(TerminalModeCapabilities.Create(nativeVtAvailable: true)),
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
@@ -198,7 +184,6 @@ public sealed class MainWindowControllerModeStartupTests
 
             viewModel.SetRenderMode(
                 useRenderedControl: true,
-                useNativeControl: false,
                 useNativeVtControl: false);
 
             int countBefore = terminalHost.Children.Count;
@@ -212,18 +197,12 @@ public sealed class MainWindowControllerModeStartupTests
             Control newContainer = terminalHost.Children[^1];
             ScrollViewer scrollViewer = Assert.IsType<ScrollViewer>(newContainer);
             TerminalControl standalone = Assert.IsType<TerminalControl>(scrollViewer.Content);
-            VtProcessorPreference expectedPreference = viewModel.NativeVtAvailable
-                ? VtProcessorPreference.Native
-                : VtProcessorPreference.Managed;
-            Assert.Equal(expectedPreference, standalone.VtProcessorPreference);
+            Assert.Equal(VtProcessorPreference.Auto, standalone.VtProcessorPreference);
 
             StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
             Button headerButton = Assert.IsType<Button>(tabStrip.Children[^1]);
-            string expectedTooltip = viewModel.NativeVtAvailable
-                ? "Rendered (Ghostty VT + CPU Cell Renderer)"
-                : "Managed VT (Pipe - Basic VT)";
-            Assert.Equal(expectedTooltip, ToolTip.GetTip(headerButton) as string);
+            Assert.Equal("Rendered (Pipe - Ghostty VT)", ToolTip.GetTip(headerButton) as string);
         }
         finally
         {
@@ -244,21 +223,17 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
         {
             lifetime = controller.Activate();
 
-            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-                embeddedGhosttyAvailable: viewModel.GhosttyAvailable,
-                nativeVtAvailable: viewModel.NativeVtAvailable);
+            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(viewModel.NativeVtAvailable);
             TerminalModeResolver resolver = TerminalModeResolver.Default;
 
             TerminalRenderMode currentMode = GetActiveMode(viewModel);
-
             for (int i = 0; i < 10; i++)
             {
                 TerminalRenderMode expected = resolver.ResolveNextMode(currentMode, capabilities);
@@ -266,10 +241,7 @@ public sealed class MainWindowControllerModeStartupTests
 
                 TerminalRenderMode actual = GetActiveMode(viewModel);
                 Assert.Equal(expected, actual);
-                Assert.True(
-                    resolver.IsSupported(actual, capabilities),
-                    $"Mode cycle produced unsupported mode '{actual}' for capabilities {capabilities}.");
-
+                Assert.True(resolver.IsSupported(actual, capabilities));
                 currentMode = actual;
             }
         }
@@ -295,8 +267,7 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
@@ -338,8 +309,7 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
@@ -424,24 +394,13 @@ public sealed class MainWindowControllerModeStartupTests
     private static void SetRequestedMode(MainWindowViewModel viewModel, TerminalRenderMode requestedMode)
     {
         viewModel.SetRenderMode(
-            useRenderedControl: requestedMode == TerminalRenderMode.GhosttyRendered,
-            useNativeControl: requestedMode == TerminalRenderMode.GhosttyNative,
+            useRenderedControl: requestedMode == TerminalRenderMode.RenderedAuto,
             useNativeVtControl: requestedMode == TerminalRenderMode.NativeVt,
             useManagedVtControl: requestedMode == TerminalRenderMode.ManagedVt);
     }
 
     private static TerminalRenderMode GetActiveMode(MainWindowViewModel viewModel)
     {
-        if (viewModel.UseRenderedControl)
-        {
-            return TerminalRenderMode.GhosttyRendered;
-        }
-
-        if (viewModel.UseNativeControl)
-        {
-            return TerminalRenderMode.GhosttyNative;
-        }
-
         if (viewModel.UseNativeVtControl)
         {
             return TerminalRenderMode.NativeVt;
@@ -457,39 +416,14 @@ public sealed class MainWindowControllerModeStartupTests
 
     private static TerminalRenderMode ResolveModeFromContainer(Control container, Button? headerButton = null)
     {
-        if (container is GhosttyRenderedTerminalControl)
+        if (container is ScrollViewer { Content: TerminalControl standalone })
         {
-            return TerminalRenderMode.GhosttyRendered;
-        }
-
-        if (container is GhosttyNativeTerminalControl)
-        {
-            return TerminalRenderMode.GhosttyNative;
-        }
-
-        if (container is ScrollViewer scrollViewer && scrollViewer.Content is TerminalControl standalone)
-        {
-            if (IsGhosttyRenderedHeader(headerButton))
+            if (headerButton is not null && (ToolTip.GetTip(headerButton) as string)?.StartsWith("Rendered (", StringComparison.Ordinal) == true)
             {
-                return TerminalRenderMode.GhosttyRendered;
+                return TerminalRenderMode.RenderedAuto;
             }
 
             return standalone.VtProcessorPreference switch
-            {
-                VtProcessorPreference.Native => TerminalRenderMode.NativeVt,
-                VtProcessorPreference.Managed => TerminalRenderMode.ManagedVt,
-                _ => TerminalRenderMode.RenderedAuto,
-            };
-        }
-
-        if (container is TerminalControl directStandalone)
-        {
-            if (IsGhosttyRenderedHeader(headerButton))
-            {
-                return TerminalRenderMode.GhosttyRendered;
-            }
-
-            return directStandalone.VtProcessorPreference switch
             {
                 VtProcessorPreference.Native => TerminalRenderMode.NativeVt,
                 VtProcessorPreference.Managed => TerminalRenderMode.ManagedVt,
@@ -501,28 +435,14 @@ public sealed class MainWindowControllerModeStartupTests
             $"Unsupported terminal host container type '{container.GetType().FullName}'.");
     }
 
-    private static bool IsGhosttyRenderedHeader(Button? headerButton)
-    {
-        string? tip = headerButton is null
-            ? null
-            : ToolTip.GetTip(headerButton) as string;
-        return !string.IsNullOrWhiteSpace(tip)
-            && tip.StartsWith("Rendered (Ghostty VT + ", StringComparison.Ordinal);
-    }
-
     private static List<TerminalControl> GetStandaloneControls(Grid terminalHost)
     {
         List<TerminalControl> controls = [];
         for (int i = 0; i < terminalHost.Children.Count; i++)
         {
-            switch (terminalHost.Children[i])
+            if (terminalHost.Children[i] is ScrollViewer { Content: TerminalControl wrapped })
             {
-                case TerminalControl direct:
-                    controls.Add(direct);
-                    break;
-                case ScrollViewer { Content: TerminalControl wrapped }:
-                    controls.Add(wrapped);
-                    break;
+                controls.Add(wrapped);
             }
         }
 
@@ -567,8 +487,6 @@ public sealed class MainWindowControllerModeStartupTests
     {
         TerminalRenderMode[] startupModes =
         [
-            TerminalRenderMode.GhosttyRendered,
-            TerminalRenderMode.GhosttyNative,
             TerminalRenderMode.NativeVt,
             TerminalRenderMode.ManagedVt,
             TerminalRenderMode.RenderedAuto,
@@ -608,7 +526,7 @@ public sealed class MainWindowControllerModeStartupTests
                 : tip.StartsWith("Managed VT", StringComparison.Ordinal)
                     ? "Managed VT"
                     : tip.StartsWith("Rendered (", StringComparison.Ordinal)
-                        ? "Rendered (Auto VT)"
+                        ? "Rendered"
                         : string.Empty;
             if (string.IsNullOrEmpty(modeName))
             {
@@ -651,7 +569,7 @@ public sealed class MainWindowControllerModeStartupTests
                 : tip.StartsWith("Managed VT", StringComparison.Ordinal)
                     ? "Managed VT"
                     : tip.StartsWith("Rendered (", StringComparison.Ordinal)
-                        ? "Rendered (Auto VT)"
+                        ? "Rendered"
                         : string.Empty;
             if (string.IsNullOrEmpty(modeName))
             {
@@ -681,7 +599,7 @@ public sealed class MainWindowControllerModeStartupTests
             _capabilities = capabilities;
         }
 
-        public TerminalModeCapabilities Resolve(bool embeddedGhosttyAvailable, bool nativeVtAvailable)
+        public TerminalModeCapabilities Resolve(bool nativeVtAvailable)
         {
             return _capabilities;
         }

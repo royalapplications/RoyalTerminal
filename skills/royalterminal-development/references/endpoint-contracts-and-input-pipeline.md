@@ -19,7 +19,6 @@ Primary code files:
 - `src/RoyalTerminal.Terminal.Services.Contracts/Contracts/ITerminalSessionService.cs`
 - `src/RoyalTerminal.Terminal.Services/Services/TerminalSessionService.cs`
 - `src/RoyalTerminal.Avalonia/Services/DefaultTerminalInputAdapter.cs`
-- `src/RoyalTerminal.Avalonia.Ghostty/Services/GhosttySurfaceTerminalEndpoint.cs`
 - `src/RoyalTerminal.Avalonia/Controls/TerminalControl.cs`
 
 Use this reference when changing endpoint capability contracts, input routing precedence, or any endpoint-backed control behavior.

@@ -21,7 +21,6 @@
     <KeyBinding Gesture="Ctrl+Subtract" Command="{Binding DecreaseFontSizeCommand}" />
     <KeyBinding Gesture="Ctrl+OemMinus" Command="{Binding DecreaseFontSizeCommand}" />
     <KeyBinding Gesture="Ctrl+D0" Command="{Binding ResetFontSizeCommand}" />
-    <KeyBinding Gesture="Ctrl+Shift+R" Command="{Binding ToggleRenderedBackendCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+C" Command="{Binding CopySelectionCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+V" Command="{Binding PasteClipboardCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+A" Command="{Binding SelectAllCommand}" />
@@ -75,12 +74,7 @@
           <Button Content="{Binding ModeButtonText}" Height="24"
                   FontSize="10" Padding="8,2"
                   Command="{Binding CycleRenderModeCommand}"
-                  ToolTip.Tip="Switch rendering mode (Ghostty Rendered / Ghostty Native / Native VT / Managed VT / Rendered)" />
-          <Button Content="{Binding RenderedBackendButtonText}" Height="24"
-                  FontSize="10" Padding="8,2"
-                  IsEnabled="{Binding CanToggleRenderedBackend}"
-                  Command="{Binding ToggleRenderedBackendCommand}"
-                  ToolTip.Tip="Toggle Ghostty rendered backend (TextureInterop / CPU Cell Renderer)" />
+                  ToolTip.Tip="Switch rendering mode (Native VT / Managed VT / Rendered)" />
           <Border Width="1" Background="{StaticResource ToolbarDividerBrush}" Margin="4,2" />
           <Button Content="{Binding CaptureToggleButtonText}" Height="24"
                   FontSize="10" Padding="8,2"
@@ -144,7 +138,7 @@
           </ComboBox>
         </WrapPanel>
 
-        <TextBlock Text="Transport settings are used for transport-backed tabs, including Ghostty Rendered CPU tabs."
+        <TextBlock Text="Transport settings are used for all demo tabs."
                    Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
                    IsVisible="{Binding ShowSessionTransportHint}" />
 

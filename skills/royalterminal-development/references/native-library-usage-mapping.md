@@ -19,8 +19,8 @@ Primary managed API:
 - `Ghostty.Initialize()` in `src/RoyalTerminal.GhosttySharp/Ghostty.cs`
 
 Main usage:
-- embedded Ghostty app/surface lifecycle for `GhosttyNativeTerminalControl` and `GhosttyRenderedTerminalControl`
-- config/app/surface APIs from Ghostty embedded runtime
+- low-level config/app/surface APIs from the Ghostty embedded runtime
+- wrapper coverage retained for advanced/native integrations, not for a built-in Avalonia Ghostty control package
 
 ## libghostty-vt
 

@@ -28,8 +28,6 @@ using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Demo.ViewModels;
-using RoyalTerminal.GhosttySharp;
-using RoyalTerminal.GhosttySharp.Native;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
@@ -49,7 +47,6 @@ internal sealed class MainWindowController
 {
     private const string DisableTextShapingEnvVar = "ROYALTERMINAL_DISABLE_TEXT_SHAPING";
     private const string EnableRenderDiagnosticsEnvVar = "ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS";
-    private const string EmbeddedGhosttyConfigOverlay = "grapheme-width-method = unicode\n";
 
     private static readonly string MonoFont =
         RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "Menlo" :
@@ -70,25 +67,19 @@ internal sealed class MainWindowController
     private readonly ITerminalModeCapabilityResolver _modeCapabilityResolver;
     private readonly ITerminalModeResolver _modeResolver;
     private readonly ITerminalSessionProfileStore _settingsProfileStore;
-    private readonly bool _skipEmbeddedGhosttyInitialization;
     private bool _suppressReplayTimelineSeek;
     private bool _settingsProfilesLoaded;
 
     private TerminalTab? _activeTab;
     private int _tabCounter;
-    private GhosttyApp? _ghosttyApp;
-    private GhosttyConfig? _ghosttyConfig;
-    private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(
-        embeddedGhosttyAvailable: false,
-        nativeVtAvailable: false);
+    private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(nativeVtAvailable: false);
 
     public MainWindowController(Window window, MainWindowViewModel viewModel)
         : this(
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: false)
+            TerminalModeResolver.Default)
     {
     }
 
@@ -97,7 +88,6 @@ internal sealed class MainWindowController
         MainWindowViewModel viewModel,
         ITerminalModeCapabilityResolver modeCapabilityResolver,
         ITerminalModeResolver modeResolver,
-        bool skipEmbeddedGhosttyInitialization,
         ITerminalSessionProfileStore? settingsProfileStore = null)
     {
         _window = window ?? throw new ArgumentNullException(nameof(window));
@@ -105,7 +95,6 @@ internal sealed class MainWindowController
         _modeCapabilityResolver = modeCapabilityResolver
             ?? throw new ArgumentNullException(nameof(modeCapabilityResolver));
         _modeResolver = modeResolver ?? throw new ArgumentNullException(nameof(modeResolver));
-        _skipEmbeddedGhosttyInitialization = skipEmbeddedGhosttyInitialization;
         _settingsProfileStore = settingsProfileStore ?? TerminalSessionProfileStoreFactory.CreateDefault();
         _terminalHost = _window.FindControl<Grid>("TerminalHost")
             ?? throw new InvalidOperationException("TerminalHost was not found in MainWindow.");
@@ -118,11 +107,7 @@ internal sealed class MainWindowController
         CompositeDisposable lifetime = new();
         RegisterInteractionHandlers(lifetime);
 
-        bool embeddedGhosttyAvailable = !_skipEmbeddedGhosttyInitialization
-            && RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
-        _terminalCapabilities = _modeCapabilityResolver.Resolve(
-            embeddedGhosttyAvailable,
-            GhosttyVtProcessor.IsAvailable());
+        _terminalCapabilities = _modeCapabilityResolver.Resolve(GhosttyVtProcessor.IsAvailable());
         _viewModel.SetTerminalCapabilities(_terminalCapabilities);
 
         TerminalRenderMode startupMode = TerminalRenderMode.RenderedAuto;
@@ -134,14 +119,12 @@ internal sealed class MainWindowController
         CreateInitialTabsForSupportedModes();
         SyncCaptureReplayState();
         string startupStatus = _viewModel.UseRenderedControl
-            ? $"Ghostty VT + {GetRenderedBackendLabel()} rendering"
-            : _viewModel.UseNativeControl
-                ? "Ghostty native terminal ready"
-                : _viewModel.UseNativeVtControl
-                    ? "Native VT (libghostty-vt) ready"
-                    : _viewModel.UseManagedVtControl
-                        ? "Managed VT (BasicVtProcessor) ready"
-                        : "Terminal ready - Rendered (Custom PTY) mode";
+            ? "Rendered terminal ready"
+            : _viewModel.UseNativeVtControl
+                ? "Native VT (libghostty-vt) ready"
+                : _viewModel.UseManagedVtControl
+                    ? "Managed VT (BasicVtProcessor) ready"
+                    : "Rendered terminal ready";
         string? nativeModeHint = BuildNativeModeAvailabilityHint();
         UpdateStatus(nativeModeHint is null
             ? startupStatus
@@ -225,12 +208,6 @@ internal sealed class MainWindowController
             context.SetOutput(Unit.Default);
         }));
 
-        disposables.Add(_viewModel.ApplyRenderedBackendInteraction.RegisterHandler(context =>
-        {
-            ApplyRenderedBackend(context.Input);
-            context.SetOutput(Unit.Default);
-        }));
-
         disposables.Add(_viewModel.ToggleCaptureInteraction.RegisterHandler(context =>
         {
             ToggleCapture(context.Input);
@@ -294,73 +271,6 @@ internal sealed class MainWindowController
             .Subscribe(_ => ApplySessionLoggingSubscriptionsToAllStandaloneTabs()));
     }
 
-    private bool TryInitializeGhostty()
-    {
-        // The Ghostty embedded API (Ghostty Rendered/Native modes) currently only supports macOS.
-        // On Windows and Linux, the app falls through to Rendered (Custom PTY) mode.
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            return false;
-        }
-
-        try
-        {
-            if (!Ghostty.Initialize())
-            {
-                return false;
-            }
-
-            _ghosttyConfig = new GhosttyConfig();
-            _ghosttyConfig.LoadDefaultFiles();
-            GhosttyConfigOverlay.ApplyText(
-                _ghosttyConfig,
-                EmbeddedGhosttyConfigOverlay,
-                filePrefix: "royalterminal-embedded");
-            _ghosttyConfig.Finalize_();
-
-            _ghosttyApp = new GhosttyApp(_ghosttyConfig);
-
-            GhosttyLibraryInfo info = Ghostty.GetInfo();
-            UpdateStatus($"Ghostty {info.Version} - custom rendered mode");
-            return true;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
-
-    private bool EnsureEmbeddedGhosttyInitialized()
-    {
-        if (_ghosttyApp is not null)
-        {
-            return true;
-        }
-
-        if (_skipEmbeddedGhosttyInitialization)
-        {
-            return false;
-        }
-
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            return false;
-        }
-
-        bool initialized = TryInitializeGhostty();
-        if (initialized)
-        {
-            _terminalCapabilities = _terminalCapabilities with
-            {
-                EmbeddedGhosttyNativeAvailable = true,
-                GhosttyRenderedAvailable = true,
-            };
-            _viewModel.SetTerminalCapabilities(_terminalCapabilities);
-        }
-
-        return initialized;
-    }
-
     private void InitializeShellProfiles()
     {
         try
@@ -392,8 +302,6 @@ internal sealed class MainWindowController
     {
         TerminalRenderMode[] startupModes =
         [
-            TerminalRenderMode.GhosttyRendered,
-            TerminalRenderMode.GhosttyNative,
             TerminalRenderMode.NativeVt,
             TerminalRenderMode.ManagedVt,
             TerminalRenderMode.RenderedAuto,
@@ -423,21 +331,19 @@ internal sealed class MainWindowController
         _tabCounter++;
         string tabName = $"Terminal {_tabCounter}";
         TerminalModeSelection modeSelection = ResolveModeSelectionForNewTab();
-        Control terminal = CreateTerminalControlWithRuntimeFallback(
+        TerminalControl terminal = CreateTerminalControlWithRuntimeFallback(
             modeSelection,
             out TerminalModeSelection finalizedModeSelection);
 
         TabVisualMode tabMode = ResolveTabMode(terminal, finalizedModeSelection.ResolvedMode);
         Button headerButton = CreateTabHeader(tabName, tabMode);
 
-        Control container = terminal is TerminalControl
-            ? new ScrollViewer
-            {
-                Content = terminal,
-                VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-            }
-            : terminal;
+        ScrollViewer container = new()
+        {
+            Content = terminal,
+            VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+        };
 
         TerminalTab tab = new(
             headerButton,
@@ -445,7 +351,7 @@ internal sealed class MainWindowController
             container,
             _tabCounter,
             tabMode.Name,
-            autoStartSession: terminal is TerminalControl,
+            autoStartSession: true,
             resolvedMode: finalizedModeSelection.ResolvedMode);
         tab.CloseButton.Command = _viewModel.CloseTabCommand;
         tab.CloseButton.CommandParameter = tab.Index;
@@ -517,10 +423,7 @@ internal sealed class MainWindowController
     private TerminalModeSelection ResolveModeSelectionForNewTab()
     {
         TerminalRenderMode requestedMode = GetRequestedRenderMode();
-        _terminalCapabilities = _terminalCapabilities with
-        {
-            NativeVtAvailable = GhosttyVtProcessor.IsAvailable(),
-        };
+        _terminalCapabilities = _terminalCapabilities with { NativeVtAvailable = GhosttyVtProcessor.IsAvailable() };
         _viewModel.SetTerminalCapabilities(_terminalCapabilities);
 
         TerminalRenderMode resolvedMode = _modeResolver.ResolveSupportedMode(requestedMode, _terminalCapabilities);
@@ -533,19 +436,17 @@ internal sealed class MainWindowController
         return new TerminalModeSelection(requestedMode, resolvedMode, fallbackApplied, fallbackReason);
     }
 
-    private Control CreateTerminalControl(TerminalRenderMode mode)
+    private TerminalControl CreateTerminalControl(TerminalRenderMode mode)
     {
         return mode switch
         {
-            TerminalRenderMode.GhosttyRendered => CreateGhosttyRenderedModeControl(),
-            TerminalRenderMode.GhosttyNative => CreateGhosttyNativeControl(),
             TerminalRenderMode.NativeVt => CreateStandaloneTerminalControl(TerminalRenderMode.NativeVt),
             TerminalRenderMode.ManagedVt => CreateStandaloneTerminalControl(TerminalRenderMode.ManagedVt),
             _ => CreateStandaloneTerminalControl(TerminalRenderMode.RenderedAuto),
         };
     }
 
-    private Control CreateTerminalControlWithRuntimeFallback(
+    private TerminalControl CreateTerminalControlWithRuntimeFallback(
         TerminalModeSelection selection,
         out TerminalModeSelection finalizedSelection)
     {
@@ -556,7 +457,7 @@ internal sealed class MainWindowController
         {
             try
             {
-                Control terminal = CreateTerminalControl(currentSelection.ResolvedMode);
+                TerminalControl terminal = CreateTerminalControl(currentSelection.ResolvedMode);
                 finalizedSelection = currentSelection;
                 return terminal;
             }
@@ -588,135 +489,6 @@ internal sealed class MainWindowController
         }
 
         throw new InvalidOperationException("Unable to construct terminal control for any supported mode.");
-    }
-
-    private GhosttyRenderedTerminalControl CreateGhosttyRenderedControl()
-    {
-        if (!EnsureEmbeddedGhosttyInitialized())
-        {
-            throw new InvalidOperationException("Ghostty rendered mode is unavailable because the embedded Ghostty app is not initialized.");
-        }
-        GhosttyApp app = _ghosttyApp
-            ?? throw new InvalidOperationException("Ghostty rendered mode is unavailable because the embedded Ghostty app is not initialized.");
-
-        GhosttyRenderedTerminalControl renderedControl = new()
-        {
-            TerminalFontSize = (float)_viewModel.FontSize,
-            FontFamilyName = MonoFont,
-            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            RenderingMode = GetRenderedRenderingMode(_viewModel.UseTextureInterop),
-        };
-        renderedControl.Initialize(app);
-        renderedControl.ApplyTheme(_viewModel.ActiveTheme);
-        ConfigureRenderer(renderedControl.Renderer);
-
-        renderedControl.TitleChanged += (_, title) =>
-        {
-            TerminalTab? tab = _tabs.Find(t => t.Control == renderedControl);
-            tab?.UpdateTitle(title);
-            AppendEventLog($"[{tab?.Title ?? "Rendered"}] Title changed to '{title}'.");
-        };
-        renderedControl.ProcessExited += (_, code) =>
-        {
-            UpdateStatus($"Process exited: {code}");
-            AppendEventLog($"[Rendered] Process exited with code {code}.");
-        };
-        renderedControl.CloseRequested += (_, _) =>
-        {
-            TerminalTab? tab = _tabs.Find(t => t.Control == renderedControl);
-            if (tab is not null)
-            {
-                AppendEventLog($"[{tab.Title}] Close requested.");
-                CloseTab(tab);
-            }
-        };
-        renderedControl.TerminalResized += (_, args) =>
-        {
-            if (_activeTab?.Control == renderedControl)
-            {
-                UpdateDimensions(args.Columns, args.Rows);
-            }
-        };
-
-        return renderedControl;
-    }
-
-    private Control CreateGhosttyRenderedModeControl()
-    {
-        // The CPU-rendered Ghostty mode can stay on the official libghostty-vt
-        // path. Only texture interop still depends on the embedded surface.
-        bool nativeVtAvailable = GhosttyVtProcessor.IsAvailable();
-        if (!_viewModel.UseTextureInterop && nativeVtAvailable)
-        {
-            return CreateStandaloneTerminalControl(
-                TerminalRenderMode.GhosttyRendered,
-                VtProcessorPreference.Native);
-        }
-
-        if (_viewModel.UseTextureInterop)
-        {
-            if (_terminalCapabilities.EmbeddedGhosttyNativeAvailable)
-            {
-                return CreateGhosttyRenderedControl();
-            }
-
-            if (nativeVtAvailable)
-            {
-                return CreateStandaloneTerminalControl(
-                    TerminalRenderMode.GhosttyRendered,
-                    VtProcessorPreference.Native);
-            }
-        }
-
-        return CreateGhosttyRenderedControl();
-    }
-
-    private GhosttyNativeTerminalControl CreateGhosttyNativeControl()
-    {
-        if (!EnsureEmbeddedGhosttyInitialized())
-        {
-            throw new InvalidOperationException("Ghostty native mode is unavailable because the embedded Ghostty app is not initialized.");
-        }
-        GhosttyApp app = _ghosttyApp
-            ?? throw new InvalidOperationException("Ghostty native mode is unavailable because the embedded Ghostty app is not initialized.");
-
-        GhosttyNativeTerminalControl nativeControl = new()
-        {
-            TerminalFontSize = (float)_viewModel.FontSize,
-            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        };
-        nativeControl.Initialize(app);
-        nativeControl.ApplyTheme(_viewModel.ActiveTheme);
-
-        nativeControl.TitleChanged += (_, title) =>
-        {
-            TerminalTab? tab = _tabs.Find(t => t.Control == nativeControl);
-            tab?.UpdateTitle(title);
-            AppendEventLog($"[{tab?.Title ?? "Native"}] Title changed to '{title}'.");
-        };
-        nativeControl.ProcessExited += (_, code) =>
-        {
-            UpdateStatus($"Process exited: {code}");
-            AppendEventLog($"[Native] Process exited with code {code}.");
-        };
-        nativeControl.CloseRequested += (_, _) =>
-        {
-            TerminalTab? tab = _tabs.Find(t => t.Control == nativeControl);
-            if (tab is not null)
-            {
-                AppendEventLog($"[{tab.Title}] Close requested.");
-                CloseTab(tab);
-            }
-        };
-        nativeControl.TerminalResized += (_, args) =>
-        {
-            if (_activeTab?.Control == nativeControl)
-            {
-                UpdateDimensions(args.Columns, args.Rows);
-            }
-        };
-
-        return nativeControl;
     }
 
     private TerminalControl CreateStandaloneTerminalControl(TerminalRenderMode mode)
@@ -881,16 +653,6 @@ internal sealed class MainWindowController
 
     private TerminalRenderMode GetRequestedRenderMode()
     {
-        if (_viewModel.UseRenderedControl)
-        {
-            return TerminalRenderMode.GhosttyRendered;
-        }
-
-        if (_viewModel.UseNativeControl)
-        {
-            return TerminalRenderMode.GhosttyNative;
-        }
-
         if (_viewModel.UseNativeVtControl)
         {
             return TerminalRenderMode.NativeVt;
@@ -908,8 +670,6 @@ internal sealed class MainWindowController
     {
         return requestedMode switch
         {
-            TerminalRenderMode.GhosttyRendered => "Ghostty rendered mode is unavailable",
-            TerminalRenderMode.GhosttyNative => "embedded Ghostty native mode is unavailable",
             TerminalRenderMode.NativeVt => "native VT provider is unavailable",
             TerminalRenderMode.ManagedVt => "managed VT mode is unavailable",
             _ => "selected mode is unavailable",
@@ -922,12 +682,6 @@ internal sealed class MainWindowController
     {
         switch (mode)
         {
-            case TerminalRenderMode.GhosttyRendered when capabilities.GhosttyRenderedAvailable:
-                capabilities = capabilities with { GhosttyRenderedAvailable = false };
-                return true;
-            case TerminalRenderMode.GhosttyNative when capabilities.EmbeddedGhosttyNativeAvailable:
-                capabilities = capabilities with { EmbeddedGhosttyNativeAvailable = false };
-                return true;
             case TerminalRenderMode.NativeVt when capabilities.NativeVtAvailable:
                 capabilities = capabilities with { NativeVtAvailable = false };
                 return true;
@@ -956,44 +710,15 @@ internal sealed class MainWindowController
     {
         return mode switch
         {
-            TerminalRenderMode.GhosttyRendered => "Ghostty Rendered",
-            TerminalRenderMode.GhosttyNative => "Ghostty Native",
             TerminalRenderMode.NativeVt => "Native VT",
             TerminalRenderMode.ManagedVt => "Managed VT",
             _ => "Rendered",
         };
     }
 
-    private TabVisualMode ResolveTabMode(Control terminal, TerminalRenderMode mode)
+    private TabVisualMode ResolveTabMode(TerminalControl terminal, TerminalRenderMode mode)
     {
-        if (terminal is GhosttyRenderedTerminalControl rendered)
-        {
-            bool isTextureInterop = rendered.RenderingMode == GhosttyRenderedTerminalRenderingMode.TextureInterop;
-            return new TabVisualMode(
-                isTextureInterop
-                    ? "Rendered (Ghostty VT + TextureInterop)"
-                    : "Rendered (Ghostty VT + CPU Cell Renderer)",
-                isTextureInterop ? "\u25CF" : "\u25CB",
-                new SolidColorBrush(Color.FromRgb(0x56, 0x9C, 0xD6)));
-        }
-
-        if (terminal is TerminalControl && mode == TerminalRenderMode.GhosttyRendered)
-        {
-            return new TabVisualMode(
-                "Rendered (Ghostty VT + CPU Cell Renderer)",
-                "\u25CB",
-                new SolidColorBrush(Color.FromRgb(0x56, 0x9C, 0xD6)));
-        }
-
-        if (terminal is GhosttyNativeTerminalControl)
-        {
-            return new TabVisualMode(
-                "Native (Ghostty Metal)",
-                "\u25C6",
-                new SolidColorBrush(Color.FromRgb(0xDC, 0xDC, 0xAA)));
-        }
-
-        string vtLabel = terminal is TerminalControl gtc && gtc.IsUsingNativeVtProcessor
+        string vtLabel = terminal.IsUsingNativeVtProcessor
             ? "Ghostty VT"
             : "Basic VT";
         string prefix = mode switch
@@ -1011,9 +736,6 @@ internal sealed class MainWindowController
             glyph,
             glyphBrush);
     }
-
-    private static GhosttyRenderedTerminalRenderingMode GetRenderedRenderingMode(bool useTextureInterop)
-        => GhosttyRenderedTerminalRenderingMode.TextureInterop;
 
     private static string CreateStandaloneModeGlyph(TerminalRenderMode mode)
     {
@@ -1037,22 +759,14 @@ internal sealed class MainWindowController
         return new SolidColorBrush(color);
     }
 
-    private string GetRenderedBackendLabel()
-        => _viewModel.UseTextureInterop ? "TextureInterop (Preview)" : "CPU Cell Renderer";
-
     private string? BuildNativeModeAvailabilityHint()
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        if (_terminalCapabilities.NativeVtAvailable)
         {
             return null;
         }
 
-        if (_terminalCapabilities.GhosttyRenderedAvailable || _terminalCapabilities.NativeVtAvailable)
-        {
-            return null;
-        }
-
-        return "Ghostty native libraries were not found; run ./scripts/build-native.sh --debug.";
+        return "Native VT libraries were not found; rendered and managed modes remain available.";
     }
 
     private static void ConfigureRenderer(SkiaTerminalRenderer? renderer)
@@ -1957,67 +1671,34 @@ internal sealed class MainWindowController
     private async Task CopySelection()
     {
         TerminalTab? tab = GetActiveTab();
-        if (tab is null)
+        if (tab?.Control is not TerminalControl standalone)
         {
             return;
         }
 
-        if (tab.Control is GhosttyNativeTerminalControl native)
-        {
-            await native.CopySelectionAsync();
-        }
-        else if (tab.Control is GhosttyRenderedTerminalControl rendered)
-        {
-            await rendered.CopySelectionAsync();
-        }
-        else if (tab.Control is TerminalControl standalone)
-        {
-            await standalone.CopySelectionAsync();
-        }
+        await standalone.CopySelectionAsync();
     }
 
     private async Task PasteClipboard()
     {
         TerminalTab? tab = GetActiveTab();
-        if (tab is null)
+        if (tab?.Control is not TerminalControl standalone)
         {
             return;
         }
 
-        if (tab.Control is GhosttyNativeTerminalControl native)
-        {
-            await native.PasteAsync();
-        }
-        else if (tab.Control is GhosttyRenderedTerminalControl rendered)
-        {
-            await rendered.PasteAsync();
-        }
-        else if (tab.Control is TerminalControl standalone)
-        {
-            await standalone.PasteAsync();
-        }
+        await standalone.PasteAsync();
     }
 
     private void SelectAll()
     {
         TerminalTab? tab = GetActiveTab();
-        if (tab is null)
+        if (tab?.Control is not TerminalControl standalone)
         {
             return;
         }
 
-        if (tab.Control is GhosttyNativeTerminalControl native)
-        {
-            native.SelectAll();
-        }
-        else if (tab.Control is GhosttyRenderedTerminalControl rendered)
-        {
-            rendered.SelectAll();
-        }
-        else if (tab.Control is TerminalControl standalone)
-        {
-            standalone.SelectAll();
-        }
+        standalone.SelectAll();
     }
 
     #endregion
@@ -2032,14 +1713,6 @@ internal sealed class MainWindowController
             {
                 standalone.TerminalFontSize = fontSize;
                 standalone.InvalidateTerminal();
-            }
-            else if (tab.Control is GhosttyRenderedTerminalControl rendered)
-            {
-                rendered.TerminalFontSize = (float)fontSize;
-            }
-            else if (tab.Control is GhosttyNativeTerminalControl native)
-            {
-                native.TerminalFontSize = (float)fontSize;
             }
         }
     }
@@ -2058,46 +1731,9 @@ internal sealed class MainWindowController
                 standalone.ApplyTheme(theme);
                 standalone.InvalidateTerminal();
             }
-            else if (tab.Control is GhosttyRenderedTerminalControl rendered)
-            {
-                rendered.ApplyTheme(theme);
-            }
-            else if (tab.Control is GhosttyNativeTerminalControl native)
-            {
-                native.ApplyTheme(theme);
-            }
         }
 
         ApplyThemeResources(CreateChromePalette(theme));
-    }
-
-    private void ApplyRenderedBackend(bool useTextureInterop)
-    {
-        GhosttyRenderedTerminalRenderingMode renderingMode = GetRenderedRenderingMode(useTextureInterop);
-        bool renderedCpuTabsRemainOnStandalonePath = false;
-        foreach (TerminalTab tab in _tabs)
-        {
-            if (tab.ResolvedMode != TerminalRenderMode.GhosttyRendered)
-            {
-                continue;
-            }
-
-            if (tab.Control is GhosttyRenderedTerminalControl rendered)
-            {
-                rendered.RenderingMode = renderingMode;
-            }
-            else if (tab.Control is TerminalControl)
-            {
-                renderedCpuTabsRemainOnStandalonePath = useTextureInterop;
-            }
-
-            UpdateTabHeaderVisual(tab, ResolveTabMode(tab.Control, tab.ResolvedMode));
-        }
-
-        if (renderedCpuTabsRemainOnStandalonePath)
-        {
-            UpdateStatus("Rendered backend switched for new tabs; existing CPU-rendered Ghostty VT tabs keep the standalone renderer until reopened.");
-        }
     }
 
     private static void UpdateTabHeaderVisual(TerminalTab tab, TabVisualMode tabMode)
@@ -2606,8 +2242,6 @@ internal sealed class MainWindowController
         }
         _sessionLogWriters.Clear();
 
-        _ghosttyApp?.Dispose();
-        _ghosttyConfig?.Dispose();
     }
 
     private void DisposeTerminal(Control control)
@@ -2626,18 +2260,6 @@ internal sealed class MainWindowController
 
             standaloneControl.StopPty();
             standaloneControl.DetachEndpoint();
-            return;
-        }
-
-        if (control is GhosttyRenderedTerminalControl renderedControl)
-        {
-            renderedControl.Dispose();
-            return;
-        }
-
-        if (control is GhosttyNativeTerminalControl nativeControl)
-        {
-            nativeControl.Dispose();
         }
     }
 

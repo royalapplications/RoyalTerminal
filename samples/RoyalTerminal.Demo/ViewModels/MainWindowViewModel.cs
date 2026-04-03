@@ -22,19 +22,14 @@ public sealed class MainWindowViewModel : ReactiveObject
     private double _fontSize = 14.0;
     private bool _isDarkTheme = true;
     private string _themePresetButtonText = "Theme: Default";
-    private bool _ghosttyAvailable;
     private bool _nativeVtAvailable;
-    private bool _useNativeControl;
     private bool _useRenderedControl;
     private bool _useNativeVtControl;
     private bool _useManagedVtControl;
-    private bool _useTextureInterop;
     private string _statusText = "Ready";
     private string _dimensionsText = "80x24";
     private string _modeButtonText = "Rendered";
-    private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(
-        embeddedGhosttyAvailable: false,
-        nativeVtAvailable: false);
+    private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(nativeVtAvailable: false);
     private TerminalRenderMode _activeRenderMode = TerminalRenderMode.RenderedAuto;
     private readonly ITerminalModeResolver _modeResolver;
     private readonly ITerminalThemeCatalog _themeCatalog;
@@ -183,7 +178,6 @@ public sealed class MainWindowViewModel : ReactiveObject
         ApplyFontSizeInteraction = new Interaction<double, Unit>();
         ApplyThemeInteraction = new Interaction<bool, Unit>();
         ApplyThemeModelInteraction = new Interaction<TerminalThemeApplyRequest, Unit>();
-        ApplyRenderedBackendInteraction = new Interaction<bool, Unit>();
         ToggleCaptureInteraction = new Interaction<bool, Unit>();
         SaveCaptureInteraction = new Interaction<Unit, Unit>();
         LoadReplayInteraction = new Interaction<Unit, Unit>();
@@ -207,7 +201,6 @@ public sealed class MainWindowViewModel : ReactiveObject
         ToggleThemeCommand = ReactiveCommand.CreateFromObservable(ToggleTheme);
         CycleThemePresetCommand = ReactiveCommand.CreateFromObservable(CycleThemePreset);
         GenerateThemeCommand = ReactiveCommand.CreateFromObservable(GenerateTheme);
-        ToggleRenderedBackendCommand = ReactiveCommand.CreateFromObservable(ToggleRenderedBackend);
         CycleRenderModeCommand = ReactiveCommand.Create(CycleRenderMode);
         ToggleCaptureCommand = ReactiveCommand.CreateFromObservable(ToggleCapture);
         SaveCaptureCommand = ReactiveCommand.CreateFromObservable(SaveCapture);
@@ -232,7 +225,6 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<double, Unit> ApplyFontSizeInteraction { get; }
     public Interaction<bool, Unit> ApplyThemeInteraction { get; }
     public Interaction<TerminalThemeApplyRequest, Unit> ApplyThemeModelInteraction { get; }
-    public Interaction<bool, Unit> ApplyRenderedBackendInteraction { get; }
     public Interaction<bool, Unit> ToggleCaptureInteraction { get; }
     public Interaction<Unit, Unit> SaveCaptureInteraction { get; }
     public Interaction<Unit, Unit> LoadReplayInteraction { get; }
@@ -256,7 +248,6 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> ToggleThemeCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleThemePresetCommand { get; }
     public ReactiveCommand<Unit, Unit> GenerateThemeCommand { get; }
-    public ReactiveCommand<Unit, Unit> ToggleRenderedBackendCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleRenderModeCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleCaptureCommand { get; }
     public ReactiveCommand<Unit, Unit> SaveCaptureCommand { get; }
@@ -310,31 +301,10 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     internal TerminalTheme ActiveTheme => GetModeThemeState(_activeRenderMode).Theme;
 
-    public bool GhosttyAvailable
-    {
-        get => _ghosttyAvailable;
-        private set => this.RaiseAndSetIfChanged(ref _ghosttyAvailable, value);
-    }
-
     public bool NativeVtAvailable
     {
         get => _nativeVtAvailable;
         private set => this.RaiseAndSetIfChanged(ref _nativeVtAvailable, value);
-    }
-
-    public bool UseNativeControl
-    {
-        get => _useNativeControl;
-        private set
-        {
-            if (_useNativeControl == value)
-            {
-                return;
-            }
-
-            this.RaiseAndSetIfChanged(ref _useNativeControl, value);
-            RaiseSessionConfigurationVisibilityChanged();
-        }
     }
 
     public bool UseRenderedControl
@@ -364,22 +334,6 @@ public sealed class MainWindowViewModel : ReactiveObject
         private set => this.RaiseAndSetIfChanged(ref _useManagedVtControl, value);
     }
 
-    public bool UseTextureInterop
-    {
-        get => _useTextureInterop;
-        private set
-        {
-            if (_useTextureInterop == value)
-            {
-                return;
-            }
-
-            this.RaiseAndSetIfChanged(ref _useTextureInterop, value);
-            this.RaisePropertyChanged(nameof(RenderedBackendButtonText));
-            RaiseSessionConfigurationVisibilityChanged();
-        }
-    }
-
     public string StatusText
     {
         get => _statusText;
@@ -397,11 +351,6 @@ public sealed class MainWindowViewModel : ReactiveObject
         get => _modeButtonText;
         private set => this.RaiseAndSetIfChanged(ref _modeButtonText, value);
     }
-
-    public string RenderedBackendButtonText
-        => UseTextureInterop ? "Backend: Interop (Preview)" : "Backend: CPU";
-
-    public bool CanToggleRenderedBackend => GhosttyAvailable;
 
     public bool IsCaptureActive
     {
@@ -606,9 +555,9 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public bool ShowSessionTransportPicker => true;
 
-    public bool IsSessionTransportConfigEnabled => !UsesEmbeddedSessionRuntime;
+    public bool IsSessionTransportConfigEnabled => true;
 
-    public bool ShowSessionTransportHint => !IsSessionTransportConfigEnabled;
+    public bool ShowSessionTransportHint => false;
 
     public bool ShowLocalSessionFields => IsPtyTransportSelected || IsPipeTransportSelected;
 
@@ -862,8 +811,6 @@ public sealed class MainWindowViewModel : ReactiveObject
         => ShowSshSessionFields &&
            string.Equals(SelectedSshAuthMode.Id, SshAuthModeOption.AgentModeId, StringComparison.Ordinal);
 
-    private bool UsesEmbeddedSessionRuntime => UseNativeControl || (UseRenderedControl && UseTextureInterop);
-
     public string SshHost
     {
         get => _sshHost;
@@ -1031,37 +978,26 @@ public sealed class MainWindowViewModel : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _sshConnectTimeoutSeconds, value);
     }
 
-    public void SetTerminalCapabilities(bool ghosttyAvailable, bool nativeVtAvailable)
+    public void SetTerminalCapabilities(bool nativeVtAvailable)
     {
-        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-            embeddedGhosttyAvailable: ghosttyAvailable,
-            nativeVtAvailable: nativeVtAvailable);
+        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(nativeVtAvailable);
         SetTerminalCapabilities(capabilities);
     }
 
     internal void SetTerminalCapabilities(TerminalModeCapabilities capabilities)
     {
         _terminalCapabilities = capabilities;
-        GhosttyAvailable = capabilities.EmbeddedGhosttyNativeAvailable;
         NativeVtAvailable = capabilities.NativeVtAvailable;
-        if (!GhosttyAvailable && UseTextureInterop)
-        {
-            UseTextureInterop = false;
-        }
-
-        this.RaisePropertyChanged(nameof(CanToggleRenderedBackend));
         SetRenderMode(_activeRenderMode);
     }
 
     public void SetRenderMode(
         bool useRenderedControl,
-        bool useNativeControl,
         bool useNativeVtControl,
         bool useManagedVtControl = false)
     {
         TerminalRenderMode requestedMode = ResolveRequestedMode(
             useRenderedControl,
-            useNativeControl,
             useNativeVtControl,
             useManagedVtControl);
         SetRenderMode(requestedMode);
@@ -1095,12 +1031,6 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         switch (_activeRenderMode)
         {
-            case TerminalRenderMode.GhosttyRendered:
-                return UseTextureInterop
-                    ? "Rendered (Ghostty VT + TextureInterop)"
-                    : "Rendered (Ghostty VT + CPU Cell Renderer)";
-            case TerminalRenderMode.GhosttyNative:
-                return "Native (Ghostty Metal)";
             case TerminalRenderMode.NativeVt:
                 return $"Native VT ({SelectedTransportMode.DisplayName})";
             case TerminalRenderMode.ManagedVt:
@@ -1283,21 +1213,6 @@ public sealed class MainWindowViewModel : ReactiveObject
         return ApplyCurrentModeTheme($"Generated theme: {state.DisplayName}");
     }
 
-    private IObservable<Unit> ToggleRenderedBackend()
-    {
-        if (!CanToggleRenderedBackend)
-        {
-            SetStatus("TextureInterop backend requires embedded Ghostty support.");
-            return Observable.Return(Unit.Default);
-        }
-
-        UseTextureInterop = !UseTextureInterop;
-        return ApplyRenderedBackendInteraction
-            .Handle(UseTextureInterop)
-            .Do(_ => SetStatus(
-                $"Rendered backend: {(UseTextureInterop ? "TextureInterop (Preview)" : "CPU Cell Renderer")}"));
-    }
-
     private IObservable<Unit> ToggleCapture()
     {
         bool shouldStartCapture = !IsCaptureActive;
@@ -1348,8 +1263,6 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         ModeButtonText = _activeRenderMode switch
         {
-            TerminalRenderMode.GhosttyRendered => "Ghostty Rendered",
-            TerminalRenderMode.GhosttyNative => "Ghostty Native",
             TerminalRenderMode.NativeVt => "Native VT",
             TerminalRenderMode.ManagedVt => "Managed VT",
             _ => "Rendered",
@@ -1359,8 +1272,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private void ApplyRenderMode(TerminalRenderMode mode)
     {
         _activeRenderMode = mode;
-        UseRenderedControl = mode == TerminalRenderMode.GhosttyRendered;
-        UseNativeControl = mode == TerminalRenderMode.GhosttyNative;
+        UseRenderedControl = mode == TerminalRenderMode.RenderedAuto;
         UseNativeVtControl = mode == TerminalRenderMode.NativeVt;
         UseManagedVtControl = mode == TerminalRenderMode.ManagedVt;
         UpdateModeButtonText();
@@ -1471,20 +1383,9 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private static TerminalRenderMode ResolveRequestedMode(
         bool useRenderedControl,
-        bool useNativeControl,
         bool useNativeVtControl,
         bool useManagedVtControl)
     {
-        if (useRenderedControl)
-        {
-            return TerminalRenderMode.GhosttyRendered;
-        }
-
-        if (useNativeControl)
-        {
-            return TerminalRenderMode.GhosttyNative;
-        }
-
         if (useNativeVtControl)
         {
             return TerminalRenderMode.NativeVt;
@@ -1493,6 +1394,11 @@ public sealed class MainWindowViewModel : ReactiveObject
         if (useManagedVtControl)
         {
             return TerminalRenderMode.ManagedVt;
+        }
+
+        if (useRenderedControl)
+        {
+            return TerminalRenderMode.RenderedAuto;
         }
 
         return TerminalRenderMode.RenderedAuto;

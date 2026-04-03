@@ -14,64 +14,21 @@ public sealed class TerminalModeResolverTests
     {
         TerminalModeCapabilityResolver resolver = new();
 
-        TerminalModeCapabilities macLike = resolver.Resolve(embeddedGhosttyAvailable: true, nativeVtAvailable: true);
-        Assert.True(macLike.EmbeddedGhosttyNativeAvailable);
-        Assert.True(macLike.GhosttyRenderedAvailable);
-        Assert.True(macLike.NativeVtAvailable);
-        Assert.True(macLike.ManagedVtAvailable);
+        TerminalModeCapabilities nativeLike = resolver.Resolve(nativeVtAvailable: true);
+        Assert.True(nativeLike.NativeVtAvailable);
+        Assert.True(nativeLike.ManagedVtAvailable);
 
-        TerminalModeCapabilities linuxWindowsLike = resolver.Resolve(embeddedGhosttyAvailable: false, nativeVtAvailable: true);
-        Assert.False(linuxWindowsLike.EmbeddedGhosttyNativeAvailable);
-        Assert.True(linuxWindowsLike.GhosttyRenderedAvailable);
-        Assert.True(linuxWindowsLike.NativeVtAvailable);
-        Assert.True(linuxWindowsLike.ManagedVtAvailable);
-
-        TerminalModeCapabilities managedOnly = resolver.Resolve(embeddedGhosttyAvailable: false, nativeVtAvailable: false);
-        Assert.False(managedOnly.EmbeddedGhosttyNativeAvailable);
-        Assert.False(managedOnly.GhosttyRenderedAvailable);
+        TerminalModeCapabilities managedOnly = resolver.Resolve(nativeVtAvailable: false);
         Assert.False(managedOnly.NativeVtAvailable);
         Assert.True(managedOnly.ManagedVtAvailable);
     }
 
     [Fact]
-    public void ResolveSupportedMode_MacOsCapabilities_PreservesRequestedMode()
+    public void ResolveSupportedMode_NativeCapabilities_PreservesRequestedMode()
     {
         TerminalModeResolver resolver = TerminalModeResolver.Default;
-        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-            embeddedGhosttyAvailable: true,
-            nativeVtAvailable: true);
+        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(nativeVtAvailable: true);
 
-        Assert.Equal(
-            TerminalRenderMode.GhosttyRendered,
-            resolver.ResolveSupportedMode(TerminalRenderMode.GhosttyRendered, capabilities));
-        Assert.Equal(
-            TerminalRenderMode.GhosttyNative,
-            resolver.ResolveSupportedMode(TerminalRenderMode.GhosttyNative, capabilities));
-        Assert.Equal(
-            TerminalRenderMode.NativeVt,
-            resolver.ResolveSupportedMode(TerminalRenderMode.NativeVt, capabilities));
-        Assert.Equal(
-            TerminalRenderMode.ManagedVt,
-            resolver.ResolveSupportedMode(TerminalRenderMode.ManagedVt, capabilities));
-        Assert.Equal(
-            TerminalRenderMode.RenderedAuto,
-            resolver.ResolveSupportedMode(TerminalRenderMode.RenderedAuto, capabilities));
-    }
-
-    [Fact]
-    public void ResolveSupportedMode_NativeVtOnlyCapabilities_PreservesGhosttyRenderedAndNativeVt()
-    {
-        TerminalModeResolver resolver = TerminalModeResolver.Default;
-        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-            embeddedGhosttyAvailable: false,
-            nativeVtAvailable: true);
-
-        Assert.Equal(
-            TerminalRenderMode.GhosttyRendered,
-            resolver.ResolveSupportedMode(TerminalRenderMode.GhosttyRendered, capabilities));
-        Assert.Equal(
-            TerminalRenderMode.NativeVt,
-            resolver.ResolveSupportedMode(TerminalRenderMode.GhosttyNative, capabilities));
         Assert.Equal(
             TerminalRenderMode.NativeVt,
             resolver.ResolveSupportedMode(TerminalRenderMode.NativeVt, capabilities));
@@ -87,16 +44,8 @@ public sealed class TerminalModeResolverTests
     public void ResolveSupportedMode_ManagedOnlyCapabilities_FallsBackToManagedOrRendered()
     {
         TerminalModeResolver resolver = TerminalModeResolver.Default;
-        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-            embeddedGhosttyAvailable: false,
-            nativeVtAvailable: false);
+        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(nativeVtAvailable: false);
 
-        Assert.Equal(
-            TerminalRenderMode.ManagedVt,
-            resolver.ResolveSupportedMode(TerminalRenderMode.GhosttyRendered, capabilities));
-        Assert.Equal(
-            TerminalRenderMode.ManagedVt,
-            resolver.ResolveSupportedMode(TerminalRenderMode.GhosttyNative, capabilities));
         Assert.Equal(
             TerminalRenderMode.ManagedVt,
             resolver.ResolveSupportedMode(TerminalRenderMode.NativeVt, capabilities));
@@ -112,16 +61,8 @@ public sealed class TerminalModeResolverTests
     public void ResolveNextMode_AllCapabilities_UsesStableCycleOrder()
     {
         TerminalModeResolver resolver = TerminalModeResolver.Default;
-        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-            embeddedGhosttyAvailable: true,
-            nativeVtAvailable: true);
+        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(nativeVtAvailable: true);
 
-        Assert.Equal(
-            TerminalRenderMode.GhosttyNative,
-            resolver.ResolveNextMode(TerminalRenderMode.GhosttyRendered, capabilities));
-        Assert.Equal(
-            TerminalRenderMode.NativeVt,
-            resolver.ResolveNextMode(TerminalRenderMode.GhosttyNative, capabilities));
         Assert.Equal(
             TerminalRenderMode.ManagedVt,
             resolver.ResolveNextMode(TerminalRenderMode.NativeVt, capabilities));
@@ -129,39 +70,15 @@ public sealed class TerminalModeResolverTests
             TerminalRenderMode.RenderedAuto,
             resolver.ResolveNextMode(TerminalRenderMode.ManagedVt, capabilities));
         Assert.Equal(
-            TerminalRenderMode.GhosttyRendered,
-            resolver.ResolveNextMode(TerminalRenderMode.RenderedAuto, capabilities));
-    }
-
-    [Fact]
-    public void ResolveNextMode_NativeVtOnlyCapabilities_StillIncludesGhosttyRendered()
-    {
-        TerminalModeResolver resolver = TerminalModeResolver.Default;
-        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-            embeddedGhosttyAvailable: false,
-            nativeVtAvailable: true);
-
-        Assert.Equal(
-            TerminalRenderMode.GhosttyRendered,
-            resolver.ResolveNextMode(TerminalRenderMode.RenderedAuto, capabilities));
-        Assert.Equal(
             TerminalRenderMode.NativeVt,
-            resolver.ResolveNextMode(TerminalRenderMode.GhosttyRendered, capabilities));
-        Assert.Equal(
-            TerminalRenderMode.ManagedVt,
-            resolver.ResolveNextMode(TerminalRenderMode.NativeVt, capabilities));
-        Assert.Equal(
-            TerminalRenderMode.RenderedAuto,
-            resolver.ResolveNextMode(TerminalRenderMode.ManagedVt, capabilities));
+            resolver.ResolveNextMode(TerminalRenderMode.RenderedAuto, capabilities));
     }
 
     [Fact]
     public void ResolveNextMode_ManagedOnly_SkipsToManagedAndRenderedOnly()
     {
         TerminalModeResolver resolver = TerminalModeResolver.Default;
-        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-            embeddedGhosttyAvailable: false,
-            nativeVtAvailable: false);
+        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(nativeVtAvailable: false);
 
         Assert.Equal(
             TerminalRenderMode.ManagedVt,
