@@ -507,6 +507,75 @@ public class PtyContractTests
     }
 
     [Fact]
+    public void WindowsPty_DataReceived_ProvidesStableBuffersAcrossReads()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        if (!TryGetWindowsContractCmdPath(out string? cmdPath))
+        {
+            return;
+        }
+
+        const string firstMarker = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        const string secondMarker = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+
+        using WindowsPty pty = new();
+        using ManualResetEventSlim sawMultipleReads = new(false);
+        byte[]? firstBuffer = null;
+        byte[]? firstSnapshot = null;
+        int firstLength = 0;
+        int nonEmptyEventCount = 0;
+
+        pty.DataReceived += (data, length) =>
+        {
+            if (length <= 0)
+            {
+                return;
+            }
+
+            if (firstBuffer is null)
+            {
+                firstBuffer = data;
+                firstLength = length;
+                firstSnapshot = data.AsSpan(0, length).ToArray();
+                return;
+            }
+
+            if (Interlocked.Increment(ref nonEmptyEventCount) >= 1)
+            {
+                sawMultipleReads.Set();
+            }
+        };
+
+        try
+        {
+            pty.Start(
+                shell: cmdPath,
+                columns: 80,
+                rows: 24,
+                workingDirectory: Environment.CurrentDirectory,
+                arguments:
+                [
+                    "/d",
+                    "/c",
+                    $"echo {firstMarker}&& ping -n 2 127.0.0.1 >nul && echo {secondMarker}",
+                ]);
+
+            Assert.True(sawMultipleReads.Wait(ContractTimeout), "Expected multiple non-empty PTY read events.");
+            Assert.NotNull(firstBuffer);
+            Assert.NotNull(firstSnapshot);
+            Assert.Equal(firstSnapshot, firstBuffer.AsSpan(0, firstLength).ToArray());
+        }
+        finally
+        {
+            pty.Stop();
+        }
+    }
+
+    [Fact]
     public void UnixPty_Resize_UpdatesTerminalSize()
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
