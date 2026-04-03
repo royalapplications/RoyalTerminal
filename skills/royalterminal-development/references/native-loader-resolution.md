@@ -2,29 +2,29 @@
 
 ## Table Of Contents
 
-- [Ghostty Core Loader](#ghostty-core-loader)
+- [Ghostty VT Loader](#ghostty-vt-loader)
 - [Renderer CAPI Loader](#renderer-capi-loader)
 - [Probe Order Summary](#probe-order-summary)
 - [Environment Overrides](#environment-overrides)
 - [Availability Probes](#availability-probes)
 - [Debug Checklist](#debug-checklist)
 
-## Ghostty Core Loader
+## Ghostty VT Loader
 
 Loader class:
 - `NativeLibraryLoader`
 - `src/RoyalTerminal.GhosttySharp/Native/NativeLibraryLoader.cs`
 
 Registered for assembly:
-- `typeof(GhosttyNative).Assembly`
+- `typeof(GhosttyVtNative).Assembly`
 
 Logical library targeted:
-- `ghostty`
+- `ghostty-vt`
 
 Behavior:
 - sets `NativeLibrary.SetDllImportResolver(...)` once (thread-safe init)
 - resolves runtime identifier from OS + process architecture
-- computes platform filename (`ghostty.dll`, `libghostty.dylib`, `libghostty.so`)
+- computes platform filename (`ghostty-vt.dll`, `libghostty-vt.dylib`, `libghostty-vt.so`)
 
 ## Renderer CAPI Loader
 
@@ -46,7 +46,7 @@ Behavior:
 
 ## Probe Order Summary
 
-Core (`ghostty`) probe order:
+Core (`ghostty-vt`) probe order:
 1. `NativeLibrary.TryLoad(libraryName, assembly, searchPath, ...)`
 2. `AppContext.BaseDirectory/runtimes/<rid>/native/<file>`
 3. `AppContext.BaseDirectory/<file>`
@@ -69,12 +69,11 @@ Supported renderer override variables:
 - `GHOSTTY_RENDERER_CAPI_LIBRARY_PATH`
 - `GHOSTTY_RENDERER_CAPI_LIBRARY_DIR`
 
-No equivalent explicit override variable is currently defined for `ghostty` core loader.
+No equivalent explicit override variable is currently defined for the VT loader.
 
 ## Availability Probes
 
 Availability APIs:
-- `Ghostty.Initialize()` (returns `false` on not found/incompatible native lib)
 - `GhosttyVtProcessor.IsAvailable()` (wraps official `libghostty-vt` availability)
 
 Common exception signals before graceful fallbacks:
@@ -109,8 +108,7 @@ dotnet run --project samples/RoyalTerminal.Demo
 ### Availability probe at startup
 
 ```csharp
-bool embeddedAvailable = Ghostty.Initialize();
 bool nativeVtAvailable = GhosttyVtProcessor.IsAvailable();
 
-Console.WriteLine($"Embedded={embeddedAvailable}, NativeVT={nativeVtAvailable}");
+Console.WriteLine($"NativeVT={nativeVtAvailable}");
 ```

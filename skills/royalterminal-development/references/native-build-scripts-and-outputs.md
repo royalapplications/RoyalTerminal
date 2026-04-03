@@ -23,7 +23,6 @@ Top-level responsibilities:
 - build `ghostty-renderer-capi`
 - copy artifacts to runtime package directories and central `native/<rid>/`
 - copy native headers into `native/include/`
-- materialize macOS `libghostty.dylib` into `zig-out/lib` when upstream leaves it in `.zig-cache`
 
 ## Subcomponent Build Scripts
 

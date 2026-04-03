@@ -2,6 +2,11 @@
 
 Native macOS SwiftUI sample that embeds Ghostty surfaces directly in `NSView` with the full native Metal renderer path (`ghostty_surface_draw`).
 
+This sample is intentionally separate from the managed `RoyalTerminal.GhosttySharp`
+package surface. The .NET stack no longer ships a managed `libghostty` wrapper or
+embedded Ghostty Avalonia controls; it uses official `libghostty-vt` for native VT
+and keeps this Swift sample only as a direct native-host example.
+
 ## What it demonstrates
 
 - Tabbed terminal UX with add/close tab actions.

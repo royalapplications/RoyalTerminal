@@ -2,25 +2,9 @@
 
 ## Table Of Contents
 
-- [libghostty](#libghostty)
 - [libghostty-vt](#libghostty-vt)
 - [ghostty-renderer-capi](#ghostty-renderer-capi)
 - [Cross-Library Runtime Paths](#cross-library-runtime-paths)
-
-## libghostty
-
-Logical library name:
-- `ghostty`
-
-Managed entrypoints:
-- `src/RoyalTerminal.GhosttySharp/Native/GhosttyNative.cs`
-
-Primary managed API:
-- `Ghostty.Initialize()` in `src/RoyalTerminal.GhosttySharp/Ghostty.cs`
-
-Main usage:
-- low-level config/app/surface APIs from the Ghostty embedded runtime
-- wrapper coverage retained for advanced/native integrations, not for a built-in Avalonia Ghostty control package
 
 ## libghostty-vt
 
@@ -62,7 +46,6 @@ High-level mapping by feature:
 
 | Feature | Native libs required |
 |---|---|
-| Embedded Ghostty controls | `ghostty` |
 | Native VT in `TerminalControl` | `ghostty-vt` |
 | VT utility integration tests | `ghostty-vt` |
 | Texture interop rendering | `ghostty-renderer-capi` |
@@ -71,20 +54,6 @@ High-level mapping by feature:
 When debugging availability, validate both loader path and feature-specific library presence.
 
 ## Code Examples
-
-### `libghostty` usage
-
-```csharp
-using RoyalTerminal.GhosttySharp;
-
-if (!Ghostty.Initialize())
-{
-    throw new InvalidOperationException("Embedded Ghostty library is unavailable.");
-}
-
-GhosttyLibraryInfo info = Ghostty.GetInfo();
-Console.WriteLine($"Ghostty {info.Version} ({info.BuildMode})");
-```
 
 ### `libghostty-vt` native VT usage
 

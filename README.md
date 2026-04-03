@@ -13,10 +13,10 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 | Package | NuGet | Description |
 |---------|-------|-------------|
 | **RoyalTerminal.Avalonia** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.Avalonia.svg)](https://www.nuget.org/packages/RoyalTerminal.Avalonia) | Backend-neutral Avalonia terminal control (`TerminalControl`) and presentation services (no Ghostty dependency) |
-| **RoyalTerminal.GhosttySharp** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp) | Core Ghostty bindings (`libghostty`, `libghostty-vt`) |
-| **RoyalTerminal.GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.OSX) | Native runtime assets for macOS (`libghostty`, `libghostty-vt`, `libghostty-renderer-capi`) |
-| **RoyalTerminal.GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Win64) | Native runtime assets for Windows x64/arm64 (`ghostty.dll`, `ghostty-vt.dll`, `ghostty-renderer-capi.dll`) |
-| **RoyalTerminal.GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Linux64) | Native runtime assets for Linux (`libghostty.so`, `libghostty-vt.so`, `libghostty-renderer-capi.so`) |
+| **RoyalTerminal.GhosttySharp** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp) | Core Ghostty VT bindings (`libghostty-vt`) |
+| **RoyalTerminal.GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.OSX) | Native runtime assets for macOS (`libghostty-vt`, `libghostty-renderer-capi`) |
+| **RoyalTerminal.GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Win64) | Native runtime assets for Windows x64/arm64 (`ghostty-vt.dll`, `ghostty-renderer-capi.dll`) |
+| **RoyalTerminal.GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Linux64) | Native runtime assets for Linux (`libghostty-vt.so`, `libghostty-renderer-capi.so`) |
 
 ### Modular Managed Packages (Packable Composition Units)
 
@@ -66,7 +66,7 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 - **Terminal session service split** (`Terminal.Services.Contracts` and `Terminal.Services`).
 - **Sample applications**:
   - Avalonia demo (`samples/RoyalTerminal.Demo`) with structured settings categories (`Session`/`Connection`/`Terminal`/`Appearance`/`SSH`/`Logging`), transport forms (`PTY`/`Pipe`/`Raw TCP`/`Telnet`/`Serial`/`SSH`), a tabbed Settings flyout with profile CRUD (`new`/`duplicate`/`delete`/`set default`) and explicit apply/save, session/event logging, and terminal behavior toggles (copy-on-select, bell notifications, backspace mode, paste safety, text shaping/ligatures)
-  - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`)
+  - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`) that hosts GhosttyKit directly as a separate native sample, outside the managed `RoyalTerminal.GhosttySharp` surface
   - VT/PTy control catalog CLI (`samples/RoyalTerminal.ControlCatalog`) with managed/Ghostty VT probes, ncurses/TUI parity scenarios, and rich visual rendering galleries
 
 ## Transport Session Model
@@ -234,9 +234,8 @@ flowchart TD
     end
 
     subgraph Native["Native Libraries"]
-      N1["libghostty"]
-      N2["libghostty-vt"]
-      N3["libghostty-renderer-capi"]
+      N1["libghostty-vt"]
+      N2["libghostty-renderer-capi"]
     end
 
     App --> CoreUI
@@ -808,7 +807,6 @@ test -f "${CODEX_HOME:-$HOME/.codex}/skills/royalterminal-development/SKILL.md" 
 | Platform availability | macOS/Linux/Windows | macOS/Linux/Windows | macOS/Linux/Windows |
 | VT engine | official `libghostty-vt` | `BasicVtProcessor` | auto-selects native VT when available, otherwise managed VT |
 | Renderer path | Skia cell renderer | Skia cell renderer | Skia cell renderer |
-| Requires `libghostty` | No | No | No |
 | Requires `libghostty-vt` | Yes | No | Optional |
 | Full Avalonia overlay support | Yes | Yes | Yes |
 | Cross-platform mode | Yes | Yes | Yes |
@@ -864,15 +862,9 @@ zig build -Doptimize=ReleaseFast -Dapp-runtime=none
 ## Ghostty Submodule Status
 
 RoyalTerminal now tracks upstream Ghostty directly in `external/ghostty`; the local
-Ghostty fork patches were removed.
-
-Current downstream behavior that is intentionally outside the submodule source:
-
-- embedded Ghostty app initialization applies `grapheme-width-method = unicode`
-  from managed host code via `GhosttyConfigOverlay`
-- macOS `app-runtime=none` builds use `scripts/ensure-macos-libghostty.sh` to
-  materialize `libghostty.dylib` into `zig-out/lib` because upstream currently
-  does not install that dylib there
+Ghostty fork patches and managed `libghostty` wrapper layer were removed. The
+managed/native integration now targets upstream `libghostty-vt` directly, with
+`ghostty-renderer-capi` retained only for optional render-target interop.
 
 ## PTY Layer
 
@@ -900,9 +892,9 @@ Probe order includes:
 
 | Platform | Files |
 |----------|-------|
-| macOS | `libghostty.dylib`, `libghostty-vt.dylib`, `libghostty-renderer-capi.dylib` |
-| Linux | `libghostty.so`, `libghostty-vt.so`, `libghostty-renderer-capi.so` |
-| Windows | `ghostty.dll`, `ghostty-vt.dll`, `ghostty-renderer-capi.dll` |
+| macOS | `libghostty-vt.dylib`, `libghostty-renderer-capi.dylib` |
+| Linux | `libghostty-vt.so`, `libghostty-renderer-capi.so` |
+| Windows | `ghostty-vt.dll`, `ghostty-renderer-capi.dll` |
 
 Primary runtime package locations:
 
@@ -1078,14 +1070,6 @@ dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csp
 ```
 
 ## API Coverage
-
-### `libghostty`
-
-| Category | Status |
-|----------|--------|
-| Initialization/config/app lifecycle | Implemented |
-| Surface lifecycle/input/sizing/focus | Implemented |
-| Inspector and selection actions | Implemented |
 
 ### `libghostty-vt`
 

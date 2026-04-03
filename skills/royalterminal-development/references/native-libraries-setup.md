@@ -72,7 +72,7 @@ The native reference set covers:
 Always validate:
 - native build scripts complete without missing artifacts
 - managed build succeeds after native copy step
-- runtime availability checks pass (`Ghostty.Initialize()`, `GhosttyVtProcessor.IsAvailable()`)
+- runtime availability checks pass (`GhosttyVtProcessor.IsAvailable()`)
 - full test suite for shared/native contract changes
 
 Details:

@@ -7,7 +7,7 @@
 - [Capability Composition Model](#capability-composition-model)
 - [Session-Service Routing Rules](#session-service-routing-rules)
 - [Input Adapter Pipeline](#input-adapter-pipeline)
-- [Ghostty Endpoint Mapping](#ghostty-endpoint-mapping)
+- [Integration-Specific Endpoint Mapping](#integration-specific-endpoint-mapping)
 - [Control Integration Points](#control-integration-points)
 - [Validation And Regression Tests](#validation-and-regression-tests)
 - [Code Examples](#code-examples)
@@ -56,13 +56,13 @@ Important precedence:
 - `ModeSource` uses endpoint mode source first, VT-derived mode bridge second.
 - `SendInput(...)` prefers endpoint path first, then transport/PTY paths.
 
-`GhosttySurfaceTerminalEndpoint` currently implements:
-- `ITerminalEndpoint`
-- `ITerminalInputSink`
-- `ITerminalSelectionSource`
-- `ITerminalScaleSink`
+No built-in endpoint-backed Ghostty surface implementation ships in the managed
+/.NET stack anymore. The current product path is transport-backed
+`TerminalControl` using managed VT or official `libghostty-vt`.
 
-It does not implement `ITerminalModeSource`, so `TerminalSessionService` mode source comes from the VT processor bridge when VT is active.
+Endpoint contracts remain intentionally generic for custom/native integrations.
+When an endpoint implementation omits `ITerminalModeSource`,
+`TerminalSessionService` falls back to the VT processor bridge when VT is active.
 
 ## Session-Service Routing Rules
 
@@ -106,26 +106,26 @@ Text input:
 Design impact:
 - endpoint-backed controls can fully own key/pointer semantics while still using shared session lifecycle APIs.
 
-## Ghostty Endpoint Mapping
+## Integration-Specific Endpoint Mapping
 
-`GhosttySurfaceTerminalEndpoint` maps normalized contracts to Ghostty APIs:
+If a custom host wants endpoint-backed routing, it should map the normalized
+contracts to its own native or managed surface APIs:
 
-| Normalized API | Ghostty API |
+| Normalized API | Typical host responsibility |
 |---|---|
-| `SendText(ReadOnlySpan<byte>)` | `Surface.SendText(utf8)` |
-| `SetFocus(bool)` | `Surface.SetFocus(focused)` |
-| `SetSize(int,int)` | `Surface.SetSize(uint,uint)` (clamped min 1x1) |
-| `SendKey(TerminalKeyEvent)` | `Surface.SendKey(GhosttyInputKey)` |
-| `SendText(string)` | `Surface.SendText(text)` |
-| `SendPointer(move)` | `Surface.SendMousePos(...)` |
-| `SendPointer(button)` | `Surface.SendMouseButton(...)` |
-| `SendPointer(scroll)` | `Surface.SendMouseScroll(...)` |
-| `ReadSelection()` | `Surface.ReadSelection()` |
-| `SetContentScale(double,double)` | `Surface.SetContentScale(...)` |
+| `SendText(ReadOnlySpan<byte>)` | forward UTF-8 input bytes to the endpoint |
+| `SetFocus(bool)` | update native focus state |
+| `SetSize(int,int)` | update endpoint pixel size |
+| `SendKey(TerminalKeyEvent)` | map normalized key data to host-native key input |
+| `SendText(string)` | send composed text directly when the host supports it |
+| `SendPointer(...)` | map move/button/scroll events to host-native pointer APIs |
+| `ReadSelection()` | expose host-managed selection text when available |
+| `SetContentScale(double,double)` | propagate DPI/content scale if the endpoint needs it |
 
-Key mapping and modifiers:
-- Avalonia `Key` -> `GhosttyKey` via `ToGhosttyKey(...)`
-- `TerminalModifiers` -> `GhosttyMods` via `ToGhosttyMods(...)`
+Design rule:
+- keep endpoint implementations integration-specific
+- keep `ITerminalEndpoint` contracts backend-neutral
+- do not reintroduce a product-wide managed wrapper around embedded `libghostty`
 
 ## Control Integration Points
 
@@ -139,7 +139,8 @@ Pointer flow in `TerminalControl`:
 - if endpoint `InputSink.SendPointer(...)` accepts event, endpoint wins
 - otherwise pointer encoding falls back to VT mouse protocol bytes when mouse-reporting mode is enabled
 
-This keeps endpoint-backed UIs (for example Ghostty surfaces) first-class without breaking legacy transport-backed behavior.
+This keeps custom endpoint-backed integrations possible without changing the
+default transport-backed `TerminalControl` behavior used by the product.
 
 ## Validation And Regression Tests
 
