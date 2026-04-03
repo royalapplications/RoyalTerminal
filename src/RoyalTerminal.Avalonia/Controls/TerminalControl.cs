@@ -60,7 +60,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const int ResumePendingOutputQueueBytes = MaxPendingOutputQueueBytes / 2;
     private const int MaxPendingOutputQueueChunks = 256;
     private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
-    private static readonly DispatcherPriority ManagedPendingOutputDrainPriority = DispatcherPriority.SystemIdle;
+    // Managed VT parsing already yields in small UI batches, so draining at
+    // Background priority avoids starvation without monopolizing the UI thread.
+    private static readonly DispatcherPriority ManagedPendingOutputDrainPriority = DispatcherPriority.Background;
     private static readonly DispatcherPriority NativePendingOutputDrainPriority = DispatcherPriority.Background;
     private static readonly long UrgentControlVtResponseSuppressionWindowTicks =
         (long)(TimeSpan.FromSeconds(1).TotalSeconds * Stopwatch.Frequency);

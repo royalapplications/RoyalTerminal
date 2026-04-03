@@ -510,7 +510,8 @@ public class TerminalControlTests
             new DefaultVtProcessorFactory(),
             VtProcessorPreference.Managed);
 
-        byte[] chunk = new byte[64 * 1024];
+        const int burstCount = 20;
+        byte[] chunk = new byte[16 * 1024];
         Array.Fill(chunk, (byte)'x');
 
         try
@@ -520,7 +521,7 @@ public class TerminalControlTests
             int sentCount = 0;
             Task producer = Task.Run(() =>
             {
-                for (int i = 0; i < 64; i++)
+                for (int i = 0; i < burstCount; i++)
                 {
                     Interlocked.Increment(ref sentCount);
                     transport.RaiseData(chunk);
@@ -538,7 +539,7 @@ public class TerminalControlTests
                 producer.IsCompleted,
                 "Expected producer to block when pending output reaches backpressure watermark.");
             Assert.True(
-                Volatile.Read(ref sentCount) < 64,
+                Volatile.Read(ref sentCount) < burstCount,
                 "Expected producer to stall before sending the full burst while UI draining is blocked.");
 
             bool completedAfterDrain = await WaitUntilAsync(
@@ -563,7 +564,8 @@ public class TerminalControlTests
             new DefaultVtProcessorFactory(),
             VtProcessorPreference.Managed);
 
-        byte[] chunk = new byte[64 * 1024];
+        const int burstCount = 20;
+        byte[] chunk = new byte[16 * 1024];
         Array.Fill(chunk, (byte)'x');
 
         try
@@ -573,7 +575,7 @@ public class TerminalControlTests
             int sentCount = 0;
             Task producer = Task.Run(() =>
             {
-                for (int i = 0; i < 64; i++)
+                for (int i = 0; i < burstCount; i++)
                 {
                     Interlocked.Increment(ref sentCount);
                     transport.RaiseData(chunk);
