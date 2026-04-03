@@ -10,6 +10,10 @@
     <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <OutputType>WinExe</OutputType>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia\RoyalTerminal.Avalonia.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia.Settings\RoyalTerminal.Avalonia.Settings.csproj" />
