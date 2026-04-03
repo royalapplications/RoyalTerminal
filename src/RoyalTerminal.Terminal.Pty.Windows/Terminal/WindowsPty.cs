@@ -289,7 +289,12 @@ public sealed class WindowsPty : IPty
 
                     try
                     {
-                        DataReceived?.Invoke(buffer, bytesRead);
+                        // ConPTY reuses the read buffer on the next iteration.
+                        // Snapshot each chunk so downstream VT parsing/batching
+                        // never observes mutated escape-sequence bytes.
+                        byte[] payload = new byte[bytesRead];
+                        Buffer.BlockCopy(buffer, 0, payload, 0, bytesRead);
+                        DataReceived?.Invoke(payload, bytesRead);
                     }
                     catch
                     {
