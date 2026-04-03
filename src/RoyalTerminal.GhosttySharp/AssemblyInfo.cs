@@ -5,7 +5,6 @@
 using System.Runtime.CompilerServices;
 
 [assembly: DisableRuntimeMarshalling]
-[assembly: InternalsVisibleTo("RoyalTerminal.Avalonia.Ghostty")]
 [assembly: InternalsVisibleTo("RoyalTerminal.Terminal.Vt.Ghostty")]
 [assembly: InternalsVisibleTo("RoyalTerminal.Tests")]
 [assembly: InternalsVisibleTo("RoyalTerminal.IntegrationTests")]
