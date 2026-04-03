@@ -34,7 +34,7 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build libghostty and libghostty-vt
+      - name: Build libghostty-vt
         working-directory: external/ghostty
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
@@ -42,9 +42,6 @@ jobs:
           else
             zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-xcframework=false -Demit-macos-app=false -Dtarget=x86_64-macos
           fi
-
-      - name: Materialize libghostty.dylib
-        run: ./scripts/ensure-macos-libghostty.sh external/ghostty
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
@@ -58,7 +55,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          find external/ghostty/zig-out -name "*.dylib" -exec cp -L {} artifacts/ \;
+          find external/ghostty/zig-out -name "libghostty-vt*.dylib" -exec cp -L {} artifacts/ \;
           if [ -f native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib ]; then
             cp -L native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib artifacts/
           fi
@@ -68,7 +65,6 @@ jobs:
         run: |
           set -euo pipefail
           required=(
-            "libghostty.dylib"
             "libghostty-vt.dylib"
             "libghostty-renderer-capi.dylib"
           )
@@ -128,7 +124,7 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build libghostty and libghostty-vt
+      - name: Build libghostty-vt
         working-directory: external/ghostty
         run: |
           zig build -Doptimize=ReleaseFast -Dapp-runtime=none \
@@ -147,9 +143,9 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          find external/ghostty/zig-out -name "libghostty*.so*" -exec cp -L {} artifacts/ \;
+          find external/ghostty/zig-out -name "libghostty-vt.so*" -exec cp -L {} artifacts/ \;
           find native/ghostty-renderer-capi/zig-out -name "libghostty-renderer-capi.so*" -exec cp -L {} artifacts/ \; || true
-          for base in libghostty libghostty-vt libghostty-renderer-capi; do
+          for base in libghostty-vt libghostty-renderer-capi; do
             if [ ! -f "artifacts/${base}.so" ]; then
               candidate="$(find artifacts -maxdepth 1 -type f -name "${base}.so*" | head -n1 || true)"
               if [ -n "${candidate}" ]; then
@@ -163,7 +159,6 @@ jobs:
         run: |
           set -euo pipefail
           required=(
-            "libghostty.so"
             "libghostty-vt.so"
             "libghostty-renderer-capi.so"
           )
@@ -197,7 +192,7 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Build libghostty and libghostty-vt
+      - name: Build libghostty-vt
         working-directory: external/ghostty
         shell: bash
         run: |
@@ -223,17 +218,13 @@ jobs:
           mkdir -p artifacts/win-${{ matrix.arch }}
           find external/ghostty/zig-out -name "*.dll" -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \;
           find external/ghostty/zig-out -name "*.lib" -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \;
-          find external/ghostty/zig-out -name "libghostty.so" -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \; || true
           find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.dll" -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \; || true
           find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.lib" -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \; || true
-          for base in ghostty ghostty-vt ghostty-renderer-capi; do
+          for base in ghostty-vt ghostty-renderer-capi; do
             if [ ! -f "artifacts/win-${{ matrix.arch }}/${base}.dll" ] && [ -f "artifacts/win-${{ matrix.arch }}/lib${base}.dll" ]; then
               cp -f "artifacts/win-${{ matrix.arch }}/lib${base}.dll" "artifacts/win-${{ matrix.arch }}/${base}.dll"
             fi
           done
-          if [ ! -f "artifacts/win-${{ matrix.arch }}/ghostty.dll" ] && [ -f "artifacts/win-${{ matrix.arch }}/libghostty.so" ]; then
-            cp -f "artifacts/win-${{ matrix.arch }}/libghostty.so" "artifacts/win-${{ matrix.arch }}/ghostty.dll"
-          fi
           ls -la artifacts/win-${{ matrix.arch }}/
 
       - name: Verify required native artifacts (Windows)
@@ -241,7 +232,6 @@ jobs:
         run: |
           set -euo pipefail
           required=(
-            "ghostty.dll"
             "ghostty-vt.dll"
             "ghostty-renderer-capi.dll"
           )
@@ -380,13 +370,13 @@ jobs:
           check_files "src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-x64/native" \
             "libghostty-vt.dylib" "libghostty-renderer-capi.dylib"
           check_files "src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-x64/native" \
-            "libghostty.so" "libghostty-vt.so" "libghostty-renderer-capi.so"
+            "libghostty-vt.so" "libghostty-renderer-capi.so"
           check_files "src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-arm64/native" \
-            "libghostty.so" "libghostty-vt.so" "libghostty-renderer-capi.so"
+            "libghostty-vt.so" "libghostty-renderer-capi.so"
           check_files "src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-x64/native" \
-            "ghostty.dll" "ghostty-vt.dll" "ghostty-renderer-capi.dll"
+            "ghostty-vt.dll" "ghostty-renderer-capi.dll"
           check_files "src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-arm64/native" \
-            "ghostty.dll" "ghostty-vt.dll" "ghostty-renderer-capi.dll"
+            "ghostty-vt.dll" "ghostty-renderer-capi.dll"
 
       # Pack managed packages with version from tag
       - name: Pack RoyalTerminal.GhosttySharp

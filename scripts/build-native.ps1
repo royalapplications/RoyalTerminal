@@ -11,9 +11,9 @@
 #   - Git submodule initialized: git submodule update --init
 #   - Windows symlink support (Developer Mode enabled or elevated shell)
 #
-# The script builds the Ghostty shared library plus the official ghostty-vt API
-# library, and also builds the ghostty-renderer-capi shared library for texture
-# interop. Artifacts are copied to the correct NuGet runtime package location.
+# The script builds the official ghostty-vt API library and the optional
+# ghostty-renderer-capi shared library for texture interop. Artifacts are copied
+# to the correct NuGet runtime package location.
 #
 # NOTE: Ghostty currently does not officially support Windows builds.
 # This script is provided for future compatibility.
@@ -238,11 +238,11 @@ if (-not (Test-Path (Join-Path $GhosttyDir "build.zig"))) {
 
 $RID = if ($Arch -eq "arm64") { "win-arm64" } else { "win-x64" }
 $ZigTarget = if ($Arch -eq "arm64") { "aarch64-windows" } else { "x86_64-windows" }
-$LibName = "ghostty.dll"
+$LibName = "ghostty-vt.dll"
 
 Write-Info "Platform: Windows ($RID)"
 Write-Info "Target: $ZigTarget"
-Write-Info "Library: $LibName"
+Write-Info "VT library: $LibName"
 
 if (-not (Test-SymlinkCreation -RootPath $GhosttyDir)) {
     $isElevated = Test-IsElevated
@@ -287,7 +287,7 @@ try {
 
     # Build
     $optimize = if ($Debug) { "" } else { "-Doptimize=ReleaseFast" }
-    Write-Info "Building libghostty shared library..."
+    Write-Info "Building ghostty-vt shared library..."
     Write-Info "Command: zig build $optimize -Dapp-runtime=none -Dtarget=$ZigTarget"
 
     $buildArgs = @("build", "-Dapp-runtime=none", "-Dtarget=$ZigTarget")
@@ -308,15 +308,11 @@ try {
         exit 1
     }
 
-    Write-Info "Built library: $builtLib"
+    Write-Info "Built official VT library: $builtLib"
 
-    $vtLibName = "ghostty-vt.dll"
-    $vtLib = Resolve-ZigArtifactPath -FileName $vtLibName
-    if ($vtLib) {
-        Write-Info "Built official VT library: $vtLib"
-    } else {
-        Write-Warn "Official ghostty-vt.dll artifact not found under zig-out\."
-        Write-Warn "Managed wrappers for GhosttyTerminal/GhosttyRenderState will require manual native library setup."
+    if (-not $builtLib) {
+        Write-Err "Could not find $LibName"
+        exit 1
     }
 
     # Copy to NuGet directory
@@ -331,22 +327,9 @@ try {
     Copy-Item $builtLib $outputDir
     Write-Info "Copied to: $outputDir\$LibName"
 
-    if ($vtLib) {
-        Copy-Item $vtLib (Join-Path $nativeRuntimeDir $vtLibName)
-        Write-Info "Copied to: $nativeRuntimeDir\$vtLibName"
-
-        Copy-Item $vtLib (Join-Path $outputDir $vtLibName)
-        Write-Info "Copied to: $outputDir\$vtLibName"
-    }
-
     # Copy header
-    $headerSrc = Join-Path $GhosttyDir "include\ghostty.h"
     $headerDest = Join-Path $NativeOutDir "include"
-    if (Test-Path $headerSrc) {
-        New-Item -ItemType Directory -Force -Path $headerDest | Out-Null
-        Copy-Item $headerSrc $headerDest
-        Write-Info "Copied header: $headerDest\ghostty.h"
-    }
+    New-Item -ItemType Directory -Force -Path $headerDest | Out-Null
 
     $vtHeadersSrc = Join-Path $GhosttyDir "include\ghostty\vt"
     if (Test-Path $vtHeadersSrc) {

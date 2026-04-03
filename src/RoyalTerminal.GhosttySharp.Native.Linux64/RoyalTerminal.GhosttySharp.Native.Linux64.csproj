@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>RoyalTerminal.GhosttySharp.Native.Linux64</PackageId>
-    <Description>Native Ghostty libraries for Linux (x64 and arm64). Provides libghostty.so, libghostty-vt.so, and libghostty-renderer-capi.so shared libraries required by RoyalTerminal.GhosttySharp on Linux.</Description>
+    <Description>Native Ghostty libraries for Linux (x64 and arm64). Provides libghostty-vt.so and libghostty-renderer-capi.so shared libraries for RoyalTerminal on Linux.</Description>
     <PackageTags>ghostty;terminal;native;linux;x64;arm64</PackageTags>
 
     <!-- This is a native-only package, no managed assembly -->

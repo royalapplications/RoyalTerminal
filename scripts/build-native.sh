@@ -10,9 +10,9 @@
 #   - Zig 0.15.2+ (https://ziglang.org/download/)
 #   - Git submodule initialized: git submodule update --init
 #
-# The script builds libghostty plus the official libghostty-vt API library,
-# and also builds libghostty-renderer-capi for texture interop. Artifacts are
-# copied to the native NuGet runtime package location.
+# The script builds the official libghostty-vt API library and the optional
+# libghostty-renderer-capi texture interop library. Artifacts are copied to the
+# native NuGet runtime package location.
 
 set -euo pipefail
 
@@ -92,7 +92,7 @@ ARCH="$(uname -m)"
 case "$OS" in
     Darwin)
         PLATFORM="osx"
-        LIB_NAME="libghostty.dylib"
+        LIB_NAME="libghostty-vt.dylib"
         if [ "$ARCH" = "arm64" ]; then
             RID="osx-arm64"
         else
@@ -101,7 +101,7 @@ case "$OS" in
         ;;
     Linux)
         PLATFORM="linux"
-        LIB_NAME="libghostty.so"
+        LIB_NAME="libghostty-vt.so"
         RID="linux-x64"
         ;;
     *)
@@ -124,7 +124,7 @@ if [ "$CLEAN" = true ]; then
 fi
 
 # Build shared libraries
-info "Building libghostty and libghostty-vt..."
+info "Building libghostty-vt..."
 info "Command: zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none"
 
 zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none 2>&1 || {
@@ -135,66 +135,23 @@ zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none 2>&1 || {
     exit 1
 }
 
-if [ "$PLATFORM" = "osx" ] && [ ! -f "zig-out/lib/$LIB_NAME" ]; then
-    info "Materializing missing macOS embed dylib from Ghostty build cache..."
-    "$ROOT_DIR/scripts/ensure-macos-libghostty.sh" "$GHOSTTY_DIR"
-fi
-
-# Locate the built library
-BUILT_LIB=""
-if [ -f "zig-out/lib/$LIB_NAME" ]; then
-    BUILT_LIB="zig-out/lib/$LIB_NAME"
-elif [ -f "zig-out/lib/libghostty-fat.a" ] && [ "$BUILD_STATIC" = true ]; then
-    info "Found fat static library (macOS universal)"
-    BUILT_LIB="zig-out/lib/libghostty-fat.a"
-fi
-
-# Also check for shared lib in default output
-if [ -z "$BUILT_LIB" ]; then
-    # Try finding it
-    FOUND=$(find zig-out -name "$LIB_NAME" 2>/dev/null | head -1)
-    if [ -n "$FOUND" ]; then
-        BUILT_LIB="$FOUND"
-    fi
-fi
-
-if [ -z "$BUILT_LIB" ]; then
-    warn "Shared library not found in zig-out/. Listing what was built:"
-    find zig-out -type f -name "*.so" -o -name "*.dylib" -o -name "*.a" 2>/dev/null || true
-    error "Could not find $LIB_NAME. Build may have produced different artifacts."
-    echo ""
-    echo "For macOS, Ghostty may only produce an xcframework."
-    echo "You may need to extract the library manually."
-    exit 1
-fi
-
-info "Built library: $BUILT_LIB"
-
-# Locate the official libghostty-vt shared library emitted by the upstream build.
-VT_LIB_NAME=""
-case "$PLATFORM" in
-    osx) VT_LIB_NAME="libghostty-vt.dylib" ;;
-    linux) VT_LIB_NAME="libghostty-vt.so" ;;
-esac
-
 VT_LIB=""
-if [ -n "$VT_LIB_NAME" ]; then
-    if [ -f "zig-out/lib/$VT_LIB_NAME" ]; then
-        VT_LIB="zig-out/lib/$VT_LIB_NAME"
-    else
-        VT_FOUND=$(find zig-out -name "$VT_LIB_NAME" 2>/dev/null | head -1)
-        if [ -n "$VT_FOUND" ]; then
-            VT_LIB="$VT_FOUND"
-        fi
+if [ -f "zig-out/lib/$LIB_NAME" ]; then
+    VT_LIB="zig-out/lib/$LIB_NAME"
+else
+    VT_FOUND=$(find zig-out -name "$LIB_NAME" 2>/dev/null | head -1)
+    if [ -n "$VT_FOUND" ]; then
+        VT_LIB="$VT_FOUND"
     fi
 fi
 
 if [ -z "$VT_LIB" ]; then
     warn "Official libghostty-vt artifact not found in zig-out/."
-    warn "Managed wrappers for GhosttyTerminal/GhosttyRenderState will require manual native library setup."
-else
-    info "Built official VT library: $VT_LIB"
+    error "Could not find $LIB_NAME."
+    exit 1
 fi
+
+info "Built official VT library: $VT_LIB"
 
 # Copy to NuGet native package directory
 case "$PLATFORM" in
@@ -203,30 +160,17 @@ case "$PLATFORM" in
 esac
 
 mkdir -p "$NATIVE_RUNTIME_DIR"
-cp "$BUILT_LIB" "$NATIVE_RUNTIME_DIR/"
+cp -L "$VT_LIB" "$NATIVE_RUNTIME_DIR/$LIB_NAME"
 info "Copied to: $NATIVE_RUNTIME_DIR/$LIB_NAME"
 
 # Also copy to a central output dir for easy access
 mkdir -p "$NATIVE_OUT_DIR/$RID"
-cp "$BUILT_LIB" "$NATIVE_OUT_DIR/$RID/"
+cp -L "$VT_LIB" "$NATIVE_OUT_DIR/$RID/$LIB_NAME"
 info "Copied to: $NATIVE_OUT_DIR/$RID/$LIB_NAME"
-
-if [ -n "$VT_LIB" ]; then
-    cp -L "$VT_LIB" "$NATIVE_RUNTIME_DIR/$VT_LIB_NAME"
-    info "Copied to: $NATIVE_RUNTIME_DIR/$VT_LIB_NAME"
-
-    cp -L "$VT_LIB" "$NATIVE_OUT_DIR/$RID/$VT_LIB_NAME"
-    info "Copied to: $NATIVE_OUT_DIR/$RID/$VT_LIB_NAME"
-fi
 
 # Copy header
 HEADER_DEST="$NATIVE_OUT_DIR/include"
 mkdir -p "$HEADER_DEST"
-if [ -f "include/ghostty.h" ]; then
-    cp "include/ghostty.h" "$HEADER_DEST/"
-    info "Copied header: $HEADER_DEST/ghostty.h"
-fi
-
 if [ -d "include/ghostty/vt" ]; then
     mkdir -p "$HEADER_DEST/ghostty"
     rm -rf "$HEADER_DEST/ghostty/vt"
@@ -238,8 +182,8 @@ fi
 if [ "$BUILD_STATIC" = true ]; then
     STATIC_LIB=""
     case "$PLATFORM" in
-        osx) STATIC_LIB="zig-out/lib/libghostty-fat.a" ;;
-        linux) STATIC_LIB="zig-out/lib/libghostty.a" ;;
+        osx) STATIC_LIB="zig-out/lib/libghostty-vt.a" ;;
+        linux) STATIC_LIB="zig-out/lib/libghostty-vt.a" ;;
     esac
 
     if [ -n "$STATIC_LIB" ] && [ -f "$STATIC_LIB" ]; then
@@ -307,14 +251,14 @@ fi
 # Print library info
 info ""
 info "=== Build Complete ==="
-info "Library:  $BUILT_LIB"
-file "$BUILT_LIB" 2>/dev/null || true
+info "Library:  $VT_LIB"
+file "$VT_LIB" 2>/dev/null || true
 if command -v otool &>/dev/null; then
     info "Dependencies:"
-    otool -L "$BUILT_LIB" 2>/dev/null | head -10 || true
+    otool -L "$VT_LIB" 2>/dev/null | head -10 || true
 elif command -v ldd &>/dev/null; then
     info "Dependencies:"
-    ldd "$BUILT_LIB" 2>/dev/null | head -10 || true
+    ldd "$VT_LIB" 2>/dev/null | head -10 || true
 fi
 
 info ""
