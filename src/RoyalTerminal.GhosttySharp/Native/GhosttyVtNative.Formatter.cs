@@ -83,7 +83,7 @@ public static partial class GhosttyVtNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct GhosttyFormatterTerminalOptions
+    public unsafe struct GhosttyFormatterTerminalOptions
     {
         public nuint Size;
         public GhosttyFormatterFormat Emit;
@@ -95,6 +95,8 @@ public static partial class GhosttyVtNative
         public bool Trim;
 
         public GhosttyFormatterTerminalExtra Extra;
+
+        public GhosttySelectionRange* Selection;
 
         public static GhosttyFormatterTerminalOptions CreateSized()
         {

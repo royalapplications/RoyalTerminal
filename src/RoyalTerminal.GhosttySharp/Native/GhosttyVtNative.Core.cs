@@ -143,6 +143,12 @@ public static partial class GhosttyVtNative
         KittyGraphics = 2,
         TmuxControlMode = 3,
         Optimize = 4,
+        VersionString = 5,
+        VersionMajor = 6,
+        VersionMinor = 7,
+        VersionPatch = 8,
+        VersionPre = 9,
+        VersionBuild = 10,
     }
 
     public enum GhosttyFocusEvent : int

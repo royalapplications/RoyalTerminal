@@ -120,6 +120,14 @@ public static partial class GhosttyVtNative
         nuint bufferLength,
         out nuint written);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_grid_ref_hyperlink_uri")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult GridRefHyperlinkUri(
+        in GhosttyGridRef reference,
+        byte* buffer,
+        nuint bufferLength,
+        out nuint written);
+
     [LibraryImport(LibName, EntryPoint = "ghostty_grid_ref_style")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult GridRefStyle(in GhosttyGridRef reference, out GhosttyStyle style);

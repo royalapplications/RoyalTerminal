@@ -120,6 +120,10 @@ public static partial class GhosttyVtNative
         ColorBackground = 12,
         ColorCursor = 13,
         ColorPalette = 14,
+        KittyImageStorageLimit = 15,
+        KittyImageMediumFile = 16,
+        KittyImageMediumTempFile = 17,
+        KittyImageMediumSharedMemory = 18,
     }
 
     public enum GhosttyTerminalData : int
@@ -150,6 +154,11 @@ public static partial class GhosttyVtNative
         ColorBackgroundDefault = 23,
         ColorCursorDefault = 24,
         ColorPaletteDefault = 25,
+        KittyImageStorageLimit = 26,
+        KittyImageMediumFile = 27,
+        KittyImageMediumTempFile = 28,
+        KittyImageMediumSharedMemory = 29,
+        KittyGraphics = 30,
     }
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_new")]

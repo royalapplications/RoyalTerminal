@@ -11,7 +11,6 @@ namespace RoyalTerminal.GhosttySharp;
 /// </summary>
 public sealed class GhosttyFormatter : IDisposable
 {
-    private readonly GhosttyTerminal _terminal;
     private nint _handle;
     private bool _disposed;
 
@@ -22,9 +21,27 @@ public sealed class GhosttyFormatter : IDisposable
         GhosttyTerminal terminal,
         GhosttyVtNative.GhosttyFormatterFormat format = GhosttyVtNative.GhosttyFormatterFormat.Plain,
         bool unwrap = false,
-        bool trim = false)
-        : this(terminal, CreateDefaultOptions(format, unwrap, trim))
+        bool trim = false,
+        GhosttySelection? selection = null)
     {
+        ArgumentNullException.ThrowIfNull(terminal);
+        NativeLibraryLoader.Initialize();
+
+        GhosttyVtNative.GhosttyFormatterTerminalOptions options =
+            CreateDefaultOptions(format, unwrap, trim);
+
+        unsafe
+        {
+            if (selection is GhosttySelection selected)
+            {
+                GhosttyVtNative.GhosttySelectionRange nativeSelection = selected.ToNative();
+                options.Selection = &nativeSelection;
+                Initialize(terminal, options);
+                return;
+            }
+        }
+
+        Initialize(terminal, options);
     }
 
     /// <summary>
@@ -36,11 +53,7 @@ public sealed class GhosttyFormatter : IDisposable
     {
         ArgumentNullException.ThrowIfNull(terminal);
         NativeLibraryLoader.Initialize();
-
-        _terminal = terminal;
-        ThrowIfFailed(
-            GhosttyVtNative.FormatterTerminalNew(nint.Zero, out _handle, terminal.Handle, options),
-            "ghostty_formatter_terminal_new");
+        Initialize(terminal, options);
     }
 
     /// <summary>Returns true when the native formatter handle is valid.</summary>
@@ -101,6 +114,15 @@ public sealed class GhosttyFormatter : IDisposable
             GhosttyVtNative.FormatterFree(_handle);
             _handle = nint.Zero;
         }
+    }
+
+    private void Initialize(
+        GhosttyTerminal terminal,
+        GhosttyVtNative.GhosttyFormatterTerminalOptions options)
+    {
+        ThrowIfFailed(
+            GhosttyVtNative.FormatterTerminalNew(nint.Zero, out _handle, terminal.Handle, options),
+            "ghostty_formatter_terminal_new");
     }
 
     private static GhosttyVtNative.GhosttyFormatterTerminalOptions CreateDefaultOptions(

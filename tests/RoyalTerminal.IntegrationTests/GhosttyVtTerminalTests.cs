@@ -126,6 +126,92 @@ public class GhosttyVtTerminalTests
     }
 
     [Fact]
+    public void OfficialTerminal_SelectionFormatting_AndHyperlinkUris_Work()
+    {
+        if (!GhosttyVtNative.IsAvailable())
+        {
+            return;
+        }
+
+        using GhosttyTerminal terminal = new(80, 24);
+
+        terminal.Write("\u001b]8;;https://example.com\u001b\\AB\u001b]8;;\u001b\\"u8);
+
+        Assert.True(terminal.TryGetGridReference(GhosttyVtNative.GhosttyPoint.Active(0, 0), out GhosttyVtNative.GhosttyGridRef start));
+        Assert.True(terminal.TryGetGridReference(GhosttyVtNative.GhosttyPoint.Active(2, 0), out GhosttyVtNative.GhosttyGridRef end));
+        Assert.Equal("https://example.com", terminal.GetHyperlinkUri(in start));
+
+        using GhosttyFormatter formatter = new(
+            terminal,
+            GhosttyVtNative.GhosttyFormatterFormat.Plain,
+            selection: new RoyalTerminal.GhosttySharp.GhosttySelection(start, end));
+
+        Assert.Equal("A", formatter.FormatToString());
+    }
+
+    [Fact]
+    public void OfficialTerminal_KittyGraphics_AreExposedThroughCurrentWrappers()
+    {
+        if (!GhosttyVtNative.IsAvailable())
+        {
+            return;
+        }
+
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        using GhosttyTerminal terminal = new(80, 24);
+        terminal.Resize(80, 24, 8, 16);
+        terminal.SetKittyImageStorageLimit(32UL * 1024UL * 1024UL);
+        terminal.SetKittyImageMediumFile(enabled: true);
+        terminal.SetKittyImageMediumTempFile(enabled: true);
+        terminal.SetKittyImageMediumSharedMemory(enabled: true);
+
+        Assert.True(terminal.TryGetKittyImageStorageLimit(out ulong storageLimit));
+        Assert.True(storageLimit >= 32UL * 1024UL * 1024UL);
+        Assert.True(terminal.TryGetKittyImageMediumFile(out bool fileMedium) && fileMedium);
+        Assert.True(terminal.TryGetKittyImageMediumTempFile(out bool tempFileMedium) && tempFileMedium);
+        Assert.True(terminal.TryGetKittyImageMediumSharedMemory(out bool sharedMemoryMedium) && sharedMemoryMedium);
+
+        terminal.Write("\u001b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=2,c=10,r=1;////////\u001b\\"u8);
+
+        Assert.True(terminal.TryGetKittyGraphics(out GhosttyKittyGraphics? graphics));
+        Assert.NotNull(graphics);
+        Assert.True(graphics!.TryGetImage(1, out GhosttyKittyGraphicsImage image));
+        Assert.True(image.IsValid);
+        Assert.Equal(1u, image.GetId());
+        Assert.Equal(1u, image.GetWidth());
+        Assert.Equal(2u, image.GetHeight());
+        Assert.Equal(GhosttyVtNative.GhosttyKittyImageFormat.Rgb, image.GetFormat());
+        Assert.Equal(6, image.CopyData().Length);
+
+        using GhosttyKittyGraphicsPlacementIterator iterator = graphics.CreatePlacementIterator();
+        iterator.SetLayer(GhosttyVtNative.GhosttyKittyPlacementLayer.All);
+        graphics.Populate(iterator);
+
+        Assert.True(iterator.MoveNext());
+        Assert.Equal(1u, iterator.GetImageId());
+        Assert.Equal(1u, iterator.GetPlacementId());
+        Assert.False(iterator.GetIsVirtual());
+        Assert.Equal(0, iterator.GetZIndex());
+        Assert.True(iterator.TryGetViewportPosition(image, terminal, out int column, out int row));
+        Assert.Equal(0, column);
+        Assert.Equal(0, row);
+        Assert.True(iterator.TryGetPixelSize(image, terminal, out uint widthPx, out uint heightPx));
+        Assert.True(widthPx > 0);
+        Assert.True(heightPx > 0);
+        Assert.True(iterator.TryGetSourceRect(image, out uint sourceX, out uint sourceY, out uint sourceWidth, out uint sourceHeight));
+        Assert.Equal(0u, sourceX);
+        Assert.Equal(0u, sourceY);
+        Assert.Equal(1u, sourceWidth);
+        Assert.Equal(2u, sourceHeight);
+        Assert.False(iterator.MoveNext());
+    }
+
+    [Fact]
     public void OfficialTerminal_EffectCallbacks_FireForBellTitleAndWritePty()
     {
         if (!GhosttyVtNative.IsAvailable())

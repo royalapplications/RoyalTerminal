@@ -211,6 +211,42 @@ public sealed class GhosttyTerminal : IDisposable
         }
     }
 
+    /// <summary>Sets the Kitty image storage limit in bytes for the terminal.</summary>
+    public void SetKittyImageStorageLimit(ulong bytes)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.KittyImageStorageLimit,
+            bytes,
+            "ghostty_terminal_set(kitty_image_storage_limit)");
+    }
+
+    /// <summary>Enables or disables the Kitty file medium.</summary>
+    public void SetKittyImageMediumFile(bool enabled)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.KittyImageMediumFile,
+            enabled,
+            "ghostty_terminal_set(kitty_image_medium_file)");
+    }
+
+    /// <summary>Enables or disables the Kitty temporary-file medium.</summary>
+    public void SetKittyImageMediumTempFile(bool enabled)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.KittyImageMediumTempFile,
+            enabled,
+            "ghostty_terminal_set(kitty_image_medium_temp_file)");
+    }
+
+    /// <summary>Enables or disables the Kitty shared-memory medium.</summary>
+    public void SetKittyImageMediumSharedMemory(bool enabled)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.KittyImageMediumSharedMemory,
+            enabled,
+            "ghostty_terminal_set(kitty_image_medium_shared_mem)");
+    }
+
     /// <summary>Gets the terminal width in cells.</summary>
     public ushort GetColumns() => GetValue<ushort>(GhosttyVtNative.GhosttyTerminalData.Cols);
 
@@ -252,6 +288,40 @@ public sealed class GhosttyTerminal : IDisposable
     /// <summary>Gets the current effective terminal scrollbar state.</summary>
     public GhosttyVtNative.GhosttyTerminalScrollbar GetScrollbar()
         => GetValue<GhosttyVtNative.GhosttyTerminalScrollbar>(GhosttyVtNative.GhosttyTerminalData.Scrollbar);
+
+    /// <summary>Gets the Kitty image storage limit when Kitty Graphics is available.</summary>
+    public bool TryGetKittyImageStorageLimit(out ulong bytes)
+        => TryGetValue(GhosttyVtNative.GhosttyTerminalData.KittyImageStorageLimit, out bytes);
+
+    /// <summary>Gets whether the Kitty file medium is enabled.</summary>
+    public bool TryGetKittyImageMediumFile(out bool enabled)
+        => TryGetValue(GhosttyVtNative.GhosttyTerminalData.KittyImageMediumFile, out enabled);
+
+    /// <summary>Gets whether the Kitty temporary-file medium is enabled.</summary>
+    public bool TryGetKittyImageMediumTempFile(out bool enabled)
+        => TryGetValue(GhosttyVtNative.GhosttyTerminalData.KittyImageMediumTempFile, out enabled);
+
+    /// <summary>Gets whether the Kitty shared-memory medium is enabled.</summary>
+    public bool TryGetKittyImageMediumSharedMemory(out bool enabled)
+        => TryGetValue(GhosttyVtNative.GhosttyTerminalData.KittyImageMediumSharedMemory, out enabled);
+
+    /// <summary>Gets the current active-screen Kitty Graphics storage handle.</summary>
+    public unsafe bool TryGetKittyGraphics(out GhosttyKittyGraphics? graphics)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        nint handle = nint.Zero;
+        GhosttyVtNative.GhosttyResult result =
+            GhosttyVtNative.TerminalGet(_handle, GhosttyVtNative.GhosttyTerminalData.KittyGraphics, &handle);
+        if (result == GhosttyVtNative.GhosttyResult.NoValue || handle == nint.Zero)
+        {
+            graphics = null;
+            return false;
+        }
+
+        ThrowIfFailed(result, "ghostty_terminal_get(kitty_graphics)");
+        graphics = new GhosttyKittyGraphics(this, handle);
+        return true;
+    }
 
     /// <summary>Gets the effective terminal foreground color when available.</summary>
     public bool TryGetForegroundColor(out GhosttyVtNative.GhosttyColorRgb color)
@@ -299,6 +369,35 @@ public sealed class GhosttyTerminal : IDisposable
         return true;
     }
 
+    /// <summary>Reads the hyperlink URI attached to a resolved grid reference.</summary>
+    public unsafe string? GetHyperlinkUri(in GhosttyVtNative.GhosttyGridRef reference)
+    {
+        GhosttyVtNative.GhosttyResult probe = GhosttyVtNative.GridRefHyperlinkUri(in reference, null, 0, out nuint needed);
+        if (probe == GhosttyVtNative.GhosttyResult.Success && needed == 0)
+        {
+            return null;
+        }
+
+        if (probe != GhosttyVtNative.GhosttyResult.OutOfSpace)
+        {
+            ThrowIfFailed(probe, "ghostty_grid_ref_hyperlink_uri(probe)");
+        }
+
+        if (needed == 0)
+        {
+            return null;
+        }
+
+        byte[] buffer = new byte[checked((int)needed)];
+        fixed (byte* bufferPtr = buffer)
+        {
+            ThrowIfFailed(
+                GhosttyVtNative.GridRefHyperlinkUri(in reference, bufferPtr, (nuint)buffer.Length, out nuint written),
+                "ghostty_grid_ref_hyperlink_uri");
+            return written == 0 ? null : System.Text.Encoding.UTF8.GetString(buffer, 0, checked((int)written));
+        }
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -337,6 +436,22 @@ public sealed class GhosttyTerminal : IDisposable
 
         ThrowIfFailed(result, $"ghostty_terminal_get({data})");
         color = value;
+        return true;
+    }
+
+    private unsafe bool TryGetValue<T>(GhosttyVtNative.GhosttyTerminalData data, out T value) where T : unmanaged
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        T copy = default;
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.TerminalGet(_handle, data, &copy);
+        if (result == GhosttyVtNative.GhosttyResult.NoValue)
+        {
+            value = default;
+            return false;
+        }
+
+        ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        value = copy;
         return true;
     }
 
