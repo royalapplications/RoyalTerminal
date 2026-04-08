@@ -6,6 +6,7 @@ using SkiaSharp;
 using System.Buffers;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
@@ -36,6 +37,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private readonly HarfBuzzTextShaper _textShaper;
     private readonly TerminalFontResolver _fontResolver;
     private readonly ShapedRunCache _shapedRunCache;
+    private readonly Dictionary<int, KittyBitmapCacheEntry> _kittyBitmapCache = new();
     private const float CellMetricEpsilon = 0.01f;
     private float _cellWidth;
     private float _cellHeight;
@@ -281,12 +283,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         canvas.Save();
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
+        ReadOnlySpan<TerminalKittyImagePlacement> kittyPlacements = screen.GetKittyPlacements();
+        HashSet<int>? activeKittyImageIds = kittyPlacements.IsEmpty ? null : new HashSet<int>();
         int overlayCapacity = Math.Max(1, screen.Columns);
         CellOverlayFlags[] overlayBuffer = ArrayPool<CellOverlayFlags>.Shared.Rent(overlayCapacity);
 
         try
         {
-            // Render backgrounds first (batched), then text on top
+            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowBackground, activeKittyImageIds);
+
+            // Render backgrounds first (batched)
             for (var row = 0; row < screen.ViewportRows; row++)
             {
                 var terminalRow = screen.GetViewportRow(row);
@@ -301,12 +307,27 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     highlights,
                     rowOverlays);
 
-                // Render background cells
                 RenderRowBackground(canvas, terminalRow, y, rowOverlays);
+            }
 
-                // Render text
+            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowText, activeKittyImageIds);
+
+            // Render text on top of the cell layer.
+            for (var row = 0; row < screen.ViewportRows; row++)
+            {
+                var terminalRow = screen.GetViewportRow(row);
+                if (!forceFullRedraw && !terminalRow.IsDirty) continue;
+
+                var y = row * _cellHeight;
+                Span<CellOverlayFlags> rowOverlays = overlayBuffer.AsSpan(0, terminalRow.Columns);
+                rowOverlays.Clear();
+                PopulateRowOverlayFlags(
+                    row,
+                    terminalRow.Columns,
+                    highlights,
+                    rowOverlays);
+
                 RenderRowText(canvas, terminalRow, y, row, rowOverlays);
-
                 terminalRow.IsDirty = false;
             }
         }
@@ -316,6 +337,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 overlayBuffer,
                 clearArray: false);
         }
+
+        RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.AboveText, activeKittyImageIds);
+        IEnumerable<int> activeKittyBitmapIds = activeKittyImageIds is not null
+            ? activeKittyImageIds
+            : Array.Empty<int>();
+        TrimKittyBitmapCache(activeKittyBitmapIds);
 
         // Render cursor
         if (CursorVisible)
@@ -2463,11 +2490,147 @@ public sealed class SkiaTerminalRenderer : IDisposable
         Interlocked.Exchange(ref _diagnosticScanLineSpriteCells, 0);
     }
 
+    private void RenderKittyLayer(
+        SKCanvas canvas,
+        TerminalScreen screen,
+        ReadOnlySpan<TerminalKittyImagePlacement> placements,
+        TerminalKittyImageLayer layer,
+        HashSet<int>? activeImageIds)
+    {
+        if (placements.IsEmpty)
+        {
+            return;
+        }
+
+        float viewportWidth = screen.Columns * _cellWidth;
+        float viewportHeight = screen.ViewportRows * _cellHeight;
+
+        canvas.Save();
+        canvas.ClipRect(new SKRect(0, 0, viewportWidth, viewportHeight));
+
+        try
+        {
+            for (int i = 0; i < placements.Length; i++)
+            {
+                TerminalKittyImagePlacement placement = placements[i];
+                if (placement.Layer != layer)
+                {
+                    continue;
+                }
+
+                if (!screen.TryGetKittyImageSource(placement.ImageId, out TerminalKittyImageSource? source) ||
+                    source is null)
+                {
+                    continue;
+                }
+
+                activeImageIds?.Add(placement.ImageId);
+                SKBitmap bitmap = GetOrCreateKittyBitmap(source);
+                SKRect sourceRect = new(
+                    placement.SourceX,
+                    placement.SourceY,
+                    placement.SourceX + placement.SourceWidth,
+                    placement.SourceY + placement.SourceHeight);
+                float destLeft = (placement.ViewportColumn * _cellWidth) + placement.XOffsetPx;
+                float destTop = (placement.ViewportRow * _cellHeight) + placement.YOffsetPx;
+                SKRect destRect = new(
+                    destLeft,
+                    destTop,
+                    destLeft + placement.WidthPx,
+                    destTop + placement.HeightPx);
+
+                canvas.DrawBitmap(bitmap, sourceRect, destRect);
+            }
+        }
+        finally
+        {
+            canvas.Restore();
+        }
+    }
+
+    private SKBitmap GetOrCreateKittyBitmap(TerminalKittyImageSource source)
+    {
+        ulong fingerprint = HashBytes(source.RgbaPixels);
+        if (_kittyBitmapCache.TryGetValue(source.ImageId, out KittyBitmapCacheEntry? existing) &&
+            existing.WidthPx == source.WidthPx &&
+            existing.HeightPx == source.HeightPx &&
+            existing.ByteLength == source.RgbaPixels.Length &&
+            existing.Fingerprint == fingerprint)
+        {
+            return existing.Bitmap;
+        }
+
+        existing?.Dispose();
+
+        SKBitmap bitmap = new(source.WidthPx, source.HeightPx, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        IntPtr pixels = bitmap.GetPixels();
+        if (pixels == IntPtr.Zero)
+        {
+            bitmap.Dispose();
+            throw new InvalidOperationException("Failed to allocate bitmap pixels for Kitty Graphics.");
+        }
+
+        Marshal.Copy(source.RgbaPixels, 0, pixels, source.RgbaPixels.Length);
+        _kittyBitmapCache[source.ImageId] = new KittyBitmapCacheEntry(
+            bitmap,
+            source.WidthPx,
+            source.HeightPx,
+            source.RgbaPixels.Length,
+            fingerprint);
+        return bitmap;
+    }
+
+    private void TrimKittyBitmapCache(IEnumerable<int> activeImageIds)
+    {
+        HashSet<int> active = activeImageIds as HashSet<int> ?? new HashSet<int>(activeImageIds);
+        List<int>? stale = null;
+
+        foreach ((int imageId, KittyBitmapCacheEntry entry) in _kittyBitmapCache)
+        {
+            if (active.Contains(imageId))
+            {
+                continue;
+            }
+
+            stale ??= new List<int>();
+            stale.Add(imageId);
+            entry.Dispose();
+        }
+
+        if (stale is null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < stale.Count; i++)
+        {
+            _kittyBitmapCache.Remove(stale[i]);
+        }
+    }
+
+    private static ulong HashBytes(ReadOnlySpan<byte> data)
+    {
+        ulong hash = FnvOffsetBasis;
+        for (int i = 0; i < data.Length; i++)
+        {
+            hash ^= data[i];
+            hash *= FnvPrime;
+        }
+
+        return hash;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
 
+        foreach (KittyBitmapCacheEntry entry in _kittyBitmapCache.Values)
+        {
+            entry.Dispose();
+        }
+
+        _kittyBitmapCache.Clear();
         _bgPaint.Dispose();
         _fgPaint.Dispose();
         _cursorPaint.Dispose();
@@ -2477,6 +2640,34 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _fontResolver.Dispose();
         _shapedRunCache.Clear();
         _glyphCache.Dispose();
+    }
+
+    private sealed class KittyBitmapCacheEntry : IDisposable
+    {
+        public KittyBitmapCacheEntry(
+            SKBitmap bitmap,
+            int widthPx,
+            int heightPx,
+            int byteLength,
+            ulong fingerprint)
+        {
+            Bitmap = bitmap;
+            WidthPx = widthPx;
+            HeightPx = heightPx;
+            ByteLength = byteLength;
+            Fingerprint = fingerprint;
+        }
+
+        public SKBitmap Bitmap { get; }
+        public int WidthPx { get; }
+        public int HeightPx { get; }
+        public int ByteLength { get; }
+        public ulong Fingerprint { get; }
+
+        public void Dispose()
+        {
+            Bitmap.Dispose();
+        }
     }
 
     private static float ComputeBaseline(SKFontMetrics metrics, float cellHeight)

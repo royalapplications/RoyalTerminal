@@ -1374,6 +1374,44 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_SearchLifecycle_NativeViewportScrollsSelectedMatchIntoView()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new DefaultVtProcessorFactory(nativeProviders),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 10; i++)
+        {
+            builder.Append("L");
+            builder.Append(i.ToString("D2"));
+            builder.Append('\n');
+        }
+
+        control.WriteOutput(Encoding.UTF8.GetBytes(builder.ToString()));
+        Assert.NotNull(control.ScrollData);
+        Assert.True(control.ScrollData!.OffsetRows > 0);
+
+        control.StartSearch("L00");
+
+        Assert.Equal(0, control.ScrollData.OffsetRows);
+        Assert.Equal(1, control.SearchTotal);
+        Assert.Equal(0, control.SearchSelected);
+    }
+
+    [AvaloniaFact]
     public void Control_HoveredLinkUrl_NormalizesWhitespace()
     {
         TerminalControl control = new();
