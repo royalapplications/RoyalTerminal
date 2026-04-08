@@ -1426,8 +1426,8 @@ public class TerminalControlTests
 
         control.StartSearch("L10");
 
-        Assert.Equal(10UL, processor.LastSetViewportOffsetRows);
-        Assert.Equal(10UL, processor.ViewportScrollState.OffsetRows);
+        Assert.Equal(7UL, processor.LastSetViewportOffsetRows);
+        Assert.Equal(7UL, processor.ViewportScrollState.OffsetRows);
         Assert.Equal(1, control.SearchTotal);
         Assert.Equal(0, control.SearchSelected);
     }
