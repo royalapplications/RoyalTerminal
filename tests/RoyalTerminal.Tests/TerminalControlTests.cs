@@ -1412,6 +1412,27 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_SearchLifecycle_NativeViewportScroll_UsesNativeTotalRows_NotViewportMirror()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 96, VisibleRows: 4),
+            [new TerminalSearchMatch(10, 0, 2)]);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        control.StartSearch("L10");
+
+        Assert.Equal(10UL, processor.LastSetViewportOffsetRows);
+        Assert.Equal(10UL, processor.ViewportScrollState.OffsetRows);
+        Assert.Equal(1, control.SearchTotal);
+        Assert.Equal(0, control.SearchSelected);
+    }
+
+    [AvaloniaFact]
     public void Control_HoveredLinkUrl_NormalizesWhitespace()
     {
         TerminalControl control = new();
@@ -2036,6 +2057,16 @@ public class TerminalControlTests
         }
     }
 
+    private sealed class SingleProcessorFactory(IVtProcessor processor) : IVtProcessorFactory
+    {
+        public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
+        {
+            _ = screen;
+            _ = preference;
+            return processor;
+        }
+    }
+
     private sealed class TrackingVtProcessor : IVtProcessor
     {
         public int CursorCol => 0;
@@ -2089,6 +2120,118 @@ public class TerminalControlTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class FakeSearchViewportVtProcessor(
+        TerminalViewportScrollState viewportScrollState,
+        IReadOnlyList<TerminalSearchMatch> matches) : IVtProcessor, ITerminalViewportScrollSource, ITerminalSearchSource
+    {
+        private readonly List<TerminalSearchMatch> _matches = [.. matches];
+
+        public int CursorCol => 0;
+        public int CursorRow => 0;
+        public bool CursorVisible => true;
+        public bool ApplicationCursorKeys => false;
+        public bool ApplicationKeypad => false;
+        public bool AlternateScreen => false;
+        public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
+        public TerminalModeState ModeState => new(
+            CursorVisible,
+            ApplicationCursorKeys,
+            ApplicationKeypad,
+            AlternateScreen,
+            BracketedPaste,
+            Win32InputMode);
+
+        public TerminalViewportScrollState ViewportScrollState { get; private set; } = viewportScrollState;
+
+        public ulong? LastSetViewportOffsetRows { get; private set; }
+
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Action<byte[]>? ResponseCallback { get; set; }
+
+        public Action? BellCallback { get; set; }
+
+        public Action<string>? TitleCallback { get; set; }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            _ = data;
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            _ = columns;
+            _ = rows;
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            _ = columns;
+            _ = rows;
+            _ = widthPx;
+            _ = heightPx;
+        }
+
+        public void ApplyTheme(TerminalTheme theme)
+        {
+            _ = theme;
+        }
+
+        public void Reset()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+
+        public void ScrollViewportByRows(int deltaRows)
+        {
+            long next = checked((long)ViewportScrollState.OffsetRows + deltaRows);
+            if (next < 0)
+            {
+                next = 0;
+            }
+
+            ulong maxOffsetRows = ViewportScrollState.MaxOffsetRows;
+            if ((ulong)next > maxOffsetRows)
+            {
+                next = (long)maxOffsetRows;
+            }
+
+            ViewportScrollState = ViewportScrollState with { OffsetRows = (ulong)next };
+        }
+
+        public void ScrollViewportToTop()
+        {
+            ViewportScrollState = ViewportScrollState with { OffsetRows = 0 };
+        }
+
+        public void ScrollViewportToBottom()
+        {
+            ViewportScrollState = ViewportScrollState with { OffsetRows = ViewportScrollState.MaxOffsetRows };
+        }
+
+        public void SetViewportOffsetRows(ulong offsetRows)
+        {
+            ulong clamped = Math.Min(offsetRows, ViewportScrollState.MaxOffsetRows);
+            LastSetViewportOffsetRows = clamped;
+            ViewportScrollState = ViewportScrollState with { OffsetRows = clamped };
+        }
+
+        public void PopulateSearchMatches(string needle, List<TerminalSearchMatch> destination)
+        {
+            _ = needle;
+            destination.Clear();
+            destination.AddRange(_matches);
         }
     }
 
