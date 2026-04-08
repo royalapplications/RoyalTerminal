@@ -3765,18 +3765,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 return false;
             }
 
-            int maxTopAbsoluteRow = Math.Max(0, _screen.TotalRows - _screen.ViewportRows);
-            nextTopAbsoluteRow = selectedAbsoluteRow < viewportTopAbsoluteRow
-                ? selectedAbsoluteRow
-                : selectedAbsoluteRow - _screen.ViewportRows + 1;
-            nextTopAbsoluteRow = Math.Clamp(nextTopAbsoluteRow, 0, maxTopAbsoluteRow);
-
             if (viewportScrollSource is not null)
             {
+                int maxTopAbsoluteRow = GetViewportMaxTopAbsoluteRow(viewportScrollSource.ViewportScrollState);
+                nextTopAbsoluteRow = selectedAbsoluteRow < viewportTopAbsoluteRow
+                    ? selectedAbsoluteRow
+                    : selectedAbsoluteRow - _screen.ViewportRows + 1;
+                nextTopAbsoluteRow = Math.Clamp(nextTopAbsoluteRow, 0, maxTopAbsoluteRow);
                 changed = (ulong)nextTopAbsoluteRow != GetViewportTopAbsoluteRowUlong(viewportScrollSource.ViewportScrollState);
             }
             else
             {
+                int maxTopAbsoluteRow = Math.Max(0, _screen.TotalRows - _screen.ViewportRows);
+                nextTopAbsoluteRow = selectedAbsoluteRow < viewportTopAbsoluteRow
+                    ? selectedAbsoluteRow
+                    : selectedAbsoluteRow - _screen.ViewportRows + 1;
+                nextTopAbsoluteRow = Math.Clamp(nextTopAbsoluteRow, 0, maxTopAbsoluteRow);
                 int nextScrollOffset = _screen.TotalRows - _screen.ViewportRows - nextTopAbsoluteRow;
                 nextScrollOffset = Math.Clamp(nextScrollOffset, 0, _screen.MaxScrollOffset);
                 if (_screen.ScrollOffset != nextScrollOffset)
@@ -4003,8 +4007,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         ulong topAbsoluteRow = GetViewportTopAbsoluteRowUlong(viewportScrollSource.ViewportScrollState);
-        ulong maxTopAbsoluteRow = (ulong)Math.Max(0, _screen.TotalRows - _screen.ViewportRows);
-        topAbsoluteRow = Math.Min(topAbsoluteRow, maxTopAbsoluteRow);
         return topAbsoluteRow > int.MaxValue
             ? int.MaxValue
             : (int)topAbsoluteRow;
@@ -4013,6 +4015,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private static ulong GetViewportTopAbsoluteRowUlong(TerminalViewportScrollState viewportState)
     {
         return Math.Min(viewportState.OffsetRows, viewportState.MaxOffsetRows);
+    }
+
+    private static int GetViewportMaxTopAbsoluteRow(TerminalViewportScrollState viewportState)
+    {
+        ulong maxTopAbsoluteRow = viewportState.MaxOffsetRows;
+        return maxTopAbsoluteRow > int.MaxValue
+            ? int.MaxValue
+            : (int)maxTopAbsoluteRow;
     }
 
     private void SyncScrollDataFromNativeViewportLocked(ITerminalViewportScrollSource viewportScrollSource)
