@@ -216,10 +216,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts/win-${{ matrix.arch }}
-          find external/ghostty/zig-out -name "*.dll" -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \;
-          find external/ghostty/zig-out -name "*.lib" -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \;
-          find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.dll" -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \; || true
-          find native/ghostty-renderer-capi/zig-out -name "*ghostty-renderer-capi*.lib" -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \; || true
+          find external/ghostty/zig-out \( -name "ghostty-vt.dll" -o -name "libghostty-vt.dll" \) -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \;
+          find native/ghostty-renderer-capi/zig-out \( -name "ghostty-renderer-capi.dll" -o -name "libghostty-renderer-capi.dll" \) -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \; || true
           for base in ghostty-vt ghostty-renderer-capi; do
             if [ ! -f "artifacts/win-${{ matrix.arch }}/${base}.dll" ] && [ -f "artifacts/win-${{ matrix.arch }}/lib${base}.dll" ]; then
               cp -f "artifacts/win-${{ matrix.arch }}/lib${base}.dll" "artifacts/win-${{ matrix.arch }}/${base}.dll"
