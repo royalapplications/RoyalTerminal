@@ -378,6 +378,9 @@ async function main() {
     }
 
     run("dotnet", [
+      "tool",
+      "run",
+      "--allow-roll-forward",
       "xmldocmd",
       assemblyPath,
       outputDirectory,
