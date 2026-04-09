@@ -23,6 +23,15 @@ function run(command, args, cwd = repoRoot) {
   }
 }
 
+function runStatus(command, args, cwd = repoRoot) {
+  const result = spawnSync(command, args, {
+    cwd,
+    stdio: "inherit"
+  });
+
+  return result.status ?? 1;
+}
+
 function getTagValue(xml, tagName) {
   const match = xml.match(new RegExp(`<${tagName}>([\\s\\S]*?)</${tagName}>`, "i"));
   return match?.[1].trim();
@@ -222,7 +231,13 @@ async function writePackageIndex(pkg, outputDirectory) {
   await fs.writeFile(path.join(outputDirectory, "index.md"), `${lines.join("\n")}\n`);
 }
 
-async function writeSourceIndexPackage(pkg, outputDirectory) {
+async function writeSourceIndexPackage(pkg, outputDirectory, options = {}) {
+  const notes =
+    options.notes ?? [
+      "- This package is indexed directly from the public source files.",
+      "- Detailed member pages are unavailable because the Markdown reflection generator could not load this assembly in the current environment.",
+      "- The source index keeps the package discoverable from the docs site and links each public type back to the repository."
+    ];
   const publicTypes = await collectPublicTypes(pkg);
   const groupedTypes = new Map();
 
@@ -250,12 +265,10 @@ async function writeSourceIndexPackage(pkg, outputDirectory) {
     `- Related guide: [${pkg.guideTitle}](${pkg.guideLink})`,
     "",
     "## Notes",
-    "",
-    "- This package exposes public native callback and function-pointer signatures.",
-    "- The Markdown reflection generator used for the rest of the API site cannot currently expand those signatures.",
-    "- This page indexes the public source types directly so the package is still discoverable from the docs site.",
     ""
   ];
+
+  lines.push(...notes, "");
 
   for (const namespaceName of Array.from(groupedTypes.keys()).sort((left, right) => left.localeCompare(right))) {
     lines.push(`## ${namespaceName}`, "", "| Type | Kind | Source |", "| --- | --- | --- |");
@@ -323,7 +336,8 @@ async function writeApiIndex(projects) {
     "",
     "## Reference Notes",
     "",
-    "- `RoyalTerminal.GhosttySharp` is source-indexed because the current Markdown reflection generator cannot expand its public function-pointer signatures."
+    "- `RoyalTerminal.GhosttySharp` is always source-indexed because the current Markdown reflection generator cannot expand its public function-pointer signatures.",
+    "- Other packages may temporarily fall back to source-indexed reference pages when the reflection generator cannot load the built assembly in the current environment."
   );
 
   await fs.mkdir(apiRoot, { recursive: true });
@@ -373,11 +387,17 @@ async function main() {
     await fs.mkdir(outputDirectory, { recursive: true });
 
     if (pkg.referenceMode === "source-index") {
-      await writeSourceIndexPackage(pkg, outputDirectory);
+      await writeSourceIndexPackage(pkg, outputDirectory, {
+        notes: [
+          "- This package exposes public native callback and function-pointer signatures.",
+          "- The Markdown reflection generator used for the rest of the API site cannot currently expand those signatures.",
+          "- This page indexes the public source types directly so the package is still discoverable from the docs site."
+        ]
+      });
       continue;
     }
 
-    run("dotnet", [
+    const generationStatus = runStatus("dotnet", [
       "tool",
       "run",
       "--allow-roll-forward",
@@ -392,6 +412,16 @@ async function main() {
       "--source",
       sourcePath
     ]);
+
+    if (generationStatus !== 0) {
+      console.warn(
+        `[docs:api] Falling back to source-index API docs for ${pkg.packageId} because xmldocmd could not load the built assembly in this environment.`
+      );
+      await fs.rm(outputDirectory, { recursive: true, force: true });
+      await fs.mkdir(outputDirectory, { recursive: true });
+      await writeSourceIndexPackage(pkg, outputDirectory);
+      continue;
+    }
 
     await normalizeMarkdown(outputDirectory);
     await writePackageIndex(pkg, outputDirectory);
