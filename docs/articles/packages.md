@@ -27,6 +27,12 @@ RoyalTerminal is published as a family of packages so you can compose the exact 
 | Rendering contracts, shaping, Skia, and Ghostty renderer interop | [Rendering, Text, And Graphics](/articles/rendering-native) |
 | High-level and low-level Ghostty wrapper layers | [Ghostty Integration](/articles/ghostty-integration) |
 
+## API reference
+
+Use [API Reference](/api/) when you need exact public types, members, and XML-commented contracts for the managed RoyalTerminal packages.
+
+The API section is generated from the packable managed libraries under `src/` and grouped the same way the package family is organized in this guide. Native runtime asset packages remain documented here because they ship binaries and MSBuild targets rather than managed public APIs.
+
 ## UI and host packages
 
 | Package | Responsibility |

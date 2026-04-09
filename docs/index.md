@@ -16,6 +16,9 @@ hero:
       text: Package Guide
       link: /articles/packages
     - theme: alt
+      text: API Reference
+      link: /api/
+    - theme: alt
       text: GitHub
       link: https://github.com/royalapplications/RoyalTerminal
 
@@ -31,7 +34,7 @@ features:
   - title: Production validation surface
     details: "The repository includes an Avalonia demo, a control catalog, headless/UI tests, integration tests, native packaging checks, and benchmarks."
   - title: Repository-scale documentation
-    details: "This guide covers the source tree outside the `external/ghostty` submodule with feature-led articles for embedding, sessions, transports, rendering, and Ghostty integration."
+    details: "This guide covers the source tree outside the `external/ghostty` submodule with feature-led articles plus generated API reference pages for the public managed packages."
 ---
 
 ## Documentation
@@ -39,6 +42,7 @@ features:
 - [Getting Started](/articles/getting-started)
 - [Architecture](/articles/architecture)
 - [Package Guide](/articles/packages)
+- [API Reference](/api/)
 - [Embedding In Avalonia](/articles/avalonia-control)
 - [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings)
 - [Transports And Remote Access](/articles/transports)

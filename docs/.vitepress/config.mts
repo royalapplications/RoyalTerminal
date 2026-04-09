@@ -1,5 +1,7 @@
 import { defineConfig } from "vitepress";
 
+import { apiPackageGroups } from "./api-packages.mjs";
+
 const guideItems = [
   { text: "Overview", link: "/" },
   { text: "Getting Started", link: "/articles/getting-started" },
@@ -14,6 +16,10 @@ const guideItems = [
   { text: "Samples And Tooling", link: "/articles/samples-tooling" },
   { text: "Build, Test, And Release", link: "/articles/build-test-release" },
   { text: "Troubleshooting", link: "/articles/troubleshooting" }
+];
+
+const apiSidebarItems = [
+  { text: "Overview", link: "/api/" }
 ];
 
 export default defineConfig({
@@ -44,6 +50,7 @@ export default defineConfig({
     nav: [
       { text: "Guide", link: "/articles/getting-started" },
       { text: "Packages", link: "/articles/packages" },
+      { text: "API", link: "/api/" },
       { text: "GitHub", link: "https://github.com/royalapplications/RoyalTerminal" }
     ],
     sidebar: {
@@ -53,10 +60,27 @@ export default defineConfig({
           items: guideItems
         }
       ],
+      "/api/": [
+        {
+          text: "API Reference",
+          items: apiSidebarItems
+        },
+        ...apiPackageGroups.map((group) => ({
+          text: group.text,
+          items: group.packages.map((pkg) => ({
+            text: pkg.packageId,
+            link: `/api/${pkg.slug}/`
+          }))
+        }))
+      ],
       "/": [
         {
           text: "Guide",
           items: guideItems
+        },
+        {
+          text: "API Reference",
+          items: apiSidebarItems
         }
       ]
     },
