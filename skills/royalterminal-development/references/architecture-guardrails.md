@@ -40,7 +40,7 @@ Do not:
 - keep view code-behind minimal (framework plumbing only).
 - route user actions through commands, interactions, and services.
 - keep `TerminalControl` reusable and backend-neutral.
-- keep Ghostty-specific control behavior isolated to `RoyalTerminal.Avalonia.Ghostty`.
+- keep low-level Ghostty interop isolated to dedicated native/interop packages; do not reintroduce a product macOS-only Ghostty control package.
 
 For sample app:
 - `MainWindowViewModel` exposes state/command surface.

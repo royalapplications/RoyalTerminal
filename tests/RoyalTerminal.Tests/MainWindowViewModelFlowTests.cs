@@ -193,45 +193,31 @@ public class MainWindowViewModelFlowTests
     public void ModeSwitching_CycleRenderMode_UpdatesState()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
-        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: false, useNativeVtControl: false);
+        viewModel.SetTerminalCapabilities(nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: true, useNativeVtControl: false);
 
         viewModel.CycleRenderModeCommand.Execute().Wait();
         Assert.False(viewModel.UseRenderedControl);
-        Assert.True(viewModel.UseNativeControl);
-        Assert.False(viewModel.UseNativeVtControl);
-
-        viewModel.CycleRenderModeCommand.Execute().Wait();
-        Assert.False(viewModel.UseRenderedControl);
-        Assert.False(viewModel.UseNativeControl);
         Assert.True(viewModel.UseNativeVtControl);
         Assert.False(viewModel.UseManagedVtControl);
 
         viewModel.CycleRenderModeCommand.Execute().Wait();
         Assert.False(viewModel.UseRenderedControl);
-        Assert.False(viewModel.UseNativeControl);
         Assert.False(viewModel.UseNativeVtControl);
         Assert.True(viewModel.UseManagedVtControl);
-
-        viewModel.CycleRenderModeCommand.Execute().Wait();
-        Assert.False(viewModel.UseRenderedControl);
-        Assert.False(viewModel.UseNativeControl);
-        Assert.False(viewModel.UseNativeVtControl);
-        Assert.False(viewModel.UseManagedVtControl);
 
         viewModel.CycleRenderModeCommand.Execute().Wait();
         Assert.True(viewModel.UseRenderedControl);
-        Assert.False(viewModel.UseNativeControl);
         Assert.False(viewModel.UseNativeVtControl);
         Assert.False(viewModel.UseManagedVtControl);
     }
 
     [Fact]
-    public void ModeSwitching_NoGhosttyNoNative_CyclesManagedAndStandalone()
+    public void ModeSwitching_NoNative_CyclesManagedAndRendered()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetTerminalCapabilities(ghosttyAvailable: false, nativeVtAvailable: false);
-        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+        viewModel.SetTerminalCapabilities(nativeVtAvailable: false);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeVtControl: false);
 
         viewModel.CycleRenderModeCommand.Execute().Wait();
         Assert.False(viewModel.UseNativeVtControl);
@@ -239,17 +225,18 @@ public class MainWindowViewModelFlowTests
         Assert.Equal("Managed VT", viewModel.ModeButtonText);
 
         viewModel.CycleRenderModeCommand.Execute().Wait();
+        Assert.True(viewModel.UseRenderedControl);
         Assert.False(viewModel.UseNativeVtControl);
         Assert.False(viewModel.UseManagedVtControl);
         Assert.Equal("Rendered", viewModel.ModeButtonText);
     }
 
     [Fact]
-    public void ModeSwitching_NoGhostty_WithNativeVt_SkipsUnavailableModes()
+    public void ModeSwitching_NativeVtOnly_CyclesNativeManagedAndRendered()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetTerminalCapabilities(ghosttyAvailable: false, nativeVtAvailable: true);
-        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+        viewModel.SetTerminalCapabilities(nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeVtControl: false);
 
         viewModel.CycleRenderModeCommand.Execute().Wait();
         Assert.True(viewModel.UseNativeVtControl);
@@ -262,35 +249,34 @@ public class MainWindowViewModelFlowTests
         Assert.Equal("Managed VT", viewModel.ModeButtonText);
 
         viewModel.CycleRenderModeCommand.Execute().Wait();
+        Assert.True(viewModel.UseRenderedControl);
         Assert.False(viewModel.UseNativeVtControl);
         Assert.False(viewModel.UseManagedVtControl);
         Assert.Equal("Rendered", viewModel.ModeButtonText);
     }
 
     [Fact]
-    public void ModeSwitching_RequestUnavailableGhosttyMode_FallsBackToSupportedMode()
+    public void ModeSwitching_RequestRendered_WithNativeVtOnly_PreservesRenderedMode()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetTerminalCapabilities(ghosttyAvailable: false, nativeVtAvailable: true);
+        viewModel.SetTerminalCapabilities(nativeVtAvailable: true);
 
-        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: false, useNativeVtControl: false);
+        viewModel.SetRenderMode(useRenderedControl: true, useNativeVtControl: false);
 
-        Assert.False(viewModel.UseRenderedControl);
-        Assert.False(viewModel.UseNativeControl);
-        Assert.True(viewModel.UseNativeVtControl);
-        Assert.Equal("Native VT", viewModel.ModeButtonText);
+        Assert.True(viewModel.UseRenderedControl);
+        Assert.False(viewModel.UseNativeVtControl);
+        Assert.Equal("Rendered", viewModel.ModeButtonText);
     }
 
     [Fact]
-    public void ModeSwitching_RequestUnavailableNativeVt_WithGhosttyAvailable_FallsBackToManagedVt()
+    public void ModeSwitching_RequestUnavailableNativeVt_FallsBackToManagedVt()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: false);
+        viewModel.SetTerminalCapabilities(nativeVtAvailable: false);
 
-        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: true);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeVtControl: true);
 
         Assert.False(viewModel.UseRenderedControl);
-        Assert.False(viewModel.UseNativeControl);
         Assert.False(viewModel.UseNativeVtControl);
         Assert.True(viewModel.UseManagedVtControl);
         Assert.Equal("Managed VT", viewModel.ModeButtonText);
@@ -300,8 +286,8 @@ public class MainWindowViewModelFlowTests
     public void ThemeSwitching_CycleThemePreset_UpdatesActiveThemeForCurrentMode()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
-        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: false, useNativeVtControl: false);
+        viewModel.SetTerminalCapabilities(nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: true, useNativeVtControl: false);
 
         string initialButtonText = viewModel.ThemePresetButtonText;
         string? appliedThemeName = null;
@@ -326,8 +312,8 @@ public class MainWindowViewModelFlowTests
     public void ThemeSwitching_GeneratedTheme_IsTrackedPerMode()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
-        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: true);
+        viewModel.SetTerminalCapabilities(nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeVtControl: true);
 
         TerminalTheme nativeBefore = viewModel.ActiveTheme;
         int applyCount = 0;
@@ -341,14 +327,14 @@ public class MainWindowViewModelFlowTests
         TerminalTheme nativeGenerated = viewModel.ActiveTheme;
         Assert.NotSame(nativeBefore, nativeGenerated);
 
-        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false, useManagedVtControl: true);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeVtControl: false, useManagedVtControl: true);
         TerminalTheme managedBefore = viewModel.ActiveTheme;
 
         viewModel.GenerateThemeCommand.Execute().Wait();
         TerminalTheme managedGenerated = viewModel.ActiveTheme;
         Assert.NotSame(managedBefore, managedGenerated);
 
-        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: true);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeVtControl: true);
         Assert.Same(nativeGenerated, viewModel.ActiveTheme);
         Assert.Equal(2, applyCount);
     }
@@ -357,8 +343,8 @@ public class MainWindowViewModelFlowTests
     public void ThemeSwitching_ToggleTheme_SwitchesBetweenLightAndModeDefaultPreset()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
-        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: true);
+        viewModel.SetTerminalCapabilities(nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeVtControl: true);
 
         using var registration = viewModel.ApplyThemeModelInteraction.RegisterHandler(context =>
         {
@@ -378,7 +364,7 @@ public class MainWindowViewModelFlowTests
     public void SessionTransport_DefaultsToPtyAndShowsLocalConfig()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeVtControl: false);
 
         Assert.Equal(TerminalTransportIds.Pty, viewModel.SelectedTransportMode.Id);
         Assert.True(viewModel.ShowSessionTransportPicker);
@@ -389,22 +375,22 @@ public class MainWindowViewModelFlowTests
     }
 
     [Fact]
-    public void SessionTransport_GhosttyRenderedMode_ShowsPanelWithHint()
+    public void SessionTransport_RenderedMode_KeepsTransportConfigEnabled()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetTerminalCapabilities(ghosttyAvailable: true, nativeVtAvailable: true);
-        viewModel.SetRenderMode(useRenderedControl: true, useNativeControl: true, useNativeVtControl: false);
+        viewModel.SetTerminalCapabilities(nativeVtAvailable: true);
+        viewModel.SetRenderMode(useRenderedControl: true, useNativeVtControl: false);
 
         Assert.True(viewModel.ShowSessionTransportPicker);
-        Assert.False(viewModel.IsSessionTransportConfigEnabled);
-        Assert.True(viewModel.ShowSessionTransportHint);
+        Assert.True(viewModel.IsSessionTransportConfigEnabled);
+        Assert.False(viewModel.ShowSessionTransportHint);
     }
 
     [Fact]
     public void SessionTransport_SwitchToSsh_UpdatesVisibilityFlags()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeVtControl: false);
 
         TransportModeOption sshMode = FindTransportMode(viewModel, TerminalTransportIds.Ssh);
         viewModel.SelectedTransportMode = sshMode;
@@ -419,7 +405,7 @@ public class MainWindowViewModelFlowTests
     public void SessionTransport_SshAuthMode_Password_ShowsPasswordFieldOnly()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeVtControl: false);
         viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Ssh);
         viewModel.SelectedSshAuthMode = FindSshAuthMode(viewModel, SshAuthModeOption.PasswordModeId);
 
@@ -433,7 +419,7 @@ public class MainWindowViewModelFlowTests
     public void SessionTransport_SshAuthMode_Agent_ShowsAgentHintOnly()
     {
         MainWindowViewModel viewModel = new();
-        viewModel.SetRenderMode(useRenderedControl: false, useNativeControl: false, useNativeVtControl: false);
+        viewModel.SetRenderMode(useRenderedControl: false, useNativeVtControl: false);
         viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Ssh);
         viewModel.SelectedSshAuthMode = FindSshAuthMode(viewModel, SshAuthModeOption.AgentModeId);
 
@@ -612,6 +598,121 @@ public class MainWindowViewModelFlowTests
         Assert.Equal("01:05 / 02:05", viewModel.ReplayTimelineText);
         Assert.Equal("session.rtcap.json", viewModel.ReplaySourceLabel);
         Assert.True(viewModel.CanSeekReplay);
+    }
+
+    [Fact]
+    public void Showcase_SetSearchStateAndDiagnostics_UpdatesSurface()
+    {
+        MainWindowViewModel viewModel = new();
+
+        viewModel.SetSearchState("ghostty", total: 3, selected: 1, usesNativeScrollback: true);
+        viewModel.SetGhosttyDiagnostics(show: true, text: "SIMD: yes");
+
+        Assert.Equal("ghostty", viewModel.SearchQuery);
+        Assert.True(viewModel.CanApplySearch);
+        Assert.True(viewModel.CanAdvanceSearch);
+        Assert.True(viewModel.CanClearSearch);
+        Assert.Equal("2/3 matches · native scrollback", viewModel.SearchResultText);
+        Assert.True(viewModel.ShowGhosttyDiagnostics);
+        Assert.Equal("Hide Diagnostics", viewModel.GhosttyDiagnosticsButtonText);
+        Assert.Equal("SIMD: yes", viewModel.GhosttyDiagnosticsText);
+
+        viewModel.ClearSearchState();
+        viewModel.SetGhosttyDiagnostics(show: false, text: string.Empty);
+
+        Assert.False(viewModel.CanAdvanceSearch);
+        Assert.False(viewModel.CanClearSearch);
+        Assert.Equal("Search idle", viewModel.SearchResultText);
+        Assert.False(viewModel.ShowGhosttyDiagnostics);
+        Assert.Equal("Native Diagnostics", viewModel.GhosttyDiagnosticsButtonText);
+        Assert.Contains("unavailable", viewModel.GhosttyDiagnosticsText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Showcase_Commands_RouteThroughInteractions()
+    {
+        MainWindowViewModel viewModel = new();
+        List<string> calls = [];
+        List<bool> diagnosticsToggles = [];
+        List<TerminalSnapshotExportFormat> snapshotFormats = [];
+
+        using IDisposable applySearch = viewModel.ApplySearchInteraction.RegisterHandler(context =>
+        {
+            calls.Add($"search:{context.Input}");
+            context.SetOutput(Unit.Default);
+        });
+        using IDisposable nextSearch = viewModel.NextSearchInteraction.RegisterHandler(context =>
+        {
+            calls.Add("next");
+            context.SetOutput(Unit.Default);
+        });
+        using IDisposable previousSearch = viewModel.PreviousSearchInteraction.RegisterHandler(context =>
+        {
+            calls.Add("previous");
+            context.SetOutput(Unit.Default);
+        });
+        using IDisposable clearSearch = viewModel.ClearSearchInteraction.RegisterHandler(context =>
+        {
+            calls.Add("clear");
+            context.SetOutput(Unit.Default);
+        });
+        using IDisposable hyperlinkSample = viewModel.ShowHyperlinkSampleInteraction.RegisterHandler(context =>
+        {
+            calls.Add("hyperlink");
+            context.SetOutput(Unit.Default);
+        });
+        using IDisposable kittySample = viewModel.ShowKittyGraphicsSampleInteraction.RegisterHandler(context =>
+        {
+            calls.Add("kitty");
+            context.SetOutput(Unit.Default);
+        });
+        using IDisposable diagnostics = viewModel.ToggleGhosttyDiagnosticsInteraction.RegisterHandler(context =>
+        {
+            diagnosticsToggles.Add(context.Input);
+            viewModel.SetGhosttyDiagnostics(context.Input, context.Input ? "open" : "closed");
+            context.SetOutput(Unit.Default);
+        });
+        using IDisposable copySnapshot = viewModel.CopySnapshotInteraction.RegisterHandler(context =>
+        {
+            snapshotFormats.Add(context.Input);
+            calls.Add($"snapshot:{context.Input}");
+            context.SetOutput(Unit.Default);
+        });
+
+        viewModel.SearchQuery = "demo";
+        viewModel.ApplySearchCommand.Execute().Wait();
+        viewModel.NextSearchCommand.Execute().Wait();
+        viewModel.PreviousSearchCommand.Execute().Wait();
+        viewModel.ClearSearchCommand.Execute().Wait();
+        viewModel.ShowHyperlinkSampleCommand.Execute().Wait();
+        viewModel.ShowKittyGraphicsSampleCommand.Execute().Wait();
+        viewModel.CopyPlainSnapshotCommand.Execute().Wait();
+        viewModel.CopyStyledVtSnapshotCommand.Execute().Wait();
+        viewModel.CopyHtmlSnapshotCommand.Execute().Wait();
+        viewModel.ToggleGhosttyDiagnosticsCommand.Execute().Wait();
+        viewModel.ToggleGhosttyDiagnosticsCommand.Execute().Wait();
+
+        Assert.Equal(
+            [
+                "search:demo",
+                "next",
+                "previous",
+                "clear",
+                "hyperlink",
+                "kitty",
+                $"snapshot:{TerminalSnapshotExportFormat.PlainText}",
+                $"snapshot:{TerminalSnapshotExportFormat.StyledVt}",
+                $"snapshot:{TerminalSnapshotExportFormat.Html}",
+            ],
+            calls);
+        Assert.Equal([true, false], diagnosticsToggles);
+        Assert.Equal(
+            [
+                TerminalSnapshotExportFormat.PlainText,
+                TerminalSnapshotExportFormat.StyledVt,
+                TerminalSnapshotExportFormat.Html,
+            ],
+            snapshotFormats);
     }
 
     private static TransportModeOption FindTransportMode(MainWindowViewModel viewModel, string transportId)

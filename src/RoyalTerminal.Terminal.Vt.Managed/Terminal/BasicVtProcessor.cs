@@ -10,6 +10,7 @@ using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Unicode;
 using System.Globalization;
+using System.Net;
 using System.Text;
 
 namespace RoyalTerminal.Terminal;
@@ -23,7 +24,7 @@ namespace RoyalTerminal.Terminal;
 /// of the VT protocol to render typical shell output and full-screen TUI
 /// applications such as Midnight Commander, htop, vim, etc.
 /// </summary>
-public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource, ITerminalFocusEventModeSource
+public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource, ITerminalFocusEventModeSource, ITerminalSelectionExportSource, ITerminalPasteSequenceEncoderSource, ITerminalSnapshotExportSource
 {
     private const int MaxOscBufferBytes = 4096;
     private const int MaxDcsBufferBytes = 4096;
@@ -303,6 +304,1014 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         RaiseModeChangedIfNeeded(before);
     }
 
+    /// <inheritdoc />
+    public string? ReadSelection(in TerminalSelectionRange selection)
+    {
+        TerminalSelectionRange normalized = selection.Normalize();
+        int startCol = normalized.StartColumn;
+        int startRow = normalized.StartRow;
+        int endCol = normalized.EndColumn;
+        int endRow = normalized.EndRow;
+
+        if (startRow > endRow || _screen.ViewportRows <= 0 || _screen.Columns <= 0)
+        {
+            return null;
+        }
+
+        StringBuilder builder = new();
+        for (int row = startRow; row <= endRow; row++)
+        {
+            if (row < 0 || row >= _screen.ViewportRows)
+            {
+                continue;
+            }
+
+            TerminalRow terminalRow = _screen.GetViewportRow(row);
+            if (!TryGetSelectionColumnRange(normalized, row, out int rowStart, out int rowEnd))
+            {
+                continue;
+            }
+
+            for (int col = rowStart; col <= rowEnd; col++)
+            {
+                ref TerminalCell cell = ref terminalRow[col];
+                if (cell.Width == 0)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(cell.Grapheme))
+                {
+                    builder.Append(cell.Grapheme);
+                }
+                else if (cell.Codepoint != 0)
+                {
+                    builder.Append(char.ConvertFromUtf32(cell.Codepoint));
+                }
+            }
+
+            if (row < endRow)
+            {
+                builder.AppendLine();
+            }
+        }
+
+        return builder.Length == 0 ? null : builder.ToString();
+    }
+
+    /// <inheritdoc />
+    public bool IsPasteSafe(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return TerminalPasteEncoder.IsSafe(text);
+    }
+
+    /// <inheritdoc />
+    public bool TryEncodePaste(string text, bool bracketedPaste, out byte[] sequence)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (text.Length == 0)
+        {
+            sequence = [];
+            return false;
+        }
+
+        sequence = TerminalPasteEncoder.Encode(text, bracketedPaste);
+        return sequence.Length > 0;
+    }
+
+    /// <inheritdoc />
+    public bool SupportsSnapshotFormat(TerminalSnapshotExportFormat format)
+    {
+        return format switch
+        {
+            TerminalSnapshotExportFormat.PlainText => true,
+            TerminalSnapshotExportFormat.StyledVt => true,
+            TerminalSnapshotExportFormat.Html => true,
+            _ => false,
+        };
+    }
+
+    /// <inheritdoc />
+    public bool TryExportSnapshot(
+        TerminalSnapshotExportFormat format,
+        in TerminalSnapshotExportOptions options,
+        out string snapshot)
+    {
+        if (!SupportsSnapshotFormat(format))
+        {
+            snapshot = string.Empty;
+            return false;
+        }
+
+        snapshot = format switch
+        {
+            TerminalSnapshotExportFormat.PlainText => ExportPlainSnapshot(options),
+            TerminalSnapshotExportFormat.StyledVt => ExportStyledVtSnapshot(options),
+            TerminalSnapshotExportFormat.Html => ExportHtmlSnapshot(options),
+            _ => string.Empty,
+        };
+
+        return snapshot.Length > 0;
+    }
+
+    private string ExportPlainSnapshot(in TerminalSnapshotExportOptions options)
+    {
+        if (_screen.TotalRows <= 0 || _screen.Columns <= 0)
+        {
+            return string.Empty;
+        }
+
+        StringBuilder builder = new();
+
+        if (options.Selection is TerminalSelectionRange selection)
+        {
+            TerminalSelectionRange normalized = selection.Normalize();
+            int viewportTopAbsoluteRow = GetViewportTopAbsoluteRow();
+            bool unwrapRows = options.Unwrap && !normalized.Rectangle;
+            for (int viewportRow = normalized.StartRow; viewportRow <= normalized.EndRow; viewportRow++)
+            {
+                int absoluteRow = viewportTopAbsoluteRow + viewportRow;
+                if ((uint)absoluteRow >= (uint)_screen.TotalRows)
+                {
+                    continue;
+                }
+
+                if (!TryGetSelectionColumnRange(normalized, viewportRow, out int rowStart, out int rowEnd))
+                {
+                    continue;
+                }
+
+                TerminalRow row = _screen.GetRow(absoluteRow);
+                AppendRowPlainText(row, rowStart, rowEnd, options.TrimTrailingWhitespace, builder);
+
+                if (ShouldAppendSnapshotLineBreak(
+                    row,
+                    unwrapRows,
+                    viewportRow,
+                    normalized.EndRow))
+                {
+                    builder.AppendLine();
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        int lastRowIndex = options.TrimTrailingWhitespace
+            ? GetSnapshotLastRowIndex(visual: false)
+            : _screen.TotalRows - 1;
+        if (lastRowIndex < 0)
+        {
+            return string.Empty;
+        }
+
+        for (int absoluteRow = 0; absoluteRow <= lastRowIndex; absoluteRow++)
+        {
+            TerminalRow row = _screen.GetRow(absoluteRow);
+            AppendRowPlainText(row, 0, row.Columns - 1, options.TrimTrailingWhitespace, builder);
+
+            if (ShouldAppendSnapshotLineBreak(row, options.Unwrap, absoluteRow, lastRowIndex))
+            {
+                builder.AppendLine();
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private string ExportStyledVtSnapshot(in TerminalSnapshotExportOptions options)
+    {
+        if (_screen.TotalRows <= 0 || _screen.Columns <= 0)
+        {
+            return string.Empty;
+        }
+
+        StringBuilder builder = new();
+        builder.Append("\x1b[0m");
+
+        SnapshotCellStyleKey? currentStyle = null;
+        string? currentHyperlink = null;
+
+        if (options.Selection is TerminalSelectionRange selection)
+        {
+            TerminalSelectionRange normalized = selection.Normalize();
+            int viewportTopAbsoluteRow = GetViewportTopAbsoluteRow();
+            bool unwrapRows = options.Unwrap && !normalized.Rectangle;
+            for (int viewportRow = normalized.StartRow; viewportRow <= normalized.EndRow; viewportRow++)
+            {
+                int absoluteRow = viewportTopAbsoluteRow + viewportRow;
+                if ((uint)absoluteRow >= (uint)_screen.TotalRows)
+                {
+                    continue;
+                }
+
+                if (!TryGetSelectionColumnRange(normalized, viewportRow, out int rowStart, out int rowEnd))
+                {
+                    continue;
+                }
+
+                AppendStyledSnapshotRow(
+                    builder,
+                    _screen.GetRow(absoluteRow),
+                    rowStart,
+                    rowEnd,
+                    options,
+                    ref currentStyle,
+                    ref currentHyperlink);
+
+                if (ShouldAppendSnapshotLineBreak(
+                    _screen.GetRow(absoluteRow),
+                    unwrapRows,
+                    viewportRow,
+                    normalized.EndRow))
+                {
+                    builder.AppendLine();
+                }
+            }
+        }
+        else
+        {
+            int lastRowIndex = options.TrimTrailingWhitespace
+                ? GetSnapshotLastRowIndex(visual: true)
+                : _screen.TotalRows - 1;
+            if (lastRowIndex < 0)
+            {
+                return string.Empty;
+            }
+
+            for (int absoluteRow = 0; absoluteRow <= lastRowIndex; absoluteRow++)
+            {
+                TerminalRow row = _screen.GetRow(absoluteRow);
+                AppendStyledSnapshotRow(
+                    builder,
+                    row,
+                    0,
+                    row.Columns - 1,
+                    options,
+                    ref currentStyle,
+                    ref currentHyperlink);
+
+                if (ShouldAppendSnapshotLineBreak(row, options.Unwrap, absoluteRow, lastRowIndex))
+                {
+                    builder.AppendLine();
+                }
+            }
+        }
+
+        CloseStyledHyperlink(builder, ref currentHyperlink);
+        builder.Append("\x1b[0m");
+        AppendStyledVtExtras(builder, options);
+        return builder.ToString();
+    }
+
+    private string ExportHtmlSnapshot(in TerminalSnapshotExportOptions options)
+    {
+        if (_screen.TotalRows <= 0 || _screen.Columns <= 0)
+        {
+            return string.Empty;
+        }
+
+        StringBuilder builder = new();
+        builder.Append("<!DOCTYPE html><html><body style=\"margin:0;\">");
+        builder.Append("<pre class=\"terminal-snapshot\" style=\"margin:0;white-space:pre;\">");
+
+        if (options.Selection is TerminalSelectionRange selection)
+        {
+            TerminalSelectionRange normalized = selection.Normalize();
+            int viewportTopAbsoluteRow = GetViewportTopAbsoluteRow();
+            bool unwrapRows = options.Unwrap && !normalized.Rectangle;
+            for (int viewportRow = normalized.StartRow; viewportRow <= normalized.EndRow; viewportRow++)
+            {
+                int absoluteRow = viewportTopAbsoluteRow + viewportRow;
+                if ((uint)absoluteRow >= (uint)_screen.TotalRows)
+                {
+                    continue;
+                }
+
+                if (!TryGetSelectionColumnRange(normalized, viewportRow, out int rowStart, out int rowEnd))
+                {
+                    continue;
+                }
+
+                TerminalRow row = _screen.GetRow(absoluteRow);
+                AppendHtmlSnapshotRow(builder, row, rowStart, rowEnd, options);
+                if (ShouldAppendSnapshotLineBreak(row, unwrapRows, viewportRow, normalized.EndRow))
+                {
+                    builder.Append('\n');
+                }
+            }
+        }
+        else
+        {
+            int lastRowIndex = options.TrimTrailingWhitespace
+                ? GetSnapshotLastRowIndex(visual: true)
+                : _screen.TotalRows - 1;
+            if (lastRowIndex < 0)
+            {
+                return string.Empty;
+            }
+
+            for (int absoluteRow = 0; absoluteRow <= lastRowIndex; absoluteRow++)
+            {
+                TerminalRow row = _screen.GetRow(absoluteRow);
+                AppendHtmlSnapshotRow(builder, row, 0, row.Columns - 1, options);
+                if (ShouldAppendSnapshotLineBreak(row, options.Unwrap, absoluteRow, lastRowIndex))
+                {
+                    builder.Append('\n');
+                }
+            }
+        }
+
+        builder.Append("</pre></body></html>");
+        return builder.ToString();
+    }
+
+    private static void AppendRowPlainText(
+        TerminalRow terminalRow,
+        int startColumn,
+        int endColumn,
+        bool trimTrailingWhitespace,
+        StringBuilder builder)
+    {
+        int originalLength = builder.Length;
+        int clampedStart = Math.Max(0, startColumn);
+        int clampedEnd = Math.Min(terminalRow.Columns - 1, endColumn);
+        if (clampedEnd < clampedStart)
+        {
+            return;
+        }
+
+        for (int col = clampedStart; col <= clampedEnd; col++)
+        {
+            ref TerminalCell cell = ref terminalRow[col];
+            if (cell.Width == 0)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                builder.Append(cell.Grapheme);
+            }
+            else if (cell.Codepoint != 0)
+            {
+                builder.Append(char.ConvertFromUtf32(cell.Codepoint));
+            }
+        }
+
+        if (!trimTrailingWhitespace)
+        {
+            return;
+        }
+
+        int end = builder.Length - 1;
+        while (end >= originalLength && char.IsWhiteSpace(builder[end]) && builder[end] is not '\r' and not '\n')
+        {
+            builder.Length--;
+            end--;
+        }
+    }
+
+    private bool TryGetSelectionColumnRange(
+        in TerminalSelectionRange selection,
+        int row,
+        out int rowStart,
+        out int rowEnd)
+    {
+        if (selection.Rectangle)
+        {
+            rowStart = Math.Min(selection.StartColumn, selection.EndColumn);
+            rowEnd = Math.Max(selection.StartColumn, selection.EndColumn);
+        }
+        else
+        {
+            rowStart = row == selection.StartRow ? selection.StartColumn : 0;
+            rowEnd = row == selection.EndRow ? selection.EndColumn : _screen.Columns - 1;
+        }
+
+        if (rowEnd < 0 || rowStart >= _screen.Columns)
+        {
+            return false;
+        }
+
+        rowStart = Math.Max(0, rowStart);
+        rowEnd = Math.Min(_screen.Columns - 1, rowEnd);
+        return rowEnd >= rowStart;
+    }
+
+    private int GetViewportTopAbsoluteRow()
+    {
+        return Math.Max(0, _screen.TotalRows - _screen.ViewportRows - _screen.ScrollOffset);
+    }
+
+    private static bool ShouldAppendSnapshotLineBreak(
+        TerminalRow row,
+        bool unwrap,
+        int rowIndex,
+        int lastRowIndex)
+    {
+        return rowIndex < lastRowIndex && (!unwrap || !row.WrapsToNext);
+    }
+
+    private void AppendStyledSnapshotRow(
+        StringBuilder builder,
+        TerminalRow row,
+        int startColumn,
+        int endColumn,
+        in TerminalSnapshotExportOptions options,
+        ref SnapshotCellStyleKey? currentStyle,
+        ref string? currentHyperlink)
+    {
+        int exportEnd = GetSnapshotRowEndColumn(row, startColumn, endColumn, options.TrimTrailingWhitespace, visual: true);
+        if (exportEnd < startColumn)
+        {
+            return;
+        }
+
+        for (int col = Math.Max(0, startColumn); col <= exportEnd; col++)
+        {
+            ref TerminalCell cell = ref row[col];
+            if (cell.Width == 0)
+            {
+                continue;
+            }
+
+            string text = GetSnapshotCellText(cell, preserveEmptyCells: true);
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            string? desiredHyperlink = ResolveSnapshotHyperlink(cell, options.Extras.IncludeHyperlinks);
+            if (!string.Equals(currentHyperlink, desiredHyperlink, StringComparison.Ordinal))
+            {
+                CloseStyledHyperlink(builder, ref currentHyperlink);
+                if (!string.IsNullOrEmpty(desiredHyperlink))
+                {
+                    builder.Append("\x1b]8;;").Append(desiredHyperlink).Append("\x1b\\");
+                    currentHyperlink = desiredHyperlink;
+                }
+            }
+
+            SnapshotCellStyleKey style = CreateSnapshotStyleKey(cell);
+            if (currentStyle is null || currentStyle.Value != style)
+            {
+                builder.Append(BuildStyledSgrSequence(cell));
+                currentStyle = style;
+            }
+
+            builder.Append(text);
+        }
+    }
+
+    private void AppendHtmlSnapshotRow(
+        StringBuilder builder,
+        TerminalRow row,
+        int startColumn,
+        int endColumn,
+        in TerminalSnapshotExportOptions options)
+    {
+        int exportEnd = GetSnapshotRowEndColumn(row, startColumn, endColumn, options.TrimTrailingWhitespace, visual: true);
+        if (exportEnd < startColumn)
+        {
+            return;
+        }
+
+        for (int col = Math.Max(0, startColumn); col <= exportEnd; col++)
+        {
+            ref TerminalCell cell = ref row[col];
+            if (cell.Width == 0)
+            {
+                continue;
+            }
+
+            string text = GetSnapshotCellText(cell, preserveEmptyCells: true);
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            string encodedText = WebUtility.HtmlEncode(text);
+            string style = BuildHtmlCellStyle(cell);
+            string? hyperlink = ResolveSnapshotHyperlink(cell, options.Extras.IncludeHyperlinks);
+
+            if (!string.IsNullOrEmpty(hyperlink))
+            {
+                builder.Append("<a href=\"")
+                    .Append(WebUtility.HtmlEncode(hyperlink))
+                    .Append("\" style=\"color:inherit;text-decoration:inherit;\">");
+            }
+
+            if (style.Length > 0)
+            {
+                builder.Append("<span style=\"")
+                    .Append(style)
+                    .Append("\">");
+            }
+
+            builder.Append(encodedText);
+
+            if (style.Length > 0)
+            {
+                builder.Append("</span>");
+            }
+
+            if (!string.IsNullOrEmpty(hyperlink))
+            {
+                builder.Append("</a>");
+            }
+        }
+    }
+
+    private int GetSnapshotRowEndColumn(
+        TerminalRow row,
+        int startColumn,
+        int endColumn,
+        bool trimTrailingWhitespace,
+        bool visual)
+    {
+        int clampedStart = Math.Max(0, startColumn);
+        int clampedEnd = Math.Min(row.Columns - 1, endColumn);
+        if (clampedEnd < clampedStart || !trimTrailingWhitespace)
+        {
+            return clampedEnd;
+        }
+
+        for (int col = clampedEnd; col >= clampedStart; col--)
+        {
+            TerminalCell cell = row[col];
+            if (cell.Width == 0)
+            {
+                continue;
+            }
+
+            if (visual ? IsVisualSnapshotCell(cell) : IsPlainSnapshotCell(cell))
+            {
+                return col;
+            }
+        }
+
+        return clampedStart - 1;
+    }
+
+    private int GetSnapshotLastRowIndex(bool visual)
+    {
+        for (int rowIndex = _screen.TotalRows - 1; rowIndex >= 0; rowIndex--)
+        {
+            TerminalRow row = _screen.GetRow(rowIndex);
+            if (GetSnapshotRowEndColumn(row, 0, row.Columns - 1, trimTrailingWhitespace: true, visual) >= 0)
+            {
+                return rowIndex;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool IsPlainSnapshotCell(TerminalCell cell)
+    {
+        if (!cell.HasContent)
+        {
+            return false;
+        }
+
+        string text = GetSnapshotCellText(cell, preserveEmptyCells: false);
+        return !string.IsNullOrEmpty(text) && !string.IsNullOrWhiteSpace(text);
+    }
+
+    private bool IsVisualSnapshotCell(TerminalCell cell)
+    {
+        if (cell.HasContent || cell.HyperlinkId > 0)
+        {
+            return true;
+        }
+
+        if (cell.Attributes != CellAttributes.None ||
+            cell.UnderlineStyle != TerminalUnderlineStyle.None ||
+            cell.HasUnderlineColor ||
+            cell.Decorations != CellDecorations.None)
+        {
+            return true;
+        }
+
+        return cell.Foreground != _screen.DefaultForeground ||
+               cell.Background != _screen.DefaultBackground ||
+               !cell.HasBackground;
+    }
+
+    private static string GetSnapshotCellText(TerminalCell cell, bool preserveEmptyCells)
+    {
+        if (!string.IsNullOrEmpty(cell.Grapheme))
+        {
+            return cell.Grapheme;
+        }
+
+        if (cell.Codepoint != 0 && Rune.IsValid(cell.Codepoint))
+        {
+            return char.ConvertFromUtf32(cell.Codepoint);
+        }
+
+        return preserveEmptyCells ? " " : string.Empty;
+    }
+
+    private string? ResolveSnapshotHyperlink(TerminalCell cell, bool includeHyperlinks)
+    {
+        if (!includeHyperlinks || cell.HyperlinkId <= 0)
+        {
+            return null;
+        }
+
+        return _screen.TryGetHyperlinkUrl(cell.HyperlinkId, out string? url)
+            ? url
+            : null;
+    }
+
+    private string BuildStyledSgrSequence(TerminalCell cell)
+    {
+        List<int> parameters = [0];
+
+        if ((cell.Attributes & CellAttributes.Bold) != 0) parameters.Add(1);
+        if ((cell.Attributes & CellAttributes.Dim) != 0) parameters.Add(2);
+        if ((cell.Attributes & CellAttributes.Italic) != 0) parameters.Add(3);
+
+        TerminalUnderlineStyle underlineStyle = GetEffectiveUnderlineStyle(cell);
+        if (underlineStyle == TerminalUnderlineStyle.Double)
+        {
+            parameters.Add(21);
+        }
+        else if (underlineStyle != TerminalUnderlineStyle.None)
+        {
+            parameters.Add(4);
+        }
+
+        if ((cell.Attributes & CellAttributes.Blink) != 0) parameters.Add(5);
+        if ((cell.Attributes & CellAttributes.Inverse) != 0) parameters.Add(7);
+        if ((cell.Attributes & CellAttributes.Hidden) != 0) parameters.Add(8);
+        if ((cell.Attributes & CellAttributes.Strikethrough) != 0) parameters.Add(9);
+        if ((cell.Decorations & CellDecorations.Overline) != 0) parameters.Add(53);
+
+        AppendRgbParameters(parameters, foreground: true, cell.Foreground);
+        AppendRgbParameters(parameters, foreground: false, cell.Background);
+
+        if (cell.HasUnderlineColor)
+        {
+            parameters.Add(58);
+            parameters.Add(2);
+            parameters.Add((int)((cell.UnderlineColor >> 16) & 0xFF));
+            parameters.Add((int)((cell.UnderlineColor >> 8) & 0xFF));
+            parameters.Add((int)(cell.UnderlineColor & 0xFF));
+        }
+
+        return $"\x1b[{string.Join(';', parameters)}m";
+    }
+
+    private void AppendStyledVtExtras(StringBuilder builder, in TerminalSnapshotExportOptions options)
+    {
+        if (options.Extras.IncludePalette)
+        {
+            AppendPaletteSnapshot(builder);
+        }
+
+        if (options.Extras.IncludeModes)
+        {
+            AppendModeSnapshot(builder);
+        }
+
+        if (options.Extras.IncludeScrollingRegion)
+        {
+            builder.Append("\x1b[")
+                .Append(_scrollTop + 1)
+                .Append(';')
+                .Append(_scrollBottom + 1)
+                .Append('r');
+        }
+
+        if (options.Extras.IncludeTabstops)
+        {
+            AppendTabstopSnapshot(builder);
+        }
+
+        if (options.Extras.IncludeCharsets)
+        {
+            builder.Append(_g0IsLineDrawing ? "\x1b(0" : "\x1b(B");
+            builder.Append(_g1IsLineDrawing ? "\x1b)0" : "\x1b)B");
+            builder.Append(_shiftOut ? "\x0E" : "\x0F");
+        }
+
+        if (options.Extras.IncludeKittyKeyboard)
+        {
+            builder.Append("\x1b[=")
+                .Append(KittyKeyboardFlags.ToString(CultureInfo.InvariantCulture))
+                .Append('u');
+        }
+
+        if (options.Extras.IncludeKeyboardModes)
+        {
+            AppendKeyboardModeSnapshot(builder);
+        }
+
+        if (options.Extras.IncludeCursor)
+        {
+            builder.Append("\x1b[")
+                .Append(_cursorRow + 1)
+                .Append(';')
+                .Append(_cursorCol + 1)
+                .Append('H');
+        }
+
+        if (options.Extras.IncludeStyle)
+        {
+            builder.Append("\x1b[")
+                .Append(BuildCurrentSgrState())
+                .Append('m');
+        }
+    }
+
+    private void AppendPaletteSnapshot(StringBuilder builder)
+    {
+        builder.Append("\x1b]10;")
+            .Append(ToOscRgb(_screen.DefaultForeground))
+            .Append("\x1b\\");
+        builder.Append("\x1b]11;")
+            .Append(ToOscRgb(_screen.DefaultBackground))
+            .Append("\x1b\\");
+        builder.Append("\x1b]12;")
+            .Append(ToOscRgb(_theme.CursorColor))
+            .Append("\x1b\\");
+
+        for (int index = 0; index < 256; index++)
+        {
+            builder.Append("\x1b]4;")
+                .Append(index.ToString(CultureInfo.InvariantCulture))
+                .Append(';')
+                .Append(ToOscRgb(_theme.Palette[index]))
+                .Append("\x1b\\");
+        }
+    }
+
+    private void AppendModeSnapshot(StringBuilder builder)
+    {
+        AppendMode(builder, ansi: false, 6, _originMode);
+        AppendMode(builder, ansi: false, 7, _autoWrap);
+        AppendMode(builder, ansi: false, 25, _cursorVisible);
+        AppendMode(builder, ansi: false, 1049, _inAltScreen);
+        AppendMode(builder, ansi: false, 1004, FocusEventsEnabled);
+        AppendMode(builder, ansi: false, 2004, _bracketedPaste);
+        AppendMode(builder, ansi: false, 2031, _extendedDecModesEnabled.Contains(2031));
+        AppendMode(builder, ansi: false, 2048, _extendedDecModesEnabled.Contains(2048));
+        AppendMode(builder, ansi: false, 9001, _win32InputMode);
+
+        for (int i = 0; i < ExtendedDecModes.Length; i++)
+        {
+            int mode = ExtendedDecModes[i];
+            if (mode is 1004 or 2004 or 2031 or 2048)
+            {
+                continue;
+            }
+
+            AppendMode(builder, ansi: false, mode, _extendedDecModesEnabled.Contains(mode));
+        }
+    }
+
+    private void AppendKeyboardModeSnapshot(StringBuilder builder)
+    {
+        AppendMode(builder, ansi: false, 1, _applicationCursorKeys);
+        builder.Append(_applicationKeypad ? "\x1b=" : "\x1b>");
+        AppendMode(builder, ansi: true, 2, _keyboardLocked);
+        AppendMode(builder, ansi: true, 4, _insertMode);
+        AppendMode(builder, ansi: true, 12, _sendReceiveMode);
+        AppendMode(builder, ansi: true, 20, _lineFeedNewLineMode);
+    }
+
+    private static void AppendMode(StringBuilder builder, bool ansi, int value, bool enabled)
+    {
+        builder.Append("\x1b[");
+        if (!ansi)
+        {
+            builder.Append('?');
+        }
+
+        builder.Append(value.ToString(CultureInfo.InvariantCulture))
+            .Append(enabled ? 'h' : 'l');
+    }
+
+    private void AppendTabstopSnapshot(StringBuilder builder)
+    {
+        builder.Append("\x1b[3g");
+        if (_tabStops.Count == 0)
+        {
+            return;
+        }
+
+        int[] orderedTabStops = new int[_tabStops.Count];
+        _tabStops.CopyTo(orderedTabStops);
+        Array.Sort(orderedTabStops);
+        for (int i = 0; i < orderedTabStops.Length; i++)
+        {
+            int tabStop = orderedTabStops[i];
+            builder.Append("\x1b[")
+                .Append(tabStop + 1)
+                .Append('G')
+                .Append("\x1bH");
+        }
+    }
+
+    private string BuildHtmlCellStyle(TerminalCell cell)
+    {
+        StringBuilder builder = new();
+
+        GetEffectiveHtmlColors(cell, out uint foreground, out uint background);
+        builder.Append("color:")
+            .Append(ToCssColor(foreground))
+            .Append(';');
+
+        if (cell.HasBackground || background != _screen.DefaultBackground || (cell.Attributes & CellAttributes.Inverse) != 0)
+        {
+            builder.Append("background-color:")
+                .Append(ToCssColor(background))
+                .Append(';');
+        }
+
+        if ((cell.Attributes & CellAttributes.Bold) != 0)
+        {
+            builder.Append("font-weight:bold;");
+        }
+
+        if ((cell.Attributes & CellAttributes.Italic) != 0)
+        {
+            builder.Append("font-style:italic;");
+        }
+
+        if ((cell.Attributes & CellAttributes.Dim) != 0)
+        {
+            builder.Append("opacity:0.7;");
+        }
+
+        if ((cell.Attributes & CellAttributes.Hidden) != 0)
+        {
+            builder.Append("visibility:hidden;");
+        }
+
+        AppendHtmlTextDecorations(builder, cell);
+        return builder.ToString();
+    }
+
+    private void AppendHtmlTextDecorations(StringBuilder builder, TerminalCell cell)
+    {
+        List<string> lines = [];
+        TerminalUnderlineStyle underlineStyle = GetEffectiveUnderlineStyle(cell);
+        if (underlineStyle != TerminalUnderlineStyle.None)
+        {
+            lines.Add("underline");
+        }
+
+        if ((cell.Attributes & CellAttributes.Strikethrough) != 0)
+        {
+            lines.Add("line-through");
+        }
+
+        if ((cell.Decorations & CellDecorations.Overline) != 0)
+        {
+            lines.Add("overline");
+        }
+
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        builder.Append("text-decoration-line:")
+            .Append(string.Join(' ', lines))
+            .Append(';');
+
+        if (underlineStyle != TerminalUnderlineStyle.None)
+        {
+            builder.Append("text-decoration-style:")
+                .Append(underlineStyle switch
+                {
+                    TerminalUnderlineStyle.Double => "double",
+                    TerminalUnderlineStyle.Curly => "wavy",
+                    TerminalUnderlineStyle.Dotted => "dotted",
+                    TerminalUnderlineStyle.Dashed => "dashed",
+                    _ => "solid",
+                })
+                .Append(';');
+        }
+
+        if (cell.HasUnderlineColor)
+        {
+            builder.Append("text-decoration-color:")
+                .Append(ToCssColor(cell.UnderlineColor))
+                .Append(';');
+        }
+    }
+
+    private void GetEffectiveHtmlColors(TerminalCell cell, out uint foreground, out uint background)
+    {
+        foreground = cell.Foreground;
+        background = cell.HasBackground ? cell.Background : _screen.DefaultBackground;
+
+        if ((cell.Attributes & CellAttributes.Inverse) != 0)
+        {
+            (foreground, background) = (background, foreground);
+        }
+    }
+
+    private static TerminalUnderlineStyle GetEffectiveUnderlineStyle(TerminalCell cell)
+    {
+        if (cell.UnderlineStyle != TerminalUnderlineStyle.None)
+        {
+            return cell.UnderlineStyle;
+        }
+
+        return (cell.Attributes & CellAttributes.Underline) != 0
+            ? TerminalUnderlineStyle.Single
+            : TerminalUnderlineStyle.None;
+    }
+
+    private static void CloseStyledHyperlink(StringBuilder builder, ref string? currentHyperlink)
+    {
+        if (string.IsNullOrEmpty(currentHyperlink))
+        {
+            return;
+        }
+
+        builder.Append("\x1b]8;;\x1b\\");
+        currentHyperlink = null;
+    }
+
+    private static void AppendRgbParameters(List<int> parameters, bool foreground, uint argb)
+    {
+        parameters.Add(foreground ? 38 : 48);
+        parameters.Add(2);
+        parameters.Add((int)((argb >> 16) & 0xFF));
+        parameters.Add((int)((argb >> 8) & 0xFF));
+        parameters.Add((int)(argb & 0xFF));
+    }
+
+    private static string ToCssColor(uint argb)
+    {
+        return string.Create(
+            7,
+            argb,
+            static (span, color) =>
+            {
+                span[0] = '#';
+                byte r = (byte)((color >> 16) & 0xFF);
+                byte g = (byte)((color >> 8) & 0xFF);
+                byte b = (byte)(color & 0xFF);
+                r.TryFormat(span[1..3], out _, "X2", CultureInfo.InvariantCulture);
+                g.TryFormat(span[3..5], out _, "X2", CultureInfo.InvariantCulture);
+                b.TryFormat(span[5..7], out _, "X2", CultureInfo.InvariantCulture);
+            });
+    }
+
+    private static string ToOscRgb(uint argb)
+    {
+        return string.Create(
+            12,
+            argb,
+            static (span, color) =>
+            {
+                span[0] = 'r';
+                span[1] = 'g';
+                span[2] = 'b';
+                span[3] = ':';
+                byte r = (byte)((color >> 16) & 0xFF);
+                byte g = (byte)((color >> 8) & 0xFF);
+                byte b = (byte)(color & 0xFF);
+                r.TryFormat(span[4..6], out _, "X2", CultureInfo.InvariantCulture);
+                span[6] = '/';
+                g.TryFormat(span[7..9], out _, "X2", CultureInfo.InvariantCulture);
+                span[9] = '/';
+                b.TryFormat(span[10..12], out _, "X2", CultureInfo.InvariantCulture);
+            });
+    }
+
+    private readonly record struct SnapshotCellStyleKey(
+        uint Foreground,
+        uint Background,
+        CellAttributes Attributes,
+        TerminalUnderlineStyle UnderlineStyle,
+        uint UnderlineColor,
+        bool HasUnderlineColor,
+        CellDecorations Decorations,
+        bool HasBackground);
+
+    private static SnapshotCellStyleKey CreateSnapshotStyleKey(TerminalCell cell)
+    {
+        return new SnapshotCellStyleKey(
+            cell.Foreground,
+            cell.Background,
+            cell.Attributes,
+            cell.UnderlineStyle,
+            cell.UnderlineColor,
+            cell.HasUnderlineColor,
+            cell.Decorations,
+            cell.HasBackground);
+    }
+
     private void EnterCsiState()
     {
         _state = ParserState.CsiEntry;
@@ -489,6 +1498,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         {
             if (_autoWrap)
             {
+                row.WrapsToNext = true;
                 _cursorCol = 0;
                 LineFeed();
                 ClampCursor();
@@ -671,6 +1681,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
         if (_autoWrap)
         {
+            if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
+            {
+                _screen.GetViewportRow(_cursorRow).WrapsToNext = true;
+            }
+
             _cursorCol = 0;
             LineFeed();
             return true;
@@ -817,6 +1832,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     {
         var count = Math.Min(src.Columns, dst.Columns);
         src.ReadOnlyCells[..count].CopyTo(dst.Cells);
+        dst.WrapsToNext = src.WrapsToNext;
         NormalizeRowWideCells(dst);
     }
 

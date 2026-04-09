@@ -22,19 +22,14 @@ public sealed class MainWindowViewModel : ReactiveObject
     private double _fontSize = 14.0;
     private bool _isDarkTheme = true;
     private string _themePresetButtonText = "Theme: Default";
-    private bool _ghosttyAvailable;
     private bool _nativeVtAvailable;
-    private bool _useNativeControl;
     private bool _useRenderedControl;
     private bool _useNativeVtControl;
     private bool _useManagedVtControl;
-    private bool _useTextureInterop;
     private string _statusText = "Ready";
     private string _dimensionsText = "80x24";
     private string _modeButtonText = "Rendered";
-    private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(
-        embeddedGhosttyAvailable: false,
-        nativeVtAvailable: false);
+    private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(nativeVtAvailable: false);
     private TerminalRenderMode _activeRenderMode = TerminalRenderMode.RenderedAuto;
     private readonly ITerminalModeResolver _modeResolver;
     private readonly ITerminalThemeCatalog _themeCatalog;
@@ -125,6 +120,13 @@ public sealed class MainWindowViewModel : ReactiveObject
     private double _replayDurationSeconds;
     private double _replayTimelineValue;
     private string _replaySourceLabel = string.Empty;
+    private string _searchQuery = string.Empty;
+    private int _searchMatchTotal;
+    private int _searchMatchSelected = -1;
+    private bool _searchUsesNativeScrollback;
+    private bool _searchApplied;
+    private bool _showGhosttyDiagnostics;
+    private string _ghosttyDiagnosticsText = "Ghostty VT diagnostics are unavailable for the active tab.";
 
     public MainWindowViewModel()
         : this(TerminalModeResolver.Default, new TerminalThemeCatalog())
@@ -183,13 +185,20 @@ public sealed class MainWindowViewModel : ReactiveObject
         ApplyFontSizeInteraction = new Interaction<double, Unit>();
         ApplyThemeInteraction = new Interaction<bool, Unit>();
         ApplyThemeModelInteraction = new Interaction<TerminalThemeApplyRequest, Unit>();
-        ApplyRenderedBackendInteraction = new Interaction<bool, Unit>();
         ToggleCaptureInteraction = new Interaction<bool, Unit>();
         SaveCaptureInteraction = new Interaction<Unit, Unit>();
         LoadReplayInteraction = new Interaction<Unit, Unit>();
         SetReplayPlayingInteraction = new Interaction<bool, Unit>();
         StopReplayInteraction = new Interaction<Unit, Unit>();
         PrepareSettingsPanelInteraction = new Interaction<Unit, Unit>();
+        ApplySearchInteraction = new Interaction<string?, Unit>();
+        NextSearchInteraction = new Interaction<Unit, Unit>();
+        PreviousSearchInteraction = new Interaction<Unit, Unit>();
+        ClearSearchInteraction = new Interaction<Unit, Unit>();
+        ShowHyperlinkSampleInteraction = new Interaction<Unit, Unit>();
+        ShowKittyGraphicsSampleInteraction = new Interaction<Unit, Unit>();
+        ToggleGhosttyDiagnosticsInteraction = new Interaction<bool, Unit>();
+        CopySnapshotInteraction = new Interaction<TerminalSnapshotExportFormat, Unit>();
 
         NewTabCommand = ReactiveCommand.CreateFromObservable(() => CreateNewTabInteraction.Handle(Unit.Default));
         CloseCurrentTabCommand = ReactiveCommand.CreateFromObservable(() => CloseCurrentTabInteraction.Handle(Unit.Default));
@@ -207,7 +216,6 @@ public sealed class MainWindowViewModel : ReactiveObject
         ToggleThemeCommand = ReactiveCommand.CreateFromObservable(ToggleTheme);
         CycleThemePresetCommand = ReactiveCommand.CreateFromObservable(CycleThemePreset);
         GenerateThemeCommand = ReactiveCommand.CreateFromObservable(GenerateTheme);
-        ToggleRenderedBackendCommand = ReactiveCommand.CreateFromObservable(ToggleRenderedBackend);
         CycleRenderModeCommand = ReactiveCommand.Create(CycleRenderMode);
         ToggleCaptureCommand = ReactiveCommand.CreateFromObservable(ToggleCapture);
         SaveCaptureCommand = ReactiveCommand.CreateFromObservable(SaveCapture);
@@ -216,6 +224,16 @@ public sealed class MainWindowViewModel : ReactiveObject
         StopReplayCommand = ReactiveCommand.CreateFromObservable(StopReplay);
         PrepareSettingsPanelCommand = ReactiveCommand.CreateFromObservable(PrepareSettingsPanel);
         ClearEventLogCommand = ReactiveCommand.Create(ClearEventLog);
+        ApplySearchCommand = ReactiveCommand.CreateFromObservable(ApplySearch);
+        NextSearchCommand = ReactiveCommand.CreateFromObservable(NextSearch);
+        PreviousSearchCommand = ReactiveCommand.CreateFromObservable(PreviousSearch);
+        ClearSearchCommand = ReactiveCommand.CreateFromObservable(ClearSearch);
+        ShowHyperlinkSampleCommand = ReactiveCommand.CreateFromObservable(ShowHyperlinkSample);
+        ShowKittyGraphicsSampleCommand = ReactiveCommand.CreateFromObservable(ShowKittyGraphicsSample);
+        ToggleGhosttyDiagnosticsCommand = ReactiveCommand.CreateFromObservable(ToggleGhosttyDiagnostics);
+        CopyPlainSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.PlainText));
+        CopyStyledVtSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.StyledVt));
+        CopyHtmlSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.Html));
 
         UpdateThemePresetButtonText();
     }
@@ -232,13 +250,20 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<double, Unit> ApplyFontSizeInteraction { get; }
     public Interaction<bool, Unit> ApplyThemeInteraction { get; }
     public Interaction<TerminalThemeApplyRequest, Unit> ApplyThemeModelInteraction { get; }
-    public Interaction<bool, Unit> ApplyRenderedBackendInteraction { get; }
     public Interaction<bool, Unit> ToggleCaptureInteraction { get; }
     public Interaction<Unit, Unit> SaveCaptureInteraction { get; }
     public Interaction<Unit, Unit> LoadReplayInteraction { get; }
     public Interaction<bool, Unit> SetReplayPlayingInteraction { get; }
     public Interaction<Unit, Unit> StopReplayInteraction { get; }
     public Interaction<Unit, Unit> PrepareSettingsPanelInteraction { get; }
+    public Interaction<string?, Unit> ApplySearchInteraction { get; }
+    public Interaction<Unit, Unit> NextSearchInteraction { get; }
+    public Interaction<Unit, Unit> PreviousSearchInteraction { get; }
+    public Interaction<Unit, Unit> ClearSearchInteraction { get; }
+    public Interaction<Unit, Unit> ShowHyperlinkSampleInteraction { get; }
+    public Interaction<Unit, Unit> ShowKittyGraphicsSampleInteraction { get; }
+    public Interaction<bool, Unit> ToggleGhosttyDiagnosticsInteraction { get; }
+    public Interaction<TerminalSnapshotExportFormat, Unit> CopySnapshotInteraction { get; }
 
     public ReactiveCommand<Unit, Unit> NewTabCommand { get; }
     public ReactiveCommand<Unit, Unit> CloseCurrentTabCommand { get; }
@@ -256,7 +281,6 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> ToggleThemeCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleThemePresetCommand { get; }
     public ReactiveCommand<Unit, Unit> GenerateThemeCommand { get; }
-    public ReactiveCommand<Unit, Unit> ToggleRenderedBackendCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleRenderModeCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleCaptureCommand { get; }
     public ReactiveCommand<Unit, Unit> SaveCaptureCommand { get; }
@@ -265,6 +289,16 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> StopReplayCommand { get; }
     public ReactiveCommand<Unit, Unit> PrepareSettingsPanelCommand { get; }
     public ReactiveCommand<Unit, Unit> ClearEventLogCommand { get; }
+    public ReactiveCommand<Unit, Unit> ApplySearchCommand { get; }
+    public ReactiveCommand<Unit, Unit> NextSearchCommand { get; }
+    public ReactiveCommand<Unit, Unit> PreviousSearchCommand { get; }
+    public ReactiveCommand<Unit, Unit> ClearSearchCommand { get; }
+    public ReactiveCommand<Unit, Unit> ShowHyperlinkSampleCommand { get; }
+    public ReactiveCommand<Unit, Unit> ShowKittyGraphicsSampleCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleGhosttyDiagnosticsCommand { get; }
+    public ReactiveCommand<Unit, Unit> CopyPlainSnapshotCommand { get; }
+    public ReactiveCommand<Unit, Unit> CopyStyledVtSnapshotCommand { get; }
+    public ReactiveCommand<Unit, Unit> CopyHtmlSnapshotCommand { get; }
 
     public TerminalSettingsPanelState SettingsPanelState => _settingsPanelState ??= new TerminalSettingsPanelState();
 
@@ -310,31 +344,10 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     internal TerminalTheme ActiveTheme => GetModeThemeState(_activeRenderMode).Theme;
 
-    public bool GhosttyAvailable
-    {
-        get => _ghosttyAvailable;
-        private set => this.RaiseAndSetIfChanged(ref _ghosttyAvailable, value);
-    }
-
     public bool NativeVtAvailable
     {
         get => _nativeVtAvailable;
         private set => this.RaiseAndSetIfChanged(ref _nativeVtAvailable, value);
-    }
-
-    public bool UseNativeControl
-    {
-        get => _useNativeControl;
-        private set
-        {
-            if (_useNativeControl == value)
-            {
-                return;
-            }
-
-            this.RaiseAndSetIfChanged(ref _useNativeControl, value);
-            RaiseSessionConfigurationVisibilityChanged();
-        }
     }
 
     public bool UseRenderedControl
@@ -364,21 +377,6 @@ public sealed class MainWindowViewModel : ReactiveObject
         private set => this.RaiseAndSetIfChanged(ref _useManagedVtControl, value);
     }
 
-    public bool UseTextureInterop
-    {
-        get => _useTextureInterop;
-        private set
-        {
-            if (_useTextureInterop == value)
-            {
-                return;
-            }
-
-            this.RaiseAndSetIfChanged(ref _useTextureInterop, value);
-            this.RaisePropertyChanged(nameof(RenderedBackendButtonText));
-        }
-    }
-
     public string StatusText
     {
         get => _statusText;
@@ -396,9 +394,6 @@ public sealed class MainWindowViewModel : ReactiveObject
         get => _modeButtonText;
         private set => this.RaiseAndSetIfChanged(ref _modeButtonText, value);
     }
-
-    public string RenderedBackendButtonText
-        => UseTextureInterop ? "Backend: Interop (Preview)" : "Backend: CPU";
 
     public bool IsCaptureActive
     {
@@ -517,6 +512,74 @@ public sealed class MainWindowViewModel : ReactiveObject
     public string ReplayTimelineText
         => $"{FormatDuration(ReplayTimelineValue)} / {FormatDuration(ReplayDurationSeconds)}";
 
+    public string SearchQuery
+    {
+        get => _searchQuery;
+        set
+        {
+            if (string.Equals(_searchQuery, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _searchQuery, value);
+            this.RaisePropertyChanged(nameof(CanApplySearch));
+            this.RaisePropertyChanged(nameof(CanClearSearch));
+            this.RaisePropertyChanged(nameof(SearchResultText));
+        }
+    }
+
+    public bool CanApplySearch => !string.IsNullOrWhiteSpace(SearchQuery);
+
+    public bool CanAdvanceSearch => _searchApplied && _searchMatchTotal > 0;
+
+    public bool CanClearSearch => !string.IsNullOrWhiteSpace(SearchQuery) || _searchApplied;
+
+    public string SearchResultText
+    {
+        get
+        {
+            if (!_searchApplied || string.IsNullOrWhiteSpace(SearchQuery))
+            {
+                return "Search idle";
+            }
+
+            string scope = _searchUsesNativeScrollback
+                ? "native scrollback"
+                : "viewport mirror";
+            if (_searchMatchTotal <= 0)
+            {
+                return $"No matches in {scope}";
+            }
+
+            int selectedDisplay = Math.Clamp(_searchMatchSelected + 1, 1, _searchMatchTotal);
+            return $"{selectedDisplay}/{_searchMatchTotal} matches · {scope}";
+        }
+    }
+
+    public bool ShowGhosttyDiagnostics
+    {
+        get => _showGhosttyDiagnostics;
+        private set
+        {
+            if (_showGhosttyDiagnostics == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _showGhosttyDiagnostics, value);
+            this.RaisePropertyChanged(nameof(GhosttyDiagnosticsButtonText));
+        }
+    }
+
+    public string GhosttyDiagnosticsText
+    {
+        get => _ghosttyDiagnosticsText;
+        private set => this.RaiseAndSetIfChanged(ref _ghosttyDiagnosticsText, value);
+    }
+
+    public string GhosttyDiagnosticsButtonText => ShowGhosttyDiagnostics ? "Hide Diagnostics" : "Native Diagnostics";
+
     public IReadOnlyList<SettingsCategoryOption> SettingsCategories => _settingsCategories;
 
     public SettingsCategoryOption SelectedSettingsCategory
@@ -603,9 +666,9 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public bool ShowSessionTransportPicker => true;
 
-    public bool IsSessionTransportConfigEnabled => !UseRenderedControl && !UseNativeControl;
+    public bool IsSessionTransportConfigEnabled => true;
 
-    public bool ShowSessionTransportHint => !IsSessionTransportConfigEnabled;
+    public bool ShowSessionTransportHint => false;
 
     public bool ShowLocalSessionFields => IsPtyTransportSelected || IsPipeTransportSelected;
 
@@ -1026,32 +1089,26 @@ public sealed class MainWindowViewModel : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _sshConnectTimeoutSeconds, value);
     }
 
-    public void SetTerminalCapabilities(bool ghosttyAvailable, bool nativeVtAvailable)
+    public void SetTerminalCapabilities(bool nativeVtAvailable)
     {
-        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-            embeddedGhosttyAvailable: ghosttyAvailable,
-            nativeVtAvailable: nativeVtAvailable);
+        TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(nativeVtAvailable);
         SetTerminalCapabilities(capabilities);
     }
 
     internal void SetTerminalCapabilities(TerminalModeCapabilities capabilities)
     {
         _terminalCapabilities = capabilities;
-        GhosttyAvailable = capabilities.EmbeddedGhosttyNativeAvailable
-            || capabilities.EmbeddedGhosttyRenderedAvailable;
         NativeVtAvailable = capabilities.NativeVtAvailable;
         SetRenderMode(_activeRenderMode);
     }
 
     public void SetRenderMode(
         bool useRenderedControl,
-        bool useNativeControl,
         bool useNativeVtControl,
         bool useManagedVtControl = false)
     {
         TerminalRenderMode requestedMode = ResolveRequestedMode(
             useRenderedControl,
-            useNativeControl,
             useNativeVtControl,
             useManagedVtControl);
         SetRenderMode(requestedMode);
@@ -1085,12 +1142,6 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         switch (_activeRenderMode)
         {
-            case TerminalRenderMode.GhosttyRendered:
-                return UseTextureInterop
-                    ? "Rendered (Ghostty VT + TextureInterop)"
-                    : "Rendered (Ghostty VT + CPU Cell Renderer)";
-            case TerminalRenderMode.GhosttyNative:
-                return "Native (Ghostty Metal)";
             case TerminalRenderMode.NativeVt:
                 return $"Native VT ({SelectedTransportMode.DisplayName})";
             case TerminalRenderMode.ManagedVt:
@@ -1125,6 +1176,36 @@ public sealed class MainWindowViewModel : ReactiveObject
         {
             ReplaySourceLabel = string.Empty;
         }
+    }
+
+    public void SetSearchState(string? needle, int total, int selected, bool usesNativeScrollback)
+    {
+        SearchQuery = needle ?? string.Empty;
+        _searchApplied = !string.IsNullOrWhiteSpace(SearchQuery);
+        _searchMatchTotal = Math.Max(0, total);
+        _searchMatchSelected = _searchMatchTotal > 0
+            ? Math.Clamp(selected, 0, _searchMatchTotal - 1)
+            : -1;
+        _searchUsesNativeScrollback = usesNativeScrollback;
+        RaiseSearchSurfaceChanged();
+    }
+
+    public void ClearSearchState()
+    {
+        SearchQuery = string.Empty;
+        _searchApplied = false;
+        _searchMatchTotal = 0;
+        _searchMatchSelected = -1;
+        _searchUsesNativeScrollback = false;
+        RaiseSearchSurfaceChanged();
+    }
+
+    public void SetGhosttyDiagnostics(bool show, string text)
+    {
+        ShowGhosttyDiagnostics = show;
+        GhosttyDiagnosticsText = string.IsNullOrWhiteSpace(text)
+            ? "Ghostty VT diagnostics are unavailable for the active tab."
+            : text;
     }
 
     public void SetStatus(string text)
@@ -1273,15 +1354,6 @@ public sealed class MainWindowViewModel : ReactiveObject
         return ApplyCurrentModeTheme($"Generated theme: {state.DisplayName}");
     }
 
-    private IObservable<Unit> ToggleRenderedBackend()
-    {
-        UseTextureInterop = !UseTextureInterop;
-        return ApplyRenderedBackendInteraction
-            .Handle(UseTextureInterop)
-            .Do(_ => SetStatus(
-                $"Rendered backend: {(UseTextureInterop ? "TextureInterop (Preview)" : "CPU Cell Renderer")}"));
-    }
-
     private IObservable<Unit> ToggleCapture()
     {
         bool shouldStartCapture = !IsCaptureActive;
@@ -1314,6 +1386,46 @@ public sealed class MainWindowViewModel : ReactiveObject
         return PrepareSettingsPanelInteraction.Handle(Unit.Default);
     }
 
+    private IObservable<Unit> ApplySearch()
+    {
+        return ApplySearchInteraction.Handle(SearchQuery);
+    }
+
+    private IObservable<Unit> NextSearch()
+    {
+        return NextSearchInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> PreviousSearch()
+    {
+        return PreviousSearchInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> ClearSearch()
+    {
+        return ClearSearchInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> ShowHyperlinkSample()
+    {
+        return ShowHyperlinkSampleInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> ShowKittyGraphicsSample()
+    {
+        return ShowKittyGraphicsSampleInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> ToggleGhosttyDiagnostics()
+    {
+        return ToggleGhosttyDiagnosticsInteraction.Handle(!ShowGhosttyDiagnostics);
+    }
+
+    private IObservable<Unit> CopySnapshot(TerminalSnapshotExportFormat format)
+    {
+        return CopySnapshotInteraction.Handle(format);
+    }
+
     private void ClearEventLog()
     {
         _eventLogEntries.Clear();
@@ -1332,8 +1444,6 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         ModeButtonText = _activeRenderMode switch
         {
-            TerminalRenderMode.GhosttyRendered => "Ghostty Rendered",
-            TerminalRenderMode.GhosttyNative => "Ghostty Native",
             TerminalRenderMode.NativeVt => "Native VT",
             TerminalRenderMode.ManagedVt => "Managed VT",
             _ => "Rendered",
@@ -1343,8 +1453,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private void ApplyRenderMode(TerminalRenderMode mode)
     {
         _activeRenderMode = mode;
-        UseRenderedControl = mode == TerminalRenderMode.GhosttyRendered;
-        UseNativeControl = mode == TerminalRenderMode.GhosttyNative;
+        UseRenderedControl = mode == TerminalRenderMode.RenderedAuto;
         UseNativeVtControl = mode == TerminalRenderMode.NativeVt;
         UseManagedVtControl = mode == TerminalRenderMode.ManagedVt;
         UpdateModeButtonText();
@@ -1455,20 +1564,9 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private static TerminalRenderMode ResolveRequestedMode(
         bool useRenderedControl,
-        bool useNativeControl,
         bool useNativeVtControl,
         bool useManagedVtControl)
     {
-        if (useRenderedControl)
-        {
-            return TerminalRenderMode.GhosttyRendered;
-        }
-
-        if (useNativeControl)
-        {
-            return TerminalRenderMode.GhosttyNative;
-        }
-
         if (useNativeVtControl)
         {
             return TerminalRenderMode.NativeVt;
@@ -1477,6 +1575,11 @@ public sealed class MainWindowViewModel : ReactiveObject
         if (useManagedVtControl)
         {
             return TerminalRenderMode.ManagedVt;
+        }
+
+        if (useRenderedControl)
+        {
+            return TerminalRenderMode.RenderedAuto;
         }
 
         return TerminalRenderMode.RenderedAuto;
@@ -1559,6 +1662,13 @@ public sealed class MainWindowViewModel : ReactiveObject
         EventLogText = string.Join(Environment.NewLine, _eventLogEntries);
         this.RaisePropertyChanged(nameof(HasEventLogEntries));
         this.RaisePropertyChanged(nameof(EventLogEntryCountText));
+    }
+
+    private void RaiseSearchSurfaceChanged()
+    {
+        this.RaisePropertyChanged(nameof(CanAdvanceSearch));
+        this.RaisePropertyChanged(nameof(CanClearSearch));
+        this.RaisePropertyChanged(nameof(SearchResultText));
     }
 
     private static string GetDefaultSessionLogPath()

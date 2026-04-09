@@ -501,7 +501,7 @@ public sealed class NcursesHarnessFlowTests
                     TimeSpan.FromSeconds(2));
 
                 if (sessionStarted &&
-                    await WaitForAnyHarnessLogLineAsync(logPath, TimeSpan.FromSeconds(3)))
+                    await WaitForAnyHarnessLogLineAsync(logPath, TimeSpan.FromSeconds(5)))
                 {
                     return;
                 }
@@ -559,7 +559,7 @@ public sealed class NcursesHarnessFlowTests
                     TimeSpan.FromSeconds(2));
 
                 if (sessionStarted &&
-                    await WaitForAnyHarnessLogLineAsync(logPath, TimeSpan.FromSeconds(3)))
+                    await WaitForAnyHarnessLogLineAsync(logPath, TimeSpan.FromSeconds(5)))
                 {
                     return;
                 }

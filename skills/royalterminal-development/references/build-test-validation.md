@@ -92,11 +92,10 @@ dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --fi
 
 ## Native Direct Build Commands
 
-Standalone terminal C API:
+Upstream Ghostty build:
 ```bash
-cd native/ghostty-terminal
-bash build.sh release
-bash build.sh test
+cd external/ghostty
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none
 ```
 
 Renderer C API:
@@ -107,7 +106,7 @@ bash build.sh test
 ```
 
 Use direct builds for component-level debugging; use top-level `scripts/build-native.sh` / `scripts/build-native.ps1` for full packaging sync.
-`libghostty-vt` is built via integration/validation scripts (`scripts/run-integration-tests.sh`, `scripts/validate-macos.sh`) rather than top-level native build scripts.
+`libghostty-vt` is produced by the same upstream Ghostty build graph and is also validated by the dedicated integration/validation scripts (`scripts/run-integration-tests.sh`, `scripts/validate-macos.sh`).
 
 ## Integration And Harness Commands
 

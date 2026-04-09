@@ -2,26 +2,9 @@
 
 ## Table Of Contents
 
-- [libghostty](#libghostty)
 - [libghostty-vt](#libghostty-vt)
-- [libghostty-terminal](#libghostty-terminal)
 - [ghostty-renderer-capi](#ghostty-renderer-capi)
 - [Cross-Library Runtime Paths](#cross-library-runtime-paths)
-
-## libghostty
-
-Logical library name:
-- `ghostty`
-
-Managed entrypoints:
-- `src/RoyalTerminal.GhosttySharp/Native/GhosttyNative.cs`
-
-Primary managed API:
-- `Ghostty.Initialize()` in `src/RoyalTerminal.GhosttySharp/Ghostty.cs`
-
-Main usage:
-- embedded Ghostty app/surface lifecycle for `GhosttyNativeTerminalControl` and `GhosttyRenderedTerminalControl`
-- config/app/surface APIs from Ghostty embedded runtime
 
 ## libghostty-vt
 
@@ -32,30 +15,14 @@ Managed bindings:
 - `src/RoyalTerminal.GhosttySharp/Native/GhosttyVtNative.cs`
 
 Main usage:
+- VT processor, render-state, and helper APIs used by `GhosttyVtProcessor`
 - VT utility APIs (key encoder, OSC/SGR parser, paste safety helpers)
-- built from `external/ghostty` via `zig build lib-vt` (scripted in `scripts/run-integration-tests.sh` and `scripts/validate-macos.sh`)
+- built from `external/ghostty` through the upstream Ghostty build graph
 - integration tests validating VT utility behavior:
   - `tests/RoyalTerminal.IntegrationTests/KeyEncoderTests.cs`
   - `tests/RoyalTerminal.IntegrationTests/OscParserTests.cs`
   - `tests/RoyalTerminal.IntegrationTests/SgrParserTests.cs`
   - `tests/RoyalTerminal.IntegrationTests/PasteTests.cs`
-
-## libghostty-terminal
-
-Logical library name:
-- `ghostty-terminal`
-
-Managed bindings:
-- `src/RoyalTerminal.GhosttySharp/Native/GhosttyTerminalNative.cs`
-
-Primary consumer:
-- `GhosttyVtProcessor` in `src/RoyalTerminal.Terminal.Vt.Ghostty/Terminal/GhosttyVtProcessor.cs`
-
-Main usage:
-- cross-platform native VT processor for `TerminalControl` native VT path
-- mode-state reads (`app cursor`, `app keypad`, `alt screen`, `bracketed paste`)
-- response/bell/title callbacks from native to managed
-- row cell readback into `TerminalScreen`
 
 ## ghostty-renderer-capi
 
@@ -79,8 +46,7 @@ High-level mapping by feature:
 
 | Feature | Native libs required |
 |---|---|
-| Embedded Ghostty controls | `ghostty` |
-| Native VT in `TerminalControl` | `ghostty-terminal` |
+| Native VT in `TerminalControl` | `ghostty-vt` |
 | VT utility integration tests | `ghostty-vt` |
 | Texture interop rendering | `ghostty-renderer-capi` |
 | Managed fallback VT/rendering | none (native optional) |
@@ -89,21 +55,7 @@ When debugging availability, validate both loader path and feature-specific libr
 
 ## Code Examples
 
-### `libghostty` usage
-
-```csharp
-using RoyalTerminal.GhosttySharp;
-
-if (!Ghostty.Initialize())
-{
-    throw new InvalidOperationException("Embedded Ghostty library is unavailable.");
-}
-
-GhosttyLibraryInfo info = Ghostty.GetInfo();
-Console.WriteLine($"Ghostty {info.Version} ({info.BuildMode})");
-```
-
-### `libghostty-terminal` native VT usage
+### `libghostty-vt` native VT usage
 
 ```csharp
 TerminalControl control = new();

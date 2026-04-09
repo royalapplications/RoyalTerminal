@@ -169,8 +169,6 @@ internal sealed class TerminalThemeCatalog : ITerminalThemeCatalog
 
     private static readonly Dictionary<TerminalRenderMode, string> s_modeDefaults = new()
     {
-        [TerminalRenderMode.GhosttyRendered] = "catppuccin-mocha",
-        [TerminalRenderMode.GhosttyNative] = "tokyo-night",
         [TerminalRenderMode.NativeVt] = "gruvbox-dark",
         [TerminalRenderMode.ManagedVt] = "nord",
         [TerminalRenderMode.RenderedAuto] = "ayu-mirage",
@@ -219,8 +217,6 @@ internal sealed class TerminalThemeCatalog : ITerminalThemeCatalog
         int iteration = Math.Max(1, generation);
         double baseHue = mode switch
         {
-            TerminalRenderMode.GhosttyRendered => 210.0,
-            TerminalRenderMode.GhosttyNative => 280.0,
             TerminalRenderMode.NativeVt => 120.0,
             TerminalRenderMode.ManagedVt => 40.0,
             _ => 330.0,
@@ -228,16 +224,12 @@ internal sealed class TerminalThemeCatalog : ITerminalThemeCatalog
 
         double hue = NormalizeHue(baseHue + (iteration * 37.0));
         uint[] base16 = BuildBase16(hue);
-        TerminalPaletteGenerationMode generationMode = mode is TerminalRenderMode.GhosttyRendered or TerminalRenderMode.GhosttyNative
-            ? TerminalPaletteGenerationMode.DerivedFromBase16Lab
-            : TerminalPaletteGenerationMode.Canonical;
-
         TerminalTheme theme = TerminalTheme.FromBase16(
             base16.AsSpan(),
             defaultForeground: base16[7],
             defaultBackground: base16[0],
             cursorColor: base16[14],
-            mode: generationMode,
+            mode: TerminalPaletteGenerationMode.Canonical,
             oscReportFormat: TerminalOscColorReportFormat.Bit16,
             selectionForeground: base16[15],
             selectionBackground: Blend(base16[0], base16[4], 0.55));
@@ -247,12 +239,7 @@ internal sealed class TerminalThemeCatalog : ITerminalThemeCatalog
 
     private static TerminalTheme AdaptForMode(TerminalTheme theme, TerminalRenderMode mode)
     {
-        TerminalPaletteGenerationMode targetGenerationMode = mode switch
-        {
-            TerminalRenderMode.GhosttyRendered => TerminalPaletteGenerationMode.DerivedFromBase16Lab,
-            TerminalRenderMode.GhosttyNative => TerminalPaletteGenerationMode.DerivedFromBase16Lab,
-            _ => TerminalPaletteGenerationMode.Canonical,
-        };
+        TerminalPaletteGenerationMode targetGenerationMode = TerminalPaletteGenerationMode.Canonical;
 
         if (theme.PaletteGenerationMode != targetGenerationMode)
         {

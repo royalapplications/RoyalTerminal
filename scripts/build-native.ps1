@@ -11,8 +11,9 @@
 #   - Git submodule initialized: git submodule update --init
 #   - Windows symlink support (Developer Mode enabled or elevated shell)
 #
-# The script builds libghostty, libghostty-terminal, and ghostty-renderer-capi as shared libraries
-# and copies them to the correct NuGet runtime package location.
+# The script builds the official ghostty-vt API library and the optional
+# ghostty-renderer-capi shared library for texture interop. Artifacts are copied
+# to the correct NuGet runtime package location.
 #
 # NOTE: Ghostty currently does not officially support Windows builds.
 # This script is provided for future compatibility.
@@ -237,11 +238,11 @@ if (-not (Test-Path (Join-Path $GhosttyDir "build.zig"))) {
 
 $RID = if ($Arch -eq "arm64") { "win-arm64" } else { "win-x64" }
 $ZigTarget = if ($Arch -eq "arm64") { "aarch64-windows" } else { "x86_64-windows" }
-$LibName = "ghostty.dll"
+$LibName = "ghostty-vt.dll"
 
 Write-Info "Platform: Windows ($RID)"
 Write-Info "Target: $ZigTarget"
-Write-Info "Library: $LibName"
+Write-Info "VT library: $LibName"
 
 if (-not (Test-SymlinkCreation -RootPath $GhosttyDir)) {
     $isElevated = Test-IsElevated
@@ -286,7 +287,7 @@ try {
 
     # Build
     $optimize = if ($Debug) { "" } else { "-Doptimize=ReleaseFast" }
-    Write-Info "Building libghostty shared library..."
+    Write-Info "Building ghostty-vt shared library..."
     Write-Info "Command: zig build $optimize -Dapp-runtime=none -Dtarget=$ZigTarget"
 
     $buildArgs = @("build", "-Dapp-runtime=none", "-Dtarget=$ZigTarget")
@@ -307,7 +308,12 @@ try {
         exit 1
     }
 
-    Write-Info "Built library: $builtLib"
+    Write-Info "Built official VT library: $builtLib"
+
+    if (-not $builtLib) {
+        Write-Err "Could not find $LibName"
+        exit 1
+    }
 
     # Copy to NuGet directory
     $nativeRuntimeDir = Join-Path $RootDir "src\RoyalTerminal.GhosttySharp.Native.Win64\runtimes\$RID\native"
@@ -322,63 +328,20 @@ try {
     Write-Info "Copied to: $outputDir\$LibName"
 
     # Copy header
-    $headerSrc = Join-Path $GhosttyDir "include\ghostty.h"
     $headerDest = Join-Path $NativeOutDir "include"
-    if (Test-Path $headerSrc) {
-        New-Item -ItemType Directory -Force -Path $headerDest | Out-Null
-        Copy-Item $headerSrc $headerDest
-        Write-Info "Copied header: $headerDest\ghostty.h"
-    }
+    New-Item -ItemType Directory -Force -Path $headerDest | Out-Null
 
-    # ═══════════════════════════════════════════════════════════════════
-    # Build libghostty-terminal (standalone terminal C API library)
-    # ═══════════════════════════════════════════════════════════════════
-
-    $terminalDir = Join-Path $RootDir "native\ghostty-terminal"
-
-    if (Test-Path (Join-Path $terminalDir "build.zig")) {
-        Write-Info ""
-        Write-Info "Building libghostty-terminal..."
-
-        Push-Location $terminalDir
-        try {
-            if ($Clean) {
-                if (Test-Path "zig-out") { Remove-Item -Recurse -Force "zig-out" }
-                if (Test-Path ".zig-cache") { Remove-Item -Recurse -Force ".zig-cache" }
-            }
-
-            $terminalBuildArgs = @("build", "-Dtarget=$ZigTarget")
-            if (-not $Debug) { $terminalBuildArgs += "-Doptimize=ReleaseFast" }
-
-            if (Invoke-ZigBuildWithCacheRecovery -Args $terminalBuildArgs) {
-                $terminalLibName = "ghostty-terminal.dll"
-                $terminalLib = Resolve-ZigArtifactPath -FileName $terminalLibName
-                if ($terminalLib) {
-                    Write-Info "Built: $terminalLib"
-
-                    Copy-Item $terminalLib $nativeRuntimeDir
-                    Write-Info "Copied to: $nativeRuntimeDir\$terminalLibName"
-
-                    Copy-Item $terminalLib $outputDir
-                    Write-Info "Copied to: $outputDir\$terminalLibName"
-
-                    $terminalHeaderSrc = Join-Path $terminalDir "include\ghostty_terminal.h"
-                    if (Test-Path $terminalHeaderSrc) {
-                        Copy-Item $terminalHeaderSrc $headerDest
-                        Write-Info "Copied header: $headerDest\ghostty_terminal.h"
-                    }
-                } else {
-                    Write-Warn "ghostty-terminal.dll not found under zig-out\ (bin/lib)."
-                }
-            } else {
-                Write-Warn "libghostty-terminal build failed - skipping."
-                Write-Warn "Native VT mode will not be available."
-            }
-        } finally {
-            Pop-Location
+    $vtHeadersSrc = Join-Path $GhosttyDir "include\ghostty\vt"
+    if (Test-Path $vtHeadersSrc) {
+        $ghosttyHeaderDest = Join-Path $headerDest "ghostty"
+        $vtHeaderDest = Join-Path $ghosttyHeaderDest "vt"
+        New-Item -ItemType Directory -Force -Path $ghosttyHeaderDest | Out-Null
+        if (Test-Path $vtHeaderDest) {
+            Remove-Item -Path $vtHeaderDest -Recurse -Force
         }
-    } else {
-        Write-Warn "native\ghostty-terminal not found - skipping libghostty-terminal build."
+
+        Copy-Item $vtHeadersSrc $ghosttyHeaderDest -Recurse
+        Write-Info "Copied official VT headers: $vtHeaderDest"
     }
 
     # ═══════════════════════════════════════════════════════════════════

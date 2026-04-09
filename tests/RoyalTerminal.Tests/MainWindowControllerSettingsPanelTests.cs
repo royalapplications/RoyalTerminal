@@ -27,7 +27,6 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true,
             settingsProfileStore: store);
 
         IDisposable? lifetime = null;
@@ -70,7 +69,6 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true,
             settingsProfileStore: store);
 
         IDisposable? lifetime = null;

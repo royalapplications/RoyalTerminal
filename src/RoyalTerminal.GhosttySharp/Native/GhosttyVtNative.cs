@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.GhosttySharp — P/Invoke bindings for libghostty-vt (VT parsing library).
 
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace RoyalTerminal.GhosttySharp.Native;
@@ -25,6 +26,10 @@ public static partial class GhosttyVtNative
         OutOfMemory = -1,
         /// <summary><c>InvalidValue</c> enum value.</summary>
         InvalidValue = -2,
+        /// <summary><c>OutOfSpace</c> enum value.</summary>
+        OutOfSpace = -3,
+        /// <summary><c>NoValue</c> enum value.</summary>
+        NoValue = -4,
     }
 
     // ──────────────────────────── Key Action ────────────────────────
@@ -206,6 +211,130 @@ public static partial class GhosttyVtNative
         ArrowRight,
         /// <summary><c>ArrowUp</c> enum value.</summary>
         ArrowUp,
+        /// <summary><c>NumLock</c> enum value.</summary>
+        NumLock,
+        /// <summary><c>Numpad0</c> enum value.</summary>
+        Numpad0,
+        /// <summary><c>Numpad1</c> enum value.</summary>
+        Numpad1,
+        /// <summary><c>Numpad2</c> enum value.</summary>
+        Numpad2,
+        /// <summary><c>Numpad3</c> enum value.</summary>
+        Numpad3,
+        /// <summary><c>Numpad4</c> enum value.</summary>
+        Numpad4,
+        /// <summary><c>Numpad5</c> enum value.</summary>
+        Numpad5,
+        /// <summary><c>Numpad6</c> enum value.</summary>
+        Numpad6,
+        /// <summary><c>Numpad7</c> enum value.</summary>
+        Numpad7,
+        /// <summary><c>Numpad8</c> enum value.</summary>
+        Numpad8,
+        /// <summary><c>Numpad9</c> enum value.</summary>
+        Numpad9,
+        /// <summary><c>NumpadAdd</c> enum value.</summary>
+        NumpadAdd,
+        /// <summary><c>NumpadBackspace</c> enum value.</summary>
+        NumpadBackspace,
+        /// <summary><c>NumpadClear</c> enum value.</summary>
+        NumpadClear,
+        /// <summary><c>NumpadClearEntry</c> enum value.</summary>
+        NumpadClearEntry,
+        /// <summary><c>NumpadComma</c> enum value.</summary>
+        NumpadComma,
+        /// <summary><c>NumpadDecimal</c> enum value.</summary>
+        NumpadDecimal,
+        /// <summary><c>NumpadDivide</c> enum value.</summary>
+        NumpadDivide,
+        /// <summary><c>NumpadEnter</c> enum value.</summary>
+        NumpadEnter,
+        /// <summary><c>NumpadEqual</c> enum value.</summary>
+        NumpadEqual,
+        /// <summary><c>NumpadMemoryAdd</c> enum value.</summary>
+        NumpadMemoryAdd,
+        /// <summary><c>NumpadMemoryClear</c> enum value.</summary>
+        NumpadMemoryClear,
+        /// <summary><c>NumpadMemoryRecall</c> enum value.</summary>
+        NumpadMemoryRecall,
+        /// <summary><c>NumpadMemoryStore</c> enum value.</summary>
+        NumpadMemoryStore,
+        /// <summary><c>NumpadMemorySubtract</c> enum value.</summary>
+        NumpadMemorySubtract,
+        /// <summary><c>NumpadMultiply</c> enum value.</summary>
+        NumpadMultiply,
+        /// <summary><c>NumpadParenLeft</c> enum value.</summary>
+        NumpadParenLeft,
+        /// <summary><c>NumpadParenRight</c> enum value.</summary>
+        NumpadParenRight,
+        /// <summary><c>NumpadSubtract</c> enum value.</summary>
+        NumpadSubtract,
+        /// <summary><c>NumpadSeparator</c> enum value.</summary>
+        NumpadSeparator,
+        /// <summary><c>NumpadUp</c> enum value.</summary>
+        NumpadUp,
+        /// <summary><c>NumpadDown</c> enum value.</summary>
+        NumpadDown,
+        /// <summary><c>NumpadRight</c> enum value.</summary>
+        NumpadRight,
+        /// <summary><c>NumpadLeft</c> enum value.</summary>
+        NumpadLeft,
+        /// <summary><c>NumpadBegin</c> enum value.</summary>
+        NumpadBegin,
+        /// <summary><c>NumpadHome</c> enum value.</summary>
+        NumpadHome,
+        /// <summary><c>NumpadEnd</c> enum value.</summary>
+        NumpadEnd,
+        /// <summary><c>NumpadInsert</c> enum value.</summary>
+        NumpadInsert,
+        /// <summary><c>NumpadDelete</c> enum value.</summary>
+        NumpadDelete,
+        /// <summary><c>NumpadPageUp</c> enum value.</summary>
+        NumpadPageUp,
+        /// <summary><c>NumpadPageDown</c> enum value.</summary>
+        NumpadPageDown,
+        /// <summary><c>Escape</c> enum value.</summary>
+        Escape,
+        /// <summary><c>F1</c> enum value.</summary>
+        F1,
+        /// <summary><c>F2</c> enum value.</summary>
+        F2,
+        /// <summary><c>F3</c> enum value.</summary>
+        F3,
+        /// <summary><c>F4</c> enum value.</summary>
+        F4,
+        /// <summary><c>F5</c> enum value.</summary>
+        F5,
+        /// <summary><c>F6</c> enum value.</summary>
+        F6,
+        /// <summary><c>F7</c> enum value.</summary>
+        F7,
+        /// <summary><c>F8</c> enum value.</summary>
+        F8,
+        /// <summary><c>F9</c> enum value.</summary>
+        F9,
+        /// <summary><c>F10</c> enum value.</summary>
+        F10,
+        /// <summary><c>F11</c> enum value.</summary>
+        F11,
+        /// <summary><c>F12</c> enum value.</summary>
+        F12,
+        /// <summary><c>F13</c> enum value.</summary>
+        F13,
+        /// <summary><c>F14</c> enum value.</summary>
+        F14,
+        /// <summary><c>F15</c> enum value.</summary>
+        F15,
+        /// <summary><c>F16</c> enum value.</summary>
+        F16,
+        /// <summary><c>F17</c> enum value.</summary>
+        F17,
+        /// <summary><c>F18</c> enum value.</summary>
+        F18,
+        /// <summary><c>F19</c> enum value.</summary>
+        F19,
+        /// <summary><c>F20</c> enum value.</summary>
+        F20,
     }
 
     // ──────────────────────────── Mods ───────────────────────────────
@@ -291,54 +420,122 @@ public static partial class GhosttyVtNative
         Faint = 6,
         /// <summary><c>Underline</c> enum value.</summary>
         Underline = 7,
-        /// <summary><c>ResetUnderline</c> enum value.</summary>
-        ResetUnderline = 8,
         /// <summary><c>UnderlineColor</c> enum value.</summary>
-        UnderlineColor = 9,
+        UnderlineColor = 8,
         /// <summary><c>UnderlineColor256</c> enum value.</summary>
-        UnderlineColor256 = 10,
+        UnderlineColor256 = 9,
         /// <summary><c>ResetUnderlineColor</c> enum value.</summary>
-        ResetUnderlineColor = 11,
+        ResetUnderlineColor = 10,
         /// <summary><c>Overline</c> enum value.</summary>
-        Overline = 12,
+        Overline = 11,
         /// <summary><c>ResetOverline</c> enum value.</summary>
-        ResetOverline = 13,
+        ResetOverline = 12,
         /// <summary><c>Blink</c> enum value.</summary>
-        Blink = 14,
+        Blink = 13,
         /// <summary><c>ResetBlink</c> enum value.</summary>
-        ResetBlink = 15,
+        ResetBlink = 14,
         /// <summary><c>Inverse</c> enum value.</summary>
-        Inverse = 16,
+        Inverse = 15,
         /// <summary><c>ResetInverse</c> enum value.</summary>
-        ResetInverse = 17,
+        ResetInverse = 16,
         /// <summary><c>Invisible</c> enum value.</summary>
-        Invisible = 18,
+        Invisible = 17,
         /// <summary><c>ResetInvisible</c> enum value.</summary>
-        ResetInvisible = 19,
+        ResetInvisible = 18,
         /// <summary><c>Strikethrough</c> enum value.</summary>
-        Strikethrough = 20,
+        Strikethrough = 19,
         /// <summary><c>ResetStrikethrough</c> enum value.</summary>
-        ResetStrikethrough = 21,
+        ResetStrikethrough = 20,
         /// <summary><c>DirectColorFg</c> enum value.</summary>
-        DirectColorFg = 22,
+        DirectColorFg = 21,
         /// <summary><c>DirectColorBg</c> enum value.</summary>
-        DirectColorBg = 23,
+        DirectColorBg = 22,
         /// <summary><c>Bg8</c> enum value.</summary>
-        Bg8 = 24,
+        Bg8 = 23,
         /// <summary><c>Fg8</c> enum value.</summary>
-        Fg8 = 25,
+        Fg8 = 24,
         /// <summary><c>ResetFg</c> enum value.</summary>
-        ResetFg = 26,
+        ResetFg = 25,
         /// <summary><c>ResetBg</c> enum value.</summary>
-        ResetBg = 27,
+        ResetBg = 26,
         /// <summary><c>BrightBg8</c> enum value.</summary>
-        BrightBg8 = 28,
+        BrightBg8 = 27,
         /// <summary><c>BrightFg8</c> enum value.</summary>
-        BrightFg8 = 29,
+        BrightFg8 = 28,
         /// <summary><c>Bg256</c> enum value.</summary>
-        Bg256 = 30,
+        Bg256 = 29,
         /// <summary><c>Fg256</c> enum value.</summary>
-        Fg256 = 31,
+        Fg256 = 30,
+    }
+
+    /// <summary>Underline style payload decoded by the SGR parser.</summary>
+    public enum GhosttySgrUnderline : int
+    {
+        None = 0,
+        Single = 1,
+        Double = 2,
+        Curly = 3,
+        Dotted = 4,
+        Dashed = 5,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GhosttySgrUnknown
+    {
+        public nint FullPtr;
+        public nuint FullLength;
+        public nint PartialPtr;
+        public nuint PartialLength;
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 64)]
+    public struct GhosttySgrAttributeValue
+    {
+        [FieldOffset(0)]
+        public GhosttySgrUnknown Unknown;
+
+        [FieldOffset(0)]
+        public GhosttySgrUnderline Underline;
+
+        [FieldOffset(0)]
+        public GhosttyColorRgb UnderlineColor;
+
+        [FieldOffset(0)]
+        public byte UnderlineColor256;
+
+        [FieldOffset(0)]
+        public GhosttyColorRgb DirectColorForeground;
+
+        [FieldOffset(0)]
+        public GhosttyColorRgb DirectColorBackground;
+
+        [FieldOffset(0)]
+        public byte Background8;
+
+        [FieldOffset(0)]
+        public byte Foreground8;
+
+        [FieldOffset(0)]
+        public byte BrightBackground8;
+
+        [FieldOffset(0)]
+        public byte BrightForeground8;
+
+        [FieldOffset(0)]
+        public byte Background256;
+
+        [FieldOffset(0)]
+        public byte Foreground256;
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 72)]
+    public struct GhosttySgrAttribute
+    {
+        [FieldOffset(0)]
+        public GhosttySgrAttributeTag Tag;
+
+        [FieldOffset(8)]
+        public GhosttySgrAttributeValue Value;
     }
 
     /// <summary>RGB color payload used by color parser helpers.</summary>
@@ -386,7 +583,6 @@ public static partial class GhosttyVtNative
     public static partial GhosttyVtMods KeyEventGetConsumedMods(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_composing")]
-    [return: MarshalAs(UnmanagedType.U1)]
     public static partial void KeyEventSetComposing(nint keyEvent, [MarshalAs(UnmanagedType.U1)] bool composing);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_composing")]
@@ -415,6 +611,9 @@ public static partial class GhosttyVtNative
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_setopt")]
     public static unsafe partial void KeyEncoderSetopt(nint encoder, int option, void* value);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_setopt_from_terminal")]
+    public static partial void KeyEncoderSetoptFromTerminal(nint encoder, nint terminal);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_encode")]
     public static unsafe partial GhosttyResult KeyEncoderEncode(
@@ -463,14 +662,39 @@ public static partial class GhosttyVtNative
     [return: MarshalAs(UnmanagedType.U1)]
     public static unsafe partial bool SgrNext(nint parser, void* attr);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_sgr_unknown_full")]
+    public static unsafe partial nuint SgrUnknownFull(GhosttySgrUnknown unknown, ushort** ptr);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_sgr_unknown_partial")]
+    public static unsafe partial nuint SgrUnknownPartial(GhosttySgrUnknown unknown, ushort** ptr);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_sgr_attribute_tag")]
+    public static partial GhosttySgrAttributeTag SgrAttributeTag(GhosttySgrAttribute attr);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_sgr_attribute_value")]
+    public static unsafe partial GhosttySgrAttributeValue* SgrAttributeValue(GhosttySgrAttribute* attr);
+
     // ────────────────────── Paste Functions ─────────────────────────
 
     [LibraryImport(LibName, EntryPoint = "ghostty_paste_is_safe")]
     [return: MarshalAs(UnmanagedType.U1)]
     public static unsafe partial bool PasteIsSafe(byte* data, nuint len);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_paste_encode")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult PasteEncode(
+        byte* data,
+        nuint dataLen,
+        [MarshalAs(UnmanagedType.U1)] bool bracketed,
+        byte* buffer,
+        nuint bufferLen,
+        out nuint written);
+
     // ────────────────────── Color Functions ─────────────────────────
 
     [LibraryImport(LibName, EntryPoint = "ghostty_color_rgb_get")]
     public static unsafe partial void ColorRgbGet(GhosttyColorRgb color, byte* r, byte* g, byte* b);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_type_json")]
+    public static partial nint TypeJson();
 }

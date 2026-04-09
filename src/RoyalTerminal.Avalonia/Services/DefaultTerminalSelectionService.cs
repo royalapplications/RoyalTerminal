@@ -37,7 +37,17 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
 
         if (string.IsNullOrEmpty(text) && screen is not null && renderer is not null)
         {
-            text = GetSelectedText(screen, renderer);
+            if (owner is TerminalControl terminalControl &&
+                terminalControl.ActiveVtProcessor is ITerminalSelectionExportSource selectionExporter &&
+                TryCreateSelectionRange(renderer, out TerminalSelectionRange selection))
+            {
+                text = selectionExporter.ReadSelection(selection);
+            }
+
+            if (string.IsNullOrEmpty(text))
+            {
+                text = GetSelectedText(screen, renderer);
+            }
         }
 
         if (string.IsNullOrEmpty(text))
@@ -139,7 +149,17 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
 
         if (request.BracketedPasteEnabled)
         {
+            if (TrySendEncodedPaste(owner, payload, bracketedPaste: true))
+            {
+                return;
+            }
+
             sendInput(string.Concat(BracketedPasteStart, payload, BracketedPasteEnd));
+            return;
+        }
+
+        if (TrySendEncodedPaste(owner, payload, bracketedPaste: false))
+        {
             return;
         }
 
@@ -168,6 +188,34 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         }
 
         presenter?.Invalidate();
+    }
+
+    private static bool TryCreateSelectionRange(SkiaTerminalRenderer renderer, out TerminalSelectionRange selection)
+    {
+        if (renderer.SelectionStart is not { } start || renderer.SelectionEnd is not { } end)
+        {
+            selection = default;
+            return false;
+        }
+
+        selection = new TerminalSelectionRange(start.Item1, start.Item2, end.Item1, end.Item2);
+        return true;
+    }
+
+    private static bool TrySendEncodedPaste(
+        Control owner,
+        string payload,
+        bool bracketedPaste)
+    {
+        if (owner is TerminalControl terminalControl &&
+            terminalControl.ActiveVtProcessor is ITerminalPasteSequenceEncoderSource pasteEncoder &&
+            pasteEncoder.TryEncodePaste(payload, bracketedPaste, out byte[] sequence))
+        {
+            terminalControl.SendInput(sequence);
+            return true;
+        }
+
+        return false;
     }
 
     private static string? GetSelectedText(TerminalScreen screen, SkiaTerminalRenderer renderer)

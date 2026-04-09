@@ -1,6 +1,6 @@
 # RoyalTerminal
 
-High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`RoyalTerminal.Avalonia`) and optional Ghostty integrations (`RoyalTerminal.Avalonia.Ghostty`).
+High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`RoyalTerminal.Avalonia`), official native Ghostty VT integration (`libghostty-vt`), and a separate fully managed VT implementation.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com)
 [![Avalonia](https://img.shields.io/badge/Avalonia-11.x-8b44ac)](https://avaloniaui.net)
@@ -13,11 +13,10 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 | Package | NuGet | Description |
 |---------|-------|-------------|
 | **RoyalTerminal.Avalonia** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.Avalonia.svg)](https://www.nuget.org/packages/RoyalTerminal.Avalonia) | Backend-neutral Avalonia terminal control (`TerminalControl`) and presentation services (no Ghostty dependency) |
-| **RoyalTerminal.Avalonia.Ghostty** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.Avalonia.Ghostty.svg)](https://www.nuget.org/packages/RoyalTerminal.Avalonia.Ghostty) | Ghostty-specific Avalonia controls (`GhosttyNativeTerminalControl`, `GhosttyRenderedTerminalControl`) and endpoint adapters |
-| **RoyalTerminal.GhosttySharp** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp) | Core Ghostty bindings (`libghostty`, `libghostty-vt`, `libghostty-terminal`) |
-| **RoyalTerminal.GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.OSX) | Native runtime assets for macOS (`libghostty`, `libghostty-vt`, `libghostty-terminal`, `libghostty-renderer-capi`) |
-| **RoyalTerminal.GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Win64) | Native runtime assets for Windows x64/arm64 (`ghostty.dll`, `ghostty-vt.dll`, `ghostty-terminal.dll`, `ghostty-renderer-capi.dll`) |
-| **RoyalTerminal.GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Linux64) | Native runtime assets for Linux (`libghostty.so`, `libghostty-vt.so`, `libghostty-terminal.so`, `libghostty-renderer-capi.so`) |
+| **RoyalTerminal.GhosttySharp** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp) | Core Ghostty VT bindings (`libghostty-vt`) |
+| **RoyalTerminal.GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.OSX) | Native runtime assets for macOS (`libghostty-vt`, `libghostty-renderer-capi`) |
+| **RoyalTerminal.GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Win64) | Native runtime assets for Windows x64/arm64 (`ghostty-vt.dll`, `ghostty-renderer-capi.dll`) |
+| **RoyalTerminal.GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Linux64) | Native runtime assets for Linux (`libghostty-vt.so`, `libghostty-renderer-capi.so`) |
 
 ### Modular Managed Packages (Packable Composition Units)
 
@@ -25,7 +24,7 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 |---------|----------------|
 | `RoyalTerminal.Terminal` | Core terminal contracts (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`), SSH bootstrap helpers, and screen model |
 | `RoyalTerminal.Terminal.Vt.Managed` | Managed VT processor (`BasicVtProcessor`) |
-| `RoyalTerminal.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over `libghostty-terminal`) + `GhosttyVtProcessorProvider` |
+| `RoyalTerminal.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over official `libghostty-vt` terminal/render APIs) + `GhosttyVtProcessorProvider` |
 | `RoyalTerminal.Terminal.Vt.Default` | Preference-based VT processor factory (`VtProcessorPreference`) |
 | `RoyalTerminal.Terminal.Pty.Unix` | Unix PTY implementation (`forkpty`) |
 | `RoyalTerminal.Terminal.Pty.Windows` | Windows PTY implementation (ConPTY) |
@@ -46,9 +45,9 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 
 ## Features
 
-- **Core/Ghostty package split**:
+- **Core/native VT split**:
   - `RoyalTerminal.Avalonia`: backend-neutral control and services.
-  - `RoyalTerminal.Avalonia.Ghostty`: Ghostty-native/rendered controls and adapters.
+  - `RoyalTerminal.Terminal.Vt.Ghostty`: official native VT integration over upstream `libghostty-vt`.
 - **Backend-neutral endpoint contracts** (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`) for control reuse across backends.
 - **Pluggable transport runtime** (`ITerminalTransportFactory`) supporting PTY, process pipe, SSH, raw TCP, Telnet, and serial sessions.
 - **Shared SSH bootstrap helper** (`SshShellBootstrapCommandBuilder`) for consistent POSIX `export` command composition across SSH backends.
@@ -56,18 +55,18 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 - **Session profiles + persistent settings model** via `TerminalSessionProfile*` contracts, `TerminalSessionProfileSerializer`, and `JsonFileTerminalSessionProfileStore`.
 - **Thread-safe output ingestion**: `TerminalControl.WriteOutput(...)` can be called from background SSH/network callbacks (marshaled to UI thread internally).
 - **Preference-based VT selection** via `VtProcessorPreference` (`Auto`, `Managed`, `Native`).
-- **Five integration modes** with explicit trade-offs between fidelity, portability, and native dependencies.
+- **Three integration modes** with explicit trade-offs between fidelity, portability, and native dependencies.
 - **Split rendering architecture**:
   - CPU cell rendering path (`RoyalTerminal.Rendering.Skia`)
   - GPU interop path (`RoyalTerminal.Rendering.*` + `ghostty-renderer-capi`)
-- **Standalone VT engine** via `libghostty-terminal` on all platforms.
+- **Official native VT engine** via `libghostty-vt` terminal/render-state APIs on all supported platforms.
 - **Modular PTY and VT packages** (`Terminal.Pty.*`, `Terminal.Vt.*`).
 - **HarfBuzz-backed text shaping** with grid-safe fallback behavior and optional diagnostics counters.
-- **Grapheme-aware cell model** in managed VT and native VT/surface readback paths.
+- **Grapheme-aware cell model** in managed VT and official native VT render-state paths.
 - **Terminal session service split** (`Terminal.Services.Contracts` and `Terminal.Services`).
 - **Sample applications**:
   - Avalonia demo (`samples/RoyalTerminal.Demo`) with structured settings categories (`Session`/`Connection`/`Terminal`/`Appearance`/`SSH`/`Logging`), transport forms (`PTY`/`Pipe`/`Raw TCP`/`Telnet`/`Serial`/`SSH`), a tabbed Settings flyout with profile CRUD (`new`/`duplicate`/`delete`/`set default`) and explicit apply/save, session/event logging, and terminal behavior toggles (copy-on-select, bell notifications, backspace mode, paste safety, text shaping/ligatures)
-  - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`)
+  - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`) that hosts GhosttyKit directly as a separate native sample, outside the managed `RoyalTerminal.GhosttySharp` surface
   - VT/PTy control catalog CLI (`samples/RoyalTerminal.ControlCatalog`) with managed/Ghostty VT probes, ncurses/TUI parity scenarios, and rich visual rendering galleries
 
 ## Transport Session Model
@@ -156,26 +155,22 @@ captureRuntime.StopReplay();
 
 | Mode | Control | Package Set | VT Engine | Renderer | PTY | Platform | Best For |
 |------|---------|-------------|-----------|----------|-----|----------|----------|
-| **Ghostty Native** | `GhosttyNativeTerminalControl` | `RoyalTerminal.Avalonia.Ghostty` + `RoyalTerminal.GhosttySharp` + native assets | Ghostty (`libghostty`) | Metal (Ghostty) | Ghostty | Capability-gated (currently macOS-only) | Maximum native fidelity when embedded Ghostty is available |
-| **Ghostty Rendered** | `GhosttyRenderedTerminalControl` | `RoyalTerminal.Avalonia.Ghostty` + `RoyalTerminal.GhosttySharp` (+ interop packages for `TextureInterop`) | Ghostty (`libghostty`) | Skia (`CpuCellRenderer`) or renderer interop (`TextureInterop`) | Ghostty | Capability-gated (currently macOS-only) | Ghostty behavior with composited rendering when embedded Ghostty is available |
-| **Native VT** | `TerminalControl` | `RoyalTerminal.Avalonia` + `RoyalTerminal.Terminal.Vt.Ghostty` + native assets | `libghostty-terminal` | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Cross-platform native VT parser |
+| **Native VT** | `TerminalControl` | `RoyalTerminal.Avalonia` + `RoyalTerminal.Terminal.Vt.Ghostty` + native assets | official `libghostty-vt` terminal/render-state APIs | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Cross-platform native VT parser on the upstream Ghostty C API |
 | **Managed VT** | `TerminalControl` | `RoyalTerminal.Avalonia` | `BasicVtProcessor` (C#) | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Explicit managed VT path |
-| **Rendered (Auto VT)** | `TerminalControl` | `RoyalTerminal.Avalonia` (+ optional native VT provider packages) | Auto (`libghostty-terminal` when available, otherwise `BasicVtProcessor`) | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Default backend-neutral mode |
+| **Rendered (Auto VT)** | `TerminalControl` | `RoyalTerminal.Avalonia` (+ optional native VT provider packages) | Auto (`libghostty-vt` when available, otherwise `BasicVtProcessor`) | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Default backend-neutral mode |
 
 ### Mode Availability and Fallback Policy (Demo)
 
-Embedded Ghostty modes are optional runtime capabilities. When an embedded mode is unavailable (for example on Linux/Windows), mode routing falls back deterministically to the next supported mode.
+The demo exposes only cross-platform modes. When native VT is unavailable, mode routing falls back deterministically to the next supported mode.
 
 Resolver cycle order:
 
-`Ghostty Rendered -> Ghostty Native -> Native VT -> Managed VT -> Rendered (Auto VT)`
+`Native VT -> Managed VT -> Rendered (Auto VT)`
 
 Fallback chains when requested mode is unavailable:
 
 | Requested Mode | Fallback Chain (next supported mode in resolver order) |
 |----------------|---------------------------------------------------------|
-| `Ghostty Rendered` | `Ghostty Native -> Native VT -> Managed VT -> Rendered (Auto VT)` |
-| `Ghostty Native` | `Native VT -> Managed VT -> Rendered (Auto VT)` |
 | `Native VT` | `Managed VT -> Rendered (Auto VT)` |
 | `Managed VT` | `Rendered (Auto VT)` |
 | `Rendered (Auto VT)` | Always supported (no fallback required) |
@@ -188,8 +183,6 @@ The Avalonia demo uses a glyph + color marker in each tab header:
 
 | Mode | Marker | Color |
 |------|--------|-------|
-| `Ghostty Rendered` (`CpuCellRenderer` / `TextureInterop`) | `○` or `●` | Blue (`#569CD6`) |
-| `Ghostty Native` | `◆` | Yellow (`#DCDCAA`) |
 | `Native VT` | `■` | Green (`#6AB04C`) |
 | `Managed VT` | `▲` | Teal (`#4EC9B0`) |
 | `Rendered (Auto VT)` | `▼` | Olive (`#6A9955`) |
@@ -198,18 +191,9 @@ The Avalonia demo uses a glyph + color marker in each tab header:
 
 | Demo Mode Label | `VtProcessorPreference` | Behavior |
 |-----------------|--------------------------|----------|
-| **Native VT** | `Native` | Requires a native provider (`libghostty-terminal`), throws when unavailable |
+| **Native VT** | `Native` | Requires the official native Ghostty VT provider (`libghostty-vt`), throws when unavailable |
 | **Managed VT** | `Managed` | Forces `BasicVtProcessor` for deterministic pure-managed behavior |
-| **Rendered (Auto VT)** | `Auto` | Uses native VT when available and falls back to managed VT otherwise |
-
-### Ghostty Rendered Rendering Modes
-
-| `GhosttyRenderedTerminalRenderingMode` | Path | Notes |
-|----------------------------------------|------|-------|
-| `CpuCellRenderer` | Read Ghostty screen cells and paint with `SkiaTerminalRenderer` | Full Avalonia composition |
-| `TextureInterop` | `ghostty-renderer-capi` + `SkiaInteropRenderer` + `TerminalTextureInteropDrawHandler` | Backend-aware target acquisition with CPU RGBA fallback |
-
-> Airspace applies only to `GhosttyNativeTerminalControl` because it hosts an OS-native view (`NativeControlHost`).
+| **Rendered (Auto VT)** | `Auto` | Uses official native VT when available and falls back to managed VT otherwise |
 
 ## Architecture
 
@@ -220,12 +204,6 @@ flowchart TD
     subgraph CoreUI["RoyalTerminal.Avalonia (Core)"]
       C1["TerminalControl"]
       C2["TerminalDrawHandler / TerminalPresenter"]
-    end
-
-    subgraph GhosttyUI["RoyalTerminal.Avalonia.Ghostty (Optional)"]
-      G1["GhosttyNativeTerminalControl"]
-      G2["GhosttyRenderedTerminalControl"]
-      G3["GhosttySurfaceTerminalEndpoint"]
     end
 
     subgraph Terminal["Terminal Modules"]
@@ -256,19 +234,13 @@ flowchart TD
     end
 
     subgraph Native["Native Libraries"]
-      N1["libghostty"]
-      N2["libghostty-vt"]
-      N3["libghostty-terminal"]
-      N4["libghostty-renderer-capi"]
+      N1["libghostty-vt"]
+      N2["libghostty-renderer-capi"]
     end
 
     App --> CoreUI
-    App --> GhosttyUI
     CoreUI --> Terminal
     CoreUI --> CoreRender
-    GhosttyUI --> Terminal
-    GhosttyUI --> CoreRender
-    GhosttyUI --> GhosttyRender
     Terminal --> Native
     GhosttyRender --> Native
 ```
@@ -547,7 +519,7 @@ var terminal = new TerminalControl();
 await terminal.StartSessionAsync(options);
 ```
 
-### 2. Core Control with Native VT Provider (`libghostty-terminal`)
+### 2. Core Control with Native VT Provider (official `libghostty-vt`)
 
 ```csharp
 using RoyalTerminal.Avalonia.Controls;
@@ -673,54 +645,7 @@ Behavior when using endpoint-only mode:
 
 If you implement `ITerminalInputSink`, fallback byte-sequence encoding is bypassed and your backend receives structured `TerminalKeyEvent` / `TerminalPointerEvent`.
 
-### 5. Ghostty Native Control (macOS, `RoyalTerminal.Avalonia.Ghostty`)
-
-```csharp
-using RoyalTerminal.Avalonia.Controls;
-using RoyalTerminal.GhosttySharp;
-
-Ghostty.Initialize();
-using var config = new GhosttyConfig();
-config.LoadDefaultFiles();
-config.Finalize_();
-using var app = new GhosttyApp(config);
-
-var terminal = new GhosttyNativeTerminalControl
-{
-    TerminalFontSize = 14.0f,
-    WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-};
-
-terminal.Initialize(app);
-```
-
-### 6. Ghostty Rendered Control (macOS, CPU or TextureInterop)
-
-```csharp
-using RoyalTerminal.Avalonia.Controls;
-using RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
-using RoyalTerminal.GhosttySharp;
-
-Ghostty.Initialize();
-using var config = new GhosttyConfig();
-config.LoadDefaultFiles();
-config.Finalize_();
-using var app = new GhosttyApp(config);
-
-var terminal = new GhosttyRenderedTerminalControl
-{
-    RenderingMode = GhosttyRenderedTerminalRenderingMode.TextureInterop,
-    InteropRenderTargetProvider = new AvaloniaSkiaRenderTargetProvider(
-        backendPreference: AvaloniaRenderBackendPreference.Auto),
-    FontFamilyName = "JetBrains Mono",
-    TerminalFontSize = 14.0f,
-};
-
-// Use GhosttyRenderedTerminalRenderingMode.CpuCellRenderer for CPU-only mode.
-terminal.Initialize(app);
-```
-
-### 7. Renderer Shaping Controls and Diagnostics
+### 5. Renderer Shaping Controls and Diagnostics
 
 ```csharp
 using RoyalTerminal.Avalonia.Controls;
@@ -740,7 +665,7 @@ if (terminal.Renderer is { } renderer)
 }
 ```
 
-### 8. Direct Renderer Interop (No Avalonia Adapter)
+### 6. Direct Renderer Interop (No Avalonia Adapter)
 
 ```csharp
 using RoyalTerminal.Rendering.Contracts;
@@ -778,7 +703,6 @@ surface.EndFrame(frameToken);
 - Core control rename:
   - `GhosttyTerminalControl` -> `TerminalControl`
   - `GhosttyTerminalPresenter` -> `TerminalPresenter`
-- Ghostty-specific controls moved to `RoyalTerminal.Avalonia.Ghostty`.
 - VT selection moved from `UseNativeVtProcessor` to `VtProcessorPreference`.
 - Legacy surface-coupled `ITerminalSurface` contract was removed.
 
@@ -795,7 +719,7 @@ dotnet add package RoyalTerminal.Avalonia
 ### Optional Native VT for Core Control
 
 ```bash
-# Native VT provider over libghostty-terminal
+# Native VT provider over official libghostty-vt bindings
 
 dotnet add package RoyalTerminal.Terminal.Vt.Ghostty
 
@@ -820,16 +744,6 @@ If you integrate a custom SSH SDK (for example Rebex) via `AttachEndpoint(...)`,
 ```bash
 dotnet add package RoyalTerminal.Avalonia
 dotnet add package RoyalTerminal.Terminal
-```
-
-### Ghostty Embedded Controls (macOS)
-
-```bash
-# Ghostty-native and Ghostty-rendered Avalonia controls
-
-dotnet add package RoyalTerminal.Avalonia.Ghostty
-dotnet add package RoyalTerminal.GhosttySharp
-dotnet add package RoyalTerminal.GhosttySharp.Native.OSX
 ```
 
 ### Modular Rendering Interop Setup
@@ -887,26 +801,16 @@ test -f "${CODEX_HOME:-$HOME/.codex}/skills/royalterminal-development/SKILL.md" 
 
 ## Feature Comparison
 
-| Capability | Ghostty Native | Ghostty Rendered (`CpuCellRenderer` / `TextureInterop`) | Native VT (`TerminalControl`) | Managed VT (`TerminalControl`) |
-|------------|----------------|-----------------------------------------------------------|--------------------------------------|---------------------------------------|
-| Package entry point | `RoyalTerminal.Avalonia.Ghostty` | `RoyalTerminal.Avalonia.Ghostty` | `RoyalTerminal.Avalonia` (+ `Terminal.Vt.Ghostty`) | `RoyalTerminal.Avalonia` |
-| Platform availability | Capability-gated (currently macOS-only) | Capability-gated (currently macOS-only) | macOS/Linux/Windows | macOS/Linux/Windows |
-| VT engine | Ghostty | Ghostty | `libghostty-terminal` | `BasicVtProcessor` |
-| Renderer path | Native Metal | Skia cell renderer or interop target + Skia fallback | Skia cell renderer | Skia cell renderer |
-| Airspace issue | Yes | No | No | No |
-| Requires `libghostty` | Yes | Yes | No | No |
-| Requires `libghostty-terminal` | No | No | Yes | No |
-| Requires `ghostty-renderer-capi` | No | `TextureInterop` only | No | No |
-| Full Avalonia overlay support | No | Yes | Yes | Yes |
-| Cross-platform mode | No | No | Yes | Yes |
-| Demo fallback when unavailable | Routed to next supported mode (`Native VT -> Managed VT -> Rendered`) | Routed to next supported mode (`Native VT -> Managed VT -> Rendered`) | Routed to `Managed VT` then `Rendered` | Routed to `Rendered` |
-
-### Ghostty Rendered Parity Notes
-
-| Area | Status | Notes |
-|------|--------|-------|
-| Per-cell `HyperlinkId` transport | Managed fallback | Synthetic ids are assigned for the currently hovered link span (from `MouseOverLink` URL + pointer row/column). Full-grid OSC8 link transport still requires native row-cell export support. |
-| `UnderlineColor` + `HasUnderlineColor` transport | Native blocker | Embedded `ghostty_surface_get_row_cells*` readback does not export explicit underline-color metadata. Managed path preserves underline rendering using foreground fallback with `HasUnderlineColor=false`. |
+| Capability | Native VT (`TerminalControl`) | Managed VT (`TerminalControl`) | Rendered (`TerminalControl`, Auto VT) |
+|------------|--------------------------------|--------------------------------|---------------------------------------|
+| Package entry point | `RoyalTerminal.Avalonia` + `Terminal.Vt.Ghostty` | `RoyalTerminal.Avalonia` | `RoyalTerminal.Avalonia` |
+| Platform availability | macOS/Linux/Windows | macOS/Linux/Windows | macOS/Linux/Windows |
+| VT engine | official `libghostty-vt` | `BasicVtProcessor` | auto-selects native VT when available, otherwise managed VT |
+| Renderer path | Skia cell renderer | Skia cell renderer | Skia cell renderer |
+| Requires `libghostty-vt` | Yes | No | Optional |
+| Full Avalonia overlay support | Yes | Yes | Yes |
+| Cross-platform mode | Yes | Yes | Yes |
+| Demo fallback when unavailable | Routed to `Managed VT` then `Rendered` | Routed to `Rendered` | Always supported |
 
 ## Rendering Interop Contract
 
@@ -943,34 +847,24 @@ bash build.sh release
 bash build.sh test
 ```
 
-## Standalone Terminal Library (`libghostty-terminal`)
+## Official VT Library (`libghostty-vt`)
 
-`native/ghostty-terminal` wraps Ghostty VT processing into a dedicated C API used by `GhosttyVtProcessor`.
-It also exposes grapheme-aware row reads via `ghostty_terminal_get_row_cells_with_graphemes(...)`.
+`libghostty-vt` is now the only native VT engine used by RoyalTerminal. `GhosttyVtProcessor`
+drives the upstream terminal and render-state APIs directly, with no custom standalone wrapper.
 
 Build directly:
 
 ```bash
-cd native/ghostty-terminal
-bash build.sh release
-bash build.sh test
+cd external/ghostty
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none
 ```
 
-## Ghostty Submodule Patch Log
+## Ghostty Submodule Status
 
-RoyalTerminal currently tracks a patched Ghostty fork in `external/ghostty`
-(`wieslawsoltes/ghostty`, branch `ghosttysharp/screen-api`). The commits below
-are required for Unicode-correct terminal cell readback and rendering.
-
-1. [`455bc6d86`](https://github.com/wieslawsoltes/ghostty/commit/455bc6d86) `screen: add grapheme-aware row cell export`
-   Added `ghostty_surface_get_row_cells_with_graphemes` and supporting grapheme-span payloads so managed code can reconstruct full per-cell graphemes (primary codepoint + trailing UTF-32 sequence). This was needed because `codepoint`-only row reads lose combining/emoji cluster data and break HarfBuzz shaping and fallback selection in RoyalTerminal.GhosttySharp.
-2. [`523554136`](https://github.com/wieslawsoltes/ghostty/commit/523554136) `Force unicode grapheme width method for embedded surfaces`
-   Forced embedded surfaces to use `grapheme-width-method=unicode`. This was needed to avoid legacy-width behavior that could split regional-indicator flag pairs and other emoji sequences into non-clustered cells, causing incorrect native VT/rendered output despite shaping support in managed code.
-
-Current native parity blockers still pending upstream/submodule API expansion:
-
-- Per-cell hyperlink token export in embedded row-cell payload.
-- Per-cell underline color export (`UnderlineColor` value + explicit-presence bit).
+RoyalTerminal now tracks upstream Ghostty directly in `external/ghostty`; the local
+Ghostty fork patches and managed `libghostty` wrapper layer were removed. The
+managed/native integration now targets upstream `libghostty-vt` directly, with
+`ghostty-renderer-capi` retained only for optional render-target interop.
 
 ## PTY Layer
 
@@ -998,9 +892,9 @@ Probe order includes:
 
 | Platform | Files |
 |----------|-------|
-| macOS | `libghostty.dylib`, `libghostty-vt.dylib`, `libghostty-terminal.dylib`, `libghostty-renderer-capi.dylib` |
-| Linux | `libghostty.so`, `libghostty-vt.so`, `libghostty-terminal.so`, `libghostty-renderer-capi.so` |
-| Windows | `ghostty.dll`, `ghostty-vt.dll`, `ghostty-terminal.dll`, `ghostty-renderer-capi.dll` |
+| macOS | `libghostty-vt.dylib`, `libghostty-renderer-capi.dylib` |
+| Linux | `libghostty-vt.so`, `libghostty-renderer-capi.so` |
+| Windows | `ghostty-vt.dll`, `ghostty-renderer-capi.dll` |
 
 Primary runtime package locations:
 
@@ -1016,12 +910,10 @@ RoyalTerminal/
 ├── Directory.Packages.props
 ├── RoyalTerminal.sln
 ├── native/
-│   ├── ghostty-terminal/
 │   └── ghostty-renderer-capi/
 ├── src/
 │   ├── RoyalTerminal.GhosttySharp/
 │   ├── RoyalTerminal.Avalonia/
-│   ├── RoyalTerminal.Avalonia.Ghostty/
 │   ├── RoyalTerminal.Avalonia.Rendering.GhosttyInterop/
 │   ├── RoyalTerminal.Terminal/
 │   ├── RoyalTerminal.Terminal.Vt.Managed/
@@ -1179,25 +1071,15 @@ dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csp
 
 ## API Coverage
 
-### `libghostty`
+### `libghostty-vt`
 
 | Category | Status |
 |----------|--------|
-| Initialization/config/app lifecycle | Implemented |
-| Surface lifecycle/input/sizing/focus | Implemented |
-| Screen readback (`surface_screen_lock`, row/cursor reads) | Implemented (`codepoint`, colors, style attrs, width, grapheme spans) |
-| Per-cell hyperlink/underline-color metadata readback | Not exported by current C API (native blocker) |
-| Inspector and selection actions | Implemented |
-
-### `libghostty-terminal`
-
-| Category | Status |
-|----------|--------|
-| Lifecycle/process/resize | Implemented |
-| Screen state and cursor reads | Implemented |
-| Grapheme-aware row reads | Implemented (`ghostty_terminal_get_row_cells_with_graphemes`) |
+| Terminal lifecycle/process/resize/reset | Implemented |
+| Render-state lifecycle and dirty tracking | Implemented |
+| Row/cell/grapheme iteration via render state | Implemented |
 | Default/palette color APIs | Implemented |
-| Mode queries and self-test | Implemented |
+| Mode queries, focus, size-report, formatter, key/mouse helpers | Implemented |
 
 ### `ghostty-renderer-capi`
 

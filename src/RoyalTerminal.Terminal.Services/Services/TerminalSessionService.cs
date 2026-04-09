@@ -401,7 +401,11 @@ public sealed class TerminalSessionService : ITerminalSessionService
         InputSent?.Invoke(this, new TerminalSessionInputEventArgs(payload));
     }
 
-    private sealed class VtProcessorModeSource : ITerminalModeSource, IKittyKeyboardStateSource, IDisposable
+    private sealed class VtProcessorModeSource : ITerminalModeSource,
+        IKittyKeyboardStateSource,
+        ITerminalKeySequenceEncoderSource,
+        ITerminalMouseReportingStateSource,
+        IDisposable
     {
         private readonly IVtProcessor _vtProcessor;
         private event EventHandler<TerminalModeState>? _modeChanged;
@@ -418,10 +422,25 @@ public sealed class TerminalSessionService : ITerminalSessionService
             ? kitty.KittyKeyboardFlags
             : 0;
 
+        public bool MouseReportingEnabled => _vtProcessor is ITerminalMouseReportingStateSource mouse
+            ? mouse.MouseReportingEnabled
+            : false;
+
         public event EventHandler<TerminalModeState>? ModeChanged
         {
             add => _modeChanged += value;
             remove => _modeChanged -= value;
+        }
+
+        public bool TryEncodeKey(in TerminalKeyEncodingRequest request, out byte[] sequence)
+        {
+            if (_vtProcessor is ITerminalKeySequenceEncoderSource encoder)
+            {
+                return encoder.TryEncodeKey(request, out sequence);
+            }
+
+            sequence = [];
+            return false;
         }
 
         public void Dispose()

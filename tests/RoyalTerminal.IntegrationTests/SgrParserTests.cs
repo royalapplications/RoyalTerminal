@@ -206,4 +206,59 @@ public class SgrParserTests
             GhosttyVtNative.SgrFree(parser);
         }
     }
+
+    [Fact]
+    public unsafe void SgrParser_HelperAccessors_ExposeTypedValues()
+    {
+        var result = GhosttyVtNative.SgrNew(0, out var parser);
+        Assert.Equal(GhosttyResult.Success, result);
+
+        try
+        {
+            ushort[] values = [1];
+            fixed (ushort* valuesPtr = values)
+            {
+                Assert.Equal(
+                    GhosttyResult.Success,
+                    GhosttyVtNative.SgrSetParams(parser, valuesPtr, null, 1));
+            }
+
+            GhosttySgrAttribute attr = default;
+            Assert.True(GhosttyVtNative.SgrNext(parser, &attr));
+            Assert.Equal(GhosttySgrAttributeTag.Bold, GhosttyVtNative.SgrAttributeTag(attr));
+            Assert.NotEqual(nint.Zero, (nint)GhosttyVtNative.SgrAttributeValue(&attr));
+
+            GhosttyVtNative.SgrReset(parser);
+
+            ushort[] unknownValues = [999];
+            fixed (ushort* unknownPtr = unknownValues)
+            {
+                Assert.Equal(
+                    GhosttyResult.Success,
+                    GhosttyVtNative.SgrSetParams(parser, unknownPtr, null, 1));
+            }
+
+            GhosttySgrAttribute unknownAttr = default;
+            Assert.True(GhosttyVtNative.SgrNext(parser, &unknownAttr));
+            Assert.Equal(GhosttySgrAttributeTag.Unknown, GhosttyVtNative.SgrAttributeTag(unknownAttr));
+
+            GhosttySgrAttributeValue* unknownValue = GhosttyVtNative.SgrAttributeValue(&unknownAttr);
+            Assert.NotEqual(nint.Zero, (nint)unknownValue);
+
+            ushort* fullPtr = null;
+            nuint fullLength = GhosttyVtNative.SgrUnknownFull(unknownValue->Unknown, &fullPtr);
+            Assert.True(fullLength > 0);
+            Assert.NotEqual((nint)0, (nint)fullPtr);
+            Assert.Equal((ushort)999, fullPtr[0]);
+
+            ushort* partialPtr = null;
+            nuint partialLength = GhosttyVtNative.SgrUnknownPartial(unknownValue->Unknown, &partialPtr);
+            Assert.True(partialLength > 0);
+            Assert.NotEqual((nint)0, (nint)partialPtr);
+        }
+        finally
+        {
+            GhosttyVtNative.SgrFree(parser);
+        }
+    }
 }

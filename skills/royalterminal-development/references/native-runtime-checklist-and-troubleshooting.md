@@ -22,7 +22,6 @@
 5. Build managed solution:
    - `dotnet build RoyalTerminal.sln -c Release`
 6. Run availability probes in runtime flow:
-   - `Ghostty.Initialize()` for embedded ghostty usage
    - `GhosttyVtProcessor.IsAvailable()` for native VT usage
 7. Run demo/tests for the changed feature path.
 
@@ -32,7 +31,6 @@ Useful checks per feature:
 
 | Feature | Probe |
 |---|---|
-| Embedded Ghostty mode | `Ghostty.Initialize()` |
 | Native VT mode | `GhosttyVtProcessor.IsAvailable()` |
 | Renderer interop mode | successful load through `GhosttyRendererNativeLibraryLoader` |
 
@@ -45,10 +43,8 @@ If one feature fails while others work, focus on that feature-specific native li
 | `DllNotFoundException` | missing file or probe-path miss | runtime folder contents + probe order |
 | `EntryPointNotFoundException` | binary/API version mismatch | stale native library in output |
 | `BadImageFormatException` | architecture mismatch | process RID/arch vs native binary arch |
-| native VT unavailable | `ghostty-terminal` missing or incompatible | `native/<rid>/` + runtime copy targets |
+| native VT unavailable | `ghostty-vt` missing or incompatible | `native/<rid>/` + runtime copy targets |
 | texture interop unavailable | `ghostty-renderer-capi` unresolved | renderer env override path |
-| SSH/transport unaffected but embedded mode missing | only `ghostty` load failing | core loader resolution path |
-
 ## Targeted Recovery Actions
 
 - Clean and rebuild native libs:
@@ -77,7 +73,7 @@ dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --fi
 
 Integration checks:
 ```bash
-dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj -c Release --filter "TerminalNativeTests|GhosttyWrapperIntegrationTests"
+dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj -c Release --filter "GhosttyVtTerminalTests|KeyEncoderTests|OscParserTests|SgrParserTests|PasteTests"
 ```
 
 For full build script and command coverage:
@@ -100,10 +96,10 @@ dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --fi
 
 ```bash
 # macOS
-file native/osx-arm64/libghostty.dylib
+file native/osx-arm64/libghostty-vt.dylib
 
 # Linux
-file native/linux-x64/libghostty.so
+file native/linux-x64/libghostty-vt.so
 ```
 
 ### Force renderer resolution during troubleshooting

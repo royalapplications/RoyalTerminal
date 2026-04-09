@@ -152,6 +152,12 @@ public sealed class TerminalRow
     /// <summary>Whether this row has been modified since last render.</summary>
     public bool IsDirty { get; set; } = true;
 
+    /// <summary>
+    /// Whether this row soft-wraps into the following row.
+    /// Explicit line feeds keep this false.
+    /// </summary>
+    public bool WrapsToNext { get; set; }
+
     /// <summary>Number of columns in this row.</summary>
     public int Columns => _cells.Length;
 
@@ -175,6 +181,7 @@ public sealed class TerminalRow
     {
         for (var i = 0; i < _cells.Length; i++)
             _cells[i] = TerminalCell.Empty(fg, bg);
+        WrapsToNext = false;
         IsDirty = true;
     }
 }
@@ -188,6 +195,8 @@ public sealed class TerminalScreen
     private readonly List<TerminalRow> _rows;
     private readonly Dictionary<int, string> _hyperlinksById = [];
     private readonly Dictionary<string, int> _hyperlinkIdsByUrl = new(StringComparer.Ordinal);
+    private readonly Dictionary<int, TerminalKittyImageSource> _kittyImagesById = [];
+    private TerminalKittyImagePlacement[] _kittyPlacements = Array.Empty<TerminalKittyImagePlacement>();
     private int _nextHyperlinkId = 1;
     private int _scrollbackLimit;
     private int _viewportTop;
@@ -230,6 +239,9 @@ public sealed class TerminalScreen
 
     /// <summary>Lock object for thread-safe access from UI and composition threads.</summary>
     public object SyncRoot { get; } = new object();
+
+    /// <summary>Gets whether the current viewport snapshot includes Kitty image placements.</summary>
+    public bool HasKittyGraphics => _kittyPlacements.Length > 0;
 
     public TerminalScreen(int columns, int viewportRows, int scrollbackLimit = 10_000)
     {
@@ -417,6 +429,67 @@ public sealed class TerminalScreen
         return _hyperlinksById.TryGetValue(hyperlinkId, out url);
     }
 
+    /// <summary>Gets the current Kitty image placement snapshot.</summary>
+    public ReadOnlySpan<TerminalKittyImagePlacement> GetKittyPlacements() => _kittyPlacements;
+
+    /// <summary>Attempts to resolve a Kitty image payload by image id.</summary>
+    public bool TryGetKittyImageSource(int imageId, out TerminalKittyImageSource? source)
+    {
+        if (imageId <= 0)
+        {
+            source = null;
+            return false;
+        }
+
+        return _kittyImagesById.TryGetValue(imageId, out source);
+    }
+
+    /// <summary>Replaces the current Kitty image snapshot.</summary>
+    public void ReplaceKittyGraphics(
+        IReadOnlyList<TerminalKittyImageSource>? images,
+        IReadOnlyList<TerminalKittyImagePlacement>? placements)
+    {
+        _kittyImagesById.Clear();
+        if (images is not null)
+        {
+            for (int i = 0; i < images.Count; i++)
+            {
+                TerminalKittyImageSource image = images[i];
+                _kittyImagesById[image.ImageId] = image;
+            }
+        }
+
+        if (placements is null || placements.Count == 0)
+        {
+            _kittyPlacements = Array.Empty<TerminalKittyImagePlacement>();
+        }
+        else
+        {
+            TerminalKittyImagePlacement[] copy = new TerminalKittyImagePlacement[placements.Count];
+            for (int i = 0; i < placements.Count; i++)
+            {
+                copy[i] = placements[i];
+            }
+
+            _kittyPlacements = copy;
+        }
+
+        InvalidateViewport();
+    }
+
+    /// <summary>Clears the current Kitty image snapshot.</summary>
+    public void ClearKittyGraphics()
+    {
+        if (_kittyImagesById.Count == 0 && _kittyPlacements.Length == 0)
+        {
+            return;
+        }
+
+        _kittyImagesById.Clear();
+        _kittyPlacements = Array.Empty<TerminalKittyImagePlacement>();
+        InvalidateViewport();
+    }
+
     /// <summary>
     /// Adds a new row to the bottom, potentially scrolling up.
     /// </summary>
@@ -455,6 +528,7 @@ public sealed class TerminalScreen
                     var oldCells = _rows[i].ReadOnlyCells;
                     var newCells = newRow.Cells;
                     oldCells[..copyCount].CopyTo(newCells);
+                    newRow.WrapsToNext = _rows[i].WrapsToNext;
                     _rows[i] = newRow;
                 }
             }

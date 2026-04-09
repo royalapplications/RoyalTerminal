@@ -6,12 +6,15 @@ using System.Reactive.Linq;
 using System.Text;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Demo.ViewModels;
+using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.Terminal;
 using Xunit;
 
@@ -32,26 +35,21 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
         {
             lifetime = controller.Activate();
 
-            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-                embeddedGhosttyAvailable: viewModel.GhosttyAvailable,
-                nativeVtAvailable: viewModel.NativeVtAvailable);
+            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(viewModel.NativeVtAvailable);
             TerminalModeResolver resolver = TerminalModeResolver.Default;
             int expectedStartupTabs = CountSupportedModes(resolver, capabilities);
 
             bool createdExpectedTabs = await WaitUntilAsync(
                 () => terminalHost.Children.Count == expectedStartupTabs,
                 TimeSpan.FromSeconds(2));
-            Assert.True(
-                createdExpectedTabs,
-                $"Expected {expectedStartupTabs} startup tabs but found {terminalHost.Children.Count}.");
+            Assert.True(createdExpectedTabs);
         }
         finally
         {
@@ -72,8 +70,7 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
@@ -90,7 +87,7 @@ public sealed class MainWindowControllerModeStartupTests
             Dictionary<string, Color> standaloneModeColors = GetStandaloneModeIndicatorColors(tabStrip);
             Dictionary<string, string> standaloneModeGlyphs = GetStandaloneModeIndicatorGlyphs(tabStrip);
 
-            Assert.True(standaloneModeColors.Count >= 2, "Expected at least two standalone startup modes.");
+            Assert.True(standaloneModeColors.Count >= 2);
             Assert.Equal(standaloneModeColors.Count, standaloneModeColors.Values.Distinct().Count());
             Assert.Equal(standaloneModeGlyphs.Count, standaloneModeGlyphs.Values.Distinct().Count());
         }
@@ -113,8 +110,7 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
@@ -124,17 +120,15 @@ public sealed class MainWindowControllerModeStartupTests
             bool initialTabCreated = await WaitUntilAsync(
                 () => terminalHost.Children.Count > 0,
                 TimeSpan.FromSeconds(2));
-            Assert.True(initialTabCreated, "Controller did not create an initial tab.");
+            Assert.True(initialTabCreated);
 
-            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-                embeddedGhosttyAvailable: viewModel.GhosttyAvailable,
-                nativeVtAvailable: viewModel.NativeVtAvailable);
+            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(viewModel.NativeVtAvailable);
             TerminalModeResolver resolver = TerminalModeResolver.Default;
+            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
 
             TerminalRenderMode[] requestedModes =
             [
-                TerminalRenderMode.GhosttyRendered,
-                TerminalRenderMode.GhosttyNative,
                 TerminalRenderMode.NativeVt,
                 TerminalRenderMode.ManagedVt,
                 TerminalRenderMode.RenderedAuto,
@@ -151,13 +145,68 @@ public sealed class MainWindowControllerModeStartupTests
                 bool created = await WaitUntilAsync(
                     () => terminalHost.Children.Count > countBefore,
                     TimeSpan.FromSeconds(2));
-                Assert.True(created, $"Controller did not create tab for requested mode '{requestedMode}'.");
+                Assert.True(created);
 
                 Control newContainer = terminalHost.Children[^1];
-                TerminalRenderMode actualMode = ResolveModeFromContainer(newContainer);
+                Button newHeader = Assert.IsType<Button>(tabStrip.Children[^1]);
+                TerminalRenderMode actualMode = ResolveModeFromContainer(newContainer, newHeader);
                 TerminalRenderMode expectedMode = resolver.ResolveSupportedMode(requestedMode, capabilities);
                 Assert.Equal(expectedMode, actualMode);
             }
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_RenderedAuto_UsesStandaloneVtControl()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo rendered-auto";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new FixedTerminalModeCapabilityResolver(TerminalModeCapabilities.Create(nativeVtAvailable: true)),
+            TerminalModeResolver.Default);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.SetRenderMode(
+                useRenderedControl: true,
+                useNativeVtControl: false);
+
+            int countBefore = terminalHost.Children.Count;
+            viewModel.NewTabCommand.Execute().Wait();
+
+            bool created = await WaitUntilAsync(
+                () => terminalHost.Children.Count == countBefore + 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(created);
+
+            Control newContainer = terminalHost.Children[^1];
+            ScrollViewer scrollViewer = Assert.IsType<ScrollViewer>(newContainer);
+            TerminalControl standalone = Assert.IsType<TerminalControl>(scrollViewer.Content);
+            Assert.Equal(VtProcessorPreference.Auto, standalone.VtProcessorPreference);
+
+            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
+            Button headerButton = Assert.IsType<Button>(tabStrip.Children[^1]);
+            string expectedVtLabel = standalone.IsUsingNativeVtProcessor ? "Ghostty VT" : "Basic VT";
+            Assert.Equal($"Rendered (Pipe - {expectedVtLabel})", ToolTip.GetTip(headerButton) as string);
         }
         finally
         {
@@ -178,21 +227,17 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
         {
             lifetime = controller.Activate();
 
-            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(
-                embeddedGhosttyAvailable: viewModel.GhosttyAvailable,
-                nativeVtAvailable: viewModel.NativeVtAvailable);
+            TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(viewModel.NativeVtAvailable);
             TerminalModeResolver resolver = TerminalModeResolver.Default;
 
             TerminalRenderMode currentMode = GetActiveMode(viewModel);
-
             for (int i = 0; i < 10; i++)
             {
                 TerminalRenderMode expected = resolver.ResolveNextMode(currentMode, capabilities);
@@ -200,10 +245,7 @@ public sealed class MainWindowControllerModeStartupTests
 
                 TerminalRenderMode actual = GetActiveMode(viewModel);
                 Assert.Equal(expected, actual);
-                Assert.True(
-                    resolver.IsSupported(actual, capabilities),
-                    $"Mode cycle produced unsupported mode '{actual}' for capabilities {capabilities}.");
-
+                Assert.True(resolver.IsSupported(actual, capabilities));
                 currentMode = actual;
             }
         }
@@ -229,8 +271,7 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
@@ -272,8 +313,7 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default,
-            skipEmbeddedGhosttyInitialization: true);
+            TerminalModeResolver.Default);
         IDisposable? lifetime = null;
 
         try
@@ -296,6 +336,211 @@ public sealed class MainWindowControllerModeStartupTests
             Dispatcher.UIThread.RunJobs();
 
             Assert.Equal("status-marker", viewModel.StatusText);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_SearchCommands_SyncActiveTerminalSearchSurface()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo search-demo";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
+            activeControl.WriteOutput(Encoding.UTF8.GetBytes("alpha beta alpha\r\n"));
+            Dispatcher.UIThread.RunJobs();
+
+            viewModel.SearchQuery = "alpha";
+            viewModel.ApplySearchCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal("alpha", activeControl.SearchNeedle);
+            Assert.Equal(2, activeControl.SearchTotal);
+            Assert.Contains("/2 matches", viewModel.SearchResultText, StringComparison.Ordinal);
+
+            viewModel.NextSearchCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(1, activeControl.SearchSelected);
+
+            viewModel.ClearSearchCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Null(activeControl.SearchNeedle);
+            Assert.Equal("Search idle", viewModel.SearchResultText);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_CopySnapshotCommand_ExportsActiveTerminalToClipboard()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo snapshot-demo";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
+            activeControl.WriteOutput(Encoding.UTF8.GetBytes("snapshot demo\r\n"));
+            Dispatcher.UIThread.RunJobs();
+
+            viewModel.CopyPlainSnapshotCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            string? copied = await window.Clipboard!.TryGetTextAsync();
+            Assert.NotNull(copied);
+            Assert.Contains("snapshot demo", copied, StringComparison.Ordinal);
+            Assert.Contains("Copied PlainText snapshot", viewModel.StatusText, StringComparison.Ordinal);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_ShowcaseHyperlinkAndDiagnostics_UpdateActiveTab()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo showcase-demo";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.ToggleGhosttyDiagnosticsCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(viewModel.ShowGhosttyDiagnostics);
+            Assert.Contains("libghostty-vt available:", viewModel.GhosttyDiagnosticsText, StringComparison.Ordinal);
+
+            viewModel.ShowHyperlinkSampleCommand.Execute().Wait();
+            TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
+            bool hyperlinkApplied = await WaitUntilAsync(
+                () => ViewportContainsHyperlink(activeControl),
+                TimeSpan.FromSeconds(2));
+            Assert.True(hyperlinkApplied);
+            Assert.Contains("Hyperlink showcase injected", viewModel.StatusText, StringComparison.Ordinal);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_ShowcaseKittyGraphics_UsesNativeGhosttyTab_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo kitty-demo";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new FixedTerminalModeCapabilityResolver(TerminalModeCapabilities.Create(nativeVtAvailable: true)),
+            TerminalModeResolver.Default);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.SetRenderMode(
+                useRenderedControl: false,
+                useNativeVtControl: true,
+                useManagedVtControl: false);
+
+            int countBefore = terminalHost.Children.Count;
+            viewModel.NewTabCommand.Execute().Wait();
+            bool newTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == countBefore + 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(newTabCreated);
+
+            TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
+            Assert.True(activeControl.IsUsingNativeVtProcessor);
+
+            viewModel.ShowKittyGraphicsSampleCommand.Execute().Wait();
+            bool kittyApplied = await WaitUntilAsync(
+                () => activeControl.Screen?.HasKittyGraphics == true,
+                TimeSpan.FromSeconds(2));
+            Assert.True(kittyApplied);
+            Assert.Contains("Kitty Graphics showcase injected", viewModel.StatusText, StringComparison.Ordinal);
         }
         finally
         {
@@ -358,24 +603,13 @@ public sealed class MainWindowControllerModeStartupTests
     private static void SetRequestedMode(MainWindowViewModel viewModel, TerminalRenderMode requestedMode)
     {
         viewModel.SetRenderMode(
-            useRenderedControl: requestedMode == TerminalRenderMode.GhosttyRendered,
-            useNativeControl: requestedMode == TerminalRenderMode.GhosttyNative,
+            useRenderedControl: requestedMode == TerminalRenderMode.RenderedAuto,
             useNativeVtControl: requestedMode == TerminalRenderMode.NativeVt,
             useManagedVtControl: requestedMode == TerminalRenderMode.ManagedVt);
     }
 
     private static TerminalRenderMode GetActiveMode(MainWindowViewModel viewModel)
     {
-        if (viewModel.UseRenderedControl)
-        {
-            return TerminalRenderMode.GhosttyRendered;
-        }
-
-        if (viewModel.UseNativeControl)
-        {
-            return TerminalRenderMode.GhosttyNative;
-        }
-
         if (viewModel.UseNativeVtControl)
         {
             return TerminalRenderMode.NativeVt;
@@ -389,31 +623,16 @@ public sealed class MainWindowControllerModeStartupTests
         return TerminalRenderMode.RenderedAuto;
     }
 
-    private static TerminalRenderMode ResolveModeFromContainer(Control container)
+    private static TerminalRenderMode ResolveModeFromContainer(Control container, Button? headerButton = null)
     {
-        if (container is GhosttyRenderedTerminalControl)
+        if (container is ScrollViewer { Content: TerminalControl standalone })
         {
-            return TerminalRenderMode.GhosttyRendered;
-        }
-
-        if (container is GhosttyNativeTerminalControl)
-        {
-            return TerminalRenderMode.GhosttyNative;
-        }
-
-        if (container is ScrollViewer scrollViewer && scrollViewer.Content is TerminalControl standalone)
-        {
-            return standalone.VtProcessorPreference switch
+            if (headerButton is not null && (ToolTip.GetTip(headerButton) as string)?.StartsWith("Rendered (", StringComparison.Ordinal) == true)
             {
-                VtProcessorPreference.Native => TerminalRenderMode.NativeVt,
-                VtProcessorPreference.Managed => TerminalRenderMode.ManagedVt,
-                _ => TerminalRenderMode.RenderedAuto,
-            };
-        }
+                return TerminalRenderMode.RenderedAuto;
+            }
 
-        if (container is TerminalControl directStandalone)
-        {
-            return directStandalone.VtProcessorPreference switch
+            return standalone.VtProcessorPreference switch
             {
                 VtProcessorPreference.Native => TerminalRenderMode.NativeVt,
                 VtProcessorPreference.Managed => TerminalRenderMode.ManagedVt,
@@ -430,18 +649,49 @@ public sealed class MainWindowControllerModeStartupTests
         List<TerminalControl> controls = [];
         for (int i = 0; i < terminalHost.Children.Count; i++)
         {
-            switch (terminalHost.Children[i])
+            if (terminalHost.Children[i] is ScrollViewer { Content: TerminalControl wrapped })
             {
-                case TerminalControl direct:
-                    controls.Add(direct);
-                    break;
-                case ScrollViewer { Content: TerminalControl wrapped }:
-                    controls.Add(wrapped);
-                    break;
+                controls.Add(wrapped);
             }
         }
 
         return controls;
+    }
+
+    private static TerminalControl GetVisibleStandaloneControl(Grid terminalHost)
+    {
+        for (int i = 0; i < terminalHost.Children.Count; i++)
+        {
+            if (terminalHost.Children[i] is ScrollViewer
+                {
+                    IsVisible: true,
+                    Content: TerminalControl wrapped,
+                })
+            {
+                return wrapped;
+            }
+        }
+
+        throw new InvalidOperationException("No visible standalone terminal control was found.");
+    }
+
+    private static bool ViewportContainsHyperlink(TerminalControl control)
+    {
+        Assert.NotNull(control.Screen);
+
+        for (int row = 0; row < control.Screen!.ViewportRows; row++)
+        {
+            TerminalRow terminalRow = control.Screen.GetViewportRow(row);
+            for (int column = 0; column < terminalRow.Columns; column++)
+            {
+                if (terminalRow[column].HyperlinkId > 0)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static void AssertTerminalBehaviorSettings(
@@ -482,8 +732,6 @@ public sealed class MainWindowControllerModeStartupTests
     {
         TerminalRenderMode[] startupModes =
         [
-            TerminalRenderMode.GhosttyRendered,
-            TerminalRenderMode.GhosttyNative,
             TerminalRenderMode.NativeVt,
             TerminalRenderMode.ManagedVt,
             TerminalRenderMode.RenderedAuto,
@@ -523,7 +771,7 @@ public sealed class MainWindowControllerModeStartupTests
                 : tip.StartsWith("Managed VT", StringComparison.Ordinal)
                     ? "Managed VT"
                     : tip.StartsWith("Rendered (", StringComparison.Ordinal)
-                        ? "Rendered (Auto VT)"
+                        ? "Rendered"
                         : string.Empty;
             if (string.IsNullOrEmpty(modeName))
             {
@@ -566,7 +814,7 @@ public sealed class MainWindowControllerModeStartupTests
                 : tip.StartsWith("Managed VT", StringComparison.Ordinal)
                     ? "Managed VT"
                     : tip.StartsWith("Rendered (", StringComparison.Ordinal)
-                        ? "Rendered (Auto VT)"
+                        ? "Rendered"
                         : string.Empty;
             if (string.IsNullOrEmpty(modeName))
             {
@@ -585,5 +833,20 @@ public sealed class MainWindowControllerModeStartupTests
         }
 
         return glyphs;
+    }
+
+    private sealed class FixedTerminalModeCapabilityResolver : ITerminalModeCapabilityResolver
+    {
+        private readonly TerminalModeCapabilities _capabilities;
+
+        public FixedTerminalModeCapabilityResolver(TerminalModeCapabilities capabilities)
+        {
+            _capabilities = capabilities;
+        }
+
+        public TerminalModeCapabilities Resolve(bool nativeVtAvailable)
+        {
+            return _capabilities;
+        }
     }
 }

@@ -116,6 +116,52 @@ public sealed class PackageBoundaryTests
         Assert.DoesNotContain("RoyalTerminal.Terminal.Vt.Ghostty", output, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void PackWorkflows_UseSharedPackScript()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string ciWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "ci.yml");
+        string releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
+
+        string ciWorkflow = File.ReadAllText(ciWorkflowPath);
+        string releaseWorkflow = File.ReadAllText(releaseWorkflowPath);
+
+        Assert.Contains("bash scripts/pack-nuget.sh --configuration Release --output artifacts", ciWorkflow, StringComparison.Ordinal);
+        Assert.Contains(
+            "bash scripts/pack-nuget.sh --configuration Release --output artifacts --version",
+            releaseWorkflow,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackableProjectSet_IncludesInternalTransitivePackagesRequiredByPublishedPackages()
+    {
+        string repoRoot = FindRepositoryRoot();
+        HashSet<string> packableProjectNames = EnumeratePackableProjects(repoRoot)
+            .Select(path => Path.GetFileNameWithoutExtension(path))
+            .ToHashSet(StringComparer.Ordinal);
+
+        string[] requiredProjects =
+        [
+            "RoyalTerminal.Avalonia.Settings",
+            "RoyalTerminal.Rendering.Text",
+            "RoyalTerminal.Terminal.Transport.Pipe",
+            "RoyalTerminal.Terminal.Transport.Pty",
+            "RoyalTerminal.Terminal.Transport.Raw",
+            "RoyalTerminal.Terminal.Transport.Serial",
+            "RoyalTerminal.Terminal.Transport.Ssh.Abstractions",
+            "RoyalTerminal.Terminal.Transport.Ssh.SshNet",
+            "RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent",
+            "RoyalTerminal.Terminal.Transport.Telnet",
+            "RoyalTerminal.Unicode",
+        ];
+
+        foreach (string requiredProject in requiredProjects)
+        {
+            Assert.Contains(requiredProject, packableProjectNames);
+        }
+    }
+
     private static string FindRepositoryRoot()
     {
         DirectoryInfo? current = new(AppContext.BaseDirectory);
@@ -130,5 +176,25 @@ public sealed class PackageBoundaryTests
         }
 
         throw new DirectoryNotFoundException("Could not locate repository root from test base directory.");
+    }
+
+    private static IEnumerable<string> EnumeratePackableProjects(string repoRoot)
+    {
+        string srcRoot = Path.Combine(repoRoot, "src");
+        foreach (string projectPath in Directory.EnumerateFiles(srcRoot, "*.csproj", SearchOption.AllDirectories)
+                     .OrderBy(path => path, StringComparer.Ordinal))
+        {
+            XDocument project = XDocument.Load(projectPath);
+            bool isPackable = project
+                .Descendants()
+                .Where(element => element.Name.LocalName == "IsPackable")
+                .Select(element => element.Value?.Trim())
+                .All(value => !string.Equals(value, "false", StringComparison.OrdinalIgnoreCase));
+
+            if (isPackable)
+            {
+                yield return projectPath;
+            }
+        }
     }
 }

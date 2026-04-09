@@ -79,9 +79,9 @@ Validation:
 - Native build and runtime resolution in `native/` and `scripts/`.
 
 2. Choose affected modes and settings up front.
-- Decide whether the change touches `GhosttyRendered`, `GhosttyNative`, `NativeVt`, `ManagedVt`, or `RenderedAuto`.
+- Decide whether the change touches `NativeVt`, `ManagedVt`, or `RenderedAuto`.
 - Decide whether transport settings are `pty`, `pipe`, or `ssh`.
-- Decide whether renderer settings must preserve `CpuCellRenderer` and `TextureInterop` behavior.
+- Decide whether renderer settings must preserve the cross-platform Skia cell-renderer path and optional low-level interop packages.
 
 3. Implement with project guardrails.
 - Keep Views passive and move logic to ViewModels, services, and domain layers.
@@ -115,7 +115,6 @@ Validate `pty`, `pipe`, and `ssh` behavior independently.
 
 ### Add or Change Renderer Settings
 
-Keep `GhosttyRenderedTerminalRenderingMode` behavior explicit for CPU and interop paths.
 Preserve CPU fallback behavior for interop when target validation fails.
 Validate shaping and diagnostics toggles, and do not introduce reflection-based backend probing.
 

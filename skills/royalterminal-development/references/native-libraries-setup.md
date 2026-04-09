@@ -63,7 +63,7 @@ The native reference set covers:
 - runtime packages must contain all required native files for target RID.
 - loader probe order and environment override behavior must remain deterministic.
 - build scripts must copy outputs to runtime package directories and central `native/<rid>/` directories.
-- top-level `scripts/build-native.sh` and `scripts/build-native.ps1` currently copy `ghostty`, `ghostty-terminal`, and `ghostty-renderer-capi`; `ghostty-vt` build/copy is handled by dedicated VT/integration scripts.
+- top-level `scripts/build-native.sh` and `scripts/build-native.ps1` copy `ghostty`, `ghostty-vt`, and `ghostty-renderer-capi`.
 - `scripts/build-native.sh` currently uses `linux-x64` RID on Linux; handle `linux-arm64` outputs through dedicated build/copy steps when needed.
 - architecture must match process runtime (`x64` vs `arm64`).
 
@@ -72,7 +72,7 @@ The native reference set covers:
 Always validate:
 - native build scripts complete without missing artifacts
 - managed build succeeds after native copy step
-- runtime availability checks pass (`Ghostty.Initialize()`, `GhosttyVtProcessor.IsAvailable()`)
+- runtime availability checks pass (`GhosttyVtProcessor.IsAvailable()`)
 - full test suite for shared/native contract changes
 
 Details:

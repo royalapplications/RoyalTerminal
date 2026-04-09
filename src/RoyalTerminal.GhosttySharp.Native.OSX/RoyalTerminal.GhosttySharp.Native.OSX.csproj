@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>RoyalTerminal.GhosttySharp.Native.OSX</PackageId>
-    <Description>Native Ghostty libraries for macOS (arm64 and x64). Provides libghostty, libghostty-vt, libghostty-terminal, and libghostty-renderer-capi shared libraries required by RoyalTerminal.GhosttySharp on macOS.</Description>
+    <Description>Native Ghostty libraries for macOS (arm64 and x64). Provides libghostty-vt and libghostty-renderer-capi shared libraries for RoyalTerminal on macOS.</Description>
     <PackageTags>ghostty;terminal;native;macos;osx;arm64;x64</PackageTags>
 
     <!-- This is a native-only package, no managed assembly -->

@@ -4,6 +4,7 @@
 
 using System.Buffers;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -60,7 +61,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const int ResumePendingOutputQueueBytes = MaxPendingOutputQueueBytes / 2;
     private const int MaxPendingOutputQueueChunks = 256;
     private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
-    private static readonly DispatcherPriority PendingOutputDrainPriority = DispatcherPriority.SystemIdle;
+    // Managed VT parsing already yields in small UI batches, so draining at
+    // Background priority avoids starvation without monopolizing the UI thread.
+    private static readonly DispatcherPriority ManagedPendingOutputDrainPriority = DispatcherPriority.Background;
+    private static readonly DispatcherPriority NativePendingOutputDrainPriority = DispatcherPriority.Background;
     private static readonly long UrgentControlVtResponseSuppressionWindowTicks =
         (long)(TimeSpan.FromSeconds(1).TotalSeconds * Stopwatch.Frequency);
 
@@ -232,7 +236,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _searchTotal;
     private int _searchSelected = -1;
     private readonly List<TerminalHighlightSpan> _highlightSpanScratch = [];
-    private readonly List<SearchMatch> _searchMatchScratch = [];
+    private readonly List<TerminalSearchMatch> _searchMatchScratch = [];
     private readonly StringBuilder _rowTextScratch = new();
     private readonly StringBuilder _linkTokenScratch = new();
     private readonly List<int> _rowColumnMapScratch = [];
@@ -255,7 +259,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _pendingTransportOutputBytes;
     private int _pendingTransportUiBatchBytes;
     private int _pendingTransportUiBatchChunks;
-    private int _pendingOutputUiNotificationScheduled;
     private long _suppressTransportVtResponsesUntilTimestamp;
     private bool _pendingTransportOutputDrainScheduled;
     private bool _pendingTransportUiDrainScheduled;
@@ -339,6 +342,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     /// <summary>Gets the renderer.</summary>
     public SkiaTerminalRenderer? Renderer => _renderer;
+
+    internal IVtProcessor? ActiveVtProcessor => _vtProcessor;
 
     /// <summary>Gets the scroll data.</summary>
     public TerminalScrollData? ScrollData => _scrollData;
@@ -1207,19 +1212,30 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             TerminalScrollService.HandleOutput(_scrollData, null, AutoScroll, _presenter, RaiseScrollInvalidated);
             UpdateRendererCursorForViewport();
+            NotifyOutputUiUpdatedOnUiThread();
             return;
         }
 
         lock (_screen.SyncRoot)
         {
-            TerminalScrollService.HandleOutput(
-                _scrollData,
-                _screen,
-                AutoScroll,
-                presenter: null,
-                raiseScrollInvalidated: static () => { });
+            if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+            {
+                SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+            }
+            else
+            {
+                TerminalScrollService.HandleOutput(
+                    _scrollData,
+                    _screen,
+                    AutoScroll,
+                    presenter: null,
+                    raiseScrollInvalidated: static () => { });
+            }
+
             UpdateRendererCursorForViewportLocked();
         }
+
+        NotifyOutputUiUpdatedOnUiThread();
     }
 
     private bool ProcessOutputCore(ReadOnlySpan<byte> data)
@@ -1693,6 +1709,30 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
         }
 
+        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+        {
+            int deltaRows = e.Delta.Y > 0
+                ? -3
+                : e.Delta.Y < 0
+                    ? 3
+                    : 0;
+            if (deltaRows != 0)
+            {
+                viewportScrollSource.ScrollViewportByRows(deltaRows);
+                lock (_screen!.SyncRoot)
+                {
+                    SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+                    UpdateRendererCursorForViewportLocked();
+                }
+
+                _presenter?.Invalidate();
+                RaiseScrollInvalidated();
+            }
+
+            e.Handled = true;
+            return;
+        }
+
         TerminalScrollService.HandlePointerWheel(
             e,
             _scrollViewer,
@@ -1739,6 +1779,33 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public async Task CopySelectionAsync()
     {
         await TerminalSelectionService.CopySelectionAsync(this, TerminalSessionService, _screen, _renderer);
+    }
+
+    /// <summary>
+    /// Returns whether the active VT processor can export the requested snapshot format.
+    /// </summary>
+    public bool SupportsSnapshotFormat(TerminalSnapshotExportFormat format)
+    {
+        return _vtProcessor is ITerminalSnapshotExportSource snapshotExporter &&
+               snapshotExporter.SupportsSnapshotFormat(format);
+    }
+
+    /// <summary>
+    /// Attempts to export the active terminal snapshot through the current VT processor.
+    /// </summary>
+    public bool TryExportSnapshot(
+        TerminalSnapshotExportFormat format,
+        in TerminalSnapshotExportOptions options,
+        out string snapshot)
+    {
+        if (_vtProcessor is not ITerminalSnapshotExportSource snapshotExporter ||
+            !snapshotExporter.SupportsSnapshotFormat(format))
+        {
+            snapshot = string.Empty;
+            return false;
+        }
+
+        return snapshotExporter.TryExportSnapshot(format, options, out snapshot);
     }
 
     /// <summary>
@@ -1918,7 +1985,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void ScrollByRows(int rows)
     {
-        TerminalScrollService.ScrollByRows(rows, _scrollData, _screen, _presenter);
+        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+        {
+            viewportScrollSource.ScrollViewportByRows(rows);
+            if (_screen is not null)
+            {
+                lock (_screen.SyncRoot)
+                {
+                    SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+                }
+            }
+
+            _presenter?.Invalidate();
+        }
+        else
+        {
+            TerminalScrollService.ScrollByRows(rows, _scrollData, _screen, _presenter);
+        }
+
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
     }
@@ -1928,7 +2012,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void ScrollToBottom()
     {
-        TerminalScrollService.ScrollToBottom(_scrollData, _screen, _presenter);
+        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+        {
+            viewportScrollSource.ScrollViewportToBottom();
+            if (_screen is not null)
+            {
+                lock (_screen.SyncRoot)
+                {
+                    SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+                }
+            }
+
+            _presenter?.Invalidate();
+        }
+        else
+        {
+            TerminalScrollService.ScrollToBottom(_scrollData, _screen, _presenter);
+        }
+
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
     }
@@ -2557,7 +2658,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (scheduleUiDrain)
         {
-            Dispatcher.UIThread.Post(DrainPendingTransportOutputUiBatches, PendingOutputDrainPriority);
+            Dispatcher.UIThread.Post(DrainPendingTransportOutputUiBatches, ManagedPendingOutputDrainPriority);
         }
     }
 
@@ -2629,12 +2730,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (scheduleContinuation)
         {
-            Dispatcher.UIThread.Post(DrainPendingTransportOutputUiBatches, PendingOutputDrainPriority);
-        }
-
-        if (processedChunks > 0)
-        {
-            ScheduleOutputUiNotifications();
+            Dispatcher.UIThread.Post(DrainPendingTransportOutputUiBatches, ManagedPendingOutputDrainPriority);
         }
     }
 
@@ -2687,8 +2783,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _pendingTransportUiDrainScheduled = false;
             Monitor.PulseAll(_pendingTransportOutputSync);
         }
-
-        Interlocked.Exchange(ref _pendingOutputUiNotificationScheduled, 0);
     }
 
     private void SetPendingTransportOutputAcceptance(bool acceptOutput)
@@ -2710,7 +2804,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        Dispatcher.UIThread.Post(DrainPendingTransportOutput, PendingOutputDrainPriority);
+        Dispatcher.UIThread.Post(DrainPendingTransportOutput, NativePendingOutputDrainPriority);
     }
 
     private void SchedulePendingTransportOutputDrainIfNeeded()
@@ -2761,19 +2855,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                GetPendingTransportBacklogChunksLocked() <= ResumePendingOutputQueueChunks;
     }
 
-    private void ScheduleOutputUiNotifications()
+    private void NotifyOutputUiUpdatedOnUiThread()
     {
-        if (Interlocked.CompareExchange(ref _pendingOutputUiNotificationScheduled, 1, 0) != 0)
-        {
-            return;
-        }
-
-        Dispatcher.UIThread.Post(DispatchOutputUiNotifications, PendingOutputDrainPriority);
-    }
-
-    private void DispatchOutputUiNotifications()
-    {
-        Interlocked.Exchange(ref _pendingOutputUiNotificationScheduled, 0);
         _presenter?.Invalidate();
         RaiseScrollInvalidated();
     }
@@ -2828,13 +2911,28 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
         }
 
-        if (!_mouseModeTracker.ModeState.IsMouseReportingEnabled ||
-            !HasTransportOrDirectPtyInputPath())
+        if (!HasTransportOrDirectPtyInputPath())
         {
             return false;
         }
 
-        if (!TryResolvePointerCell(pointerEvent.X, pointerEvent.Y, out int column, out int row))
+        if (_vtProcessor is ITerminalPointerSequenceEncoderSource nativeEncoder &&
+            _renderer is not null &&
+            nativeEncoder.TryEncodePointer(
+                pointerEvent,
+                new TerminalPointerEncodingContext(
+                    ScreenWidthPx: Math.Max(1, (int)Math.Round(Bounds.Width)),
+                    ScreenHeightPx: Math.Max(1, (int)Math.Round(Bounds.Height)),
+                    CellWidthPx: Math.Max(1, (int)Math.Ceiling(_renderer.CellWidth)),
+                    CellHeightPx: Math.Max(1, (int)Math.Ceiling(_renderer.CellHeight))),
+                out byte[] nativeEncoded))
+        {
+            TerminalSessionService.SendInput(nativeEncoded);
+            return true;
+        }
+
+        if (!_mouseModeTracker.ModeState.IsMouseReportingEnabled ||
+            !TryResolvePointerCell(pointerEvent.X, pointerEvent.Y, out int column, out int row))
         {
             return false;
         }
@@ -2855,6 +2953,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool IsMouseReportingActiveForInput()
     {
+        if (_vtProcessor is ITerminalMouseReportingStateSource nativeSource &&
+            nativeSource.MouseReportingEnabled)
+        {
+            return TerminalSessionService.InputSink is not null ||
+                HasTransportOrDirectPtyInputPath();
+        }
+
         if (!_mouseModeTracker.ModeState.IsMouseReportingEnabled)
         {
             return false;
@@ -3262,7 +3367,60 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _searchMatchScratch.Clear();
-        int viewportTopAbsoluteRow = Math.Max(0, _screen.TotalRows - _screen.ViewportRows - _screen.ScrollOffset);
+        if (_vtProcessor is ITerminalSearchSource terminalSearchSource)
+        {
+            terminalSearchSource.PopulateSearchMatches(needle, _searchMatchScratch);
+        }
+        else
+        {
+            PopulateSearchMatchesFromScreenLocked(needle);
+        }
+
+        _searchTotal = _searchMatchScratch.Count;
+        if (_searchTotal <= 0)
+        {
+            _searchSelected = -1;
+            return;
+        }
+
+        if (_searchSelected < 0)
+        {
+            _searchSelected = 0;
+        }
+        else if (_searchSelected >= _searchTotal)
+        {
+            _searchSelected = _searchTotal - 1;
+        }
+
+        int viewportTopAbsoluteRow = GetViewportTopAbsoluteRowLocked();
+        for (int index = 0; index < _searchMatchScratch.Count; index++)
+        {
+            TerminalSearchMatch match = _searchMatchScratch[index];
+            int viewportRow = match.AbsoluteRow - viewportTopAbsoluteRow;
+            if ((uint)viewportRow >= (uint)_screen.ViewportRows)
+            {
+                continue;
+            }
+
+            TerminalHighlightKind kind = index == _searchSelected
+                ? TerminalHighlightKind.SearchSelected
+                : TerminalHighlightKind.SearchMatch;
+            _highlightSpanScratch.Add(
+                new TerminalHighlightSpan(
+                    viewportRow,
+                    match.StartColumn,
+                    match.EndColumn,
+                    kind));
+        }
+    }
+
+    private void PopulateSearchMatchesFromScreenLocked(string needle)
+    {
+        if (_screen is null)
+        {
+            return;
+        }
+
         for (int absoluteRow = 0; absoluteRow < _screen.TotalRows; absoluteRow++)
         {
             TerminalRow terminalRow = _screen.GetRow(absoluteRow);
@@ -3286,46 +3444,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 {
                     int startColumn = _rowColumnMapScratch[found];
                     int endColumn = _rowColumnMapScratch[mapEnd];
-                    _searchMatchScratch.Add(new SearchMatch(absoluteRow, startColumn, endColumn));
+                    _searchMatchScratch.Add(new TerminalSearchMatch(absoluteRow, startColumn, endColumn));
                 }
+
                 searchFrom = found + Math.Max(needle.Length, 1);
             }
-        }
-
-        _searchTotal = _searchMatchScratch.Count;
-        if (_searchTotal <= 0)
-        {
-            _searchSelected = -1;
-            return;
-        }
-
-        if (_searchSelected < 0)
-        {
-            _searchSelected = 0;
-        }
-        else if (_searchSelected >= _searchTotal)
-        {
-            _searchSelected = _searchTotal - 1;
-        }
-
-        for (int index = 0; index < _searchMatchScratch.Count; index++)
-        {
-            SearchMatch match = _searchMatchScratch[index];
-            int viewportRow = match.AbsoluteRow - viewportTopAbsoluteRow;
-            if ((uint)viewportRow >= (uint)_screen.ViewportRows)
-            {
-                continue;
-            }
-
-            TerminalHighlightKind kind = index == _searchSelected
-                ? TerminalHighlightKind.SearchSelected
-                : TerminalHighlightKind.SearchMatch;
-            _highlightSpanScratch.Add(
-                new TerminalHighlightSpan(
-                    viewportRow,
-                    match.StartColumn,
-                    match.EndColumn,
-                    kind));
         }
     }
 
@@ -3648,6 +3771,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
+        ITerminalViewportScrollSource? viewportScrollSource = null;
+        int nextTopAbsoluteRow = 0;
         bool changed = false;
         lock (_screen.SyncRoot)
         {
@@ -3657,31 +3782,53 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
 
             int selectedAbsoluteRow = _searchMatchScratch[_searchSelected].AbsoluteRow;
-            int viewportTopAbsoluteRow = Math.Max(0, _screen.TotalRows - _screen.ViewportRows - _screen.ScrollOffset);
+            if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? nativeViewportScrollSource))
+            {
+                viewportScrollSource = nativeViewportScrollSource;
+            }
+
+            int viewportTopAbsoluteRow = GetViewportTopAbsoluteRowLocked(viewportScrollSource);
             int viewportBottomAbsoluteRow = viewportTopAbsoluteRow + _screen.ViewportRows - 1;
             if (selectedAbsoluteRow >= viewportTopAbsoluteRow && selectedAbsoluteRow <= viewportBottomAbsoluteRow)
             {
                 return false;
             }
 
-            int maxTopAbsoluteRow = Math.Max(0, _screen.TotalRows - _screen.ViewportRows);
-            int nextTopAbsoluteRow = selectedAbsoluteRow < viewportTopAbsoluteRow
-                ? selectedAbsoluteRow
-                : selectedAbsoluteRow - _screen.ViewportRows + 1;
-            nextTopAbsoluteRow = Math.Clamp(nextTopAbsoluteRow, 0, maxTopAbsoluteRow);
-            int nextScrollOffset = _screen.TotalRows - _screen.ViewportRows - nextTopAbsoluteRow;
-            nextScrollOffset = Math.Clamp(nextScrollOffset, 0, _screen.MaxScrollOffset);
-            if (_screen.ScrollOffset != nextScrollOffset)
+            if (viewportScrollSource is not null)
             {
-                _screen.ScrollOffset = nextScrollOffset;
-                _screen.InvalidateViewport();
-                changed = true;
+                int maxTopAbsoluteRow = GetViewportMaxTopAbsoluteRow(viewportScrollSource.ViewportScrollState);
+                nextTopAbsoluteRow = selectedAbsoluteRow < viewportTopAbsoluteRow
+                    ? selectedAbsoluteRow
+                    : selectedAbsoluteRow - _screen.ViewportRows + 1;
+                nextTopAbsoluteRow = Math.Clamp(nextTopAbsoluteRow, 0, maxTopAbsoluteRow);
+                changed = (ulong)nextTopAbsoluteRow != GetViewportTopAbsoluteRowUlong(viewportScrollSource.ViewportScrollState);
+            }
+            else
+            {
+                int maxTopAbsoluteRow = Math.Max(0, _screen.TotalRows - _screen.ViewportRows);
+                nextTopAbsoluteRow = selectedAbsoluteRow < viewportTopAbsoluteRow
+                    ? selectedAbsoluteRow
+                    : selectedAbsoluteRow - _screen.ViewportRows + 1;
+                nextTopAbsoluteRow = Math.Clamp(nextTopAbsoluteRow, 0, maxTopAbsoluteRow);
+                int nextScrollOffset = _screen.TotalRows - _screen.ViewportRows - nextTopAbsoluteRow;
+                nextScrollOffset = Math.Clamp(nextScrollOffset, 0, _screen.MaxScrollOffset);
+                if (_screen.ScrollOffset != nextScrollOffset)
+                {
+                    _screen.ScrollOffset = nextScrollOffset;
+                    _screen.InvalidateViewport();
+                    changed = true;
+                }
             }
         }
 
         if (!changed)
         {
             return false;
+        }
+
+        if (viewportScrollSource is not null)
+        {
+            viewportScrollSource.SetViewportOffsetRows((ulong)nextTopAbsoluteRow);
         }
 
         SyncScrollDataFromScreenOffset();
@@ -3853,6 +4000,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         lock (_screen.SyncRoot)
         {
+            if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+            {
+                SyncNativeViewportFromScrollDataLocked(viewportScrollSource);
+                return;
+            }
+
             int nextOffset = _scrollData.ToScreenScrollOffsetRows(_screen.MaxScrollOffset);
             if (_screen.ScrollOffset == nextOffset)
             {
@@ -3864,10 +4017,123 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
     }
 
+    private bool TryGetViewportScrollSource([NotNullWhen(true)] out ITerminalViewportScrollSource? viewportScrollSource)
+    {
+        viewportScrollSource = _vtProcessor as ITerminalViewportScrollSource;
+        return viewportScrollSource is not null && _scrollData is not null && _screen is not null;
+    }
+
+    private int GetViewportTopAbsoluteRowLocked(ITerminalViewportScrollSource? viewportScrollSource = null)
+    {
+        if (_screen is null)
+        {
+            return 0;
+        }
+
+        if (viewportScrollSource is null && !TryGetViewportScrollSource(out viewportScrollSource))
+        {
+            return Math.Max(0, _screen.TotalRows - _screen.ViewportRows - _screen.ScrollOffset);
+        }
+
+        ulong topAbsoluteRow = GetViewportTopAbsoluteRowUlong(viewportScrollSource.ViewportScrollState);
+        return topAbsoluteRow > int.MaxValue
+            ? int.MaxValue
+            : (int)topAbsoluteRow;
+    }
+
+    private static ulong GetViewportTopAbsoluteRowUlong(TerminalViewportScrollState viewportState)
+    {
+        return Math.Min(viewportState.OffsetRows, viewportState.MaxOffsetRows);
+    }
+
+    private static int GetViewportMaxTopAbsoluteRow(TerminalViewportScrollState viewportState)
+    {
+        ulong maxTopAbsoluteRow = viewportState.MaxOffsetRows;
+        return maxTopAbsoluteRow > int.MaxValue
+            ? int.MaxValue
+            : (int)maxTopAbsoluteRow;
+    }
+
+    private void SyncScrollDataFromNativeViewportLocked(ITerminalViewportScrollSource viewportScrollSource)
+    {
+        if (_scrollData is null || _screen is null)
+        {
+            return;
+        }
+
+        TerminalViewportScrollState viewportState = viewportScrollSource.ViewportScrollState;
+        double cellHeight = Math.Max(1d, _scrollData.CellHeight);
+        int totalRows = viewportState.TotalRows > int.MaxValue
+            ? int.MaxValue
+            : (int)viewportState.TotalRows;
+        _scrollData.Extent = totalRows * cellHeight;
+
+        ulong clampedOffsetRows = Math.Min(viewportState.OffsetRows, viewportState.MaxOffsetRows);
+        double targetOffset = clampedOffsetRows * cellHeight;
+        if (targetOffset > _scrollData.MaxOffset)
+        {
+            targetOffset = _scrollData.MaxOffset;
+        }
+
+        _scrollData.Offset = targetOffset;
+
+        if (_screen.ScrollOffset != 0)
+        {
+            _screen.ScrollOffset = 0;
+            _screen.InvalidateViewport();
+        }
+    }
+
+    private void SyncNativeViewportFromScrollDataLocked(ITerminalViewportScrollSource viewportScrollSource)
+    {
+        if (_scrollData is null || _screen is null)
+        {
+            return;
+        }
+
+        TerminalViewportScrollState viewportState = viewportScrollSource.ViewportScrollState;
+        ulong maxOffsetRows = viewportState.MaxOffsetRows;
+        ulong targetOffsetRows;
+        if (_scrollData.MaxOffset <= 0 || maxOffsetRows == 0)
+        {
+            targetOffsetRows = 0;
+        }
+        else
+        {
+            double normalizedOffset = _scrollData.Offset / _scrollData.MaxOffset;
+            normalizedOffset = Math.Clamp(normalizedOffset, 0d, 1d);
+            targetOffsetRows = (ulong)Math.Round(normalizedOffset * maxOffsetRows, MidpointRounding.AwayFromZero);
+        }
+
+        if (targetOffsetRows == viewportState.OffsetRows)
+        {
+            if (_screen.ScrollOffset != 0)
+            {
+                _screen.ScrollOffset = 0;
+                _screen.InvalidateViewport();
+            }
+
+            return;
+        }
+
+        viewportScrollSource.SetViewportOffsetRows(targetOffsetRows);
+        SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+    }
+
     private void SyncScrollDataFromScreenOffset()
     {
         if (_scrollData is null || _screen is null)
         {
+            return;
+        }
+
+        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+        {
+            lock (_screen.SyncRoot)
+            {
+                SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+            }
+
             return;
         }
 
@@ -3912,14 +4178,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         int cursorColumn = _vtProcessor.CursorCol;
-        int cursorRow = _vtProcessor.CursorRow + _screen.ScrollOffset;
+        int cursorRow = _vtProcessor.CursorRow;
+        bool atLiveBottom;
+        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+        {
+            atLiveBottom = viewportScrollSource.ViewportScrollState.OffsetRows >= viewportScrollSource.ViewportScrollState.MaxOffsetRows;
+        }
+        else
+        {
+            cursorRow += _screen.ScrollOffset;
+            atLiveBottom = _screen.ScrollOffset == 0;
+        }
+
         _renderer.CursorColumn = cursorColumn;
         _renderer.CursorRow = cursorRow;
         bool blinkEnabled = UpdateRendererCursorStyleFromVtProcessor();
 
         bool rowVisible = (uint)cursorRow < (uint)_screen.ViewportRows;
         bool columnVisible = (uint)cursorColumn < (uint)_screen.Columns;
-        bool atLiveBottom = _screen.ScrollOffset == 0;
         bool baseVisible = _vtProcessor.CursorVisible && atLiveBottom && rowVisible && columnVisible;
         bool blinkPhaseActive = blinkEnabled && IsFocused;
 
@@ -4000,8 +4276,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _ => CursorStyle.Block,
         };
     }
-
-    private readonly record struct SearchMatch(int AbsoluteRow, int StartColumn, int EndColumn);
 
     private static Color ArgbToAvaloniaColor(uint argb) =>
         Color.FromArgb(

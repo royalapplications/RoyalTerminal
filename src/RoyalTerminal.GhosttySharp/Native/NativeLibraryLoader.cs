@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 namespace RoyalTerminal.GhosttySharp.Native;
 
 /// <summary>
-/// Handles cross-platform native library resolution for the Ghostty native library.
+/// Handles cross-platform native library resolution for the official Ghostty VT library.
 /// Registers a custom <see cref="NativeLibrary"/> resolver that searches platform-specific
 /// runtime directories following the NuGet native package convention.
 /// </summary>
@@ -16,6 +16,10 @@ public static class NativeLibraryLoader
 {
     private static bool s_initialized;
     private static readonly object s_lock = new();
+    private static readonly Dictionary<string, string> s_libraryFileNames = new(StringComparer.Ordinal)
+    {
+        ["ghostty-vt"] = GetLibraryFileName("ghostty-vt"),
+    };
 
     /// <summary>
     /// Initializes the native library resolver. Safe to call multiple times.
@@ -28,14 +32,14 @@ public static class NativeLibraryLoader
         {
             if (s_initialized) return;
 
-            NativeLibrary.SetDllImportResolver(typeof(GhosttyNative).Assembly, ResolveLibrary);
+            NativeLibrary.SetDllImportResolver(typeof(GhosttyVtNative).Assembly, ResolveLibrary);
             s_initialized = true;
         }
     }
 
     private static nint ResolveLibrary(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
-        if (libraryName != GhosttyNative.LibraryName)
+        if (!s_libraryFileNames.TryGetValue(libraryName, out string? libraryFileName))
             return nint.Zero;
 
         // Try standard resolution first
@@ -44,7 +48,6 @@ public static class NativeLibraryLoader
 
         // Try platform-specific paths
         var rid = GetRuntimeIdentifier();
-        var libraryFileName = GetLibraryFileName();
 
         // Search paths in priority order
         string[] searchPaths =
@@ -100,12 +103,12 @@ public static class NativeLibraryLoader
         return "unknown";
     }
 
-    private static string GetLibraryFileName()
+    private static string GetLibraryFileName(string libraryName)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            return "ghostty.dll";
+            return $"{libraryName}.dll";
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            return "libghostty.dylib";
-        return "libghostty.so";
+            return $"lib{libraryName}.dylib";
+        return $"lib{libraryName}.so";
     }
 }

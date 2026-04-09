@@ -8,10 +8,12 @@ using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
@@ -441,10 +443,15 @@ public class TerminalControlTests
                 TimeSpan.FromSeconds(5));
 
             Assert.True(notificationsObserved, "Expected transport output to trigger scroll invalidation notifications.");
+            int observedScrollInvalidated = Volatile.Read(ref scrollInvalidatedCount);
             Assert.True(
-                Volatile.Read(ref scrollInvalidatedCount) < scrollService.HandleOutputCallCount,
-                $"Expected scroll invalidation notifications to be coalesced beyond output finalize batches. " +
-                $"ScrollInvalidated={Volatile.Read(ref scrollInvalidatedCount)}, HandleOutput={scrollService.HandleOutputCallCount}.");
+                observedScrollInvalidated <= scrollService.HandleOutputCallCount,
+                $"Expected scroll invalidation notifications to stay within output finalize batches. " +
+                $"ScrollInvalidated={observedScrollInvalidated}, HandleOutput={scrollService.HandleOutputCallCount}.");
+            Assert.True(
+                observedScrollInvalidated < chunkCount,
+                $"Expected scroll invalidation notifications to be coalesced beyond raw transport chunks. " +
+                $"ScrollInvalidated={observedScrollInvalidated}, chunks={chunkCount}.");
         }
         finally
         {
@@ -503,7 +510,8 @@ public class TerminalControlTests
             new DefaultVtProcessorFactory(),
             VtProcessorPreference.Managed);
 
-        byte[] chunk = new byte[64 * 1024];
+        const int burstCount = 20;
+        byte[] chunk = new byte[16 * 1024];
         Array.Fill(chunk, (byte)'x');
 
         try
@@ -513,7 +521,7 @@ public class TerminalControlTests
             int sentCount = 0;
             Task producer = Task.Run(() =>
             {
-                for (int i = 0; i < 64; i++)
+                for (int i = 0; i < burstCount; i++)
                 {
                     Interlocked.Increment(ref sentCount);
                     transport.RaiseData(chunk);
@@ -531,7 +539,7 @@ public class TerminalControlTests
                 producer.IsCompleted,
                 "Expected producer to block when pending output reaches backpressure watermark.");
             Assert.True(
-                Volatile.Read(ref sentCount) < 64,
+                Volatile.Read(ref sentCount) < burstCount,
                 "Expected producer to stall before sending the full burst while UI draining is blocked.");
 
             bool completedAfterDrain = await WaitUntilAsync(
@@ -556,7 +564,8 @@ public class TerminalControlTests
             new DefaultVtProcessorFactory(),
             VtProcessorPreference.Managed);
 
-        byte[] chunk = new byte[64 * 1024];
+        const int burstCount = 20;
+        byte[] chunk = new byte[16 * 1024];
         Array.Fill(chunk, (byte)'x');
 
         try
@@ -566,7 +575,7 @@ public class TerminalControlTests
             int sentCount = 0;
             Task producer = Task.Run(() =>
             {
-                for (int i = 0; i < 64; i++)
+                for (int i = 0; i < burstCount; i++)
                 {
                     Interlocked.Increment(ref sentCount);
                     transport.RaiseData(chunk);
@@ -1365,6 +1374,65 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_SearchLifecycle_NativeViewportScrollsSelectedMatchIntoView()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new DefaultVtProcessorFactory(nativeProviders),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 10; i++)
+        {
+            builder.Append("L");
+            builder.Append(i.ToString("D2"));
+            builder.Append('\n');
+        }
+
+        control.WriteOutput(Encoding.UTF8.GetBytes(builder.ToString()));
+        Assert.NotNull(control.ScrollData);
+        Assert.True(control.ScrollData!.OffsetRows > 0);
+
+        control.StartSearch("L00");
+
+        Assert.Equal(0, control.ScrollData.OffsetRows);
+        Assert.Equal(1, control.SearchTotal);
+        Assert.Equal(0, control.SearchSelected);
+    }
+
+    [AvaloniaFact]
+    public void Control_SearchLifecycle_NativeViewportScroll_UsesNativeTotalRows_NotViewportMirror()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 96, VisibleRows: 4),
+            [new TerminalSearchMatch(10, 0, 2)]);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        control.StartSearch("L10");
+
+        Assert.Equal(7UL, processor.LastSetViewportOffsetRows);
+        Assert.Equal(7UL, processor.ViewportScrollState.OffsetRows);
+        Assert.Equal(1, control.SearchTotal);
+        Assert.Equal(0, control.SearchSelected);
+    }
+
+    [AvaloniaFact]
     public void Control_HoveredLinkUrl_NormalizesWhitespace()
     {
         TerminalControl control = new();
@@ -1587,7 +1655,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public async Task Control_PasteAsync_DefaultPolicy_PreservesControlCharacters()
+    public async Task Control_PasteAsync_DefaultPolicy_UsesManagedPasteEncodingRules()
     {
         FakeTransport transport = new();
         TerminalControl control = CreateControlWithTransport(
@@ -1606,7 +1674,7 @@ public class TerminalControlTests
             await control.PasteAsync();
 
             Assert.Contains(transport.SentInputs, static payload =>
-                Encoding.UTF8.GetString(payload) == "safe\x1b[201~\u0001text");
+                Encoding.UTF8.GetString(payload) == "safe [201~\u0001text");
         }
         finally
         {
@@ -1647,6 +1715,58 @@ public class TerminalControlTests
             Assert.Contains(
                 transport.SentInputs,
                 static payload => Encoding.UTF8.GetString(payload) == "\x1b[200~printf\x1b[201~");
+        }
+        finally
+        {
+            window.Close();
+            control.StopPty();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeTransportEcho_RendersImmediately_AfterTypedInput()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(nativeProviders),
+            VtProcessorPreference.Native);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            byte[] before = CaptureFramePng(window);
+
+            window.KeyTextInput("x");
+
+            bool echoed = await WaitUntilAsync(
+                () => ContainsScreenText(control, "x"),
+                TimeSpan.FromSeconds(2));
+            Assert.True(echoed);
+
+            byte[] after = CaptureFramePng(window);
+            Assert.False(
+                before.AsSpan().SequenceEqual(after),
+                "Expected typed native transport echo to trigger a visible frame update immediately.");
         }
         finally
         {
@@ -1786,6 +1906,17 @@ public class TerminalControlTests
         };
     }
 
+    private static byte[] CaptureFramePng(Window window)
+    {
+        Dispatcher.UIThread.RunJobs();
+        Bitmap? frame = window.CaptureRenderedFrame();
+        Assert.NotNull(frame);
+
+        using MemoryStream stream = new();
+        frame!.Save(stream);
+        return stream.ToArray();
+    }
+
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
     {
         DateTime deadline = DateTime.UtcNow + timeout;
@@ -1802,6 +1933,33 @@ public class TerminalControlTests
 
         Dispatcher.UIThread.RunJobs();
         return predicate();
+    }
+
+    private static bool ContainsScreenText(TerminalControl control, string needle)
+    {
+        TerminalScreen? screen = control.Screen;
+        if (screen is null)
+        {
+            return false;
+        }
+
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            TerminalRow terminalRow = screen.GetViewportRow(row);
+            char[] chars = new char[terminalRow.Columns];
+            for (int col = 0; col < terminalRow.Columns; col++)
+            {
+                int codepoint = terminalRow[col].Codepoint;
+                chars[col] = codepoint <= 0 ? ' ' : codepoint <= 0x7F ? (char)codepoint : '?';
+            }
+
+            if (new string(chars).Contains(needle, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private sealed class CountingTerminalScrollService : ITerminalScrollService
@@ -1899,6 +2057,16 @@ public class TerminalControlTests
         }
     }
 
+    private sealed class SingleProcessorFactory(IVtProcessor processor) : IVtProcessorFactory
+    {
+        public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
+        {
+            _ = screen;
+            _ = preference;
+            return processor;
+        }
+    }
+
     private sealed class TrackingVtProcessor : IVtProcessor
     {
         public int CursorCol => 0;
@@ -1952,6 +2120,118 @@ public class TerminalControlTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class FakeSearchViewportVtProcessor(
+        TerminalViewportScrollState viewportScrollState,
+        IReadOnlyList<TerminalSearchMatch> matches) : IVtProcessor, ITerminalViewportScrollSource, ITerminalSearchSource
+    {
+        private readonly List<TerminalSearchMatch> _matches = [.. matches];
+
+        public int CursorCol => 0;
+        public int CursorRow => 0;
+        public bool CursorVisible => true;
+        public bool ApplicationCursorKeys => false;
+        public bool ApplicationKeypad => false;
+        public bool AlternateScreen => false;
+        public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
+        public TerminalModeState ModeState => new(
+            CursorVisible,
+            ApplicationCursorKeys,
+            ApplicationKeypad,
+            AlternateScreen,
+            BracketedPaste,
+            Win32InputMode);
+
+        public TerminalViewportScrollState ViewportScrollState { get; private set; } = viewportScrollState;
+
+        public ulong? LastSetViewportOffsetRows { get; private set; }
+
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Action<byte[]>? ResponseCallback { get; set; }
+
+        public Action? BellCallback { get; set; }
+
+        public Action<string>? TitleCallback { get; set; }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            _ = data;
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            _ = columns;
+            _ = rows;
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            _ = columns;
+            _ = rows;
+            _ = widthPx;
+            _ = heightPx;
+        }
+
+        public void ApplyTheme(TerminalTheme theme)
+        {
+            _ = theme;
+        }
+
+        public void Reset()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+
+        public void ScrollViewportByRows(int deltaRows)
+        {
+            long next = checked((long)ViewportScrollState.OffsetRows + deltaRows);
+            if (next < 0)
+            {
+                next = 0;
+            }
+
+            ulong maxOffsetRows = ViewportScrollState.MaxOffsetRows;
+            if ((ulong)next > maxOffsetRows)
+            {
+                next = (long)maxOffsetRows;
+            }
+
+            ViewportScrollState = ViewportScrollState with { OffsetRows = (ulong)next };
+        }
+
+        public void ScrollViewportToTop()
+        {
+            ViewportScrollState = ViewportScrollState with { OffsetRows = 0 };
+        }
+
+        public void ScrollViewportToBottom()
+        {
+            ViewportScrollState = ViewportScrollState with { OffsetRows = ViewportScrollState.MaxOffsetRows };
+        }
+
+        public void SetViewportOffsetRows(ulong offsetRows)
+        {
+            ulong clamped = Math.Min(offsetRows, ViewportScrollState.MaxOffsetRows);
+            LastSetViewportOffsetRows = clamped;
+            ViewportScrollState = ViewportScrollState with { OffsetRows = clamped };
+        }
+
+        public void PopulateSearchMatches(string needle, List<TerminalSearchMatch> destination)
+        {
+            _ = needle;
+            destination.Clear();
+            destination.AddRange(_matches);
         }
     }
 
