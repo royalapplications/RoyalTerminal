@@ -1,0 +1,401 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+import { apiPackageGroups, apiPackages, nativeAssetPackages } from "../.vitepress/api-packages.mjs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, "../..");
+const docsRoot = path.join(repoRoot, "docs");
+const apiRoot = path.join(docsRoot, "api");
+const directoryBuildPropsPath = path.join(repoRoot, "Directory.Build.props");
+
+function run(command, args, cwd = repoRoot) {
+  const result = spawnSync(command, args, {
+    cwd,
+    stdio: "inherit"
+  });
+
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
+}
+
+function getTagValue(xml, tagName) {
+  const match = xml.match(new RegExp(`<${tagName}>([\\s\\S]*?)</${tagName}>`, "i"));
+  return match?.[1].trim();
+}
+
+function toPosix(value) {
+  return value.split(path.sep).join("/");
+}
+
+function getProjectDirectory(projectPath) {
+  return path.dirname(projectPath);
+}
+
+async function readProjectMetadata(pkg) {
+  const fullProjectPath = path.join(repoRoot, pkg.project);
+  const xml = await fs.readFile(fullProjectPath, "utf8");
+
+  return {
+    ...pkg,
+    referenceMode: pkg.referenceMode ?? "generated",
+    description: getTagValue(xml, "Description") ?? `${pkg.packageId} managed API surface.`,
+    assemblyName: getTagValue(xml, "AssemblyName") ?? path.basename(fullProjectPath, ".csproj"),
+    projectDirectory: getProjectDirectory(pkg.project)
+  };
+}
+
+async function getTargetFramework() {
+  const xml = await fs.readFile(directoryBuildPropsPath, "utf8");
+  return getTagValue(xml, "TargetFramework") ?? "net10.0";
+}
+
+async function normalizeMarkdown(outputDirectory) {
+  const entries = await fs.readdir(outputDirectory, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(outputDirectory, entry.name);
+
+    if (entry.isDirectory()) {
+      await normalizeMarkdown(fullPath);
+      continue;
+    }
+
+    if (!entry.isFile() || !entry.name.endsWith(".md")) {
+      continue;
+    }
+
+    let content = await fs.readFile(fullPath, "utf8");
+    content = content.replace(/\.md\.md/g, ".md");
+    content = content.replace(/!:\b([A-Za-z_][A-Za-z0-9_\.]*)/g, "`$1`");
+    await fs.writeFile(fullPath, content);
+  }
+}
+
+async function getNamespaceLinks(outputDirectory) {
+  const entries = await fs.readdir(outputDirectory, { withFileTypes: true });
+
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith("Namespace.md"))
+    .map((entry) => ({
+      name: entry.name.replace(/Namespace\.md$/, ""),
+      link: `./${entry.name}`
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function getSourceFiles(directory) {
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(directory, entry.name);
+
+    if (entry.isDirectory()) {
+      if (entry.name === "bin" || entry.name === "obj") {
+        continue;
+      }
+
+      files.push(...(await getSourceFiles(fullPath)));
+      continue;
+    }
+
+    if (entry.isFile() && entry.name.endsWith(".cs")) {
+      files.push(fullPath);
+    }
+  }
+
+  return files;
+}
+
+async function collectPublicTypes(pkg) {
+  const sourceDirectory = path.join(repoRoot, pkg.projectDirectory);
+  const sourceFiles = await getSourceFiles(sourceDirectory);
+  const types = new Map();
+
+  for (const sourceFile of sourceFiles) {
+    const content = await fs.readFile(sourceFile, "utf8");
+    const namespaceMatch = content.match(/^\s*namespace\s+([A-Za-z0-9_.]+)\s*[;{]/m);
+
+    if (!namespaceMatch) {
+      continue;
+    }
+
+    const namespaceName = namespaceMatch[1];
+    const sourcePath = toPosix(path.relative(repoRoot, sourceFile));
+    const typeRegex =
+      /^\s*public\s+(?:(?:unsafe|readonly|sealed|static|partial|abstract)\s+)*(class|struct|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/gm;
+    const delegateRegex =
+      /^\s*public\s+(?:(?:unsafe|readonly|sealed|static|partial|abstract)\s+)*delegate\s+.+?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+
+    for (const match of content.matchAll(typeRegex)) {
+      const key = `${namespaceName}:${match[1]}:${match[2]}`;
+      const existing =
+        types.get(key) ??
+        {
+          namespaceName,
+          kind: match[1],
+          name: match[2],
+          sourcePaths: new Set()
+        };
+
+      existing.sourcePaths.add(sourcePath);
+      types.set(key, existing);
+    }
+
+    for (const match of content.matchAll(delegateRegex)) {
+      const key = `${namespaceName}:delegate:${match[1]}`;
+      const existing =
+        types.get(key) ??
+        {
+          namespaceName,
+          kind: "delegate",
+          name: match[1],
+          sourcePaths: new Set()
+        };
+
+      existing.sourcePaths.add(sourcePath);
+      types.set(key, existing);
+    }
+  }
+
+  return Array.from(types.values())
+    .map((type) => ({
+      ...type,
+      sourcePaths: Array.from(type.sourcePaths).sort((left, right) => left.localeCompare(right))
+    }))
+    .sort((left, right) => {
+      const namespaceCompare = left.namespaceName.localeCompare(right.namespaceName);
+
+      if (namespaceCompare !== 0) {
+        return namespaceCompare;
+      }
+
+      return left.name.localeCompare(right.name);
+    });
+}
+
+async function writePackageIndex(pkg, outputDirectory) {
+  const namespaceLinks = await getNamespaceLinks(outputDirectory);
+  const lines = [
+    "---",
+    `title: ${pkg.packageId} API`,
+    "---",
+    "",
+    `# ${pkg.packageId} API`,
+    "",
+    `Generated API reference for \`${pkg.packageId}\`.`,
+    "",
+    pkg.description,
+    "",
+    "## Package",
+    "",
+    `- Package ID: \`${pkg.packageId}\``,
+    `- Source project: \`${pkg.project}\``,
+    `- Related guide: [${pkg.guideTitle}](${pkg.guideLink})`,
+    "",
+    "## Entry Points",
+    "",
+    `- [Assembly overview](./${pkg.assemblyName}.md)`,
+  ];
+
+  if (namespaceLinks.length > 0) {
+    lines.push("", "## Namespaces", "");
+
+    for (const namespaceLink of namespaceLinks) {
+      lines.push(`- [${namespaceLink.name}](${namespaceLink.link})`);
+    }
+  }
+
+  lines.push(
+    "",
+    "## Notes",
+    "",
+    "- This section is generated from the package's public XML documentation comments.",
+    "- Use the related guide for task-oriented integration and architecture walkthroughs."
+  );
+
+  await fs.writeFile(path.join(outputDirectory, "index.md"), `${lines.join("\n")}\n`);
+}
+
+async function writeSourceIndexPackage(pkg, outputDirectory) {
+  const publicTypes = await collectPublicTypes(pkg);
+  const groupedTypes = new Map();
+
+  for (const publicType of publicTypes) {
+    const bucket = groupedTypes.get(publicType.namespaceName) ?? [];
+    bucket.push(publicType);
+    groupedTypes.set(publicType.namespaceName, bucket);
+  }
+
+  const lines = [
+    "---",
+    `title: ${pkg.packageId} API`,
+    "---",
+    "",
+    `# ${pkg.packageId} API`,
+    "",
+    `Source-indexed API reference for \`${pkg.packageId}\`.`,
+    "",
+    pkg.description,
+    "",
+    "## Package",
+    "",
+    `- Package ID: \`${pkg.packageId}\``,
+    `- Source project: \`${pkg.project}\``,
+    `- Related guide: [${pkg.guideTitle}](${pkg.guideLink})`,
+    "",
+    "## Notes",
+    "",
+    "- This package exposes public native callback and function-pointer signatures.",
+    "- The Markdown reflection generator used for the rest of the API site cannot currently expand those signatures.",
+    "- This page indexes the public source types directly so the package is still discoverable from the docs site.",
+    ""
+  ];
+
+  for (const namespaceName of Array.from(groupedTypes.keys()).sort((left, right) => left.localeCompare(right))) {
+    lines.push(`## ${namespaceName}`, "", "| Type | Kind | Source |", "| --- | --- | --- |");
+
+    for (const publicType of groupedTypes.get(namespaceName)) {
+      const sourceLinks = publicType.sourcePaths
+        .map((sourcePath) => {
+          const sourceUrl = `https://github.com/royalapplications/RoyalTerminal/blob/main/${sourcePath}`;
+          return `[\`${sourcePath}\`](${sourceUrl})`;
+        })
+        .join("<br>");
+
+      lines.push(`| \`${publicType.name}\` | ${publicType.kind} | ${sourceLinks} |`);
+    }
+
+    lines.push("");
+  }
+
+  await fs.writeFile(path.join(outputDirectory, "index.md"), `${lines.join("\n")}\n`);
+}
+
+async function writeApiIndex(projects) {
+  const lines = [
+    "---",
+    "title: API Reference",
+    "---",
+    "",
+    "# API Reference",
+    "",
+    "RoyalTerminal ships a large managed surface area across UI, terminal, transport, VT, rendering, and Ghostty integration packages. This section keeps the article-led docs intact and adds generated reference pages for the public managed APIs that ship from `src/`.",
+    "",
+    "Use the guide articles for workflows and architecture. Use this reference when you need exact type and member contracts.",
+    "",
+    "## Coverage",
+    "",
+    `- Managed packages covered: ${projects.length}`,
+    "- Source links in generated pages point back to the repository paths on GitHub.",
+    "- Native-only runtime asset packages are excluded because they do not expose managed public APIs.",
+    "",
+    "## Package Groups",
+    ""
+  ];
+
+  for (const group of apiPackageGroups) {
+    lines.push(`### ${group.text}`, "", "| Package | Description | Related guide |", "| --- | --- | --- |");
+
+    for (const pkg of projects.filter((project) => project.group === group.text)) {
+      lines.push(
+        `| [\`${pkg.packageId}\`](/api/${pkg.slug}/) | ${pkg.description} | [${pkg.guideTitle}](${pkg.guideLink}) |`
+      );
+    }
+
+    lines.push("");
+  }
+
+  lines.push("## Native Asset Packages", "");
+
+  for (const packageId of nativeAssetPackages) {
+    lines.push(`- \`${packageId}\``);
+  }
+
+  lines.push(
+    "",
+    "Native asset packages remain documented in the package guide because they ship runtime binaries and MSBuild targets rather than managed public APIs.",
+    "",
+    "## Reference Notes",
+    "",
+    "- `RoyalTerminal.GhosttySharp` is source-indexed because the current Markdown reflection generator cannot expand its public function-pointer signatures."
+  );
+
+  await fs.mkdir(apiRoot, { recursive: true });
+  await fs.writeFile(path.join(apiRoot, "index.md"), `${lines.join("\n")}\n`);
+}
+
+async function main() {
+  const targetFramework = await getTargetFramework();
+  const projects = [];
+
+  for (const pkg of apiPackages) {
+    projects.push(await readProjectMetadata(pkg));
+  }
+
+  await fs.rm(apiRoot, { recursive: true, force: true });
+  await writeApiIndex(projects);
+
+  run("dotnet", ["tool", "restore"]);
+  run("dotnet", ["restore", "RoyalTerminal.sln"]);
+
+  for (const pkg of projects) {
+    run("dotnet", [
+      "build",
+      pkg.project,
+      "-c",
+      "Release",
+      "--no-restore",
+      "--nologo",
+      "-p:GenerateDocumentationFile=true",
+      "-p:CopyLocalLockFileAssemblies=true",
+      "-p:NoWarn=1591%3B1574"
+    ]);
+  }
+
+  for (const pkg of projects) {
+    const outputDirectory = path.join(apiRoot, pkg.slug);
+    const assemblyPath = path.join(
+      repoRoot,
+      pkg.projectDirectory,
+      "bin",
+      "Release",
+      targetFramework,
+      `${pkg.assemblyName}.dll`
+    );
+    const sourcePath = `https://github.com/royalapplications/RoyalTerminal/blob/main/${toPosix(pkg.projectDirectory)}/`;
+
+    await fs.mkdir(outputDirectory, { recursive: true });
+
+    if (pkg.referenceMode === "source-index") {
+      await writeSourceIndexPackage(pkg, outputDirectory);
+      continue;
+    }
+
+    run("dotnet", [
+      "xmldocmd",
+      assemblyPath,
+      outputDirectory,
+      "--namespace-pages",
+      "--visibility",
+      "public",
+      "--clean",
+      "--quiet",
+      "--source",
+      sourcePath
+    ]);
+
+    await normalizeMarkdown(outputDirectory);
+    await writePackageIndex(pkg, outputDirectory);
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
