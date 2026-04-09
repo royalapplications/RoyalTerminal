@@ -23,9 +23,12 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     ITerminalCursorStyleSource,
     ITerminalFocusEventModeSource,
     ITerminalKeySequenceEncoderSource,
+    ITerminalPasteSequenceEncoderSource,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseReportingStateSource,
     ITerminalViewportScrollSource,
+    ITerminalSelectionExportSource,
+    ITerminalSnapshotExportSource,
     ITerminalSearchSource
 {
     private readonly TerminalScreen _screen;
@@ -409,6 +412,119 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         }
     }
 
+    /// <inheritdoc />
+    public string? ReadSelection(in TerminalSelectionRange selection)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!TryCreateNativeSelection(selection, out RoyalTerminal.GhosttySharp.GhosttySelection nativeSelection))
+        {
+            return null;
+        }
+
+        using GhosttyFormatter formatter = new(
+            _terminal,
+            GhosttyVtNative.GhosttyFormatterFormat.Plain,
+            unwrap: false,
+            trim: false,
+            selection: nativeSelection);
+        return formatter.FormatToString();
+    }
+
+    /// <inheritdoc />
+    public bool IsPasteSafe(string text)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(text);
+        return GhosttyPaste.IsSafe(text);
+    }
+
+    /// <inheritdoc />
+    public bool TryEncodePaste(string text, bool bracketedPaste, out byte[] sequence)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(text);
+
+        if (text.Length == 0)
+        {
+            sequence = [];
+            return false;
+        }
+
+        sequence = GhosttyPaste.Encode(text, bracketedPaste);
+        return sequence.Length > 0;
+    }
+
+    /// <inheritdoc />
+    public bool SupportsSnapshotFormat(TerminalSnapshotExportFormat format)
+    {
+        return format switch
+        {
+            TerminalSnapshotExportFormat.PlainText => true,
+            TerminalSnapshotExportFormat.StyledVt => true,
+            TerminalSnapshotExportFormat.Html => true,
+            _ => false,
+        };
+    }
+
+    /// <inheritdoc />
+    public bool TryExportSnapshot(
+        TerminalSnapshotExportFormat format,
+        in TerminalSnapshotExportOptions options,
+        out string snapshot)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!SupportsSnapshotFormat(format))
+        {
+            snapshot = string.Empty;
+            return false;
+        }
+
+        RoyalTerminal.GhosttySharp.GhosttySelection? selection = null;
+        RoyalTerminal.GhosttySharp.GhosttySelection nativeSelection = default;
+        if (options.Selection is TerminalSelectionRange selectionRange)
+        {
+            if (!TryCreateNativeSelection(selectionRange, out nativeSelection))
+            {
+                snapshot = string.Empty;
+                return false;
+            }
+
+            selection = nativeSelection;
+        }
+
+        GhosttyFormatterOptions formatterOptions = new(
+            Format: format switch
+            {
+                TerminalSnapshotExportFormat.PlainText => GhosttyVtNative.GhosttyFormatterFormat.Plain,
+                TerminalSnapshotExportFormat.StyledVt => GhosttyVtNative.GhosttyFormatterFormat.Vt,
+                TerminalSnapshotExportFormat.Html => GhosttyVtNative.GhosttyFormatterFormat.Html,
+                _ => GhosttyVtNative.GhosttyFormatterFormat.Plain,
+            },
+            Unwrap: options.Unwrap,
+            Trim: options.TrimTrailingWhitespace,
+            Extra: new GhosttyFormatterExtraOptions(
+                IncludePalette: options.Extras.IncludePalette,
+                IncludeModes: options.Extras.IncludeModes,
+                IncludeScrollingRegion: options.Extras.IncludeScrollingRegion,
+                IncludeTabstops: options.Extras.IncludeTabstops,
+                IncludeWorkingDirectory: options.Extras.IncludeWorkingDirectory,
+                IncludeKeyboardModes: options.Extras.IncludeKeyboardModes,
+                Screen: new GhosttyFormatterScreenOptions(
+                    IncludeCursor: options.Extras.IncludeCursor,
+                    IncludeStyle: options.Extras.IncludeStyle,
+                    IncludeHyperlinks: options.Extras.IncludeHyperlinks,
+                    IncludeProtection: options.Extras.IncludeProtection,
+                    IncludeKittyKeyboard: options.Extras.IncludeKittyKeyboard,
+                    IncludeCharsets: options.Extras.IncludeCharsets)),
+            Selection: selection);
+
+        using GhosttyFormatter formatter = new(_terminal, formatterOptions);
+        snapshot = formatter.FormatToString();
+        return true;
+    }
+
     private unsafe void SetupTerminalEffects()
     {
         _writePtyDelegate ??= OnNativeWritePty;
@@ -563,6 +679,34 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         SyncKittyGraphicsFromNative();
         _renderState.SetDirty(GhosttyVtNative.GhosttyRenderStateDirty.False);
+    }
+
+    private bool TryCreateNativeSelection(
+        TerminalSelectionRange selection,
+        out RoyalTerminal.GhosttySharp.GhosttySelection nativeSelection)
+    {
+        TerminalSelectionRange normalized = selection.Normalize();
+        int startColumn = Math.Clamp(normalized.StartColumn, 0, Math.Max(0, _screen.Columns - 1));
+        int endColumn = Math.Clamp(normalized.EndColumn, 0, Math.Max(0, _screen.Columns - 1));
+        int startRow = Math.Clamp(normalized.StartRow, 0, Math.Max(0, _screen.ViewportRows - 1));
+        int endRow = Math.Clamp(normalized.EndRow, 0, Math.Max(0, _screen.ViewportRows - 1));
+        ulong viewportOffset = ViewportScrollState.OffsetRows;
+        uint startAbsoluteRow = checked((uint)Math.Min(uint.MaxValue, viewportOffset + (ulong)startRow));
+        uint endAbsoluteRow = checked((uint)Math.Min(uint.MaxValue, viewportOffset + (ulong)endRow));
+
+        if (!_terminal.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Screen((ushort)startColumn, startAbsoluteRow),
+                out GhosttyVtNative.GhosttyGridRef startRef) ||
+            !_terminal.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Screen((ushort)endColumn, endAbsoluteRow),
+                out GhosttyVtNative.GhosttyGridRef endRef))
+        {
+            nativeSelection = default;
+            return false;
+        }
+
+        nativeSelection = new RoyalTerminal.GhosttySharp.GhosttySelection(startRef, endRef, normalized.Rectangle);
+        return true;
     }
 
     private unsafe void PopulateCell(

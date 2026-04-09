@@ -343,6 +343,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// <summary>Gets the renderer.</summary>
     public SkiaTerminalRenderer? Renderer => _renderer;
 
+    internal IVtProcessor? ActiveVtProcessor => _vtProcessor;
+
     /// <summary>Gets the scroll data.</summary>
     public TerminalScrollData? ScrollData => _scrollData;
 
@@ -1777,6 +1779,33 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public async Task CopySelectionAsync()
     {
         await TerminalSelectionService.CopySelectionAsync(this, TerminalSessionService, _screen, _renderer);
+    }
+
+    /// <summary>
+    /// Returns whether the active VT processor can export the requested snapshot format.
+    /// </summary>
+    public bool SupportsSnapshotFormat(TerminalSnapshotExportFormat format)
+    {
+        return _vtProcessor is ITerminalSnapshotExportSource snapshotExporter &&
+               snapshotExporter.SupportsSnapshotFormat(format);
+    }
+
+    /// <summary>
+    /// Attempts to export the active terminal snapshot through the current VT processor.
+    /// </summary>
+    public bool TryExportSnapshot(
+        TerminalSnapshotExportFormat format,
+        in TerminalSnapshotExportOptions options,
+        out string snapshot)
+    {
+        if (_vtProcessor is not ITerminalSnapshotExportSource snapshotExporter ||
+            !snapshotExporter.SupportsSnapshotFormat(format))
+        {
+            snapshot = string.Empty;
+            return false;
+        }
+
+        return snapshotExporter.TryExportSnapshot(format, options, out snapshot);
     }
 
     /// <summary>

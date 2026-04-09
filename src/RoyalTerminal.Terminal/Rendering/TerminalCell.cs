@@ -152,6 +152,12 @@ public sealed class TerminalRow
     /// <summary>Whether this row has been modified since last render.</summary>
     public bool IsDirty { get; set; } = true;
 
+    /// <summary>
+    /// Whether this row soft-wraps into the following row.
+    /// Explicit line feeds keep this false.
+    /// </summary>
+    public bool WrapsToNext { get; set; }
+
     /// <summary>Number of columns in this row.</summary>
     public int Columns => _cells.Length;
 
@@ -175,6 +181,7 @@ public sealed class TerminalRow
     {
         for (var i = 0; i < _cells.Length; i++)
             _cells[i] = TerminalCell.Empty(fg, bg);
+        WrapsToNext = false;
         IsDirty = true;
     }
 }
@@ -521,6 +528,7 @@ public sealed class TerminalScreen
                     var oldCells = _rows[i].ReadOnlyCells;
                     var newCells = newRow.Cells;
                     oldCells[..copyCount].CopyTo(newCells);
+                    newRow.WrapsToNext = _rows[i].WrapsToNext;
                     _rows[i] = newRow;
                 }
             }

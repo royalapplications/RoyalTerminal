@@ -1655,7 +1655,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public async Task Control_PasteAsync_DefaultPolicy_PreservesControlCharacters()
+    public async Task Control_PasteAsync_DefaultPolicy_UsesManagedPasteEncodingRules()
     {
         FakeTransport transport = new();
         TerminalControl control = CreateControlWithTransport(
@@ -1674,7 +1674,7 @@ public class TerminalControlTests
             await control.PasteAsync();
 
             Assert.Contains(transport.SentInputs, static payload =>
-                Encoding.UTF8.GetString(payload) == "safe\x1b[201~\u0001text");
+                Encoding.UTF8.GetString(payload) == "safe [201~\u0001text");
         }
         finally
         {
