@@ -19,6 +19,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -28,6 +29,8 @@ using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Demo.ViewModels;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Native;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
@@ -47,6 +50,15 @@ internal sealed class MainWindowController
 {
     private const string DisableTextShapingEnvVar = "ROYALTERMINAL_DISABLE_TEXT_SHAPING";
     private const string EnableRenderDiagnosticsEnvVar = "ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS";
+    private static readonly byte[] s_hyperlinkShowcaseBytes = Encoding.UTF8.GetBytes(
+        "\r\n\u001b[1mRoyalTerminal OSC8 hyperlink showcase\u001b[0m\r\n" +
+        "\u001b]8;;https://ghostty.org\u001b\\Ghostty docs\u001b]8;;\u001b\\  |  " +
+        "\u001b]8;;https://github.com/ghostty-org/ghostling\u001b\\Ghostling example\u001b]8;;\u001b\\\r\n" +
+        "Ctrl/Cmd+click the highlighted span to launch the link.\r\n");
+    private static readonly byte[] s_kittyGraphicsShowcaseBytes = Encoding.UTF8.GetBytes(
+        "\r\n\u001b[1mRoyalTerminal Kitty Graphics showcase\u001b[0m\r\n" +
+        "Ghostty VT renders the image placement below via the native Kitty Graphics API.\r\n" +
+        "\u001b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=2,c=10,r=1;////////\u001b\\\r\n");
 
     private static readonly string MonoFont =
         RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "Menlo" :
@@ -129,6 +141,7 @@ internal sealed class MainWindowController
         UpdateStatus(nativeModeHint is null
             ? startupStatus
             : $"{startupStatus} | {nativeModeHint}");
+        SyncActiveTerminalSurface();
 
         lifetime.Add(Disposable.Create(DisposeResources));
         return lifetime;
@@ -241,6 +254,54 @@ internal sealed class MainWindowController
         disposables.Add(_viewModel.PrepareSettingsPanelInteraction.RegisterHandler(async context =>
         {
             await PrepareSettingsPanelAsync();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.ApplySearchInteraction.RegisterHandler(context =>
+        {
+            ApplySearch(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.NextSearchInteraction.RegisterHandler(context =>
+        {
+            SelectNextSearchMatch();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.PreviousSearchInteraction.RegisterHandler(context =>
+        {
+            SelectPreviousSearchMatch();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.ClearSearchInteraction.RegisterHandler(context =>
+        {
+            ClearSearch();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.ShowHyperlinkSampleInteraction.RegisterHandler(context =>
+        {
+            ShowHyperlinkSample();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.ShowKittyGraphicsSampleInteraction.RegisterHandler(context =>
+        {
+            ShowKittyGraphicsSample();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.ToggleGhosttyDiagnosticsInteraction.RegisterHandler(context =>
+        {
+            ToggleGhosttyDiagnostics(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.CopySnapshotInteraction.RegisterHandler(async context =>
+        {
+            await CopySnapshotAsync(context.Input);
             context.SetOutput(Unit.Default);
         }));
 
@@ -513,6 +574,10 @@ internal sealed class MainWindowController
         standaloneControl.TitleChanged += (_, title) =>
         {
             AppendEventLog($"[{GetTabDisplayName(standaloneControl)}] Title changed to '{title}'.");
+            if (ReferenceEquals(GetActiveStandaloneControl(), standaloneControl) && _viewModel.ShowGhosttyDiagnostics)
+            {
+                _viewModel.SetGhosttyDiagnostics(true, BuildGhosttyDiagnosticsText(standaloneControl));
+            }
         };
         standaloneControl.Bell += (_, _) =>
         {
@@ -532,6 +597,10 @@ internal sealed class MainWindowController
         {
             UpdateDimensions(args.Columns, args.Rows);
             AppendEventLog($"[{GetTabDisplayName(standaloneControl)}] Resized to {args.Columns}x{args.Rows}.");
+            if (ReferenceEquals(GetActiveStandaloneControl(), standaloneControl))
+            {
+                SyncActiveTerminalSurface();
+            }
         };
         standaloneControl.TerminalSessionService.InputSent += (_, args) =>
         {
@@ -1383,6 +1452,7 @@ internal sealed class MainWindowController
         }, DispatcherPriority.Input);
 
         SyncCaptureReplayState();
+        SyncActiveTerminalSurface();
     }
 
     private void CycleTab(bool forward)
@@ -1699,6 +1769,336 @@ internal sealed class MainWindowController
         }
 
         standalone.SelectAll();
+    }
+
+    private async Task CopySnapshotAsync(TerminalSnapshotExportFormat format)
+    {
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
+        {
+            UpdateStatus("Snapshot export is available for standalone terminal tabs only.");
+            return;
+        }
+
+        if (!control.SupportsSnapshotFormat(format))
+        {
+            UpdateStatus($"{format} snapshot export is unavailable for {GetTabDisplayName(control)}.");
+            return;
+        }
+
+        TerminalSnapshotExportOptions options = CreateSnapshotExportOptions(format);
+        if (!control.TryExportSnapshot(format, options, out string snapshot) || string.IsNullOrEmpty(snapshot))
+        {
+            UpdateStatus($"No {format} snapshot data is available for {GetTabDisplayName(control)}.");
+            return;
+        }
+
+        IClipboard? clipboard = TopLevel.GetTopLevel(_window)?.Clipboard;
+        if (clipboard is null)
+        {
+            UpdateStatus("Clipboard is unavailable for snapshot export.");
+            return;
+        }
+
+        await clipboard.SetTextAsync(snapshot);
+        UpdateStatus($"Copied {format} snapshot from {GetTabDisplayName(control)}.");
+    }
+
+    private static TerminalSnapshotExportOptions CreateSnapshotExportOptions(TerminalSnapshotExportFormat format)
+    {
+        return format switch
+        {
+            TerminalSnapshotExportFormat.PlainText => new TerminalSnapshotExportOptions(
+                Unwrap: true,
+                TrimTrailingWhitespace: true),
+            TerminalSnapshotExportFormat.StyledVt => new TerminalSnapshotExportOptions(
+                Unwrap: true,
+                TrimTrailingWhitespace: true,
+                Extras: new TerminalSnapshotExportExtras(
+                    IncludeCursor: true,
+                    IncludeStyle: true,
+                    IncludeHyperlinks: true,
+                    IncludeKittyKeyboard: true,
+                    IncludeCharsets: true,
+                    IncludePalette: true,
+                    IncludeModes: true,
+                    IncludeScrollingRegion: true,
+                    IncludeTabstops: true,
+                    IncludeKeyboardModes: true)),
+            TerminalSnapshotExportFormat.Html => new TerminalSnapshotExportOptions(
+                Unwrap: true,
+                TrimTrailingWhitespace: true,
+                Extras: new TerminalSnapshotExportExtras(
+                    IncludeHyperlinks: true)),
+            _ => default,
+        };
+    }
+
+    #endregion
+
+    #region Showcase And Search
+
+    private void ApplySearch(string? needle)
+    {
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
+        {
+            _viewModel.ClearSearchState();
+            UpdateStatus("Search is available for standalone terminal tabs only.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(needle))
+        {
+            control.EndSearch();
+            _viewModel.ClearSearchState();
+            UpdateStatus($"Search cleared in {GetTabDisplayName(control)}.");
+            return;
+        }
+
+        control.StartSearch(needle);
+        SyncSearchSurface(control);
+        if (control.SearchTotal > 0)
+        {
+            string scope = control.IsUsingNativeVtProcessor ? "native scrollback" : "viewport mirror";
+            UpdateStatus($"Found {control.SearchTotal} match(es) in {scope}.");
+        }
+        else
+        {
+            UpdateStatus($"No matches found in {GetTabDisplayName(control)}.");
+        }
+    }
+
+    private void ClearSearch()
+    {
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
+        {
+            _viewModel.ClearSearchState();
+            return;
+        }
+
+        control.EndSearch();
+        _viewModel.ClearSearchState();
+        UpdateStatus($"Search cleared in {GetTabDisplayName(control)}.");
+    }
+
+    private void SelectNextSearchMatch()
+    {
+        SelectSearchMatch(directionForward: true);
+    }
+
+    private void SelectPreviousSearchMatch()
+    {
+        SelectSearchMatch(directionForward: false);
+    }
+
+    private void SelectSearchMatch(bool directionForward)
+    {
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
+        {
+            _viewModel.ClearSearchState();
+            return;
+        }
+
+        bool moved = directionForward
+            ? control.SelectNextSearchMatch()
+            : control.SelectPreviousSearchMatch();
+        SyncSearchSurface(control);
+
+        if (!moved)
+        {
+            UpdateStatus("No search matches are active.");
+            return;
+        }
+
+        int selectedDisplay = Math.Clamp(control.SearchSelected + 1, 1, Math.Max(1, control.SearchTotal));
+        UpdateStatus($"Search match {selectedDisplay} of {control.SearchTotal}.");
+    }
+
+    private void ShowHyperlinkSample()
+    {
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
+        {
+            UpdateStatus("Hyperlink showcase is available for standalone terminal tabs only.");
+            return;
+        }
+
+        control.WriteOutput(s_hyperlinkShowcaseBytes);
+        SyncActiveTerminalSurface();
+        string tabName = GetTabDisplayName(control);
+        AppendEventLog($"[{tabName}] Injected OSC8 hyperlink showcase.");
+        UpdateStatus($"Hyperlink showcase injected into {tabName}.");
+    }
+
+    private void ShowKittyGraphicsSample()
+    {
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
+        {
+            UpdateStatus("Kitty Graphics showcase is available for standalone terminal tabs only.");
+            return;
+        }
+
+        if (!control.IsUsingNativeVtProcessor || !GhosttyVtProcessor.IsAvailable())
+        {
+            UpdateStatus("Kitty Graphics showcase requires an active Ghostty VT tab.");
+            return;
+        }
+
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            UpdateStatus("This libghostty-vt build does not include Kitty Graphics support.");
+            return;
+        }
+
+        control.WriteOutput(s_kittyGraphicsShowcaseBytes);
+        SyncActiveTerminalSurface();
+        string tabName = GetTabDisplayName(control);
+        AppendEventLog($"[{tabName}] Injected Ghostty Kitty Graphics showcase.");
+        UpdateStatus($"Kitty Graphics showcase injected into {tabName}.");
+    }
+
+    private void ToggleGhosttyDiagnostics(bool show)
+    {
+        _viewModel.SetGhosttyDiagnostics(show, BuildGhosttyDiagnosticsText());
+        UpdateStatus(show ? "Native diagnostics opened." : "Native diagnostics hidden.");
+    }
+
+    private void SyncActiveTerminalSurface()
+    {
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
+        {
+            _viewModel.ClearSearchState();
+            _viewModel.SetGhosttyDiagnostics(_viewModel.ShowGhosttyDiagnostics, BuildGhosttyDiagnosticsText());
+            return;
+        }
+
+        UpdateDimensions(control.Columns, control.Rows);
+        SyncSearchSurface(control);
+        if (_viewModel.ShowGhosttyDiagnostics)
+        {
+            _viewModel.SetGhosttyDiagnostics(true, BuildGhosttyDiagnosticsText(control));
+        }
+    }
+
+    private void SyncSearchSurface(TerminalControl control)
+    {
+        if (string.IsNullOrWhiteSpace(control.SearchNeedle))
+        {
+            _viewModel.ClearSearchState();
+            return;
+        }
+
+        _viewModel.SetSearchState(
+            control.SearchNeedle,
+            control.SearchTotal,
+            control.SearchSelected,
+            control.IsUsingNativeVtProcessor);
+    }
+
+    private TerminalControl? GetActiveStandaloneControl()
+    {
+        return GetActiveTab()?.Control as TerminalControl;
+    }
+
+    private string BuildGhosttyDiagnosticsText()
+    {
+        return BuildGhosttyDiagnosticsText(GetActiveStandaloneControl());
+    }
+
+    private string BuildGhosttyDiagnosticsText(TerminalControl? control)
+    {
+        StringBuilder builder = new();
+        bool nativeAvailable = GhosttyVtProcessor.IsAvailable();
+        builder.AppendLine("Ghostty VT runtime");
+        builder.Append("  libghostty-vt available: ").AppendLine(nativeAvailable ? "yes" : "no");
+        if (nativeAvailable)
+        {
+            GhosttyVtHelpers.GhosttyBuildInfoSnapshot buildInfo = GhosttyVtHelpers.GetBuildInfoSnapshot();
+            builder.Append("  version: ").AppendLine(string.IsNullOrWhiteSpace(buildInfo.VersionString) ? "(unknown)" : buildInfo.VersionString);
+            builder.Append("  semver: ")
+                .Append(buildInfo.VersionMajor.ToString(CultureInfo.InvariantCulture))
+                .Append('.')
+                .Append(buildInfo.VersionMinor.ToString(CultureInfo.InvariantCulture))
+                .Append('.')
+                .AppendLine(buildInfo.VersionPatch.ToString(CultureInfo.InvariantCulture));
+            if (!string.IsNullOrWhiteSpace(buildInfo.VersionPre))
+            {
+                builder.Append("  pre-release: ").AppendLine(buildInfo.VersionPre);
+            }
+
+            if (!string.IsNullOrWhiteSpace(buildInfo.VersionBuild))
+            {
+                builder.Append("  build metadata: ").AppendLine(buildInfo.VersionBuild);
+            }
+
+            builder.Append("  SIMD: ").AppendLine(buildInfo.Simd ? "yes" : "no");
+            builder.Append("  Kitty graphics: ").AppendLine(buildInfo.KittyGraphics ? "yes" : "no");
+            builder.Append("  tmux control mode: ").AppendLine(buildInfo.TmuxControlMode ? "yes" : "no");
+            builder.Append("  optimize mode: ").AppendLine(buildInfo.OptimizeMode.ToString());
+            builder.Append("  focus gained sample: ").AppendLine(EscapeForDiagnostics(
+                GhosttyVtHelpers.EncodeFocusString(GhosttyVtNative.GhosttyFocusEvent.Gained)));
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("Active tab");
+        if (control is null || _activeTab is null)
+        {
+            builder.AppendLine("  No standalone terminal tab is active.");
+            return builder.ToString().TrimEnd();
+        }
+
+        builder.Append("  Title: ").AppendLine(_activeTab.Title);
+        builder.Append("  Mode: ").AppendLine(_activeTab.ModeName);
+        builder.Append("  VT backend: ").AppendLine(control.IsUsingNativeVtProcessor ? "Ghostty VT" : "Basic VT");
+        builder.Append("  Session transport: ").AppendLine(control.ActiveTransportId ?? _viewModel.SelectedTransportMode.DisplayName);
+        builder.Append("  Grid: ").Append(control.Columns.ToString(CultureInfo.InvariantCulture))
+            .Append('x')
+            .AppendLine(control.Rows.ToString(CultureInfo.InvariantCulture));
+        builder.Append("  Search: ").AppendLine(string.IsNullOrWhiteSpace(control.SearchNeedle)
+            ? "inactive"
+            : $"{Math.Clamp(control.SearchSelected + 1, 1, Math.Max(1, control.SearchTotal))}/{control.SearchTotal} for '{control.SearchNeedle}'");
+        builder.Append("  Hovered link: ").AppendLine(control.HoveredLinkUrl ?? "(none)");
+        builder.Append("  Kitty graphics on screen: ").AppendLine(control.Screen?.HasKittyGraphics == true ? "yes" : "no");
+
+        if (control.ScrollData is { } scrollData)
+        {
+            builder.Append("  UI scroll rows: ").Append(scrollData.OffsetRows.ToString(CultureInfo.InvariantCulture))
+                .Append(" / ")
+                .AppendLine(scrollData.MaxOffsetRows.ToString(CultureInfo.InvariantCulture));
+        }
+
+        if (nativeAvailable)
+        {
+            GhosttyVtNative.GhosttySizeReportSize size = new()
+            {
+                Rows = (ushort)Math.Clamp(control.Rows, 0, ushort.MaxValue),
+                Columns = (ushort)Math.Clamp(control.Columns, 0, ushort.MaxValue),
+                CellWidth = (ushort)Math.Clamp((int)Math.Round(control.Renderer?.CellWidth ?? 0), 0, ushort.MaxValue),
+                CellHeight = (ushort)Math.Clamp((int)Math.Round(control.Renderer?.CellHeight ?? 0), 0, ushort.MaxValue),
+            };
+            builder.Append("  size report sample: ").AppendLine(EscapeForDiagnostics(
+                GhosttyVtHelpers.EncodeSizeReportString(GhosttyVtNative.GhosttySizeReportStyle.Csi18T, size)));
+            builder.Append("  bracketed paste report sample: ").AppendLine(EscapeForDiagnostics(
+                GhosttyVtHelpers.EncodeModeReportString(
+                    GhosttyVtNative.ModeBracketedPaste,
+                    GhosttyVtNative.GhosttyModeReportState.Set)));
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string EscapeForDiagnostics(string value)
+    {
+        return value
+            .Replace("\u001b", "ESC", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
     }
 
     #endregion

@@ -6,12 +6,15 @@ using System.Reactive.Linq;
 using System.Text;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Demo.ViewModels;
+using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.Terminal;
 using Xunit;
 
@@ -341,6 +344,211 @@ public sealed class MainWindowControllerModeStartupTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task Controller_SearchCommands_SyncActiveTerminalSearchSurface()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo search-demo";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
+            activeControl.WriteOutput(Encoding.UTF8.GetBytes("alpha beta alpha\r\n"));
+            Dispatcher.UIThread.RunJobs();
+
+            viewModel.SearchQuery = "alpha";
+            viewModel.ApplySearchCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal("alpha", activeControl.SearchNeedle);
+            Assert.Equal(2, activeControl.SearchTotal);
+            Assert.Contains("/2 matches", viewModel.SearchResultText, StringComparison.Ordinal);
+
+            viewModel.NextSearchCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(1, activeControl.SearchSelected);
+
+            viewModel.ClearSearchCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Null(activeControl.SearchNeedle);
+            Assert.Equal("Search idle", viewModel.SearchResultText);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_CopySnapshotCommand_ExportsActiveTerminalToClipboard()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo snapshot-demo";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
+            activeControl.WriteOutput(Encoding.UTF8.GetBytes("snapshot demo\r\n"));
+            Dispatcher.UIThread.RunJobs();
+
+            viewModel.CopyPlainSnapshotCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            string? copied = await window.Clipboard!.TryGetTextAsync();
+            Assert.NotNull(copied);
+            Assert.Contains("snapshot demo", copied, StringComparison.Ordinal);
+            Assert.Contains("Copied PlainText snapshot", viewModel.StatusText, StringComparison.Ordinal);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_ShowcaseHyperlinkAndDiagnostics_UpdateActiveTab()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo showcase-demo";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.ToggleGhosttyDiagnosticsCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(viewModel.ShowGhosttyDiagnostics);
+            Assert.Contains("libghostty-vt available:", viewModel.GhosttyDiagnosticsText, StringComparison.Ordinal);
+
+            viewModel.ShowHyperlinkSampleCommand.Execute().Wait();
+            TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
+            bool hyperlinkApplied = await WaitUntilAsync(
+                () => ViewportContainsHyperlink(activeControl),
+                TimeSpan.FromSeconds(2));
+            Assert.True(hyperlinkApplied);
+            Assert.Contains("Hyperlink showcase injected", viewModel.StatusText, StringComparison.Ordinal);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_ShowcaseKittyGraphics_UsesNativeGhosttyTab_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo kitty-demo";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new FixedTerminalModeCapabilityResolver(TerminalModeCapabilities.Create(nativeVtAvailable: true)),
+            TerminalModeResolver.Default);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.SetRenderMode(
+                useRenderedControl: false,
+                useNativeVtControl: true,
+                useManagedVtControl: false);
+
+            int countBefore = terminalHost.Children.Count;
+            viewModel.NewTabCommand.Execute().Wait();
+            bool newTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == countBefore + 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(newTabCreated);
+
+            TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
+            Assert.True(activeControl.IsUsingNativeVtProcessor);
+
+            viewModel.ShowKittyGraphicsSampleCommand.Execute().Wait();
+            bool kittyApplied = await WaitUntilAsync(
+                () => activeControl.Screen?.HasKittyGraphics == true,
+                TimeSpan.FromSeconds(2));
+            Assert.True(kittyApplied);
+            Assert.Contains("Kitty Graphics showcase injected", viewModel.StatusText, StringComparison.Ordinal);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
     private static Window CreateControllerHostWindow(MainWindowViewModel viewModel, out Grid terminalHost)
     {
         StackPanel tabStrip = new()
@@ -448,6 +656,42 @@ public sealed class MainWindowControllerModeStartupTests
         }
 
         return controls;
+    }
+
+    private static TerminalControl GetVisibleStandaloneControl(Grid terminalHost)
+    {
+        for (int i = 0; i < terminalHost.Children.Count; i++)
+        {
+            if (terminalHost.Children[i] is ScrollViewer
+                {
+                    IsVisible: true,
+                    Content: TerminalControl wrapped,
+                })
+            {
+                return wrapped;
+            }
+        }
+
+        throw new InvalidOperationException("No visible standalone terminal control was found.");
+    }
+
+    private static bool ViewportContainsHyperlink(TerminalControl control)
+    {
+        Assert.NotNull(control.Screen);
+
+        for (int row = 0; row < control.Screen!.ViewportRows; row++)
+        {
+            TerminalRow terminalRow = control.Screen.GetViewportRow(row);
+            for (int column = 0; column < terminalRow.Columns; column++)
+            {
+                if (terminalRow[column].HyperlinkId > 0)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static void AssertTerminalBehaviorSettings(

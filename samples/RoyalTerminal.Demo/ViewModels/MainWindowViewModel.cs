@@ -120,6 +120,13 @@ public sealed class MainWindowViewModel : ReactiveObject
     private double _replayDurationSeconds;
     private double _replayTimelineValue;
     private string _replaySourceLabel = string.Empty;
+    private string _searchQuery = string.Empty;
+    private int _searchMatchTotal;
+    private int _searchMatchSelected = -1;
+    private bool _searchUsesNativeScrollback;
+    private bool _searchApplied;
+    private bool _showGhosttyDiagnostics;
+    private string _ghosttyDiagnosticsText = "Ghostty VT diagnostics are unavailable for the active tab.";
 
     public MainWindowViewModel()
         : this(TerminalModeResolver.Default, new TerminalThemeCatalog())
@@ -184,6 +191,14 @@ public sealed class MainWindowViewModel : ReactiveObject
         SetReplayPlayingInteraction = new Interaction<bool, Unit>();
         StopReplayInteraction = new Interaction<Unit, Unit>();
         PrepareSettingsPanelInteraction = new Interaction<Unit, Unit>();
+        ApplySearchInteraction = new Interaction<string?, Unit>();
+        NextSearchInteraction = new Interaction<Unit, Unit>();
+        PreviousSearchInteraction = new Interaction<Unit, Unit>();
+        ClearSearchInteraction = new Interaction<Unit, Unit>();
+        ShowHyperlinkSampleInteraction = new Interaction<Unit, Unit>();
+        ShowKittyGraphicsSampleInteraction = new Interaction<Unit, Unit>();
+        ToggleGhosttyDiagnosticsInteraction = new Interaction<bool, Unit>();
+        CopySnapshotInteraction = new Interaction<TerminalSnapshotExportFormat, Unit>();
 
         NewTabCommand = ReactiveCommand.CreateFromObservable(() => CreateNewTabInteraction.Handle(Unit.Default));
         CloseCurrentTabCommand = ReactiveCommand.CreateFromObservable(() => CloseCurrentTabInteraction.Handle(Unit.Default));
@@ -209,6 +224,16 @@ public sealed class MainWindowViewModel : ReactiveObject
         StopReplayCommand = ReactiveCommand.CreateFromObservable(StopReplay);
         PrepareSettingsPanelCommand = ReactiveCommand.CreateFromObservable(PrepareSettingsPanel);
         ClearEventLogCommand = ReactiveCommand.Create(ClearEventLog);
+        ApplySearchCommand = ReactiveCommand.CreateFromObservable(ApplySearch);
+        NextSearchCommand = ReactiveCommand.CreateFromObservable(NextSearch);
+        PreviousSearchCommand = ReactiveCommand.CreateFromObservable(PreviousSearch);
+        ClearSearchCommand = ReactiveCommand.CreateFromObservable(ClearSearch);
+        ShowHyperlinkSampleCommand = ReactiveCommand.CreateFromObservable(ShowHyperlinkSample);
+        ShowKittyGraphicsSampleCommand = ReactiveCommand.CreateFromObservable(ShowKittyGraphicsSample);
+        ToggleGhosttyDiagnosticsCommand = ReactiveCommand.CreateFromObservable(ToggleGhosttyDiagnostics);
+        CopyPlainSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.PlainText));
+        CopyStyledVtSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.StyledVt));
+        CopyHtmlSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.Html));
 
         UpdateThemePresetButtonText();
     }
@@ -231,6 +256,14 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<bool, Unit> SetReplayPlayingInteraction { get; }
     public Interaction<Unit, Unit> StopReplayInteraction { get; }
     public Interaction<Unit, Unit> PrepareSettingsPanelInteraction { get; }
+    public Interaction<string?, Unit> ApplySearchInteraction { get; }
+    public Interaction<Unit, Unit> NextSearchInteraction { get; }
+    public Interaction<Unit, Unit> PreviousSearchInteraction { get; }
+    public Interaction<Unit, Unit> ClearSearchInteraction { get; }
+    public Interaction<Unit, Unit> ShowHyperlinkSampleInteraction { get; }
+    public Interaction<Unit, Unit> ShowKittyGraphicsSampleInteraction { get; }
+    public Interaction<bool, Unit> ToggleGhosttyDiagnosticsInteraction { get; }
+    public Interaction<TerminalSnapshotExportFormat, Unit> CopySnapshotInteraction { get; }
 
     public ReactiveCommand<Unit, Unit> NewTabCommand { get; }
     public ReactiveCommand<Unit, Unit> CloseCurrentTabCommand { get; }
@@ -256,6 +289,16 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> StopReplayCommand { get; }
     public ReactiveCommand<Unit, Unit> PrepareSettingsPanelCommand { get; }
     public ReactiveCommand<Unit, Unit> ClearEventLogCommand { get; }
+    public ReactiveCommand<Unit, Unit> ApplySearchCommand { get; }
+    public ReactiveCommand<Unit, Unit> NextSearchCommand { get; }
+    public ReactiveCommand<Unit, Unit> PreviousSearchCommand { get; }
+    public ReactiveCommand<Unit, Unit> ClearSearchCommand { get; }
+    public ReactiveCommand<Unit, Unit> ShowHyperlinkSampleCommand { get; }
+    public ReactiveCommand<Unit, Unit> ShowKittyGraphicsSampleCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleGhosttyDiagnosticsCommand { get; }
+    public ReactiveCommand<Unit, Unit> CopyPlainSnapshotCommand { get; }
+    public ReactiveCommand<Unit, Unit> CopyStyledVtSnapshotCommand { get; }
+    public ReactiveCommand<Unit, Unit> CopyHtmlSnapshotCommand { get; }
 
     public TerminalSettingsPanelState SettingsPanelState => _settingsPanelState ??= new TerminalSettingsPanelState();
 
@@ -468,6 +511,74 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public string ReplayTimelineText
         => $"{FormatDuration(ReplayTimelineValue)} / {FormatDuration(ReplayDurationSeconds)}";
+
+    public string SearchQuery
+    {
+        get => _searchQuery;
+        set
+        {
+            if (string.Equals(_searchQuery, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _searchQuery, value);
+            this.RaisePropertyChanged(nameof(CanApplySearch));
+            this.RaisePropertyChanged(nameof(CanClearSearch));
+            this.RaisePropertyChanged(nameof(SearchResultText));
+        }
+    }
+
+    public bool CanApplySearch => !string.IsNullOrWhiteSpace(SearchQuery);
+
+    public bool CanAdvanceSearch => _searchApplied && _searchMatchTotal > 0;
+
+    public bool CanClearSearch => !string.IsNullOrWhiteSpace(SearchQuery) || _searchApplied;
+
+    public string SearchResultText
+    {
+        get
+        {
+            if (!_searchApplied || string.IsNullOrWhiteSpace(SearchQuery))
+            {
+                return "Search idle";
+            }
+
+            string scope = _searchUsesNativeScrollback
+                ? "native scrollback"
+                : "viewport mirror";
+            if (_searchMatchTotal <= 0)
+            {
+                return $"No matches in {scope}";
+            }
+
+            int selectedDisplay = Math.Clamp(_searchMatchSelected + 1, 1, _searchMatchTotal);
+            return $"{selectedDisplay}/{_searchMatchTotal} matches · {scope}";
+        }
+    }
+
+    public bool ShowGhosttyDiagnostics
+    {
+        get => _showGhosttyDiagnostics;
+        private set
+        {
+            if (_showGhosttyDiagnostics == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _showGhosttyDiagnostics, value);
+            this.RaisePropertyChanged(nameof(GhosttyDiagnosticsButtonText));
+        }
+    }
+
+    public string GhosttyDiagnosticsText
+    {
+        get => _ghosttyDiagnosticsText;
+        private set => this.RaiseAndSetIfChanged(ref _ghosttyDiagnosticsText, value);
+    }
+
+    public string GhosttyDiagnosticsButtonText => ShowGhosttyDiagnostics ? "Hide Diagnostics" : "Native Diagnostics";
 
     public IReadOnlyList<SettingsCategoryOption> SettingsCategories => _settingsCategories;
 
@@ -1067,6 +1178,36 @@ public sealed class MainWindowViewModel : ReactiveObject
         }
     }
 
+    public void SetSearchState(string? needle, int total, int selected, bool usesNativeScrollback)
+    {
+        SearchQuery = needle ?? string.Empty;
+        _searchApplied = !string.IsNullOrWhiteSpace(SearchQuery);
+        _searchMatchTotal = Math.Max(0, total);
+        _searchMatchSelected = _searchMatchTotal > 0
+            ? Math.Clamp(selected, 0, _searchMatchTotal - 1)
+            : -1;
+        _searchUsesNativeScrollback = usesNativeScrollback;
+        RaiseSearchSurfaceChanged();
+    }
+
+    public void ClearSearchState()
+    {
+        SearchQuery = string.Empty;
+        _searchApplied = false;
+        _searchMatchTotal = 0;
+        _searchMatchSelected = -1;
+        _searchUsesNativeScrollback = false;
+        RaiseSearchSurfaceChanged();
+    }
+
+    public void SetGhosttyDiagnostics(bool show, string text)
+    {
+        ShowGhosttyDiagnostics = show;
+        GhosttyDiagnosticsText = string.IsNullOrWhiteSpace(text)
+            ? "Ghostty VT diagnostics are unavailable for the active tab."
+            : text;
+    }
+
     public void SetStatus(string text)
     {
         StatusText = text;
@@ -1243,6 +1384,46 @@ public sealed class MainWindowViewModel : ReactiveObject
     private IObservable<Unit> PrepareSettingsPanel()
     {
         return PrepareSettingsPanelInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> ApplySearch()
+    {
+        return ApplySearchInteraction.Handle(SearchQuery);
+    }
+
+    private IObservable<Unit> NextSearch()
+    {
+        return NextSearchInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> PreviousSearch()
+    {
+        return PreviousSearchInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> ClearSearch()
+    {
+        return ClearSearchInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> ShowHyperlinkSample()
+    {
+        return ShowHyperlinkSampleInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> ShowKittyGraphicsSample()
+    {
+        return ShowKittyGraphicsSampleInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> ToggleGhosttyDiagnostics()
+    {
+        return ToggleGhosttyDiagnosticsInteraction.Handle(!ShowGhosttyDiagnostics);
+    }
+
+    private IObservable<Unit> CopySnapshot(TerminalSnapshotExportFormat format)
+    {
+        return CopySnapshotInteraction.Handle(format);
     }
 
     private void ClearEventLog()
@@ -1481,6 +1662,13 @@ public sealed class MainWindowViewModel : ReactiveObject
         EventLogText = string.Join(Environment.NewLine, _eventLogEntries);
         this.RaisePropertyChanged(nameof(HasEventLogEntries));
         this.RaisePropertyChanged(nameof(EventLogEntryCountText));
+    }
+
+    private void RaiseSearchSurfaceChanged()
+    {
+        this.RaisePropertyChanged(nameof(CanAdvanceSearch));
+        this.RaisePropertyChanged(nameof(CanClearSearch));
+        this.RaisePropertyChanged(nameof(SearchResultText));
     }
 
     private static string GetDefaultSessionLogPath()

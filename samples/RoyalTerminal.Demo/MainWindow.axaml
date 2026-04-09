@@ -104,6 +104,113 @@
             Background="{DynamicResource ToolbarBackgroundBrush}"
             BorderBrush="{StaticResource ToolbarDividerBrush}"
             BorderThickness="0,0,0,1"
+            Padding="6,4">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+          <Button Content="Hyperlink Sample"
+                  Height="24"
+                  FontSize="10"
+                  Padding="8,2"
+                  Command="{Binding ShowHyperlinkSampleCommand}"
+                  ToolTip.Tip="Inject OSC8 hyperlink sample output into the active terminal tab" />
+          <Button Content="Kitty Graphics"
+                  Height="24"
+                  FontSize="10"
+                  Padding="8,2"
+                  Command="{Binding ShowKittyGraphicsSampleCommand}"
+                  ToolTip.Tip="Inject a Ghostty Kitty Graphics sample into the active native VT tab" />
+          <Button Content="Copy Plain Snapshot"
+                  Height="24"
+                  FontSize="10"
+                  Padding="8,2"
+                  Command="{Binding CopyPlainSnapshotCommand}"
+                  ToolTip.Tip="Copy a plain-text snapshot of the active terminal buffer" />
+          <Button Content="Copy VT Snapshot"
+                  Height="24"
+                  FontSize="10"
+                  Padding="8,2"
+                  Command="{Binding CopyStyledVtSnapshotCommand}"
+                  ToolTip.Tip="Copy a styled VT snapshot of the active terminal buffer" />
+          <Button Content="Copy HTML Snapshot"
+                  Height="24"
+                  FontSize="10"
+                  Padding="8,2"
+                  Command="{Binding CopyHtmlSnapshotCommand}"
+                  ToolTip.Tip="Copy an HTML snapshot of the active terminal buffer" />
+          <Button Content="{Binding GhosttyDiagnosticsButtonText}"
+                  Height="24"
+                  FontSize="10"
+                  Padding="8,2"
+                  Command="{Binding ToggleGhosttyDiagnosticsCommand}"
+                  ToolTip.Tip="Show or hide Ghostty VT capability and active-tab diagnostics" />
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+          <TextBlock Text="Search"
+                     Margin="0,4,0,0"
+                     Foreground="{DynamicResource ToolbarForegroundBrush}"
+                     FontSize="11" />
+          <TextBox Width="220"
+                   Watermark="Find in active terminal"
+                   Text="{Binding SearchQuery}" />
+          <Button Content="Find"
+                  Height="24"
+                  FontSize="10"
+                  Padding="8,2"
+                  IsEnabled="{Binding CanApplySearch}"
+                  Command="{Binding ApplySearchCommand}"
+                  ToolTip.Tip="Start search on the active terminal tab" />
+          <Button Content="Prev"
+                  Height="24"
+                  FontSize="10"
+                  Padding="8,2"
+                  IsEnabled="{Binding CanAdvanceSearch}"
+                  Command="{Binding PreviousSearchCommand}"
+                  ToolTip.Tip="Select the previous search result" />
+          <Button Content="Next"
+                  Height="24"
+                  FontSize="10"
+                  Padding="8,2"
+                  IsEnabled="{Binding CanAdvanceSearch}"
+                  Command="{Binding NextSearchCommand}"
+                  ToolTip.Tip="Select the next search result" />
+          <Button Content="Clear"
+                  Height="24"
+                  FontSize="10"
+                  Padding="8,2"
+                  IsEnabled="{Binding CanClearSearch}"
+                  Command="{Binding ClearSearchCommand}"
+                  ToolTip.Tip="Clear search highlights on the active terminal tab" />
+          <TextBlock Text="{Binding SearchResultText}"
+                     Margin="8,4,0,0"
+                     Foreground="{DynamicResource ToolbarForegroundBrush}"
+                     FontSize="11" />
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Top"
+            Background="{DynamicResource ToolbarBackgroundBrush}"
+            BorderBrush="{StaticResource ToolbarDividerBrush}"
+            BorderThickness="0,0,0,1"
+            Padding="6,4"
+            IsVisible="{Binding ShowGhosttyDiagnostics}">
+      <StackPanel Spacing="4">
+        <TextBlock Text="Ghostty VT Diagnostics"
+                   Foreground="{DynamicResource ToolbarForegroundBrush}"
+                   FontSize="11" />
+        <TextBox Height="132"
+                 IsReadOnly="True"
+                 AcceptsReturn="True"
+                 TextWrapping="Wrap"
+                 Text="{Binding GhosttyDiagnosticsText}" />
+      </StackPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Top"
+            Background="{DynamicResource ToolbarBackgroundBrush}"
+            BorderBrush="{StaticResource ToolbarDividerBrush}"
+            BorderThickness="0,0,0,1"
             Padding="6,4"
             IsVisible="{Binding ShowSessionTransportPicker}">
       <StackPanel Spacing="6">
