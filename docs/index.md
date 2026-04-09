@@ -31,7 +31,7 @@ features:
   - title: Production validation surface
     details: "The repository includes an Avalonia demo, a control catalog, headless/UI tests, integration tests, native packaging checks, and benchmarks."
   - title: Repository-scale documentation
-    details: "This guide covers the source tree outside the `external/ghostty` submodule and maps features back to concrete packages and workflows."
+    details: "This guide covers the source tree outside the `external/ghostty` submodule with feature-led articles for embedding, sessions, transports, rendering, and Ghostty integration."
 ---
 
 ## Documentation
@@ -39,10 +39,12 @@ features:
 - [Getting Started](/articles/getting-started)
 - [Architecture](/articles/architecture)
 - [Package Guide](/articles/packages)
-- [Avalonia Control](/articles/avalonia-control)
-- [Transport Sessions](/articles/transports)
-- [VT Processors And Modes](/articles/vt-modes)
-- [Rendering And Native Runtime](/articles/rendering-native)
+- [Embedding In Avalonia](/articles/avalonia-control)
+- [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings)
+- [Transports And Remote Access](/articles/transports)
+- [Terminal Engine And Screen State](/articles/vt-modes)
+- [Rendering, Text, And Graphics](/articles/rendering-native)
+- [Ghostty Integration](/articles/ghostty-integration)
 - [Samples And Tooling](/articles/samples-tooling)
 - [Build, Test, And Release](/articles/build-test-release)
 - [Troubleshooting](/articles/troubleshooting)

@@ -29,10 +29,39 @@
     0 24px 80px rgba(15, 23, 42, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.88);
   padding: 26px;
+  min-height: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .VPHomeHero .image-bg {
   opacity: 0.94;
+}
+
+.VPHomeHero .image-container {
+  width: min(78%, 360px);
+  height: auto;
+}
+
+.VPHomeHero .image-container img,
+.VPHomeHero .image-container .image-src {
+  width: 100%;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  display: block;
+}
+
+@media (max-width: 960px) {
+  .VPHomeHero .image {
+    min-height: 280px;
+    padding: 20px;
+  }
+
+  .VPHomeHero .image-container {
+    width: min(62vw, 280px);
+  }
 }
 
 .VPFeature {

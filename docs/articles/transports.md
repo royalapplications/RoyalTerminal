@@ -1,157 +1,164 @@
 ---
-title: Transport Sessions
+title: Transports And Remote Access
 ---
 
-# Transport Sessions
+# Transports And Remote Access
 
-RoyalTerminal runs sessions through a transport abstraction instead of a PTY-only runtime. Every session starts from an `ITerminalTransportOptions` implementation with a stable `TransportId`.
+RoyalTerminal does not treat a terminal session as "always a local PTY". The public transport surface is broader than that on purpose: local shells, child processes, SSH, raw TCP, Telnet, and serial all fit into the same session model.
 
-## Transport matrix
+## One session model, several transport families
 
-| Transport ID | Options type | Typical use |
+Every transport starts from `ITerminalTransportOptions` and a stable `TransportId`. That shared boundary is what lets `TerminalControl`, `TerminalSessionService`, settings UI, and profile persistence all work across very different backends.
+
+| Transport | Options type | Typical use |
 | --- | --- | --- |
-| `pty` | `PtyTransportOptions` | Local interactive shell with ConPTY or `forkpty` |
-| `pipe` | `PipeTransportOptions` | Non-PTY process I/O for command, output, or log style scenarios |
-| `ssh` | `SshTransportOptions` | Remote shell sessions with optional PTY, trust policy, proxies, and forwarding |
-| `raw-tcp` | `RawTcpTransportOptions` | Unframed TCP byte streams |
-| `telnet` | `TelnetTransportOptions` | Telnet sessions with option negotiation |
-| `serial` | `SerialTransportOptions` | Direct serial line sessions |
+| Local PTY | `PtyTransportOptions` | Interactive shell with ConPTY or `forkpty` |
+| Child process pipe | `PipeTransportOptions` | Output capture, automation, or non-interactive process IO |
+| SSH | `SshTransportOptions` | Remote shell sessions and tunneling |
+| Raw TCP | `RawTcpTransportOptions` | Plain byte streams |
+| Telnet | `TelnetTransportOptions` | Legacy text terminals with negotiation |
+| Serial | `SerialTransportOptions` | Devices, consoles, and embedded targets |
 
-## Preferred startup pattern
+## The common runtime boundary
 
-`TerminalControl.StartSessionAsync(...)` is the main API:
+The transport layer is deliberately small and composable:
 
-```csharp
-PtyTransportOptions options = new(
-    Command: null,
-    WorkingDirectory: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-    Environment: null,
-    Dimensions: new TerminalSessionDimensions(120, 40, 1200, 800));
+| Type | Why it matters |
+| --- | --- |
+| `ITerminalTransportOptions` | Shared startup contract for all transports. |
+| `TerminalSessionDimensions` | Shared logical and pixel dimensions. |
+| `ITerminalTransport` | Running transport abstraction. |
+| `ITerminalPtyTransport` | Optional capability for transports backed by a PTY. |
+| `ITerminalTransportProvider` | Factory participant for one transport family. |
+| `ITerminalTransportFactory` | Factory used by hosts and session services. |
+| `CompositeTerminalTransportFactory` | Multi-provider selector used throughout the repo. |
+| `TerminalTransportIds` | Shared string ids for all standard transports. |
+| `TerminalCommandSpec` | Executable path plus argument list. |
 
-await terminal.StartSessionAsync(options);
-```
+The pattern is simple: build the options record, pass it to a factory, and let the session service wire the result to the active VT processor.
 
-Typed helpers such as `StartSshAsync(...)` exist where they improve readability, but the transport abstraction is the primary model.
+## Local process and PTY sessions
 
-## SSH transport
+Local shells use the PTY path because that is what full-screen TUIs and interactive shells expect. Pipe mode exists for simpler process IO scenarios that do not want a pseudo-terminal.
 
-`SshTransportOptions` is the richest transport surface in the repository. It includes:
+### PTY-facing contracts and implementations
 
-- endpoint information
-- authentication settings
-- optional host-key fingerprint pinning
-- optional environment-variable bootstrap
-- proxy settings
-- port forwarding
-- keep-alive and connect timeout policy
-- optional X11 settings surface
+| Type | Purpose |
+| --- | --- |
+| `IPty` | Minimal pseudo-terminal abstraction. |
+| `IPtyFactory` | Factory for creating PTYs. |
+| `DefaultPtyFactory` | Platform-selecting PTY factory. |
+| `UnixPty` | Unix `forkpty` implementation. |
+| `WindowsPty` | Windows ConPTY implementation. |
+| `PtyTerminalTransport` | PTY-backed transport runtime. |
+| `PtyTerminalTransportProvider` | Provider for PTY sessions. |
+| `PtyTransportOptions` | PTY startup options. |
 
-```csharp
-SshTransportOptions options = new(
-    Endpoint: new SshEndpointOptions("example.com", 22, "alice"),
-    RequestPty: true,
-    TerminalType: "xterm-256color",
-    InitialCommand: null,
-    Authentication: new SshAuthenticationOptions(
-        UsePassword: true,
-        PasswordSecretId: "demo-password",
-        PrivateKeySecretIds: Array.Empty<string>(),
-        UseAgent: false),
-    Dimensions: new TerminalSessionDimensions(120, 40, 1200, 800))
-{
-    ExpectedHostKeyFingerprintSha256 = "SHA256:BASE64_FINGERPRINT",
-    EnvironmentVariables = new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-        ["LANG"] = "en_US.UTF-8",
-        ["LC_CTYPE"] = "en_US.UTF-8",
-        ["TERM"] = "xterm-256color",
-    },
-};
+### Pipe process sessions
 
-await terminal.StartSshAsync(options);
-```
+| Type | Purpose |
+| --- | --- |
+| `PipeTerminalTransport` | Child-process pipe transport. |
+| `PipeTerminalTransportProvider` | Provider for pipe sessions. |
+| `PipeTransportOptions` | Pipe process options, including stderr merge behavior. |
 
-### SSH security and trust
+## Network and device transports
 
-The SSH transport supports:
+These transports all stay intentionally small. They are useful because they let the rest of the stack remain transport-agnostic.
 
-- `KnownHostsSshHostKeyValidator`
-- `ExpectedFingerprintSshHostKeyValidator`
-- `RejectAllSshHostKeyValidator`
+| Type | Purpose |
+| --- | --- |
+| `RawTcpTerminalTransport` | Plain TCP transport runtime. |
+| `RawTcpTerminalTransportProvider` | Provider for raw TCP sessions. |
+| `RawTcpTransportOptions` | Host and port for raw TCP sessions. |
+| `TelnetTerminalTransport` | Telnet transport runtime. |
+| `TelnetTerminalTransportProvider` | Provider for Telnet sessions. |
+| `TelnetTransportOptions` | Telnet host, port, terminal type, and optional startup command. |
+| `SerialTerminalTransport` | Serial line transport runtime. |
+| `SerialTerminalTransportProvider` | Provider for serial sessions. |
+| `TerminalSerialParity` | Serial parity enum. |
+| `TerminalSerialStopBits` | Serial stop-bit enum. |
+| `TerminalSerialHandshake` | Serial handshake enum. |
+| `SerialTransportOptions` | Serial port name, baud rate, data bits, parity, stop bits, handshake, and newline settings. |
 
-When `ExpectedHostKeyFingerprintSha256` is set, the session can enforce SHA-256 host-key pinning. When omitted, the default path falls back to OpenSSH `known_hosts`.
+## SSH as a first-class remote session
 
-### SSH agent support
+SSH is the richest transport in the library because it has to cover trust, credentials, PTY requests, terminal type, environment bootstrap, proxies, forwarding, and operational policy.
 
-If you want agent-backed auth with SSH.NET, add `RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent`. It provides `SshNetAgentAuthenticationMethodContributor`.
+### Runtime SSH option model
 
-### SSH bootstrap composition
+| Type | Purpose |
+| --- | --- |
+| `SshEndpointOptions` | Host, port, and username. |
+| `SshAuthenticationOptions` | Runtime auth choices: password, keys, and agent usage. |
+| `SshProxyType` | Proxy type enum. |
+| `SshProxyOptions` | Proxy connection settings. |
+| `SshPortForwardMode` | Local, remote, or dynamic forwarding mode. |
+| `SshPortForwardOptions` | One forwarding rule. |
+| `SshX11Options` | X11 forwarding settings. |
+| `SshPolicyOptions` | Keepalive and connect timeout settings. |
+| `SshTransportOptions` | Full SSH startup options including endpoint, auth, environment, proxy, forwarding, X11, and host-key pinning. |
 
-For custom SSH backends, reuse `SshShellBootstrapCommandBuilder` so environment-variable export behavior stays consistent with the built-in SSH.NET transport.
+### Host-key trust policy
 
-### Current X11 limitation
+RoyalTerminal keeps host-key validation pluggable instead of burying it inside the SSH transport:
 
-`SshX11Options` exists in the shared option model, but the SSH.NET backend currently does not support X11 forwarding and will throw when enabled.
+| Type | Purpose |
+| --- | --- |
+| `SshHostKeyInfo` | Host-key metadata passed into validators. |
+| `ISshHostKeyValidator` | Trust-policy contract. |
+| `KnownHostsSshHostKeyValidator` | OpenSSH `known_hosts` validator. |
+| `ExpectedFingerprintSshHostKeyValidator` | Strict fingerprint pinning validator. |
+| `RejectAllSshHostKeyValidator` | Explicit deny-all validator. |
 
-## Telnet, raw TCP, and serial
+### SSH.NET integration
 
-These transports are intentionally explicit and lightweight:
+The default SSH runtime is built on SSH.NET, but the auth method list is still extensible:
 
-- `RawTcpTransportOptions` is for raw host/port stream sessions
-- `TelnetTransportOptions` adds terminal type and optional startup command
-- `SerialTransportOptions` captures baud rate, parity, stop bits, handshake, and newline
+| Type | Purpose |
+| --- | --- |
+| `ISshNetAuthenticationMethodContributor` | Adds auth methods to the SSH.NET runtime. |
+| `NullSshCredentialProvider` | No-op credential provider for externally managed auth. |
+| `SshNetTerminalTransport` | SSH.NET transport runtime. |
+| `SshNetTerminalTransportProvider` | Provider for `SshTransportOptions`. |
+| `SshNetAgentAuthenticationMethodContributor` | Agent-backed auth contributor package. |
 
-They all reuse the same `TerminalSessionDimensions` model so the UI/session contract stays uniform.
+## Secret storage and credential resolution
 
-## Session profiles
+RoyalTerminal separates credential lookup, secret persistence, and secret protection. That makes the SSH transport easier to host in real applications with policy constraints.
 
-Profile persistence is built into the shared `RoyalTerminal.Terminal` package. The core document model is `TerminalSessionProfilesDocument`.
+### Secret and credential contracts
 
-```csharp
-TerminalSessionProfilesDocument profiles = new()
-{
-    Profiles =
-    [
-        new TerminalSessionProfile
-        {
-            Id = "dev-ssh",
-            DisplayName = "Dev SSH",
-            Transport = new TerminalSessionTransportProfile
-            {
-                TransportId = TerminalTransportIds.Ssh,
-                Ssh = new TerminalSessionSshSettings
-                {
-                    Host = "example.com",
-                    Port = 22,
-                    Username = "alice",
-                    Authentication = new TerminalSessionSshAuthenticationSettings
-                    {
-                        UsePassword = true,
-                        PasswordSecretId = "ssh/dev/password",
-                    },
-                },
-            },
-        },
-    ],
-};
+| Type | Purpose |
+| --- | --- |
+| `SshCredentialRequest` | Request for credentials. |
+| `SshResolvedCredentials` | Resolved credential payload. |
+| `ISshCredentialProvider` | Async credential source contract. |
+| `ISshSecretStore` | Secret persistence contract. |
+| `ISshSecretProtector` | Secret protector contract. |
 
-ITerminalSessionProfileStore store = TerminalSessionProfileStoreFactory.CreateDefault();
-await store.SaveAsync(profiles);
+### Built-in secret stores and protectors
 
-TerminalSessionProfilesDocument loaded = await store.LoadAsync();
-ITerminalTransportOptions options = TerminalSessionProfileMapper.ToTransportOptions(loaded.Profiles[0]);
-await terminal.StartSessionAsync(options);
-```
+| Type | Purpose |
+| --- | --- |
+| `InMemorySshSecretStore` | In-memory store for tests or short-lived sessions. |
+| `EnvironmentVariableSshSecretStore` | Environment-variable backed store. |
+| `JsonFileSshSecretStore` | Plain JSON file store. |
+| `ProtectedJsonFileSshSecretStore` | JSON file store protected by an `ISshSecretProtector`. |
+| `CompositeSshSecretStore` | Multi-store lookup chain. |
+| `SecretStoreSshCredentialProvider` | Credential provider backed by a secret store. |
+| `NoOpSshSecretProtector` | Pass-through protector. |
+| `DpapiSshSecretScope` | Windows DPAPI scope enum. |
+| `DpapiSshSecretProtector` | Windows DPAPI protector. |
+| `AesGcmSshSecretProtector` | Cross-platform AES-GCM file-key protector. |
+| `SshSecretProtectionFactory` | Factory for default protectors and stores. |
+| `SshShellBootstrapCommandBuilder` | Safe bootstrap command builder for environment variables and startup commands. |
 
-This is the same persistence model used by the demo’s settings and profile editor.
+## How the articles map to the code
 
-## Secret storage
+The runtime transport implementations live in the transport packages, but the durable document model for configuring them lives in [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings). That separation is deliberate:
 
-The repository includes pluggable secret protection and persistence:
+- this article is about starting and running sessions
+- the session/profile article is about saving and editing them
 
-- `ISshSecretStore`
-- `ISshSecretProtector`
-- `SshSecretProtectionFactory`
-- `SecretStoreSshCredentialProvider`
-
-The default factory provides a cross-platform secure default so secret handling is not hard-coded into the SSH transport itself.
+That is the same split Ghostty uses between conceptual feature pages and lower-level reference material.
