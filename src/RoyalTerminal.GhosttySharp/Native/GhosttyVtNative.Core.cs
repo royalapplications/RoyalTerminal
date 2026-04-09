@@ -110,6 +110,16 @@ public static partial class GhosttyVtNative
         return (ushort)((value & 0x7FFF) | (ansi ? 0x8000 : 0));
     }
 
+    public static ushort ModeValue(GhosttyMode mode)
+    {
+        return (ushort)(mode.Value & 0x7FFF);
+    }
+
+    public static bool ModeIsAnsi(GhosttyMode mode)
+    {
+        return (mode.Value & 0x8000) != 0;
+    }
+
     public static GhosttyMode ModeDecckm => CreateMode(1, ansi: false);
     public static GhosttyMode ModeKeypadKeys => CreateMode(66, ansi: false);
     public static GhosttyMode ModeAltScreen => CreateMode(1047, ansi: false);
@@ -245,18 +255,17 @@ public static partial class GhosttyVtNative
         History = 3,
     }
 
-    [StructLayout(LayoutKind.Explicit, Size = 16)]
-    public struct GhosttyPointValue
-    {
-        [FieldOffset(0)]
-        public GhosttyPointCoordinate Coordinate;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Explicit, Size = 24)]
     public struct GhosttyPoint
     {
+        [FieldOffset(0)]
         public GhosttyPointTag Tag;
-        public GhosttyPointValue Value;
+
+        [FieldOffset(8)]
+        public ushort X;
+
+        [FieldOffset(12)]
+        public uint Y;
 
         public static GhosttyPoint Active(ushort x, uint y) => Create(GhosttyPointTag.Active, x, y);
         public static GhosttyPoint Viewport(ushort x, uint y) => Create(GhosttyPointTag.Viewport, x, y);
@@ -268,14 +277,8 @@ public static partial class GhosttyVtNative
             return new GhosttyPoint
             {
                 Tag = tag,
-                Value = new GhosttyPointValue
-                {
-                    Coordinate = new GhosttyPointCoordinate
-                    {
-                        X = x,
-                        Y = y,
-                    },
-                },
+                X = x,
+                Y = y,
             };
         }
     }

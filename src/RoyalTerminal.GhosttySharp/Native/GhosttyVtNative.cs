@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.GhosttySharp — P/Invoke bindings for libghostty-vt (VT parsing library).
 
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace RoyalTerminal.GhosttySharp.Native;
@@ -419,54 +420,122 @@ public static partial class GhosttyVtNative
         Faint = 6,
         /// <summary><c>Underline</c> enum value.</summary>
         Underline = 7,
-        /// <summary><c>ResetUnderline</c> enum value.</summary>
-        ResetUnderline = 8,
         /// <summary><c>UnderlineColor</c> enum value.</summary>
-        UnderlineColor = 9,
+        UnderlineColor = 8,
         /// <summary><c>UnderlineColor256</c> enum value.</summary>
-        UnderlineColor256 = 10,
+        UnderlineColor256 = 9,
         /// <summary><c>ResetUnderlineColor</c> enum value.</summary>
-        ResetUnderlineColor = 11,
+        ResetUnderlineColor = 10,
         /// <summary><c>Overline</c> enum value.</summary>
-        Overline = 12,
+        Overline = 11,
         /// <summary><c>ResetOverline</c> enum value.</summary>
-        ResetOverline = 13,
+        ResetOverline = 12,
         /// <summary><c>Blink</c> enum value.</summary>
-        Blink = 14,
+        Blink = 13,
         /// <summary><c>ResetBlink</c> enum value.</summary>
-        ResetBlink = 15,
+        ResetBlink = 14,
         /// <summary><c>Inverse</c> enum value.</summary>
-        Inverse = 16,
+        Inverse = 15,
         /// <summary><c>ResetInverse</c> enum value.</summary>
-        ResetInverse = 17,
+        ResetInverse = 16,
         /// <summary><c>Invisible</c> enum value.</summary>
-        Invisible = 18,
+        Invisible = 17,
         /// <summary><c>ResetInvisible</c> enum value.</summary>
-        ResetInvisible = 19,
+        ResetInvisible = 18,
         /// <summary><c>Strikethrough</c> enum value.</summary>
-        Strikethrough = 20,
+        Strikethrough = 19,
         /// <summary><c>ResetStrikethrough</c> enum value.</summary>
-        ResetStrikethrough = 21,
+        ResetStrikethrough = 20,
         /// <summary><c>DirectColorFg</c> enum value.</summary>
-        DirectColorFg = 22,
+        DirectColorFg = 21,
         /// <summary><c>DirectColorBg</c> enum value.</summary>
-        DirectColorBg = 23,
+        DirectColorBg = 22,
         /// <summary><c>Bg8</c> enum value.</summary>
-        Bg8 = 24,
+        Bg8 = 23,
         /// <summary><c>Fg8</c> enum value.</summary>
-        Fg8 = 25,
+        Fg8 = 24,
         /// <summary><c>ResetFg</c> enum value.</summary>
-        ResetFg = 26,
+        ResetFg = 25,
         /// <summary><c>ResetBg</c> enum value.</summary>
-        ResetBg = 27,
+        ResetBg = 26,
         /// <summary><c>BrightBg8</c> enum value.</summary>
-        BrightBg8 = 28,
+        BrightBg8 = 27,
         /// <summary><c>BrightFg8</c> enum value.</summary>
-        BrightFg8 = 29,
+        BrightFg8 = 28,
         /// <summary><c>Bg256</c> enum value.</summary>
-        Bg256 = 30,
+        Bg256 = 29,
         /// <summary><c>Fg256</c> enum value.</summary>
-        Fg256 = 31,
+        Fg256 = 30,
+    }
+
+    /// <summary>Underline style payload decoded by the SGR parser.</summary>
+    public enum GhosttySgrUnderline : int
+    {
+        None = 0,
+        Single = 1,
+        Double = 2,
+        Curly = 3,
+        Dotted = 4,
+        Dashed = 5,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GhosttySgrUnknown
+    {
+        public nint FullPtr;
+        public nuint FullLength;
+        public nint PartialPtr;
+        public nuint PartialLength;
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 64)]
+    public struct GhosttySgrAttributeValue
+    {
+        [FieldOffset(0)]
+        public GhosttySgrUnknown Unknown;
+
+        [FieldOffset(0)]
+        public GhosttySgrUnderline Underline;
+
+        [FieldOffset(0)]
+        public GhosttyColorRgb UnderlineColor;
+
+        [FieldOffset(0)]
+        public byte UnderlineColor256;
+
+        [FieldOffset(0)]
+        public GhosttyColorRgb DirectColorForeground;
+
+        [FieldOffset(0)]
+        public GhosttyColorRgb DirectColorBackground;
+
+        [FieldOffset(0)]
+        public byte Background8;
+
+        [FieldOffset(0)]
+        public byte Foreground8;
+
+        [FieldOffset(0)]
+        public byte BrightBackground8;
+
+        [FieldOffset(0)]
+        public byte BrightForeground8;
+
+        [FieldOffset(0)]
+        public byte Background256;
+
+        [FieldOffset(0)]
+        public byte Foreground256;
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 72)]
+    public struct GhosttySgrAttribute
+    {
+        [FieldOffset(0)]
+        public GhosttySgrAttributeTag Tag;
+
+        [FieldOffset(8)]
+        public GhosttySgrAttributeValue Value;
     }
 
     /// <summary>RGB color payload used by color parser helpers.</summary>
@@ -593,14 +662,39 @@ public static partial class GhosttyVtNative
     [return: MarshalAs(UnmanagedType.U1)]
     public static unsafe partial bool SgrNext(nint parser, void* attr);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_sgr_unknown_full")]
+    public static unsafe partial nuint SgrUnknownFull(GhosttySgrUnknown unknown, ushort** ptr);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_sgr_unknown_partial")]
+    public static unsafe partial nuint SgrUnknownPartial(GhosttySgrUnknown unknown, ushort** ptr);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_sgr_attribute_tag")]
+    public static partial GhosttySgrAttributeTag SgrAttributeTag(GhosttySgrAttribute attr);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_sgr_attribute_value")]
+    public static unsafe partial GhosttySgrAttributeValue* SgrAttributeValue(GhosttySgrAttribute* attr);
+
     // ────────────────────── Paste Functions ─────────────────────────
 
     [LibraryImport(LibName, EntryPoint = "ghostty_paste_is_safe")]
     [return: MarshalAs(UnmanagedType.U1)]
     public static unsafe partial bool PasteIsSafe(byte* data, nuint len);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_paste_encode")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult PasteEncode(
+        byte* data,
+        nuint dataLen,
+        [MarshalAs(UnmanagedType.U1)] bool bracketed,
+        byte* buffer,
+        nuint bufferLen,
+        out nuint written);
+
     // ────────────────────── Color Functions ─────────────────────────
 
     [LibraryImport(LibName, EntryPoint = "ghostty_color_rgb_get")]
     public static unsafe partial void ColorRgbGet(GhosttyColorRgb color, byte* r, byte* g, byte* b);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_type_json")]
+    public static partial nint TypeJson();
 }

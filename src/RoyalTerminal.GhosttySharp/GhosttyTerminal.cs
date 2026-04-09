@@ -369,6 +369,28 @@ public sealed class GhosttyTerminal : IDisposable
         return true;
     }
 
+    /// <summary>Attempts to convert a grid reference back into a point.</summary>
+    public unsafe bool TryGetPointFromGridReference(
+        in GhosttyVtNative.GhosttyGridRef reference,
+        GhosttyVtNative.GhosttyPointTag tag,
+        out GhosttyVtNative.GhosttyPointCoordinate point)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyPointCoordinate value = default;
+        GhosttyVtNative.GhosttyResult result =
+            GhosttyVtNative.TerminalPointFromGridRef(_handle, in reference, tag, &value);
+        if (result == GhosttyVtNative.GhosttyResult.NoValue ||
+            result == GhosttyVtNative.GhosttyResult.InvalidValue)
+        {
+            point = default;
+            return false;
+        }
+
+        ThrowIfFailed(result, "ghostty_terminal_point_from_grid_ref");
+        point = value;
+        return true;
+    }
+
     /// <summary>Reads the hyperlink URI attached to a resolved grid reference.</summary>
     public unsafe string? GetHyperlinkUri(in GhosttyVtNative.GhosttyGridRef reference)
     {

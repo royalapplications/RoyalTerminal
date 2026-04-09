@@ -227,4 +227,12 @@ public static partial class GhosttyVtNative
         nint terminal,
         GhosttyPoint point,
         ref GhosttyGridRef reference);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_point_from_grid_ref")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult TerminalPointFromGridRef(
+        nint terminal,
+        in GhosttyGridRef reference,
+        GhosttyPointTag tag,
+        GhosttyPointCoordinate* output);
 }

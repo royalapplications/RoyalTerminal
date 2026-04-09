@@ -124,6 +124,14 @@ public static partial class GhosttyVtNative
         nuint bufferLength,
         out nuint written);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_formatter_format_alloc")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult FormatterFormatAlloc(
+        nint formatter,
+        GhosttyAllocator* allocator,
+        byte** output,
+        out nuint outputLength);
+
     [LibraryImport(LibName, EntryPoint = "ghostty_formatter_free")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial void FormatterFree(nint formatter);

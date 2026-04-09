@@ -138,7 +138,7 @@ public class GhosttyVtTerminalTests
         terminal.Write("\u001b]8;;https://example.com\u001b\\AB\u001b]8;;\u001b\\"u8);
 
         Assert.True(terminal.TryGetGridReference(GhosttyVtNative.GhosttyPoint.Active(0, 0), out GhosttyVtNative.GhosttyGridRef start));
-        Assert.True(terminal.TryGetGridReference(GhosttyVtNative.GhosttyPoint.Active(2, 0), out GhosttyVtNative.GhosttyGridRef end));
+        Assert.True(terminal.TryGetGridReference(GhosttyVtNative.GhosttyPoint.Active(1, 0), out GhosttyVtNative.GhosttyGridRef end));
         Assert.Equal("https://example.com", terminal.GetHyperlinkUri(in start));
 
         using GhosttyFormatter formatter = new(
@@ -146,7 +146,7 @@ public class GhosttyVtTerminalTests
             GhosttyVtNative.GhosttyFormatterFormat.Plain,
             selection: new RoyalTerminal.GhosttySharp.GhosttySelection(start, end));
 
-        Assert.Equal("A", formatter.FormatToString());
+        Assert.Equal("AB", formatter.FormatToString());
     }
 
     [Fact]
@@ -261,8 +261,9 @@ public class GhosttyVtTerminalTests
             return;
         }
 
-        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
-        Assert.InRange((int)features.OptimizeMode, 0, 3);
+        GhosttyVtHelpers.GhosttyBuildInfoSnapshot buildInfo = GhosttyVtHelpers.GetBuildInfoSnapshot();
+        Assert.InRange((int)buildInfo.OptimizeMode, 0, 3);
+        Assert.False(string.IsNullOrWhiteSpace(buildInfo.VersionString));
 
         Assert.Equal("\u001b[I", GhosttyVtHelpers.EncodeFocusString(GhosttyVtNative.GhosttyFocusEvent.Gained));
         Assert.Equal(
@@ -281,6 +282,27 @@ public class GhosttyVtTerminalTests
                 CellHeight = 16,
             });
         Assert.Equal("\u001b[8;24;80t", sizeReport);
+    }
+
+    [Fact]
+    public void ProtocolHelpers_TypeMetadataAndModeHelpers_Work()
+    {
+        if (!GhosttyVtNative.IsAvailable())
+        {
+            return;
+        }
+
+        string typeJson = GhosttyVtHelpers.GetTypeMetadataJson();
+        Assert.Contains("GhosttyFormatterTerminalOptions", typeJson, StringComparison.Ordinal);
+        Assert.Contains("GhosttyPoint", typeJson, StringComparison.Ordinal);
+
+        GhosttyVtNative.GhosttyMode ansiMode = GhosttyVtNative.CreateMode(4, ansi: true);
+        GhosttyVtNative.GhosttyMode decMode = GhosttyVtNative.CreateMode(2004, ansi: false);
+
+        Assert.True(GhosttyVtNative.ModeIsAnsi(ansiMode));
+        Assert.False(GhosttyVtNative.ModeIsAnsi(decMode));
+        Assert.Equal((ushort)4, GhosttyVtNative.ModeValue(ansiMode));
+        Assert.Equal((ushort)2004, GhosttyVtNative.ModeValue(decMode));
     }
 
     [Fact]
