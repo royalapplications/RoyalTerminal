@@ -17,9 +17,17 @@
     <Company>Royal Apps</Company>
     <Copyright>Copyright © 2026 Royal Apps Contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/ghostty-org/ghostty</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/ghostty-org/ghostty</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/royalapplications/RoyalTerminal</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/royalapplications/RoyalTerminal</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageTags>ghostty;terminal;vte;pty;bindings;interop</PackageTags>
+    <PackageTags>royalterminal;terminal;avalonia;vte;pty;ssh;rendering</PackageTags>
   </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsPackable)' == 'true'">
+    <PackageIcon>assets/royalterminal-logo.png</PackageIcon>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)assets/royalterminal-logo.png" Pack="true" PackagePath="assets" Visible="false" Link="assets/royalterminal-logo.png" />
+  </ItemGroup>
 </Project>

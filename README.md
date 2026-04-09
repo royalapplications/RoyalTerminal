@@ -1,5 +1,7 @@
 # RoyalTerminal
 
+![RoyalTerminal logo](assets/royalterminal-logo.png)
+
 High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`RoyalTerminal.Avalonia`), official native Ghostty VT integration (`libghostty-vt`), and a separate fully managed VT implementation.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com)
