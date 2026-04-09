@@ -17,9 +17,6 @@ on:
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
-env:
-  DOCS_DEPLOY_ENABLED: "false"
-
 permissions:
   contents: read
   pages: write
@@ -46,7 +43,7 @@ jobs:
           cache: npm
 
       - name: Setup Pages
-        if: github.event_name == 'push' && env.DOCS_DEPLOY_ENABLED == 'true'
+        if: github.event_name == 'push' && vars.DOCS_DEPLOY_ENABLED == 'true'
         uses: actions/configure-pages@v4
 
       - name: Install dependencies
@@ -56,13 +53,13 @@ jobs:
         run: npm run docs:build
 
       - name: Upload Pages artifact
-        if: github.event_name == 'push' && env.DOCS_DEPLOY_ENABLED == 'true'
+        if: github.event_name == 'push' && vars.DOCS_DEPLOY_ENABLED == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs/.vitepress/dist
 
   deploy:
-    if: github.event_name == 'push' && env.DOCS_DEPLOY_ENABLED == 'true'
+    if: github.event_name == 'push' && vars.DOCS_DEPLOY_ENABLED == 'true'
     name: Deploy Docs
     needs: build
     runs-on: ubuntu-latest
