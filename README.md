@@ -6,6 +6,8 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 [![Avalonia](https://img.shields.io/badge/Avalonia-11.x-8b44ac)](https://avaloniaui.net)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+Project documentation source lives in [docs/](docs/) and is published through the VitePress/GitHub Pages workflow in [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
+
 ## NuGet Packages
 
 ### Primary Packages
