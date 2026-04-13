@@ -5,6 +5,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.IntegrationTests.TestInfrastructure;
 using Xunit;
 using static RoyalTerminal.GhosttySharp.Native.GhosttyVtNative;
 
@@ -16,7 +17,7 @@ namespace RoyalTerminal.IntegrationTests;
 /// </summary>
 public class KeyEncoderTests
 {
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEvent_CreateAndFree()
     {
         var result = GhosttyVtNative.KeyEventNew(0, out var keyEvent);
@@ -25,7 +26,7 @@ public class KeyEncoderTests
         GhosttyVtNative.KeyEventFree(keyEvent);
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEvent_SetAndGetAction()
     {
         GhosttyVtNative.KeyEventNew(0, out var keyEvent);
@@ -40,7 +41,7 @@ public class KeyEncoderTests
         finally { GhosttyVtNative.KeyEventFree(keyEvent); }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEvent_SetAndGetKey()
     {
         GhosttyVtNative.KeyEventNew(0, out var keyEvent);
@@ -55,7 +56,7 @@ public class KeyEncoderTests
         finally { GhosttyVtNative.KeyEventFree(keyEvent); }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEvent_SetAndGetMods()
     {
         GhosttyVtNative.KeyEventNew(0, out var keyEvent);
@@ -70,7 +71,7 @@ public class KeyEncoderTests
         finally { GhosttyVtNative.KeyEventFree(keyEvent); }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEvent_SetAndGetUnshiftedCodepoint()
     {
         GhosttyVtNative.KeyEventNew(0, out var keyEvent);
@@ -82,7 +83,7 @@ public class KeyEncoderTests
         finally { GhosttyVtNative.KeyEventFree(keyEvent); }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEncoder_CreateAndFree()
     {
         var result = GhosttyVtNative.KeyEncoderNew(0, out var encoder);
@@ -91,7 +92,7 @@ public class KeyEncoderTests
         GhosttyVtNative.KeyEncoderFree(encoder);
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEncoder_EncodeEnterKey()
     {
         GhosttyVtNative.KeyEncoderNew(0, out var encoder);
@@ -125,7 +126,7 @@ public class KeyEncoderTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEncoder_EncodeArrowUp()
     {
         GhosttyVtNative.KeyEncoderNew(0, out var encoder);
@@ -160,7 +161,7 @@ public class KeyEncoderTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEncoder_EncodeCtrlC()
     {
         GhosttyVtNative.KeyEncoderNew(0, out var encoder);
@@ -194,7 +195,7 @@ public class KeyEncoderTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEncoder_ReleaseEvent_NoOutput()
     {
         GhosttyVtNative.KeyEncoderNew(0, out var encoder);
@@ -225,7 +226,7 @@ public class KeyEncoderTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEncoder_WithKittyProtocol_ProducesExtendedSequence()
     {
         GhosttyVtNative.KeyEncoderNew(0, out var encoder);
@@ -264,7 +265,7 @@ public class KeyEncoderTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void KeyEvent_SetAndGetUtf8Text()
     {
         GhosttyVtNative.KeyEventNew(0, out var keyEvent);

@@ -403,14 +403,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         new(Bounds.Width, Bounds.Height);
 
     /// <inheritdoc />
-    bool ILogicalScrollable.CanHorizontallyScroll
+    public bool CanHorizontallyScroll
     {
         get => _canHScroll;
         set => _canHScroll = value;
     }
 
     /// <inheritdoc />
-    bool ILogicalScrollable.CanVerticallyScroll
+    public bool CanVerticallyScroll
     {
         get => _canVScroll;
         set => _canVScroll = value;
@@ -1747,7 +1747,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     #region Focus
 
-    protected override void OnGotFocus(GotFocusEventArgs e)
+    protected override void OnGotFocus(FocusChangedEventArgs e)
     {
         base.OnGotFocus(e);
         SuppressReservedAncestorKeyBindings();
@@ -1758,7 +1758,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _presenter?.Invalidate();
     }
 
-    protected override void OnLostFocus(RoutedEventArgs e)
+    protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
         RestoreReservedAncestorKeyBindings();

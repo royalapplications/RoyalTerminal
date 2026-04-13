@@ -4,6 +4,7 @@
 
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Diagnostics;
 using Avalonia.Markup.Xaml;
 
 namespace RoyalTerminal.Demo;
@@ -23,5 +24,9 @@ public class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+
+#if DEBUG
+        this.AttachDevTools();
+#endif
     }
 }
