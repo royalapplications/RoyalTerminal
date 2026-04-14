@@ -1587,20 +1587,7 @@ public sealed class TerminalControlHeadlessInteractionTests
 
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
     {
-        DateTime deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            Dispatcher.UIThread.RunJobs();
-            if (predicate())
-            {
-                return true;
-            }
-
-            await Task.Delay(25);
-        }
-
-        Dispatcher.UIThread.RunJobs();
-        return predicate();
+        return await HeadlessTerminalTestCleanup.WaitUntilAsync(predicate, timeout);
     }
 
     private static async Task VerifyVtQueryResponseBehaviorUnderOutputBacklogAsync(
@@ -2198,7 +2185,7 @@ public sealed class TerminalControlHeadlessInteractionTests
         Assert.True(arranged, $"Terminal control was not arranged in time. Bounds={control.Bounds}");
 
         control.Focus();
-        Dispatcher.UIThread.RunJobs();
+        HeadlessTerminalTestCleanup.RunDispatcherJobs();
     }
 
     private static async Task<Point> GetInteractionPointAsync(TerminalControl control, Window window)
@@ -2216,21 +2203,7 @@ public sealed class TerminalControlHeadlessInteractionTests
 
     private static async Task CleanupWindowAsync(Window window, Action cleanup)
     {
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            cleanup();
-
-            if (window.IsVisible)
-            {
-                window.Close();
-            }
-        }, DispatcherPriority.Send);
-
-        for (int i = 0; i < 4; i++)
-        {
-            Dispatcher.UIThread.RunJobs();
-            await Task.Delay(10);
-        }
+        await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, cleanup);
     }
 
     private static async Task<Point> GetCellInteractionPointAsync(

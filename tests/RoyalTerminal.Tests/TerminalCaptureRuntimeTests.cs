@@ -14,7 +14,7 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalCaptureRuntimeTests
 {
     [AvaloniaFact]
-    public void TerminalCaptureRuntime_CapturesInputAndOutput()
+    public async Task TerminalCaptureRuntime_CapturesInputAndOutput()
     {
         TerminalControl control = new();
         control.AttachEndpoint(new FakeTerminalEndpoint());
@@ -35,13 +35,14 @@ public sealed class TerminalCaptureRuntimeTests
         finally
         {
             runtime.Dispose();
-            control.DetachEndpoint();
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(
+                control,
+                control.DetachEndpoint);
         }
     }
 
     [AvaloniaFact]
-    public void TerminalCaptureRuntime_LoadReplayAndSeek_UpdatesTimeline()
+    public async Task TerminalCaptureRuntime_LoadReplayAndSeek_UpdatesTimeline()
     {
         TerminalControl control = new();
         TerminalCaptureRuntime runtime = new(control);
@@ -82,7 +83,7 @@ public sealed class TerminalCaptureRuntimeTests
         finally
         {
             runtime.Dispose();
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
         }
     }
 

@@ -195,6 +195,7 @@ public class TerminalControlTests
         Assert.False(control.HasActiveSession);
         Assert.Null(control.ActiveTransportId);
         Assert.True(transport.StopCalled);
+        await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
     }
 
     [AvaloniaFact]
@@ -221,11 +222,18 @@ public class TerminalControlTests
         int? exitCode = null;
         control.ProcessExited += (_, code) => exitCode = code;
 
-        await control.StartSessionAsync(new FakeTransportOptions("fake"));
-        transport.RaiseProcessExited(17);
-        Dispatcher.UIThread.RunJobs();
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            transport.RaiseProcessExited(17);
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
-        Assert.Equal(17, exitCode);
+            Assert.Equal(17, exitCode);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
     }
 
     [AvaloniaFact]
@@ -292,7 +300,7 @@ public class TerminalControlTests
         }
         finally
         {
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
         }
     }
 
@@ -364,7 +372,7 @@ public class TerminalControlTests
         }
         finally
         {
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
         }
     }
 
@@ -407,7 +415,7 @@ public class TerminalControlTests
         }
         finally
         {
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
         }
     }
 
@@ -455,7 +463,7 @@ public class TerminalControlTests
         }
         finally
         {
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
         }
     }
 
@@ -497,7 +505,7 @@ public class TerminalControlTests
         }
         finally
         {
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
         }
     }
 
@@ -551,7 +559,7 @@ public class TerminalControlTests
         }
         finally
         {
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
         }
     }
 
@@ -603,14 +611,7 @@ public class TerminalControlTests
         }
         finally
         {
-            try
-            {
-                control.StopPty();
-            }
-            catch
-            {
-                // Best effort cleanup in tests.
-            }
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
         }
     }
 
@@ -853,7 +854,7 @@ public class TerminalControlTests
 
             control.Measure(new Size(960, 640));
             control.Arrange(new Rect(0, 0, 960, 640));
-            Dispatcher.UIThread.RunJobs();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
             Assert.NotNull(control.Renderer);
             double cellWidth = control.Renderer!.CellWidth;
@@ -867,7 +868,7 @@ public class TerminalControlTests
 
             control.Measure(pixelOnlySize);
             control.Arrange(new Rect(pixelOnlySize));
-            Dispatcher.UIThread.RunJobs();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
             Assert.Equal(columnsBefore, control.Columns);
             Assert.Equal(rowsBefore, control.Rows);
@@ -875,7 +876,7 @@ public class TerminalControlTests
         }
         finally
         {
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
         }
     }
 
@@ -896,7 +897,7 @@ public class TerminalControlTests
 
         control.Measure(new Size(960, 640));
         control.Arrange(new Rect(0, 0, 960, 640));
-        Dispatcher.UIThread.RunJobs();
+        HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
         Assert.NotNull(factory.LastProcessor);
         ResizeTrackingVtProcessor processor = factory.LastProcessor!;
@@ -913,7 +914,7 @@ public class TerminalControlTests
 
         control.Measure(pixelOnlySize);
         control.Arrange(new Rect(pixelOnlySize));
-        Dispatcher.UIThread.RunJobs();
+        HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
         Assert.Equal(columnsBefore, control.Columns);
         Assert.Equal(rowsBefore, control.Rows);
@@ -989,6 +990,7 @@ public class TerminalControlTests
         Assert.IsType<TerminalControl>(window.Content);
 
         window.Close();
+        HeadlessTerminalTestCleanup.RunDispatcherJobs();
     }
 
     [AvaloniaFact]
@@ -1124,7 +1126,7 @@ public class TerminalControlTests
         }
         finally
         {
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
         }
     }
 
@@ -1463,13 +1465,13 @@ public class TerminalControlTests
 
         window.Show();
         control.Focus();
-        Dispatcher.UIThread.RunJobs();
+        HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
         try
         {
             control.WriteOutput("X"u8);
             control.WriteOutput("\x1b[1 q"u8); // blinking block
-            Dispatcher.UIThread.RunJobs();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
             bool initialVisible = renderer.CursorVisible;
             bool toggled = await WaitUntilAsync(
@@ -1478,16 +1480,16 @@ public class TerminalControlTests
             Assert.True(toggled);
 
             control.WriteOutput("\x1b[2 q"u8); // steady block
-            Dispatcher.UIThread.RunJobs();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
             bool steadyVisible = renderer.CursorVisible;
 
             await Task.Delay(700);
-            Dispatcher.UIThread.RunJobs();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
             Assert.Equal(steadyVisible, renderer.CursorVisible);
         }
         finally
         {
-            window.Close();
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
         }
     }
 
@@ -1539,7 +1541,7 @@ public class TerminalControlTests
         }
         finally
         {
-            window.Close();
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
         }
     }
 
@@ -1570,7 +1572,7 @@ public class TerminalControlTests
         }
         finally
         {
-            window.Close();
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
         }
     }
 
@@ -1600,8 +1602,7 @@ public class TerminalControlTests
         }
         finally
         {
-            window.Close();
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
         }
     }
 
@@ -1631,16 +1632,16 @@ public class TerminalControlTests
 
             // Enable focus-event reporting (DECSET 1004) in managed VT state.
             control.WriteOutput("\x1b[?1004h"u8);
-            Dispatcher.UIThread.RunJobs();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
             other.Focus();
-            Dispatcher.UIThread.RunJobs();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
             transport.SentInputs.Clear();
 
             control.Focus();
-            Dispatcher.UIThread.RunJobs();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
             other.Focus();
-            Dispatcher.UIThread.RunJobs();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
             Assert.Contains(transport.SentInputs, static payload =>
                 Encoding.UTF8.GetString(payload) == "\x1b[I");
@@ -1649,8 +1650,7 @@ public class TerminalControlTests
         }
         finally
         {
-            window.Close();
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
         }
     }
 
@@ -1678,8 +1678,7 @@ public class TerminalControlTests
         }
         finally
         {
-            window.Close();
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
         }
     }
 
@@ -1718,8 +1717,7 @@ public class TerminalControlTests
         }
         finally
         {
-            window.Close();
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
         }
     }
 
@@ -1752,7 +1750,7 @@ public class TerminalControlTests
         {
             await control.StartSessionAsync(new FakeTransportOptions("fake"));
             control.Focus();
-            Dispatcher.UIThread.RunJobs();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
             byte[] before = CaptureFramePng(window);
 
@@ -1770,8 +1768,7 @@ public class TerminalControlTests
         }
         finally
         {
-            window.Close();
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
         }
     }
 
@@ -1799,8 +1796,7 @@ public class TerminalControlTests
         }
         finally
         {
-            window.Close();
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
         }
     }
 
@@ -1831,8 +1827,7 @@ public class TerminalControlTests
         }
         finally
         {
-            window.Close();
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
         }
     }
 
@@ -1874,8 +1869,7 @@ public class TerminalControlTests
         }
         finally
         {
-            window.Close();
-            control.StopPty();
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
         }
     }
 
@@ -1908,7 +1902,7 @@ public class TerminalControlTests
 
     private static byte[] CaptureFramePng(Window window)
     {
-        Dispatcher.UIThread.RunJobs();
+        HeadlessTerminalTestCleanup.RunDispatcherJobs();
         Bitmap? frame = window.CaptureRenderedFrame();
         Assert.NotNull(frame);
 
@@ -1919,20 +1913,7 @@ public class TerminalControlTests
 
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
     {
-        DateTime deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            Dispatcher.UIThread.RunJobs();
-            if (predicate())
-            {
-                return true;
-            }
-
-            await Task.Delay(25);
-        }
-
-        Dispatcher.UIThread.RunJobs();
-        return predicate();
+        return await HeadlessTerminalTestCleanup.WaitUntilAsync(predicate, timeout);
     }
 
     private static bool ContainsScreenText(TerminalControl control, string needle)
