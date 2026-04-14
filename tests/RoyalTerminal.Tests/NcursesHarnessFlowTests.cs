@@ -50,7 +50,9 @@ public sealed class NcursesHarnessFlowTests
         await RunHarnessFlowAsync(VtProcessorPreference.Auto);
     }
 
-    [AvaloniaFact]
+    [AvaloniaFact(
+        SkipType = typeof(TestPlatformConditions),
+        SkipWhen = nameof(TestPlatformConditions.IsLinux))]
     public async Task NcursesHarness_NativeVt_HandlesKeyboardMouseAndResize_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
@@ -91,7 +93,9 @@ public sealed class NcursesHarnessFlowTests
                 line.Contains("action=M", StringComparison.Ordinal));
     }
 
-    [AvaloniaFact]
+    [AvaloniaFact(
+        SkipType = typeof(TestPlatformConditions),
+        SkipWhen = nameof(TestPlatformConditions.IsLinux))]
     public async Task PtyHarness_MouseMatrix_1002_ButtonMotion_IsObserved_EndToEnd()
     {
         if (ShouldSkipMouseMatrixHarnessOnCurrentPlatform())
