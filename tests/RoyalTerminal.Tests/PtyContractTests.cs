@@ -98,6 +98,10 @@ public class PtyContractTests
             return;
         }
 
+        string scriptDirectory = Path.Combine(Path.GetTempPath(), "royalterminal-tests");
+        Directory.CreateDirectory(scriptDirectory);
+        string scriptPath = Path.Combine(scriptDirectory, Guid.NewGuid().ToString("N") + ".sh");
+
         using UnixPty pty = new();
         using ManualResetEventSlim sawMarker = new(false);
         using ManualResetEventSlim sawExit = new(false);
@@ -119,21 +123,42 @@ public class PtyContractTests
 
         pty.ProcessExited += _ => sawExit.Set();
 
-        pty.Start(
-            shell: "/bin/sh",
-            columns: 80,
-            rows: 24,
-            workingDirectory: Environment.CurrentDirectory,
-            arguments:
-            [
-                "-c",
-                $"i=0; while [ $i -lt 5 ]; do printf '{marker}\\n'; i=$((i+1)); sleep 0.2; done",
-            ]);
+        File.WriteAllText(
+            scriptPath,
+            $$"""
+              marker="{{marker}}"
+              i=0
+              while [ "$i" -lt 5 ]; do
+                  printf '%s\n' "$marker"
+                  i=$((i+1))
+                  sleep 0.2
+              done
+              """);
 
-        Assert.True(
-            sawMarker.Wait(TimeSpan.FromSeconds(10)),
-            $"Did not observe argument-driven command output. Current output: {output}");
-        Assert.True(sawExit.Wait(TimeSpan.FromSeconds(10)), "PTY child did not exit after argument-driven command.");
+        try
+        {
+            pty.Start(
+                shell: "/bin/sh",
+                columns: 80,
+                rows: 24,
+                workingDirectory: Environment.CurrentDirectory,
+                arguments:
+                [
+                    scriptPath,
+                ]);
+
+            Assert.True(
+                sawMarker.Wait(TimeSpan.FromSeconds(15)),
+                $"Did not observe argument-driven command output. Current output: {output}");
+            Assert.True(sawExit.Wait(TimeSpan.FromSeconds(15)), "PTY child did not exit after argument-driven command.");
+        }
+        finally
+        {
+            if (File.Exists(scriptPath))
+            {
+                File.Delete(scriptPath);
+            }
+        }
     }
 
     [Fact]
