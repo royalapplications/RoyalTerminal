@@ -8,6 +8,7 @@ using Avalonia.Skia;
 using ReactiveUI.Avalonia;
 
 [assembly: AvaloniaTestApplication(typeof(RoyalTerminal.Tests.TestAppBuilder))]
+[assembly: AvaloniaTestIsolation(AvaloniaTestIsolationLevel.PerAssembly)]
 
 namespace RoyalTerminal.Tests;
 
