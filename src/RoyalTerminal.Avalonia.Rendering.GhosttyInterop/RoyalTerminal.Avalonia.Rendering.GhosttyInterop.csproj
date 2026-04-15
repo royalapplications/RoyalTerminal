@@ -4,6 +4,7 @@
     <PackageId>RoyalTerminal.Avalonia.Rendering.GhosttyInterop</PackageId>
     <Description>Avalonia-specific render target acquisition and draw-loop adapters for Ghostty renderer interop.</Description>
     <IsPackable>true</IsPackable>
+    <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
