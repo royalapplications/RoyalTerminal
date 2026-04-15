@@ -8,6 +8,7 @@
     <PackageTags>terminal;avalonia;settings</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <IsPackable>true</IsPackable>
+    <NoWarn>$(NoWarn);NU5104</NoWarn>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 

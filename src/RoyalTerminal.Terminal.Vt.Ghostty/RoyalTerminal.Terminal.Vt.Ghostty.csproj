@@ -4,6 +4,7 @@
     <PackageId>RoyalTerminal.Terminal.Vt.Ghostty</PackageId>
     <Description>Native Ghostty-backed VT processor implementation for RoyalTerminal terminal contracts.</Description>
     <IsPackable>true</IsPackable>
+    <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
