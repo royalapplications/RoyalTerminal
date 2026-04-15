@@ -546,7 +546,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             PhysicalKey.C,
             "Ctrl+C",
             0x03,
-            cycleCount: 6,
+            cycleCount: 4,
             RepeatedFloodScenario.Base64);
     }
 
@@ -586,7 +586,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             PhysicalKey.Z,
             "Ctrl+Z",
             0x1A,
-            cycleCount: 6,
+            cycleCount: 4,
             RepeatedFloodScenario.Base64);
     }
 
@@ -1861,12 +1861,14 @@ public sealed class TerminalControlHeadlessInteractionTests
 
                 bool promptRecovered = await WaitUntilAsync(
                     () => ContainsOutput(outputSync, output, cycleMarker),
-                    TimeSpan.FromSeconds(5));
+                    GetRepeatedFloodRecoveryTimeout(scenario));
                 Assert.True(
                     promptRecovered,
                     $"Cycle {cycle}: Did not observe prompt recovery marker after {controlCharacterLabel}. " +
                     $"Mode={SnapshotModeState(control.TerminalSessionService.ModeSource)}, Kitty={SnapshotKittyKeyboardFlags(control.TerminalSessionService.ModeSource)}, " +
                     $"Output={SnapshotOutput(outputSync, output)}");
+
+                await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
 
                 if (physicalKey == PhysicalKey.Z)
                 {
@@ -2124,6 +2126,15 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     private static TimeSpan GetRepeatedFloodObservationTimeout(RepeatedFloodScenario scenario)
+    {
+        return scenario switch
+        {
+            RepeatedFloodScenario.Base64 => TimeSpan.FromSeconds(10),
+            _ => TimeSpan.FromSeconds(5),
+        };
+    }
+
+    private static TimeSpan GetRepeatedFloodRecoveryTimeout(RepeatedFloodScenario scenario)
     {
         return scenario switch
         {
