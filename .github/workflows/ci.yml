@@ -129,7 +129,10 @@ jobs:
           slice_names=(
             "test-results-headless-skia"
             "test-results-terminal-control-interaction-keyboard"
-            "test-results-terminal-control-interaction-vt"
+            "test-results-terminal-control-interaction-pty-latency"
+            "test-results-terminal-control-interaction-pty-repeat"
+            "test-results-terminal-control-interaction-vt-queries"
+            "test-results-terminal-control-interaction-da-responses"
             "test-results-terminal-control-interaction-pointer"
             "test-results-terminal-control-interaction-hover"
             "test-results-terminal-control"
@@ -143,7 +146,10 @@ jobs:
           slice_filters=(
             "(FullyQualifiedName~RoyalTerminal.Tests.HeadlessSkiaRenderingTests.)"
             "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_WindowResize_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardInput_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardInterrupt_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_TextInput_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardSuspend_)"
-            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_VtQueryResponses_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedTransport_)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_CtrlC_InterruptsFloodedShellWithinLatencyBudget)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_CtrlC_RecoversVisibleScreenAfterUnterminatedOscFlood)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_KeyDownCtrlC_InterruptsAnsiFloodWithinLatencyBudget)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_KeyDownCtrlZ_SuspendsAnsiFloodWithinLatencyBudget)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_RepeatedKeyDownCtrlC_InterruptsBase64FloodAcrossCycles)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_RepeatedKeyDownCtrlC_InterruptsAnsiFloodAcrossCycles)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_RepeatedKeyDownCtrlZ_SuspendsBase64FloodAcrossCycles)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_VtQueryResponses_AreSuppressed_ForPtyBackedSessions_WhenOutputBacklogIsHigh)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_VtQueryResponses_AreNotSuppressed_ForNonPtyTransports_WhenOutputBacklogIsHigh)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_DaResponse_IsForwardedWithoutUrgentControlSuppression)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_CtrlC_SuppressesLateDaResponseAtPromptBoundary)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedTransport_DaResponse_IsForwardedWithoutUrgentControlSuppression)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedTransport_CtrlC_SuppressesLateDaResponseAtPromptBoundary)"
             "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_MouseInput_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_FocusEvents_)"
             "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_Osc8Hover_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_PlainUrlHover_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ModifiedClick_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_FallbackParity_)"
             "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlTests.)"

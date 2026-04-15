@@ -134,11 +134,6 @@ internal static class HeadlessTerminalTestCleanup
                     // Best effort cleanup in tests.
                 }
             }
-
-            if (window.IsVisible)
-            {
-                window.Close();
-            }
         }, DispatcherPriority.Send);
 
         if (control is not null)
@@ -147,6 +142,16 @@ internal static class HeadlessTerminalTestCleanup
                 () => !control.HasActiveSession,
                 SessionQuiesceTimeout);
         }
+
+        await DrainDispatcherAsync();
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (window.IsVisible)
+            {
+                window.Close();
+            }
+        }, DispatcherPriority.Send);
 
         await DrainDispatcherAsync();
     }
