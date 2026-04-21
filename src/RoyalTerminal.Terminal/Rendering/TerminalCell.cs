@@ -147,7 +147,8 @@ public readonly record struct TerminalHighlightSpan(
 /// </summary>
 public sealed class TerminalRow
 {
-    private readonly TerminalCell[] _cells;
+    private TerminalCell[] _cells;
+    private int _columns;
 
     /// <summary>Whether this row has been modified since last render.</summary>
     public bool IsDirty { get; set; } = true;
@@ -159,22 +160,44 @@ public sealed class TerminalRow
     public bool WrapsToNext { get; set; }
 
     /// <summary>Number of columns in this row.</summary>
-    public int Columns => _cells.Length;
+    public int Columns => _columns;
 
     /// <summary>Access the cells array as a span.</summary>
-    public Span<TerminalCell> Cells => _cells.AsSpan();
+    public Span<TerminalCell> Cells => _cells.AsSpan(0, _columns);
 
     /// <summary>Read-only access to cells.</summary>
-    public ReadOnlySpan<TerminalCell> ReadOnlyCells => _cells.AsSpan();
+    public ReadOnlySpan<TerminalCell> ReadOnlyCells => _cells.AsSpan(0, _columns);
 
     public TerminalRow(int columns, uint defaultFg = 0xFFD4D4D4, uint defaultBg = 0xFF1E1E1E)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(columns);
+
+        _columns = columns;
         _cells = new TerminalCell[columns];
         Clear(defaultFg, defaultBg);
     }
 
     /// <summary>Access a cell by column index.</summary>
     public ref TerminalCell this[int column] => ref _cells[column];
+
+    /// <summary>Resize the active row width without discarding preserved cells.</summary>
+    public void Resize(int columns, uint defaultFg = 0xFFD4D4D4, uint defaultBg = 0xFF1E1E1E)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(columns);
+
+        int previousLength = _cells.Length;
+        if (columns > previousLength)
+        {
+            Array.Resize(ref _cells, columns);
+            for (int i = previousLength; i < _cells.Length; i++)
+            {
+                _cells[i] = TerminalCell.Empty(defaultFg, defaultBg);
+            }
+        }
+
+        _columns = columns;
+        IsDirty = true;
+    }
 
     /// <summary>Clear all cells to the default state.</summary>
     public void Clear(uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E)
@@ -521,16 +544,7 @@ public sealed class TerminalScreen
         {
             for (var i = 0; i < _rows.Count; i++)
             {
-                if (_rows[i].Columns != columns)
-                {
-                    var newRow = new TerminalRow(columns, DefaultForeground, DefaultBackground);
-                    var copyCount = Math.Min(_rows[i].Columns, columns);
-                    var oldCells = _rows[i].ReadOnlyCells;
-                    var newCells = newRow.Cells;
-                    oldCells[..copyCount].CopyTo(newCells);
-                    newRow.WrapsToNext = _rows[i].WrapsToNext;
-                    _rows[i] = newRow;
-                }
+                _rows[i].Resize(columns, DefaultForeground, DefaultBackground);
             }
         }
 

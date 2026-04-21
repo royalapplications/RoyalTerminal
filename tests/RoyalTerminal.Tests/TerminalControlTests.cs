@@ -863,6 +863,32 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_HorizontalResizeShrinkAndRestore_PreservesBufferedContent()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 80,
+            Rows = 24,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        string line = "COLUMN-000-010-020-030-040-050-060-070-END";
+        control.WriteOutput(Encoding.UTF8.GetBytes(line));
+
+        Assert.True(ContainsScreenText(control, "070-END"));
+
+        control.Columns = 32;
+
+        Assert.Equal(32, control.Screen!.Columns);
+        Assert.False(ContainsScreenText(control, "070-END"));
+
+        control.Columns = 80;
+
+        Assert.Equal(80, control.Screen.Columns);
+        Assert.True(ContainsScreenText(control, "070-END"));
+    }
+
+    [AvaloniaFact]
     public async Task Control_Arrange_PixelOnlyResize_DoesNotPropagateTransportResize()
     {
         FakeTransport transport = new();

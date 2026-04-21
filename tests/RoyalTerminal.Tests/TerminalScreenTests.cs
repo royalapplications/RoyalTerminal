@@ -144,6 +144,28 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_ResizeHorizontalShrinkAndRestore_PreservesBufferedCells()
+    {
+        TerminalScreen screen = new(12, 3);
+        TerminalRow row = screen.GetViewportRow(0);
+        row[0].Codepoint = 'A';
+        row[10].Codepoint = 'K';
+
+        screen.Resize(6, 3);
+
+        Assert.Equal(6, screen.Columns);
+        Assert.Equal(6, screen.GetViewportRow(0).Columns);
+        Assert.Equal('A', screen.GetViewportRow(0)[0].Codepoint);
+
+        screen.Resize(12, 3);
+
+        Assert.Equal(12, screen.Columns);
+        Assert.Equal(12, screen.GetViewportRow(0).Columns);
+        Assert.Equal('A', screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal('K', screen.GetViewportRow(0)[10].Codepoint);
+    }
+
+    [Fact]
     public void TerminalScreen_InvalidateAll_MarksDirty()
     {
         var screen = new TerminalScreen(80, 24);
