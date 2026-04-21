@@ -1287,7 +1287,28 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 resetMouseSelection = true;
             }
 
-            _vtProcessor?.Process(data);
+            int restoreScrollOffset = -1;
+            if (!TryGetViewportScrollSource(out _) && _screen.ScrollOffset != 0)
+            {
+                // The managed VT processor writes through TerminalScreen.GetViewportRow.
+                // Keep those writes anchored to the live terminal viewport, not the
+                // user's scrollback viewport.
+                restoreScrollOffset = _screen.ScrollOffset;
+                _screen.ScrollOffset = 0;
+            }
+
+            try
+            {
+                _vtProcessor?.Process(data);
+            }
+            finally
+            {
+                if (restoreScrollOffset >= 0)
+                {
+                    _screen.ScrollOffset = restoreScrollOffset;
+                }
+            }
+
             TryUpdateHoveredLinkFromPointerLocked();
             UpdateRendererParityStateLocked();
         }

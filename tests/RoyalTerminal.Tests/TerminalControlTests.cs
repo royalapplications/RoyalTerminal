@@ -1252,6 +1252,42 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_WriteOutputWhileScrolledBack_PreservesVisibleScrollbackRows()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.ScrollData);
+        Assert.NotNull(control.Screen);
+
+        for (int i = 0; i < 64; i++)
+        {
+            control.WriteOutput(Encoding.UTF8.GetBytes($"LINE-{i:000}\n"));
+        }
+
+        TerminalScreen screen = control.Screen!;
+        Assert.True(control.ScrollData!.MaxOffset > 0);
+
+        control.ScrollByRows(-3);
+
+        Assert.True(screen.ScrollOffset > 0);
+        string[] beforeRows = ReadVisibleAsciiRows(screen);
+        int totalRowsBeforeOutput = screen.TotalRows;
+
+        control.WriteOutput("SCROLLBACK-MUTATION-SENTINEL\n"u8);
+
+        string[] afterRows = ReadVisibleAsciiRows(screen);
+        Assert.Equal(beforeRows, afterRows);
+        Assert.True(screen.TotalRows > totalRowsBeforeOutput);
+
+        control.ScrollToBottom();
+
+        Assert.True(ContainsScreenText(control, "SCROLLBACK-MUTATION-SENTINEL"));
+    }
+
+    [AvaloniaFact]
     public void Control_OffsetScroll_MarksViewportRowsDirty()
     {
         TerminalControl control = new()
@@ -1964,6 +2000,25 @@ public class TerminalControlTests
         }
 
         return false;
+    }
+
+    private static string[] ReadVisibleAsciiRows(TerminalScreen screen)
+    {
+        string[] rows = new string[screen.ViewportRows];
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            TerminalRow terminalRow = screen.GetViewportRow(row);
+            char[] chars = new char[terminalRow.Columns];
+            for (int col = 0; col < terminalRow.Columns; col++)
+            {
+                int codepoint = terminalRow[col].Codepoint;
+                chars[col] = codepoint <= 0 ? ' ' : codepoint <= 0x7F ? (char)codepoint : '?';
+            }
+
+            rows[row] = new string(chars);
+        }
+
+        return rows;
     }
 
     private sealed class CountingTerminalScrollService : ITerminalScrollService
