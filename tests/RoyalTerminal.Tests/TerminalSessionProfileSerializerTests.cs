@@ -75,6 +75,32 @@ public sealed class TerminalSessionProfileSerializerTests
     }
 
     [Fact]
+    public void Serializer_RoundTripsReflowOnResizeBehavior()
+    {
+        TerminalSessionProfilesDocument document = new()
+        {
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "fixed-width",
+                    DisplayName = "Fixed Width",
+                    Behavior = new TerminalSessionBehaviorSettings
+                    {
+                        ReflowOnResize = false,
+                    },
+                },
+            ],
+        };
+
+        string json = TerminalSessionProfileSerializer.ToJson(document);
+        TerminalSessionProfilesDocument restored = TerminalSessionProfileSerializer.FromJson(json);
+
+        TerminalSessionProfile profile = Assert.Single(restored.Profiles);
+        Assert.False(profile.Behavior.ReflowOnResize);
+    }
+
+    [Fact]
     public void Serializer_RoundTripsFileFontAppearance()
     {
         TerminalSessionProfilesDocument document = new()

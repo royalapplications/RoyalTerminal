@@ -16,6 +16,7 @@ public sealed class TerminalSettingsTerminalBehaviorState : TerminalSettingsCate
             nameof(TerminalSettingsPanelState.EnableBellNotifications),
             nameof(TerminalSettingsPanelState.BackspaceSendsControlH),
             nameof(TerminalSettingsPanelState.EnableTextShaping),
+            nameof(TerminalSettingsPanelState.ReflowOnResize),
             nameof(TerminalSettingsPanelState.EnableLigatures),
             nameof(TerminalSettingsPanelState.SelectedPasteSafetyPolicy),
             nameof(TerminalSettingsPanelState.SshRequestPty),
@@ -48,6 +49,12 @@ public sealed class TerminalSettingsTerminalBehaviorState : TerminalSettingsCate
     {
         get => Owner.EnableTextShaping;
         set => Owner.EnableTextShaping = value;
+    }
+
+    public bool ReflowOnResize
+    {
+        get => Owner.ReflowOnResize;
+        set => Owner.ReflowOnResize = value;
     }
 
     public bool EnableLigatures

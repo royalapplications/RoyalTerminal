@@ -80,6 +80,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _enableBellNotifications = true;
     private bool _backspaceSendsControlH;
     private bool _enableTextShaping = true;
+    private bool _reflowOnResize = true;
     private bool _enableLigatures;
     private readonly IReadOnlyList<TerminalPasteSafetyPolicy> _pasteSafetyPolicies = Enum.GetValues<TerminalPasteSafetyPolicy>();
     private TerminalPasteSafetyPolicy _selectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.None;
@@ -753,6 +754,12 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _enableTextShaping;
         set => this.RaiseAndSetIfChanged(ref _enableTextShaping, value);
+    }
+
+    public bool ReflowOnResize
+    {
+        get => _reflowOnResize;
+        set => this.RaiseAndSetIfChanged(ref _reflowOnResize, value);
     }
 
     public bool EnableLigatures

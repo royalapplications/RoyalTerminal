@@ -217,6 +217,9 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public static readonly StyledProperty<bool> EnableTextShapingProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(EnableTextShaping), true);
 
+    public static readonly StyledProperty<bool> ReflowOnResizeProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(ReflowOnResize), true);
+
     public static readonly StyledProperty<bool> EnableLigaturesProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(EnableLigatures), false);
 
@@ -678,6 +681,12 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         set => SetValue(EnableTextShapingProperty, value);
     }
 
+    public bool ReflowOnResize
+    {
+        get => GetValue(ReflowOnResizeProperty);
+        set => SetValue(ReflowOnResizeProperty, value);
+    }
+
     public bool EnableLigatures
     {
         get => GetValue(EnableLigaturesProperty);
@@ -1095,6 +1104,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
                 EnableBellNotifications = EnableBellNotifications,
                 BackspaceSendsControlH = BackspaceSendsControlH,
                 EnableTextShaping = EnableTextShaping,
+                ReflowOnResize = ReflowOnResize,
                 EnableLigatures = EnableLigatures,
                 PasteSafetyPolicy = SelectedPasteSafetyPolicy.ToString(),
             },
@@ -1252,6 +1262,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             EnableBellNotifications = profile.Behavior.EnableBellNotifications;
             BackspaceSendsControlH = profile.Behavior.BackspaceSendsControlH;
             EnableTextShaping = profile.Behavior.EnableTextShaping;
+            ReflowOnResize = profile.Behavior.ReflowOnResize;
             EnableLigatures = profile.Behavior.EnableLigatures;
             SelectedPasteSafetyPolicy = ParsePasteSafetyPolicy(profile.Behavior.PasteSafetyPolicy);
 

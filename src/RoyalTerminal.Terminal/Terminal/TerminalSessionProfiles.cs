@@ -242,6 +242,11 @@ public sealed record TerminalSessionBehaviorSettings
     public bool EnableTextShaping { get; init; } = true;
 
     /// <summary>
+    /// Whether buffered terminal lines reflow when the terminal width changes.
+    /// </summary>
+    public bool ReflowOnResize { get; init; } = true;
+
+    /// <summary>
     /// Whether ligatures are enabled.
     /// </summary>
     public bool EnableLigatures { get; init; }

@@ -3924,14 +3924,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     /// </summary>
     public void NotifyResize(int columns, int rows)
     {
-        _scrollBottom = rows - 1;
-        if (_scrollTop >= rows)
-            _scrollTop = 0;
-        if (_cursorRow >= rows)
-            _cursorRow = rows - 1;
-        if (_cursorCol >= columns)
-            _cursorCol = columns - 1;
-        InitTabStops();
+        ApplyResizeState(columns, rows);
     }
 
     /// <summary>
@@ -3943,6 +3936,59 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _widthPx = Math.Max(0, widthPx);
         _heightPx = Math.Max(0, heightPx);
         NotifyResize(columns, rows);
+    }
+
+    /// <summary>
+    /// Resizes the associated screen buffer and remaps the managed cursor through any row reflow.
+    /// </summary>
+    public void ResizeScreen(int columns, int rows, int widthPx, int heightPx, bool reflowOnResize)
+    {
+        _widthPx = Math.Max(0, widthPx);
+        _heightPx = Math.Max(0, heightPx);
+
+        TerminalGridPosition mappedCursor = _screen.Resize(
+            columns,
+            rows,
+            reflowOnResize && !_inAltScreen,
+            new TerminalGridPosition(_cursorCol, _cursorRow));
+
+        _cursorCol = mappedCursor.Column;
+        _cursorRow = mappedCursor.Row;
+        ApplyResizeState(columns, rows);
+    }
+
+    private void ApplyResizeState(int columns, int rows)
+    {
+        int safeColumns = Math.Max(1, columns);
+        int safeRows = Math.Max(1, rows);
+
+        _scrollBottom = safeRows - 1;
+        if (_scrollTop >= safeRows)
+        {
+            _scrollTop = 0;
+        }
+
+        if (_cursorRow >= safeRows)
+        {
+            _cursorRow = safeRows - 1;
+        }
+
+        if (_cursorCol > safeColumns)
+        {
+            _cursorCol = safeColumns;
+        }
+
+        if (_cursorRow < 0)
+        {
+            _cursorRow = 0;
+        }
+
+        if (_cursorCol < 0)
+        {
+            _cursorCol = 0;
+        }
+
+        InitTabStops();
     }
 
     /// <inheritdoc />

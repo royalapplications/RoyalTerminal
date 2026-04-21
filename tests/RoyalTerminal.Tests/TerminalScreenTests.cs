@@ -3,7 +3,9 @@
 // RoyalTerminal.Tests — Terminal screen and cell model tests.
 
 using System.Collections.Concurrent;
+using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Terminal;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -154,15 +156,51 @@ public class TerminalScreenTests
         screen.Resize(6, 3);
 
         Assert.Equal(6, screen.Columns);
-        Assert.Equal(6, screen.GetViewportRow(0).Columns);
-        Assert.Equal('A', screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal(6, screen.GetRow(0).Columns);
+        Assert.Equal('A', screen.GetRow(0)[0].Codepoint);
+        Assert.True(screen.GetRow(0).WrapsToNext);
+        Assert.Equal('K', screen.GetRow(1)[4].Codepoint);
 
         screen.Resize(12, 3);
 
         Assert.Equal(12, screen.Columns);
-        Assert.Equal(12, screen.GetViewportRow(0).Columns);
+        Assert.Equal(12, screen.GetRow(0).Columns);
+        Assert.Equal('A', screen.GetRow(0)[0].Codepoint);
+        Assert.Equal('K', screen.GetRow(0)[10].Codepoint);
+    }
+
+    [Fact]
+    public void TerminalScreen_ResizeWithoutReflow_HidesAndRestoresBufferedCells()
+    {
+        TerminalScreen screen = new(12, 3);
+        TerminalRow row = screen.GetViewportRow(0);
+        row[0].Codepoint = 'A';
+        row[10].Codepoint = 'K';
+
+        screen.Resize(6, 3, reflowOnResize: false);
+
+        Assert.Equal(6, screen.Columns);
+        Assert.False(screen.GetViewportRow(0).WrapsToNext);
         Assert.Equal('A', screen.GetViewportRow(0)[0].Codepoint);
+
+        screen.Resize(12, 3, reflowOnResize: false);
+
         Assert.Equal('K', screen.GetViewportRow(0)[10].Codepoint);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ResizeWithReflow_KeepsCursorOnPrompt()
+    {
+        TerminalScreen screen = new(12, 6);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process(Encoding.UTF8.GetBytes("ABCDEFGHIJKLMNO\r\n$ "));
+
+        processor.ResizeScreen(columns: 6, rows: 6, widthPx: 60, heightPx: 96, reflowOnResize: true);
+        processor.Process(Encoding.UTF8.GetBytes("ok"));
+
+        Assert.Contains("MNO", GetVisibleText(screen), StringComparison.Ordinal);
+        Assert.Contains("$ ok", GetVisibleText(screen), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -177,6 +215,29 @@ public class TerminalScreenTests
 
         screen.InvalidateAll();
         Assert.True(screen.HasDirtyRows());
+    }
+
+    private static string GetVisibleText(TerminalScreen screen)
+    {
+        StringBuilder builder = new();
+        for (int rowIndex = 0; rowIndex < screen.ViewportRows; rowIndex++)
+        {
+            TerminalRow row = screen.GetViewportRow(rowIndex);
+            for (int column = 0; column < row.Columns; column++)
+            {
+                TerminalCell cell = row[column];
+                if (cell.Width == 0)
+                {
+                    continue;
+                }
+
+                builder.Append(cell.Codepoint == 0 ? ' ' : (char)cell.Codepoint);
+            }
+
+            builder.AppendLine();
+        }
+
+        return builder.ToString();
     }
 
     [Fact]

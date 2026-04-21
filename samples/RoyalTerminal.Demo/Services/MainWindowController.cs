@@ -326,6 +326,7 @@ internal sealed class MainWindowController
             .WhenAnyValue(
                 model => model.SelectedPasteSafetyPolicy,
                 model => model.EnableTextShaping,
+                model => model.ReflowOnResize,
                 model => model.EnableLigatures)
             .Subscribe(_ => ApplyTerminalBehaviorSettingsToAllStandaloneTabs()));
 
@@ -2369,6 +2370,7 @@ internal sealed class MainWindowController
             current.EnableBellNotifications = _viewModel.EnableBellNotifications;
             current.BackspaceSendsControlH = _viewModel.BackspaceSendsControlH;
             current.EnableTextShaping = _viewModel.EnableTextShaping;
+            current.ReflowOnResize = _viewModel.ReflowOnResize;
             current.EnableLigatures = _viewModel.EnableLigatures;
             current.SelectedPasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
 
@@ -2471,6 +2473,7 @@ internal sealed class MainWindowController
         _viewModel.EnableBellNotifications = state.EnableBellNotifications;
         _viewModel.BackspaceSendsControlH = state.BackspaceSendsControlH;
         _viewModel.EnableTextShaping = state.EnableTextShaping;
+        _viewModel.ReflowOnResize = state.ReflowOnResize;
         _viewModel.EnableLigatures = state.EnableLigatures;
         _viewModel.SelectedPasteSafetyPolicy = state.SelectedPasteSafetyPolicy;
 
@@ -2609,6 +2612,7 @@ internal sealed class MainWindowController
     private void ApplyTerminalBehaviorSettings(TerminalControl control)
     {
         control.PasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
+        control.ReflowOnResize = _viewModel.ReflowOnResize;
         SkiaTerminalRenderer? renderer = control.Renderer;
         if (renderer is not null)
         {

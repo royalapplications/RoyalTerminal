@@ -264,6 +264,7 @@ public sealed class MainWindowControllerModeStartupTests
         viewModel.PipeCommandText = "echo behavior-settings";
         viewModel.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.BlockUnsafe;
         viewModel.EnableTextShaping = false;
+        viewModel.ReflowOnResize = false;
         viewModel.EnableLigatures = true;
 
         Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
@@ -285,14 +286,15 @@ public sealed class MainWindowControllerModeStartupTests
 
             List<TerminalControl> controls = GetStandaloneControls(terminalHost);
             Assert.NotEmpty(controls);
-            AssertTerminalBehaviorSettings(controls, TerminalPasteSafetyPolicy.BlockUnsafe, enableTextShaping: false, enableLigatures: true);
+            AssertTerminalBehaviorSettings(controls, TerminalPasteSafetyPolicy.BlockUnsafe, enableTextShaping: false, reflowOnResize: false, enableLigatures: true);
 
             viewModel.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.SanitizeControlSequences;
             viewModel.EnableTextShaping = true;
+            viewModel.ReflowOnResize = true;
             viewModel.EnableLigatures = false;
             Dispatcher.UIThread.RunJobs();
 
-            AssertTerminalBehaviorSettings(controls, TerminalPasteSafetyPolicy.SanitizeControlSequences, enableTextShaping: true, enableLigatures: false);
+            AssertTerminalBehaviorSettings(controls, TerminalPasteSafetyPolicy.SanitizeControlSequences, enableTextShaping: true, reflowOnResize: true, enableLigatures: false);
         }
         finally
         {
@@ -698,6 +700,7 @@ public sealed class MainWindowControllerModeStartupTests
         IReadOnlyList<TerminalControl> controls,
         TerminalPasteSafetyPolicy expectedPastePolicy,
         bool enableTextShaping,
+        bool reflowOnResize,
         bool enableLigatures)
     {
         for (int i = 0; i < controls.Count; i++)
@@ -706,6 +709,7 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.Equal(expectedPastePolicy, control.PasteSafetyPolicy);
             Assert.NotNull(control.Renderer);
             Assert.Equal(enableTextShaping, control.Renderer!.EnableTextShaping);
+            Assert.Equal(reflowOnResize, control.ReflowOnResize);
             Assert.Equal(enableLigatures, control.Renderer.EnableLigatures);
         }
     }

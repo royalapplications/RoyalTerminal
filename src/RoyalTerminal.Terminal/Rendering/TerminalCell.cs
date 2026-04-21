@@ -7,6 +7,11 @@ using RoyalTerminal.Terminal.Theming;
 namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
+/// Zero-based terminal grid position in viewport coordinates.
+/// </summary>
+public readonly record struct TerminalGridPosition(int Column, int Row);
+
+/// <summary>
 /// Represents a single cell in the terminal grid.
 /// Designed for efficient storage in contiguous arrays.
 /// </summary>
@@ -533,29 +538,281 @@ public sealed class TerminalScreen
     /// <summary>
     /// Resizes the screen to new dimensions.
     /// </summary>
-    public void Resize(int columns, int viewportRows)
+    public TerminalGridPosition Resize(
+        int columns,
+        int viewportRows,
+        bool reflowOnResize = true,
+        TerminalGridPosition? trackedViewportPosition = null)
     {
-        var oldColumns = Columns;
-        Columns = columns;
-        ViewportRows = viewportRows;
+        ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(viewportRows, 1);
 
-        // Resize existing rows if column count changed
+        int oldColumns = Columns;
+        int trackedAbsoluteRow = trackedViewportPosition is { } trackedPosition
+            ? GetAbsoluteRowForViewportRow(trackedPosition.Row)
+            : -1;
+        int trackedColumn = trackedViewportPosition is { } position
+            ? Math.Clamp(position.Column, 0, oldColumns)
+            : 0;
+        int mappedAbsoluteRow = trackedAbsoluteRow;
+        int mappedColumn = Math.Clamp(trackedColumn, 0, columns);
+
         if (columns != oldColumns)
         {
-            for (var i = 0; i < _rows.Count; i++)
+            if (reflowOnResize)
             {
-                _rows[i].Resize(columns, DefaultForeground, DefaultBackground);
+                ReflowRows(columns, trackedAbsoluteRow, trackedColumn, out mappedAbsoluteRow, out mappedColumn);
+            }
+            else
+            {
+                ResizeRows(columns);
             }
         }
 
-        // Ensure we have enough rows
-        while (_rows.Count < viewportRows)
-            _rows.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground));
+        Columns = columns;
+        ViewportRows = viewportRows;
 
-        // Mark all dirty for re-render
-        foreach (var row in _rows)
+        while (_rows.Count < viewportRows)
+        {
+            _rows.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground));
+        }
+
+        int removedRows = 0;
+        while (_rows.Count > ViewportRows + _scrollbackLimit)
+        {
+            _rows.RemoveAt(0);
+            removedRows++;
+        }
+
+        if (mappedAbsoluteRow >= 0)
+        {
+            mappedAbsoluteRow -= removedRows;
+        }
+
+        ScrollOffset = _viewportTop;
+
+        foreach (TerminalRow row in _rows)
+        {
             row.IsDirty = true;
+        }
+
+        return GetViewportPositionForAbsoluteRow(mappedAbsoluteRow, mappedColumn);
     }
+
+    private void ResizeRows(int columns)
+    {
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            _rows[i].Resize(columns, DefaultForeground, DefaultBackground);
+        }
+    }
+
+    private int GetAbsoluteRowForViewportRow(int viewportRow)
+    {
+        if (_rows.Count == 0)
+        {
+            return -1;
+        }
+
+        int clampedViewportRow = Math.Clamp(viewportRow, 0, Math.Max(0, ViewportRows - 1));
+        int absoluteRow = TotalRows - ViewportRows - _viewportTop + clampedViewportRow;
+        return Math.Clamp(absoluteRow, 0, TotalRows - 1);
+    }
+
+    private TerminalGridPosition GetViewportPositionForAbsoluteRow(int absoluteRow, int column)
+    {
+        int clampedColumn = Math.Clamp(column, 0, Columns);
+        if (_rows.Count == 0)
+        {
+            return new TerminalGridPosition(clampedColumn, 0);
+        }
+
+        int viewportStart = Math.Max(0, TotalRows - ViewportRows - _viewportTop);
+        int viewportRow = Math.Clamp(absoluteRow - viewportStart, 0, Math.Max(0, ViewportRows - 1));
+        return new TerminalGridPosition(clampedColumn, viewportRow);
+    }
+
+    private void ReflowRows(
+        int columns,
+        int trackedAbsoluteRow,
+        int trackedColumn,
+        out int mappedAbsoluteRow,
+        out int mappedColumn)
+    {
+        List<TerminalRow> reflowedRows = new(_rows.Count);
+        List<TerminalCell> logicalLine = new(Math.Max(Columns, columns));
+        mappedAbsoluteRow = trackedAbsoluteRow;
+        mappedColumn = Math.Clamp(trackedColumn, 0, columns);
+
+        int rowIndex = 0;
+        while (rowIndex < _rows.Count)
+        {
+            logicalLine.Clear();
+            int trackedLogicalOffset = -1;
+
+            bool hasContinuation;
+            do
+            {
+                TerminalRow row = _rows[rowIndex];
+                int endExclusive = GetReflowEndExclusive(row);
+                if (rowIndex == trackedAbsoluteRow)
+                {
+                    int clampedTrackedColumn = Math.Clamp(trackedColumn, 0, row.Columns);
+                    endExclusive = Math.Max(endExclusive, clampedTrackedColumn);
+                    trackedLogicalOffset = logicalLine.Count + clampedTrackedColumn;
+                }
+
+                if (endExclusive > 0)
+                {
+                    ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells[..endExclusive];
+                    for (int i = 0; i < cells.Length; i++)
+                    {
+                        logicalLine.Add(cells[i]);
+                    }
+                }
+
+                hasContinuation = row.WrapsToNext && rowIndex + 1 < _rows.Count;
+                rowIndex++;
+            }
+            while (hasContinuation);
+
+            int destinationStartRow = reflowedRows.Count;
+            AppendReflowedLogicalLine(logicalLine, columns, reflowedRows);
+
+            if (trackedLogicalOffset >= 0)
+            {
+                mappedAbsoluteRow = destinationStartRow + GetReflowedCursorRow(trackedLogicalOffset, columns);
+                mappedColumn = GetReflowedCursorColumn(trackedLogicalOffset, columns);
+            }
+        }
+
+        _rows.Clear();
+        _rows.AddRange(reflowedRows);
+    }
+
+    private static int GetReflowedCursorRow(int logicalOffset, int columns)
+    {
+        if (logicalOffset <= 0)
+        {
+            return 0;
+        }
+
+        return (logicalOffset - 1) / columns;
+    }
+
+    private static int GetReflowedCursorColumn(int logicalOffset, int columns)
+    {
+        if (logicalOffset <= 0)
+        {
+            return 0;
+        }
+
+        int column = logicalOffset % columns;
+        return column == 0 ? columns : column;
+    }
+
+    private int GetReflowEndExclusive(TerminalRow row)
+    {
+        if (row.WrapsToNext)
+        {
+            return row.Columns;
+        }
+
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        for (int i = cells.Length - 1; i >= 0; i--)
+        {
+            if (IsReflowMeaningfulCell(in cells[i]))
+            {
+                return i + 1;
+            }
+        }
+
+        return 0;
+    }
+
+    private bool IsReflowMeaningfulCell(ref readonly TerminalCell cell)
+    {
+        return cell.HasContent ||
+            cell.Attributes != CellAttributes.None ||
+            cell.UnderlineStyle != TerminalUnderlineStyle.None ||
+            cell.HasUnderlineColor ||
+            cell.Decorations != CellDecorations.None ||
+            cell.HyperlinkId != 0 ||
+            cell.Foreground != DefaultForeground ||
+            cell.Background != DefaultBackground ||
+            !cell.HasBackground;
+    }
+
+    private void AppendReflowedLogicalLine(
+        List<TerminalCell> logicalLine,
+        int columns,
+        List<TerminalRow> destination)
+    {
+        if (logicalLine.Count == 0)
+        {
+            destination.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground));
+            return;
+        }
+
+        int sourceIndex = 0;
+        while (sourceIndex < logicalLine.Count)
+        {
+            TerminalRow row = new(columns, DefaultForeground, DefaultBackground);
+            int column = 0;
+
+            while (sourceIndex < logicalLine.Count && column < columns)
+            {
+                TerminalCell cell = logicalLine[sourceIndex];
+                if (cell.Width == 0)
+                {
+                    sourceIndex++;
+                    continue;
+                }
+
+                int sourceStep = cell.Width <= 1 ? 1 : 2;
+                int width = sourceStep;
+                if (columns == 1)
+                {
+                    width = 1;
+                }
+
+                if (width == 2 && column == columns - 1)
+                {
+                    break;
+                }
+
+                cell.Width = (byte)width;
+                row[column] = cell;
+
+                if (width == 2 && column + 1 < columns)
+                {
+                    row[column + 1] = CreateWideSpacer(cell);
+                }
+
+                sourceIndex += sourceStep;
+                column += width;
+            }
+
+            row.WrapsToNext = sourceIndex < logicalLine.Count;
+            destination.Add(row);
+        }
+    }
+
+    private static TerminalCell CreateWideSpacer(TerminalCell source) => new()
+    {
+        Codepoint = 0,
+        Grapheme = null,
+        Foreground = source.Foreground,
+        Background = source.Background,
+        Attributes = source.Attributes,
+        UnderlineStyle = source.UnderlineStyle,
+        UnderlineColor = source.UnderlineColor,
+        HasUnderlineColor = source.HasUnderlineColor,
+        Decorations = source.Decorations,
+        HasBackground = source.HasBackground,
+        HyperlinkId = source.HyperlinkId,
+        Width = 0,
+    };
 
     /// <summary>
     /// Marks all rows as dirty for a full repaint.

@@ -112,6 +112,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public static readonly StyledProperty<bool> AutoScrollProperty =
         AvaloniaProperty.Register<TerminalControl, bool>(nameof(AutoScroll), true);
 
+    /// <summary>Whether buffered terminal rows reflow when the terminal width changes.</summary>
+    public static readonly StyledProperty<bool> ReflowOnResizeProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(nameof(ReflowOnResize), true);
+
     /// <summary>
     /// Preferred VT processor implementation.
     /// </summary>
@@ -194,6 +198,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         get => GetValue(AutoScrollProperty);
         set => SetValue(AutoScrollProperty, value);
+    }
+
+    /// <summary>Gets or sets whether buffered terminal rows reflow when the terminal width changes.</summary>
+    public bool ReflowOnResize
+    {
+        get => GetValue(ReflowOnResizeProperty);
+        set => SetValue(ReflowOnResizeProperty, value);
     }
 
     /// <summary>
@@ -964,12 +975,26 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             lock (_screen.SyncRoot)
             {
-                if (force || gridChanged)
+                if (_vtProcessor is BasicVtProcessor basicVtProcessor)
                 {
-                    _screen.Resize(safeColumns, safeRows);
+                    if (force || gridChanged)
+                    {
+                        basicVtProcessor.ResizeScreen(safeColumns, safeRows, widthPx, heightPx, ReflowOnResize);
+                    }
+                    else
+                    {
+                        basicVtProcessor.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
+                    }
                 }
+                else
+                {
+                    if (force || gridChanged)
+                    {
+                        _screen.Resize(safeColumns, safeRows, ReflowOnResize && _vtProcessor?.AlternateScreen != true);
+                    }
 
-                _vtProcessor?.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
+                    _vtProcessor?.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
+                }
             }
         }
 

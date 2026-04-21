@@ -246,6 +246,9 @@
                 <CheckBox Content="Enable Text Shaping"
                           Margin="0,2,10,0"
                           IsChecked="{Binding EnableTextShaping}" />
+                <CheckBox Content="Reflow on Resize"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding ReflowOnResize}" />
                 <CheckBox Content="Enable Ligatures"
                           Margin="0,2,10,0"
                           IsChecked="{Binding EnableLigatures}" />

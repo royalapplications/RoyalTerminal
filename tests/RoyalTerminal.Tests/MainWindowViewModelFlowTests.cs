@@ -494,6 +494,7 @@ public class MainWindowViewModelFlowTests
         Assert.True(viewModel.EnableBellNotifications);
         Assert.False(viewModel.BackspaceSendsControlH);
         Assert.True(viewModel.EnableTextShaping);
+        Assert.True(viewModel.ReflowOnResize);
         Assert.False(viewModel.EnableLigatures);
         Assert.Equal(TerminalPasteSafetyPolicy.None, viewModel.SelectedPasteSafetyPolicy);
         Assert.Contains(TerminalPasteSafetyPolicy.BlockUnsafe, viewModel.PasteSafetyPolicies);

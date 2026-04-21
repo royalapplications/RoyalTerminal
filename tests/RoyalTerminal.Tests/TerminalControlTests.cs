@@ -58,6 +58,7 @@ public class TerminalControlTests
         Assert.Equal(24, control.Rows);
         Assert.Equal(10_000, control.ScrollbackLimit);
         Assert.True(control.AutoScroll);
+        Assert.True(control.ReflowOnResize);
     }
 
     [AvaloniaFact]
@@ -81,6 +82,7 @@ public class TerminalControlTests
             Rows = 40,
             ScrollbackLimit = 50_000,
             AutoScroll = false,
+            ReflowOnResize = false,
         };
 
         Assert.Equal("JetBrains Mono", control.FontFamilyName);
@@ -91,6 +93,7 @@ public class TerminalControlTests
         Assert.Equal(40, control.Rows);
         Assert.Equal(50_000, control.ScrollbackLimit);
         Assert.False(control.AutoScroll);
+        Assert.False(control.ReflowOnResize);
     }
 
     [AvaloniaFact]
@@ -863,12 +866,39 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public void Control_HorizontalResizeShrinkAndRestore_PreservesBufferedContent()
+    public void Control_HorizontalResizeShrink_ReflowsBufferedContent()
     {
         TerminalControl control = new()
         {
             Columns = 80,
             Rows = 24,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        string line = "COLUMN-000-010-020-030-040-050-060-070-END";
+        control.WriteOutput(Encoding.UTF8.GetBytes(line));
+
+        Assert.True(ContainsScreenText(control, "070-END"));
+
+        control.Columns = 32;
+
+        Assert.Equal(32, control.Screen!.Columns);
+        Assert.True(ContainsScreenText(control, "070-END"));
+
+        control.Columns = 80;
+
+        Assert.Equal(80, control.Screen.Columns);
+        Assert.True(ContainsScreenText(control, "070-END"));
+    }
+
+    [AvaloniaFact]
+    public void Control_HorizontalResizeShrinkWithoutReflow_HidesAndRestoresBufferedContent()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 80,
+            Rows = 24,
+            ReflowOnResize = false,
             VtProcessorPreference = VtProcessorPreference.Managed,
         };
 

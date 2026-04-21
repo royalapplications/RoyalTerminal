@@ -41,12 +41,14 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.NotNull(viewModel.SettingsPanelState.SelectedProfile);
             Assert.Equal("Stored Profile", viewModel.SettingsPanelState.SelectedProfile!.DisplayName);
             Assert.Equal(TerminalPasteSafetyPolicy.BlockUnsafe, viewModel.SettingsPanelState.SelectedPasteSafetyPolicy);
+            Assert.False(viewModel.SettingsPanelState.ReflowOnResize);
             Assert.Equal(TerminalFontSource.File, viewModel.SettingsPanelState.SelectedFontSource);
             Assert.Equal(GetStoredFontPath(), viewModel.SettingsPanelState.FontFilePath);
             Assert.Equal(18, viewModel.SettingsPanelState.FontSize);
 
             viewModel.SettingsPanelState.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.SanitizeControlSequences;
             viewModel.SettingsPanelState.EnableTextShaping = false;
+            viewModel.SettingsPanelState.ReflowOnResize = true;
             viewModel.SettingsPanelState.EnableLigatures = true;
             viewModel.SettingsPanelState.SelectedFontSource = TerminalFontSource.System;
             viewModel.SettingsPanelState.FontFamilyName = "Monaco";
@@ -56,6 +58,7 @@ public sealed class MainWindowControllerSettingsPanelTests
 
             Assert.Equal(TerminalPasteSafetyPolicy.SanitizeControlSequences, viewModel.SelectedPasteSafetyPolicy);
             Assert.False(viewModel.EnableTextShaping);
+            Assert.True(viewModel.ReflowOnResize);
             Assert.True(viewModel.EnableLigatures);
             Assert.Equal(TerminalFontSource.System, viewModel.FontSource);
             Assert.Equal("Monaco", viewModel.FontFamilyName);
@@ -69,6 +72,7 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.Equal(TerminalFontSource.System, control.FontSource);
             Assert.Equal("Monaco", control.FontFamilyName);
             Assert.Equal(17, control.TerminalFontSize);
+            Assert.True(control.ReflowOnResize);
         }
         finally
         {
@@ -100,6 +104,7 @@ public sealed class MainWindowControllerSettingsPanelTests
 
             viewModel.SettingsPanelState.SessionName = "Renamed Stored Profile";
             viewModel.SettingsPanelState.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.BlockUnsafe;
+            viewModel.SettingsPanelState.ReflowOnResize = false;
             viewModel.SettingsPanelState.SelectedFontSource = TerminalFontSource.File;
             viewModel.SettingsPanelState.FontFamilyName = "Saved Font";
             viewModel.SettingsPanelState.FontFilePath = GetSavedFontPath();
@@ -111,6 +116,7 @@ public sealed class MainWindowControllerSettingsPanelTests
             TerminalSessionProfile savedProfile = Assert.Single(store.Document.Profiles);
             Assert.Equal("Renamed Stored Profile", savedProfile.DisplayName);
             Assert.Equal("BlockUnsafe", savedProfile.Behavior.PasteSafetyPolicy);
+            Assert.False(savedProfile.Behavior.ReflowOnResize);
             Assert.Equal(TerminalFontSource.File, savedProfile.Appearance.FontSource);
             Assert.Equal("Saved Font", savedProfile.Appearance.FontFamilyName);
             Assert.Equal(GetSavedFontPath(), savedProfile.Appearance.FontFilePath);
@@ -193,6 +199,7 @@ public sealed class MainWindowControllerSettingsPanelTests
                         EnableBellNotifications = true,
                         BackspaceSendsControlH = false,
                         EnableTextShaping = true,
+                        ReflowOnResize = false,
                         EnableLigatures = false,
                         PasteSafetyPolicy = "BlockUnsafe",
                     },
