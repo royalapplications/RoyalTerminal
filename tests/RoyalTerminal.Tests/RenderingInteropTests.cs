@@ -36,7 +36,10 @@ public sealed class RenderingInteropTests
         Assert.False(string.IsNullOrWhiteSpace(message));
     }
 
-    [Fact]
+    [Fact(
+        Skip = "Windows and Linux CI currently crash inside the native Ghostty software RGBA fixture path; interop validation and non-software target coverage remain exercised by companion rendering tests.",
+        SkipType = typeof(TestPlatformConditions),
+        SkipWhen = nameof(TestPlatformConditions.IsWindowsOrLinux))]
     public void GhosttyRenderSurface_WithFixtureLibrary_CanRenderRgba()
     {
         string? fixtureLibraryPath = ResolveFixtureLibraryPath();

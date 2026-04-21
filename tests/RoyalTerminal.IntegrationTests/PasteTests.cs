@@ -5,6 +5,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.IntegrationTests.TestInfrastructure;
 using Xunit;
 using static RoyalTerminal.GhosttySharp.Native.GhosttyVtNative;
 
@@ -16,7 +17,7 @@ namespace RoyalTerminal.IntegrationTests;
 /// </summary>
 public class PasteTests
 {
-    [Fact]
+    [GhosttyNativeFact]
     public void PasteIsSafe_SafeText_ReturnsTrue()
     {
         var data = "hello world"u8;
@@ -31,7 +32,7 @@ public class PasteTests
         Assert.True(safe);
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void PasteIsSafe_TextWithNewline_ReturnsFalse()
     {
         var data = "rm -rf /\n"u8;
@@ -46,7 +47,7 @@ public class PasteTests
         Assert.False(safe);
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void PasteIsSafe_EmptyString_ReturnsTrue()
     {
         bool safe;
@@ -58,7 +59,7 @@ public class PasteTests
         Assert.True(safe);
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void PasteIsSafe_BracketedPasteEnd_ReturnsFalse()
     {
         // ESC[201~ — bracketed paste end sequence
@@ -74,7 +75,7 @@ public class PasteTests
         Assert.False(safe);
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void PasteIsSafe_LongSafeText_ReturnsTrue()
     {
         var data = Encoding.UTF8.GetBytes(new string('A', 10000));

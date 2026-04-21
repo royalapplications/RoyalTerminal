@@ -5,6 +5,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.IntegrationTests.TestInfrastructure;
 using Xunit;
 using static RoyalTerminal.GhosttySharp.Native.GhosttyVtNative;
 
@@ -16,7 +17,7 @@ namespace RoyalTerminal.IntegrationTests;
 /// </summary>
 public class OscParserTests
 {
-    [Fact]
+    [GhosttyNativeFact]
     public void OscParser_CreateAndFree()
     {
         var result = GhosttyVtNative.OscNew(0, out var parser);
@@ -25,7 +26,7 @@ public class OscParserTests
         GhosttyVtNative.OscFree(parser);
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OscParser_ParseWindowTitle()
     {
         var result = GhosttyVtNative.OscNew(0, out var parser);
@@ -53,7 +54,7 @@ public class OscParserTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OscParser_ExtractWindowTitleData()
     {
         var result = GhosttyVtNative.OscNew(0, out var parser);
@@ -93,7 +94,7 @@ public class OscParserTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OscParser_Reset_AllowsReuse()
     {
         var result = GhosttyVtNative.OscNew(0, out var parser);
@@ -120,7 +121,7 @@ public class OscParserTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OscParser_InvalidSequence_ReturnsInvalid()
     {
         var result = GhosttyVtNative.OscNew(0, out var parser);
@@ -152,7 +153,7 @@ public class OscParserTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OscParser_NullCommand_ReturnsInvalid()
     {
         var cmdType = GhosttyVtNative.OscCommandType(0);

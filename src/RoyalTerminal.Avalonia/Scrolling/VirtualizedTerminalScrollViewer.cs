@@ -52,13 +52,15 @@ public class VirtualizedTerminalScrollViewer : Control, ILogicalScrollable
     /// <summary>The page scroll size.</summary>
     public Size PageScrollSize => new(Bounds.Width, Bounds.Height);
 
-    bool ILogicalScrollable.CanHorizontallyScroll
+    /// <summary>Whether horizontal scrolling is enabled.</summary>
+    public bool CanHorizontallyScroll
     {
         get => _canHorizontallyScroll;
         set => _canHorizontallyScroll = value;
     }
 
-    bool ILogicalScrollable.CanVerticallyScroll
+    /// <summary>Whether vertical scrolling is enabled.</summary>
+    public bool CanVerticallyScroll
     {
         get => _canVerticallyScroll;
         set => _canVerticallyScroll = value;

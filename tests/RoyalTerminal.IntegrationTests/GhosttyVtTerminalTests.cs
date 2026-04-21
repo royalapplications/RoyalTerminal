@@ -6,20 +6,16 @@ using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.IntegrationTests.TestInfrastructure;
 using Xunit;
 
 namespace RoyalTerminal.IntegrationTests;
 
 public class GhosttyVtTerminalTests
 {
-    [Fact]
+    [GhosttyNativeFact]
     public unsafe void OfficialTerminalAndRenderState_WriteTextAndGridRefExposeCells()
     {
-        if (!GhosttyVtNative.IsAvailable())
-        {
-            return;
-        }
-
         using GhosttyTerminal terminal = new(80, 24);
         using GhosttyRenderState renderState = new();
 
@@ -44,14 +40,9 @@ public class GhosttyVtTerminalTests
         Assert.Equal((uint)'A', GetCellCodepoint(cell));
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OfficialRenderState_ExposesGraphemeClusters()
     {
-        if (!GhosttyVtNative.IsAvailable())
-        {
-            return;
-        }
-
         using GhosttyTerminal terminal = new(80, 24);
         using GhosttyRenderState renderState = new();
 
@@ -74,14 +65,9 @@ public class GhosttyVtTerminalTests
         Assert.True(GhosttyVtNative.StyleIsDefault(in style));
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OfficialTerminal_ModesResizeResetScrollAndFormatterWork()
     {
-        if (!GhosttyVtNative.IsAvailable())
-        {
-            return;
-        }
-
         using GhosttyTerminal terminal = new(10, 5);
         using GhosttyRenderState renderState = new();
 
@@ -125,14 +111,9 @@ public class GhosttyVtTerminalTests
         Assert.Equal((ushort)6, renderState.GetRows());
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OfficialTerminal_SelectionFormatting_AndHyperlinkUris_Work()
     {
-        if (!GhosttyVtNative.IsAvailable())
-        {
-            return;
-        }
-
         using GhosttyTerminal terminal = new(80, 24);
 
         terminal.Write("\u001b]8;;https://example.com\u001b\\AB\u001b]8;;\u001b\\"u8);
@@ -149,14 +130,9 @@ public class GhosttyVtTerminalTests
         Assert.Equal("AB", formatter.FormatToString());
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OfficialTerminal_KittyGraphics_AreExposedThroughCurrentWrappers()
     {
-        if (!GhosttyVtNative.IsAvailable())
-        {
-            return;
-        }
-
         GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
         if (!features.KittyGraphics)
         {
@@ -211,14 +187,9 @@ public class GhosttyVtTerminalTests
         Assert.False(iterator.MoveNext());
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OfficialTerminal_EffectCallbacks_FireForBellTitleAndWritePty()
     {
-        if (!GhosttyVtNative.IsAvailable())
-        {
-            return;
-        }
-
         using GhosttyTerminal terminal = new(80, 24);
 
         int bellCount = 0;
@@ -253,14 +224,9 @@ public class GhosttyVtTerminalTests
         Assert.Equal("\u001b[0n", writePty);
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void ProtocolHelpers_EncodeReportsAndBuildInfo()
     {
-        if (!GhosttyVtNative.IsAvailable())
-        {
-            return;
-        }
-
         GhosttyVtHelpers.GhosttyBuildInfoSnapshot buildInfo = GhosttyVtHelpers.GetBuildInfoSnapshot();
         Assert.InRange((int)buildInfo.OptimizeMode, 0, 3);
         Assert.False(string.IsNullOrWhiteSpace(buildInfo.VersionString));
@@ -284,14 +250,9 @@ public class GhosttyVtTerminalTests
         Assert.Equal("\u001b[8;24;80t", sizeReport);
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void ProtocolHelpers_TypeMetadataAndModeHelpers_Work()
     {
-        if (!GhosttyVtNative.IsAvailable())
-        {
-            return;
-        }
-
         string typeJson = GhosttyVtHelpers.GetTypeMetadataJson();
         Assert.Contains("GhosttyFormatterTerminalOptions", typeJson, StringComparison.Ordinal);
         Assert.Contains("GhosttyPoint", typeJson, StringComparison.Ordinal);
@@ -305,14 +266,9 @@ public class GhosttyVtTerminalTests
         Assert.Equal((ushort)2004, GhosttyVtNative.ModeValue(decMode));
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void MouseEncoder_FromTerminalState_EncodesSgrMousePress()
     {
-        if (!GhosttyVtNative.IsAvailable())
-        {
-            return;
-        }
-
         using GhosttyTerminal terminal = new(80, 24);
         using GhosttyMouseEncoder encoder = new();
         using GhosttyMouseEvent mouseEvent = new();
@@ -341,14 +297,9 @@ public class GhosttyVtTerminalTests
         Assert.EndsWith("M", encoded);
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OfficialTerminal_SplitEscapeSequenceAcrossWrites_DoesNotLeakControlBytes()
     {
-        if (!GhosttyVtNative.IsAvailable())
-        {
-            return;
-        }
-
         using GhosttyTerminal terminal = new(80, 24);
         using GhosttyRenderState renderState = new();
 
@@ -359,14 +310,9 @@ public class GhosttyVtTerminalTests
         Assert.Equal("Red", ReadLeadingRowText(renderState, 3));
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void OfficialTerminal_Resize_PreservesCellsAndAcceptsAdditionalWrites()
     {
-        if (!GhosttyVtNative.IsAvailable())
-        {
-            return;
-        }
-
         using GhosttyTerminal terminal = new(80, 24);
         using GhosttyRenderState renderState = new();
 

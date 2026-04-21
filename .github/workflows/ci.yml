@@ -120,48 +120,125 @@ jobs:
       - name: Build
         run: dotnet build -c Release --no-restore
 
-      - name: Test (Unit)
-        if: matrix.os != 'ubuntu-latest'
-        run: dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory ./test-results
-
-      - name: Test (Unit - Linux slices)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Test (Unit - Batches)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p test-results
 
           slice_names=(
-            "test-results-linux-slice-1"
-            "test-results-linux-slice-2"
-            "test-results-linux-slice-3"
-            "test-results-linux-slice-4"
+            "test-results-headless-skia"
+            "test-results-terminal-control-window-resize"
+            "test-results-terminal-control-keyboard-fallback"
+            "test-results-terminal-control-keyboard-handled-ctrlc"
+            "test-results-terminal-control-keyboard-handled-text"
+            "test-results-terminal-control-keyboard-window-ctrlc"
+            "test-results-terminal-control-keyboard-window-ctrlz"
+            "test-results-terminal-control-keyboard-selection-ctrlc"
+            "test-results-terminal-control-keyboard-flood-ctrlc"
+            "test-results-terminal-control-keyboard-flood-ctrlz"
+            "test-results-terminal-control-keyboard-endpoint-sink"
+            "test-results-terminal-control-keyboard-endpoint-textpath"
+            "test-results-terminal-control-interaction-pty-latency"
+            "test-results-terminal-control-interaction-pty-repeat-ansi"
+            "test-results-terminal-control-interaction-pty-repeat-base64-ctrlc"
+            "test-results-terminal-control-interaction-pty-repeat-base64-ctrlz"
+            "test-results-terminal-control-interaction-vt-queries-pty"
+            "test-results-terminal-control-interaction-vt-queries-transport"
+            "test-results-terminal-control-interaction-da-responses"
+            "test-results-terminal-control-interaction-pointer"
+            "test-results-terminal-control-interaction-hover"
+            "test-results-terminal-control"
+            "test-results-terminal-capture-runtime"
+            "test-results-core-headless-and-native"
+            "test-results-mainwindow-controller-settings-load"
+            "test-results-mainwindow-controller-settings-save"
+            "test-results-mainwindow-controller-startup-tabs"
+            "test-results-mainwindow-controller-startup-colors"
+            "test-results-mainwindow-controller-startup-request-modes"
+            "test-results-mainwindow-controller-startup-rendered-auto"
+            "test-results-mainwindow-controller-startup-capabilities"
+            "test-results-mainwindow-controller-startup-terminal-behavior"
+            "test-results-mainwindow-controller-startup-statusbar"
+            "test-results-mainwindow-controller-startup-search"
+            "test-results-mainwindow-controller-startup-copy-snapshot"
+            "test-results-mainwindow-controller-startup-hyperlink-diagnostics"
+            "test-results-mainwindow-controller-startup-kitty-graphics"
+            "test-results-presentation-and-rendering"
+            "test-results-transports"
+            "test-results-core-runtime"
           )
 
           slice_filters=(
-            "(FullyQualifiedName~RoyalTerminal.Tests.GhosttyComponentTests.)|(FullyQualifiedName~RoyalTerminal.Tests.GhosttyUnsupportedWindowsSequenceSanitizerTests.)|(FullyQualifiedName~RoyalTerminal.Tests.HeadlessSkiaRenderingTests.)|(FullyQualifiedName~RoyalTerminal.Tests.NativeEnumTests.)|(FullyQualifiedName~RoyalTerminal.Tests.NativeTerminalControlTests.)|(FullyQualifiedName~RoyalTerminal.Tests.NcursesHarnessFlowTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalQueryTests.)"
-            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.)|(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerSettingsPanelTests.)|(FullyQualifiedName~RoyalTerminal.Tests.MainWindowViewModelFlowTests.)|(FullyQualifiedName~RoyalTerminal.Tests.PackageBoundaryTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingAvaloniaAdapterTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingContractsTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingInteropTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingSkiaInteropTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalScreenTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalScrollDataTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalSettingsPanelStateTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalThemeTests.)|(FullyQualifiedName~RoyalTerminal.Tests.UnicodeWidthTests.)|(FullyQualifiedName~RoyalTerminal.Tests.WindowsArm64NativePackagingTests.)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.HeadlessSkiaRenderingTests.)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_WindowResize_UpdatesGrid_AndPropagatesToTransport)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardInput_SendsToTransportFallback)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardInterrupt_FromHandledTunnelRouting_StillReachesTransportFallback)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_TextInput_FromHandledTunnelRouting_StillReachesTransportFallback)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardInterrupt_WithWindowScopedKeyBinding_StillReachesTransportFallback)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardSuspend_WithWindowScopedKeyBinding_StillReachesTransportFallback)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardInterrupt_WithActiveSelection_StillReachesTransportFallback)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardInterrupt_UnderOutputFlood_SendsCtrlCImmediately)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardSuspend_UnderOutputFlood_SendsCtrlZImmediately)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardInput_UsesAttachedEndpointSink)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_KeyboardInput_FallsBackToAttachedEndpointTextPath_WhenNoInputSink)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_CtrlC_InterruptsFloodedShellWithinLatencyBudget)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_CtrlC_RecoversVisibleScreenAfterUnterminatedOscFlood)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_KeyDownCtrlC_InterruptsAnsiFloodWithinLatencyBudget)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_KeyDownCtrlZ_SuspendsAnsiFloodWithinLatencyBudget)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_RepeatedKeyDownCtrlC_InterruptsAnsiFloodAcrossCycles)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_RepeatedKeyDownCtrlC_InterruptsBase64FloodAcrossCycles)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_RepeatedKeyDownCtrlZ_SuspendsBase64FloodAcrossCycles)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_VtQueryResponses_AreSuppressed_ForPtyBackedSessions_WhenOutputBacklogIsHigh)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_VtQueryResponses_AreNotSuppressed_ForNonPtyTransports_WhenOutputBacklogIsHigh)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_DaResponse_IsForwardedWithoutUrgentControlSuppression)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedPty_CtrlC_SuppressesLateDaResponseAtPromptBoundary)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedTransport_DaResponse_IsForwardedWithoutUrgentControlSuppression)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ManagedTransport_CtrlC_SuppressesLateDaResponseAtPromptBoundary)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_MouseInput_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_FocusEvents_)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_Osc8Hover_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_PlainUrlHover_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_ModifiedClick_)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlHeadlessInteractionTests.Headless_FallbackParity_)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalControlTests.)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalCaptureRuntimeTests.)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.GhosttyVtProcessorTests.)|(FullyQualifiedName~RoyalTerminal.Tests.GhosttyUnsupportedWindowsSequenceSanitizerTests.)|(FullyQualifiedName~RoyalTerminal.Tests.NativeEnumTests.)|(FullyQualifiedName~RoyalTerminal.Tests.NcursesHarnessFlowTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalQueryTests.)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerSettingsPanelTests.Controller_PrepareSettingsPanel_LoadsStoredProfile_AndApplyUpdatesViewModel)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerSettingsPanelTests.Controller_SaveSettingsPanel_PersistsEditedDocument)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.Controller_Startup_CreatesTabsForEachSupportedMode)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.Controller_Startup_StandaloneModeIndicators_UseDistinctColors)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.Controller_NewTab_RequestModes_ResolveToSupportedModesWithoutCrash)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.Controller_RenderedAuto_UsesStandaloneVtControl)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.Controller_RuntimeCapabilities_KeepModeCycleStable)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.Controller_TerminalBehaviorSettings_AreAppliedAndUpdated)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.Controller_StandaloneTerminalOutput_DoesNotSpamStatusBar)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.Controller_SearchCommands_SyncActiveTerminalSearchSurface)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.Controller_CopySnapshotCommand_ExportsActiveTerminalToClipboard)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.Controller_ShowcaseHyperlinkAndDiagnostics_UpdateActiveTab)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowControllerModeStartupTests.Controller_ShowcaseKittyGraphics_UsesNativeGhosttyTab_WhenAvailable)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.MainWindowViewModelFlowTests.)|(FullyQualifiedName~RoyalTerminal.Tests.PackageBoundaryTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingAvaloniaAdapterTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingContractsTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingInteropTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingSkiaInteropTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RenderingTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalScreenTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalScrollDataTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalSelectionAndPasteTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalSettingsPanelStateTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalThemeTests.)|(FullyQualifiedName~RoyalTerminal.Tests.UnicodeWidthTests.)|(FullyQualifiedName~RoyalTerminal.Tests.WindowsArm64NativePackagingTests.)"
             "(FullyQualifiedName~RoyalTerminal.Tests.KnownHostsSshHostKeyValidatorTests.)|(FullyQualifiedName~RoyalTerminal.Tests.PipeTerminalTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.PtyContractTests.)|(FullyQualifiedName~RoyalTerminal.Tests.PtyTerminalTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.RawTcpTerminalTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SerialTerminalTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SshCredentialProvidersTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SshHostKeyValidationTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SshNetAgentAuthenticationMethodContributorTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SshNetTerminalTransportSecurityTests.)|(FullyQualifiedName~RoyalTerminal.Tests.SshShellBootstrapCommandBuilderTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TelnetTerminalTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalSessionProfileSerializerTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalSessionServiceTransportTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalTransportFactoryTests.)"
-            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalAbstractionsTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalBufferTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalCaptureRecorderTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalCaptureRuntimeTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalDataProcessorTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalInputAdapterTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalModeResolverTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalMouseProtocolTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalShortcutDispatcherTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalWin32InputModeTrackerTests.)"
+            "(FullyQualifiedName~RoyalTerminal.Tests.TerminalAbstractionsTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalBufferTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalCaptureRecorderTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalDataProcessorTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalInputAdapterTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalModeResolverTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalMouseProtocolTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalShortcutDispatcherTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TerminalWin32InputModeTrackerTests.)|(FullyQualifiedName~RoyalTerminal.Tests.TransportWritePumpTests.)"
           )
 
           for i in "${!slice_names[@]}"; do
             name="${slice_names[$i]}"
             filter="${slice_filters[$i]}"
-            dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj \
-              -c Release \
-              --no-build \
-              --filter "$filter" \
-              --blame-crash \
-              --blame-hang \
-              --blame-hang-timeout 5m \
-              --diag "./test-results/${name}.diag.log" \
-              --logger "trx;LogFileName=${name}.trx" \
-              --results-directory ./test-results
+            if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+              dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj \
+                -c Release \
+                --no-build \
+                --filter "$filter" \
+                --blame-crash \
+                --blame-hang \
+                --blame-hang-timeout 5m \
+                --diag "./test-results/${name}.diag.log" \
+                --logger "trx;LogFileName=${name}.trx" \
+                --results-directory ./test-results
+            else
+              dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj \
+                -c Release \
+                --no-build \
+                --filter "$filter" \
+                --diag "./test-results/${name}.diag.log" \
+                --logger "trx;LogFileName=${name}.trx" \
+                --results-directory ./test-results
+            fi
           done
 
       - name: Test (Mode Startup Smoke)
-        run: dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --no-build --filter "(FullyQualifiedName~TerminalModeResolverTests)|(FullyQualifiedName~MainWindowControllerModeStartupTests)|(FullyQualifiedName~Headless_FallbackParity_AutoAndManaged_PreserveKeyboardMousePasteAndResize_WhenHostedInScrollViewer)" --logger "trx;LogFileName=mode-startup-smoke-results.trx" --results-directory ./test-results
+        run: dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --no-build --filter "(FullyQualifiedName~TerminalModeResolverTests)|(FullyQualifiedName~Headless_FallbackParity_AutoAndManaged_PreserveKeyboardMousePasteAndResize_WhenHostedInScrollViewer)" --logger "trx;LogFileName=mode-startup-smoke-results.trx" --results-directory ./test-results
 
       - name: Upload test results
         uses: actions/upload-artifact@v4

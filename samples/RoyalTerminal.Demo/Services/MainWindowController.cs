@@ -22,7 +22,6 @@ using Avalonia.Media;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Capture;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
@@ -674,7 +673,7 @@ internal sealed class MainWindowController
             try
             {
                 await WaitForStandaloneControlAttachmentAsync(standaloneControl);
-                if (standaloneControl.GetVisualRoot() is null || standaloneControl.Parent is null)
+                if (TopLevel.GetTopLevel(standaloneControl) is null || standaloneControl.Parent is null)
                 {
                     return;
                 }
@@ -701,7 +700,7 @@ internal sealed class MainWindowController
         DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
         while (DateTime.UtcNow < deadline)
         {
-            if (standaloneControl.GetVisualRoot() is not null)
+            if (TopLevel.GetTopLevel(standaloneControl) is not null)
             {
                 return;
             }

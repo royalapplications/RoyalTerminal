@@ -4,6 +4,7 @@
 
 using System.Runtime.InteropServices;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.IntegrationTests.TestInfrastructure;
 using Xunit;
 using static RoyalTerminal.GhosttySharp.Native.GhosttyVtNative;
 
@@ -15,7 +16,7 @@ namespace RoyalTerminal.IntegrationTests;
 /// </summary>
 public class SgrParserTests
 {
-    [Fact]
+    [GhosttyNativeFact]
     public void SgrParser_CreateAndFree()
     {
         var result = GhosttyVtNative.SgrNew(0, out var parser);
@@ -24,7 +25,7 @@ public class SgrParserTests
         GhosttyVtNative.SgrFree(parser);
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void SgrParser_ParseBold()
     {
         var result = GhosttyVtNative.SgrNew(0, out var parser);
@@ -59,7 +60,7 @@ public class SgrParserTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void SgrParser_ParseBoldAndRedForeground()
     {
         var result = GhosttyVtNative.SgrNew(0, out var parser);
@@ -102,7 +103,7 @@ public class SgrParserTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void SgrParser_ParseReset_ReturnsUnset()
     {
         var result = GhosttyVtNative.SgrNew(0, out var parser);
@@ -134,7 +135,7 @@ public class SgrParserTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void SgrParser_Reset_AllowsReuse()
     {
         var result = GhosttyVtNative.SgrNew(0, out var parser);
@@ -175,7 +176,7 @@ public class SgrParserTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public void SgrParser_NoMoreAttributes_ReturnsFalse()
     {
         var result = GhosttyVtNative.SgrNew(0, out var parser);
@@ -207,7 +208,7 @@ public class SgrParserTests
         }
     }
 
-    [Fact]
+    [GhosttyNativeFact]
     public unsafe void SgrParser_HelperAccessors_ExposeTypedValues()
     {
         var result = GhosttyVtNative.SgrNew(0, out var parser);

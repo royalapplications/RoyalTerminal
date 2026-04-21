@@ -151,7 +151,7 @@
                      Foreground="{DynamicResource ToolbarForegroundBrush}"
                      FontSize="11" />
           <TextBox Width="220"
-                   Watermark="Find in active terminal"
+                   PlaceholderText="Find in active terminal"
                    Text="{Binding SearchQuery}" />
           <Button Content="Find"
                   Height="24"
@@ -476,7 +476,7 @@
                          IsVisible="{Binding ShowSshPrivateKeyField}" />
               <TextBox Width="220" Margin="0,0,8,0"
                        Text="{Binding SshPrivateKeyPath}"
-                       Watermark="Path or PEM; separate multiple with comma/semicolon/newline"
+                       PlaceholderText="Path or PEM; separate multiple with comma/semicolon/newline"
                        IsVisible="{Binding ShowSshPrivateKeyField}" />
 
               <TextBlock Text="Agent credentials are resolved from your SSH agent socket."

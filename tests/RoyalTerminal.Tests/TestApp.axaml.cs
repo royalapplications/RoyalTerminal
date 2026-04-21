@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Markup.Xaml;
 using Avalonia.Skia;
+using ReactiveUI.Avalonia;
 
 [assembly: AvaloniaTestApplication(typeof(RoyalTerminal.Tests.TestAppBuilder))]
 
@@ -23,6 +24,8 @@ public class TestAppBuilder
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<TestApp>()
             .UseSkia()
+            .UseHarfBuzz()
+            .UseReactiveUI(_ => { })
             .UseHeadless(new AvaloniaHeadlessPlatformOptions
             {
                 UseHeadlessDrawing = false,

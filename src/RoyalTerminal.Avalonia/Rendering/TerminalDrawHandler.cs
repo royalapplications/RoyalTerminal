@@ -66,7 +66,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                 return;
             }
 
-            var leaseFeature = context.TryGetFeature<ISkiaSharpApiLeaseFeature>();
+            var leaseFeature = context.TryGetFeature(typeof(ISkiaSharpApiLeaseFeature)) as ISkiaSharpApiLeaseFeature;
             if (leaseFeature is null)
             {
                 return;

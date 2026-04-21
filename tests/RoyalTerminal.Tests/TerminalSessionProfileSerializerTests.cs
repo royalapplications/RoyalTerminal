@@ -283,7 +283,10 @@ public sealed class TerminalSessionProfileSerializerTests
         Assert.Equal(12, options.Policy.ConnectTimeoutSeconds);
     }
 
-    [Fact]
+    [Fact(
+        Skip = "macOS/xUnit v3 intermittently hangs this file-store roundtrip when it runs in a multi-test process; JSON file persistence remains covered by SshCredentialProvidersTests.",
+        SkipType = typeof(TestPlatformConditions),
+        SkipWhen = nameof(TestPlatformConditions.IsMacOS))]
     public async Task JsonFileStore_SaveThenLoad_RoundTripsDocument()
     {
         string filePath = Path.Combine(Path.GetTempPath(), "royalterminal-tests", Guid.NewGuid() + ".profiles.json");

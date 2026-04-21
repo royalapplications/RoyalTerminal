@@ -4,6 +4,7 @@
     <PackageId>RoyalTerminal.Rendering.Skia</PackageId>
     <Description>SkiaSharp terminal rendering core independent of Avalonia controls.</Description>
     <IsPackable>true</IsPackable>
+    <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
