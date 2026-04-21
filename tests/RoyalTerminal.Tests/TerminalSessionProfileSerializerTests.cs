@@ -75,6 +75,67 @@ public sealed class TerminalSessionProfileSerializerTests
     }
 
     [Fact]
+    public void Serializer_RoundTripsFileFontAppearance()
+    {
+        TerminalSessionProfilesDocument document = new()
+        {
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "file-font",
+                    DisplayName = "File Font",
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        FontSource = TerminalFontSource.File,
+                        FontFamilyName = "Custom Terminal",
+                        FontFilePath = "/fonts/custom-terminal.otf",
+                        FontSize = 16,
+                    },
+                },
+            ],
+        };
+
+        string json = TerminalSessionProfileSerializer.ToJson(document);
+        TerminalSessionProfilesDocument restored = TerminalSessionProfileSerializer.FromJson(json);
+
+        TerminalSessionProfile profile = Assert.Single(restored.Profiles);
+        Assert.Equal(TerminalFontSource.File, profile.Appearance.FontSource);
+        Assert.Equal("Custom Terminal", profile.Appearance.FontFamilyName);
+        Assert.Equal("/fonts/custom-terminal.otf", profile.Appearance.FontFilePath);
+        Assert.Equal(16, profile.Appearance.FontSize);
+    }
+
+    [Fact]
+    public void Serializer_FileFontWithoutPath_NormalizesToSystemFont()
+    {
+        TerminalSessionProfilesDocument document = new()
+        {
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "missing-file-font",
+                    DisplayName = "Missing File Font",
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        FontSource = TerminalFontSource.File,
+                        FontFamilyName = "Custom Terminal",
+                        FontFilePath = " ",
+                    },
+                },
+            ],
+        };
+
+        TerminalSessionProfilesDocument restored = TerminalSessionProfileSerializer.FromJson(
+            TerminalSessionProfileSerializer.ToJson(document));
+
+        TerminalSessionProfile profile = Assert.Single(restored.Profiles);
+        Assert.Equal(TerminalFontSource.System, profile.Appearance.FontSource);
+        Assert.Null(profile.Appearance.FontFilePath);
+    }
+
+    [Fact]
     public async Task Serializer_LoadAsync_RejectsDuplicateProfileIds()
     {
         const string json = """

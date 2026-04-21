@@ -3,6 +3,7 @@
 // RoyalTerminal.Avalonia - Terminal rendering with SkiaSharp.
 
 using System.Collections.Concurrent;
+using RoyalTerminal.Terminal;
 using SkiaSharp;
 
 namespace RoyalTerminal.Avalonia.Rendering;
@@ -36,14 +37,43 @@ public sealed class GlyphCache : IDisposable
     /// <param name="fontFamily">Font family name (e.g., "JetBrains Mono", "Cascadia Code").</param>
     /// <param name="maxEntries">Maximum number of cached glyph images before eviction.</param>
     public GlyphCache(string fontFamily = "Consolas", int maxEntries = 8192)
+        : this(fontFamily, TerminalFontSource.System, fontFilePath: null, maxEntries)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new glyph cache with the specified font source and max entries.
+    /// </summary>
+    /// <param name="fontFamily">System font family fallback.</param>
+    /// <param name="fontSource">Source used to resolve the primary typeface.</param>
+    /// <param name="fontFilePath">Font file path used when <paramref name="fontSource"/> is <see cref="TerminalFontSource.File"/>.</param>
+    /// <param name="maxEntries">Maximum number of cached glyph images before eviction.</param>
+    public GlyphCache(
+        string fontFamily,
+        TerminalFontSource fontSource,
+        string? fontFilePath,
+        int maxEntries = 8192)
     {
         _maxEntries = maxEntries;
 
-        _regularTypeface = SKTypeface.FromFamilyName(fontFamily, SKFontStyle.Normal)
-                           ?? SKTypeface.Default;
-        _boldTypeface = SKTypeface.FromFamilyName(fontFamily, SKFontStyle.Bold);
-        _italicTypeface = SKTypeface.FromFamilyName(fontFamily, SKFontStyle.Italic);
-        _boldItalicTypeface = SKTypeface.FromFamilyName(fontFamily, SKFontStyle.BoldItalic);
+        string normalizedFamily = string.IsNullOrWhiteSpace(fontFamily)
+            ? "Consolas"
+            : fontFamily.Trim();
+
+        if (fontSource == TerminalFontSource.File &&
+            TryCreateTypefaceFromFile(fontFilePath) is { } fileTypeface)
+        {
+            _regularTypeface = fileTypeface;
+            _boldTypeface = null;
+            _italicTypeface = null;
+            _boldItalicTypeface = null;
+            return;
+        }
+
+        _regularTypeface = CreateSystemTypeface(normalizedFamily, SKFontStyle.Normal);
+        _boldTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.Bold);
+        _italicTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.Italic);
+        _boldItalicTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.BoldItalic);
     }
 
     /// <summary>
@@ -132,5 +162,27 @@ public sealed class GlyphCache : IDisposable
         _boldTypeface?.Dispose();
         _italicTypeface?.Dispose();
         _boldItalicTypeface?.Dispose();
+    }
+
+    private static SKTypeface CreateSystemTypeface(string fontFamily, SKFontStyle style)
+    {
+        return SKTypeface.FromFamilyName(fontFamily, style) ?? SKTypeface.Default;
+    }
+
+    private static SKTypeface? TryCreateTypefaceFromFile(string? fontFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(fontFilePath) || !File.Exists(fontFilePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return SKTypeface.FromFile(fontFilePath, 0);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

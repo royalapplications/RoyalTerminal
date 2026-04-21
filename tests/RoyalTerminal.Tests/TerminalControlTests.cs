@@ -51,6 +51,8 @@ public class TerminalControlTests
             RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "DejaVu Sans Mono" :
             "Consolas";
         Assert.Equal(expectedFont, control.FontFamilyName);
+        Assert.Equal(TerminalFontSource.System, control.FontSource);
+        Assert.Equal(string.Empty, control.FontFilePath);
         Assert.Equal(14.0, control.TerminalFontSize);
         Assert.Equal(80, control.Columns);
         Assert.Equal(24, control.Rows);
@@ -72,6 +74,8 @@ public class TerminalControlTests
         var control = new TerminalControl
         {
             FontFamilyName = "JetBrains Mono",
+            FontSource = TerminalFontSource.System,
+            FontFilePath = string.Empty,
             TerminalFontSize = 16.0,
             Columns = 120,
             Rows = 40,
@@ -80,11 +84,30 @@ public class TerminalControlTests
         };
 
         Assert.Equal("JetBrains Mono", control.FontFamilyName);
+        Assert.Equal(TerminalFontSource.System, control.FontSource);
+        Assert.Equal(string.Empty, control.FontFilePath);
         Assert.Equal(16.0, control.TerminalFontSize);
         Assert.Equal(120, control.Columns);
         Assert.Equal(40, control.Rows);
         Assert.Equal(50_000, control.ScrollbackLimit);
         Assert.False(control.AutoScroll);
+    }
+
+    [AvaloniaFact]
+    public void Control_FileFontSourceWithMissingPath_FallsBackWithoutThrowing()
+    {
+        var control = new TerminalControl
+        {
+            FontFamilyName = "Missing Font Family",
+            FontFilePath = Path.Combine(Path.GetTempPath(), "missing-royalterminal-font.ttf"),
+            FontSource = TerminalFontSource.File,
+        };
+
+        Assert.Equal(TerminalFontSource.File, control.FontSource);
+        Assert.EndsWith("missing-royalterminal-font.ttf", control.FontFilePath, StringComparison.Ordinal);
+        Assert.NotNull(control.Renderer);
+        Assert.True(control.Renderer!.CellWidth > 0);
+        Assert.True(control.Renderer.CellHeight > 0);
     }
 
     [AvaloniaFact]

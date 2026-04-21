@@ -74,6 +74,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public static readonly StyledProperty<string> FontFamilyNameProperty =
         AvaloniaProperty.Register<TerminalControl, string>(nameof(FontFamilyName), TerminalDefaults.DefaultMonoFont);
 
+    /// <summary>The source used to resolve the terminal font.</summary>
+    public static readonly StyledProperty<TerminalFontSource> FontSourceProperty =
+        AvaloniaProperty.Register<TerminalControl, TerminalFontSource>(nameof(FontSource), TerminalFontSource.System);
+
+    /// <summary>The font file path used when <see cref="FontSource"/> is <see cref="TerminalFontSource.File"/>.</summary>
+    public static readonly StyledProperty<string> FontFilePathProperty =
+        AvaloniaProperty.Register<TerminalControl, string>(nameof(FontFilePath), string.Empty);
+
     /// <summary>The font size for terminal text.</summary>
     public static readonly StyledProperty<double> TerminalFontSizeProperty =
         AvaloniaProperty.Register<TerminalControl, double>(nameof(TerminalFontSize), 14.0);
@@ -130,6 +138,20 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         get => GetValue(FontFamilyNameProperty);
         set => SetValue(FontFamilyNameProperty, value);
+    }
+
+    /// <summary>Gets or sets the source used to resolve the terminal font.</summary>
+    public TerminalFontSource FontSource
+    {
+        get => GetValue(FontSourceProperty);
+        set => SetValue(FontSourceProperty, value);
+    }
+
+    /// <summary>Gets or sets the font file path used when <see cref="FontSource"/> is <see cref="TerminalFontSource.File"/>.</summary>
+    public string FontFilePath
+    {
+        get => GetValue(FontFilePathProperty);
+        set => SetValue(FontFilePathProperty, value);
     }
 
     public double TerminalFontSize
@@ -586,7 +608,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnPropertyChanged(change);
 
-        if (change.Property == FontFamilyNameProperty || change.Property == TerminalFontSizeProperty)
+        if (change.Property == FontFamilyNameProperty ||
+            change.Property == FontSourceProperty ||
+            change.Property == FontFilePathProperty ||
+            change.Property == TerminalFontSizeProperty)
         {
             ApplyFontSettings();
             return;
@@ -678,7 +703,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         string family = string.IsNullOrWhiteSpace(FontFamilyName)
             ? TerminalDefaults.DefaultMonoFont
             : FontFamilyName;
-        SkiaTerminalRenderer renderer = new(family, (float)TerminalFontSize);
+        string? fontFilePath = FontSource == TerminalFontSource.File
+            ? FontFilePath
+            : null;
+        SkiaTerminalRenderer renderer = new(
+            family,
+            (float)TerminalFontSize,
+            FontSource,
+            fontFilePath);
         renderer.BackgroundOpacityEnabled = _backgroundOpacityEnabled;
         renderer.BackgroundOpacityCells = RendererBackgroundOpacityCells;
         renderer.BackgroundOpacity = RendererBackgroundOpacity;
