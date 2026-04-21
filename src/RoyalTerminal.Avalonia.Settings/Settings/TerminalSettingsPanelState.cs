@@ -19,6 +19,13 @@ public sealed record TerminalSettingsProfileItem(string Id, string DisplayName);
 
 public sealed record TerminalSettingsTransportModeOption(string Id, string DisplayName);
 
+/// <summary>
+/// Font source option displayed by the terminal settings appearance panel.
+/// </summary>
+/// <param name="Source">Font source value.</param>
+/// <param name="DisplayName">Human-readable display name.</param>
+public sealed record TerminalSettingsFontSourceOption(TerminalFontSource Source, string DisplayName);
+
 public sealed record TerminalSettingsSshAuthModeOption(string Id, string DisplayName)
 {
     public const string PasswordModeId = "password";
@@ -216,11 +223,23 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public static readonly StyledProperty<TerminalPasteSafetyPolicy> SelectedPasteSafetyPolicyProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, TerminalPasteSafetyPolicy>(nameof(SelectedPasteSafetyPolicy), TerminalPasteSafetyPolicy.None);
 
+    public static readonly StyledProperty<TerminalFontSource> SelectedFontSourceProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, TerminalFontSource>(nameof(SelectedFontSource), TerminalFontSource.System);
+
     public static readonly StyledProperty<string> FontFamilyNameProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, string>(nameof(FontFamilyName), GetDefaultMonospaceFont());
 
+    public static readonly StyledProperty<string> FontFilePathProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, string>(nameof(FontFilePath), string.Empty);
+
     public static readonly StyledProperty<double> FontSizeProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, double>(nameof(FontSize), 14.0);
+
+    public static readonly StyledProperty<bool> IsSystemFontSourceSelectedProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(IsSystemFontSourceSelected), true);
+
+    public static readonly StyledProperty<bool> IsFileFontSourceSelectedProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(IsFileFontSourceSelected), false);
 
     public static readonly StyledProperty<bool> AutoScrollProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(AutoScroll), true);
@@ -271,6 +290,12 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         SshProxyTypes = Enum.GetValues<SshProxyType>();
         PasteSafetyPolicies = Enum.GetValues<TerminalPasteSafetyPolicy>();
         SessionLogFormats = Enum.GetValues<TerminalSessionLogFormat>();
+        FontSources =
+        [
+            new TerminalSettingsFontSourceOption(TerminalFontSource.System, "System Font"),
+            new TerminalSettingsFontSourceOption(TerminalFontSource.File, "Font File"),
+        ];
+        SystemFontFamilies = CreateSystemFontFamilies();
 
         Session = new TerminalSettingsSessionState(this);
         Connection = new TerminalSettingsConnectionState(this);
@@ -285,6 +310,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         SetDefaultProfileCommand = new RelayCommand(SetSelectedAsDefault, CanModifySelectedProfile);
         ApplyCommand = new RelayCommand(Apply, CanModifySelectedProfile);
         SaveCommand = new RelayCommand(Save, CanSaveDocument);
+        BrowseFontFileCommand = new RelayCommand(RequestBrowseFontFile);
 
         SelectedTransportMode = TransportModes[0];
         SelectedSshAuthMode = SshAuthModes[0];
@@ -295,6 +321,8 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public event EventHandler? ApplyRequested;
 
     public event EventHandler? SaveRequested;
+
+    public event EventHandler? BrowseFontFileRequested;
 
     public AvaloniaList<TerminalSettingsProfileItem> Profiles { get; }
 
@@ -313,6 +341,10 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public IReadOnlyList<TerminalPasteSafetyPolicy> PasteSafetyPolicies { get; }
 
     public IReadOnlyList<TerminalSessionLogFormat> SessionLogFormats { get; }
+
+    public IReadOnlyList<TerminalSettingsFontSourceOption> FontSources { get; }
+
+    public AvaloniaList<string> SystemFontFamilies { get; }
 
     public TerminalSettingsSessionState Session { get; }
 
@@ -337,6 +369,8 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public ICommand ApplyCommand { get; }
 
     public ICommand SaveCommand { get; }
+
+    public ICommand BrowseFontFileCommand { get; }
 
     public TerminalSettingsProfileItem? SelectedProfile
     {
@@ -656,16 +690,40 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         set => SetValue(SelectedPasteSafetyPolicyProperty, value);
     }
 
+    public TerminalFontSource SelectedFontSource
+    {
+        get => GetValue(SelectedFontSourceProperty);
+        set => SetValue(SelectedFontSourceProperty, value);
+    }
+
     public string FontFamilyName
     {
         get => GetValue(FontFamilyNameProperty);
         set => SetValue(FontFamilyNameProperty, value);
     }
 
+    public string FontFilePath
+    {
+        get => GetValue(FontFilePathProperty);
+        set => SetValue(FontFilePathProperty, value);
+    }
+
     public double FontSize
     {
         get => GetValue(FontSizeProperty);
         set => SetValue(FontSizeProperty, value);
+    }
+
+    public bool IsSystemFontSourceSelected
+    {
+        get => GetValue(IsSystemFontSourceSelectedProperty);
+        private set => SetValue(IsSystemFontSourceSelectedProperty, value);
+    }
+
+    public bool IsFileFontSourceSelected
+    {
+        get => GetValue(IsFileFontSourceSelectedProperty);
+        private set => SetValue(IsFileFontSourceSelectedProperty, value);
     }
 
     public bool AutoScroll
@@ -720,6 +778,11 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             return;
         }
 
+        if (change.Property == SelectedFontSourceProperty)
+        {
+            UpdateFontSourceFlags((TerminalFontSource)change.NewValue!);
+        }
+
         if (_suppressDirtyTracking)
         {
             return;
@@ -727,7 +790,9 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
 
         if (change.Property != IsDirtyProperty &&
             change.Property != LastOperationStatusProperty &&
-            change.Property != SelectedProfileProperty)
+            change.Property != SelectedProfileProperty &&
+            change.Property != IsSystemFontSourceSelectedProperty &&
+            change.Property != IsFileFontSourceSelectedProperty)
         {
             IsDirty = true;
         }
@@ -791,6 +856,25 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public void SetStatus(string statusMessage)
     {
         LastOperationStatus = statusMessage ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Loads a font file selection into the editor state.
+    /// </summary>
+    /// <param name="fontFilePath">Local font file path.</param>
+    public void LoadFontFile(string fontFilePath)
+    {
+        string? normalizedPath = NormalizeOptional(fontFilePath);
+        if (normalizedPath is null)
+        {
+            return;
+        }
+
+        FontFilePath = normalizedPath;
+        FontFamilyName = TerminalFontCatalog.TryGetFontFamilyNameFromFile(normalizedPath)
+            ?? Path.GetFileNameWithoutExtension(normalizedPath);
+        SelectedFontSource = TerminalFontSource.File;
+        LastOperationStatus = $"Loaded font file '{Path.GetFileName(normalizedPath)}'.";
     }
 
     public void UpdateFromRuntime(Action<TerminalSettingsPanelState> updateAction)
@@ -948,6 +1032,11 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         UpdateCommandStates();
     }
 
+    private void RequestBrowseFontFile()
+    {
+        BrowseFontFileRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     private bool CanModifySelectedProfile() => SelectedProfile is not null;
 
     private bool CanDeleteSelectedProfile() => SelectedProfile is not null && _profiles.Count > 1;
@@ -989,7 +1078,13 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             DisplayName = normalizedDisplayName,
             Appearance = source.Appearance with
             {
+                FontSource = SelectedFontSource == TerminalFontSource.File && NormalizeOptional(FontFilePath) is not null
+                    ? TerminalFontSource.File
+                    : TerminalFontSource.System,
                 FontFamilyName = NormalizeOptional(FontFamilyName) ?? GetDefaultMonospaceFont(),
+                FontFilePath = SelectedFontSource == TerminalFontSource.File
+                    ? NormalizeOptional(FontFilePath)
+                    : null,
                 FontSize = FontSize > 0 ? FontSize : 14.0,
                 AutoScroll = AutoScroll,
                 BackgroundOpacityEnabled = BackgroundOpacityEnabled,
@@ -1160,7 +1255,9 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             EnableLigatures = profile.Behavior.EnableLigatures;
             SelectedPasteSafetyPolicy = ParsePasteSafetyPolicy(profile.Behavior.PasteSafetyPolicy);
 
+            SelectedFontSource = profile.Appearance.FontSource;
             FontFamilyName = profile.Appearance.FontFamilyName;
+            FontFilePath = profile.Appearance.FontFilePath ?? string.Empty;
             FontSize = profile.Appearance.FontSize;
             AutoScroll = profile.Appearance.AutoScroll;
             BackgroundOpacityEnabled = profile.Appearance.BackgroundOpacityEnabled;
@@ -1332,6 +1429,43 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     private static string? NormalizeOptional(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private void UpdateFontSourceFlags(TerminalFontSource fontSource)
+    {
+        IsSystemFontSourceSelected = fontSource == TerminalFontSource.System;
+        IsFileFontSourceSelected = fontSource == TerminalFontSource.File;
+    }
+
+    private static AvaloniaList<string> CreateSystemFontFamilies()
+    {
+        AvaloniaList<string> families = [];
+        IReadOnlyList<string> discoveredFamilies = TerminalFontCatalog.GetSystemFontFamilies();
+        for (int i = 0; i < discoveredFamilies.Count; i++)
+        {
+            families.Add(discoveredFamilies[i]);
+        }
+
+        string defaultFont = GetDefaultMonospaceFont();
+        if (!ContainsString(families, defaultFont))
+        {
+            families.Insert(0, defaultFont);
+        }
+
+        return families;
+    }
+
+    private static bool ContainsString(IReadOnlyList<string> values, string value)
+    {
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (string.Equals(values[i], value, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static int ParsePort(string value, int fallback)

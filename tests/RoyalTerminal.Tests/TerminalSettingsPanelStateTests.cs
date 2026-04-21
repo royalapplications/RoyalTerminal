@@ -58,4 +58,28 @@ public sealed class TerminalSettingsPanelStateTests
         TerminalSessionProfile profile = Assert.Single(document.Profiles);
         Assert.Equal("BlockUnsafe", profile.Behavior.PasteSafetyPolicy);
     }
+
+    [AvaloniaFact]
+    public void FontSettings_LoadFontFile_UpdatesStateAndPersistsProfile()
+    {
+        TerminalSettingsPanelState state = new();
+        state.MarkSaved();
+
+        string fontPath = Path.Combine(Path.GetTempPath(), "RoyalTerminal.CustomFont.otf");
+        state.LoadFontFile(fontPath);
+
+        Assert.True(state.IsDirty);
+        Assert.Equal(TerminalFontSource.File, state.SelectedFontSource);
+        Assert.True(state.Appearance.IsFileFontSourceSelected);
+        Assert.False(state.Appearance.IsSystemFontSourceSelected);
+        Assert.Equal(fontPath, state.Appearance.FontFilePath);
+        Assert.Equal("RoyalTerminal.CustomFont", state.Appearance.FontFamilyName);
+        Assert.NotEmpty(state.Appearance.SystemFontFamilies);
+
+        TerminalSessionProfilesDocument document = state.BuildDocument();
+        TerminalSessionProfile profile = Assert.Single(document.Profiles);
+        Assert.Equal(TerminalFontSource.File, profile.Appearance.FontSource);
+        Assert.Equal(fontPath, profile.Appearance.FontFilePath);
+        Assert.Equal("RoyalTerminal.CustomFont", profile.Appearance.FontFamilyName);
+    }
 }

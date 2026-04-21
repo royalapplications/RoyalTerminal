@@ -8,6 +8,7 @@ using System.Globalization;
 using System.IO;
 using System.Reactive;
 using System.Reactive.Linq;
+using System.Runtime.InteropServices;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Demo.Services;
@@ -20,6 +21,9 @@ namespace RoyalTerminal.Demo.ViewModels;
 public sealed class MainWindowViewModel : ReactiveObject
 {
     private double _fontSize = 14.0;
+    private TerminalFontSource _fontSource = TerminalFontSource.System;
+    private string _fontFamilyName = GetDefaultMonospaceFont();
+    private string _fontFilePath = string.Empty;
     private bool _isDarkTheme = true;
     private string _themePresetButtonText = "Theme: Default";
     private bool _nativeVtAvailable;
@@ -318,6 +322,24 @@ public sealed class MainWindowViewModel : ReactiveObject
     }
 
     public string FontSizeDisplay => FontSize.ToString("0", CultureInfo.InvariantCulture);
+
+    public TerminalFontSource FontSource
+    {
+        get => _fontSource;
+        set => this.RaiseAndSetIfChanged(ref _fontSource, value);
+    }
+
+    public string FontFamilyName
+    {
+        get => _fontFamilyName;
+        set => this.RaiseAndSetIfChanged(ref _fontFamilyName, value);
+    }
+
+    public string FontFilePath
+    {
+        get => _fontFilePath;
+        set => this.RaiseAndSetIfChanged(ref _fontFilePath, value);
+    }
 
     public bool IsDarkTheme
     {
@@ -1221,6 +1243,13 @@ public sealed class MainWindowViewModel : ReactiveObject
     public void SetFontSizeFromSettings(double fontSize)
     {
         FontSize = Math.Clamp(fontSize, 8, 72);
+    }
+
+    private static string GetDefaultMonospaceFont()
+    {
+        return RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "Menlo" :
+            RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "DejaVu Sans Mono" :
+            "Consolas";
     }
 
     public TerminalSessionLoggingSettings GetSessionLoggingSettings()

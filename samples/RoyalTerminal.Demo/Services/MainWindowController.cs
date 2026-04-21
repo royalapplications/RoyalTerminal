@@ -306,12 +306,15 @@ internal sealed class MainWindowController
 
         EventHandler applySettingsHandler = (_, _) => ApplySettingsPanelState();
         EventHandler saveSettingsHandler = (_, _) => _ = SaveSettingsPanelStateAsync();
+        EventHandler browseFontFileHandler = (_, _) => _ = BrowseSettingsFontFileAsync();
         _viewModel.SettingsPanelState.ApplyRequested += applySettingsHandler;
         _viewModel.SettingsPanelState.SaveRequested += saveSettingsHandler;
+        _viewModel.SettingsPanelState.BrowseFontFileRequested += browseFontFileHandler;
         disposables.Add(Disposable.Create(() =>
         {
             _viewModel.SettingsPanelState.ApplyRequested -= applySettingsHandler;
             _viewModel.SettingsPanelState.SaveRequested -= saveSettingsHandler;
+            _viewModel.SettingsPanelState.BrowseFontFileRequested -= browseFontFileHandler;
         }));
 
         disposables.Add(_viewModel
@@ -560,8 +563,7 @@ internal sealed class MainWindowController
     {
         TerminalTheme theme = _viewModel.ActiveTheme;
         TerminalControl standaloneControl = CreateStandaloneControl();
-        standaloneControl.FontFamilyName = MonoFont;
-        standaloneControl.TerminalFontSize = _viewModel.FontSize;
+        ApplyFontSettings(standaloneControl);
         standaloneControl.Columns = 80;
         standaloneControl.Rows = 24;
         standaloneControl.ScrollbackLimit = 10_000;
@@ -635,8 +637,7 @@ internal sealed class MainWindowController
 
         TerminalTheme theme = _viewModel.ActiveTheme;
         TerminalControl standaloneControl = CreateStandaloneControl();
-        standaloneControl.FontFamilyName = MonoFont;
-        standaloneControl.TerminalFontSize = _viewModel.FontSize;
+        ApplyFontSettings(standaloneControl);
         standaloneControl.Columns = Math.Max(1, session.InitialColumns);
         standaloneControl.Rows = Math.Max(1, session.InitialRows);
         standaloneControl.ScrollbackLimit = 10_000;
@@ -1621,6 +1622,47 @@ internal sealed class MainWindowController
         }
     }
 
+    private async Task BrowseSettingsFontFileAsync()
+    {
+        if (!_window.StorageProvider.CanOpen)
+        {
+            _viewModel.SettingsPanelState.SetStatus("Open file picker is unavailable in this runtime.");
+            return;
+        }
+
+        try
+        {
+            FilePickerOpenOptions options = new()
+            {
+                Title = "Load Terminal Font",
+                AllowMultiple = false,
+                FileTypeFilter =
+                [
+                    CreateFontFileType(),
+                ],
+            };
+
+            IReadOnlyList<IStorageFile> files = await _window.StorageProvider.OpenFilePickerAsync(options);
+            if (files.Count == 0)
+            {
+                return;
+            }
+
+            string? localPath = files[0].TryGetLocalPath();
+            if (string.IsNullOrWhiteSpace(localPath))
+            {
+                _viewModel.SettingsPanelState.SetStatus("Selected font must be a local file.");
+                return;
+            }
+
+            _viewModel.SettingsPanelState.LoadFontFile(localPath);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SettingsPanelState.SetStatus($"Font load failed: {ex.Message}");
+        }
+    }
+
     private void SetReplayPlaying(bool shouldPlay)
     {
         TerminalCaptureRuntime? runtime = GetActiveCaptureRuntime();
@@ -1725,6 +1767,15 @@ internal sealed class MainWindowController
         {
             Patterns = ["*.rtcap.json", "*.json"],
             MimeTypes = ["application/json"],
+        };
+    }
+
+    private static FilePickerFileType CreateFontFileType()
+    {
+        return new FilePickerFileType("Font Files")
+        {
+            Patterns = ["*.ttf", "*.otf", "*.ttc", "*.otc"],
+            MimeTypes = ["font/ttf", "font/otf", "font/collection", "application/font-sfnt"],
         };
     }
 
@@ -2104,6 +2155,23 @@ internal sealed class MainWindowController
 
     #region Font And Theme
 
+    private void ApplyFontSettings(TerminalControl standalone)
+    {
+        string fontFamily = string.IsNullOrWhiteSpace(_viewModel.FontFamilyName)
+            ? MonoFont
+            : _viewModel.FontFamilyName.Trim();
+        string fontFilePath = _viewModel.FontSource == TerminalFontSource.File
+            ? _viewModel.FontFilePath.Trim()
+            : string.Empty;
+
+        standalone.FontFamilyName = fontFamily;
+        standalone.FontFilePath = fontFilePath;
+        standalone.FontSource = _viewModel.FontSource == TerminalFontSource.File && !string.IsNullOrWhiteSpace(fontFilePath)
+            ? TerminalFontSource.File
+            : TerminalFontSource.System;
+        standalone.TerminalFontSize = _viewModel.FontSize;
+    }
+
     private void ApplyFontSize(double fontSize)
     {
         foreach (TerminalTab tab in _tabs)
@@ -2304,8 +2372,10 @@ internal sealed class MainWindowController
             current.EnableLigatures = _viewModel.EnableLigatures;
             current.SelectedPasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
 
+            current.SelectedFontSource = _viewModel.FontSource;
+            current.FontFamilyName = _viewModel.FontFamilyName;
+            current.FontFilePath = _viewModel.FontFilePath;
             current.FontSize = _viewModel.FontSize;
-            current.FontFamilyName = MonoFont;
             current.AutoScroll = true;
             current.BackgroundOpacityEnabled = false;
 
@@ -2411,6 +2481,19 @@ internal sealed class MainWindowController
         _viewModel.EventLogEnabled = state.EventLogEnabled;
 
         double fontSize = Math.Clamp(state.FontSize, 8, 72);
+        string fontFamilyName = string.IsNullOrWhiteSpace(state.FontFamilyName)
+            ? MonoFont
+            : state.FontFamilyName.Trim();
+        string fontFilePath = state.SelectedFontSource == TerminalFontSource.File
+            ? state.FontFilePath.Trim()
+            : string.Empty;
+        TerminalFontSource fontSource = state.SelectedFontSource == TerminalFontSource.File &&
+            !string.IsNullOrWhiteSpace(fontFilePath)
+                ? TerminalFontSource.File
+                : TerminalFontSource.System;
+        _viewModel.FontSource = fontSource;
+        _viewModel.FontFamilyName = fontFamilyName;
+        _viewModel.FontFilePath = fontFilePath;
         _viewModel.SetFontSizeFromSettings(fontSize);
         ApplyFontSize(fontSize);
 
@@ -2418,9 +2501,7 @@ internal sealed class MainWindowController
         {
             if (_tabs[i].Control is TerminalControl standaloneControl)
             {
-                standaloneControl.FontFamilyName = string.IsNullOrWhiteSpace(state.FontFamilyName)
-                    ? MonoFont
-                    : state.FontFamilyName;
+                ApplyFontSettings(standaloneControl);
                 standaloneControl.AutoScroll = state.AutoScroll;
                 standaloneControl.BackgroundOpacityEnabled = state.BackgroundOpacityEnabled;
             }

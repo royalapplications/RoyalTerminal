@@ -284,8 +284,38 @@
               Spacing="12"
               Margin="0,10,0,0">
               <StackPanel Spacing="4">
-                <TextBlock Text="Font Family" Margin="0,4,6,0" />
-                <TextBox Margin="0,0,8,0" Text="{Binding FontFamilyName}" />
+                <TextBlock Text="Font Source" Margin="0,4,6,0" />
+                <ComboBox
+                  ItemsSource="{Binding FontSources}"
+                  SelectedValue="{Binding SelectedFontSource}"
+                  SelectedValueBinding="{Binding Source}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="settings:TerminalSettingsFontSourceOption">
+                      <TextBlock Text="{Binding DisplayName}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+              </StackPanel>
+              <StackPanel Spacing="4" IsVisible="{Binding IsSystemFontSourceSelected}">
+                <TextBlock Text="System Font" Margin="0,4,6,0" />
+                <ComboBox
+                  Margin="0,0,8,0"
+                  ItemsSource="{Binding SystemFontFamilies}"
+                  SelectedItem="{Binding FontFamilyName}" />
+              </StackPanel>
+              <StackPanel Spacing="4" IsVisible="{Binding IsFileFontSourceSelected}">
+                <TextBlock Text="Font File" Margin="0,4,6,0" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                  <TextBox Grid.Column="0"
+                           IsReadOnly="True"
+                           Text="{Binding FontFilePath}" />
+                  <Button Grid.Column="1"
+                          Content="Browse"
+                          Command="{Binding BrowseFontFileCommand}" />
+                </Grid>
+                <TextBlock Text="{Binding FontFamilyName, StringFormat='Family: {0}'}" />
+              </StackPanel>
+              <StackPanel Spacing="4">
                 <TextBlock Text="Font Size" Margin="0,4,6,0" />
                 <NumericUpDown
                   Minimum="8"
