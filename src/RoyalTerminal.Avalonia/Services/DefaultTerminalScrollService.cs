@@ -27,10 +27,6 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
         if (scrollData is not null && screen is not null)
         {
             scrollData.UpdateExtent(screen.TotalRows, autoScroll);
-            if (autoScroll)
-            {
-                scrollData.ScrollToBottom();
-            }
         }
 
         SyncScreenScrollOffset(scrollData, screen);
