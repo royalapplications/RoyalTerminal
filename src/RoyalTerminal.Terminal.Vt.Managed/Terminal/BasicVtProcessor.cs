@@ -3946,11 +3946,28 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _widthPx = Math.Max(0, widthPx);
         _heightPx = Math.Max(0, heightPx);
 
-        TerminalGridPosition mappedCursor = _screen.Resize(
-            columns,
-            rows,
-            reflowOnResize && !_inAltScreen,
-            new TerminalGridPosition(_cursorCol, _cursorRow));
+        int restoreScrollOffset = _screen.ScrollOffset;
+        if (restoreScrollOffset != 0)
+        {
+            _screen.ScrollOffset = 0;
+        }
+
+        TerminalGridPosition mappedCursor;
+        try
+        {
+            mappedCursor = _screen.Resize(
+                columns,
+                rows,
+                reflowOnResize && !_inAltScreen,
+                new TerminalGridPosition(_cursorCol, _cursorRow));
+        }
+        finally
+        {
+            if (restoreScrollOffset != 0)
+            {
+                _screen.ScrollOffset = restoreScrollOffset;
+            }
+        }
 
         _cursorCol = mappedCursor.Column;
         _cursorRow = mappedCursor.Row;

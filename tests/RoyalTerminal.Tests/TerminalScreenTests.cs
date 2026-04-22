@@ -204,6 +204,24 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void BasicVtProcessor_ResizeWithReflow_TracksLiveCursorWhileScrolledBack()
+    {
+        TerminalScreen screen = new(12, 4);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process(Encoding.UTF8.GetBytes("first-line\r\nsecond-line\r\nthird-line\r\nABCDEFGHIJKLMNO\r\n$ "));
+        screen.ScrollOffset = 2;
+
+        processor.ResizeScreen(columns: 6, rows: 4, widthPx: 60, heightPx: 64, reflowOnResize: true);
+        screen.ScrollOffset = 0;
+        processor.Process(Encoding.UTF8.GetBytes("ok"));
+
+        string visibleText = GetVisibleText(screen);
+        Assert.Contains("MNO", visibleText, StringComparison.Ordinal);
+        Assert.Contains("$ ok", visibleText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TerminalScreen_InvalidateAll_MarksDirty()
     {
         var screen = new TerminalScreen(80, 24);
