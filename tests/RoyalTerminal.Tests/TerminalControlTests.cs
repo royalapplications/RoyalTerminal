@@ -51,11 +51,14 @@ public class TerminalControlTests
             RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "DejaVu Sans Mono" :
             "Consolas";
         Assert.Equal(expectedFont, control.FontFamilyName);
+        Assert.Equal(TerminalFontSource.System, control.FontSource);
+        Assert.Equal(string.Empty, control.FontFilePath);
         Assert.Equal(14.0, control.TerminalFontSize);
         Assert.Equal(80, control.Columns);
         Assert.Equal(24, control.Rows);
         Assert.Equal(10_000, control.ScrollbackLimit);
         Assert.True(control.AutoScroll);
+        Assert.True(control.ReflowOnResize);
     }
 
     [AvaloniaFact]
@@ -72,19 +75,42 @@ public class TerminalControlTests
         var control = new TerminalControl
         {
             FontFamilyName = "JetBrains Mono",
+            FontSource = TerminalFontSource.System,
+            FontFilePath = string.Empty,
             TerminalFontSize = 16.0,
             Columns = 120,
             Rows = 40,
             ScrollbackLimit = 50_000,
             AutoScroll = false,
+            ReflowOnResize = false,
         };
 
         Assert.Equal("JetBrains Mono", control.FontFamilyName);
+        Assert.Equal(TerminalFontSource.System, control.FontSource);
+        Assert.Equal(string.Empty, control.FontFilePath);
         Assert.Equal(16.0, control.TerminalFontSize);
         Assert.Equal(120, control.Columns);
         Assert.Equal(40, control.Rows);
         Assert.Equal(50_000, control.ScrollbackLimit);
         Assert.False(control.AutoScroll);
+        Assert.False(control.ReflowOnResize);
+    }
+
+    [AvaloniaFact]
+    public void Control_FileFontSourceWithMissingPath_FallsBackWithoutThrowing()
+    {
+        var control = new TerminalControl
+        {
+            FontFamilyName = "Missing Font Family",
+            FontFilePath = Path.Combine(Path.GetTempPath(), "missing-royalterminal-font.ttf"),
+            FontSource = TerminalFontSource.File,
+        };
+
+        Assert.Equal(TerminalFontSource.File, control.FontSource);
+        Assert.EndsWith("missing-royalterminal-font.ttf", control.FontFilePath, StringComparison.Ordinal);
+        Assert.NotNull(control.Renderer);
+        Assert.True(control.Renderer!.CellWidth > 0);
+        Assert.True(control.Renderer.CellHeight > 0);
     }
 
     [AvaloniaFact]
@@ -786,6 +812,35 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_ApplyTheme_WithCurrentTheme_ReappliesAndInvalidatesRows()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 80,
+            Rows = 24,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.Screen);
+        Assert.NotNull(control.Theme);
+        TerminalScreen screen = control.Screen!;
+        TerminalTheme theme = control.Theme!;
+
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            screen.GetViewportRow(row).IsDirty = false;
+        }
+
+        Assert.False(screen.HasDirtyRows());
+
+        control.ApplyTheme(theme);
+
+        Assert.True(screen.HasDirtyRows());
+        Assert.Equal(theme.DefaultForeground, screen.DefaultForeground);
+        Assert.Equal(theme.DefaultBackground, screen.DefaultBackground);
+    }
+
+    [AvaloniaFact]
     public void Control_ApplyTheme_PropagatesToThemeSinkProcessor()
     {
         ThemeTrackingVtProcessorFactory factory = new();
@@ -837,6 +892,59 @@ public class TerminalControlTests
 
         Assert.Equal(columnsBefore, control.Screen.Columns);
         Assert.Equal(rowsBefore, control.Screen.ViewportRows);
+    }
+
+    [AvaloniaFact]
+    public void Control_HorizontalResizeShrink_ReflowsBufferedContent()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 80,
+            Rows = 24,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        string line = "COLUMN-000-010-020-030-040-050-060-070-END";
+        control.WriteOutput(Encoding.UTF8.GetBytes(line));
+
+        Assert.True(ContainsScreenText(control, "070-END"));
+
+        control.Columns = 32;
+
+        Assert.Equal(32, control.Screen!.Columns);
+        Assert.True(ContainsScreenText(control, "070-END"));
+
+        control.Columns = 80;
+
+        Assert.Equal(80, control.Screen.Columns);
+        Assert.True(ContainsScreenText(control, "070-END"));
+    }
+
+    [AvaloniaFact]
+    public void Control_HorizontalResizeShrinkWithoutReflow_HidesAndRestoresBufferedContent()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 80,
+            Rows = 24,
+            ReflowOnResize = false,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        string line = "COLUMN-000-010-020-030-040-050-060-070-END";
+        control.WriteOutput(Encoding.UTF8.GetBytes(line));
+
+        Assert.True(ContainsScreenText(control, "070-END"));
+
+        control.Columns = 32;
+
+        Assert.Equal(32, control.Screen!.Columns);
+        Assert.False(ContainsScreenText(control, "070-END"));
+
+        control.Columns = 80;
+
+        Assert.Equal(80, control.Screen.Columns);
+        Assert.True(ContainsScreenText(control, "070-END"));
     }
 
     [AvaloniaFact]
@@ -1226,6 +1334,123 @@ public class TerminalControlTests
 
         Assert.Equal(0, screen.ScrollOffset);
         Assert.True(renderer.CursorVisible);
+    }
+
+    [AvaloniaFact]
+    public void Control_WriteOutputWhileScrolledBack_PreservesVisibleScrollbackRows()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.ScrollData);
+        Assert.NotNull(control.Screen);
+
+        for (int i = 0; i < 64; i++)
+        {
+            control.WriteOutput(Encoding.UTF8.GetBytes($"LINE-{i:000}\n"));
+        }
+
+        TerminalScreen screen = control.Screen!;
+        Assert.True(control.ScrollData!.MaxOffset > 0);
+
+        control.ScrollByRows(-3);
+
+        Assert.True(screen.ScrollOffset > 0);
+        string[] beforeRows = ReadVisibleAsciiRows(screen);
+        int totalRowsBeforeOutput = screen.TotalRows;
+
+        control.WriteOutput("SCROLLBACK-MUTATION-SENTINEL\n"u8);
+
+        string[] afterRows = ReadVisibleAsciiRows(screen);
+        Assert.Equal(beforeRows, afterRows);
+        Assert.True(screen.TotalRows > totalRowsBeforeOutput);
+
+        control.ScrollToBottom();
+
+        Assert.True(ContainsScreenText(control, "SCROLLBACK-MUTATION-SENTINEL"));
+    }
+
+    [AvaloniaFact]
+    public void Control_AlternateScreenResize_DoesNotExposePrimaryScrollback()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 18,
+            Rows = 5,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.ScrollData);
+        Assert.NotNull(control.Screen);
+        TerminalScreen screen = control.Screen!;
+
+        for (int i = 0; i < 64; i++)
+        {
+            control.WriteOutput(Encoding.UTF8.GetBytes($"HIST-{i:00}\r\n"));
+        }
+
+        Assert.True(control.ScrollData!.MaxOffset > 0);
+
+        ((IScrollable)control).Offset = new Vector(0, 0);
+        Assert.True(screen.ScrollOffset > 0);
+
+        control.WriteOutput(Encoding.UTF8.GetBytes("\x1b[?1049h\x1b[2J\x1b[HALT-00\r\nALT-01\r\nALT-02\r\nALT-03"));
+
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Equal(0, control.ScrollData.MaxOffset);
+        AssertVisibleAlternateScreenRowsOnly(screen);
+
+        control.Rows = 3;
+
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Equal(0, control.ScrollData.MaxOffset);
+        AssertVisibleAlternateScreenRowsOnly(screen);
+
+        control.Rows = 7;
+
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Equal(0, control.ScrollData.MaxOffset);
+        AssertVisibleAlternateScreenRowsOnly(screen);
+    }
+
+    [AvaloniaFact]
+    public void Control_AlternateScreenExit_DropsTuiArtifactsFromPrimaryScrollback()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 24,
+            Rows = 5,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.ScrollData);
+        Assert.NotNull(control.Screen);
+        TerminalScreen screen = control.Screen!;
+
+        for (int i = 0; i < 16; i++)
+        {
+            control.WriteOutput(Encoding.UTF8.GetBytes($"MAIN-{i:00}\r\n"));
+        }
+
+        int primaryRows = screen.TotalRows;
+        double primaryMaxOffset = control.ScrollData!.MaxOffset;
+
+        control.WriteOutput("\x1b[?1049h\x1b[2JLeft File Command Options Right\r\nALT-PANEL\r\nALT-STATUS"u8);
+
+        Assert.True(screen.AlternateBufferActive);
+        Assert.Contains("ALT-", string.Join('\n', ReadVisibleAsciiRows(screen)), StringComparison.Ordinal);
+        Assert.Equal(0, control.ScrollData.MaxOffset);
+
+        control.WriteOutput("\x1b[?1049l"u8);
+
+        string visible = string.Join('\n', ReadVisibleAsciiRows(screen));
+        Assert.False(screen.AlternateBufferActive);
+        Assert.Equal(primaryRows, screen.TotalRows);
+        Assert.Equal(primaryMaxOffset, control.ScrollData.MaxOffset);
+        Assert.DoesNotContain("ALT-", visible, StringComparison.Ordinal);
+        Assert.DoesNotContain("Left File", visible, StringComparison.Ordinal);
     }
 
     [AvaloniaFact]
@@ -1941,6 +2166,32 @@ public class TerminalControlTests
         }
 
         return false;
+    }
+
+    private static string[] ReadVisibleAsciiRows(TerminalScreen screen)
+    {
+        string[] rows = new string[screen.ViewportRows];
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            TerminalRow terminalRow = screen.GetViewportRow(row);
+            char[] chars = new char[terminalRow.Columns];
+            for (int col = 0; col < terminalRow.Columns; col++)
+            {
+                int codepoint = terminalRow[col].Codepoint;
+                chars[col] = codepoint <= 0 ? ' ' : codepoint <= 0x7F ? (char)codepoint : '?';
+            }
+
+            rows[row] = new string(chars);
+        }
+
+        return rows;
+    }
+
+    private static void AssertVisibleAlternateScreenRowsOnly(TerminalScreen screen)
+    {
+        string visible = string.Join('\n', ReadVisibleAsciiRows(screen));
+        Assert.Contains("ALT-", visible, StringComparison.Ordinal);
+        Assert.DoesNotContain("HIST-", visible, StringComparison.Ordinal);
     }
 
     private sealed class CountingTerminalScrollService : ITerminalScrollService

@@ -109,7 +109,6 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private int _scrollBottom; // 0-based inclusive (ViewportRows - 1 at init)
 
     // Alternate screen buffer
-    private TerminalRow[]? _savedMainBuffer;
     private int _savedMainCursorCol;
     private int _savedMainCursorRow;
     private bool _inAltScreen;
@@ -1490,6 +1489,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
         TerminalRow row = _screen.GetViewportRow(_cursorRow);
         if (_cursorCol >= row.Columns) return;
+        ClearPreservedCellsForMutation(row);
 
         int width = TerminalCellWidthCalculator.GetCellWidth(codepoint);
         width = width <= 1 ? 1 : 2;
@@ -1512,6 +1512,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             if (_cursorCol < 0 || _cursorCol >= _screen.Columns) return;
             row = _screen.GetViewportRow(_cursorRow);
             if (_cursorCol >= row.Columns) return;
+            ClearPreservedCellsForMutation(row);
         }
 
         if (_insertMode)
@@ -1522,6 +1523,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             {
                 return;
             }
+
+            ClearPreservedCellsForMutation(row);
         }
 
         ClearCellAndWideArtifacts(row, _cursorCol);
@@ -1634,6 +1637,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         {
             return false;
         }
+
+        ClearPreservedCellsForMutation(targetRow);
 
         targetCell.Codepoint = targetCell.Codepoint != 0
             ? targetCell.Codepoint
@@ -1830,9 +1835,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
     private void CopyRow(TerminalRow src, TerminalRow dst)
     {
-        var count = Math.Min(src.Columns, dst.Columns);
-        src.ReadOnlyCells[..count].CopyTo(dst.Cells);
-        dst.WrapsToNext = src.WrapsToNext;
+        dst.CopyFrom(src, _screen.DefaultForeground, _screen.DefaultBackground);
         NormalizeRowWideCells(dst);
     }
 
@@ -3277,21 +3280,20 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     {
         if (_inAltScreen) return;
 
-        // Save current main screen content
-        _savedMainBuffer = new TerminalRow[_screen.ViewportRows];
-        for (var r = 0; r < _screen.ViewportRows; r++)
+        if (_screen.ScrollOffset != 0)
         {
-            var srcRow = _screen.GetViewportRow(r);
-            var saved = new TerminalRow(_screen.Columns, _screen.DefaultForeground, _screen.DefaultBackground);
-            CopyRow(srcRow, saved);
-            _savedMainBuffer[r] = saved;
+            _screen.ScrollOffset = 0;
         }
+
         _savedMainCursorCol = _cursorCol;
         _savedMainCursorRow = _cursorRow;
         _inAltScreen = true;
-
+        _screen.SwitchToAlternateBuffer(clearAlt);
         if (clearAlt)
-            ClearScreen();
+        {
+            _cursorCol = 0;
+            _cursorRow = 0;
+        }
 
         // Reset scroll region
         _scrollTop = 0;
@@ -3302,17 +3304,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     {
         if (!_inAltScreen) return;
 
-        // Restore main screen content
-        if (_savedMainBuffer is not null)
+        if (_screen.ScrollOffset != 0)
         {
-            for (var r = 0; r < _screen.ViewportRows && r < _savedMainBuffer.Length; r++)
-            {
-                var dst = _screen.GetViewportRow(r);
-                CopyRow(_savedMainBuffer[r], dst);
-                dst.IsDirty = true;
-            }
-            _savedMainBuffer = null;
+            _screen.ScrollOffset = 0;
         }
+
+        _screen.SwitchToPrimaryBuffer();
 
         _cursorCol = _savedMainCursorCol;
         _cursorRow = _savedMainCursorRow;
@@ -3542,6 +3539,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
                 if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
                 {
                     var rowToCursor = _screen.GetViewportRow(_cursorRow);
+                    ClearPreservedCellsForMutation(rowToCursor);
                     for (var c = 0; c <= _cursorCol && c < _screen.Columns; c++)
                         rowToCursor[c] = TerminalCell.Empty(_currentFg, _currentBg);
                     NormalizeRowWideCells(rowToCursor);
@@ -3569,6 +3567,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
 
         var row = _screen.GetViewportRow(_cursorRow);
+        ClearPreservedCellsForMutation(row);
         switch (mode)
         {
             case 0: // From cursor to end of line
@@ -3636,6 +3635,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
 
         var row = _screen.GetViewportRow(_cursorRow);
+        ClearPreservedCellsForMutation(row);
         for (var c = _screen.Columns - 1; c >= _cursorCol + count; c--)
             row[c] = row[c - count];
         for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
@@ -3650,6 +3650,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
 
         var row = _screen.GetViewportRow(_cursorRow);
+        ClearPreservedCellsForMutation(row);
         for (var c = _cursorCol; c + count < _screen.Columns; c++)
             row[c] = row[c + count];
         for (var c = Math.Max(_cursorCol, _screen.Columns - count); c < _screen.Columns; c++)
@@ -3664,10 +3665,19 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
 
         var row = _screen.GetViewportRow(_cursorRow);
+        ClearPreservedCellsForMutation(row);
         for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
             row[c] = TerminalCell.Empty(_currentFg, _currentBg);
         NormalizeRowWideCells(row);
         row.IsDirty = true;
+    }
+
+    private void ClearPreservedCellsForMutation(TerminalRow row)
+    {
+        if (row.PreservedColumns > row.Columns)
+        {
+            row.ClearPreservedCellsFrom(row.Columns, _screen.DefaultForeground, _screen.DefaultBackground);
+        }
     }
 
     private static void NormalizeRowWideCells(TerminalRow row)
@@ -3875,8 +3885,14 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _isDiscardingDcsPayload = false;
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
+        if (_inAltScreen || _screen.AlternateBufferActive)
+        {
+            _screen.SwitchToPrimaryBuffer();
+        }
+
+        _screen.DiscardInactiveAlternateBuffer();
+
         _inAltScreen = false;
-        _savedMainBuffer = null;
         _autoWrap = true;
         _cursorVisible = true;
         _originMode = false;
@@ -3924,14 +3940,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     /// </summary>
     public void NotifyResize(int columns, int rows)
     {
-        _scrollBottom = rows - 1;
-        if (_scrollTop >= rows)
-            _scrollTop = 0;
-        if (_cursorRow >= rows)
-            _cursorRow = rows - 1;
-        if (_cursorCol >= columns)
-            _cursorCol = columns - 1;
-        InitTabStops();
+        ApplyResizeState(columns, rows);
     }
 
     /// <summary>
@@ -3943,6 +3952,92 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _widthPx = Math.Max(0, widthPx);
         _heightPx = Math.Max(0, heightPx);
         NotifyResize(columns, rows);
+    }
+
+    /// <summary>
+    /// Resizes the associated screen buffer and remaps the managed cursor through any row reflow.
+    /// </summary>
+    public void ResizeScreen(int columns, int rows, int widthPx, int heightPx, bool reflowOnResize)
+    {
+        _widthPx = Math.Max(0, widthPx);
+        _heightPx = Math.Max(0, heightPx);
+
+        bool alternateScreen = _inAltScreen;
+        int previousCursorCol = _cursorCol;
+        int previousCursorRow = _cursorRow;
+        int alternateViewportTop = alternateScreen
+            ? Math.Max(0, _screen.TotalRows - _screen.ViewportRows)
+            : 0;
+        int restoreScrollOffset = alternateScreen ? 0 : _screen.ScrollOffset;
+        if (_screen.ScrollOffset != 0)
+        {
+            _screen.ScrollOffset = 0;
+        }
+
+        TerminalGridPosition mappedCursor;
+        try
+        {
+            mappedCursor = _screen.Resize(
+                columns,
+                rows,
+                reflowOnResize && !alternateScreen,
+                alternateScreen ? null : new TerminalGridPosition(_cursorCol, _cursorRow));
+        }
+        finally
+        {
+            if (!alternateScreen && restoreScrollOffset != 0)
+            {
+                _screen.ScrollOffset = restoreScrollOffset;
+            }
+        }
+
+        if (alternateScreen)
+        {
+            _screen.PadBottomViewportToPreserveTop(alternateViewportTop);
+            _cursorCol = previousCursorCol;
+            _cursorRow = previousCursorRow;
+        }
+        else
+        {
+            _cursorCol = mappedCursor.Column;
+            _cursorRow = mappedCursor.Row;
+        }
+
+        ApplyResizeState(columns, rows);
+    }
+
+    private void ApplyResizeState(int columns, int rows)
+    {
+        int safeColumns = Math.Max(1, columns);
+        int safeRows = Math.Max(1, rows);
+
+        _scrollBottom = safeRows - 1;
+        if (_scrollTop >= safeRows)
+        {
+            _scrollTop = 0;
+        }
+
+        if (_cursorRow >= safeRows)
+        {
+            _cursorRow = safeRows - 1;
+        }
+
+        if (_cursorCol > safeColumns)
+        {
+            _cursorCol = safeColumns;
+        }
+
+        if (_cursorRow < 0)
+        {
+            _cursorRow = 0;
+        }
+
+        if (_cursorCol < 0)
+        {
+            _cursorCol = 0;
+        }
+
+        InitTabStops();
     }
 
     /// <inheritdoc />

@@ -8,6 +8,7 @@ using System.Globalization;
 using System.IO;
 using System.Reactive;
 using System.Reactive.Linq;
+using System.Runtime.InteropServices;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Demo.Services;
@@ -20,6 +21,9 @@ namespace RoyalTerminal.Demo.ViewModels;
 public sealed class MainWindowViewModel : ReactiveObject
 {
     private double _fontSize = 14.0;
+    private TerminalFontSource _fontSource = TerminalFontSource.System;
+    private string _fontFamilyName = GetDefaultMonospaceFont();
+    private string _fontFilePath = string.Empty;
     private bool _isDarkTheme = true;
     private string _themePresetButtonText = "Theme: Default";
     private bool _nativeVtAvailable;
@@ -76,6 +80,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _enableBellNotifications = true;
     private bool _backspaceSendsControlH;
     private bool _enableTextShaping = true;
+    private bool _reflowOnResize = true;
     private bool _enableLigatures;
     private readonly IReadOnlyList<TerminalPasteSafetyPolicy> _pasteSafetyPolicies = Enum.GetValues<TerminalPasteSafetyPolicy>();
     private TerminalPasteSafetyPolicy _selectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.None;
@@ -318,6 +323,30 @@ public sealed class MainWindowViewModel : ReactiveObject
     }
 
     public string FontSizeDisplay => FontSize.ToString("0", CultureInfo.InvariantCulture);
+
+    public TerminalFontSource FontSource
+    {
+        get => _fontSource;
+        set => this.RaiseAndSetIfChanged(ref _fontSource, value);
+    }
+
+    public string FontFamilyName
+    {
+        get => _fontFamilyName;
+        set
+        {
+            string next = string.IsNullOrWhiteSpace(value)
+                ? GetDefaultMonospaceFont()
+                : value.Trim();
+            this.RaiseAndSetIfChanged(ref _fontFamilyName, next);
+        }
+    }
+
+    public string FontFilePath
+    {
+        get => _fontFilePath;
+        set => this.RaiseAndSetIfChanged(ref _fontFilePath, value?.Trim() ?? string.Empty);
+    }
 
     public bool IsDarkTheme
     {
@@ -731,6 +760,12 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _enableTextShaping;
         set => this.RaiseAndSetIfChanged(ref _enableTextShaping, value);
+    }
+
+    public bool ReflowOnResize
+    {
+        get => _reflowOnResize;
+        set => this.RaiseAndSetIfChanged(ref _reflowOnResize, value);
     }
 
     public bool EnableLigatures
@@ -1221,6 +1256,13 @@ public sealed class MainWindowViewModel : ReactiveObject
     public void SetFontSizeFromSettings(double fontSize)
     {
         FontSize = Math.Clamp(fontSize, 8, 72);
+    }
+
+    private static string GetDefaultMonospaceFont()
+    {
+        return RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "Menlo" :
+            RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "DejaVu Sans Mono" :
+            "Consolas";
     }
 
     public TerminalSessionLoggingSettings GetSessionLoggingSettings()

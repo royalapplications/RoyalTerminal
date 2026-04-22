@@ -31,6 +31,22 @@ public enum TerminalSessionLogFormat
 }
 
 /// <summary>
+/// Font source used by terminal appearance settings.
+/// </summary>
+public enum TerminalFontSource
+{
+    /// <summary>
+    /// Use an installed system font family.
+    /// </summary>
+    System,
+
+    /// <summary>
+    /// Load a font face from a font file on disk.
+    /// </summary>
+    File,
+}
+
+/// <summary>
 /// Supported proxy profile types.
 /// </summary>
 public enum TerminalSessionProxyType
@@ -170,9 +186,19 @@ public sealed record TerminalSessionLayoutSettings
 public sealed record TerminalSessionAppearanceSettings
 {
     /// <summary>
+    /// Source used to resolve the terminal font.
+    /// </summary>
+    public TerminalFontSource FontSource { get; init; } = TerminalFontSource.System;
+
+    /// <summary>
     /// Font family name.
     /// </summary>
     public string FontFamilyName { get; init; } = TerminalSessionProfileDefaults.DefaultMonoFont;
+
+    /// <summary>
+    /// Optional font file path used when <see cref="FontSource"/> is <see cref="TerminalFontSource.File"/>.
+    /// </summary>
+    public string? FontFilePath { get; init; }
 
     /// <summary>
     /// Font size in points.
@@ -214,6 +240,11 @@ public sealed record TerminalSessionBehaviorSettings
     /// Whether text shaping is enabled.
     /// </summary>
     public bool EnableTextShaping { get; init; } = true;
+
+    /// <summary>
+    /// Whether buffered terminal lines reflow when the terminal width changes.
+    /// </summary>
+    public bool ReflowOnResize { get; init; } = true;
 
     /// <summary>
     /// Whether ligatures are enabled.

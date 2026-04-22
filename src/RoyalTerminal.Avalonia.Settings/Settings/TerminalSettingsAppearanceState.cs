@@ -1,6 +1,11 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using System.Collections.Generic;
+using System.Windows.Input;
+using Avalonia.Collections;
+using RoyalTerminal.Terminal;
+
 namespace RoyalTerminal.Avalonia.Settings;
 
 public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategoryStateBase
@@ -8,11 +13,25 @@ public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategorySt
     internal TerminalSettingsAppearanceState(TerminalSettingsPanelState owner)
         : base(
             owner,
+            nameof(TerminalSettingsPanelState.SelectedFontSource),
             nameof(TerminalSettingsPanelState.FontFamilyName),
+            nameof(TerminalSettingsPanelState.FontFilePath),
             nameof(TerminalSettingsPanelState.FontSize),
+            nameof(TerminalSettingsPanelState.IsSystemFontSourceSelected),
+            nameof(TerminalSettingsPanelState.IsFileFontSourceSelected),
             nameof(TerminalSettingsPanelState.AutoScroll),
             nameof(TerminalSettingsPanelState.BackgroundOpacityEnabled))
     {
+    }
+
+    public IReadOnlyList<TerminalSettingsFontSourceOption> FontSources => Owner.FontSources;
+
+    public AvaloniaList<string> SystemFontFamilies => Owner.SystemFontFamilies;
+
+    public TerminalFontSource SelectedFontSource
+    {
+        get => Owner.SelectedFontSource;
+        set => Owner.SelectedFontSource = value;
     }
 
     public string FontFamilyName
@@ -21,11 +40,23 @@ public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategorySt
         set => Owner.FontFamilyName = value;
     }
 
+    public string FontFilePath
+    {
+        get => Owner.FontFilePath;
+        set => Owner.FontFilePath = value;
+    }
+
     public double FontSize
     {
         get => Owner.FontSize;
         set => Owner.FontSize = value;
     }
+
+    public bool IsSystemFontSourceSelected => Owner.IsSystemFontSourceSelected;
+
+    public bool IsFileFontSourceSelected => Owner.IsFileFontSourceSelected;
+
+    public ICommand BrowseFontFileCommand => Owner.BrowseFontFileCommand;
 
     public bool AutoScroll
     {

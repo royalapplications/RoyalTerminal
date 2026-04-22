@@ -42,6 +42,7 @@ public sealed class TerminalSettingsPanelStateTests
         {
             current.SessionName = "Runtime";
             current.EnableLigatures = true;
+            current.ReflowOnResize = false;
             current.EventLogEnabled = false;
             current.FontSize = 16;
             current.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.BlockUnsafe;
@@ -52,10 +53,36 @@ public sealed class TerminalSettingsPanelStateTests
         Assert.True(state.TerminalBehavior.EnableLigatures);
         Assert.False(state.Logging.EventLogEnabled);
         Assert.Equal(16, state.Appearance.FontSize);
+        Assert.False(state.TerminalBehavior.ReflowOnResize);
         Assert.Equal(TerminalPasteSafetyPolicy.BlockUnsafe, state.TerminalBehavior.SelectedPasteSafetyPolicy);
 
         TerminalSessionProfilesDocument document = state.BuildDocument();
         TerminalSessionProfile profile = Assert.Single(document.Profiles);
         Assert.Equal("BlockUnsafe", profile.Behavior.PasteSafetyPolicy);
+        Assert.False(profile.Behavior.ReflowOnResize);
+    }
+
+    [AvaloniaFact]
+    public void FontSettings_LoadFontFile_UpdatesStateAndPersistsProfile()
+    {
+        TerminalSettingsPanelState state = new();
+        state.MarkSaved();
+
+        string fontPath = Path.Combine(Path.GetTempPath(), "RoyalTerminal.CustomFont.otf");
+        state.LoadFontFile(fontPath);
+
+        Assert.True(state.IsDirty);
+        Assert.Equal(TerminalFontSource.File, state.SelectedFontSource);
+        Assert.True(state.Appearance.IsFileFontSourceSelected);
+        Assert.False(state.Appearance.IsSystemFontSourceSelected);
+        Assert.Equal(fontPath, state.Appearance.FontFilePath);
+        Assert.Equal("RoyalTerminal.CustomFont", state.Appearance.FontFamilyName);
+        Assert.NotEmpty(state.Appearance.SystemFontFamilies);
+
+        TerminalSessionProfilesDocument document = state.BuildDocument();
+        TerminalSessionProfile profile = Assert.Single(document.Profiles);
+        Assert.Equal(TerminalFontSource.File, profile.Appearance.FontSource);
+        Assert.Equal(fontPath, profile.Appearance.FontFilePath);
+        Assert.Equal("RoyalTerminal.CustomFont", profile.Appearance.FontFamilyName);
     }
 }

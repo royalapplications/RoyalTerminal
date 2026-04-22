@@ -2,13 +2,14 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia - SkiaSharp-based terminal renderer.
 
-using SkiaSharp;
 using System.Buffers;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using RoyalTerminal.Terminal;
+using SkiaSharp;
 
 namespace RoyalTerminal.Avalonia.Rendering;
 
@@ -185,10 +186,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
     }
 
-    public SkiaTerminalRenderer(string fontFamily = "Consolas", float fontSize = 14f)
+    public SkiaTerminalRenderer(
+        string fontFamily = "Consolas",
+        float fontSize = 14f,
+        TerminalFontSource fontSource = TerminalFontSource.System,
+        string? fontFilePath = null)
     {
         _fontSize = fontSize;
-        _glyphCache = new GlyphCache(fontFamily);
+        _glyphCache = new GlyphCache(fontFamily, fontSource, fontFilePath);
         _textShaper = new HarfBuzzTextShaper();
         _fontResolver = new TerminalFontResolver();
         _shapedRunCache = new ShapedRunCache();

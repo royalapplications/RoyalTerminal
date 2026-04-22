@@ -5,6 +5,7 @@ using System.Reactive.Linq;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
+using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Demo.ViewModels;
@@ -21,7 +22,7 @@ public sealed class MainWindowControllerSettingsPanelTests
     {
         InMemoryProfileStore store = new(CreateStoredDocument());
         MainWindowViewModel viewModel = new();
-        Window window = CreateControllerHostWindow(viewModel, out _);
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
         MainWindowController controller = new(
             window,
             viewModel,
@@ -40,16 +41,38 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.NotNull(viewModel.SettingsPanelState.SelectedProfile);
             Assert.Equal("Stored Profile", viewModel.SettingsPanelState.SelectedProfile!.DisplayName);
             Assert.Equal(TerminalPasteSafetyPolicy.BlockUnsafe, viewModel.SettingsPanelState.SelectedPasteSafetyPolicy);
+            Assert.False(viewModel.SettingsPanelState.ReflowOnResize);
+            Assert.Equal(TerminalFontSource.File, viewModel.SettingsPanelState.SelectedFontSource);
+            Assert.Equal(GetStoredFontPath(), viewModel.SettingsPanelState.FontFilePath);
+            Assert.Equal(18, viewModel.SettingsPanelState.FontSize);
 
             viewModel.SettingsPanelState.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.SanitizeControlSequences;
             viewModel.SettingsPanelState.EnableTextShaping = false;
+            viewModel.SettingsPanelState.ReflowOnResize = true;
             viewModel.SettingsPanelState.EnableLigatures = true;
+            viewModel.SettingsPanelState.SelectedFontSource = TerminalFontSource.System;
+            viewModel.SettingsPanelState.FontFamilyName = "Monaco";
+            viewModel.SettingsPanelState.FontSize = 17;
             viewModel.SettingsPanelState.ApplyCommand.Execute(null);
             Dispatcher.UIThread.RunJobs();
 
             Assert.Equal(TerminalPasteSafetyPolicy.SanitizeControlSequences, viewModel.SelectedPasteSafetyPolicy);
             Assert.False(viewModel.EnableTextShaping);
+            Assert.True(viewModel.ReflowOnResize);
             Assert.True(viewModel.EnableLigatures);
+            Assert.Equal(TerminalFontSource.System, viewModel.FontSource);
+            Assert.Equal("Monaco", viewModel.FontFamilyName);
+            Assert.Equal(17, viewModel.FontSize);
+
+            TerminalControl control = terminalHost.Children
+                .OfType<ScrollViewer>()
+                .Select(viewer => viewer.Content)
+                .OfType<TerminalControl>()
+                .First();
+            Assert.Equal(TerminalFontSource.System, control.FontSource);
+            Assert.Equal("Monaco", control.FontFamilyName);
+            Assert.Equal(17, control.TerminalFontSize);
+            Assert.True(control.ReflowOnResize);
         }
         finally
         {
@@ -81,6 +104,10 @@ public sealed class MainWindowControllerSettingsPanelTests
 
             viewModel.SettingsPanelState.SessionName = "Renamed Stored Profile";
             viewModel.SettingsPanelState.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.BlockUnsafe;
+            viewModel.SettingsPanelState.ReflowOnResize = false;
+            viewModel.SettingsPanelState.SelectedFontSource = TerminalFontSource.File;
+            viewModel.SettingsPanelState.FontFamilyName = "Saved Font";
+            viewModel.SettingsPanelState.FontFilePath = GetSavedFontPath();
             viewModel.SettingsPanelState.SaveCommand.Execute(null);
 
             bool saved = await WaitUntilAsync(() => store.SaveCount > 0, TimeSpan.FromSeconds(2));
@@ -89,6 +116,10 @@ public sealed class MainWindowControllerSettingsPanelTests
             TerminalSessionProfile savedProfile = Assert.Single(store.Document.Profiles);
             Assert.Equal("Renamed Stored Profile", savedProfile.DisplayName);
             Assert.Equal("BlockUnsafe", savedProfile.Behavior.PasteSafetyPolicy);
+            Assert.False(savedProfile.Behavior.ReflowOnResize);
+            Assert.Equal(TerminalFontSource.File, savedProfile.Appearance.FontSource);
+            Assert.Equal("Saved Font", savedProfile.Appearance.FontFamilyName);
+            Assert.Equal(GetSavedFontPath(), savedProfile.Appearance.FontFilePath);
         }
         finally
         {
@@ -155,12 +186,20 @@ public sealed class MainWindowControllerSettingsPanelTests
                             WorkingDirectory = null,
                         },
                     },
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        FontSource = TerminalFontSource.File,
+                        FontFamilyName = "Stored Font",
+                        FontFilePath = GetStoredFontPath(),
+                        FontSize = 18,
+                    },
                     Behavior = new TerminalSessionBehaviorSettings
                     {
                         CopyOnSelectEnabled = true,
                         EnableBellNotifications = true,
                         BackspaceSendsControlH = false,
                         EnableTextShaping = true,
+                        ReflowOnResize = false,
                         EnableLigatures = false,
                         PasteSafetyPolicy = "BlockUnsafe",
                     },
@@ -172,6 +211,16 @@ public sealed class MainWindowControllerSettingsPanelTests
                 },
             ],
         };
+    }
+
+    private static string GetStoredFontPath()
+    {
+        return Path.Combine(Path.GetTempPath(), "royalterminal-stored-font.otf");
+    }
+
+    private static string GetSavedFontPath()
+    {
+        return Path.Combine(Path.GetTempPath(), "royalterminal-saved-font.otf");
     }
 
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)

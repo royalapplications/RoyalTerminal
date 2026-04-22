@@ -494,9 +494,28 @@ public class MainWindowViewModelFlowTests
         Assert.True(viewModel.EnableBellNotifications);
         Assert.False(viewModel.BackspaceSendsControlH);
         Assert.True(viewModel.EnableTextShaping);
+        Assert.True(viewModel.ReflowOnResize);
         Assert.False(viewModel.EnableLigatures);
         Assert.Equal(TerminalPasteSafetyPolicy.None, viewModel.SelectedPasteSafetyPolicy);
         Assert.Contains(TerminalPasteSafetyPolicy.BlockUnsafe, viewModel.PasteSafetyPolicies);
+    }
+
+    [Fact]
+    public void FontSettings_NormalizeNullAndWhitespaceValues()
+    {
+        MainWindowViewModel viewModel = new();
+
+        viewModel.FontFamilyName = "  Custom Mono  ";
+        viewModel.FontFilePath = "  /tmp/custom-font.ttf  ";
+
+        Assert.Equal("Custom Mono", viewModel.FontFamilyName);
+        Assert.Equal("/tmp/custom-font.ttf", viewModel.FontFilePath);
+
+        viewModel.FontFamilyName = null!;
+        viewModel.FontFilePath = null!;
+
+        Assert.False(string.IsNullOrWhiteSpace(viewModel.FontFamilyName));
+        Assert.Equal(string.Empty, viewModel.FontFilePath);
     }
 
     [Fact]

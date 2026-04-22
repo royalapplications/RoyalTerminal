@@ -3,6 +3,8 @@
 // RoyalTerminal.Tests — Scroll data state management tests.
 
 using RoyalTerminal.Avalonia.Scrolling;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Avalonia.Services;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -185,6 +187,53 @@ public class TerminalScrollDataTests
     }
 
     [Fact]
+    public void HandleOutput_AutoScroll_PreservesOffset_WhenScrolledAwayFromBottom()
+    {
+        TerminalScreen screen = CreateScreenWithRows(totalRows: 100, viewportRows: 24);
+        TerminalScrollData data = CreateScrollData(cellHeight: 20, viewport: 480);
+        data.UpdateExtent(screen.TotalRows, autoScrollToBottom: true);
+        data.ScrollToBottom();
+        data.ScrollByRows(-3);
+        double scrolledOffset = data.Offset;
+
+        screen.AddRow();
+
+        int invalidatedCount = 0;
+        DefaultTerminalScrollService service = new();
+        service.HandleOutput(
+            data,
+            screen,
+            autoScroll: true,
+            presenter: null,
+            raiseScrollInvalidated: () => invalidatedCount++);
+
+        Assert.Equal(scrolledOffset, data.Offset);
+        Assert.True(data.Offset < data.MaxOffset);
+        Assert.Equal(1, invalidatedCount);
+    }
+
+    [Fact]
+    public void HandleOutput_AutoScroll_KeepsBottom_WhenAlreadyAtBottom()
+    {
+        TerminalScreen screen = CreateScreenWithRows(totalRows: 100, viewportRows: 24);
+        TerminalScrollData data = CreateScrollData(cellHeight: 20, viewport: 480);
+        data.UpdateExtent(screen.TotalRows, autoScrollToBottom: true);
+        data.ScrollToBottom();
+
+        screen.AddRow();
+
+        DefaultTerminalScrollService service = new();
+        service.HandleOutput(
+            data,
+            screen,
+            autoScroll: true,
+            presenter: null,
+            raiseScrollInvalidated: () => { });
+
+        Assert.Equal(data.MaxOffset, data.Offset);
+    }
+
+    [Fact]
     public void UpdateExtent_ClampsOffset_WhenExtentShrinks()
     {
         var data = CreateScrollData(cellHeight: 16, viewport: 384, extent: 3200);
@@ -230,6 +279,49 @@ public class TerminalScrollDataTests
     }
 
     [Fact]
+    public void VirtualizedScrollViewer_HandleWheel_AccumulatesFractionalRows()
+    {
+        TerminalScreen screen = CreateScreenWithRows(totalRows: 100, viewportRows: 24);
+        TerminalScrollData data = CreateScrollData(cellHeight: 20, viewport: 480);
+        data.UpdateExtent(screen.TotalRows, autoScrollToBottom: true);
+        data.ScrollToBottom();
+
+        VirtualizedTerminalScrollViewer viewer = new(screen, data);
+        int invalidatedCount = 0;
+        viewer.ScrollInvalidated += (_, _) => invalidatedCount++;
+
+        double bottomOffset = data.Offset;
+
+        viewer.HandleWheel(0.2);
+
+        Assert.Equal(bottomOffset, data.Offset);
+        Assert.Equal(0, invalidatedCount);
+
+        viewer.HandleWheel(0.2);
+
+        Assert.Equal(bottomOffset - data.CellHeight, data.Offset);
+        Assert.Equal(1, invalidatedCount);
+    }
+
+    [Fact]
+    public void VirtualizedScrollViewer_HandleWheel_ClearsFractionalRemainder_WhenDirectionChanges()
+    {
+        TerminalScreen screen = CreateScreenWithRows(totalRows: 100, viewportRows: 24);
+        TerminalScrollData data = CreateScrollData(cellHeight: 20, viewport: 480);
+        data.UpdateExtent(screen.TotalRows, autoScrollToBottom: true);
+        data.ScrollToBottom();
+
+        VirtualizedTerminalScrollViewer viewer = new(screen, data);
+        double bottomOffset = data.Offset;
+
+        viewer.HandleWheel(0.2);
+        viewer.HandleWheel(-0.2);
+        viewer.HandleWheel(-0.2);
+
+        Assert.Equal(bottomOffset, data.Offset);
+    }
+
+    [Fact]
     public void ViewportYToRow_ConvertsCorrectly()
     {
         var data = CreateScrollData(cellHeight: 16);
@@ -263,5 +355,16 @@ public class TerminalScrollDataTests
 
         data.CellHeight = -5;
         Assert.Equal(1, data.CellHeight);
+    }
+
+    private static TerminalScreen CreateScreenWithRows(int totalRows, int viewportRows)
+    {
+        TerminalScreen screen = new(80, viewportRows, scrollbackLimit: totalRows);
+        while (screen.TotalRows < totalRows)
+        {
+            screen.AddRow();
+        }
+
+        return screen;
     }
 }

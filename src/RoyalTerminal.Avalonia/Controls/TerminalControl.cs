@@ -74,6 +74,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public static readonly StyledProperty<string> FontFamilyNameProperty =
         AvaloniaProperty.Register<TerminalControl, string>(nameof(FontFamilyName), TerminalDefaults.DefaultMonoFont);
 
+    /// <summary>The source used to resolve the terminal font.</summary>
+    public static readonly StyledProperty<TerminalFontSource> FontSourceProperty =
+        AvaloniaProperty.Register<TerminalControl, TerminalFontSource>(nameof(FontSource), TerminalFontSource.System);
+
+    /// <summary>The font file path used when <see cref="FontSource"/> is <see cref="TerminalFontSource.File"/>.</summary>
+    public static readonly StyledProperty<string> FontFilePathProperty =
+        AvaloniaProperty.Register<TerminalControl, string>(nameof(FontFilePath), string.Empty);
+
     /// <summary>The font size for terminal text.</summary>
     public static readonly StyledProperty<double> TerminalFontSizeProperty =
         AvaloniaProperty.Register<TerminalControl, double>(nameof(TerminalFontSize), 14.0);
@@ -104,6 +112,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public static readonly StyledProperty<bool> AutoScrollProperty =
         AvaloniaProperty.Register<TerminalControl, bool>(nameof(AutoScroll), true);
 
+    /// <summary>Whether buffered terminal rows reflow when the terminal width changes.</summary>
+    public static readonly StyledProperty<bool> ReflowOnResizeProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(nameof(ReflowOnResize), true);
+
     /// <summary>
     /// Preferred VT processor implementation.
     /// </summary>
@@ -130,6 +142,20 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         get => GetValue(FontFamilyNameProperty);
         set => SetValue(FontFamilyNameProperty, value);
+    }
+
+    /// <summary>Gets or sets the source used to resolve the terminal font.</summary>
+    public TerminalFontSource FontSource
+    {
+        get => GetValue(FontSourceProperty);
+        set => SetValue(FontSourceProperty, value);
+    }
+
+    /// <summary>Gets or sets the font file path used when <see cref="FontSource"/> is <see cref="TerminalFontSource.File"/>.</summary>
+    public string FontFilePath
+    {
+        get => GetValue(FontFilePathProperty);
+        set => SetValue(FontFilePathProperty, value);
     }
 
     public double TerminalFontSize
@@ -172,6 +198,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         get => GetValue(AutoScrollProperty);
         set => SetValue(AutoScrollProperty, value);
+    }
+
+    /// <summary>Gets or sets whether buffered terminal rows reflow when the terminal width changes.</summary>
+    public bool ReflowOnResize
+    {
+        get => GetValue(ReflowOnResizeProperty);
+        set => SetValue(ReflowOnResizeProperty, value);
     }
 
     /// <summary>
@@ -586,7 +619,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnPropertyChanged(change);
 
-        if (change.Property == FontFamilyNameProperty || change.Property == TerminalFontSizeProperty)
+        if (change.Property == FontFamilyNameProperty ||
+            change.Property == FontSourceProperty ||
+            change.Property == FontFilePathProperty ||
+            change.Property == TerminalFontSizeProperty)
         {
             ApplyFontSettings();
             return;
@@ -668,7 +704,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         _presenter?.SetRenderState(nextRenderer, _screen);
         _presenter?.NotifyResize(Bounds.Size);
-        _presenter?.Invalidate(fullRedraw: true);
         RaiseScrollInvalidated();
         InvalidateMeasure();
     }
@@ -678,7 +713,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         string family = string.IsNullOrWhiteSpace(FontFamilyName)
             ? TerminalDefaults.DefaultMonoFont
             : FontFamilyName;
-        SkiaTerminalRenderer renderer = new(family, (float)TerminalFontSize);
+        string? fontFilePath = FontSource == TerminalFontSource.File
+            ? FontFilePath
+            : null;
+        SkiaTerminalRenderer renderer = new(
+            family,
+            (float)TerminalFontSize,
+            FontSource,
+            fontFilePath);
         renderer.BackgroundOpacityEnabled = _backgroundOpacityEnabled;
         renderer.BackgroundOpacityCells = RendererBackgroundOpacityCells;
         renderer.BackgroundOpacity = RendererBackgroundOpacity;
@@ -724,7 +766,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _screen.InvalidateAll();
         }
 
-        _presenter?.Invalidate(fullRedraw: true);
+        RefreshPresenterRenderState(fullRedraw: true);
     }
 
     private void ApplyLegacyColorBridge()
@@ -786,7 +828,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         InvalidateScreen();
-        _presenter?.Invalidate(fullRedraw: true);
+        RefreshPresenterRenderState(fullRedraw: true);
     }
 
     private static void ApplyThemeToRenderer(TerminalTheme theme, SkiaTerminalRenderer renderer)
@@ -932,19 +974,30 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             lock (_screen.SyncRoot)
             {
-                if (force || gridChanged)
+                if (_vtProcessor is BasicVtProcessor basicVtProcessor)
                 {
-                    _screen.Resize(safeColumns, safeRows);
+                    if (force || gridChanged)
+                    {
+                        basicVtProcessor.ResizeScreen(safeColumns, safeRows, widthPx, heightPx, ReflowOnResize);
+                    }
+                    else
+                    {
+                        basicVtProcessor.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
+                    }
                 }
+                else
+                {
+                    if (force || gridChanged)
+                    {
+                        _screen.Resize(safeColumns, safeRows, ReflowOnResize && _vtProcessor?.AlternateScreen != true);
+                    }
 
-                _vtProcessor?.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
+                    _vtProcessor?.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
+                }
             }
         }
 
-        if (force || gridChanged)
-        {
-            _scrollData?.UpdateExtent(_screen?.TotalRows ?? 0, AutoScroll);
-        }
+        bool alternateScreenActive = _vtProcessor?.AlternateScreen == true;
 
         if (_scrollData is not null)
         {
@@ -952,7 +1005,20 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 ? height
                 : safeRows * _renderer.CellHeight;
             _scrollViewer?.UpdateViewport(_scrollData.Viewport, _renderer.CellHeight);
-            SyncScreenScrollOffsetFromScrollData();
+            if (force || gridChanged)
+            {
+                _scrollData.UpdateExtent(GetScrollableRowCount(), AutoScroll || alternateScreenActive);
+            }
+
+            if (alternateScreenActive)
+            {
+                SyncAlternateScreenScrollState();
+            }
+            else
+            {
+                SyncScreenScrollOffsetFromScrollData();
+            }
+
             UpdateRendererCursorForViewport();
             UpdateRendererParityStateFromScreen();
         }
@@ -1018,6 +1084,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (_presenter is not null)
         {
             _presenter.IsHitTestVisible = true;
+            if (_renderer is not null && _screen is not null)
+            {
+                _presenter.SetRenderState(_renderer, _screen);
+            }
+
             return;
         }
 
@@ -1027,7 +1098,25 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         VisualChildren.Add(_presenter);
 
         if (_renderer is not null && _screen is not null)
+        {
             _presenter.SetRenderState(_renderer, _screen);
+        }
+    }
+
+    private void RefreshPresenterRenderState(bool fullRedraw)
+    {
+        if (_presenter is null)
+        {
+            return;
+        }
+
+        if (_renderer is not null && _screen is not null)
+        {
+            _presenter.SetRenderState(_renderer, _screen);
+            return;
+        }
+
+        _presenter.Invalidate(fullRedraw);
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -1218,7 +1307,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         lock (_screen.SyncRoot)
         {
-            if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+            if (_vtProcessor?.AlternateScreen == true)
+            {
+                SyncAlternateScreenScrollStateLocked();
+            }
+            else if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
             {
                 SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
             }
@@ -1255,7 +1348,28 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 resetMouseSelection = true;
             }
 
-            _vtProcessor?.Process(data);
+            int restoreScrollOffset = -1;
+            if (!TryGetViewportScrollSource(out _) && _screen.ScrollOffset != 0)
+            {
+                // The managed VT processor writes through TerminalScreen.GetViewportRow.
+                // Keep those writes anchored to the live terminal viewport, not the
+                // user's scrollback viewport.
+                restoreScrollOffset = _screen.ScrollOffset;
+                _screen.ScrollOffset = 0;
+            }
+
+            try
+            {
+                _vtProcessor?.Process(data);
+            }
+            finally
+            {
+                if (restoreScrollOffset >= 0)
+                {
+                    _screen.ScrollOffset = restoreScrollOffset;
+                }
+            }
+
             TryUpdateHoveredLinkFromPointerLocked();
             UpdateRendererParityStateLocked();
         }
@@ -1968,6 +2082,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public void ApplyTheme(TerminalTheme theme)
     {
         ArgumentNullException.ThrowIfNull(theme);
+        if (ReferenceEquals(_theme, theme))
+        {
+            ApplyThemeCore(theme, updateStyledDefaults: true);
+            return;
+        }
+
         SetCurrentValue(ThemeProperty, theme);
     }
 
@@ -1977,7 +2097,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public void InvalidateTerminal()
     {
         InvalidateScreen();
-        _presenter?.Invalidate(fullRedraw: true);
+        RefreshPresenterRenderState(fullRedraw: true);
     }
 
     /// <summary>
@@ -4013,6 +4133,59 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
 
             _screen.ScrollOffset = nextOffset;
+            _screen.InvalidateViewport();
+        }
+    }
+
+    private int GetScrollableRowCount()
+    {
+        if (_screen is null)
+        {
+            return 0;
+        }
+
+        return _vtProcessor?.AlternateScreen == true
+            ? _screen.ViewportRows
+            : _screen.TotalRows;
+    }
+
+    private void SyncAlternateScreenScrollState()
+    {
+        if (_scrollData is null || _screen is null || _vtProcessor?.AlternateScreen != true)
+        {
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            SyncAlternateScreenScrollStateLocked();
+        }
+    }
+
+    private void SyncAlternateScreenScrollStateLocked()
+    {
+        if (_scrollData is null || _screen is null || _vtProcessor?.AlternateScreen != true)
+        {
+            return;
+        }
+
+        if (_vtProcessor is ITerminalViewportScrollSource viewportScrollSource
+            && viewportScrollSource.ViewportScrollState.OffsetRows != 0)
+        {
+            viewportScrollSource.SetViewportOffsetRows(0);
+        }
+
+        double alternateExtent = _screen.ViewportRows * Math.Max(1d, _scrollData.CellHeight);
+        if (Math.Abs(_scrollData.Extent - alternateExtent) > double.Epsilon)
+        {
+            _scrollData.Extent = alternateExtent;
+        }
+
+        _scrollData.ScrollToBottom();
+
+        if (_screen.ScrollOffset != 0)
+        {
+            _screen.ScrollOffset = 0;
             _screen.InvalidateViewport();
         }
     }

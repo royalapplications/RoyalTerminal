@@ -21,6 +21,7 @@ public class VirtualizedTerminalScrollViewer : Control, ILogicalScrollable
     private Size _scrollSize = new(1, 1);
     private bool _canHorizontallyScroll;
     private bool _canVerticallyScroll = true;
+    private double _pendingWheelRows;
 
     /// <summary>Event raised when the scroll state changes.</summary>
     public event EventHandler? ScrollInvalidated;
@@ -124,7 +125,26 @@ public class VirtualizedTerminalScrollViewer : Control, ILogicalScrollable
     /// </summary>
     public void HandleWheel(double delta)
     {
-        _scrollData.ScrollByRows(-(int)(delta * 3));
+        double rows = -delta * 3d;
+        if (Math.Abs(rows) < double.Epsilon)
+        {
+            return;
+        }
+
+        if (_pendingWheelRows != 0d && Math.Sign(_pendingWheelRows) != Math.Sign(rows))
+        {
+            _pendingWheelRows = 0d;
+        }
+
+        _pendingWheelRows += rows;
+        int wholeRows = (int)Math.Truncate(_pendingWheelRows);
+        if (wholeRows == 0)
+        {
+            return;
+        }
+
+        _pendingWheelRows -= wholeRows;
+        _scrollData.ScrollByRows(wholeRows);
         UpdateScreenScroll();
         InvalidateScrollInfo();
     }

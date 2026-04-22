@@ -17,9 +17,19 @@ namespace RoyalTerminal.Avalonia.Controls;
 /// </summary>
 public class TerminalPresenter : Control
 {
+    private readonly Action _completeCompositionCommit;
     private CompositionCustomVisual? _compositionVisual;
     private SkiaTerminalRenderer? _renderer;
     private TerminalScreen? _screen;
+    private bool _compositionCommitPending;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TerminalPresenter"/> class.
+    /// </summary>
+    public TerminalPresenter()
+    {
+        _completeCompositionCommit = CompleteCompositionCommit;
+    }
 
     /// <summary>
     /// Gets the composition visual used for rendering.
@@ -36,6 +46,7 @@ public class TerminalPresenter : Control
     {
         base.OnDetachedFromVisualTree(e);
         _compositionVisual = null;
+        _compositionCommitPending = false;
     }
 
     private void InitializeComposition()
@@ -107,6 +118,7 @@ public class TerminalPresenter : Control
         if (_renderer is null || _screen is null) return;
         _compositionVisual.SendHandlerMessage(
             new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
+        RequestCompositionCommit();
     }
 
     /// <summary>
@@ -125,13 +137,13 @@ public class TerminalPresenter : Control
         {
             // Force a full handler refresh when callers require a complete redraw
             // (for example, theme changes that can update defaults/palette mappings).
-            _compositionVisual.SendHandlerMessage(
-                new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
+            SendUpdate();
             return;
         }
 
         _compositionVisual.SendHandlerMessage(
             new TerminalDrawHandler.InvalidateMessage());
+        RequestCompositionCommit();
     }
 
     /// <summary>
@@ -141,6 +153,24 @@ public class TerminalPresenter : Control
     {
         _compositionVisual?.SendHandlerMessage(
             new TerminalDrawHandler.ResizeMessage());
+        RequestCompositionCommit();
         UpdateVisualSize();
+    }
+
+    private void RequestCompositionCommit()
+    {
+        CompositionCustomVisual? compositionVisual = _compositionVisual;
+        if (compositionVisual is null || _compositionCommitPending)
+        {
+            return;
+        }
+
+        _compositionCommitPending = true;
+        compositionVisual.Compositor.RequestCompositionUpdate(_completeCompositionCommit);
+    }
+
+    private void CompleteCompositionCommit()
+    {
+        _compositionCommitPending = false;
     }
 }

@@ -194,9 +194,16 @@ public static class TerminalSessionProfileSerializer
 
     private static TerminalSessionAppearanceSettings NormalizeAppearance(TerminalSessionAppearanceSettings appearance)
     {
+        string? fontFilePath = NormalizeOptional(appearance.FontFilePath);
+        TerminalFontSource fontSource = appearance.FontSource == TerminalFontSource.File && fontFilePath is not null
+            ? TerminalFontSource.File
+            : TerminalFontSource.System;
+
         return appearance with
         {
+            FontSource = fontSource,
             FontFamilyName = NormalizeOptional(appearance.FontFamilyName) ?? TerminalSessionProfileDefaults.DefaultMonoFont,
+            FontFilePath = fontSource == TerminalFontSource.File ? fontFilePath : null,
             FontSize = appearance.FontSize > 0 ? appearance.FontSize : 14.0,
         };
     }
