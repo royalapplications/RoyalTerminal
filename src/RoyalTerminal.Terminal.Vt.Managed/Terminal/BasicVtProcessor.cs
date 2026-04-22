@@ -3281,6 +3281,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     {
         if (_inAltScreen) return;
 
+        if (_screen.ScrollOffset != 0)
+        {
+            _screen.ScrollOffset = 0;
+        }
+
         // Save current main screen content
         _savedMainBuffer = new TerminalRow[_screen.ViewportRows];
         for (var r = 0; r < _screen.ViewportRows; r++)
@@ -3305,6 +3310,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private void SwitchToMainScreen()
     {
         if (!_inAltScreen) return;
+
+        if (_screen.ScrollOffset != 0)
+        {
+            _screen.ScrollOffset = 0;
+        }
 
         // Restore main screen content
         if (_savedMainBuffer is not null)
@@ -3963,8 +3973,14 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _widthPx = Math.Max(0, widthPx);
         _heightPx = Math.Max(0, heightPx);
 
-        int restoreScrollOffset = _screen.ScrollOffset;
-        if (restoreScrollOffset != 0)
+        bool alternateScreen = _inAltScreen;
+        int previousCursorCol = _cursorCol;
+        int previousCursorRow = _cursorRow;
+        int alternateViewportTop = alternateScreen
+            ? Math.Max(0, _screen.TotalRows - _screen.ViewportRows)
+            : 0;
+        int restoreScrollOffset = alternateScreen ? 0 : _screen.ScrollOffset;
+        if (_screen.ScrollOffset != 0)
         {
             _screen.ScrollOffset = 0;
         }
@@ -3975,19 +3991,29 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             mappedCursor = _screen.Resize(
                 columns,
                 rows,
-                reflowOnResize && !_inAltScreen,
-                new TerminalGridPosition(_cursorCol, _cursorRow));
+                reflowOnResize && !alternateScreen,
+                alternateScreen ? null : new TerminalGridPosition(_cursorCol, _cursorRow));
         }
         finally
         {
-            if (restoreScrollOffset != 0)
+            if (!alternateScreen && restoreScrollOffset != 0)
             {
                 _screen.ScrollOffset = restoreScrollOffset;
             }
         }
 
-        _cursorCol = mappedCursor.Column;
-        _cursorRow = mappedCursor.Row;
+        if (alternateScreen)
+        {
+            _screen.PadBottomViewportToPreserveTop(alternateViewportTop);
+            _cursorCol = previousCursorCol;
+            _cursorRow = previousCursorRow;
+        }
+        else
+        {
+            _cursorCol = mappedCursor.Column;
+            _cursorRow = mappedCursor.Row;
+        }
+
         ApplyResizeState(columns, rows);
     }
 

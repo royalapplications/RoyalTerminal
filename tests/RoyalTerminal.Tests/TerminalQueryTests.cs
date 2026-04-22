@@ -962,6 +962,33 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_AlternateScreenResize_DoesNotExposePrimaryScrollback()
+    {
+        var screen = new TerminalScreen(8, 3, scrollbackLimit: 100);
+        var processor = new BasicVtProcessor(screen);
+
+        for (int i = 0; i < 16; i++)
+        {
+            processor.Process(System.Text.Encoding.UTF8.GetBytes($"HIST-{i:00}\r\n"));
+        }
+
+        Assert.True(screen.MaxScrollOffset > 0);
+        screen.ScrollOffset = screen.MaxScrollOffset;
+
+        processor.Process("\x1b[?1049h\x1b[2J\x1b[HALT-00\r\nALT-01"u8);
+
+        Assert.True(processor.AlternateScreen);
+        Assert.Equal(0, screen.ScrollOffset);
+
+        processor.ResizeScreen(columns: 8, rows: 5, widthPx: 80, heightPx: 80, reflowOnResize: true);
+
+        string visible = ReadViewportText(screen);
+        Assert.Contains("ALT-", visible, StringComparison.Ordinal);
+        Assert.DoesNotContain("HIST-", visible, StringComparison.Ordinal);
+        Assert.Equal(0, screen.ScrollOffset);
+    }
+
+    [Fact]
     public void BasicVtProcessor_DecPrivate9001_TracksState_AndRespondsToDecrqm()
     {
         var screen = new TerminalScreen(80, 24, 0);
@@ -1540,6 +1567,27 @@ public class TerminalQueryTests
         return value
             .Replace("\x1b", "<ESC>", StringComparison.Ordinal)
             .Replace("\a", "<BEL>", StringComparison.Ordinal);
+    }
+
+    private static string ReadViewportText(TerminalScreen screen)
+    {
+        var builder = new System.Text.StringBuilder(screen.ViewportRows * (screen.Columns + 1));
+        for (int rowIndex = 0; rowIndex < screen.ViewportRows; rowIndex++)
+        {
+            ReadOnlySpan<TerminalCell> cells = screen.GetViewportRow(rowIndex).ReadOnlyCells;
+            for (int columnIndex = 0; columnIndex < cells.Length; columnIndex++)
+            {
+                int codepoint = cells[columnIndex].Codepoint;
+                if (codepoint != 0)
+                {
+                    builder.Append((char)codepoint);
+                }
+            }
+
+            builder.Append('\n');
+        }
+
+        return builder.ToString();
     }
 
     private sealed class VtParityPair : IDisposable

@@ -997,10 +997,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
         }
 
-        if (force || gridChanged)
-        {
-            _scrollData?.UpdateExtent(_screen?.TotalRows ?? 0, AutoScroll);
-        }
+        bool alternateScreenActive = _vtProcessor?.AlternateScreen == true;
 
         if (_scrollData is not null)
         {
@@ -1008,7 +1005,20 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 ? height
                 : safeRows * _renderer.CellHeight;
             _scrollViewer?.UpdateViewport(_scrollData.Viewport, _renderer.CellHeight);
-            SyncScreenScrollOffsetFromScrollData();
+            if (force || gridChanged)
+            {
+                _scrollData.UpdateExtent(GetScrollableRowCount(), AutoScroll || alternateScreenActive);
+            }
+
+            if (alternateScreenActive)
+            {
+                SyncAlternateScreenScrollState();
+            }
+            else
+            {
+                SyncScreenScrollOffsetFromScrollData();
+            }
+
             UpdateRendererCursorForViewport();
             UpdateRendererParityStateFromScreen();
         }
@@ -1297,7 +1307,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         lock (_screen.SyncRoot)
         {
-            if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+            if (_vtProcessor?.AlternateScreen == true)
+            {
+                SyncAlternateScreenScrollStateLocked();
+            }
+            else if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
             {
                 SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
             }
@@ -4119,6 +4133,59 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
 
             _screen.ScrollOffset = nextOffset;
+            _screen.InvalidateViewport();
+        }
+    }
+
+    private int GetScrollableRowCount()
+    {
+        if (_screen is null)
+        {
+            return 0;
+        }
+
+        return _vtProcessor?.AlternateScreen == true
+            ? _screen.ViewportRows
+            : _screen.TotalRows;
+    }
+
+    private void SyncAlternateScreenScrollState()
+    {
+        if (_scrollData is null || _screen is null || _vtProcessor?.AlternateScreen != true)
+        {
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            SyncAlternateScreenScrollStateLocked();
+        }
+    }
+
+    private void SyncAlternateScreenScrollStateLocked()
+    {
+        if (_scrollData is null || _screen is null || _vtProcessor?.AlternateScreen != true)
+        {
+            return;
+        }
+
+        if (_vtProcessor is ITerminalViewportScrollSource viewportScrollSource
+            && viewportScrollSource.ViewportScrollState.OffsetRows != 0)
+        {
+            viewportScrollSource.SetViewportOffsetRows(0);
+        }
+
+        double alternateExtent = _screen.ViewportRows * Math.Max(1d, _scrollData.CellHeight);
+        if (Math.Abs(_scrollData.Extent - alternateExtent) > double.Epsilon)
+        {
+            _scrollData.Extent = alternateExtent;
+        }
+
+        _scrollData.ScrollToBottom();
+
+        if (_screen.ScrollOffset != 0)
+        {
+            _screen.ScrollOffset = 0;
             _screen.InvalidateViewport();
         }
     }

@@ -620,6 +620,21 @@ public sealed class TerminalScreen
     }
 
     /// <summary>
+    /// Appends blank rows until the bottom-anchored viewport starts at or after the requested absolute row.
+    /// </summary>
+    public void PadBottomViewportToPreserveTop(int minimumViewportTopAbsoluteRow)
+    {
+        int targetTop = Math.Clamp(minimumViewportTopAbsoluteRow, 0, Math.Max(0, _scrollbackLimit));
+        int missingRows = targetTop - Math.Max(0, TotalRows - ViewportRows);
+        for (int i = 0; i < missingRows; i++)
+        {
+            AddRow();
+        }
+
+        ScrollOffset = 0;
+    }
+
+    /// <summary>
     /// Resizes the screen to new dimensions.
     /// </summary>
     public TerminalGridPosition Resize(

@@ -494,6 +494,35 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_PadBottomViewportToPreserveTop_AppendsBlankRows()
+    {
+        var screen = new TerminalScreen(1, 3, scrollbackLimit: 100);
+
+        screen.GetViewportRow(0)[0].Codepoint = '0';
+        screen.GetViewportRow(1)[0].Codepoint = '1';
+        screen.GetViewportRow(2)[0].Codepoint = '2';
+
+        for (int i = 0; i < 10; i++)
+        {
+            TerminalRow row = screen.AddRow();
+            row[0].Codepoint = 'A' + i;
+        }
+
+        int liveViewportTop = screen.TotalRows - screen.ViewportRows;
+        Assert.Equal('H', screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal('J', screen.GetViewportRow(2)[0].Codepoint);
+
+        screen.Resize(columns: 1, viewportRows: 5, reflowOnResize: false);
+        screen.PadBottomViewportToPreserveTop(liveViewportTop);
+
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Equal('H', screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal('J', screen.GetViewportRow(2)[0].Codepoint);
+        Assert.False(screen.GetViewportRow(3)[0].HasContent);
+        Assert.False(screen.GetViewportRow(4)[0].HasContent);
+    }
+
+    [Fact]
     public void TerminalScreen_DefaultColors_Applied()
     {
         var screen = new TerminalScreen(80, 24)

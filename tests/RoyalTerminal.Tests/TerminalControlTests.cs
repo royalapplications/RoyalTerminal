@@ -1373,6 +1373,49 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_AlternateScreenResize_DoesNotExposePrimaryScrollback()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 18,
+            Rows = 5,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.ScrollData);
+        Assert.NotNull(control.Screen);
+        TerminalScreen screen = control.Screen!;
+
+        for (int i = 0; i < 64; i++)
+        {
+            control.WriteOutput(Encoding.UTF8.GetBytes($"HIST-{i:00}\r\n"));
+        }
+
+        Assert.True(control.ScrollData!.MaxOffset > 0);
+
+        ((IScrollable)control).Offset = new Vector(0, 0);
+        Assert.True(screen.ScrollOffset > 0);
+
+        control.WriteOutput(Encoding.UTF8.GetBytes("\x1b[?1049h\x1b[2J\x1b[HALT-00\r\nALT-01\r\nALT-02\r\nALT-03"));
+
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Equal(0, control.ScrollData.MaxOffset);
+        AssertVisibleAlternateScreenRowsOnly(screen);
+
+        control.Rows = 3;
+
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Equal(0, control.ScrollData.MaxOffset);
+        AssertVisibleAlternateScreenRowsOnly(screen);
+
+        control.Rows = 7;
+
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Equal(0, control.ScrollData.MaxOffset);
+        AssertVisibleAlternateScreenRowsOnly(screen);
+    }
+
+    [AvaloniaFact]
     public void Control_OffsetScroll_MarksViewportRowsDirty()
     {
         TerminalControl control = new()
@@ -2104,6 +2147,13 @@ public class TerminalControlTests
         }
 
         return rows;
+    }
+
+    private static void AssertVisibleAlternateScreenRowsOnly(TerminalScreen screen)
+    {
+        string visible = string.Join('\n', ReadVisibleAsciiRows(screen));
+        Assert.Contains("ALT-", visible, StringComparison.Ordinal);
+        Assert.DoesNotContain("HIST-", visible, StringComparison.Ordinal);
     }
 
     private sealed class CountingTerminalScrollService : ITerminalScrollService
