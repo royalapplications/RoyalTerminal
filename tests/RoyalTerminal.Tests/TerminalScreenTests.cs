@@ -82,6 +82,36 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalRow_Clear_DropsPreservedHiddenCells()
+    {
+        TerminalRow row = new(12);
+        row[10].Codepoint = 'K';
+        row.Resize(6);
+
+        row.Clear();
+
+        Assert.Equal(6, row.Columns);
+        Assert.Equal(6, row.PreservedColumns);
+        row.Resize(12);
+        Assert.False(row[10].HasContent);
+    }
+
+    [Fact]
+    public void TerminalRow_ClearPreservedCellsFromActiveWidth_DropsHiddenStorage()
+    {
+        TerminalRow row = new(12);
+        row[10].Codepoint = 'K';
+        row.Resize(6);
+
+        row.ClearPreservedCellsFrom(row.Columns);
+
+        Assert.Equal(6, row.Columns);
+        Assert.Equal(6, row.PreservedColumns);
+        row.Resize(12);
+        Assert.False(row[10].HasContent);
+    }
+
+    [Fact]
     public void TerminalRow_SpanAccess_ReturnsCells()
     {
         var row = new TerminalRow(10);

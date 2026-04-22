@@ -206,7 +206,8 @@ public sealed class TerminalRow
     {
         ArgumentNullException.ThrowIfNull(source);
 
-        EnsureCapacity(source.PreservedColumns, defaultFg, defaultBg);
+        int preservedColumns = Math.Max(_columns, source.PreservedColumns);
+        ResizePreservedStorage(preservedColumns, defaultFg, defaultBg);
 
         ReadOnlySpan<TerminalCell> sourceCells = source.ReadOnlyPreservedCells;
         sourceCells.CopyTo(_cells);
@@ -225,6 +226,25 @@ public sealed class TerminalRow
         int start = Math.Clamp(column, 0, _cells.Length);
         if (start >= _cells.Length)
         {
+            return;
+        }
+
+        if (start < _columns)
+        {
+            for (int i = start; i < _columns; i++)
+            {
+                _cells[i] = TerminalCell.Empty(fg, bg);
+            }
+
+            ResizePreservedStorage(_columns, fg, bg);
+            IsDirty = true;
+            return;
+        }
+
+        if (start == _columns)
+        {
+            ResizePreservedStorage(_columns, fg, bg);
+            IsDirty = true;
             return;
         }
 
@@ -268,7 +288,8 @@ public sealed class TerminalRow
     /// <summary>Clear all cells to the default state.</summary>
     public void Clear(uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E)
     {
-        for (var i = 0; i < _cells.Length; i++)
+        ResizePreservedStorage(_columns, fg, bg);
+        for (var i = 0; i < _columns; i++)
             _cells[i] = TerminalCell.Empty(fg, bg);
         WrapsToNext = false;
         IsDirty = true;
@@ -277,6 +298,16 @@ public sealed class TerminalRow
     private void EnsureCapacity(int columns, uint defaultFg, uint defaultBg)
     {
         if (columns <= _cells.Length)
+        {
+            return;
+        }
+
+        ResizePreservedStorage(columns, defaultFg, defaultBg);
+    }
+
+    private void ResizePreservedStorage(int columns, uint defaultFg, uint defaultBg)
+    {
+        if (columns == _cells.Length)
         {
             return;
         }

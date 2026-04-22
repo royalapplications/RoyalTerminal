@@ -10,10 +10,14 @@ namespace RoyalTerminal.Avalonia.Services;
 /// </summary>
 public static class TerminalFontCatalog
 {
+    private static readonly Lazy<IReadOnlyList<string>> SystemFontFamilies = new(LoadSystemFontFamilies);
+
     /// <summary>
     /// Gets installed system font family names.
     /// </summary>
-    public static IReadOnlyList<string> GetSystemFontFamilies()
+    public static IReadOnlyList<string> GetSystemFontFamilies() => SystemFontFamilies.Value;
+
+    private static IReadOnlyList<string> LoadSystemFontFamilies()
     {
         try
         {
@@ -50,18 +54,35 @@ public static class TerminalFontCatalog
         }
     }
 
-    private static IReadOnlyList<string> NormalizeFamilies(IReadOnlyList<string> families)
+    private static IReadOnlyList<string> NormalizeFamilies(string[] families)
     {
-        SortedSet<string> sortedFamilies = new(StringComparer.CurrentCultureIgnoreCase);
-        for (int i = 0; i < families.Count; i++)
+        if (families.Length == 0)
         {
-            string family = families[i];
-            if (!string.IsNullOrWhiteSpace(family))
+            return Array.Empty<string>();
+        }
+
+        Array.Sort(families, StringComparer.OrdinalIgnoreCase);
+        List<string> normalizedFamilies = new(families.Length);
+        string? previous = null;
+
+        for (int i = 0; i < families.Length; i++)
+        {
+            string? family = families[i];
+            if (string.IsNullOrWhiteSpace(family))
             {
-                sortedFamilies.Add(family.Trim());
+                continue;
+            }
+
+            string normalized = family.Trim();
+            if (previous is null || !string.Equals(previous, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedFamilies.Add(normalized);
+                previous = normalized;
             }
         }
 
-        return sortedFamilies.ToArray();
+        return normalizedFamilies.Count == 0
+            ? Array.Empty<string>()
+            : normalizedFamilies.ToArray();
     }
 }
