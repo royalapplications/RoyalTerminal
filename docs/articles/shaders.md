@@ -8,6 +8,8 @@ RoyalTerminal supports terminal framebuffer shaders in the managed Skia render p
 
 This keeps shader support independent from the VT processor. The same shader pipeline works when the terminal state came from the managed VT engine, the Ghostty-backed VT engine, replay data, or any transport that updates `TerminalScreen`.
 
+The non-terminal shader surface lives in `RoyalTerminal.Shaders`. That package contains source descriptions, compatibility translation, HLSL package validation, compiler contracts, and backend-neutral runtime contracts without referencing Avalonia, SkiaSharp, terminal internals, or native renderer packages. The Skia-specific post-processing adapter remains in `RoyalTerminal.Rendering.Skia`.
+
 ## Supported shader paths
 
 | Path | Use when |
@@ -31,18 +33,19 @@ Because the shader runs after terminal drawing, it affects everything in the fra
 
 ## Public API surface
 
-| Type or member | Purpose |
-| --- | --- |
-| `TerminalControl.ShaderSources` | Optional shader chain applied to the completed terminal frame. |
-| `TerminalControl.ShaderAnimationEnabled` | Allows shaders that request animation to keep the render loop active between terminal updates. |
-| `TerminalShaderSource` | One named shader source plus language and animation metadata. |
-| `TerminalShaderLanguage` | Selects direct SkSL, Ghostty/Shadertoy compatibility, or Windows Terminal HLSL compatibility. |
-| `TerminalShaderPostProcessor` | Lower-level compiler and post-processor used by the renderer. |
-| `TerminalShaderFrameContext` | Per-frame data passed to shader uniforms. |
-| `TerminalShaderPackage` | Full HLSL package model for compiler-backed shader work. |
-| `TerminalShaderCompilationPipeline` | Validation, include resolution, and compiler orchestration for full packages. |
-| `TerminalShaderDxcCliCompiler` | DXC command-line compiler integration. |
-| `ITerminalShaderRuntime` | Backend-neutral runtime contract for compiled packages. |
+| Type or member | Package | Purpose |
+| --- | --- | --- |
+| `TerminalControl.ShaderSources` | `RoyalTerminal.Avalonia` | Optional shader chain applied to the completed terminal frame. |
+| `TerminalControl.ShaderAnimationEnabled` | `RoyalTerminal.Avalonia` | Allows shaders that request animation to keep the render loop active between terminal updates. |
+| `TerminalShaderSource` | `RoyalTerminal.Shaders` | One named shader source plus language and animation metadata. |
+| `TerminalShaderLanguage` | `RoyalTerminal.Shaders` | Selects direct SkSL, Ghostty/Shadertoy compatibility, or Windows Terminal HLSL compatibility. |
+| `TerminalShaderSourceTranslator` | `RoyalTerminal.Shaders` | Dependency-free source translator used by the Skia adapter. |
+| `TerminalShaderPostProcessor` | `RoyalTerminal.Rendering.Skia` | Lower-level compiler and post-processor used by the renderer. |
+| `TerminalShaderFrameContext` | `RoyalTerminal.Rendering.Skia` | Skia/terminal frame data passed to post-process uniforms. |
+| `TerminalShaderPackage` | `RoyalTerminal.Shaders` | Full HLSL package model for compiler-backed shader work. |
+| `TerminalShaderCompilationPipeline` | `RoyalTerminal.Shaders` | Validation, include resolution, and compiler orchestration for full packages. |
+| `TerminalShaderDxcCliCompiler` | `RoyalTerminal.Shaders` | DXC command-line compiler integration. |
+| `ITerminalShaderRuntime` | `RoyalTerminal.Shaders` | Backend-neutral runtime contract for compiled packages. |
 
 ## Frame inputs
 

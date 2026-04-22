@@ -62,6 +62,8 @@ This is an important difference between RoyalTerminal and a monolithic widget: t
 `TerminalControl` can apply one or more post-process shaders to the completed terminal frame:
 
 ```csharp
+using RoyalTerminal.Shaders;
+
 Terminal.ShaderSources =
 [
     new TerminalShaderSource(

@@ -192,6 +192,13 @@ export const apiPackageGroups = [
         guideLink: "/articles/rendering-native"
       },
       {
+        packageId: "RoyalTerminal.Shaders",
+        slug: "royalterminal-shaders",
+        project: "src/RoyalTerminal.Shaders/RoyalTerminal.Shaders.csproj",
+        guideTitle: "Shader Support",
+        guideLink: "/articles/shaders"
+      },
+      {
         packageId: "RoyalTerminal.Rendering.Skia",
         slug: "royalterminal-rendering-skia",
         project: "src/RoyalTerminal.Rendering.Skia/RoyalTerminal.Rendering.Skia.csproj",

@@ -6,6 +6,8 @@ title: Compiler-Backed HLSL Shader Packages
 
 RoyalTerminal now has a compiler-backed package model for full HLSL shader work. This model is separate from the lightweight Windows Terminal compatibility adapter described in [Windows Terminal HLSL Shader Compatibility](/articles/shaders-windows-terminal-hlsl).
 
+The package model, compiler contracts, include resolver, runtime contracts, and diagnostics live in `RoyalTerminal.Shaders`. The project is dependency-free, so hosts can validate, translate, and compile shader packages without taking an Avalonia, SkiaSharp, terminal model, or native renderer dependency.
+
 Use shader packages when you need real HLSL concepts:
 
 - multiple source files and includes
@@ -162,6 +164,8 @@ public interface ITerminalShaderRuntime : IDisposable
         CancellationToken cancellationToken = default);
 }
 ```
+
+`TerminalShaderFrameRequest` carries primitive frame dimensions, timing, scale, and resource values. Renderer-specific adapters should map their own richer frame context into this contract before invoking a runtime backend.
 
 `TerminalShaderUnavailableRuntime` is provided as a deterministic diagnostic runtime when a backend is requested but unavailable.
 

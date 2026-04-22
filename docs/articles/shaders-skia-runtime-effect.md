@@ -11,6 +11,8 @@ Use this format for new effects.
 ## Minimal shader
 
 ```csharp
+using RoyalTerminal.Shaders;
+
 Terminal.ShaderSources =
 [
     new TerminalShaderSource(
@@ -107,6 +109,8 @@ Only declared uniforms are set.
 Use this behavior in settings surfaces:
 
 ```csharp
+using RoyalTerminal.Avalonia.Rendering;
+
 using TerminalShaderPostProcessor processor = TerminalShaderPostProcessor.Create(candidateSources);
 
 if (!processor.HasShaders && !string.IsNullOrWhiteSpace(processor.CompileLog))

@@ -11,6 +11,8 @@ This is source compatibility for post-process effects. It does not inject shader
 ## Apply a `mainImage` shader
 
 ```csharp
+using RoyalTerminal.Shaders;
+
 Terminal.ShaderSources =
 [
     new TerminalShaderSource(

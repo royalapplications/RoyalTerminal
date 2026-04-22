@@ -44,6 +44,7 @@ Project documentation source lives in [docs/](docs/) and is published through th
 | `RoyalTerminal.Terminal.Services.Contracts` | Terminal session service contracts |
 | `RoyalTerminal.Terminal.Services` | Terminal session service implementations |
 | `RoyalTerminal.Rendering.Text` | Reusable text shaping/fallback subsystem (`HarfBuzzTextShaper`, `TerminalFontResolver`) |
+| `RoyalTerminal.Shaders` | Dependency-free shader source, compatibility translation, package validation, compiler contracts, and runtime contracts |
 | `RoyalTerminal.Rendering.Skia` | CPU cell renderer core (`SkiaTerminalRenderer`, `GlyphCache`) with HarfBuzz shaping, fallback font resolution, and framebuffer shader post-processing |
 | `RoyalTerminal.Rendering.Contracts` | Backend-agnostic render contracts (`RenderTargetDescriptor`, capabilities) |
 | `RoyalTerminal.Rendering.Interop.Ghostty` | Managed wrapper for `ghostty-renderer-capi` |
@@ -761,6 +762,7 @@ Use this when embedding the renderer interop pipeline directly (for `TextureInte
 ```bash
 dotnet add package RoyalTerminal.Rendering.Contracts
 dotnet add package RoyalTerminal.Rendering.Interop.Ghostty
+dotnet add package RoyalTerminal.Shaders
 dotnet add package RoyalTerminal.Rendering.Skia
 dotnet add package RoyalTerminal.Rendering.Interop.Ghostty.Skia
 dotnet add package RoyalTerminal.Avalonia.Rendering.GhosttyInterop
@@ -933,6 +935,7 @@ RoyalTerminal/
 │   ├── RoyalTerminal.Terminal.Services.Contracts/
 │   ├── RoyalTerminal.Terminal.Services/
 │   ├── RoyalTerminal.Rendering.Text/
+│   ├── RoyalTerminal.Shaders/
 │   ├── RoyalTerminal.Rendering.Contracts/
 │   ├── RoyalTerminal.Rendering.Interop.Ghostty/
 │   ├── RoyalTerminal.Rendering.Skia/

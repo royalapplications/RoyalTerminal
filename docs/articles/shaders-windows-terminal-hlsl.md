@@ -13,6 +13,8 @@ For real compiler-backed HLSL packages, including includes, multiple resources, 
 ## Apply a Windows Terminal-style shader
 
 ```csharp
+using RoyalTerminal.Shaders;
+
 Terminal.ShaderSources =
 [
     new TerminalShaderSource(

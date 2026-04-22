@@ -30,6 +30,8 @@ For most applications, this is the only rendering path you need.
 
 The managed shader path runs after the terminal has been rendered into a Skia surface. It treats the completed terminal frame as a texture and applies one or more `TerminalShaderSource` entries through `TerminalShaderPostProcessor`.
 
+The reusable shader model and compatibility translation live in `RoyalTerminal.Shaders`, which has no Avalonia, SkiaSharp, terminal, or native interop dependency. `RoyalTerminal.Rendering.Skia` owns the Skia-specific `TerminalShaderPostProcessor` and `TerminalShaderFrameContext` adapter types.
+
 The main host-facing properties live on `TerminalControl`:
 
 | Member | Purpose |

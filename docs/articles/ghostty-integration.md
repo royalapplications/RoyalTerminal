@@ -13,6 +13,8 @@ RoyalTerminal also supports a Ghostty/Shadertoy-style shader compatibility mode 
 Use `TerminalShaderLanguage.GhosttyShadertoy` when you have a single-pass `mainImage` shader that samples `iChannel0`:
 
 ```csharp
+using RoyalTerminal.Shaders;
+
 Terminal.ShaderSources =
 [
     new TerminalShaderSource(

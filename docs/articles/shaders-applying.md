@@ -11,11 +11,15 @@ RoyalTerminal exposes shaders at two levels:
 
 Most applications should use `TerminalControl`.
 
+`TerminalShaderSource`, `TerminalShaderLanguage`, and package/compiler/runtime contracts are defined in `RoyalTerminal.Shaders`. `TerminalShaderPostProcessor` and `TerminalShaderFrameContext` are Skia adapter types from `RoyalTerminal.Rendering.Skia`.
+
 ## Apply a shader to `TerminalControl`
 
 Create one or more `TerminalShaderSource` instances and assign them to `ShaderSources`:
 
 ```csharp
+using RoyalTerminal.Shaders;
+
 Terminal.ShaderSources =
 [
     new TerminalShaderSource(
@@ -108,6 +112,9 @@ Compatibility modes are translated into Skia Runtime Effect source before compil
 Use `TerminalShaderPostProcessor` when you are testing shader behavior or rendering outside `TerminalControl`:
 
 ```csharp
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Shaders;
+
 using TerminalShaderPostProcessor processor = TerminalShaderPostProcessor.Create(sources);
 
 if (!string.IsNullOrWhiteSpace(processor.CompileLog))
