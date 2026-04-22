@@ -132,6 +132,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _searchApplied;
     private bool _showGhosttyDiagnostics;
     private string _ghosttyDiagnosticsText = "Ghostty VT diagnostics are unavailable for the active tab.";
+    private readonly IReadOnlyList<TerminalShaderSampleOption> _shaderSamples;
+    private TerminalShaderSampleOption _selectedShaderSample;
 
     public MainWindowViewModel()
         : this(TerminalModeResolver.Default, new TerminalThemeCatalog())
@@ -144,6 +146,8 @@ public sealed class MainWindowViewModel : ReactiveObject
         _themeCatalog = themeCatalog ?? throw new ArgumentNullException(nameof(themeCatalog));
         _themePresets = _themeCatalog.Presets;
         InitializeModeThemes();
+        _shaderSamples = TerminalShaderSampleCatalog.Options;
+        _selectedShaderSample = _shaderSamples[0];
 
         _settingsCategories =
         [
@@ -204,6 +208,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         ShowKittyGraphicsSampleInteraction = new Interaction<Unit, Unit>();
         ToggleGhosttyDiagnosticsInteraction = new Interaction<bool, Unit>();
         CopySnapshotInteraction = new Interaction<TerminalSnapshotExportFormat, Unit>();
+        ApplyShaderSampleInteraction = new Interaction<string, Unit>();
 
         NewTabCommand = ReactiveCommand.CreateFromObservable(() => CreateNewTabInteraction.Handle(Unit.Default));
         CloseCurrentTabCommand = ReactiveCommand.CreateFromObservable(() => CloseCurrentTabInteraction.Handle(Unit.Default));
@@ -239,6 +244,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         CopyPlainSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.PlainText));
         CopyStyledVtSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.StyledVt));
         CopyHtmlSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.Html));
+        CycleShaderSampleCommand = ReactiveCommand.CreateFromObservable(CycleShaderSample);
 
         UpdateThemePresetButtonText();
     }
@@ -269,6 +275,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<Unit, Unit> ShowKittyGraphicsSampleInteraction { get; }
     public Interaction<bool, Unit> ToggleGhosttyDiagnosticsInteraction { get; }
     public Interaction<TerminalSnapshotExportFormat, Unit> CopySnapshotInteraction { get; }
+    public Interaction<string, Unit> ApplyShaderSampleInteraction { get; }
 
     public ReactiveCommand<Unit, Unit> NewTabCommand { get; }
     public ReactiveCommand<Unit, Unit> CloseCurrentTabCommand { get; }
@@ -304,6 +311,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> CopyPlainSnapshotCommand { get; }
     public ReactiveCommand<Unit, Unit> CopyStyledVtSnapshotCommand { get; }
     public ReactiveCommand<Unit, Unit> CopyHtmlSnapshotCommand { get; }
+    public ReactiveCommand<Unit, Unit> CycleShaderSampleCommand { get; }
 
     public TerminalSettingsPanelState SettingsPanelState => _settingsPanelState ??= new TerminalSettingsPanelState();
 
@@ -608,6 +616,25 @@ public sealed class MainWindowViewModel : ReactiveObject
     }
 
     public string GhosttyDiagnosticsButtonText => ShowGhosttyDiagnostics ? "Hide Diagnostics" : "Native Diagnostics";
+
+    public IReadOnlyList<TerminalShaderSampleOption> ShaderSamples => _shaderSamples;
+
+    public TerminalShaderSampleOption SelectedShaderSample
+    {
+        get => _selectedShaderSample;
+        private set
+        {
+            if (_selectedShaderSample == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _selectedShaderSample, value);
+            this.RaisePropertyChanged(nameof(ShaderSampleButtonText));
+        }
+    }
+
+    public string ShaderSampleButtonText => $"Shader: {SelectedShaderSample.DisplayName}";
 
     public IReadOnlyList<SettingsCategoryOption> SettingsCategories => _settingsCategories;
 
@@ -1461,6 +1488,25 @@ public sealed class MainWindowViewModel : ReactiveObject
     private IObservable<Unit> ToggleGhosttyDiagnostics()
     {
         return ToggleGhosttyDiagnosticsInteraction.Handle(!ShowGhosttyDiagnostics);
+    }
+
+    private IObservable<Unit> CycleShaderSample()
+    {
+        int currentIndex = 0;
+        for (int i = 0; i < _shaderSamples.Count; i++)
+        {
+            if (string.Equals(_shaderSamples[i].Id, SelectedShaderSample.Id, StringComparison.Ordinal))
+            {
+                currentIndex = i;
+                break;
+            }
+        }
+
+        int nextIndex = (currentIndex + 1) % _shaderSamples.Count;
+        SelectedShaderSample = _shaderSamples[nextIndex];
+        return ApplyShaderSampleInteraction
+            .Handle(SelectedShaderSample.Id)
+            .Do(_ => SetStatus($"Shader sample: {SelectedShaderSample.DisplayName}"));
     }
 
     private IObservable<Unit> CopySnapshot(TerminalSnapshotExportFormat format)
