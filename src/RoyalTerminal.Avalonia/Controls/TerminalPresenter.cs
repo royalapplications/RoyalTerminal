@@ -96,18 +96,18 @@ public class TerminalPresenter : Control
     /// <summary>
     /// Sets the renderer and screen to use for drawing.
     /// </summary>
-    public void SetRenderState(SkiaTerminalRenderer renderer, TerminalScreen screen, bool fullRedraw = false)
+    public void SetRenderState(SkiaTerminalRenderer renderer, TerminalScreen screen)
     {
         _renderer = renderer;
         _screen = screen;
-        SendUpdate(fullRedraw);
+        SendUpdate();
     }
 
     /// <summary>
     /// Sends an update message to the composition handler.
     /// Retries composition initialization if the visual isn't ready yet.
     /// </summary>
-    public void SendUpdate(bool fullRedraw = false)
+    public void SendUpdate()
     {
         if (_compositionVisual is null)
         {
@@ -119,11 +119,6 @@ public class TerminalPresenter : Control
         _compositionVisual.SendHandlerMessage(
             new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
         RequestCompositionCommit();
-
-        if (fullRedraw)
-        {
-            InvalidateVisual();
-        }
     }
 
     /// <summary>
@@ -142,7 +137,7 @@ public class TerminalPresenter : Control
         {
             // Force a full handler refresh when callers require a complete redraw
             // (for example, theme changes that can update defaults/palette mappings).
-            SendUpdate(fullRedraw: true);
+            SendUpdate();
             return;
         }
 

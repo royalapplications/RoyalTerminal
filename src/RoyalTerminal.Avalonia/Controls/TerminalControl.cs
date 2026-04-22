@@ -1102,7 +1102,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (_renderer is not null && _screen is not null)
         {
-            _presenter.SetRenderState(_renderer, _screen, fullRedraw);
+            _presenter.SetRenderState(_renderer, _screen);
             return;
         }
 
