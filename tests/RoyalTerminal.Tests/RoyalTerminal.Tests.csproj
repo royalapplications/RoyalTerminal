@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\RoyalTerminal.Shaders\RoyalTerminal.Shaders.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Shaders.D3D11\RoyalTerminal.Shaders.D3D11.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Contracts\RoyalTerminal.Rendering.Contracts.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Interop.Ghostty\RoyalTerminal.Rendering.Interop.Ghostty.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Interop.Ghostty.Skia\RoyalTerminal.Rendering.Interop.Ghostty.Skia.csproj" />
