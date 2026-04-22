@@ -812,6 +812,35 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_ApplyTheme_WithCurrentTheme_ReappliesAndInvalidatesRows()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 80,
+            Rows = 24,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.Screen);
+        Assert.NotNull(control.Theme);
+        TerminalScreen screen = control.Screen!;
+        TerminalTheme theme = control.Theme!;
+
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            screen.GetViewportRow(row).IsDirty = false;
+        }
+
+        Assert.False(screen.HasDirtyRows());
+
+        control.ApplyTheme(theme);
+
+        Assert.True(screen.HasDirtyRows());
+        Assert.Equal(theme.DefaultForeground, screen.DefaultForeground);
+        Assert.Equal(theme.DefaultBackground, screen.DefaultBackground);
+    }
+
+    [AvaloniaFact]
     public void Control_ApplyTheme_PropagatesToThemeSinkProcessor()
     {
         ThemeTrackingVtProcessorFactory factory = new();

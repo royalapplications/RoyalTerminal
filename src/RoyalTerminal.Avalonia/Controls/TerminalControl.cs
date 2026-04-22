@@ -704,7 +704,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         _presenter?.SetRenderState(nextRenderer, _screen);
         _presenter?.NotifyResize(Bounds.Size);
-        _presenter?.Invalidate(fullRedraw: true);
         RaiseScrollInvalidated();
         InvalidateMeasure();
     }
@@ -767,7 +766,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _screen.InvalidateAll();
         }
 
-        _presenter?.Invalidate(fullRedraw: true);
+        RefreshPresenterRenderState(fullRedraw: true);
     }
 
     private void ApplyLegacyColorBridge()
@@ -829,7 +828,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         InvalidateScreen();
-        _presenter?.Invalidate(fullRedraw: true);
+        RefreshPresenterRenderState(fullRedraw: true);
     }
 
     private static void ApplyThemeToRenderer(TerminalTheme theme, SkiaTerminalRenderer renderer)
@@ -1075,6 +1074,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (_presenter is not null)
         {
             _presenter.IsHitTestVisible = true;
+            if (_renderer is not null && _screen is not null)
+            {
+                _presenter.SetRenderState(_renderer, _screen);
+            }
+
             return;
         }
 
@@ -1084,7 +1088,25 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         VisualChildren.Add(_presenter);
 
         if (_renderer is not null && _screen is not null)
+        {
             _presenter.SetRenderState(_renderer, _screen);
+        }
+    }
+
+    private void RefreshPresenterRenderState(bool fullRedraw)
+    {
+        if (_presenter is null)
+        {
+            return;
+        }
+
+        if (_renderer is not null && _screen is not null)
+        {
+            _presenter.SetRenderState(_renderer, _screen, fullRedraw);
+            return;
+        }
+
+        _presenter.Invalidate(fullRedraw);
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -2046,6 +2068,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public void ApplyTheme(TerminalTheme theme)
     {
         ArgumentNullException.ThrowIfNull(theme);
+        if (ReferenceEquals(_theme, theme))
+        {
+            ApplyThemeCore(theme, updateStyledDefaults: true);
+            return;
+        }
+
         SetCurrentValue(ThemeProperty, theme);
     }
 
@@ -2055,7 +2083,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public void InvalidateTerminal()
     {
         InvalidateScreen();
-        _presenter?.Invalidate(fullRedraw: true);
+        RefreshPresenterRenderState(fullRedraw: true);
     }
 
     /// <summary>
