@@ -1016,6 +1016,24 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_Reset_DiscardsInactiveAlternateRows()
+    {
+        var screen = new TerminalScreen(18, 4, scrollbackLimit: 100);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("\x1b[?1049h\x1b[2JALT-PANEL"u8);
+        processor.Process("\x1b[?1049l"u8);
+
+        processor.Reset();
+        processor.Process("\x1b[?47h"u8);
+
+        string visible = ReadViewportText(screen);
+        Assert.True(processor.AlternateScreen);
+        Assert.True(screen.AlternateBufferActive);
+        Assert.DoesNotContain("ALT-PANEL", visible, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BasicVtProcessor_DecPrivate9001_TracksState_AndRespondsToDecrqm()
     {
         var screen = new TerminalScreen(80, 24, 0);

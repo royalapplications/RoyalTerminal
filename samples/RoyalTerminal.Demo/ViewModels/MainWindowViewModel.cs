@@ -333,13 +333,19 @@ public sealed class MainWindowViewModel : ReactiveObject
     public string FontFamilyName
     {
         get => _fontFamilyName;
-        set => this.RaiseAndSetIfChanged(ref _fontFamilyName, value);
+        set
+        {
+            string next = string.IsNullOrWhiteSpace(value)
+                ? GetDefaultMonospaceFont()
+                : value.Trim();
+            this.RaiseAndSetIfChanged(ref _fontFamilyName, next);
+        }
     }
 
     public string FontFilePath
     {
         get => _fontFilePath;
-        set => this.RaiseAndSetIfChanged(ref _fontFilePath, value);
+        set => this.RaiseAndSetIfChanged(ref _fontFilePath, value?.Trim() ?? string.Empty);
     }
 
     public bool IsDarkTheme

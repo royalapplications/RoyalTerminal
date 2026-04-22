@@ -699,6 +699,19 @@ public sealed class TerminalScreen
     }
 
     /// <summary>
+    /// Releases any inactive alternate screen rows.
+    /// </summary>
+    public void DiscardInactiveAlternateBuffer()
+    {
+        if (_alternateBufferActive)
+        {
+            return;
+        }
+
+        _alternateRows = null;
+    }
+
+    /// <summary>
     /// Appends blank rows until the bottom-anchored viewport starts at or after the requested absolute row.
     /// </summary>
     public void PadBottomViewportToPreserveTop(int minimumViewportTopAbsoluteRow)

@@ -3890,6 +3890,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             _screen.SwitchToPrimaryBuffer();
         }
 
+        _screen.DiscardInactiveAlternateBuffer();
+
         _inAltScreen = false;
         _autoWrap = true;
         _cursorVisible = true;

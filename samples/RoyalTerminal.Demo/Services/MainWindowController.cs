@@ -2158,12 +2158,8 @@ internal sealed class MainWindowController
 
     private void ApplyFontSettings(TerminalControl standalone)
     {
-        string fontFamily = string.IsNullOrWhiteSpace(_viewModel.FontFamilyName)
-            ? MonoFont
-            : _viewModel.FontFamilyName.Trim();
-        string fontFilePath = _viewModel.FontSource == TerminalFontSource.File
-            ? _viewModel.FontFilePath.Trim()
-            : string.Empty;
+        string fontFamily = NormalizeFontFamily(_viewModel.FontFamilyName);
+        string fontFilePath = NormalizeFontFilePath(_viewModel.FontSource, _viewModel.FontFilePath);
 
         standalone.FontFamilyName = fontFamily;
         standalone.FontFilePath = fontFilePath;
@@ -2171,6 +2167,20 @@ internal sealed class MainWindowController
             ? TerminalFontSource.File
             : TerminalFontSource.System;
         standalone.TerminalFontSize = _viewModel.FontSize;
+    }
+
+    private static string NormalizeFontFamily(string? fontFamilyName)
+    {
+        return string.IsNullOrWhiteSpace(fontFamilyName)
+            ? MonoFont
+            : fontFamilyName.Trim();
+    }
+
+    private static string NormalizeFontFilePath(TerminalFontSource fontSource, string? fontFilePath)
+    {
+        return fontSource == TerminalFontSource.File && !string.IsNullOrWhiteSpace(fontFilePath)
+            ? fontFilePath.Trim()
+            : string.Empty;
     }
 
     private void ApplyFontSize(double fontSize)
@@ -2484,12 +2494,8 @@ internal sealed class MainWindowController
         _viewModel.EventLogEnabled = state.EventLogEnabled;
 
         double fontSize = Math.Clamp(state.FontSize, 8, 72);
-        string fontFamilyName = string.IsNullOrWhiteSpace(state.FontFamilyName)
-            ? MonoFont
-            : state.FontFamilyName.Trim();
-        string fontFilePath = state.SelectedFontSource == TerminalFontSource.File
-            ? state.FontFilePath.Trim()
-            : string.Empty;
+        string fontFamilyName = NormalizeFontFamily(state.FontFamilyName);
+        string fontFilePath = NormalizeFontFilePath(state.SelectedFontSource, state.FontFilePath);
         TerminalFontSource fontSource = state.SelectedFontSource == TerminalFontSource.File &&
             !string.IsNullOrWhiteSpace(fontFilePath)
                 ? TerminalFontSource.File
