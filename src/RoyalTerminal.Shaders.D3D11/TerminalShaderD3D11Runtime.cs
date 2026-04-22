@@ -333,6 +333,8 @@ public sealed class TerminalShaderD3D11Runtime : ITerminalShaderRuntime
         }
 
         _context.Dispatch(x, y, z);
+        _context.CSSetUnorderedAccessViews(0, new ID3D11UnorderedAccessView[16]);
+        _context.CSSetShaderResources(0, new ID3D11ShaderResourceView[16]);
         graph.SetFinal(output);
     }
 
@@ -347,8 +349,17 @@ public sealed class TerminalShaderD3D11Runtime : ITerminalShaderRuntime
             _context.PSSetShaderResources(0, shaderResourceViews!);
         }
 
-        _context.PSSetSamplers(0, [_linearClampSampler]);
-        _context.PSSetConstantBuffers(0, [graph.FrameConstantBuffer]);
+        ID3D11SamplerState?[] samplerStates = BuildSamplerSlots(package, pass);
+        if (samplerStates.Length > 0)
+        {
+            _context.PSSetSamplers(0, samplerStates!);
+        }
+
+        ID3D11Buffer?[] constantBuffers = BuildConstantBufferSlots(package, pass, graph);
+        if (constantBuffers.Length > 0)
+        {
+            _context.PSSetConstantBuffers(0, constantBuffers!);
+        }
     }
 
     private void BindComputeResources(
@@ -367,8 +378,18 @@ public sealed class TerminalShaderD3D11Runtime : ITerminalShaderRuntime
         ID3D11UnorderedAccessView?[] uavs = new ID3D11UnorderedAccessView?[Math.Max(1, uavSlot + 1)];
         uavs[uavSlot < 0 ? 0 : uavSlot] = output.UnorderedAccessView;
         _context.CSSetUnorderedAccessViews(0, uavs!);
-        _context.CSSetSamplers(0, [_linearClampSampler]);
-        _context.CSSetConstantBuffers(0, [graph.FrameConstantBuffer]);
+
+        ID3D11SamplerState?[] samplerStates = BuildSamplerSlots(package, pass);
+        if (samplerStates.Length > 0)
+        {
+            _context.CSSetSamplers(0, samplerStates!);
+        }
+
+        ID3D11Buffer?[] constantBuffers = BuildConstantBufferSlots(package, pass, graph);
+        if (constantBuffers.Length > 0)
+        {
+            _context.CSSetConstantBuffers(0, constantBuffers!);
+        }
     }
 
     private ID3D11ShaderResourceView?[] BuildShaderResourceViewSlots(
@@ -403,6 +424,90 @@ public sealed class TerminalShaderD3D11Runtime : ITerminalShaderRuntime
         }
 
         return views;
+    }
+
+    private ID3D11SamplerState?[] BuildSamplerSlots(
+        TerminalShaderPackage package,
+        D3D11Pass pass)
+    {
+        List<int> slots = [];
+        for (int i = 0; i < package.Resources.Count; i++)
+        {
+            TerminalShaderResourceBinding resource = package.Resources[i];
+            if (resource.Kind == TerminalShaderResourceKind.Sampler && resource.RegisterIndex >= 0)
+            {
+                slots.Add(resource.RegisterIndex);
+            }
+        }
+
+        for (int i = 0; i < pass.CompiledPass.Reflection.Resources.Count; i++)
+        {
+            TerminalShaderResourceReflection resource = pass.CompiledPass.Reflection.Resources[i];
+            if (resource.Kind == TerminalShaderResourceKind.Sampler && resource.RegisterIndex >= 0)
+            {
+                slots.Add(resource.RegisterIndex);
+            }
+        }
+
+        if (slots.Count == 0)
+        {
+            slots.Add(0);
+        }
+
+        int maxSlot = slots.Max();
+        ID3D11SamplerState?[] samplers = new ID3D11SamplerState?[maxSlot + 1];
+        for (int i = 0; i < slots.Count; i++)
+        {
+            samplers[slots[i]] = _linearClampSampler;
+        }
+
+        return samplers;
+    }
+
+    private static ID3D11Buffer?[] BuildConstantBufferSlots(
+        TerminalShaderPackage package,
+        D3D11Pass pass,
+        D3D11FrameGraph graph)
+    {
+        List<(int Slot, ID3D11Buffer Buffer)> bindings = [];
+
+        int frameSlot = FindDeclaredResourceRegister(package, "TerminalFrame", "TerminalFrame");
+        if (frameSlot < 0)
+        {
+            frameSlot = FindResourceRegister(pass.CompiledPass.Reflection, "TerminalFrame", TerminalShaderResourceKind.ConstantBuffer);
+        }
+
+        if (frameSlot < 0)
+        {
+            frameSlot = FindResourceRegister(pass.CompiledPass.Reflection, "PixelShaderSettings", TerminalShaderResourceKind.ConstantBuffer);
+        }
+
+        bindings.Add((frameSlot < 0 ? 0 : frameSlot, graph.FrameConstantBuffer));
+
+        for (int i = 0; i < package.Resources.Count; i++)
+        {
+            TerminalShaderResourceBinding resource = package.Resources[i];
+            if (resource.Kind != TerminalShaderResourceKind.ConstantBuffer ||
+                !graph.TryGetConstantBuffer(resource.Name, out ID3D11Buffer? buffer) ||
+                buffer is null)
+            {
+                continue;
+            }
+
+            int slot = resource.RegisterIndex >= 0
+                ? resource.RegisterIndex
+                : FindResourceRegister(pass.CompiledPass.Reflection, resource.Name, TerminalShaderResourceKind.ConstantBuffer);
+            bindings.Add((slot < 0 ? bindings.Count : slot, buffer));
+        }
+
+        int maxSlot = bindings.Max(static binding => binding.Slot);
+        ID3D11Buffer?[] buffers = new ID3D11Buffer?[maxSlot + 1];
+        for (int i = 0; i < bindings.Count; i++)
+        {
+            buffers[bindings[i].Slot] = bindings[i].Buffer;
+        }
+
+        return buffers;
     }
 
     private void UploadBuiltInFrameConstantBuffer(D3D11FrameGraph graph, TerminalShaderFrameRequest frame)
@@ -656,6 +761,7 @@ public sealed class TerminalShaderD3D11Runtime : ITerminalShaderRuntime
         private readonly ID3D11DeviceContext _context;
         private readonly TerminalShaderFrameRequest _frame;
         private readonly Dictionary<string, D3D11TextureResource> _textures = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, D3D11BufferResource> _constantBuffers = new(StringComparer.OrdinalIgnoreCase);
 
         public D3D11FrameGraph(
             ID3D11Device device,
@@ -680,6 +786,10 @@ public sealed class TerminalShaderD3D11Runtime : ITerminalShaderRuntime
                     TerminalShaderResourceKind.HistoryTexture)
                 {
                     AddTexture(resource);
+                }
+                else if (resource.Kind == TerminalShaderResourceKind.ConstantBuffer)
+                {
+                    AddConstantBuffer(resource);
                 }
             }
         }
@@ -717,16 +827,23 @@ public sealed class TerminalShaderD3D11Runtime : ITerminalShaderRuntime
             return resource;
         }
 
+        public bool TryGetConstantBuffer(string name, out ID3D11Buffer? buffer)
+        {
+            if (_constantBuffers.TryGetValue(name, out D3D11BufferResource? resource))
+            {
+                buffer = resource.Buffer;
+                return true;
+            }
+
+            buffer = null;
+            return false;
+        }
+
         public void SetFinal(D3D11TextureResource resource)
         {
             if (string.Equals(resource.Name, FinalFrameResourceName, StringComparison.OrdinalIgnoreCase))
             {
                 return;
-            }
-
-            if (_textures.TryGetValue(FinalFrameResourceName, out D3D11TextureResource? existing))
-            {
-                existing.Dispose();
             }
 
             _textures[FinalFrameResourceName] = resource;
@@ -741,6 +858,11 @@ public sealed class TerminalShaderD3D11Runtime : ITerminalShaderRuntime
                 {
                     resource.Dispose();
                 }
+            }
+
+            foreach (D3D11BufferResource resource in _constantBuffers.Values)
+            {
+                resource.Dispose();
             }
 
             FrameConstantBuffer?.Dispose();
@@ -771,6 +893,53 @@ public sealed class TerminalShaderD3D11Runtime : ITerminalShaderRuntime
             }
 
             _textures[value.Name] = resource;
+        }
+
+        private void AddConstantBuffer(TerminalShaderResourceValue value)
+        {
+            if (value.Data.Length == 0)
+            {
+                throw new InvalidOperationException($"Direct3D 11 constant buffer resource '{value.Name}' requires CPU data.");
+            }
+
+            int byteLength = value.Data.Length;
+            int alignedByteLength = Math.Max(16, Align16(byteLength));
+            byte[] rented = ArrayPool<byte>.Shared.Rent(alignedByteLength);
+            rented.AsSpan(0, alignedByteLength).Clear();
+            value.Data.Span.CopyTo(rented.AsSpan(0, byteLength));
+
+            try
+            {
+                ID3D11Buffer buffer = _device.CreateBuffer(
+                    new BufferDescription(
+                        (uint)alignedByteLength,
+                        BindFlags.ConstantBuffer,
+                        ResourceUsage.Default,
+                        CpuAccessFlags.None,
+                        ResourceOptionFlags.None,
+                        structureByteStride: 0),
+                    (SubresourceData?)null);
+
+                unsafe
+                {
+                    fixed (byte* pointer = rented)
+                    {
+                        _context.UpdateSubresource(
+                            buffer,
+                            0,
+                            null,
+                            (IntPtr)pointer,
+                            (uint)alignedByteLength,
+                            0);
+                    }
+                }
+
+                _constantBuffers[value.Name] = new D3D11BufferResource(value.Name, buffer);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
         }
 
         private D3D11TextureResource CreateTextureResource(
@@ -807,6 +976,29 @@ public sealed class TerminalShaderD3D11Runtime : ITerminalShaderRuntime
                 unorderedAccessView,
                 width,
                 height);
+        }
+
+        private static int Align16(int value)
+        {
+            return checked((value + 15) & ~15);
+        }
+    }
+
+    private sealed class D3D11BufferResource : IDisposable
+    {
+        public D3D11BufferResource(string name, ID3D11Buffer buffer)
+        {
+            Name = name;
+            Buffer = buffer;
+        }
+
+        public string Name { get; }
+
+        public ID3D11Buffer Buffer { get; }
+
+        public void Dispose()
+        {
+            Buffer.Dispose();
         }
     }
 
