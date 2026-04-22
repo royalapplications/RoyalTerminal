@@ -17,6 +17,7 @@ const guideItems = [
   { text: "Skia Runtime Effect Shaders", link: "/articles/shaders-skia-runtime-effect" },
   { text: "Ghostty/Shadertoy Shader Compatibility", link: "/articles/shaders-ghostty-shadertoy" },
   { text: "Windows Terminal HLSL Shader Compatibility", link: "/articles/shaders-windows-terminal-hlsl" },
+  { text: "Compiler-Backed HLSL Shader Packages", link: "/articles/shaders-full-hlsl-packages" },
   { text: "Ghostty Integration", link: "/articles/ghostty-integration" },
   { text: "Samples And Tooling", link: "/articles/samples-tooling" },
   { text: "Build, Test, And Release", link: "/articles/build-test-release" },

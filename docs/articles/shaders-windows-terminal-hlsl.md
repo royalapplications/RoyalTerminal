@@ -8,6 +8,8 @@ RoyalTerminal can load a supported subset of Windows Terminal-style HLSL pixel s
 
 This compatibility mode is source adaptation. RoyalTerminal does not currently invoke DXC, Direct2D, or the Windows Terminal rendering pipeline.
 
+For real compiler-backed HLSL packages, including includes, multiple resources, compute-stage modeling, and DXC CLI compilation, see [Compiler-Backed HLSL Shader Packages](/articles/shaders-full-hlsl-packages).
+
 ## Apply a Windows Terminal-style shader
 
 ```csharp

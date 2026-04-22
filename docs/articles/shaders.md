@@ -16,6 +16,7 @@ This keeps shader support independent from the VT processor. The same shader pip
 | [Skia Runtime Effect Shaders](/articles/shaders-skia-runtime-effect) | You can write or port the shader as Skia Runtime Effect source. This is the canonical runtime format. |
 | [Ghostty/Shadertoy Compatibility](/articles/shaders-ghostty-shadertoy) | You have a Ghostty-style or Shadertoy-style GLSL fragment shader with a `mainImage` entry point. |
 | [Windows Terminal HLSL Compatibility](/articles/shaders-windows-terminal-hlsl) | You have a Windows Terminal-style HLSL pixel shader that samples `shaderTexture` through `PixelShaderSettings`. |
+| [Compiler-Backed HLSL Shader Packages](/articles/shaders-full-hlsl-packages) | You need package validation, includes, real DXC compilation, compute/pass/resource modeling, and backend capability diagnostics. |
 
 ## Render architecture
 
@@ -38,6 +39,10 @@ Because the shader runs after terminal drawing, it affects everything in the fra
 | `TerminalShaderLanguage` | Selects direct SkSL, Ghostty/Shadertoy compatibility, or Windows Terminal HLSL compatibility. |
 | `TerminalShaderPostProcessor` | Lower-level compiler and post-processor used by the renderer. |
 | `TerminalShaderFrameContext` | Per-frame data passed to shader uniforms. |
+| `TerminalShaderPackage` | Full HLSL package model for compiler-backed shader work. |
+| `TerminalShaderCompilationPipeline` | Validation, include resolution, and compiler orchestration for full packages. |
+| `TerminalShaderDxcCliCompiler` | DXC command-line compiler integration. |
+| `ITerminalShaderRuntime` | Backend-neutral runtime contract for compiled packages. |
 
 ## Frame inputs
 
@@ -81,6 +86,7 @@ The current compatibility layer is source-level adaptation into Skia Runtime Eff
 | Skia Runtime Effect | Native support. This is the preferred production format. |
 | Ghostty/Shadertoy `mainImage` GLSL | Supported for single-pass post-process shaders that sample the terminal frame through `iChannel0`. |
 | Windows Terminal HLSL | Supported for common Windows Terminal pixel shader samples that use `shaderTexture`, `samplerState`, `PSInput`, and `PixelShaderSettings`. |
+| Compiler-backed HLSL packages | Package model, validation, include resolution, DXC CLI compilation, and runtime contracts are implemented. Native GPU execution backends are still required to render compiled packages. |
 | Arbitrary HLSL/GLSL projects | Not supported without manual porting or a future compiler-backed path. |
 | Native Ghostty renderer custom shaders | Not injected into the native renderer yet. RoyalTerminal applies Ghostty-compatible shader source through the managed Skia post-process path. |
 
