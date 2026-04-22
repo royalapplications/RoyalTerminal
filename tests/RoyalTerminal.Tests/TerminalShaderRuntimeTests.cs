@@ -9,6 +9,52 @@ namespace RoyalTerminal.Tests;
 
 public sealed class TerminalShaderRuntimeTests
 {
+    [Theory]
+    [InlineData(TerminalShaderBackendPreference.D3D11, TerminalShaderBackendKind.D3D11)]
+    [InlineData(TerminalShaderBackendPreference.D3D12, TerminalShaderBackendKind.D3D12)]
+    [InlineData(TerminalShaderBackendPreference.Vulkan, TerminalShaderBackendKind.Vulkan)]
+    [InlineData(TerminalShaderBackendPreference.Metal, TerminalShaderBackendKind.Metal)]
+    public void BackendSelector_ExplicitPreferenceMapsToBackend(
+        TerminalShaderBackendPreference preference,
+        TerminalShaderBackendKind expectedBackend)
+    {
+        TerminalShaderBackendKind backend = TerminalShaderBackendSelector.SelectBackend(preference);
+
+        Assert.Equal(expectedBackend, backend);
+    }
+
+    [Fact]
+    public void BackendSelector_AutoPreferenceMapsToSupportedBackendKind()
+    {
+        TerminalShaderBackendKind backend =
+            TerminalShaderBackendSelector.SelectBackend(TerminalShaderBackendPreference.Auto);
+        TerminalShaderBackendKind[] expectedBackends =
+        [
+            TerminalShaderBackendKind.D3D11,
+            TerminalShaderBackendKind.Vulkan,
+            TerminalShaderBackendKind.Metal,
+        ];
+
+        Assert.Contains(backend, expectedBackends);
+    }
+
+    [Fact]
+    public async Task BackendSelector_CreateUnavailableRuntime_ReturnsDiagnosticRuntime()
+    {
+        using TerminalShaderUnavailableRuntime runtime =
+            TerminalShaderBackendSelector.CreateUnavailableRuntime(
+                TerminalShaderBackendPreference.Vulkan,
+                "No Vulkan runtime was registered.");
+
+        Assert.Equal(TerminalShaderBackendKind.Vulkan, runtime.Capabilities.BackendKind);
+
+        using TerminalShaderRuntimeProgram program =
+            await runtime.CreateProgramAsync(CreateCompilationResult());
+
+        Assert.False(program.Compilation.IsSuccess);
+        Assert.Contains(program.Compilation.Diagnostics, static diagnostic => diagnostic.Code == "RTSHADERRUNTIME001");
+    }
+
     [Fact]
     public async Task UnavailableRuntime_CreateProgram_ReturnsDiagnosticProgram()
     {
