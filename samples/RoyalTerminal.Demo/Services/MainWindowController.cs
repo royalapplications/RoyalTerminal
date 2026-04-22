@@ -30,6 +30,7 @@ using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.Shaders;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
@@ -304,6 +305,12 @@ internal sealed class MainWindowController
             context.SetOutput(Unit.Default);
         }));
 
+        disposables.Add(_viewModel.ApplyShaderSampleInteraction.RegisterHandler(context =>
+        {
+            ApplyShaderSample(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
         EventHandler applySettingsHandler = (_, _) => ApplySettingsPanelState();
         EventHandler saveSettingsHandler = (_, _) => _ = SaveSettingsPanelStateAsync();
         EventHandler browseFontFileHandler = (_, _) => _ = BrowseSettingsFontFileAsync();
@@ -572,6 +579,7 @@ internal sealed class MainWindowController
         standaloneControl.ApplyTheme(theme);
         ConfigureRenderer(standaloneControl.Renderer);
         ApplyTerminalBehaviorSettings(standaloneControl);
+        ApplyShaderSampleToControl(standaloneControl);
 
         standaloneControl.TitleChanged += (_, title) =>
         {
@@ -646,6 +654,7 @@ internal sealed class MainWindowController
         standaloneControl.ApplyTheme(theme);
         ConfigureRenderer(standaloneControl.Renderer);
         ApplyTerminalBehaviorSettings(standaloneControl);
+        ApplyShaderSampleToControl(standaloneControl);
 
         standaloneControl.TerminalResized += (_, args) =>
         {
@@ -2212,6 +2221,33 @@ internal sealed class MainWindowController
         }
 
         ApplyThemeResources(CreateChromePalette(theme));
+    }
+
+    private void ApplyShaderSample(string shaderId)
+    {
+        TerminalShaderSampleOption option = TerminalShaderSampleCatalog.FindOption(shaderId);
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            if (_tabs[i].Control is TerminalControl standalone)
+            {
+                ApplyShaderSampleToControl(standalone);
+                standalone.InvalidateTerminal();
+            }
+        }
+
+        string status = string.Equals(option.Id, TerminalShaderSampleCatalog.OffShaderId, StringComparison.Ordinal)
+            ? "Shader effects disabled."
+            : $"Shader sample enabled: {option.DisplayName}.";
+        UpdateStatus(status);
+        AppendEventLog(status);
+    }
+
+    private void ApplyShaderSampleToControl(TerminalControl control)
+    {
+        IReadOnlyList<TerminalShaderSource>? sources =
+            TerminalShaderSampleCatalog.GetSources(_viewModel.SelectedShaderSample.Id);
+        control.ShaderSources = sources;
+        control.ShaderAnimationEnabled = true;
     }
 
     private static void UpdateTabHeaderVisual(TerminalTab tab, TabVisualMode tabMode)

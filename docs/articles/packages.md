@@ -14,6 +14,7 @@ RoyalTerminal is published as a family of packages so you can compose the exact 
 | Avalonia terminal plus reusable settings UI | `RoyalTerminal.Avalonia`, `RoyalTerminal.Avalonia.Settings` |
 | Avalonia terminal with native Ghostty VT available | `RoyalTerminal.Avalonia`, `RoyalTerminal.Terminal.Vt.Ghostty`, matching `RoyalTerminal.GhosttySharp.Native.*` |
 | Custom transport/profile orchestration without Avalonia | `RoyalTerminal.Terminal`, `RoyalTerminal.Terminal.Services`, selected `RoyalTerminal.Terminal.Transport.*` packages |
+| Shader source models and compatibility translation without Avalonia or Skia | `RoyalTerminal.Shaders` |
 | Custom rendering integration | `RoyalTerminal.Rendering.Contracts`, `RoyalTerminal.Rendering.Skia`, optional `RoyalTerminal.Rendering.Interop.Ghostty*` |
 
 ## Deep dive guides
@@ -25,6 +26,7 @@ RoyalTerminal is published as a family of packages so you can compose the exact 
 | PTY, pipe, SSH, raw TCP, Telnet, serial, trust policy, and secret handling | [Transports And Remote Access](/articles/transports) |
 | Screen state, endpoint contracts, VT processors, input encoding, and Unicode | [Terminal Engine And Screen State](/articles/vt-modes) |
 | Rendering contracts, shaping, Skia, and Ghostty renderer interop | [Rendering, Text, And Graphics](/articles/rendering-native) |
+| Framebuffer shader architecture, application, and source compatibility | [Shader Support](/articles/shaders) |
 | High-level and low-level Ghostty wrapper layers | [Ghostty Integration](/articles/ghostty-integration) |
 
 ## API reference
@@ -81,7 +83,8 @@ The API section is generated from the packable managed libraries under `src/` an
 | --- | --- |
 | `RoyalTerminal.Rendering.Contracts` | Backend-agnostic GPU rendering contracts and validation helpers. |
 | `RoyalTerminal.Rendering.Text` | HarfBuzz-backed shaping, font fallback, and diagnostics primitives. |
-| `RoyalTerminal.Rendering.Skia` | CPU Skia terminal renderer and glyph cache. |
+| `RoyalTerminal.Shaders` | Dependency-free shader source models plus Ghostty/Shadertoy and Windows Terminal translation into Skia Runtime Effect source. |
+| `RoyalTerminal.Rendering.Skia` | CPU Skia terminal renderer, glyph cache, and framebuffer shader post-processing. |
 | `RoyalTerminal.Rendering.Interop.Ghostty` | Managed interop wrappers for `ghostty-renderer-capi`. |
 | `RoyalTerminal.Rendering.Interop.Ghostty.Skia` | Skia bridge around Ghostty renderer interop with fallback support. |
 

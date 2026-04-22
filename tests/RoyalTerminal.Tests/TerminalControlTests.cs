@@ -19,6 +19,7 @@ using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Scrolling;
 using RoyalTerminal.Avalonia.Services;
+using RoyalTerminal.Shaders;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
@@ -59,6 +60,8 @@ public class TerminalControlTests
         Assert.Equal(10_000, control.ScrollbackLimit);
         Assert.True(control.AutoScroll);
         Assert.True(control.ReflowOnResize);
+        Assert.Null(control.ShaderSources);
+        Assert.True(control.ShaderAnimationEnabled);
     }
 
     [AvaloniaFact]

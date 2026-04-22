@@ -5,7 +5,7 @@
   <img src="assets/royalterminal-logo-dark.svg#gh-dark-mode-only" alt="RoyalTerminal logo" width="128" height="128">
 </p>
 
-High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`RoyalTerminal.Avalonia`), official native Ghostty VT integration (`libghostty-vt`), and a separate fully managed VT implementation.
+High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`RoyalTerminal.Avalonia`), framebuffer shader support, official native Ghostty VT integration (`libghostty-vt`), and a separate fully managed VT implementation.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com)
 [![Avalonia](https://img.shields.io/badge/Avalonia-11.x-8b44ac)](https://avaloniaui.net)
@@ -44,7 +44,8 @@ Project documentation source lives in [docs/](docs/) and is published through th
 | `RoyalTerminal.Terminal.Services.Contracts` | Terminal session service contracts |
 | `RoyalTerminal.Terminal.Services` | Terminal session service implementations |
 | `RoyalTerminal.Rendering.Text` | Reusable text shaping/fallback subsystem (`HarfBuzzTextShaper`, `TerminalFontResolver`) |
-| `RoyalTerminal.Rendering.Skia` | CPU cell renderer core (`SkiaTerminalRenderer`, `GlyphCache`) with HarfBuzz shaping + fallback font resolution |
+| `RoyalTerminal.Shaders` | Dependency-free shader source models and compatibility translation for Skia Runtime Effect terminal shaders |
+| `RoyalTerminal.Rendering.Skia` | CPU cell renderer core (`SkiaTerminalRenderer`, `GlyphCache`) with HarfBuzz shaping, fallback font resolution, and framebuffer shader post-processing |
 | `RoyalTerminal.Rendering.Contracts` | Backend-agnostic render contracts (`RenderTargetDescriptor`, capabilities) |
 | `RoyalTerminal.Rendering.Interop.Ghostty` | Managed wrapper for `ghostty-renderer-capi` |
 | `RoyalTerminal.Rendering.Interop.Ghostty.Skia` | Skia bridge (`SkiaInteropRenderer`) with CPU fallback |
@@ -65,6 +66,7 @@ Project documentation source lives in [docs/](docs/) and is published through th
 - **Three integration modes** with explicit trade-offs between fidelity, portability, and native dependencies.
 - **Split rendering architecture**:
   - CPU cell rendering path (`RoyalTerminal.Rendering.Skia`)
+  - Managed framebuffer shader pipeline with direct Skia Runtime Effect source plus Ghostty/Shadertoy and Windows Terminal HLSL compatibility adapters
   - GPU interop path (`RoyalTerminal.Rendering.*` + `ghostty-renderer-capi`)
 - **Official native VT engine** via `libghostty-vt` terminal/render-state APIs on all supported platforms.
 - **Modular PTY and VT packages** (`Terminal.Pty.*`, `Terminal.Vt.*`).
@@ -72,7 +74,7 @@ Project documentation source lives in [docs/](docs/) and is published through th
 - **Grapheme-aware cell model** in managed VT and official native VT render-state paths.
 - **Terminal session service split** (`Terminal.Services.Contracts` and `Terminal.Services`).
 - **Sample applications**:
-  - Avalonia demo (`samples/RoyalTerminal.Demo`) with structured settings categories (`Session`/`Connection`/`Terminal`/`Appearance`/`SSH`/`Logging`), transport forms (`PTY`/`Pipe`/`Raw TCP`/`Telnet`/`Serial`/`SSH`), a tabbed Settings flyout with profile CRUD (`new`/`duplicate`/`delete`/`set default`) and explicit apply/save, session/event logging, and terminal behavior toggles (copy-on-select, bell notifications, backspace mode, paste safety, text shaping/ligatures)
+  - Avalonia demo (`samples/RoyalTerminal.Demo`) with structured settings categories (`Session`/`Connection`/`Terminal`/`Appearance`/`SSH`/`Logging`), transport forms (`PTY`/`Pipe`/`Raw TCP`/`Telnet`/`Serial`/`SSH`), a tabbed Settings flyout with profile CRUD (`new`/`duplicate`/`delete`/`set default`) and explicit apply/save, session/event logging, shader samples, and terminal behavior toggles (copy-on-select, bell notifications, backspace mode, paste safety, text shaping/ligatures)
   - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`) that hosts GhosttyKit directly as a separate native sample, outside the managed `RoyalTerminal.GhosttySharp` surface
   - VT/PTy control catalog CLI (`samples/RoyalTerminal.ControlCatalog`) with managed/Ghostty VT probes, ncurses/TUI parity scenarios, and rich visual rendering galleries
 
@@ -760,6 +762,7 @@ Use this when embedding the renderer interop pipeline directly (for `TextureInte
 ```bash
 dotnet add package RoyalTerminal.Rendering.Contracts
 dotnet add package RoyalTerminal.Rendering.Interop.Ghostty
+dotnet add package RoyalTerminal.Shaders
 dotnet add package RoyalTerminal.Rendering.Skia
 dotnet add package RoyalTerminal.Rendering.Interop.Ghostty.Skia
 dotnet add package RoyalTerminal.Avalonia.Rendering.GhosttyInterop
@@ -932,6 +935,7 @@ RoyalTerminal/
 │   ├── RoyalTerminal.Terminal.Services.Contracts/
 │   ├── RoyalTerminal.Terminal.Services/
 │   ├── RoyalTerminal.Rendering.Text/
+│   ├── RoyalTerminal.Shaders/
 │   ├── RoyalTerminal.Rendering.Contracts/
 │   ├── RoyalTerminal.Rendering.Interop.Ghostty/
 │   ├── RoyalTerminal.Rendering.Skia/

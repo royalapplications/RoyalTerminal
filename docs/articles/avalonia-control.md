@@ -38,7 +38,7 @@ That one control already owns the default session service, the active VT process
 
 ## What the control actually owns
 
-`TerminalControl` is the public host boundary. It is where Avalonia-facing configuration lives: font family, font size, grid size, scrollback size, colors, active theme, and `VtProcessorPreference`. It also exposes the events most hosts care about, such as `DataReceived`, `TitleChanged`, `Bell`, `ProcessExited`, `CloseRequested`, and `TerminalResized`.
+`TerminalControl` is the public host boundary. It is where Avalonia-facing configuration lives: font family, font size, grid size, scrollback size, colors, active theme, framebuffer shaders, and `VtProcessorPreference`. It also exposes the events most hosts care about, such as `DataReceived`, `TitleChanged`, `Bell`, `ProcessExited`, `CloseRequested`, and `TerminalResized`.
 
 The rendering tree around the control is intentionally exposed instead of hidden:
 
@@ -56,6 +56,27 @@ The rendering tree around the control is intentionally exposed instead of hidden
 | `TerminalSizeEventArgs` | Carries resize notifications to the host. |
 
 This is an important difference between RoyalTerminal and a monolithic widget: the control is high level, but it still exposes the moving pieces you need if you are building a specialized host.
+
+## Applying framebuffer shaders
+
+`TerminalControl` can apply one or more post-process shaders to the completed terminal frame:
+
+```csharp
+using RoyalTerminal.Shaders;
+
+Terminal.ShaderSources =
+[
+    new TerminalShaderSource(
+        "Scanline",
+        shaderSource,
+        TerminalShaderLanguage.SkiaRuntimeEffect,
+        requiresContinuousAnimation: true)
+];
+```
+
+Use `ShaderAnimationEnabled` to control whether animated shaders keep rendering between terminal output events. It defaults to `true`.
+
+RoyalTerminal supports direct Skia Runtime Effect source plus compatibility adapters for Ghostty/Shadertoy-style `mainImage` GLSL and common Windows Terminal-style HLSL pixel shaders. See [Shader Support](/articles/shaders) and [Applying Shaders](/articles/shaders-applying) for the complete API and compatibility matrix.
 
 ## Input, selection, paste, and shortcuts
 

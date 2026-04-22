@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Shaders\RoyalTerminal.Shaders.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Rendering.Text\RoyalTerminal.Rendering.Text.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
   </ItemGroup>

@@ -79,6 +79,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Terminal.Tran
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Terminal.Transport.Serial", "src\RoyalTerminal.Terminal.Transport.Serial\RoyalTerminal.Terminal.Transport.Serial.csproj", "{E674E7DD-D9F3-4DF1-85F0-8FB4DE58C6EE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Shaders", "src\RoyalTerminal.Shaders\RoyalTerminal.Shaders.csproj", "{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -509,6 +511,18 @@ Global
 		{E674E7DD-D9F3-4DF1-85F0-8FB4DE58C6EE}.Release|x64.Build.0 = Release|Any CPU
 		{E674E7DD-D9F3-4DF1-85F0-8FB4DE58C6EE}.Release|x86.ActiveCfg = Release|Any CPU
 		{E674E7DD-D9F3-4DF1-85F0-8FB4DE58C6EE}.Release|x86.Build.0 = Release|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Debug|x64.Build.0 = Debug|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Debug|x86.Build.0 = Debug|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Release|x64.ActiveCfg = Release|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Release|x64.Build.0 = Release|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Release|x86.ActiveCfg = Release|Any CPU
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -547,5 +561,6 @@ Global
 		{9D6193C1-EDFF-458A-8C43-609274C8BD94} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{4D84D5E8-6C6A-40BF-A92B-BE1D377FE466} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{E674E7DD-D9F3-4DF1-85F0-8FB4DE58C6EE} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

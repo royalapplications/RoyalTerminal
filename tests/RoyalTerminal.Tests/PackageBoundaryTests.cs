@@ -144,6 +144,7 @@ public sealed class PackageBoundaryTests
         string[] requiredProjects =
         [
             "RoyalTerminal.Avalonia.Settings",
+            "RoyalTerminal.Shaders",
             "RoyalTerminal.Rendering.Text",
             "RoyalTerminal.Terminal.Transport.Pipe",
             "RoyalTerminal.Terminal.Transport.Pty",
@@ -159,6 +160,55 @@ public sealed class PackageBoundaryTests
         foreach (string requiredProject in requiredProjects)
         {
             Assert.Contains(requiredProject, packableProjectNames);
+        }
+    }
+
+    [Fact]
+    public void RoyalTerminalShaders_ProjectHasNoPackageOrProjectReferences()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string projectPath = Path.Combine(
+            repoRoot,
+            "src",
+            "RoyalTerminal.Shaders",
+            "RoyalTerminal.Shaders.csproj");
+
+        XDocument project = XDocument.Load(projectPath);
+        List<string> references = project
+            .Descendants()
+            .Where(element =>
+                element.Name.LocalName is "ProjectReference" or "PackageReference")
+            .Select(element => element.Attribute("Include")?.Value ?? string.Empty)
+            .Where(include => !string.IsNullOrWhiteSpace(include))
+            .ToList();
+
+        Assert.Empty(references);
+    }
+
+    [Fact]
+    public void RoyalTerminalShaders_SourceDoesNotUseTerminalOrRenderingTypes()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string shaderProjectRoot = Path.Combine(repoRoot, "src", "RoyalTerminal.Shaders");
+        string[] forbiddenFragments =
+        [
+            "using Avalonia",
+            "using SkiaSharp",
+            "using RoyalTerminal.Avalonia",
+            "using RoyalTerminal.Rendering",
+            "using RoyalTerminal.Terminal",
+            "namespace RoyalTerminal.Avalonia",
+            "namespace RoyalTerminal.Rendering",
+            "namespace RoyalTerminal.Terminal",
+        ];
+
+        foreach (string sourcePath in Directory.EnumerateFiles(shaderProjectRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            string source = File.ReadAllText(sourcePath);
+            foreach (string forbiddenFragment in forbiddenFragments)
+            {
+                Assert.DoesNotContain(forbiddenFragment, source, StringComparison.Ordinal);
+            }
         }
     }
 
