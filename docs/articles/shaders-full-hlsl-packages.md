@@ -28,7 +28,12 @@ The implemented foundation includes:
 | Package validation | Implemented for file/pass/resource invariants, register conflicts, pass ordering, compute dispatch, and target profile mismatches. |
 | Compiler pipeline | Implemented through `TerminalShaderCompilationPipeline` and `ITerminalShaderCompiler`. |
 | DXC CLI compiler | Implemented through `TerminalShaderDxcCliCompiler` when a `dxc` executable is available. |
+| Slang CLI compiler | Implemented through `TerminalShaderSlangCliCompiler` when a `slangc` executable is available. |
+| Compiler cache | Implemented through `TerminalShaderCachingCompiler` with deterministic cache keys. |
+| Source-side reflection preflight | Implemented through `TerminalShaderHlslReflectionScanner` for resources, entry-point semantics, compute thread groups, and basic constant-buffer packing. |
 | Runtime contracts | Implemented through `ITerminalShaderRuntime`, runtime program/frame models, capabilities, and unavailable-backend diagnostics. |
+| Runtime frame validation | Implemented through `TerminalShaderRuntimeValidator.ValidateFrameResources`. |
+| Runtime orchestration | Implemented through `TerminalShaderRuntimePipeline` for external resource resolution and validation-gated frame execution. |
 | Native GPU execution | Not implemented yet. D3D11/D3D12/Vulkan/Metal runtime backends still need native execution code. |
 
 The important distinction is that HLSL compilation can now be represented and executed through a real compiler backend, but applying compiled DXIL/SPIR-V/MSL to the terminal frame still requires a native runtime backend.
@@ -143,7 +148,38 @@ TerminalShaderCompilationResult result =
         includeProvider);
 ```
 
-For Vulkan targets, the DXC CLI backend emits SPIR-V by adding `-spirv`. Metal targets require a Slang-based compiler backend and are not handled by DXC.
+For Vulkan targets, the DXC CLI backend emits SPIR-V by adding `-spirv`. Metal targets require the Slang CLI backend.
+
+## Compiling with Slang
+
+`TerminalShaderSlangCliCompiler` invokes a `slangc` executable and can target DXIL, SPIR-V, or MSL depending on `TerminalShaderBackendKind`:
+
+```csharp
+ITerminalShaderCompiler compiler = new TerminalShaderSlangCliCompiler("slangc");
+TerminalShaderCompilationOptions options = new(
+    TerminalShaderBackendKind.Vulkan,
+    TerminalShaderCompilerKind.Slang);
+
+TerminalShaderCompilationResult result =
+    await TerminalShaderCompilationPipeline.CompileAsync(
+        package,
+        new TerminalShaderCachingCompiler(compiler),
+        options,
+        includeProvider);
+```
+
+Use `TerminalShaderCachingCompiler` around DXC or Slang when packages are recompiled from settings or profile state. The cache key includes resolved source files, pass graph data, resources, target backend, compiler kind, defines, and debug name.
+
+## Reflection preflight
+
+`TerminalShaderHlslReflectionScanner` provides deterministic source-side reflection before a native compiler or GPU backend is available:
+
+```csharp
+TerminalShaderReflectionResult reflection =
+    TerminalShaderHlslReflectionScanner.ScanPackage(package);
+```
+
+It identifies common HLSL resources, explicit registers, entry-point input/output semantics, compute `[numthreads]`, and basic constant-buffer packing. Native compiler reflection should still be preferred by runtime backends because HLSL source scanning cannot fully resolve macros, overloads, templates, or compiler-lowered resource layouts.
 
 ## Runtime boundary
 
@@ -167,6 +203,28 @@ public interface ITerminalShaderRuntime : IDisposable
 
 `TerminalShaderFrameRequest` carries primitive frame dimensions, timing, scale, and resource values. Renderer-specific adapters should map their own richer frame context into this contract before invoking a runtime backend.
 
+`TerminalShaderRuntimePipeline` resolves external resources through `ITerminalShaderResourceProvider`, validates backend capabilities, validates frame resources and texture-size limits, rejects backend/program mismatches, and only then invokes the runtime:
+
+```csharp
+TerminalShaderFrameRequest frame =
+    await TerminalShaderRuntimePipeline.CreateFrameRequestAsync(
+        package,
+        width,
+        height,
+        time,
+        timeDelta,
+        frameIndex,
+        scale,
+        resourceProvider);
+
+TerminalShaderFrameResult result =
+    await TerminalShaderRuntimePipeline.RenderFrameAsync(
+        package,
+        runtime,
+        program,
+        frame);
+```
+
 `TerminalShaderUnavailableRuntime` is provided as a deterministic diagnostic runtime when a backend is requested but unavailable.
 
 ## Testing surface
@@ -179,7 +237,12 @@ The current tests cover:
 - compiler orchestration
 - unavailable compiler diagnostics
 - optional DXC CLI compilation when `dxc` is available
+- Slang CLI unavailable diagnostics and optional compilation when `slangc` is available
+- deterministic compiler caching
+- source-side HLSL reflection for resources, semantics, thread groups, and constant buffers
 - runtime capability validation
+- runtime frame resource validation
+- runtime pipeline resource resolution and validation-gated execution
 - unavailable runtime diagnostics
 
 Native GPU runtime tests should be added with backend gates when D3D11, D3D12, Vulkan, or Metal execution backends are implemented.

@@ -45,7 +45,11 @@ Because the shader runs after terminal drawing, it affects everything in the fra
 | `TerminalShaderPackage` | `RoyalTerminal.Shaders` | Full HLSL package model for compiler-backed shader work. |
 | `TerminalShaderCompilationPipeline` | `RoyalTerminal.Shaders` | Validation, include resolution, and compiler orchestration for full packages. |
 | `TerminalShaderDxcCliCompiler` | `RoyalTerminal.Shaders` | DXC command-line compiler integration. |
+| `TerminalShaderSlangCliCompiler` | `RoyalTerminal.Shaders` | Slang command-line compiler integration for DXIL, SPIR-V, and MSL targets. |
+| `TerminalShaderCachingCompiler` | `RoyalTerminal.Shaders` | Deterministic compilation cache wrapper. |
+| `TerminalShaderHlslReflectionScanner` | `RoyalTerminal.Shaders` | Source-side HLSL reflection preflight for resources and semantics. |
 | `ITerminalShaderRuntime` | `RoyalTerminal.Shaders` | Backend-neutral runtime contract for compiled packages. |
+| `TerminalShaderRuntimePipeline` | `RoyalTerminal.Shaders` | Backend-neutral frame resource resolution and runtime validation orchestration. |
 
 ## Frame inputs
 
