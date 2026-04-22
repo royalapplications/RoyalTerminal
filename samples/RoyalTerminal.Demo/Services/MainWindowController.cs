@@ -2249,9 +2249,29 @@ internal sealed class MainWindowController
         IReadOnlyList<TerminalShaderSource>? sources =
             package is null ? TerminalShaderSampleCatalog.GetSources(_viewModel.SelectedShaderSample.Id) : null;
 
+        DisposeShaderPackageExecutor(control);
+        control.ShaderPackageExecutor = package is null
+            ? null
+            : TerminalShaderDemoExecutorFactory.TryCreate(package);
+        control.ShaderBackendPreference = control.ShaderPackageExecutor?.BackendKind switch
+        {
+            TerminalShaderBackendKind.D3D11 => TerminalShaderBackendPreference.D3D11,
+            TerminalShaderBackendKind.D3D12 => TerminalShaderBackendPreference.D3D12,
+            TerminalShaderBackendKind.Vulkan => TerminalShaderBackendPreference.Vulkan,
+            TerminalShaderBackendKind.Metal => TerminalShaderBackendPreference.Metal,
+            _ => TerminalShaderBackendPreference.Auto,
+        };
         control.ShaderPackage = package;
         control.ShaderSources = sources;
         control.ShaderAnimationEnabled = true;
+    }
+
+    private static void DisposeShaderPackageExecutor(TerminalControl control)
+    {
+        if (control.ShaderPackageExecutor is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
     }
 
     private static void UpdateTabHeaderVisual(TerminalTab tab, TabVisualMode tabMode)
