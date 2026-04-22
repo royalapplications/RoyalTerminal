@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Shaders\RoyalTerminal.Shaders.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Services.Contracts\RoyalTerminal.Terminal.Services.Contracts.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Services\RoyalTerminal.Terminal.Services.csproj" />

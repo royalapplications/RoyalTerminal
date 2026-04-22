@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Rendering.Composition;
 using Avalonia.Media;
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Shaders;
 
 namespace RoyalTerminal.Avalonia.Controls;
 

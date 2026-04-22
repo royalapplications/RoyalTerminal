@@ -4,6 +4,7 @@
 
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Demo.Services;
+using RoyalTerminal.Shaders;
 using SkiaSharp;
 using Xunit;
 

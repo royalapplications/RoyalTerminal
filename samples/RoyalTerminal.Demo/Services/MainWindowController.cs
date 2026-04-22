@@ -30,6 +30,7 @@ using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.Shaders;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;

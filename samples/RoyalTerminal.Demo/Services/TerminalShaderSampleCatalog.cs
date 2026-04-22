@@ -4,7 +4,7 @@
 
 using System;
 using System.Collections.Generic;
-using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Shaders;
 
 namespace RoyalTerminal.Demo.Services;
 

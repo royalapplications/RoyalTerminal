@@ -2,8 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests - Full terminal shader runtime tests.
 
-using RoyalTerminal.Avalonia.Rendering;
-using SkiaSharp;
+using RoyalTerminal.Shaders;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -34,7 +33,13 @@ public sealed class TerminalShaderRuntimeTests
             TerminalShaderBackendKind.Vulkan,
             "Vulkan runtime is unavailable.");
         using TerminalShaderRuntimeProgram program = await runtime.CreateProgramAsync(CreateCompilationResult());
-        TerminalShaderFrameRequest frame = new(CreateFrameContext());
+        TerminalShaderFrameRequest frame = new(
+            width: 4,
+            height: 4,
+            time: 0f,
+            timeDelta: 0f,
+            frame: 0,
+            scale: 1f);
 
         TerminalShaderFrameResult result = await runtime.RenderFrameAsync(program, frame);
 
@@ -131,20 +136,4 @@ public sealed class TerminalShaderRuntimeTests
             ]);
     }
 
-    private static TerminalShaderFrameContext CreateFrameContext()
-    {
-        return new TerminalShaderFrameContext(
-            width: 4,
-            height: 4,
-            time: 0f,
-            timeDelta: 0f,
-            frame: 0,
-            scale: 1f,
-            backgroundColor: SKColors.Black,
-            foregroundColor: SKColors.White,
-            cursorColor: SKColors.White,
-            cursorRect: new SKRect(0, 0, 1, 1),
-            cursorStyle: CursorStyle.Block,
-            cursorVisible: true);
-    }
 }

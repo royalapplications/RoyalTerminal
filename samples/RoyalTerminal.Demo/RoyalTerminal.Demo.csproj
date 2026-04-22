@@ -15,6 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\RoyalTerminal.Shaders\RoyalTerminal.Shaders.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia\RoyalTerminal.Avalonia.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia.Settings\RoyalTerminal.Avalonia.Settings.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Vt.Ghostty\RoyalTerminal.Terminal.Vt.Ghostty.csproj" />

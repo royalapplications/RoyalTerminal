@@ -3,7 +3,7 @@
 // RoyalTerminal.Tests - Full terminal shader compilation pipeline tests.
 
 using System.Text;
-using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Shaders;
 using Xunit;
 
 namespace RoyalTerminal.Tests;

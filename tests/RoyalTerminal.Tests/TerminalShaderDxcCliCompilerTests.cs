@@ -2,7 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests - DXC shader compiler backend tests.
 
-using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Shaders;
 using Xunit;
 
 namespace RoyalTerminal.Tests;

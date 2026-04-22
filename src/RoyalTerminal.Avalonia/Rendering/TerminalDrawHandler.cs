@@ -7,6 +7,7 @@ using Avalonia.Platform;
 using Avalonia.Rendering.Composition;
 using Avalonia.Skia;
 using System.Diagnostics;
+using RoyalTerminal.Shaders;
 using SkiaSharp;
 
 namespace RoyalTerminal.Avalonia.Rendering;

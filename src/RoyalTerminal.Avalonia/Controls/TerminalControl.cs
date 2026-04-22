@@ -19,6 +19,7 @@ using SkiaSharp;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Scrolling;
+using RoyalTerminal.Shaders;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;

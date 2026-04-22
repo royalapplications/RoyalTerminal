@@ -4,6 +4,7 @@
 
 using System.Globalization;
 using System.Text;
+using RoyalTerminal.Shaders;
 using RoyalTerminal.Terminal;
 using SkiaSharp;
 

@@ -2,7 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests - Full terminal shader package tests.
 
-using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Shaders;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
