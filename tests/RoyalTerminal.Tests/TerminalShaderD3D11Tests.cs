@@ -42,6 +42,45 @@ public sealed class TerminalShaderD3D11Tests
     }
 
     [Fact]
+    public async Task D3D11Compiler_ReflectsDxbcBindings_WhenExplicitlyEnabled()
+    {
+        if (!OperatingSystem.IsWindows() ||
+            !string.Equals(Environment.GetEnvironmentVariable("ROYALTERMINAL_TEST_D3D11"), "1", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        TerminalShaderPackage package = CreatePackage();
+        TerminalShaderD3D11Compiler compiler = new();
+        TerminalShaderCompilationRequest request = new(
+            package,
+            package.Files,
+            new TerminalShaderCompilationOptions(TerminalShaderBackendKind.D3D11));
+
+        TerminalShaderCompilationResult result = await compiler.CompileAsync(request);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        TerminalShaderCompiledPass compiledPass = Assert.Single(result.Passes);
+        Assert.Contains(compiledPass.Reflection.Resources, static resource =>
+            resource.Name == TerminalShaderBuiltInResourceNames.TerminalFramebuffer &&
+            resource.Kind == TerminalShaderResourceKind.Texture2D &&
+            resource.RegisterIndex == 0);
+        Assert.Contains(compiledPass.Reflection.Resources, static resource =>
+            resource.Name == "TerminalSampler" &&
+            resource.Kind == TerminalShaderResourceKind.Sampler &&
+            resource.RegisterIndex == 0);
+        Assert.Contains(compiledPass.Reflection.Resources, static resource =>
+            resource.Name == "TerminalFrame" &&
+            resource.Kind == TerminalShaderResourceKind.ConstantBuffer &&
+            resource.RegisterIndex == 0 &&
+            resource.SizeInBytes >= 48);
+        Assert.Contains(compiledPass.Reflection.EntryPoints, static entryPoint =>
+            entryPoint.Name == "Main" &&
+            entryPoint.Stage == TerminalShaderStage.Pixel &&
+            entryPoint.Outputs.Any(static semantic => semantic.Name == "SV_Target"));
+    }
+
+    [Fact]
     public async Task D3D11GpuSmokeTest_RunsWhenExplicitlyEnabled()
     {
         if (!OperatingSystem.IsWindows() ||

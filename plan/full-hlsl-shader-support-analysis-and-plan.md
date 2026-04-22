@@ -55,14 +55,16 @@ Completed:
 - Added full HLSL package samples to the demo catalog: CRT bloom, two-pass bloom blur, and compute phosphor.
 - Added tests for package validation, include resolution, compiler orchestration, DXC diagnostics, Slang diagnostics, compiler caching, reflection preflight, runtime capability validation, runtime frame validation, runtime pipeline gating, and unavailable runtime diagnostics.
 - Added tests for package executor caching, built-in framebuffer resources, control behavior with an executor, demo package validation, D3D11 non-Windows gating, and an opt-in D3D11 GPU smoke test behind `ROYALTERMINAL_TEST_D3D11=1`.
+- Implemented D3D11 compiler-native DXBC reflection extraction through D3DCompiler, including bound resources, constant-buffer sizes, input/output semantics, and compute thread-group metadata, with source-scanner fallback when reflection is unavailable.
+- Added opt-in D3D11 DXBC reflection coverage behind `ROYALTERMINAL_TEST_D3D11=1`.
 - Updated public docs and API package configuration for `RoyalTerminal.Shaders`.
 
 Partially complete:
 
-- Reflection is currently source-side and deterministic. Native compiler reflection extraction from DXIL, SPIR-V, or Slang reflection metadata remains to be implemented for runtime backends.
+- Reflection now has D3D11 compiler-native DXBC extraction. DXIL, SPIR-V, and Slang reflection metadata extraction remains to be implemented for the other compiler/runtime paths.
 - Compiler support is CLI-based. Native `dxcompiler` and `slang` hosting remain future improvements.
 - Runtime validation detects missing external resources, resource-kind mismatches, UAV capability issues, unsupported stages, and texture-size limit violations.
-- Direct3D 11 execution is implemented as the first native backend path, but it still needs Windows GPU validation for the opt-in smoke test and broader resource-binding/corpus coverage before it should be treated as production complete.
+- Direct3D 11 execution is implemented as the first native backend path, and the compiler now reflects DXBC bindings natively. It still needs Windows GPU validation for the opt-in smoke test and broader resource-binding/corpus coverage before it should be treated as production complete.
 - `TerminalControl` can execute packages through an injected executor today. The demo app ships package samples, but it does not yet auto-create a platform runtime/compiler because native runtime registration and trust policy need composition-root wiring.
 
 Not complete:
@@ -76,7 +78,7 @@ Not complete:
 Current next implementation priority:
 
 1. Validate and harden the D3D11 backend on Windows with `ROYALTERMINAL_TEST_D3D11=1`.
-2. Add compiler-native reflection extraction so runtime binding no longer relies on source preflight.
+2. Add compiler-native DXIL, SPIR-V, and Slang reflection extraction so non-D3D11 paths no longer rely on source preflight.
 3. Add platform runtime registration and zero-copy import adapters.
 4. Implement Vulkan and Metal runtimes after D3D11 validation is stable.
 
@@ -87,8 +89,8 @@ Current next implementation priority:
 | Phase 0: Design lock | Mostly complete | Public names and backend strategy are represented in the plan; final native dependency packaging is still open. |
 | Phase 1: Package model and validation | Complete | Package/files/passes/resources/options/diagnostics/include validation are implemented and tested. |
 | Phase 2: Compiler abstraction | Mostly complete | DXC and Slang CLI paths, cache keys, and compiler tests exist. Native compiler hosting and compiler version keys remain open. |
-| Phase 3: Reflection and binding | Partially complete | Source-side reflection preflight exists and D3D11 consumes reflected/source binding records. Compiler-native DXIL/SPIR-V/Slang reflection and full binding maps remain open. |
-| Phase 4: First runtime backend | Partially complete | `RoyalTerminal.Shaders.D3D11` now contains DXBC compilation, native shader creation, SRV/UAV/sampler/cbuffer binding, pixel/compute pass execution, and readback. Windows GPU validation and hardening remain. |
+| Phase 3: Reflection and binding | Partially complete | Source-side reflection preflight exists, and D3D11 now consumes compiler-native DXBC reflection for resources, semantics, cbuffer sizes, and compute thread groups. Compiler-native DXIL/SPIR-V/Slang reflection and full binding maps remain open. |
+| Phase 4: First runtime backend | Partially complete | `RoyalTerminal.Shaders.D3D11` now contains DXBC compilation, native DXBC reflection, native shader creation, SRV/UAV/sampler/cbuffer binding, pixel/compute pass execution, and readback. Windows GPU validation and hardening remain. |
 | Phase 5: Avalonia integration | Mostly complete | Control properties, backend preference, resource provider, diagnostics sink, package executor, runtime frame creation, and CPU fallback drawing exist. Runtime registration and zero-copy import remain. |
 | Phase 6: Cross-platform backends | Not complete | Vulkan and Metal runtime packages remain future work after D3D11 MVP. |
 | Phase 7: Corpus, docs, and demo | Partially complete | Docs, simple shader samples, and full HLSL package samples exist. Full corpus, GPU golden images, package runtime registration UI, and performance suites remain open. |

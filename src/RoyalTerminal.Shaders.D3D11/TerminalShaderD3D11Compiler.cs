@@ -88,13 +88,14 @@ public sealed class TerminalShaderD3D11Compiler : ITerminalShaderCompiler
                 continue;
             }
 
-            CompilePass(file, pass, macros, include, passes, diagnostics);
+            CompilePass(request.ResolvedFiles, file, pass, macros, include, passes, diagnostics);
         }
 
         return ValueTask.FromResult(new TerminalShaderCompilationResult(passes, diagnostics));
     }
 
     private static void CompilePass(
+        IReadOnlyList<TerminalShaderFile> resolvedFiles,
         TerminalShaderFile file,
         TerminalShaderPass pass,
         ShaderMacro[] macros,
@@ -128,7 +129,13 @@ public sealed class TerminalShaderD3D11Compiler : ITerminalShaderCompiler
             }
 
             TerminalShaderReflectionResult reflectionResult =
-                TerminalShaderHlslReflectionScanner.ScanPass([file], pass);
+                TerminalShaderD3D11ReflectionReader.TryRead(code.AsMemory(), pass);
+            if (!HasReflectionPayload(reflectionResult.Reflection))
+            {
+                diagnostics.AddRange(reflectionResult.Diagnostics);
+                reflectionResult = TerminalShaderHlslReflectionScanner.ScanPass(resolvedFiles, pass);
+            }
+
             passes.Add(new TerminalShaderCompiledPass(
                 pass.Name,
                 pass.Stage,
@@ -171,6 +178,11 @@ public sealed class TerminalShaderD3D11Compiler : ITerminalShaderCompiler
         return string.IsNullOrWhiteSpace(errorText)
             ? $"D3DCompiler failed while compiling pass '{passName}' with result {result}."
             : $"D3DCompiler failed while compiling pass '{passName}': {errorText.Trim()}";
+    }
+
+    private static bool HasReflectionPayload(TerminalShaderReflection reflection)
+    {
+        return reflection.EntryPoints.Count > 0 || reflection.Resources.Count > 0;
     }
 
     private sealed class ResolvedInclude : Include
