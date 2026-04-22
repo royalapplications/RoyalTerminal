@@ -250,6 +250,131 @@ public sealed class TerminalShaderPackageTests
         Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Code == "RTSHADER126");
     }
 
+    [Fact]
+    public void HlslReflectionScanner_ReflectsResourcesSemanticsAndThreadGroups()
+    {
+        TerminalShaderPackage package = new(
+            "reflection",
+            [
+                new TerminalShaderFile(
+                    "main.hlsl",
+                    """
+                    cbuffer PixelSettings : register(b2)
+                    {
+                        float3 Tint;
+                        float Intensity;
+                    };
+
+                    Texture2D<float4> terminalFrame : register(t0);
+                    Texture2D noiseTexture : register(t1, space1);
+                    SamplerState linearSampler : register(s0);
+                    RWTexture2D<float4> outputTexture : register(u0);
+
+                    struct PSInput
+                    {
+                        float4 pos : SV_POSITION;
+                        float2 uv : TEXCOORD0;
+                        float4 color : COLOR1;
+                    };
+
+                    float4 Main(PSInput input) : SV_TARGET0
+                    {
+                        return terminalFrame.Sample(linearSampler, input.uv) * Intensity;
+                    }
+
+                    [numthreads(8, 4, 1)]
+                    void ComputeMain(uint3 id : SV_DispatchThreadID)
+                    {
+                        outputTexture[id.xy] = float4(1, 0, 0, 1);
+                    }
+                    """),
+            ],
+            [
+                new TerminalShaderPass(
+                    "main",
+                    TerminalShaderStage.Pixel,
+                    "main.hlsl",
+                    "Main",
+                    TerminalShaderTargetProfile.PixelShader60),
+                new TerminalShaderPass(
+                    "compute",
+                    TerminalShaderStage.Compute,
+                    "main.hlsl",
+                    "ComputeMain",
+                    TerminalShaderTargetProfile.ComputeShader60,
+                    new TerminalShaderDispatch(1, 1),
+                    outputs: [new TerminalShaderPassOutput("outputTexture", TerminalShaderResourceKind.UavTexture2D)]),
+            ]);
+
+        TerminalShaderReflectionResult result = TerminalShaderHlslReflectionScanner.ScanPackage(package);
+
+        Assert.True(result.IsValid, FormatDiagnostics(result.Diagnostics));
+        Assert.Contains(result.Reflection.Resources, static resource =>
+            resource.Name == "PixelSettings" &&
+            resource.Kind == TerminalShaderResourceKind.ConstantBuffer &&
+            resource.RegisterIndex == 2 &&
+            resource.SizeInBytes == 16);
+        Assert.Contains(result.Reflection.Resources, static resource =>
+            resource.Name == "noiseTexture" &&
+            resource.Kind == TerminalShaderResourceKind.Texture2D &&
+            resource.RegisterIndex == 1 &&
+            resource.RegisterSpace == 1);
+        Assert.Contains(result.Reflection.Resources, static resource =>
+            resource.Name == "outputTexture" &&
+            resource.Kind == TerminalShaderResourceKind.UavTexture2D &&
+            resource.RegisterIndex == 0);
+
+        TerminalShaderEntryPointReflection pixelEntry =
+            Assert.Single(result.Reflection.EntryPoints, static entry => entry.Name == "Main");
+        Assert.Contains(pixelEntry.Inputs, static semantic => semantic.Name == "SV_POSITION");
+        Assert.Contains(pixelEntry.Inputs, static semantic => semantic.Name == "TEXCOORD" && semantic.SemanticIndex == 0);
+        Assert.Contains(pixelEntry.Inputs, static semantic => semantic.Name == "COLOR" && semantic.SemanticIndex == 1);
+        Assert.Contains(pixelEntry.Outputs, static semantic => semantic.Name == "SV_TARGET" && semantic.SemanticIndex == 0);
+
+        TerminalShaderEntryPointReflection computeEntry =
+            Assert.Single(result.Reflection.EntryPoints, static entry => entry.Name == "ComputeMain");
+        Assert.NotNull(computeEntry.ThreadGroupSize);
+        Assert.Equal(8, computeEntry.ThreadGroupSize.Value.X);
+        Assert.Equal(4, computeEntry.ThreadGroupSize.Value.Y);
+        Assert.Equal(1, computeEntry.ThreadGroupSize.Value.Z);
+        Assert.Contains(computeEntry.Inputs, static semantic => semantic.Name == "SV_DispatchThreadID");
+    }
+
+    [Fact]
+    public void HlslReflectionScanner_ComputesBasicConstantBufferPacking()
+    {
+        TerminalShaderPackage package = new(
+            "packing",
+            [
+                new TerminalShaderFile(
+                    "main.hlsl",
+                    """
+                    cbuffer PackedValues : register(b0)
+                    {
+                        float3 Color;
+                        float Intensity;
+                        float2 Offset;
+                    };
+
+                    float4 Main() : SV_TARGET { return float4(Color * Intensity, 1); }
+                    """),
+            ],
+            [
+                new TerminalShaderPass(
+                    "main",
+                    TerminalShaderStage.Pixel,
+                    "main.hlsl",
+                    "Main",
+                    TerminalShaderTargetProfile.PixelShader60),
+            ]);
+
+        TerminalShaderReflectionResult result = TerminalShaderHlslReflectionScanner.ScanPackage(package);
+
+        TerminalShaderResourceReflection cbuffer =
+            Assert.Single(result.Reflection.Resources, static resource => resource.Name == "PackedValues");
+        Assert.Equal(32, cbuffer.SizeInBytes);
+    }
+
     private static TerminalShaderPackage CreateValidPixelPackage()
     {
         return new TerminalShaderPackage(

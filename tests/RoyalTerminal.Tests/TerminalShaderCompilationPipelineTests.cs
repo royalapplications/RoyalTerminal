@@ -105,6 +105,50 @@ public sealed class TerminalShaderCompilationPipelineTests
         Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Code == "RTSHADERRUNTIME021");
     }
 
+    [Fact]
+    public async Task CachingCompiler_ReusesResultForEquivalentRequest()
+    {
+        TerminalShaderPackage package = CreatePackage();
+        CapturingCompiler innerCompiler = new();
+        TerminalShaderCachingCompiler compiler = new(innerCompiler);
+        TerminalShaderCompilationOptions options = new(TerminalShaderBackendKind.D3D11);
+
+        TerminalShaderCompilationResult first =
+            await TerminalShaderCompilationPipeline.CompileAsync(package, compiler, options);
+        TerminalShaderCompilationResult second =
+            await TerminalShaderCompilationPipeline.CompileAsync(package, compiler, options);
+
+        Assert.True(first.IsSuccess, FormatDiagnostics(first.Diagnostics));
+        Assert.True(second.IsSuccess, FormatDiagnostics(second.Diagnostics));
+        Assert.Same(first, second);
+        Assert.Equal(1, innerCompiler.CallCount);
+        Assert.Equal(1, compiler.Count);
+    }
+
+    [Fact]
+    public async Task CachingCompiler_InvalidatesWhenDefinesChange()
+    {
+        TerminalShaderPackage package = CreatePackage();
+        CapturingCompiler innerCompiler = new();
+        TerminalShaderCachingCompiler compiler = new(innerCompiler);
+
+        await TerminalShaderCompilationPipeline.CompileAsync(
+            package,
+            compiler,
+            new TerminalShaderCompilationOptions(
+                TerminalShaderBackendKind.D3D11,
+                defines: new Dictionary<string, string>(StringComparer.Ordinal) { ["MODE"] = "0" }));
+        await TerminalShaderCompilationPipeline.CompileAsync(
+            package,
+            compiler,
+            new TerminalShaderCompilationOptions(
+                TerminalShaderBackendKind.D3D11,
+                defines: new Dictionary<string, string>(StringComparer.Ordinal) { ["MODE"] = "1" }));
+
+        Assert.Equal(2, innerCompiler.CallCount);
+        Assert.Equal(2, compiler.Count);
+    }
+
     private static TerminalShaderPackage CreatePackageWithExternalInclude()
     {
         return new TerminalShaderPackage(
@@ -154,6 +198,8 @@ public sealed class TerminalShaderCompilationPipelineTests
 
         public bool WasCalled { get; private set; }
 
+        public int CallCount { get; private set; }
+
         public TerminalShaderCompilationRequest? LastRequest { get; private set; }
 
         public ValueTask<TerminalShaderCompilationResult> CompileAsync(
@@ -163,6 +209,7 @@ public sealed class TerminalShaderCompilationPipelineTests
             cancellationToken.ThrowIfCancellationRequested();
 
             WasCalled = true;
+            CallCount++;
             LastRequest = request;
             TerminalShaderCompilationResult result = _result ?? new TerminalShaderCompilationResult(
                 [

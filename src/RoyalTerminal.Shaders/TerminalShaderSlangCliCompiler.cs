@@ -1,6 +1,6 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Shaders - DXC CLI shader compiler backend.
+// RoyalTerminal.Shaders - Slang CLI shader compiler backend.
 
 using System.ComponentModel;
 using System.Diagnostics;
@@ -9,23 +9,23 @@ using System.Globalization;
 namespace RoyalTerminal.Shaders;
 
 /// <summary>
-/// Compiles full terminal shader packages by invoking the DirectX Shader Compiler command-line tool.
+/// Compiles full terminal shader packages by invoking the Slang command-line compiler.
 /// </summary>
-public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
+public sealed class TerminalShaderSlangCliCompiler : ITerminalShaderCompiler
 {
     private readonly string _executablePath;
     private readonly TimeSpan _timeout;
 
     /// <summary>
-    /// Initializes a new DXC CLI compiler wrapper.
+    /// Initializes a new Slang CLI compiler wrapper.
     /// </summary>
-    /// <param name="executablePath">Path to the <c>dxc</c> executable.</param>
+    /// <param name="executablePath">Path to the <c>slangc</c> executable.</param>
     /// <param name="timeout">Optional per-pass compiler timeout.</param>
-    public TerminalShaderDxcCliCompiler(string executablePath = "dxc", TimeSpan? timeout = null)
+    public TerminalShaderSlangCliCompiler(string executablePath = "slangc", TimeSpan? timeout = null)
     {
         if (string.IsNullOrWhiteSpace(executablePath))
         {
-            throw new ArgumentException("DXC executable path must be non-empty.", nameof(executablePath));
+            throw new ArgumentException("Slang executable path must be non-empty.", nameof(executablePath));
         }
 
         _executablePath = executablePath.Trim();
@@ -33,18 +33,18 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
     }
 
     /// <summary>
-    /// Checks whether a DXC executable can be started.
+    /// Checks whether a Slang executable can be started.
     /// </summary>
-    /// <param name="executablePath">Path to the <c>dxc</c> executable.</param>
+    /// <param name="executablePath">Path to the <c>slangc</c> executable.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns><c>true</c> when DXC can be started; otherwise <c>false</c>.</returns>
+    /// <returns><c>true</c> when Slang can be started; otherwise <c>false</c>.</returns>
     public static async ValueTask<bool> IsAvailableAsync(
-        string executablePath = "dxc",
+        string executablePath = "slangc",
         CancellationToken cancellationToken = default)
     {
-        TerminalShaderDxcCliCompiler compiler = new(executablePath, TimeSpan.FromSeconds(5));
+        TerminalShaderSlangCliCompiler compiler = new(executablePath, TimeSpan.FromSeconds(5));
         TerminalShaderProcessResult result = await compiler
-            .RunDxcAsync(["--version"], null, cancellationToken)
+            .RunSlangAsync(["-version"], null, cancellationToken)
             .ConfigureAwait(false);
         return result.Started && result.ExitCode == 0;
     }
@@ -56,18 +56,18 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (request.Options.BackendKind == TerminalShaderBackendKind.Metal)
+        if (request.Options.BackendKind == TerminalShaderBackendKind.SkiaRuntimeEffect)
         {
             return TerminalShaderCompilationResult.Failed(
                 [
                     new TerminalShaderDiagnostic(
                         TerminalShaderDiagnosticSeverity.Error,
-                        "RTSHADERDXC000",
-                        "DXC CLI does not compile Metal shaders. Use a Slang compiler backend for Metal targets."),
+                        "RTSHADERSLANG000",
+                        "Slang CLI does not compile Skia Runtime Effect shaders. Use the Skia shader source path for this backend."),
                 ]);
         }
 
-        string tempRoot = Path.Combine(Path.GetTempPath(), "RoyalTerminal.Shaders", Guid.NewGuid().ToString("N"));
+        string tempRoot = Path.Combine(Path.GetTempPath(), "RoyalTerminal.Shaders.Slang", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempRoot);
         try
         {
@@ -113,22 +113,24 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
                 [
                     new TerminalShaderDiagnostic(
                         TerminalShaderDiagnosticSeverity.Error,
-                        "RTSHADERDXC010",
+                        "RTSHADERSLANG010",
                         $"Pass '{pass.Name}' is missing source or entry-point information."),
                 ]);
         }
 
-        string profile = GetTargetProfile(pass);
         string sourcePath = Path.Combine(tempRoot, pass.SourcePath.Replace('/', Path.DirectorySeparatorChar));
         string outputPath = Path.Combine(tempRoot, ".out", pass.Name + GetOutputExtension(request.Options.BackendKind));
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
 
         List<string> arguments =
         [
-            "-T", profile,
-            "-E", pass.EntryPoint,
+            sourcePath,
+            "-entry", pass.EntryPoint,
+            "-stage", GetStageName(pass.Stage),
+            "-target", GetTargetName(request.Options.BackendKind),
+            "-profile", GetTargetProfile(pass),
             "-I", tempRoot,
-            "-Fo", outputPath,
+            "-o", outputPath,
         ];
 
         foreach (KeyValuePair<string, string> define in request.Options.Defines)
@@ -137,14 +139,7 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
             arguments.Add(string.IsNullOrEmpty(define.Value) ? define.Key : $"{define.Key}={define.Value}");
         }
 
-        if (request.Options.BackendKind == TerminalShaderBackendKind.Vulkan)
-        {
-            arguments.Add("-spirv");
-        }
-
-        arguments.Add(sourcePath);
-
-        TerminalShaderProcessResult processResult = await RunDxcAsync(arguments, tempRoot, cancellationToken)
+        TerminalShaderProcessResult processResult = await RunSlangAsync(arguments, tempRoot, cancellationToken)
             .ConfigureAwait(false);
         if (!processResult.Started)
         {
@@ -152,8 +147,8 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
                 [
                     new TerminalShaderDiagnostic(
                         TerminalShaderDiagnosticSeverity.Error,
-                        "RTSHADERDXC001",
-                        $"DXC executable '{_executablePath}' could not be started: {processResult.ErrorText}"),
+                        "RTSHADERSLANG001",
+                        $"Slang executable '{_executablePath}' could not be started: {processResult.ErrorText}"),
                 ]);
         }
 
@@ -163,10 +158,10 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
                 [
                     new TerminalShaderDiagnostic(
                         TerminalShaderDiagnosticSeverity.Error,
-                        "RTSHADERDXC002",
+                        "RTSHADERSLANG002",
                         string.Create(
                             CultureInfo.InvariantCulture,
-                            $"DXC timed out after {_timeout.TotalSeconds:0.###} seconds while compiling pass '{pass.Name}'.")),
+                            $"Slang timed out after {_timeout.TotalSeconds:0.###} seconds while compiling pass '{pass.Name}'.")),
                 ]);
         }
 
@@ -176,7 +171,7 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
                 [
                     new TerminalShaderDiagnostic(
                         TerminalShaderDiagnosticSeverity.Error,
-                        "RTSHADERDXC003",
+                        "RTSHADERSLANG003",
                         BuildCompilerFailureMessage(pass.Name, processResult),
                         pass.SourcePath),
                 ]);
@@ -194,7 +189,7 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
         return new TerminalShaderCompilationResult([compiledPass], reflectionResult.Diagnostics);
     }
 
-    private async ValueTask<TerminalShaderProcessResult> RunDxcAsync(
+    private async ValueTask<TerminalShaderProcessResult> RunSlangAsync(
         IReadOnlyList<string> arguments,
         string? workingDirectory,
         CancellationToken cancellationToken)
@@ -277,28 +272,50 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
         }
     }
 
+    private static string GetStageName(TerminalShaderStage stage)
+    {
+        return stage == TerminalShaderStage.Compute ? "compute" : "fragment";
+    }
+
     private static string GetTargetProfile(TerminalShaderPass pass)
     {
         if (pass.TargetProfile is not null)
         {
-            return pass.TargetProfile.Name;
+            return pass.TargetProfile.Name.Replace('_', '-');
         }
 
-        return pass.Stage == TerminalShaderStage.Compute
-            ? TerminalShaderTargetProfile.ComputeShader60.Name
-            : TerminalShaderTargetProfile.PixelShader60.Name;
+        return pass.Stage == TerminalShaderStage.Compute ? "cs-6-0" : "ps-6-0";
+    }
+
+    private static string GetTargetName(TerminalShaderBackendKind backendKind)
+    {
+        return backendKind switch
+        {
+            TerminalShaderBackendKind.Vulkan => "spirv",
+            TerminalShaderBackendKind.Metal => "metal",
+            TerminalShaderBackendKind.D3D11 or TerminalShaderBackendKind.D3D12 => "dxil",
+            _ => "dxil",
+        };
     }
 
     private static TerminalShaderCompiledCodeFormat GetOutputFormat(TerminalShaderBackendKind backendKind)
     {
-        return backendKind == TerminalShaderBackendKind.Vulkan
-            ? TerminalShaderCompiledCodeFormat.SpirV
-            : TerminalShaderCompiledCodeFormat.Dxil;
+        return backendKind switch
+        {
+            TerminalShaderBackendKind.Vulkan => TerminalShaderCompiledCodeFormat.SpirV,
+            TerminalShaderBackendKind.Metal => TerminalShaderCompiledCodeFormat.Msl,
+            _ => TerminalShaderCompiledCodeFormat.Dxil,
+        };
     }
 
     private static string GetOutputExtension(TerminalShaderBackendKind backendKind)
     {
-        return backendKind == TerminalShaderBackendKind.Vulkan ? ".spv" : ".dxil";
+        return backendKind switch
+        {
+            TerminalShaderBackendKind.Vulkan => ".spv",
+            TerminalShaderBackendKind.Metal => ".metal",
+            _ => ".dxil",
+        };
     }
 
     private static string BuildCompilerFailureMessage(
@@ -310,8 +327,8 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
             new[] { processResult.ErrorText.Trim(), processResult.OutputText.Trim() }
                 .Where(static value => value.Length > 0));
         return text.Length == 0
-            ? $"DXC failed while compiling pass '{passName}'."
-            : $"DXC failed while compiling pass '{passName}': {text}";
+            ? $"Slang failed while compiling pass '{passName}'."
+            : $"Slang failed while compiling pass '{passName}': {text}";
     }
 
     private static void TryKill(Process process)

@@ -124,6 +124,183 @@ public sealed class TerminalShaderRuntimeTests
         Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Code == "RTSHADERRUNTIME023");
     }
 
+    [Fact]
+    public void RuntimeValidator_DetectsMissingExternalFrameResources()
+    {
+        TerminalShaderPackage package = new(
+            "resources",
+            [new TerminalShaderFile("main.hlsl", "float4 Main() : SV_TARGET { return 1; }")],
+            [
+                new TerminalShaderPass(
+                    "main",
+                    TerminalShaderStage.Pixel,
+                    "main.hlsl",
+                    "Main",
+                    TerminalShaderTargetProfile.PixelShader60),
+            ],
+            [
+                new TerminalShaderResourceBinding(
+                    "noise",
+                    TerminalShaderResourceKind.Texture2D,
+                    TerminalShaderResourceSource.External,
+                    TerminalShaderValueType.Texture2D),
+            ]);
+        TerminalShaderFrameRequest frame = new(128, 64, 0f, 0f, 0, 1f);
+
+        TerminalShaderPackageValidationResult result =
+            TerminalShaderRuntimeValidator.ValidateFrameResources(package, frame);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Code == "RTSHADERRUNTIME031");
+    }
+
+    [Fact]
+    public void RuntimeValidator_DetectsRuntimeResourceKindAndSizeMismatch()
+    {
+        TerminalShaderPackage package = new(
+            "resources",
+            [new TerminalShaderFile("main.hlsl", "float4 Main() : SV_TARGET { return 1; }")],
+            [
+                new TerminalShaderPass(
+                    "main",
+                    TerminalShaderStage.Pixel,
+                    "main.hlsl",
+                    "Main",
+                    TerminalShaderTargetProfile.PixelShader60,
+                    outputs: [new TerminalShaderPassOutput("oversized", widthScale: 2f, heightScale: 1f)]),
+            ],
+            [
+                new TerminalShaderResourceBinding(
+                    "noise",
+                    TerminalShaderResourceKind.Texture2D,
+                    TerminalShaderResourceSource.External,
+                    TerminalShaderValueType.Texture2D),
+            ]);
+        TerminalShaderFrameRequest frame = new(
+            128,
+            64,
+            0f,
+            0f,
+            0,
+            1f,
+            [
+                new TerminalShaderResourceValue(
+                    "noise",
+                    TerminalShaderResourceKind.Sampler,
+                    width: 256,
+                    height: 8),
+            ]);
+        TerminalShaderBackendCapabilities capabilities = new(
+            TerminalShaderBackendKind.D3D11,
+            supportsPixelShaders: true,
+            supportsComputeShaders: true,
+            supportsUavResources: true,
+            supportsTextureInterop: true,
+            maxTextureSize: 128);
+
+        TerminalShaderPackageValidationResult result =
+            TerminalShaderRuntimeValidator.ValidateFrameResources(package, frame, capabilities);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Code == "RTSHADERRUNTIME032");
+        Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Code == "RTSHADERRUNTIME033");
+        Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Code == "RTSHADERRUNTIME034");
+    }
+
+    [Fact]
+    public async Task RuntimePipeline_CreateFrameRequest_ResolvesExternalResources()
+    {
+        TerminalShaderPackage package = CreatePackageWithExternalTexture(optional: true);
+        TerminalShaderResourceValue texture = new(
+            "noise",
+            TerminalShaderResourceKind.Texture2D,
+            nativeHandle: 42,
+            width: 32,
+            height: 16);
+        FixedResourceProvider provider = new(texture);
+
+        TerminalShaderFrameRequest frame = await TerminalShaderRuntimePipeline.CreateFrameRequestAsync(
+            package,
+            width: 80,
+            height: 24,
+            time: 1f,
+            timeDelta: 0.016f,
+            frame: 12,
+            scale: 2f,
+            provider);
+
+        TerminalShaderResourceValue resolved = Assert.Single(frame.Resources);
+        Assert.Equal("noise", resolved.Name);
+        Assert.Equal(42, resolved.NativeHandle);
+    }
+
+    [Fact]
+    public async Task RuntimePipeline_RenderFrame_ReturnsValidationDiagnosticsBeforeRuntime()
+    {
+        TerminalShaderPackage package = CreatePackageWithExternalTexture(optional: false);
+        FakeShaderRuntime runtime = new(
+            new TerminalShaderBackendCapabilities(
+                TerminalShaderBackendKind.D3D11,
+                supportsPixelShaders: true,
+                supportsComputeShaders: true,
+                supportsUavResources: true,
+                supportsTextureInterop: true,
+                maxTextureSize: 4096));
+        using TerminalShaderRuntimeProgram program = await runtime.CreateProgramAsync(CreateCompilationResult());
+        TerminalShaderFrameRequest frame = new(80, 24, 0f, 0f, 0, 1f);
+
+        TerminalShaderFrameResult result = await TerminalShaderRuntimePipeline.RenderFrameAsync(
+            package,
+            runtime,
+            program,
+            frame);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(0, runtime.RenderFrameCallCount);
+        Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Code == "RTSHADERRUNTIME031");
+    }
+
+    [Fact]
+    public async Task RuntimePipeline_RenderFrame_ForwardsValidFrame()
+    {
+        TerminalShaderPackage package = CreatePackageWithExternalTexture(optional: false);
+        FakeShaderRuntime runtime = new(
+            new TerminalShaderBackendCapabilities(
+                TerminalShaderBackendKind.D3D11,
+                supportsPixelShaders: true,
+                supportsComputeShaders: true,
+                supportsUavResources: true,
+                supportsTextureInterop: true,
+                maxTextureSize: 4096));
+        using TerminalShaderRuntimeProgram program = await runtime.CreateProgramAsync(CreateCompilationResult());
+        TerminalShaderFrameRequest frame = new(
+            80,
+            24,
+            0f,
+            0f,
+            0,
+            1f,
+            [
+                new TerminalShaderResourceValue(
+                    "noise",
+                    TerminalShaderResourceKind.Texture2D,
+                    nativeHandle: 42,
+                    width: 32,
+                    height: 16),
+            ]);
+
+        TerminalShaderFrameResult result = await TerminalShaderRuntimePipeline.RenderFrameAsync(
+            package,
+            runtime,
+            program,
+            frame);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, runtime.RenderFrameCallCount);
+        Assert.Equal(80, result.Width);
+        Assert.Equal(24, result.Height);
+    }
+
     private static TerminalShaderCompilationResult CreateCompilationResult()
     {
         return new TerminalShaderCompilationResult(
@@ -132,8 +309,92 @@ public sealed class TerminalShaderRuntimeTests
                     "main",
                     TerminalShaderStage.Pixel,
                     TerminalShaderCompiledCodeFormat.Dxil,
-                    new byte[] { 1, 2, 3 }),
+                new byte[] { 1, 2, 3 }),
             ]);
+    }
+
+    private static TerminalShaderPackage CreatePackageWithExternalTexture(bool optional)
+    {
+        return new TerminalShaderPackage(
+            "resources",
+            [new TerminalShaderFile("main.hlsl", "float4 Main() : SV_TARGET { return 1; }")],
+            [
+                new TerminalShaderPass(
+                    "main",
+                    TerminalShaderStage.Pixel,
+                    "main.hlsl",
+                    "Main",
+                    TerminalShaderTargetProfile.PixelShader60),
+            ],
+            [
+                new TerminalShaderResourceBinding(
+                    "noise",
+                    TerminalShaderResourceKind.Texture2D,
+                    TerminalShaderResourceSource.External,
+                    TerminalShaderValueType.Texture2D,
+                    optional: optional),
+            ]);
+    }
+
+    private sealed class FixedResourceProvider : ITerminalShaderResourceProvider
+    {
+        private readonly TerminalShaderResourceValue _value;
+
+        public FixedResourceProvider(TerminalShaderResourceValue value)
+        {
+            _value = value;
+        }
+
+        public ValueTask<TerminalShaderResourceValue?> TryGetResourceAsync(
+            string resourceName,
+            CancellationToken cancellationToken = default)
+        {
+            TerminalShaderResourceValue? value = string.Equals(
+                resourceName,
+                _value.Name,
+                StringComparison.OrdinalIgnoreCase)
+                ? _value
+                : null;
+            return ValueTask.FromResult(value);
+        }
+    }
+
+    private sealed class FakeShaderRuntime : ITerminalShaderRuntime
+    {
+        public FakeShaderRuntime(TerminalShaderBackendCapabilities capabilities)
+        {
+            Capabilities = capabilities;
+        }
+
+        public TerminalShaderBackendCapabilities Capabilities { get; }
+
+        public int RenderFrameCallCount { get; private set; }
+
+        public ValueTask<TerminalShaderRuntimeProgram> CreateProgramAsync(
+            TerminalShaderCompilationResult compilation,
+            CancellationToken cancellationToken = default)
+        {
+            TerminalShaderRuntimeProgram program = new(Capabilities.BackendKind, compilation, Capabilities);
+            return ValueTask.FromResult(program);
+        }
+
+        public ValueTask<TerminalShaderFrameResult> RenderFrameAsync(
+            TerminalShaderRuntimeProgram program,
+            TerminalShaderFrameRequest frame,
+            CancellationToken cancellationToken = default)
+        {
+            RenderFrameCallCount++;
+            TerminalShaderFrameResult result = new(
+                Capabilities.BackendKind,
+                pixelData: new byte[frame.Width * frame.Height * 4],
+                width: frame.Width,
+                height: frame.Height);
+            return ValueTask.FromResult(result);
+        }
+
+        public void Dispose()
+        {
+        }
     }
 
 }
