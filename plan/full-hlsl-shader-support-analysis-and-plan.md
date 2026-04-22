@@ -31,7 +31,7 @@ This supports common Windows Terminal shader samples but cannot become a full HL
 
 ## Progress Update 2026-04-22
 
-Implementation has moved beyond the original source-adapter-only state. The managed package execution bridge, first native backend package, compiler-generated reflection paths, demo runtime opt-in, and Avalonia native-texture presentation boundary now exist. The main remaining gaps are OS-specific GPU validation and new native runtime backends for D3D12, Vulkan, and Metal.
+Implementation has moved beyond the original source-adapter-only state. The managed package execution bridge, first native backend package, compiler-generated reflection paths, runtime registration layer, demo runtime opt-in, golden/corpus/perf test suites, and Avalonia native-texture presentation boundary now exist. The main remaining gaps are OS-specific GPU validation and new native runtime backends for D3D12, Vulkan, and Metal.
 
 Completed:
 
@@ -48,10 +48,12 @@ Completed:
 - Implemented built-in terminal framebuffer resource propagation for full shader package frames.
 - Implemented `ITerminalShaderPackageExecutor` and `TerminalShaderCompilerRuntimePackageExecutor` so a package can compile once, cache its runtime program, and execute frames through a concrete runtime.
 - Implemented backend preference selection through `TerminalShaderBackendPreference` and `TerminalShaderBackendSelector`.
+- Implemented host-side runtime registration through `TerminalShaderPackageExecutorRegistry`, `TerminalShaderPackageExecutorRegistration`, and `TerminalShaderPackageExecutorCreationResult`.
+- Added `TerminalShaderCompilerKind.D3DCompiler` and `TerminalShaderD3D11PackageExecutorRegistration` so D3D11 compiler/runtime creation is an explicit composition-root registration.
 - Implemented shader diagnostics sink contract through `ITerminalShaderDiagnosticsSink`.
 - Implemented the `TerminalControl.ShaderPackage`, `ShaderBackendPreference`, `ShaderResourceProvider`, `ShaderDiagnosticsSink`, and `ShaderPackageExecutor` configuration surface.
 - Implemented real `TerminalControl.ShaderPackage` propagation through `TerminalPresenter` and `TerminalDrawHandler`, including terminal framebuffer capture, runtime frame creation, package execution, diagnostic reporting, CPU pixel fallback drawing, and native-texture fallback diagnostics.
-- Implemented the `RoyalTerminal.Shaders.D3D11` project with a Windows-only D3DCompiler DXBC compiler path and a Direct3D 11 runtime backend skeleton that creates native shaders, binds SRV/UAV/sampler/cbuffer resources, executes pixel and compute passes, and reads back the final frame for tests/presentation fallback.
+- Implemented the `RoyalTerminal.Shaders.D3D11` project with a Windows-only D3DCompiler DXBC compiler path and a Direct3D 11 runtime backend that creates native shaders, binds SRV/UAV/sampler/cbuffer resources, supports external constant-buffer resources, executes pixel and compute passes, chains pass outputs, and reads back the final frame for tests/presentation fallback.
 - Added full HLSL package samples to the demo catalog: CRT bloom, two-pass bloom blur, and compute phosphor.
 - Added tests for package validation, include resolution, compiler orchestration, DXC diagnostics, Slang diagnostics, compiler caching, reflection preflight, runtime capability validation, runtime frame validation, runtime pipeline gating, and unavailable runtime diagnostics.
 - Added tests for package executor caching, built-in framebuffer resources, control behavior with an executor, demo package validation, D3D11 non-Windows gating, and an opt-in D3D11 GPU smoke test behind `ROYALTERMINAL_TEST_D3D11=1`.
@@ -66,6 +68,11 @@ Completed:
 - Added `TerminalControl.ShaderNativeTexturePresenter` and renderer plumbing so full package execution can draw native texture output before falling back to CPU pixels.
 - Wired the demo composition root to create a Windows D3D11 compiler/runtime package executor when D3D11 is available, while keeping non-Windows and unsupported hosts on the existing fallback path.
 - Added focused tests for SPIR-V reflection, DXC listing reflection, Slang JSON reflection, native texture frame results, default native texture presenter wiring, and demo runtime package selection.
+- Added runtime registry tests for explicit backend selection, auto fallback, compiler mismatch diagnostics, and factory failure diagnostics.
+- Expanded opt-in D3D11 GPU tests behind `ROYALTERMINAL_TEST_D3D11=1` to cover expected pixel output, external constant buffers, multipass output chaining, compute/UAV output, and DXBC reflection.
+- Added deterministic Skia shader golden-pixel coverage.
+- Added curated demo and synthetic package corpus tests for package validation, reflection, resources, includes, semantics, and compute/UAV shape.
+- Added shader package validation, reflection, and cache-key benchmarks to `RoyalTerminal.Benchmarks`.
 - Updated public docs and API package configuration for `RoyalTerminal.Shaders`.
 
 Partially complete:
@@ -73,24 +80,25 @@ Partially complete:
 - Reflection now has D3D11 compiler-native DXBC extraction, SPIR-V binary extraction, DXC listing extraction for DXIL paths, and Slang JSON extraction. Native `dxcompiler` DXIL reflection hosting and native Slang API reflection hosting remain future improvements.
 - Compiler support is CLI-based. Native `dxcompiler` and `slang` hosting remain future improvements.
 - Runtime validation detects missing external resources, resource-kind mismatches, UAV capability issues, unsupported stages, and texture-size limit violations.
-- Direct3D 11 execution is implemented as the first native backend path, and the compiler now reflects DXBC bindings natively. It still needs Windows GPU validation for the opt-in smoke test and broader resource-binding/corpus coverage before it should be treated as production complete.
-- `TerminalControl` can execute packages through an injected executor today. The demo app now auto-creates a D3D11 package executor on Windows when the native compiler/runtime are available; broader application-level trust policy and dependency packaging remain open.
+- Direct3D 11 execution is implemented as the first native backend path, and the compiler now reflects DXBC bindings natively. The opt-in Windows suite is broader, but it still needs to be run on Windows GPU-capable agents before production sign-off.
+- `TerminalControl` can execute packages through an injected executor today. The demo app now uses runtime registration to create a D3D11 package executor on Windows when the native compiler/runtime are available; broader application-level trust policy and native dependency packaging remain open.
 - Zero-copy presentation has a descriptor and Avalonia/Skia presenter path for Metal, Vulkan, and D3D12 descriptors. The current D3D11 runtime still returns CPU readback frames; D3D11 zero-copy requires a safe shared-texture lifetime model or D3D11-to-Skia interop bridge before native handles can be exposed.
+- Golden, corpus, and performance suites now exist as initial coverage. They should be expanded with real native compiler/runtime artifacts on GPU-enabled CI.
 
 Not complete:
 
 - D3D12/Vulkan/Metal native GPU runtime backends.
 - Native `dxcompiler` DXIL reflection hosting and native Slang API reflection hosting.
 - D3D11 zero-copy Skia/Avalonia GPU texture import with safe shared texture lifetime.
-- Application-wide runtime registration, native dependency packaging, and trust policy outside the demo composition root.
-- Golden image tests, full corpus tests, and performance test suites.
+- Native dependency packaging and trust policy outside the demo composition root.
+- GPU-backed golden images, full third-party corpus tests, and backend perf suites that require native GPU agents.
 
 Current next implementation priority:
 
-1. Validate and harden the D3D11 backend on Windows with `ROYALTERMINAL_TEST_D3D11=1`.
+1. Run the expanded D3D11 backend suite on a Windows GPU-capable agent with `ROYALTERMINAL_TEST_D3D11=1`.
 2. Add a safe D3D11 native texture lifetime/share-handle path if zero-copy presentation is required for the D3D11 runtime.
-3. Add application-wide native dependency registration and shader trust policy.
-4. Implement D3D12, Vulkan, and Metal runtimes after D3D11 validation is stable.
+3. Add native dependency packaging and shader trust policy for production hosts.
+4. Implement true D3D12, Vulkan, and Metal runtime packages after D3D11 validation is stable.
 
 ### Remaining Phase Status
 
@@ -98,12 +106,12 @@ Current next implementation priority:
 | --- | --- | --- |
 | Phase 0: Design lock | Mostly complete | Public names and backend strategy are represented in the plan; final native dependency packaging is still open. |
 | Phase 1: Package model and validation | Complete | Package/files/passes/resources/options/diagnostics/include validation are implemented and tested. |
-| Phase 2: Compiler abstraction | Mostly complete | DXC and Slang CLI paths, cache keys, compiler tests, SPIR-V reflection flags, DXC listing output, and Slang JSON output exist. Native compiler hosting and compiler version keys remain open. |
-| Phase 3: Reflection and binding | Mostly complete | Source-side reflection preflight, D3D11 DXBC reflection, SPIR-V binary reflection, DXC listing reflection, and Slang JSON reflection exist. Native DXIL/Slang API hosting and exhaustive binding-map validation remain open. |
-| Phase 4: First runtime backend | Partially complete | `RoyalTerminal.Shaders.D3D11` now contains DXBC compilation, native DXBC reflection, native shader creation, SRV/UAV/sampler/cbuffer binding, pixel/compute pass execution, and readback. Windows GPU validation and hardening remain. |
-| Phase 5: Avalonia integration | Mostly complete | Control properties, backend preference, resource provider, diagnostics sink, package executor, runtime frame creation, CPU fallback drawing, demo D3D11 executor registration, native texture descriptors, and Skia native texture presenter exist. D3D11 zero-copy lifetime and app-wide trust/dependency policy remain. |
+| Phase 2: Compiler abstraction | Mostly complete | DXC and Slang CLI paths, cache keys, compiler tests, SPIR-V reflection flags, DXC listing output, Slang JSON output, and package benchmarks exist. Native compiler hosting and compiler version keys remain open. |
+| Phase 3: Reflection and binding | Mostly complete | Source-side reflection preflight, D3D11 DXBC reflection, SPIR-V binary reflection, DXC listing reflection, Slang JSON reflection, corpus tests, and expanded D3D11 binding tests exist. Native DXIL/Slang API hosting and exhaustive GPU binding-map validation remain open. |
+| Phase 4: First runtime backend | Partially complete | `RoyalTerminal.Shaders.D3D11` now contains DXBC compilation, native DXBC reflection, native shader creation, SRV/UAV/sampler/cbuffer binding including external cbuffers, pixel/compute pass execution, pass-output chaining, readback, and expanded opt-in GPU tests. Windows GPU-agent validation remains. |
+| Phase 5: Avalonia integration | Mostly complete | Control properties, backend preference, resource provider, diagnostics sink, package executor, runtime registry, runtime frame creation, CPU fallback drawing, demo D3D11 executor registration, native texture descriptors, and Skia native texture presenter exist. D3D11 zero-copy lifetime and app-wide trust/dependency policy remain. |
 | Phase 6: Cross-platform backends | Not complete | Vulkan and Metal runtime packages remain future work after D3D11 MVP. |
-| Phase 7: Corpus, docs, and demo | Partially complete | Docs, simple shader samples, full HLSL package samples, demo package executor selection, and focused reflection/runtime tests exist. Full corpus, GPU golden images, and performance suites remain open. |
+| Phase 7: Corpus, docs, and demo | Partially complete | Docs, simple shader samples, full HLSL package samples, demo package executor selection, focused reflection/runtime tests, initial corpus tests, deterministic Skia golden tests, and package perf benchmarks exist. Third-party shader corpus, GPU golden images, and backend perf suites remain open. |
 
 ## Source-Grounded Constraints
 

@@ -58,6 +58,8 @@ Because the shader runs after terminal drawing, it affects everything in the fra
 | `TerminalShaderDxcReflectionListingReader` | `RoyalTerminal.Shaders` | DXC text-listing reflection reader for DXIL compiler output. |
 | `TerminalShaderSlangReflectionJsonReader` | `RoyalTerminal.Shaders` | Slang JSON reflection reader for Slang compiler output. |
 | `TerminalShaderBackendSelector` | `RoyalTerminal.Shaders` | Maps backend preferences to platform defaults and deterministic unavailable runtimes. |
+| `TerminalShaderPackageExecutorRegistry` | `RoyalTerminal.Shaders` | Host-side registry for selecting concrete compiler/runtime package executors. |
+| `TerminalShaderPackageExecutorRegistration` | `RoyalTerminal.Shaders` | Describes one registered compiler/runtime pair and its availability. |
 | `ITerminalShaderRuntime` | `RoyalTerminal.Shaders` | Backend-neutral runtime contract for compiled packages. |
 | `TerminalShaderRuntimePipeline` | `RoyalTerminal.Shaders` | Backend-neutral frame resource resolution and runtime validation orchestration. |
 

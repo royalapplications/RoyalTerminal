@@ -88,7 +88,19 @@ Full HLSL packages use a separate control surface:
 
 `ShaderPackage` is the configuration entry point for compiler-backed HLSL packages. `ShaderBackendPreference` selects the requested native backend, `ShaderResourceProvider` supplies external textures and buffers, `ShaderDiagnosticsSink` receives validation or backend availability diagnostics, and `ShaderPackageExecutor` provides the concrete compiler/runtime execution path.
 
-If a package is assigned without an executor, `TerminalControl` reports `RTSHADERCONTROL001` through the diagnostics sink and renders without package shaders. The D3D11 package runtime is available through `RoyalTerminal.Shaders.D3D11` on Windows and can be supplied by the host composition root. Keep using `ShaderSources` for lightweight Skia Runtime Effect, Ghostty/Shadertoy, and Windows Terminal sample-compatible shaders when a native runtime is not available.
+If a package is assigned without an executor, `TerminalControl` reports `RTSHADERCONTROL001` through the diagnostics sink and renders without package shaders. The D3D11 package runtime is available through `RoyalTerminal.Shaders.D3D11` on Windows and can be supplied by the host composition root directly or through `TerminalShaderPackageExecutorRegistry`:
+
+```csharp
+TerminalShaderPackageExecutorRegistry registry = new();
+registry.Register(TerminalShaderD3D11PackageExecutorRegistration.Create());
+
+TerminalShaderPackageExecutorCreationResult creation =
+    registry.TryCreate(TerminalShaderBackendPreference.D3D11);
+
+Terminal.ShaderPackageExecutor = creation.Executor;
+```
+
+Keep using `ShaderSources` for lightweight Skia Runtime Effect, Ghostty/Shadertoy, and Windows Terminal sample-compatible shaders when a native runtime is not available.
 
 `ShaderNativeTexturePresenter` can be set when a runtime returns native texture output. The default presenter imports compatible Metal, Vulkan, and D3D12 descriptors through the active Avalonia Skia GPU context; CPU pixel output remains the portable fallback.
 
