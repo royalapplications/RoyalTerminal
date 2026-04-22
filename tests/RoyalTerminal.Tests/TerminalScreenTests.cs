@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
+using RoyalTerminal.Terminal.Theming;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -186,6 +187,51 @@ public class TerminalScreenTests
         screen.Resize(12, 3, reflowOnResize: false);
 
         Assert.Equal('K', screen.GetViewportRow(0)[10].Codepoint);
+    }
+
+    [Fact]
+    public void TerminalScreen_ApplyTheme_RemapsHiddenCellsPreservedByNonReflowResize()
+    {
+        TerminalScreen screen = new(12, 3);
+        TerminalRow row = screen.GetViewportRow(0);
+        row[10].Codepoint = 'K';
+        row[10].Foreground = screen.DefaultForeground;
+
+        screen.Resize(6, 3, reflowOnResize: false);
+        screen.ApplyTheme(TerminalTheme.Dark.WithDefaultForeground(0xFF010203u));
+        screen.Resize(12, 3, reflowOnResize: false);
+
+        Assert.Equal('K', screen.GetViewportRow(0)[10].Codepoint);
+        Assert.Equal(0xFF010203u, screen.GetViewportRow(0)[10].Foreground);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ResizeWithoutReflow_ClearsHiddenTailAfterLineErase()
+    {
+        TerminalScreen screen = new(12, 3);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process(Encoding.UTF8.GetBytes("ABCDEFGHIJK"));
+        processor.ResizeScreen(columns: 6, rows: 3, widthPx: 60, heightPx: 48, reflowOnResize: false);
+        processor.Process("\r\x1b[K"u8);
+        processor.ResizeScreen(columns: 12, rows: 3, widthPx: 120, heightPx: 48, reflowOnResize: false);
+
+        Assert.False(screen.GetViewportRow(0)[10].HasContent);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ResizeWithoutReflow_CopiesHiddenTailWhenRowsShift()
+    {
+        TerminalScreen screen = new(12, 3);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process(Encoding.UTF8.GetBytes("0123456789A\r\nabcdefghijB"));
+        processor.ResizeScreen(columns: 6, rows: 3, widthPx: 60, heightPx: 48, reflowOnResize: false);
+        processor.Process("\x1b[1;1H\x1b[M"u8);
+        processor.ResizeScreen(columns: 12, rows: 3, widthPx: 120, heightPx: 48, reflowOnResize: false);
+
+        Assert.Equal('a', screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal('B', screen.GetViewportRow(0)[10].Codepoint);
     }
 
     [Fact]

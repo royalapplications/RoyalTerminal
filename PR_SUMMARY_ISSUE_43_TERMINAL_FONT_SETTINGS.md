@@ -8,15 +8,14 @@ It adds first-class terminal font configuration, fixes wheel scrolling that coul
 
 The user-facing result is that RoyalTerminal now behaves closer to native terminals such as Ghostty when a terminal is narrowed and widened again: long command output is reflowed instead of being permanently cut off, while fullscreen alternate-screen applications remain free to redraw themselves on resize.
 
-## Implementation Commits
+## Implementation Areas
 
-- `620faed` `feat: add configurable terminal font support`
-- `85e4994` `feat: expose terminal font settings in UI`
-- `ce9c547` `fix: preserve scrollback position while wheel scrolling`
-- `37927a1` `fix: write output against live terminal viewport`
-- `2ca9c6d` `fix: preserve row content across horizontal resize`
-- `6453345` `fix: reflow terminal rows on horizontal resize`
-- `77e7aa1` `fix: keep live cursor anchored during scrolled resize`
+- Terminal font configuration and rendering.
+- Settings UI/profile persistence for font and behavior settings.
+- Scrollback anchoring while output is received.
+- Managed terminal horizontal resize reflow.
+- Non-reflow shrink/restore preservation and stale hidden-cell cleanup.
+- Version bump to `0.1.2`.
 
 ## User-Facing Changes
 
@@ -70,6 +69,9 @@ The user-facing result is that RoyalTerminal now behaves closer to native termin
 - Anchored cursor remapping to the live bottom viewport even when the user is scrolled back during resize.
 - Disabled managed reflow while the alternate screen is active so fullscreen TUI applications can handle redraw through normal resize notifications.
 - Kept the non-reflow path capable of preserving hidden cells for shrink/restore cycles when users opt out of reflow.
+- Cleared retained hidden cells when a narrow row is edited, erased, or receives grapheme updates so stale wide-output tails do not reappear after expanding.
+- Copied retained hidden cells when rows shift inside the managed VT processor so non-reflow scroll-region operations do not mix active cells from one row with hidden cells from another.
+- Remapped colors for retained hidden cells during theme changes so expanding after a theme switch does not reveal old-theme cell colors.
 
 ## Performance Notes
 
@@ -95,7 +97,10 @@ Added and updated tests for:
 - default-on and persisted reflow-on-resize settings,
 - managed VT cursor preservation after reflow followed by additional output,
 - managed VT cursor preservation when resizing while scrolled back, then writing more output at the live prompt,
-- opt-out behavior that keeps fixed-width hidden cells available for shrink/restore without reflow.
+- opt-out behavior that keeps fixed-width hidden cells available for shrink/restore without reflow,
+- stale hidden-cell cleanup after line erase while non-reflow resize is active,
+- retained hidden-cell copying when managed VT rows shift while non-reflow resize is active,
+- retained hidden-cell color remapping after theme changes.
 
 ## Validation
 
@@ -104,17 +109,17 @@ The following checks passed locally:
 ```text
 git diff --check
 dotnet build RoyalTerminal.sln --no-restore
-dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj
-dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj
+dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj --no-build
+dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj --no-build
 ```
 
 Unit test result:
 
 ```text
-Passed: 710
+Passed: 713
 Skipped: 14
 Failed: 0
-Total: 724
+Total: 727
 ```
 
 Integration test result:

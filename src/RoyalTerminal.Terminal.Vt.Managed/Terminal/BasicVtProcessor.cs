@@ -1490,6 +1490,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
         TerminalRow row = _screen.GetViewportRow(_cursorRow);
         if (_cursorCol >= row.Columns) return;
+        ClearPreservedCellsForMutation(row);
 
         int width = TerminalCellWidthCalculator.GetCellWidth(codepoint);
         width = width <= 1 ? 1 : 2;
@@ -1512,6 +1513,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             if (_cursorCol < 0 || _cursorCol >= _screen.Columns) return;
             row = _screen.GetViewportRow(_cursorRow);
             if (_cursorCol >= row.Columns) return;
+            ClearPreservedCellsForMutation(row);
         }
 
         if (_insertMode)
@@ -1522,6 +1524,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             {
                 return;
             }
+
+            ClearPreservedCellsForMutation(row);
         }
 
         ClearCellAndWideArtifacts(row, _cursorCol);
@@ -1634,6 +1638,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         {
             return false;
         }
+
+        ClearPreservedCellsForMutation(targetRow);
 
         targetCell.Codepoint = targetCell.Codepoint != 0
             ? targetCell.Codepoint
@@ -1830,9 +1836,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
     private void CopyRow(TerminalRow src, TerminalRow dst)
     {
-        var count = Math.Min(src.Columns, dst.Columns);
-        src.ReadOnlyCells[..count].CopyTo(dst.Cells);
-        dst.WrapsToNext = src.WrapsToNext;
+        dst.CopyFrom(src, _screen.DefaultForeground, _screen.DefaultBackground);
         NormalizeRowWideCells(dst);
     }
 
@@ -3542,6 +3546,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
                 if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
                 {
                     var rowToCursor = _screen.GetViewportRow(_cursorRow);
+                    ClearPreservedCellsForMutation(rowToCursor);
                     for (var c = 0; c <= _cursorCol && c < _screen.Columns; c++)
                         rowToCursor[c] = TerminalCell.Empty(_currentFg, _currentBg);
                     NormalizeRowWideCells(rowToCursor);
@@ -3569,6 +3574,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
 
         var row = _screen.GetViewportRow(_cursorRow);
+        ClearPreservedCellsForMutation(row);
         switch (mode)
         {
             case 0: // From cursor to end of line
@@ -3636,6 +3642,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
 
         var row = _screen.GetViewportRow(_cursorRow);
+        ClearPreservedCellsForMutation(row);
         for (var c = _screen.Columns - 1; c >= _cursorCol + count; c--)
             row[c] = row[c - count];
         for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
@@ -3650,6 +3657,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
 
         var row = _screen.GetViewportRow(_cursorRow);
+        ClearPreservedCellsForMutation(row);
         for (var c = _cursorCol; c + count < _screen.Columns; c++)
             row[c] = row[c + count];
         for (var c = Math.Max(_cursorCol, _screen.Columns - count); c < _screen.Columns; c++)
@@ -3664,10 +3672,19 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
 
         var row = _screen.GetViewportRow(_cursorRow);
+        ClearPreservedCellsForMutation(row);
         for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
             row[c] = TerminalCell.Empty(_currentFg, _currentBg);
         NormalizeRowWideCells(row);
         row.IsDirty = true;
+    }
+
+    private void ClearPreservedCellsForMutation(TerminalRow row)
+    {
+        if (row.PreservedColumns > row.Columns)
+        {
+            row.ClearPreservedCellsFrom(row.Columns, _screen.DefaultForeground, _screen.DefaultBackground);
+        }
     }
 
     private static void NormalizeRowWideCells(TerminalRow row)

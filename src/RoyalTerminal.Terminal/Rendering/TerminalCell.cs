@@ -167,11 +167,17 @@ public sealed class TerminalRow
     /// <summary>Number of columns in this row.</summary>
     public int Columns => _columns;
 
+    /// <summary>Number of cells retained in backing storage, including cells hidden by a narrower resize.</summary>
+    public int PreservedColumns => _cells.Length;
+
     /// <summary>Access the cells array as a span.</summary>
     public Span<TerminalCell> Cells => _cells.AsSpan(0, _columns);
 
     /// <summary>Read-only access to cells.</summary>
     public ReadOnlySpan<TerminalCell> ReadOnlyCells => _cells.AsSpan(0, _columns);
+
+    /// <summary>Read-only access to all retained cells, including cells hidden by a narrower resize.</summary>
+    public ReadOnlySpan<TerminalCell> ReadOnlyPreservedCells => _cells.AsSpan();
 
     public TerminalRow(int columns, uint defaultFg = 0xFFD4D4D4, uint defaultBg = 0xFF1E1E1E)
     {
@@ -190,18 +196,73 @@ public sealed class TerminalRow
     {
         ArgumentOutOfRangeException.ThrowIfNegative(columns);
 
-        int previousLength = _cells.Length;
-        if (columns > previousLength)
+        EnsureCapacity(columns, defaultFg, defaultBg);
+        _columns = columns;
+        IsDirty = true;
+    }
+
+    /// <summary>Copies active and retained cells from another row while keeping this row's active width.</summary>
+    public void CopyFrom(TerminalRow source, uint defaultFg = 0xFFD4D4D4, uint defaultBg = 0xFF1E1E1E)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        EnsureCapacity(source.PreservedColumns, defaultFg, defaultBg);
+
+        ReadOnlySpan<TerminalCell> sourceCells = source.ReadOnlyPreservedCells;
+        sourceCells.CopyTo(_cells);
+        for (int i = sourceCells.Length; i < _cells.Length; i++)
         {
-            Array.Resize(ref _cells, columns);
-            for (int i = previousLength; i < _cells.Length; i++)
+            _cells[i] = TerminalCell.Empty(defaultFg, defaultBg);
+        }
+
+        WrapsToNext = source.WrapsToNext;
+        IsDirty = true;
+    }
+
+    /// <summary>Clears cells retained outside the active width after this row is edited while narrow.</summary>
+    public void ClearPreservedCellsFrom(int column, uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E)
+    {
+        int start = Math.Clamp(column, 0, _cells.Length);
+        if (start >= _cells.Length)
+        {
+            return;
+        }
+
+        for (int i = start; i < _cells.Length; i++)
+        {
+            _cells[i] = TerminalCell.Empty(fg, bg);
+        }
+
+        IsDirty = true;
+    }
+
+    /// <summary>Remaps cell colors across active and retained cells.</summary>
+    internal bool RemapCellColors(IReadOnlyDictionary<uint, uint> colorRemap)
+    {
+        bool changed = false;
+        for (int col = 0; col < _cells.Length; col++)
+        {
+            ref TerminalCell cell = ref _cells[col];
+
+            if (colorRemap.TryGetValue(cell.Foreground, out uint mappedFg))
             {
-                _cells[i] = TerminalCell.Empty(defaultFg, defaultBg);
+                cell.Foreground = mappedFg;
+                changed = true;
+            }
+
+            if (colorRemap.TryGetValue(cell.Background, out uint mappedBg))
+            {
+                cell.Background = mappedBg;
+                changed = true;
             }
         }
 
-        _columns = columns;
-        IsDirty = true;
+        if (changed)
+        {
+            IsDirty = true;
+        }
+
+        return changed;
     }
 
     /// <summary>Clear all cells to the default state.</summary>
@@ -211,6 +272,21 @@ public sealed class TerminalRow
             _cells[i] = TerminalCell.Empty(fg, bg);
         WrapsToNext = false;
         IsDirty = true;
+    }
+
+    private void EnsureCapacity(int columns, uint defaultFg, uint defaultBg)
+    {
+        if (columns <= _cells.Length)
+        {
+            return;
+        }
+
+        int previousLength = _cells.Length;
+        Array.Resize(ref _cells, columns);
+        for (int i = previousLength; i < _cells.Length; i++)
+        {
+            _cells[i] = TerminalCell.Empty(defaultFg, defaultBg);
+        }
     }
 }
 
@@ -318,30 +394,7 @@ public sealed class TerminalScreen
         for (int rowIndex = 0; rowIndex < _rows.Count; rowIndex++)
         {
             TerminalRow row = _rows[rowIndex];
-            Span<TerminalCell> cells = row.Cells;
-            bool changed = false;
-
-            for (int col = 0; col < cells.Length; col++)
-            {
-                ref TerminalCell cell = ref cells[col];
-
-                if (colorRemap.TryGetValue(cell.Foreground, out uint mappedFg))
-                {
-                    cell.Foreground = mappedFg;
-                    changed = true;
-                }
-
-                if (colorRemap.TryGetValue(cell.Background, out uint mappedBg))
-                {
-                    cell.Background = mappedBg;
-                    changed = true;
-                }
-            }
-
-            if (changed)
-            {
-                row.IsDirty = true;
-            }
+            row.RemapCellColors(colorRemap);
         }
     }
 
