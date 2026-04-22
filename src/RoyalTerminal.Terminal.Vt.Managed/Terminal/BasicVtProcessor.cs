@@ -109,7 +109,6 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private int _scrollBottom; // 0-based inclusive (ViewportRows - 1 at init)
 
     // Alternate screen buffer
-    private TerminalRow[]? _savedMainBuffer;
     private int _savedMainCursorCol;
     private int _savedMainCursorRow;
     private bool _inAltScreen;
@@ -3286,21 +3285,15 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             _screen.ScrollOffset = 0;
         }
 
-        // Save current main screen content
-        _savedMainBuffer = new TerminalRow[_screen.ViewportRows];
-        for (var r = 0; r < _screen.ViewportRows; r++)
-        {
-            var srcRow = _screen.GetViewportRow(r);
-            var saved = new TerminalRow(_screen.Columns, _screen.DefaultForeground, _screen.DefaultBackground);
-            CopyRow(srcRow, saved);
-            _savedMainBuffer[r] = saved;
-        }
         _savedMainCursorCol = _cursorCol;
         _savedMainCursorRow = _cursorRow;
         _inAltScreen = true;
-
+        _screen.SwitchToAlternateBuffer(clearAlt);
         if (clearAlt)
-            ClearScreen();
+        {
+            _cursorCol = 0;
+            _cursorRow = 0;
+        }
 
         // Reset scroll region
         _scrollTop = 0;
@@ -3316,17 +3309,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             _screen.ScrollOffset = 0;
         }
 
-        // Restore main screen content
-        if (_savedMainBuffer is not null)
-        {
-            for (var r = 0; r < _screen.ViewportRows && r < _savedMainBuffer.Length; r++)
-            {
-                var dst = _screen.GetViewportRow(r);
-                CopyRow(_savedMainBuffer[r], dst);
-                dst.IsDirty = true;
-            }
-            _savedMainBuffer = null;
-        }
+        _screen.SwitchToPrimaryBuffer();
 
         _cursorCol = _savedMainCursorCol;
         _cursorRow = _savedMainCursorRow;
@@ -3902,8 +3885,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _isDiscardingDcsPayload = false;
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
+        if (_inAltScreen || _screen.AlternateBufferActive)
+        {
+            _screen.SwitchToPrimaryBuffer();
+        }
+
         _inAltScreen = false;
-        _savedMainBuffer = null;
         _autoWrap = true;
         _cursorVisible = true;
         _originMode = false;

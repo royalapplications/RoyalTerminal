@@ -523,6 +523,37 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_AlternateBuffer_DoesNotMutatePrimaryRows()
+    {
+        var screen = new TerminalScreen(8, 3, scrollbackLimit: 100);
+
+        screen.GetViewportRow(0)[0].Codepoint = 'M';
+        screen.GetViewportRow(1)[0].Codepoint = 'A';
+        screen.GetViewportRow(2)[0].Codepoint = 'I';
+        int primaryRows = screen.TotalRows;
+
+        screen.SwitchToAlternateBuffer(clear: true);
+
+        Assert.True(screen.AlternateBufferActive);
+        Assert.Equal(screen.ViewportRows, screen.TotalRows);
+
+        screen.GetViewportRow(0)[0].Codepoint = 'T';
+        screen.GetViewportRow(1)[0].Codepoint = 'U';
+        screen.GetViewportRow(2)[0].Codepoint = 'I';
+        screen.AddRow()[0].Codepoint = 'X';
+
+        Assert.Equal(screen.ViewportRows, screen.TotalRows);
+
+        screen.SwitchToPrimaryBuffer();
+
+        Assert.False(screen.AlternateBufferActive);
+        Assert.Equal(primaryRows, screen.TotalRows);
+        Assert.Equal('M', screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal('A', screen.GetViewportRow(1)[0].Codepoint);
+        Assert.Equal('I', screen.GetViewportRow(2)[0].Codepoint);
+    }
+
+    [Fact]
     public void TerminalScreen_DefaultColors_Applied()
     {
         var screen = new TerminalScreen(80, 24)

@@ -1416,6 +1416,44 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_AlternateScreenExit_DropsTuiArtifactsFromPrimaryScrollback()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 24,
+            Rows = 5,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        Assert.NotNull(control.ScrollData);
+        Assert.NotNull(control.Screen);
+        TerminalScreen screen = control.Screen!;
+
+        for (int i = 0; i < 16; i++)
+        {
+            control.WriteOutput(Encoding.UTF8.GetBytes($"MAIN-{i:00}\r\n"));
+        }
+
+        int primaryRows = screen.TotalRows;
+        double primaryMaxOffset = control.ScrollData!.MaxOffset;
+
+        control.WriteOutput("\x1b[?1049h\x1b[2JLeft File Command Options Right\r\nALT-PANEL\r\nALT-STATUS"u8);
+
+        Assert.True(screen.AlternateBufferActive);
+        Assert.Contains("ALT-", string.Join('\n', ReadVisibleAsciiRows(screen)), StringComparison.Ordinal);
+        Assert.Equal(0, control.ScrollData.MaxOffset);
+
+        control.WriteOutput("\x1b[?1049l"u8);
+
+        string visible = string.Join('\n', ReadVisibleAsciiRows(screen));
+        Assert.False(screen.AlternateBufferActive);
+        Assert.Equal(primaryRows, screen.TotalRows);
+        Assert.Equal(primaryMaxOffset, control.ScrollData.MaxOffset);
+        Assert.DoesNotContain("ALT-", visible, StringComparison.Ordinal);
+        Assert.DoesNotContain("Left File", visible, StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
     public void Control_OffsetScroll_MarksViewportRowsDirty()
     {
         TerminalControl control = new()

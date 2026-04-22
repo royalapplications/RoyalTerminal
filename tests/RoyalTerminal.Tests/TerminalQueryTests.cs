@@ -989,6 +989,33 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_AlternateScreenExit_RestoresPrimaryAndDropsTuiRows()
+    {
+        var screen = new TerminalScreen(18, 4, scrollbackLimit: 100);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process("MAIN-00\r\nMAIN-01\r\nMAIN-02"u8);
+        string before = ReadViewportText(screen);
+        int primaryRows = screen.TotalRows;
+
+        processor.Process("\x1b[?1049h\x1b[2JLeft File Command\r\nALT-PANEL\r\nALT-STATUS"u8);
+
+        Assert.True(processor.AlternateScreen);
+        Assert.True(screen.AlternateBufferActive);
+        Assert.Contains("ALT-", ReadViewportText(screen), StringComparison.Ordinal);
+
+        processor.Process("\x1b[?1049l"u8);
+
+        string after = ReadViewportText(screen);
+        Assert.False(processor.AlternateScreen);
+        Assert.False(screen.AlternateBufferActive);
+        Assert.Equal(primaryRows, screen.TotalRows);
+        Assert.Equal(before, after);
+        Assert.DoesNotContain("ALT-", after, StringComparison.Ordinal);
+        Assert.DoesNotContain("Left File", after, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BasicVtProcessor_DecPrivate9001_TracksState_AndRespondsToDecrqm()
     {
         var screen = new TerminalScreen(80, 24, 0);

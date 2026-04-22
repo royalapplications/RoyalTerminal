@@ -327,7 +327,9 @@ public sealed class TerminalRow
 /// </summary>
 public sealed class TerminalScreen
 {
-    private readonly List<TerminalRow> _rows;
+    private List<TerminalRow> _rows;
+    private List<TerminalRow>? _primaryRows;
+    private List<TerminalRow>? _alternateRows;
     private readonly Dictionary<int, string> _hyperlinksById = [];
     private readonly Dictionary<string, int> _hyperlinkIdsByUrl = new(StringComparer.Ordinal);
     private readonly Dictionary<int, TerminalKittyImageSource> _kittyImagesById = [];
@@ -335,6 +337,8 @@ public sealed class TerminalScreen
     private int _nextHyperlinkId = 1;
     private int _scrollbackLimit;
     private int _viewportTop;
+    private int _primaryScrollOffset;
+    private bool _alternateBufferActive;
     private TerminalTheme _theme = TerminalTheme.Dark;
     private long _themeRevision;
 
@@ -356,6 +360,9 @@ public sealed class TerminalScreen
 
     /// <summary>Maximum scroll offset.</summary>
     public int MaxScrollOffset => Math.Max(0, TotalRows - ViewportRows);
+
+    /// <summary>Whether the screen is currently rendering the alternate buffer.</summary>
+    public bool AlternateBufferActive => _alternateBufferActive;
 
     /// <summary>Default foreground color.</summary>
     public uint DefaultForeground { get; set; } = 0xFFD4D4D4;
@@ -422,10 +429,24 @@ public sealed class TerminalScreen
 
     private void RemapExistingCellColors(IReadOnlyDictionary<uint, uint> colorRemap)
     {
-        for (int rowIndex = 0; rowIndex < _rows.Count; rowIndex++)
+        RemapRowColors(_rows, colorRemap);
+
+        if (_primaryRows is not null && !ReferenceEquals(_primaryRows, _rows))
         {
-            TerminalRow row = _rows[rowIndex];
-            row.RemapCellColors(colorRemap);
+            RemapRowColors(_primaryRows, colorRemap);
+        }
+
+        if (_alternateRows is not null && !ReferenceEquals(_alternateRows, _rows))
+        {
+            RemapRowColors(_alternateRows, colorRemap);
+        }
+    }
+
+    private static void RemapRowColors(List<TerminalRow> rows, IReadOnlyDictionary<uint, uint> colorRemap)
+    {
+        for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+        {
+            rows[rowIndex].RemapCellColors(colorRemap);
         }
     }
 
@@ -611,7 +632,8 @@ public sealed class TerminalScreen
         _rows.Add(row);
 
         // Trim scrollback if exceeding limit
-        while (_rows.Count > ViewportRows + _scrollbackLimit)
+        int maxRows = ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit);
+        while (_rows.Count > maxRows)
         {
             _rows.RemoveAt(0);
         }
@@ -620,10 +642,74 @@ public sealed class TerminalScreen
     }
 
     /// <summary>
+    /// Switches the active backing rows to an isolated alternate screen buffer.
+    /// </summary>
+    public void SwitchToAlternateBuffer(bool clear)
+    {
+        if (_alternateBufferActive)
+        {
+            ScrollOffset = 0;
+            EnsureAlternateRows();
+            if (clear)
+            {
+                ClearActiveRows();
+            }
+
+            InvalidateAll();
+            return;
+        }
+
+        _primaryRows = _rows;
+        _primaryScrollOffset = _viewportTop;
+        _alternateBufferActive = true;
+        _viewportTop = 0;
+
+        _alternateRows ??= new List<TerminalRow>(ViewportRows);
+        _rows = _alternateRows;
+        EnsureAlternateRows();
+
+        if (clear)
+        {
+            ClearActiveRows();
+        }
+
+        InvalidateAll();
+    }
+
+    /// <summary>
+    /// Restores the primary screen buffer after alternate screen use.
+    /// </summary>
+    public void SwitchToPrimaryBuffer()
+    {
+        if (!_alternateBufferActive)
+        {
+            return;
+        }
+
+        _alternateRows = _rows;
+        _rows = _primaryRows ?? CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
+        _primaryRows = null;
+        _alternateBufferActive = false;
+
+        ResizeActiveRows(Columns);
+        EnsureMinimumRows(ViewportRows);
+        TrimScrollbackRows();
+        ScrollOffset = _primaryScrollOffset;
+        InvalidateAll();
+    }
+
+    /// <summary>
     /// Appends blank rows until the bottom-anchored viewport starts at or after the requested absolute row.
     /// </summary>
     public void PadBottomViewportToPreserveTop(int minimumViewportTopAbsoluteRow)
     {
+        if (_alternateBufferActive)
+        {
+            EnsureAlternateRows();
+            ScrollOffset = 0;
+            return;
+        }
+
         int targetTop = Math.Clamp(minimumViewportTopAbsoluteRow, 0, Math.Max(0, _scrollbackLimit));
         int missingRows = targetTop - Math.Max(0, TotalRows - ViewportRows);
         for (int i = 0; i < missingRows; i++)
@@ -632,6 +718,61 @@ public sealed class TerminalScreen
         }
 
         ScrollOffset = 0;
+    }
+
+    private void EnsureAlternateRows()
+    {
+        ResizeActiveRows(Columns);
+        EnsureMinimumRows(ViewportRows);
+        if (_rows.Count > ViewportRows)
+        {
+            _rows.RemoveRange(ViewportRows, _rows.Count - ViewportRows);
+        }
+
+        ScrollOffset = 0;
+    }
+
+    private void ClearActiveRows()
+    {
+        for (int rowIndex = 0; rowIndex < _rows.Count; rowIndex++)
+        {
+            _rows[rowIndex].Clear(DefaultForeground, DefaultBackground);
+        }
+    }
+
+    private void ResizeActiveRows(int columns)
+    {
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            _rows[i].Resize(columns, DefaultForeground, DefaultBackground);
+        }
+    }
+
+    private void EnsureMinimumRows(int rows)
+    {
+        while (_rows.Count < rows)
+        {
+            _rows.Add(new TerminalRow(Columns, DefaultForeground, DefaultBackground));
+        }
+    }
+
+    private void TrimScrollbackRows()
+    {
+        while (_rows.Count > ViewportRows + _scrollbackLimit)
+        {
+            _rows.RemoveAt(0);
+        }
+    }
+
+    private static List<TerminalRow> CreateRows(int columns, int rows, uint defaultForeground, uint defaultBackground)
+    {
+        List<TerminalRow> result = new(rows);
+        for (int i = 0; i < rows; i++)
+        {
+            result.Add(new TerminalRow(columns, defaultForeground, defaultBackground));
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -677,10 +818,20 @@ public sealed class TerminalScreen
         }
 
         int removedRows = 0;
-        while (_rows.Count > ViewportRows + _scrollbackLimit)
+        if (_alternateBufferActive)
         {
-            _rows.RemoveAt(0);
-            removedRows++;
+            if (_rows.Count > ViewportRows)
+            {
+                _rows.RemoveRange(ViewportRows, _rows.Count - ViewportRows);
+            }
+        }
+        else
+        {
+            while (_rows.Count > ViewportRows + _scrollbackLimit)
+            {
+                _rows.RemoveAt(0);
+                removedRows++;
+            }
         }
 
         if (mappedAbsoluteRow >= 0)
