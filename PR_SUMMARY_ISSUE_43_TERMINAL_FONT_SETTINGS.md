@@ -8,7 +8,7 @@ It adds first-class terminal font configuration, fixes wheel scrolling that coul
 
 The user-facing result is that RoyalTerminal now behaves closer to native terminals such as Ghostty when a terminal is narrowed and widened again: long command output is reflowed instead of being permanently cut off, while fullscreen alternate-screen applications remain free to redraw themselves on resize.
 
-## Branch Commits
+## Implementation Commits
 
 - `620faed` `feat: add configurable terminal font support`
 - `85e4994` `feat: expose terminal font settings in UI`
@@ -17,7 +17,6 @@ The user-facing result is that RoyalTerminal now behaves closer to native termin
 - `2ca9c6d` `fix: preserve row content across horizontal resize`
 - `6453345` `fix: reflow terminal rows on horizontal resize`
 - `77e7aa1` `fix: keep live cursor anchored during scrolled resize`
-- `ddbea41` `docs: add issue 43 pr summary`
 
 ## User-Facing Changes
 
