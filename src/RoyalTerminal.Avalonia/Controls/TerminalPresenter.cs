@@ -21,6 +21,8 @@ public class TerminalPresenter : Control
     private CompositionCustomVisual? _compositionVisual;
     private SkiaTerminalRenderer? _renderer;
     private TerminalScreen? _screen;
+    private IReadOnlyList<TerminalShaderSource>? _shaderSources;
+    private bool _shaderAnimationEnabled;
     private bool _compositionCommitPending;
 
     /// <summary>
@@ -62,6 +64,7 @@ public class TerminalPresenter : Control
 
         if (_renderer is not null && _screen is not null)
             SendUpdate();
+        SendShaderUpdate();
     }
 
     protected override Size ArrangeOverride(Size finalSize)
@@ -104,6 +107,16 @@ public class TerminalPresenter : Control
     }
 
     /// <summary>
+    /// Sets the terminal framebuffer shader sources for this presenter.
+    /// </summary>
+    public void SetShaderState(IReadOnlyList<TerminalShaderSource>? shaderSources, bool animationEnabled)
+    {
+        _shaderSources = shaderSources;
+        _shaderAnimationEnabled = animationEnabled;
+        SendShaderUpdate();
+    }
+
+    /// <summary>
     /// Sends an update message to the composition handler.
     /// Retries composition initialization if the visual isn't ready yet.
     /// </summary>
@@ -118,6 +131,7 @@ public class TerminalPresenter : Control
         if (_renderer is null || _screen is null) return;
         _compositionVisual.SendHandlerMessage(
             new TerminalDrawHandler.UpdateMessage(_renderer, _screen));
+        SendShaderUpdate();
         RequestCompositionCommit();
     }
 
@@ -167,6 +181,17 @@ public class TerminalPresenter : Control
 
         _compositionCommitPending = true;
         compositionVisual.Compositor.RequestCompositionUpdate(_completeCompositionCommit);
+    }
+
+    private void SendShaderUpdate()
+    {
+        if (_compositionVisual is null)
+        {
+            return;
+        }
+
+        _compositionVisual.SendHandlerMessage(
+            new TerminalDrawHandler.ShaderStateMessage(_shaderSources, _shaderAnimationEnabled));
     }
 
     private void CompleteCompositionCommit()

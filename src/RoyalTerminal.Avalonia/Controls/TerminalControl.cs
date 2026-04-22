@@ -138,6 +138,28 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private TerminalTheme? _theme;
 
+    /// <summary>
+    /// Configured terminal framebuffer shader sources.
+    /// </summary>
+    public static readonly DirectProperty<TerminalControl, IReadOnlyList<TerminalShaderSource>?> ShaderSourcesProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, IReadOnlyList<TerminalShaderSource>?>(
+            nameof(ShaderSources),
+            o => o.ShaderSources,
+            (o, v) => o.ShaderSources = v);
+
+    private IReadOnlyList<TerminalShaderSource>? _shaderSources;
+
+    /// <summary>
+    /// Whether configured framebuffer shaders may request continuous animation frames.
+    /// </summary>
+    public static readonly DirectProperty<TerminalControl, bool> ShaderAnimationEnabledProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, bool>(
+            nameof(ShaderAnimationEnabled),
+            o => o.ShaderAnimationEnabled,
+            (o, v) => o.ShaderAnimationEnabled = v);
+
+    private bool _shaderAnimationEnabled = true;
+
     public string FontFamilyName
     {
         get => GetValue(FontFamilyNameProperty);
@@ -223,6 +245,43 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         get => _theme;
         set => SetAndRaise(ThemeProperty, ref _theme, value);
+    }
+
+    /// <summary>
+    /// Gets or sets terminal framebuffer shader sources.
+    /// </summary>
+    public IReadOnlyList<TerminalShaderSource>? ShaderSources
+    {
+        get => _shaderSources;
+        set
+        {
+            IReadOnlyList<TerminalShaderSource>? next = NormalizeShaderSources(value);
+            if (ReferenceEquals(_shaderSources, next))
+            {
+                return;
+            }
+
+            SetAndRaise(ShaderSourcesProperty, ref _shaderSources, next);
+            UpdatePresenterShaderState();
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets whether configured shaders can animate without terminal output.
+    /// </summary>
+    public bool ShaderAnimationEnabled
+    {
+        get => _shaderAnimationEnabled;
+        set
+        {
+            if (_shaderAnimationEnabled == value)
+            {
+                return;
+            }
+
+            SetAndRaise(ShaderAnimationEnabledProperty, ref _shaderAnimationEnabled, value);
+            UpdatePresenterShaderState();
+        }
     }
 
     #endregion
@@ -1089,6 +1148,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 _presenter.SetRenderState(_renderer, _screen);
             }
 
+            UpdatePresenterShaderState();
             return;
         }
 
@@ -1101,6 +1161,33 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             _presenter.SetRenderState(_renderer, _screen);
         }
+
+        UpdatePresenterShaderState();
+    }
+
+    private void UpdatePresenterShaderState()
+    {
+        _presenter?.SetShaderState(_shaderSources, _shaderAnimationEnabled);
+        _presenter?.Invalidate(fullRedraw: true);
+    }
+
+    private static IReadOnlyList<TerminalShaderSource>? NormalizeShaderSources(
+        IReadOnlyList<TerminalShaderSource>? sources)
+    {
+        if (sources is null || sources.Count == 0)
+        {
+            return null;
+        }
+
+        TerminalShaderSource[] copy = new TerminalShaderSource[sources.Count];
+        for (int i = 0; i < sources.Count; i++)
+        {
+            copy[i] = sources[i] ?? throw new ArgumentException(
+                "Shader source collection cannot contain null entries.",
+                nameof(sources));
+        }
+
+        return copy;
     }
 
     private void RefreshPresenterRenderState(bool fullRedraw)
