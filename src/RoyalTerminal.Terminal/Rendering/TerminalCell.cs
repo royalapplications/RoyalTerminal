@@ -730,38 +730,21 @@ public sealed class TerminalScreen
             while (hasContinuation);
 
             int destinationStartRow = reflowedRows.Count;
-            AppendReflowedLogicalLine(logicalLine, columns, reflowedRows);
+            TerminalGridPosition? mappedLinePosition = AppendReflowedLogicalLine(
+                logicalLine,
+                columns,
+                reflowedRows,
+                trackedLogicalOffset);
 
-            if (trackedLogicalOffset >= 0)
+            if (mappedLinePosition is { } mappedPosition)
             {
-                mappedAbsoluteRow = destinationStartRow + GetReflowedCursorRow(trackedLogicalOffset, columns);
-                mappedColumn = GetReflowedCursorColumn(trackedLogicalOffset, columns);
+                mappedAbsoluteRow = destinationStartRow + mappedPosition.Row;
+                mappedColumn = mappedPosition.Column;
             }
         }
 
         _rows.Clear();
         _rows.AddRange(reflowedRows);
-    }
-
-    private static int GetReflowedCursorRow(int logicalOffset, int columns)
-    {
-        if (logicalOffset <= 0)
-        {
-            return 0;
-        }
-
-        return (logicalOffset - 1) / columns;
-    }
-
-    private static int GetReflowedCursorColumn(int logicalOffset, int columns)
-    {
-        if (logicalOffset <= 0)
-        {
-            return 0;
-        }
-
-        int column = logicalOffset % columns;
-        return column == 0 ? columns : column;
     }
 
     private int GetReflowEndExclusive(TerminalRow row)
@@ -796,25 +779,37 @@ public sealed class TerminalScreen
             !cell.HasBackground;
     }
 
-    private void AppendReflowedLogicalLine(
+    private TerminalGridPosition? AppendReflowedLogicalLine(
         List<TerminalCell> logicalLine,
         int columns,
-        List<TerminalRow> destination)
+        List<TerminalRow> destination,
+        int trackedLogicalOffset)
     {
+        int destinationStart = destination.Count;
+        TerminalGridPosition? mappedPosition = null;
+
         if (logicalLine.Count == 0)
         {
             destination.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground));
-            return;
+            return trackedLogicalOffset >= 0
+                ? new TerminalGridPosition(0, 0)
+                : null;
         }
 
         int sourceIndex = 0;
         while (sourceIndex < logicalLine.Count)
         {
             TerminalRow row = new(columns, DefaultForeground, DefaultBackground);
+            int destinationRow = destination.Count - destinationStart;
             int column = 0;
 
             while (sourceIndex < logicalLine.Count && column < columns)
             {
+                if (mappedPosition is null && trackedLogicalOffset >= 0 && trackedLogicalOffset <= sourceIndex)
+                {
+                    mappedPosition = new TerminalGridPosition(column, destinationRow);
+                }
+
                 TerminalCell cell = logicalLine[sourceIndex];
                 if (cell.Width == 0)
                 {
@@ -822,11 +817,19 @@ public sealed class TerminalScreen
                     continue;
                 }
 
-                int sourceStep = cell.Width <= 1 ? 1 : 2;
-                int width = sourceStep;
-                if (columns == 1)
+                int sourceStep = GetReflowSourceStep(logicalLine, sourceIndex);
+                int width = cell.Width <= 1 ? 1 : 2;
+                if (width == 2 && columns == 1)
                 {
-                    width = 1;
+                    sourceIndex += sourceStep;
+                    column++;
+
+                    if (mappedPosition is null && trackedLogicalOffset >= 0 && trackedLogicalOffset <= sourceIndex)
+                    {
+                        mappedPosition = new TerminalGridPosition(column, destinationRow);
+                    }
+
+                    continue;
                 }
 
                 if (width == 2 && column == columns - 1)
@@ -844,11 +847,37 @@ public sealed class TerminalScreen
 
                 sourceIndex += sourceStep;
                 column += width;
+
+                if (mappedPosition is null && trackedLogicalOffset >= 0 && trackedLogicalOffset <= sourceIndex)
+                {
+                    mappedPosition = new TerminalGridPosition(column, destinationRow);
+                }
             }
 
             row.WrapsToNext = sourceIndex < logicalLine.Count;
             destination.Add(row);
         }
+
+        if (mappedPosition is null && trackedLogicalOffset >= 0)
+        {
+            int lastRow = Math.Max(0, destination.Count - destinationStart - 1);
+            mappedPosition = new TerminalGridPosition(0, lastRow);
+        }
+
+        return mappedPosition;
+    }
+
+    private static int GetReflowSourceStep(List<TerminalCell> logicalLine, int sourceIndex)
+    {
+        TerminalCell cell = logicalLine[sourceIndex];
+        if (cell.Width <= 1)
+        {
+            return 1;
+        }
+
+        return sourceIndex + 1 < logicalLine.Count && logicalLine[sourceIndex + 1].Width == 0
+            ? 2
+            : 1;
     }
 
     private static TerminalCell CreateWideSpacer(TerminalCell source) => new()

@@ -171,6 +171,58 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_ResizeWithReflowToOneColumn_DropsWideCharacterAsBlankCell()
+    {
+        TerminalScreen screen = new(2, 1);
+        TerminalRow row = screen.GetViewportRow(0);
+        row[0].Codepoint = 0x1F600;
+        row[0].Width = 2;
+        row[1].Width = 0;
+
+        screen.Resize(1, 1);
+
+        TerminalRow resized = screen.GetViewportRow(0);
+        Assert.Equal(1, resized.Columns);
+        Assert.False(resized[0].HasContent);
+        Assert.Equal(1, resized[0].Width);
+    }
+
+    [Fact]
+    public void TerminalScreen_ResizeWithReflow_WrapsWideCharacterWhenItDoesNotFit()
+    {
+        TerminalScreen screen = new(3, 2);
+        TerminalRow row = screen.GetViewportRow(0);
+        row[0].Codepoint = 'x';
+        row[1].Codepoint = 0x1F600;
+        row[1].Width = 2;
+        row[2].Width = 0;
+
+        screen.Resize(2, 2);
+
+        TerminalRow first = screen.GetRow(0);
+        TerminalRow second = screen.GetRow(1);
+        Assert.Equal('x', first[0].Codepoint);
+        Assert.True(first.WrapsToNext);
+        Assert.Equal(0x1F600, second[0].Codepoint);
+        Assert.Equal(2, second[0].Width);
+        Assert.Equal(0, second[1].Width);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ResizeWithReflowToOneColumn_TracksCursorAfterDroppedWideCharacter()
+    {
+        TerminalScreen screen = new(2, 3);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process(Encoding.UTF8.GetBytes(char.ConvertFromUtf32(0x1F600)));
+        processor.ResizeScreen(columns: 1, rows: 3, widthPx: 10, heightPx: 48, reflowOnResize: true);
+        processor.Process(Encoding.UTF8.GetBytes("X"));
+
+        Assert.False(screen.GetViewportRow(0)[0].HasContent);
+        Assert.Equal('X', screen.GetViewportRow(1)[0].Codepoint);
+    }
+
+    [Fact]
     public void TerminalScreen_ResizeWithoutReflow_HidesAndRestoresBufferedCells()
     {
         TerminalScreen screen = new(12, 3);
