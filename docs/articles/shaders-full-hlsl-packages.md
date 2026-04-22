@@ -34,6 +34,8 @@ The implemented foundation includes:
 | Runtime contracts | Implemented through `ITerminalShaderRuntime`, runtime program/frame models, capabilities, and unavailable-backend diagnostics. |
 | Runtime frame validation | Implemented through `TerminalShaderRuntimeValidator.ValidateFrameResources`. |
 | Runtime orchestration | Implemented through `TerminalShaderRuntimePipeline` for external resource resolution and validation-gated frame execution. |
+| Backend preference and diagnostics | Implemented through `TerminalShaderBackendPreference`, `TerminalShaderBackendSelector`, and `ITerminalShaderDiagnosticsSink`. |
+| Avalonia package configuration | Implemented through `TerminalControl.ShaderPackage`, `ShaderBackendPreference`, `ShaderResourceProvider`, and `ShaderDiagnosticsSink`. |
 | Native GPU execution | Not implemented yet. D3D11/D3D12/Vulkan/Metal runtime backends still need native execution code. |
 
 The important distinction is that HLSL compilation can now be represented and executed through a real compiler backend, but applying compiled DXIL/SPIR-V/MSL to the terminal frame still requires a native runtime backend.
@@ -227,6 +229,19 @@ TerminalShaderFrameResult result =
 
 `TerminalShaderUnavailableRuntime` is provided as a deterministic diagnostic runtime when a backend is requested but unavailable.
 
+## Avalonia control surface
+
+`TerminalControl` exposes the full-package configuration surface separately from `ShaderSources`:
+
+```csharp
+terminal.ShaderPackage = package;
+terminal.ShaderBackendPreference = TerminalShaderBackendPreference.D3D11;
+terminal.ShaderResourceProvider = resourceProvider;
+terminal.ShaderDiagnosticsSink = diagnosticsSink;
+```
+
+The control validates assigned packages and reports backend availability through `ShaderDiagnosticsSink`. Native execution is still pending; until a D3D/Vulkan/Metal runtime is registered and wired into the renderer, the control emits `RTSHADERCONTROL001` and continues rendering without package shaders.
+
 ## Testing surface
 
 The current tests cover:
@@ -243,6 +258,8 @@ The current tests cover:
 - runtime capability validation
 - runtime frame resource validation
 - runtime pipeline resource resolution and validation-gated execution
+- backend preference selection and deterministic unavailable-runtime creation
+- `TerminalControl` full-package properties and unavailable-backend diagnostics
 - unavailable runtime diagnostics
 
 Native GPU runtime tests should be added with backend gates when D3D11, D3D12, Vulkan, or Metal execution backends are implemented.

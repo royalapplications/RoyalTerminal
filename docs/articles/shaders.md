@@ -37,6 +37,10 @@ Because the shader runs after terminal drawing, it affects everything in the fra
 | --- | --- | --- |
 | `TerminalControl.ShaderSources` | `RoyalTerminal.Avalonia` | Optional shader chain applied to the completed terminal frame. |
 | `TerminalControl.ShaderAnimationEnabled` | `RoyalTerminal.Avalonia` | Allows shaders that request animation to keep the render loop active between terminal updates. |
+| `TerminalControl.ShaderPackage` | `RoyalTerminal.Avalonia` | Compiler-backed full shader package configuration surface. Native execution backends are still required before packages render. |
+| `TerminalControl.ShaderBackendPreference` | `RoyalTerminal.Avalonia` | Preferred backend for full shader packages. |
+| `TerminalControl.ShaderResourceProvider` | `RoyalTerminal.Avalonia` | Optional external resource provider for full shader packages. |
+| `TerminalControl.ShaderDiagnosticsSink` | `RoyalTerminal.Avalonia` | Optional diagnostics sink for package validation and backend availability diagnostics. |
 | `TerminalShaderSource` | `RoyalTerminal.Shaders` | One named shader source plus language and animation metadata. |
 | `TerminalShaderLanguage` | `RoyalTerminal.Shaders` | Selects direct SkSL, Ghostty/Shadertoy compatibility, or Windows Terminal HLSL compatibility. |
 | `TerminalShaderSourceTranslator` | `RoyalTerminal.Shaders` | Dependency-free source translator used by the Skia adapter. |
@@ -48,6 +52,7 @@ Because the shader runs after terminal drawing, it affects everything in the fra
 | `TerminalShaderSlangCliCompiler` | `RoyalTerminal.Shaders` | Slang command-line compiler integration for DXIL, SPIR-V, and MSL targets. |
 | `TerminalShaderCachingCompiler` | `RoyalTerminal.Shaders` | Deterministic compilation cache wrapper. |
 | `TerminalShaderHlslReflectionScanner` | `RoyalTerminal.Shaders` | Source-side HLSL reflection preflight for resources and semantics. |
+| `TerminalShaderBackendSelector` | `RoyalTerminal.Shaders` | Maps backend preferences to platform defaults and deterministic unavailable runtimes. |
 | `ITerminalShaderRuntime` | `RoyalTerminal.Shaders` | Backend-neutral runtime contract for compiled packages. |
 | `TerminalShaderRuntimePipeline` | `RoyalTerminal.Shaders` | Backend-neutral frame resource resolution and runtime validation orchestration. |
 

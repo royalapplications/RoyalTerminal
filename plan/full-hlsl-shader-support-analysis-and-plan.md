@@ -45,6 +45,9 @@ Completed:
 - Implemented backend capability validation and frame resource validation through `TerminalShaderRuntimeValidator`.
 - Implemented runtime contracts, runtime program/frame/result models, resource values, resource providers, and `TerminalShaderUnavailableRuntime`.
 - Implemented runtime orchestration through `TerminalShaderRuntimePipeline`, including external resource resolution and validation-gated frame execution.
+- Implemented backend preference selection through `TerminalShaderBackendPreference` and `TerminalShaderBackendSelector`.
+- Implemented shader diagnostics sink contract through `ITerminalShaderDiagnosticsSink`.
+- Implemented the `TerminalControl.ShaderPackage`, `ShaderBackendPreference`, `ShaderResourceProvider`, and `ShaderDiagnosticsSink` configuration surface with deterministic unavailable-backend diagnostics.
 - Added tests for package validation, include resolution, compiler orchestration, DXC diagnostics, Slang diagnostics, compiler caching, reflection preflight, runtime capability validation, runtime frame validation, runtime pipeline gating, and unavailable runtime diagnostics.
 - Updated public docs and API package configuration for `RoyalTerminal.Shaders`.
 
@@ -52,21 +55,34 @@ Partially complete:
 
 - Reflection is currently source-side and deterministic. Native compiler reflection extraction from DXIL, SPIR-V, or Slang reflection metadata remains to be implemented for runtime backends.
 - Compiler support is CLI-based. Native `dxcompiler` and `slang` hosting remain future improvements.
-- Runtime validation detects missing external resources, resource-kind mismatches, UAV capability issues, unsupported stages, and texture-size limit violations. It does not execute passes yet.
+- Runtime validation detects missing external resources, resource-kind mismatches, UAV capability issues, unsupported stages, and texture-size limit violations. The control API reports unavailable native execution, but it does not execute package passes yet.
 
 Not complete:
 
 - D3D11/D3D12/Vulkan/Metal native GPU runtime backends.
 - Zero-copy Skia/Avalonia GPU texture import for full HLSL output.
-- `TerminalControl.ShaderPackage` runtime execution path.
+- `TerminalControl.ShaderPackage` native runtime execution path.
 - Golden image tests and GPU runtime tests gated by backend availability.
 - Corpus and performance test suites.
 
 Current next implementation priority:
 
 1. Add a D3D11 runtime package and Windows-gated tests.
-2. Wire `TerminalControl.ShaderPackage` to runtime selection with fallback diagnostics.
+2. Wire `TerminalControl.ShaderPackage` to an actual registered D3D11 runtime once that backend exists.
 3. Add compiler-native reflection extraction so runtime binding no longer relies on source preflight.
+
+### Remaining Phase Status
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| Phase 0: Design lock | Mostly complete | Public names and backend strategy are represented in the plan; final native dependency packaging is still open. |
+| Phase 1: Package model and validation | Complete | Package/files/passes/resources/options/diagnostics/include validation are implemented and tested. |
+| Phase 2: Compiler abstraction | Mostly complete | DXC and Slang CLI paths, cache keys, and compiler tests exist. Native compiler hosting and compiler version keys remain open. |
+| Phase 3: Reflection and binding | Partially complete | Source-side reflection preflight exists. Compiler-native DXIL/SPIR-V/Slang reflection and resource binding maps remain open. |
+| Phase 4: First runtime backend | Not complete | D3D11 runtime package, pixel/compute execution, UAV/cbuffer binding, readback, and texture copy/import are still required. |
+| Phase 5: Avalonia integration | Partially complete | Control properties, backend preference, resource provider, and diagnostics sink exist. Actual package execution awaits native runtime backend registration. |
+| Phase 6: Cross-platform backends | Not complete | Vulkan and Metal runtime packages remain future work after D3D11 MVP. |
+| Phase 7: Corpus, docs, and demo | Partially complete | Docs and simple shader samples exist. Full HLSL package corpus, package loader, GPU golden images, and performance suites remain open. |
 
 ## Source-Grounded Constraints
 

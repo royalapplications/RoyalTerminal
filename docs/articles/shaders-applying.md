@@ -4,9 +4,10 @@ title: Applying Shaders
 
 # Applying Shaders
 
-RoyalTerminal exposes shaders at two levels:
+RoyalTerminal exposes shaders at three levels:
 
 - `TerminalControl.ShaderSources` for Avalonia hosts
+- `TerminalControl.ShaderPackage` for compiler-backed full HLSL packages
 - `TerminalShaderPostProcessor` for lower-level Skia render integration and tests
 
 Most applications should use `TerminalControl`.
@@ -71,6 +72,22 @@ Terminal.ShaderAnimationEnabled = true;
 ```
 
 Keep the ViewModel framework-agnostic by storing shader selections as application state and creating `TerminalShaderSource` values in a presentation service or adapter.
+
+## Bind compiler-backed packages
+
+Full HLSL packages use a separate control surface:
+
+```xml
+<rt:TerminalControl
+    ShaderPackage="{Binding ActiveShaderPackage}"
+    ShaderBackendPreference="{Binding ShaderBackendPreference}"
+    ShaderResourceProvider="{Binding ShaderResourceProvider}"
+    ShaderDiagnosticsSink="{Binding ShaderDiagnosticsSink}" />
+```
+
+`ShaderPackage` is the configuration entry point for compiler-backed HLSL packages. `ShaderBackendPreference` selects the requested native backend, `ShaderResourceProvider` supplies external textures and buffers, and `ShaderDiagnosticsSink` receives validation or backend availability diagnostics.
+
+Native full-HLSL execution backends are not implemented yet. When a package is assigned today, `TerminalControl` reports `RTSHADERCONTROL001` through the diagnostics sink and renders without package shaders. Keep using `ShaderSources` for currently executable Skia Runtime Effect, Ghostty/Shadertoy, and Windows Terminal sample-compatible shaders.
 
 ## Chain multiple shaders
 
