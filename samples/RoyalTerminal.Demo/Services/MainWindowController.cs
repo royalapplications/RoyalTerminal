@@ -2244,8 +2244,12 @@ internal sealed class MainWindowController
 
     private void ApplyShaderSampleToControl(TerminalControl control)
     {
+        TerminalShaderPackage? package =
+            TerminalShaderSampleCatalog.GetPackage(_viewModel.SelectedShaderSample.Id);
         IReadOnlyList<TerminalShaderSource>? sources =
-            TerminalShaderSampleCatalog.GetSources(_viewModel.SelectedShaderSample.Id);
+            package is null ? TerminalShaderSampleCatalog.GetSources(_viewModel.SelectedShaderSample.Id) : null;
+
+        control.ShaderPackage = package;
         control.ShaderSources = sources;
         control.ShaderAnimationEnabled = true;
     }

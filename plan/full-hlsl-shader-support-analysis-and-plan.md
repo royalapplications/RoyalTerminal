@@ -31,7 +31,7 @@ This supports common Windows Terminal shader samples but cannot become a full HL
 
 ## Progress Update 2026-04-22
 
-Implementation has moved beyond the original source-adapter-only state, but the full native GPU execution backend is still the main remaining gap.
+Implementation has moved beyond the original source-adapter-only state. The managed package execution bridge and first native backend package now exist, but cross-platform native backends and zero-copy presentation are still the main remaining gaps.
 
 Completed:
 
@@ -45,31 +45,40 @@ Completed:
 - Implemented backend capability validation and frame resource validation through `TerminalShaderRuntimeValidator`.
 - Implemented runtime contracts, runtime program/frame/result models, resource values, resource providers, and `TerminalShaderUnavailableRuntime`.
 - Implemented runtime orchestration through `TerminalShaderRuntimePipeline`, including external resource resolution and validation-gated frame execution.
+- Implemented built-in terminal framebuffer resource propagation for full shader package frames.
+- Implemented `ITerminalShaderPackageExecutor` and `TerminalShaderCompilerRuntimePackageExecutor` so a package can compile once, cache its runtime program, and execute frames through a concrete runtime.
 - Implemented backend preference selection through `TerminalShaderBackendPreference` and `TerminalShaderBackendSelector`.
 - Implemented shader diagnostics sink contract through `ITerminalShaderDiagnosticsSink`.
-- Implemented the `TerminalControl.ShaderPackage`, `ShaderBackendPreference`, `ShaderResourceProvider`, and `ShaderDiagnosticsSink` configuration surface with deterministic unavailable-backend diagnostics.
+- Implemented the `TerminalControl.ShaderPackage`, `ShaderBackendPreference`, `ShaderResourceProvider`, `ShaderDiagnosticsSink`, and `ShaderPackageExecutor` configuration surface.
+- Implemented real `TerminalControl.ShaderPackage` propagation through `TerminalPresenter` and `TerminalDrawHandler`, including terminal framebuffer capture, runtime frame creation, package execution, diagnostic reporting, CPU pixel fallback drawing, and native-texture fallback diagnostics.
+- Implemented the `RoyalTerminal.Shaders.D3D11` project with a Windows-only D3DCompiler DXBC compiler path and a Direct3D 11 runtime backend skeleton that creates native shaders, binds SRV/UAV/sampler/cbuffer resources, executes pixel and compute passes, and reads back the final frame for tests/presentation fallback.
+- Added full HLSL package samples to the demo catalog: CRT bloom, two-pass bloom blur, and compute phosphor.
 - Added tests for package validation, include resolution, compiler orchestration, DXC diagnostics, Slang diagnostics, compiler caching, reflection preflight, runtime capability validation, runtime frame validation, runtime pipeline gating, and unavailable runtime diagnostics.
+- Added tests for package executor caching, built-in framebuffer resources, control behavior with an executor, demo package validation, D3D11 non-Windows gating, and an opt-in D3D11 GPU smoke test behind `ROYALTERMINAL_TEST_D3D11=1`.
 - Updated public docs and API package configuration for `RoyalTerminal.Shaders`.
 
 Partially complete:
 
 - Reflection is currently source-side and deterministic. Native compiler reflection extraction from DXIL, SPIR-V, or Slang reflection metadata remains to be implemented for runtime backends.
 - Compiler support is CLI-based. Native `dxcompiler` and `slang` hosting remain future improvements.
-- Runtime validation detects missing external resources, resource-kind mismatches, UAV capability issues, unsupported stages, and texture-size limit violations. The control API reports unavailable native execution, but it does not execute package passes yet.
+- Runtime validation detects missing external resources, resource-kind mismatches, UAV capability issues, unsupported stages, and texture-size limit violations.
+- Direct3D 11 execution is implemented as the first native backend path, but it still needs Windows GPU validation for the opt-in smoke test and broader resource-binding/corpus coverage before it should be treated as production complete.
+- `TerminalControl` can execute packages through an injected executor today. The demo app ships package samples, but it does not yet auto-create a platform runtime/compiler because native runtime registration and trust policy need composition-root wiring.
 
 Not complete:
 
-- D3D11/D3D12/Vulkan/Metal native GPU runtime backends.
+- D3D12/Vulkan/Metal native GPU runtime backends.
+- Compiler-native DXIL, SPIR-V, and Slang reflection extraction.
 - Zero-copy Skia/Avalonia GPU texture import for full HLSL output.
-- `TerminalControl.ShaderPackage` native runtime execution path.
-- Golden image tests and GPU runtime tests gated by backend availability.
-- Corpus and performance test suites.
+- Runtime registration/composition root wiring for demo/application opt-in execution.
+- Golden image tests, full corpus tests, and performance test suites.
 
 Current next implementation priority:
 
-1. Add a D3D11 runtime package and Windows-gated tests.
-2. Wire `TerminalControl.ShaderPackage` to an actual registered D3D11 runtime once that backend exists.
-3. Add compiler-native reflection extraction so runtime binding no longer relies on source preflight.
+1. Validate and harden the D3D11 backend on Windows with `ROYALTERMINAL_TEST_D3D11=1`.
+2. Add compiler-native reflection extraction so runtime binding no longer relies on source preflight.
+3. Add platform runtime registration and zero-copy import adapters.
+4. Implement Vulkan and Metal runtimes after D3D11 validation is stable.
 
 ### Remaining Phase Status
 
@@ -78,11 +87,11 @@ Current next implementation priority:
 | Phase 0: Design lock | Mostly complete | Public names and backend strategy are represented in the plan; final native dependency packaging is still open. |
 | Phase 1: Package model and validation | Complete | Package/files/passes/resources/options/diagnostics/include validation are implemented and tested. |
 | Phase 2: Compiler abstraction | Mostly complete | DXC and Slang CLI paths, cache keys, and compiler tests exist. Native compiler hosting and compiler version keys remain open. |
-| Phase 3: Reflection and binding | Partially complete | Source-side reflection preflight exists. Compiler-native DXIL/SPIR-V/Slang reflection and resource binding maps remain open. |
-| Phase 4: First runtime backend | Not complete | D3D11 runtime package, pixel/compute execution, UAV/cbuffer binding, readback, and texture copy/import are still required. |
-| Phase 5: Avalonia integration | Partially complete | Control properties, backend preference, resource provider, and diagnostics sink exist. Actual package execution awaits native runtime backend registration. |
+| Phase 3: Reflection and binding | Partially complete | Source-side reflection preflight exists and D3D11 consumes reflected/source binding records. Compiler-native DXIL/SPIR-V/Slang reflection and full binding maps remain open. |
+| Phase 4: First runtime backend | Partially complete | `RoyalTerminal.Shaders.D3D11` now contains DXBC compilation, native shader creation, SRV/UAV/sampler/cbuffer binding, pixel/compute pass execution, and readback. Windows GPU validation and hardening remain. |
+| Phase 5: Avalonia integration | Mostly complete | Control properties, backend preference, resource provider, diagnostics sink, package executor, runtime frame creation, and CPU fallback drawing exist. Runtime registration and zero-copy import remain. |
 | Phase 6: Cross-platform backends | Not complete | Vulkan and Metal runtime packages remain future work after D3D11 MVP. |
-| Phase 7: Corpus, docs, and demo | Partially complete | Docs and simple shader samples exist. Full HLSL package corpus, package loader, GPU golden images, and performance suites remain open. |
+| Phase 7: Corpus, docs, and demo | Partially complete | Docs, simple shader samples, and full HLSL package samples exist. Full corpus, GPU golden images, package runtime registration UI, and performance suites remain open. |
 
 ## Source-Grounded Constraints
 

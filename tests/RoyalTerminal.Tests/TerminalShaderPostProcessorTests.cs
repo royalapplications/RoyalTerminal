@@ -17,17 +17,33 @@ public sealed class TerminalShaderPostProcessorTests
     {
         foreach (TerminalShaderSampleOption option in TerminalShaderSampleCatalog.Options)
         {
-            if (string.Equals(option.Id, TerminalShaderSampleCatalog.OffShaderId, StringComparison.Ordinal))
+            IReadOnlyList<TerminalShaderSource>? sources = TerminalShaderSampleCatalog.GetSources(option.Id);
+            if (sources is null)
             {
                 continue;
             }
-
-            IReadOnlyList<TerminalShaderSource>? sources = TerminalShaderSampleCatalog.GetSources(option.Id);
 
             using TerminalShaderPostProcessor processor = TerminalShaderPostProcessor.Create(sources);
 
             Assert.True(processor.HasShaders, processor.CompileLog);
             Assert.True(string.IsNullOrWhiteSpace(processor.CompileLog), processor.CompileLog);
+        }
+    }
+
+    [Fact]
+    public void DemoShaderPackageSamples_Validate()
+    {
+        foreach (TerminalShaderSampleOption option in TerminalShaderSampleCatalog.Options)
+        {
+            TerminalShaderPackage? package = TerminalShaderSampleCatalog.GetPackage(option.Id);
+            if (package is null)
+            {
+                continue;
+            }
+
+            TerminalShaderPackageValidationResult result = TerminalShaderPackageValidator.Validate(package);
+
+            Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Diagnostics));
         }
     }
 

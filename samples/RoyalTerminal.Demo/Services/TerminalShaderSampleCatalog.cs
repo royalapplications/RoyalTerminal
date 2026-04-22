@@ -15,6 +15,9 @@ internal static class TerminalShaderSampleCatalog
     public const string HueShiftShaderId = "hue-shift";
     public const string TransparentKeyShaderId = "transparent-key";
     public const string RetroScanlinesShaderId = "retro-scanlines";
+    public const string PackageCrtBloomShaderId = "package-crt-bloom";
+    public const string PackageBloomBlurShaderId = "package-bloom-blur";
+    public const string PackageComputePhosphorShaderId = "package-compute-phosphor";
 
     public static IReadOnlyList<TerminalShaderSampleOption> Options { get; } =
     [
@@ -23,6 +26,9 @@ internal static class TerminalShaderSampleCatalog
         new TerminalShaderSampleOption(HueShiftShaderId, "Hue Shift"),
         new TerminalShaderSampleOption(TransparentKeyShaderId, "Transparent Key"),
         new TerminalShaderSampleOption(RetroScanlinesShaderId, "Retro Scanlines"),
+        new TerminalShaderSampleOption(PackageCrtBloomShaderId, "Full HLSL CRT Bloom"),
+        new TerminalShaderSampleOption(PackageBloomBlurShaderId, "Full HLSL Bloom Blur"),
+        new TerminalShaderSampleOption(PackageComputePhosphorShaderId, "Full HLSL Compute Phosphor"),
     ];
 
     public static IReadOnlyList<TerminalShaderSource>? GetSources(string? shaderId)
@@ -56,6 +62,17 @@ internal static class TerminalShaderSampleCatalog
                     RetroScanlinesSource,
                     requiresContinuousAnimation: true),
             ],
+            _ => null,
+        };
+    }
+
+    public static TerminalShaderPackage? GetPackage(string? shaderId)
+    {
+        return shaderId switch
+        {
+            PackageCrtBloomShaderId => CreateCrtBloomPackage(),
+            PackageBloomBlurShaderId => CreateBloomBlurPackage(),
+            PackageComputePhosphorShaderId => CreateComputePhosphorPackage(),
             _ => null,
         };
     }
@@ -197,6 +214,295 @@ internal static class TerminalShaderSampleCatalog
             float grain = (hash(fragCoord + Time * 53.0) - 0.5) * 0.035;
             color.rgb = clamp(color.rgb * scanline * vignette + refresh * 0.08 + grain, float3(0.0), float3(1.0));
             return half4(color.rgb, color.a);
+        }
+        """;
+
+    private static TerminalShaderPackage CreateCrtBloomPackage()
+    {
+        return new TerminalShaderPackage(
+            "Full HLSL CRT Bloom",
+            [new TerminalShaderFile("crt-bloom.hlsl", PackageCrtBloomSource)],
+            [
+                new TerminalShaderPass(
+                    "main",
+                    TerminalShaderStage.Pixel,
+                    "crt-bloom.hlsl",
+                    "Main",
+                    TerminalShaderTargetProfile.PixelShader50,
+                    inputs:
+                    [
+                        new TerminalShaderPassInput(TerminalShaderBuiltInResourceNames.TerminalFramebuffer),
+                    ]),
+            ],
+            CreateFrameResources());
+    }
+
+    private static TerminalShaderPackage CreateBloomBlurPackage()
+    {
+        return new TerminalShaderPackage(
+            "Full HLSL Bloom Blur",
+            [
+                new TerminalShaderFile("bloom-extract.hlsl", PackageBloomExtractSource),
+                new TerminalShaderFile("bloom-composite.hlsl", PackageBloomCompositeSource),
+            ],
+            [
+                new TerminalShaderPass(
+                    "extract",
+                    TerminalShaderStage.Pixel,
+                    "bloom-extract.hlsl",
+                    "Main",
+                    TerminalShaderTargetProfile.PixelShader50,
+                    inputs:
+                    [
+                        new TerminalShaderPassInput(TerminalShaderBuiltInResourceNames.TerminalFramebuffer),
+                    ],
+                    outputs:
+                    [
+                        new TerminalShaderPassOutput("BloomTexture"),
+                    ]),
+                new TerminalShaderPass(
+                    "composite",
+                    TerminalShaderStage.Pixel,
+                    "bloom-composite.hlsl",
+                    "Main",
+                    TerminalShaderTargetProfile.PixelShader50,
+                    inputs:
+                    [
+                        new TerminalShaderPassInput(TerminalShaderBuiltInResourceNames.TerminalFramebuffer),
+                        new TerminalShaderPassInput("BloomTexture"),
+                    ]),
+            ],
+            CreateFrameResources());
+    }
+
+    private static TerminalShaderPackage CreateComputePhosphorPackage()
+    {
+        return new TerminalShaderPackage(
+            "Full HLSL Compute Phosphor",
+            [
+                new TerminalShaderFile("phosphor-compute.hlsl", PackagePhosphorComputeSource),
+                new TerminalShaderFile("phosphor-present.hlsl", PackagePhosphorPresentSource),
+            ],
+            [
+                new TerminalShaderPass(
+                    "compute",
+                    TerminalShaderStage.Compute,
+                    "phosphor-compute.hlsl",
+                    "Main",
+                    TerminalShaderTargetProfile.ComputeShader50,
+                    new TerminalShaderDispatch(8, 8, kind: TerminalShaderDispatchKind.CoverOutput),
+                    inputs:
+                    [
+                        new TerminalShaderPassInput(TerminalShaderBuiltInResourceNames.TerminalFramebuffer),
+                    ],
+                    outputs:
+                    [
+                        new TerminalShaderPassOutput("PhosphorTexture", TerminalShaderResourceKind.UavTexture2D),
+                    ]),
+                new TerminalShaderPass(
+                    "present",
+                    TerminalShaderStage.Pixel,
+                    "phosphor-present.hlsl",
+                    "Main",
+                    TerminalShaderTargetProfile.PixelShader50,
+                    inputs:
+                    [
+                        new TerminalShaderPassInput("PhosphorTexture"),
+                    ]),
+            ],
+            CreateFrameResources());
+    }
+
+    private static IReadOnlyList<TerminalShaderResourceBinding> CreateFrameResources()
+    {
+        return
+        [
+            new TerminalShaderResourceBinding(
+                TerminalShaderBuiltInResourceNames.TerminalFramebuffer,
+                TerminalShaderResourceKind.TerminalFramebuffer,
+                TerminalShaderResourceSource.BuiltIn,
+                TerminalShaderValueType.Texture2D,
+                registerIndex: 0),
+            new TerminalShaderResourceBinding(
+                "TerminalSampler",
+                TerminalShaderResourceKind.Sampler,
+                TerminalShaderResourceSource.BuiltIn,
+                registerIndex: 0),
+            new TerminalShaderResourceBinding(
+                "TerminalFrame",
+                TerminalShaderResourceKind.ConstantBuffer,
+                TerminalShaderResourceSource.BuiltIn,
+                TerminalShaderValueType.Float4,
+                registerIndex: 0),
+        ];
+    }
+
+    private const string PackageFramePrelude = """
+        Texture2D TerminalFramebuffer : register(t0);
+        SamplerState TerminalSampler : register(s0);
+
+        cbuffer TerminalFrame : register(b0)
+        {
+            float2 Resolution;
+            float Time;
+            float TimeDelta;
+            float Scale;
+            float3 Padding0;
+            float4 Background;
+        };
+
+        struct PixelInput
+        {
+            float4 Position : SV_Position;
+            float2 TexCoord : TEXCOORD0;
+        };
+
+        float Hash(float2 p)
+        {
+            return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+        }
+
+        float2 CurvedUv(float2 uv)
+        {
+            float2 centered = uv - 0.5;
+            float radius = dot(centered, centered);
+            return centered * (1.0 + radius * 0.28) + 0.5;
+        }
+        """;
+
+    private const string PackageCrtBloomSource = PackageFramePrelude + """
+
+        float4 Main(PixelInput input) : SV_Target
+        {
+            float2 uv = CurvedUv(input.Position.xy / max(Resolution, 1.0));
+            if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0)
+            {
+                return float4(Background.rgb * 0.08, 1.0);
+            }
+
+            float2 texel = max(Scale, 1.0) / max(Resolution, 1.0);
+            float4 color = TerminalFramebuffer.Sample(TerminalSampler, uv);
+            float3 glow = TerminalFramebuffer.Sample(TerminalSampler, uv + float2(texel.x * 1.5, 0.0)).rgb;
+            glow += TerminalFramebuffer.Sample(TerminalSampler, uv - float2(texel.x * 1.5, 0.0)).rgb;
+            glow += TerminalFramebuffer.Sample(TerminalSampler, uv + float2(0.0, texel.y * 1.5)).rgb;
+            glow += TerminalFramebuffer.Sample(TerminalSampler, uv - float2(0.0, texel.y * 1.5)).rgb;
+            glow *= 0.16;
+
+            float luma = dot(color.rgb, float3(0.299, 0.587, 0.114));
+            float scanline = 1.0 - (fmod(floor(input.Position.y / max(Scale, 1.0)), 2.0) * 0.32);
+            float vignette = smoothstep(1.2, 0.28, length((uv - 0.5) * float2(1.18, 1.0)));
+            float grain = (Hash(input.Position.xy + Time * 53.0) - 0.5) * 0.035;
+            float3 amber = max(float3(0.025, 0.0175, 0.0), luma.xxx * float3(1.0, 0.72, 0.08));
+            return float4(saturate((amber + glow) * scanline * vignette + grain), color.a);
+        }
+        """;
+
+    private const string PackageBloomExtractSource = PackageFramePrelude + """
+
+        float4 Main(PixelInput input) : SV_Target
+        {
+            float2 uv = input.Position.xy / max(Resolution, 1.0);
+            float2 texel = 1.0 / max(Resolution, 1.0);
+            float4 color = TerminalFramebuffer.Sample(TerminalSampler, uv);
+            float3 blur = color.rgb * 0.48;
+            blur += TerminalFramebuffer.Sample(TerminalSampler, uv + float2(texel.x * 2.0, 0.0)).rgb * 0.13;
+            blur += TerminalFramebuffer.Sample(TerminalSampler, uv - float2(texel.x * 2.0, 0.0)).rgb * 0.13;
+            blur += TerminalFramebuffer.Sample(TerminalSampler, uv + float2(0.0, texel.y * 2.0)).rgb * 0.13;
+            blur += TerminalFramebuffer.Sample(TerminalSampler, uv - float2(0.0, texel.y * 2.0)).rgb * 0.13;
+            float brightness = max(max(blur.r, blur.g), blur.b);
+            return float4(saturate((blur - 0.18) * 1.6) * smoothstep(0.1, 0.7, brightness), color.a);
+        }
+        """;
+
+    private const string PackageBloomCompositeSource = """
+        Texture2D TerminalFramebuffer : register(t0);
+        Texture2D BloomTexture : register(t1);
+        SamplerState TerminalSampler : register(s0);
+
+        cbuffer TerminalFrame : register(b0)
+        {
+            float2 Resolution;
+            float Time;
+            float TimeDelta;
+            float Scale;
+            float3 Padding0;
+            float4 Background;
+        };
+
+        struct PixelInput
+        {
+            float4 Position : SV_Position;
+            float2 TexCoord : TEXCOORD0;
+        };
+
+        float4 Main(PixelInput input) : SV_Target
+        {
+            float2 uv = input.Position.xy / max(Resolution, 1.0);
+            float4 baseColor = TerminalFramebuffer.Sample(TerminalSampler, uv);
+            float3 bloom = BloomTexture.Sample(TerminalSampler, uv).rgb;
+            float scanline = 1.0 - (fmod(floor(input.Position.y / max(Scale, 1.0)), 2.0) * 0.18);
+            return float4(saturate((baseColor.rgb + bloom * 0.55) * scanline), baseColor.a);
+        }
+        """;
+
+    private const string PackagePhosphorComputeSource = """
+        Texture2D TerminalFramebuffer : register(t0);
+        SamplerState TerminalSampler : register(s0);
+        RWTexture2D<float4> PhosphorTexture : register(u0);
+
+        cbuffer TerminalFrame : register(b0)
+        {
+            float2 Resolution;
+            float Time;
+            float TimeDelta;
+            float Scale;
+            float3 Padding0;
+            float4 Background;
+        };
+
+        [numthreads(8, 8, 1)]
+        void Main(uint3 id : SV_DispatchThreadID)
+        {
+            if (id.x >= (uint)Resolution.x || id.y >= (uint)Resolution.y)
+            {
+                return;
+            }
+
+            float2 uv = (float2(id.xy) + 0.5) / max(Resolution, 1.0);
+            float4 color = TerminalFramebuffer.SampleLevel(TerminalSampler, uv, 0.0);
+            float luma = dot(color.rgb, float3(0.299, 0.587, 0.114));
+            float triad = frac((float)id.x / max(Scale, 1.0));
+            float3 mask = triad < 0.333 ? float3(1.0, 0.56, 0.42) : (triad < 0.666 ? float3(0.58, 1.0, 0.46) : float3(0.48, 0.68, 1.0));
+            PhosphorTexture[id.xy] = float4(saturate(luma.xxx * mask + color.rgb * 0.22), color.a);
+        }
+        """;
+
+    private const string PackagePhosphorPresentSource = """
+        Texture2D PhosphorTexture : register(t1);
+        SamplerState TerminalSampler : register(s0);
+
+        cbuffer TerminalFrame : register(b0)
+        {
+            float2 Resolution;
+            float Time;
+            float TimeDelta;
+            float Scale;
+            float3 Padding0;
+            float4 Background;
+        };
+
+        struct PixelInput
+        {
+            float4 Position : SV_Position;
+            float2 TexCoord : TEXCOORD0;
+        };
+
+        float4 Main(PixelInput input) : SV_Target
+        {
+            float2 uv = input.Position.xy / max(Resolution, 1.0);
+            float4 color = PhosphorTexture.Sample(TerminalSampler, uv);
+            float scanline = 1.0 - (fmod(floor(input.Position.y / max(Scale, 1.0)), 2.0) * 0.22);
+            return float4(saturate(color.rgb * scanline), color.a);
         }
         """;
 }
