@@ -120,6 +120,7 @@ public sealed class TerminalShaderSlangCliCompiler : ITerminalShaderCompiler
 
         string sourcePath = Path.Combine(tempRoot, pass.SourcePath.Replace('/', Path.DirectorySeparatorChar));
         string outputPath = Path.Combine(tempRoot, ".out", pass.Name + GetOutputExtension(request.Options.BackendKind));
+        string reflectionPath = Path.Combine(tempRoot, ".out", pass.Name + ".slang-reflection.json");
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
 
         List<string> arguments =
@@ -130,6 +131,7 @@ public sealed class TerminalShaderSlangCliCompiler : ITerminalShaderCompiler
             "-target", GetTargetName(request.Options.BackendKind),
             "-profile", GetTargetProfile(pass),
             "-I", tempRoot,
+            "-reflection-json", reflectionPath,
             "-o", outputPath,
         ];
 
@@ -137,6 +139,11 @@ public sealed class TerminalShaderSlangCliCompiler : ITerminalShaderCompiler
         {
             arguments.Add("-D");
             arguments.Add(string.IsNullOrEmpty(define.Value) ? define.Key : $"{define.Key}={define.Value}");
+        }
+
+        if (request.Options.BackendKind == TerminalShaderBackendKind.Vulkan)
+        {
+            arguments.Add("-fspv-reflect");
         }
 
         TerminalShaderProcessResult processResult = await RunSlangAsync(arguments, tempRoot, cancellationToken)
@@ -178,8 +185,11 @@ public sealed class TerminalShaderSlangCliCompiler : ITerminalShaderCompiler
         }
 
         byte[] code = await File.ReadAllBytesAsync(outputPath, cancellationToken).ConfigureAwait(false);
+        string? reflectionJson = File.Exists(reflectionPath)
+            ? await File.ReadAllTextAsync(reflectionPath, cancellationToken).ConfigureAwait(false)
+            : null;
         TerminalShaderReflectionResult reflectionResult =
-            TerminalShaderHlslReflectionScanner.ScanPass(request.ResolvedFiles, pass);
+            ReadCompilerReflection(code, reflectionJson, request, pass);
         TerminalShaderCompiledPass compiledPass = new(
             pass.Name,
             pass.Stage,
@@ -187,6 +197,56 @@ public sealed class TerminalShaderSlangCliCompiler : ITerminalShaderCompiler
             code,
             reflectionResult.Reflection);
         return new TerminalShaderCompilationResult([compiledPass], reflectionResult.Diagnostics);
+    }
+
+    private static TerminalShaderReflectionResult ReadCompilerReflection(
+        ReadOnlyMemory<byte> code,
+        string? reflectionJson,
+        TerminalShaderCompilationRequest request,
+        TerminalShaderPass pass)
+    {
+        if (request.Options.BackendKind == TerminalShaderBackendKind.Vulkan)
+        {
+            TerminalShaderReflectionResult spirvReflection =
+                TerminalShaderSpirVReflectionReader.TryRead(code, pass);
+            if (HasReflectionPayload(spirvReflection.Reflection))
+            {
+                return spirvReflection;
+            }
+
+            TerminalShaderReflectionResult sourceReflection =
+                TerminalShaderHlslReflectionScanner.ScanPass(request.ResolvedFiles, pass);
+            List<TerminalShaderDiagnostic> diagnostics = new(
+                spirvReflection.Diagnostics.Count + sourceReflection.Diagnostics.Count);
+            diagnostics.AddRange(spirvReflection.Diagnostics);
+            diagnostics.AddRange(sourceReflection.Diagnostics);
+            return new TerminalShaderReflectionResult(sourceReflection.Reflection, diagnostics);
+        }
+
+        if (!string.IsNullOrWhiteSpace(reflectionJson))
+        {
+            TerminalShaderReflectionResult slangReflection =
+                TerminalShaderSlangReflectionJsonReader.TryRead(reflectionJson, pass);
+            if (HasReflectionPayload(slangReflection.Reflection))
+            {
+                return slangReflection;
+            }
+
+            TerminalShaderReflectionResult sourceReflection =
+                TerminalShaderHlslReflectionScanner.ScanPass(request.ResolvedFiles, pass);
+            List<TerminalShaderDiagnostic> diagnostics = new(
+                slangReflection.Diagnostics.Count + sourceReflection.Diagnostics.Count);
+            diagnostics.AddRange(slangReflection.Diagnostics);
+            diagnostics.AddRange(sourceReflection.Diagnostics);
+            return new TerminalShaderReflectionResult(sourceReflection.Reflection, diagnostics);
+        }
+
+        return TerminalShaderHlslReflectionScanner.ScanPass(request.ResolvedFiles, pass);
+    }
+
+    private static bool HasReflectionPayload(TerminalShaderReflection reflection)
+    {
+        return reflection.EntryPoints.Count > 0 || reflection.Resources.Count > 0;
     }
 
     private async ValueTask<TerminalShaderProcessResult> RunSlangAsync(

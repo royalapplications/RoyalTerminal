@@ -121,6 +121,7 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
         string profile = GetTargetProfile(pass);
         string sourcePath = Path.Combine(tempRoot, pass.SourcePath.Replace('/', Path.DirectorySeparatorChar));
         string outputPath = Path.Combine(tempRoot, ".out", pass.Name + GetOutputExtension(request.Options.BackendKind));
+        string listingPath = Path.Combine(tempRoot, ".out", pass.Name + ".dxc.txt");
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
 
         List<string> arguments =
@@ -131,6 +132,12 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
             "-Fo", outputPath,
         ];
 
+        if (request.Options.BackendKind != TerminalShaderBackendKind.Vulkan)
+        {
+            arguments.Add("-Fc");
+            arguments.Add(listingPath);
+        }
+
         foreach (KeyValuePair<string, string> define in request.Options.Defines)
         {
             arguments.Add("-D");
@@ -140,6 +147,7 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
         if (request.Options.BackendKind == TerminalShaderBackendKind.Vulkan)
         {
             arguments.Add("-spirv");
+            arguments.Add("-fspv-reflect");
         }
 
         arguments.Add(sourcePath);
@@ -183,8 +191,11 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
         }
 
         byte[] code = await File.ReadAllBytesAsync(outputPath, cancellationToken).ConfigureAwait(false);
+        string? listingText = File.Exists(listingPath)
+            ? await File.ReadAllTextAsync(listingPath, cancellationToken).ConfigureAwait(false)
+            : null;
         TerminalShaderReflectionResult reflectionResult =
-            TerminalShaderHlslReflectionScanner.ScanPass(request.ResolvedFiles, pass);
+            ReadCompilerReflection(code, listingText, request, pass);
         TerminalShaderCompiledPass compiledPass = new(
             pass.Name,
             pass.Stage,
@@ -192,6 +203,56 @@ public sealed class TerminalShaderDxcCliCompiler : ITerminalShaderCompiler
             code,
             reflectionResult.Reflection);
         return new TerminalShaderCompilationResult([compiledPass], reflectionResult.Diagnostics);
+    }
+
+    private static TerminalShaderReflectionResult ReadCompilerReflection(
+        ReadOnlyMemory<byte> code,
+        string? listingText,
+        TerminalShaderCompilationRequest request,
+        TerminalShaderPass pass)
+    {
+        if (request.Options.BackendKind == TerminalShaderBackendKind.Vulkan)
+        {
+            TerminalShaderReflectionResult spirvReflection =
+                TerminalShaderSpirVReflectionReader.TryRead(code, pass);
+            if (HasReflectionPayload(spirvReflection.Reflection))
+            {
+                return spirvReflection;
+            }
+
+            TerminalShaderReflectionResult sourceReflection =
+                TerminalShaderHlslReflectionScanner.ScanPass(request.ResolvedFiles, pass);
+            List<TerminalShaderDiagnostic> diagnostics = new(
+                spirvReflection.Diagnostics.Count + sourceReflection.Diagnostics.Count);
+            diagnostics.AddRange(spirvReflection.Diagnostics);
+            diagnostics.AddRange(sourceReflection.Diagnostics);
+            return new TerminalShaderReflectionResult(sourceReflection.Reflection, diagnostics);
+        }
+
+        if (!string.IsNullOrWhiteSpace(listingText))
+        {
+            TerminalShaderReflectionResult dxcReflection =
+                TerminalShaderDxcReflectionListingReader.TryRead(listingText, pass);
+            if (HasReflectionPayload(dxcReflection.Reflection))
+            {
+                return dxcReflection;
+            }
+
+            TerminalShaderReflectionResult sourceReflection =
+                TerminalShaderHlslReflectionScanner.ScanPass(request.ResolvedFiles, pass);
+            List<TerminalShaderDiagnostic> diagnostics = new(
+                dxcReflection.Diagnostics.Count + sourceReflection.Diagnostics.Count);
+            diagnostics.AddRange(dxcReflection.Diagnostics);
+            diagnostics.AddRange(sourceReflection.Diagnostics);
+            return new TerminalShaderReflectionResult(sourceReflection.Reflection, diagnostics);
+        }
+
+        return TerminalShaderHlslReflectionScanner.ScanPass(request.ResolvedFiles, pass);
+    }
+
+    private static bool HasReflectionPayload(TerminalShaderReflection reflection)
+    {
+        return reflection.EntryPoints.Count > 0 || reflection.Resources.Count > 0;
     }
 
     private async ValueTask<TerminalShaderProcessResult> RunDxcAsync(
