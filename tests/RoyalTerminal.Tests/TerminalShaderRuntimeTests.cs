@@ -131,6 +131,44 @@ public sealed class TerminalShaderRuntimeTests
     }
 
     [Fact]
+    public void FrameResult_WithNativeTexture_IsSuccessful()
+    {
+        TerminalShaderNativeTexture texture = new(
+            TerminalShaderBackendKind.Metal,
+            (nint)1234,
+            2,
+            3,
+            TerminalShaderNativeTextureFormat.Bgra8Unorm);
+
+        TerminalShaderFrameResult result = new(
+            TerminalShaderBackendKind.Metal,
+            nativeTexture: texture,
+            width: 2,
+            height: 3);
+
+        Assert.True(result.IsSuccess);
+        Assert.Same(texture, result.NativeTexture);
+        Assert.Equal((nint)1234, result.NativeTextureHandle);
+    }
+
+    [Fact]
+    public void FrameResult_WithLegacyNativeTextureHandle_CreatesDescriptor()
+    {
+        TerminalShaderFrameResult result = new(
+            TerminalShaderBackendKind.Vulkan,
+            nativeTextureHandle: (nint)5678,
+            width: 4,
+            height: 5);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.NativeTexture);
+        Assert.Equal(TerminalShaderBackendKind.Vulkan, result.NativeTexture.BackendKind);
+        Assert.Equal((nint)5678, result.NativeTexture.TextureHandle);
+        Assert.Equal(4, result.NativeTexture.Width);
+        Assert.Equal(5, result.NativeTexture.Height);
+    }
+
+    [Fact]
     public void RuntimeValidator_DetectsUnsupportedComputeAndUavResources()
     {
         TerminalShaderPackage package = new(

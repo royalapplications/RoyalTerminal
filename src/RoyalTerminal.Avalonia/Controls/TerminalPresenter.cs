@@ -28,6 +28,7 @@ public class TerminalPresenter : Control
     private ITerminalShaderResourceProvider? _shaderResourceProvider;
     private ITerminalShaderDiagnosticsSink? _shaderDiagnosticsSink;
     private ITerminalShaderPackageExecutor? _shaderPackageExecutor;
+    private ITerminalShaderNativeTexturePresenter? _shaderNativeTexturePresenter;
     private bool _shaderAnimationEnabled;
     private bool _compositionCommitPending;
 
@@ -122,6 +123,7 @@ public class TerminalPresenter : Control
         ITerminalShaderResourceProvider? shaderResourceProvider,
         ITerminalShaderDiagnosticsSink? shaderDiagnosticsSink,
         ITerminalShaderPackageExecutor? shaderPackageExecutor,
+        ITerminalShaderNativeTexturePresenter? shaderNativeTexturePresenter,
         bool animationEnabled)
     {
         _shaderSources = shaderSources;
@@ -130,6 +132,7 @@ public class TerminalPresenter : Control
         _shaderResourceProvider = shaderResourceProvider;
         _shaderDiagnosticsSink = shaderDiagnosticsSink;
         _shaderPackageExecutor = shaderPackageExecutor;
+        _shaderNativeTexturePresenter = shaderNativeTexturePresenter;
         _shaderAnimationEnabled = animationEnabled;
         SendShaderUpdate();
     }
@@ -216,6 +219,7 @@ public class TerminalPresenter : Control
                 _shaderResourceProvider,
                 _shaderDiagnosticsSink,
                 _shaderPackageExecutor,
+                _shaderNativeTexturePresenter,
                 _shaderAnimationEnabled));
     }
 

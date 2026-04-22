@@ -173,6 +173,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private ITerminalShaderPackageExecutor? _shaderPackageExecutor;
 
     /// <summary>
+    /// Optional native texture presenter for compiler-backed full shader packages.
+    /// </summary>
+    public static readonly DirectProperty<TerminalControl, ITerminalShaderNativeTexturePresenter?> ShaderNativeTexturePresenterProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, ITerminalShaderNativeTexturePresenter?>(
+            nameof(ShaderNativeTexturePresenter),
+            o => o.ShaderNativeTexturePresenter,
+            (o, v) => o.ShaderNativeTexturePresenter = v);
+
+    private ITerminalShaderNativeTexturePresenter? _shaderNativeTexturePresenter =
+        TerminalShaderSkiaNativeTexturePresenter.Instance;
+
+    /// <summary>
     /// Preferred backend for compiler-backed full shader packages.
     /// </summary>
     public static readonly DirectProperty<TerminalControl, TerminalShaderBackendPreference> ShaderBackendPreferenceProperty =
@@ -357,6 +369,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
             SetAndRaise(ShaderPackageExecutorProperty, ref _shaderPackageExecutor, value);
             _lastShaderPackageDiagnosticKey = null;
+            UpdatePresenterShaderState();
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the presenter used for native shader texture results.
+    /// </summary>
+    public ITerminalShaderNativeTexturePresenter? ShaderNativeTexturePresenter
+    {
+        get => _shaderNativeTexturePresenter;
+        set
+        {
+            if (ReferenceEquals(_shaderNativeTexturePresenter, value))
+            {
+                return;
+            }
+
+            SetAndRaise(ShaderNativeTexturePresenterProperty, ref _shaderNativeTexturePresenter, value);
             UpdatePresenterShaderState();
         }
     }
@@ -1328,6 +1358,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _shaderResourceProvider,
             _shaderDiagnosticsSink,
             _shaderPackageExecutor,
+            _shaderNativeTexturePresenter,
             _shaderAnimationEnabled);
         _presenter?.Invalidate(fullRedraw: true);
     }

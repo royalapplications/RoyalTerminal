@@ -14,6 +14,7 @@ public sealed class TerminalShaderFrameResult
     /// </summary>
     /// <param name="backendKind">Backend kind.</param>
     /// <param name="nativeTextureHandle">Optional final native texture handle.</param>
+    /// <param name="nativeTexture">Optional final native texture descriptor.</param>
     /// <param name="pixelData">Optional final CPU pixel data.</param>
     /// <param name="width">Final frame width.</param>
     /// <param name="height">Final frame height.</param>
@@ -21,19 +22,25 @@ public sealed class TerminalShaderFrameResult
     public TerminalShaderFrameResult(
         TerminalShaderBackendKind backendKind,
         nint nativeTextureHandle = 0,
+        TerminalShaderNativeTexture? nativeTexture = null,
         ReadOnlyMemory<byte> pixelData = default,
         int width = 0,
         int height = 0,
         IReadOnlyList<TerminalShaderDiagnostic>? diagnostics = null)
     {
         BackendKind = backendKind;
-        NativeTextureHandle = nativeTextureHandle;
         PixelData = pixelData.ToArray();
         Width = Math.Max(0, width);
         Height = Math.Max(0, height);
+        NativeTexture = nativeTexture ?? CreateLegacyNativeTexture(
+            backendKind,
+            nativeTextureHandle,
+            Width,
+            Height);
+        NativeTextureHandle = NativeTexture?.TextureHandle ?? nativeTextureHandle;
         Diagnostics = diagnostics is null ? [] : diagnostics.ToArray();
         IsSuccess = !Diagnostics.Any(static diagnostic => diagnostic.Severity == TerminalShaderDiagnosticSeverity.Error) &&
-            (nativeTextureHandle != 0 || PixelData.Length > 0);
+            (NativeTexture is not null || PixelData.Length > 0);
     }
 
     /// <summary>
@@ -50,6 +57,11 @@ public sealed class TerminalShaderFrameResult
     /// Gets the optional final native texture handle.
     /// </summary>
     public nint NativeTextureHandle { get; }
+
+    /// <summary>
+    /// Gets the optional final native texture descriptor.
+    /// </summary>
+    public TerminalShaderNativeTexture? NativeTexture { get; }
 
     /// <summary>
     /// Gets optional final CPU pixel data.
@@ -82,5 +94,16 @@ public sealed class TerminalShaderFrameResult
         IReadOnlyList<TerminalShaderDiagnostic> diagnostics)
     {
         return new TerminalShaderFrameResult(backendKind, diagnostics: diagnostics);
+    }
+
+    private static TerminalShaderNativeTexture? CreateLegacyNativeTexture(
+        TerminalShaderBackendKind backendKind,
+        nint nativeTextureHandle,
+        int width,
+        int height)
+    {
+        return nativeTextureHandle == 0 || width <= 0 || height <= 0
+            ? null
+            : new TerminalShaderNativeTexture(backendKind, nativeTextureHandle, width, height);
     }
 }

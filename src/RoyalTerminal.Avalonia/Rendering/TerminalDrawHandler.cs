@@ -29,6 +29,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     private ITerminalShaderResourceProvider? _shaderResourceProvider;
     private ITerminalShaderDiagnosticsSink? _shaderDiagnosticsSink;
     private ITerminalShaderPackageExecutor? _shaderPackageExecutor;
+    private ITerminalShaderNativeTexturePresenter? _shaderNativeTexturePresenter;
     private bool _shaderAnimationEnabled;
     private bool _pendingRender;
     private long _shaderStartTimestamp;
@@ -49,6 +50,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         ITerminalShaderResourceProvider? ResourceProvider,
         ITerminalShaderDiagnosticsSink? DiagnosticsSink,
         ITerminalShaderPackageExecutor? PackageExecutor,
+        ITerminalShaderNativeTexturePresenter? NativeTexturePresenter,
         bool AnimationEnabled);
 
     public override void OnMessage(object message)
@@ -77,6 +79,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                     shaderState.ResourceProvider,
                     shaderState.DiagnosticsSink,
                     shaderState.PackageExecutor,
+                    shaderState.NativeTexturePresenter,
                     shaderState.AnimationEnabled);
                 RequestRender();
                 break;
@@ -123,7 +126,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                     ITerminalShaderPackageExecutor? shaderPackageExecutor = _shaderPackageExecutor;
                     if (shaderPackage is not null && shaderPackageExecutor is not null)
                     {
-                        RenderWithShaderPackage(canvas, renderer, screen, shaderPackage, shaderPackageExecutor);
+                        RenderWithShaderPackage(lease, canvas, renderer, screen, shaderPackage, shaderPackageExecutor);
                     }
                     else if (shaderPostProcessor is not null && shaderPostProcessor.HasShaders)
                     {
@@ -173,6 +176,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         ITerminalShaderResourceProvider? resourceProvider,
         ITerminalShaderDiagnosticsSink? diagnosticsSink,
         ITerminalShaderPackageExecutor? packageExecutor,
+        ITerminalShaderNativeTexturePresenter? nativeTexturePresenter,
         bool animationEnabled)
     {
         _shaderPostProcessor?.Dispose();
@@ -182,6 +186,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         _shaderResourceProvider = resourceProvider;
         _shaderDiagnosticsSink = diagnosticsSink;
         _shaderPackageExecutor = packageExecutor;
+        _shaderNativeTexturePresenter = nativeTexturePresenter;
         _shaderAnimationEnabled = animationEnabled;
         _shaderStartTimestamp = 0;
         _lastShaderTimestamp = 0;
@@ -240,6 +245,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     }
 
     private void RenderWithShaderPackage(
+        ISkiaSharpApiLease lease,
         SKCanvas destinationCanvas,
         SkiaTerminalRenderer renderer,
         TerminalScreen screen,
@@ -328,12 +334,17 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             return;
         }
 
-        if (result.IsSuccess && result.NativeTextureHandle != 0)
+        if (result.IsSuccess && TryDrawNativeTextureResult(lease, destinationCanvas, result, destinationRect))
+        {
+            return;
+        }
+
+        if (result.IsSuccess && result.NativeTexture is not null)
         {
             ReportDiagnosticOnce(new TerminalShaderDiagnostic(
                 TerminalShaderDiagnosticSeverity.Warning,
                 "RTSHADERCONTROL004",
-                $"Full shader package '{package.Name}' produced a native {result.BackendKind} texture, but this renderer requires CPU pixel data until a zero-copy import adapter is registered."));
+                $"Full shader package '{package.Name}' produced a native {result.BackendKind} texture, but the active Skia renderer could not import it. Rendering fell back to the unshaded terminal frame."));
         }
 
         destinationCanvas.DrawImage(terminalFrame, destinationRect);
@@ -386,6 +397,17 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         using SKImage image = SKImage.FromBitmap(bitmap);
         destinationCanvas.DrawImage(image, destinationRect);
         return true;
+    }
+
+    private bool TryDrawNativeTextureResult(
+        ISkiaSharpApiLease lease,
+        SKCanvas destinationCanvas,
+        TerminalShaderFrameResult result,
+        SKRect destinationRect)
+    {
+        ITerminalShaderNativeTexturePresenter? presenter = _shaderNativeTexturePresenter;
+        return presenter is not null &&
+               presenter.TryDraw(lease, destinationCanvas, result, destinationRect);
     }
 
     private void ReportDiagnosticsOnce(IReadOnlyList<TerminalShaderDiagnostic> diagnostics)

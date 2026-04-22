@@ -62,6 +62,7 @@ public class TerminalControlTests
         Assert.True(control.ReflowOnResize);
         Assert.Null(control.ShaderPackage);
         Assert.Null(control.ShaderPackageExecutor);
+        Assert.Same(TerminalShaderSkiaNativeTexturePresenter.Instance, control.ShaderNativeTexturePresenter);
         Assert.Equal(TerminalShaderBackendPreference.Auto, control.ShaderBackendPreference);
         Assert.Null(control.ShaderResourceProvider);
         Assert.Null(control.ShaderDiagnosticsSink);
