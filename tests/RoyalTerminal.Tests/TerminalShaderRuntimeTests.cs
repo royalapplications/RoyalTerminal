@@ -281,6 +281,34 @@ public sealed class TerminalShaderRuntimeTests
     }
 
     [Fact]
+    public async Task RuntimePipeline_CreateFrameRequest_IncludesBuiltInResources()
+    {
+        TerminalShaderPackage package = CreatePackageWithExternalTexture(optional: true);
+        TerminalShaderResourceValue terminalFramebuffer = new(
+            TerminalShaderBuiltInResourceNames.TerminalFramebuffer,
+            TerminalShaderResourceKind.TerminalFramebuffer,
+            data: new byte[4 * 4 * 4],
+            width: 4,
+            height: 4);
+
+        TerminalShaderFrameRequest frame = await TerminalShaderRuntimePipeline.CreateFrameRequestAsync(
+            package,
+            width: 4,
+            height: 4,
+            time: 0f,
+            timeDelta: 0f,
+            frame: 0,
+            scale: 1f,
+            builtInResources: [terminalFramebuffer]);
+
+        TerminalShaderResourceValue resolved = Assert.Single(frame.Resources);
+        Assert.Equal(TerminalShaderBuiltInResourceNames.TerminalFramebuffer, resolved.Name);
+        Assert.Equal(TerminalShaderResourceKind.TerminalFramebuffer, resolved.Kind);
+        Assert.Equal(4, resolved.Width);
+        Assert.Equal(4, resolved.Height);
+    }
+
+    [Fact]
     public async Task RuntimePipeline_RenderFrame_ReturnsValidationDiagnosticsBeforeRuntime()
     {
         TerminalShaderPackage package = CreatePackageWithExternalTexture(optional: false);
@@ -347,6 +375,72 @@ public sealed class TerminalShaderRuntimeTests
         Assert.Equal(24, result.Height);
     }
 
+    [Fact]
+    public async Task PackageExecutor_CompilesProgramOnceAndRendersFrames()
+    {
+        TerminalShaderPackage package = CreatePackageWithExternalTexture(optional: true);
+        FakeShaderCompiler compiler = new(CreateCompilationResult());
+        FakeShaderRuntime runtime = new(
+            new TerminalShaderBackendCapabilities(
+                TerminalShaderBackendKind.D3D11,
+                supportsPixelShaders: true,
+                supportsComputeShaders: true,
+                supportsUavResources: true,
+                supportsTextureInterop: true,
+                maxTextureSize: 4096));
+        using TerminalShaderCompilerRuntimePackageExecutor executor = new(
+            compiler,
+            runtime,
+            new TerminalShaderCompilationOptions(TerminalShaderBackendKind.D3D11),
+            disposeRuntime: false);
+        TerminalShaderFrameRequest frame = new(8, 8, 0f, 0f, 0, 1f);
+
+        TerminalShaderFrameResult first = await executor.RenderFrameAsync(package, frame);
+        TerminalShaderFrameResult second = await executor.RenderFrameAsync(package, frame);
+
+        Assert.True(first.IsSuccess);
+        Assert.True(second.IsSuccess);
+        Assert.Equal(1, compiler.CompileCallCount);
+        Assert.Equal(1, runtime.CreateProgramCallCount);
+        Assert.Equal(2, runtime.RenderFrameCallCount);
+    }
+
+    [Fact]
+    public async Task PackageExecutor_ReturnsCompilationDiagnostics()
+    {
+        TerminalShaderPackage package = CreatePackageWithExternalTexture(optional: true);
+        FakeShaderCompiler compiler = new(TerminalShaderCompilationResult.Failed(
+            [
+                new TerminalShaderDiagnostic(
+                    TerminalShaderDiagnosticSeverity.Error,
+                    "TESTCOMPILE",
+                    "Compilation failed."),
+            ]));
+        FakeShaderRuntime runtime = new(
+            new TerminalShaderBackendCapabilities(
+                TerminalShaderBackendKind.Vulkan,
+                supportsPixelShaders: true,
+                supportsComputeShaders: true,
+                supportsUavResources: true,
+                supportsTextureInterop: true,
+                maxTextureSize: 4096));
+        using TerminalShaderCompilerRuntimePackageExecutor executor = new(
+            compiler,
+            runtime,
+            new TerminalShaderCompilationOptions(TerminalShaderBackendKind.Vulkan),
+            disposeRuntime: false);
+
+        TerminalShaderFrameResult result = await executor.RenderFrameAsync(
+            package,
+            new TerminalShaderFrameRequest(8, 8, 0f, 0f, 0, 1f));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(TerminalShaderBackendKind.Vulkan, result.BackendKind);
+        Assert.Contains(result.Diagnostics, static diagnostic => diagnostic.Code == "TESTCOMPILE");
+        Assert.Equal(0, runtime.CreateProgramCallCount);
+        Assert.Equal(0, runtime.RenderFrameCallCount);
+    }
+
     private static TerminalShaderCompilationResult CreateCompilationResult()
     {
         return new TerminalShaderCompilationResult(
@@ -405,6 +499,27 @@ public sealed class TerminalShaderRuntimeTests
         }
     }
 
+    private sealed class FakeShaderCompiler : ITerminalShaderCompiler
+    {
+        private readonly TerminalShaderCompilationResult _result;
+
+        public FakeShaderCompiler(TerminalShaderCompilationResult result)
+        {
+            _result = result;
+        }
+
+        public int CompileCallCount { get; private set; }
+
+        public ValueTask<TerminalShaderCompilationResult> CompileAsync(
+            TerminalShaderCompilationRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            _ = request;
+            CompileCallCount++;
+            return ValueTask.FromResult(_result);
+        }
+    }
+
     private sealed class FakeShaderRuntime : ITerminalShaderRuntime
     {
         public FakeShaderRuntime(TerminalShaderBackendCapabilities capabilities)
@@ -414,12 +529,15 @@ public sealed class TerminalShaderRuntimeTests
 
         public TerminalShaderBackendCapabilities Capabilities { get; }
 
+        public int CreateProgramCallCount { get; private set; }
+
         public int RenderFrameCallCount { get; private set; }
 
         public ValueTask<TerminalShaderRuntimeProgram> CreateProgramAsync(
             TerminalShaderCompilationResult compilation,
             CancellationToken cancellationToken = default)
         {
+            CreateProgramCallCount++;
             TerminalShaderRuntimeProgram program = new(Capabilities.BackendKind, compilation, Capabilities);
             return ValueTask.FromResult(program);
         }

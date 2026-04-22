@@ -162,6 +162,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private TerminalShaderPackage? _shaderPackage;
 
     /// <summary>
+    /// Optional executor for compiler-backed full shader packages.
+    /// </summary>
+    public static readonly DirectProperty<TerminalControl, ITerminalShaderPackageExecutor?> ShaderPackageExecutorProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, ITerminalShaderPackageExecutor?>(
+            nameof(ShaderPackageExecutor),
+            o => o.ShaderPackageExecutor,
+            (o, v) => o.ShaderPackageExecutor = v);
+
+    private ITerminalShaderPackageExecutor? _shaderPackageExecutor;
+
+    /// <summary>
     /// Preferred backend for compiler-backed full shader packages.
     /// </summary>
     public static readonly DirectProperty<TerminalControl, TerminalShaderBackendPreference> ShaderBackendPreferenceProperty =
@@ -326,6 +337,25 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
 
             SetAndRaise(ShaderPackageProperty, ref _shaderPackage, value);
+            _lastShaderPackageDiagnosticKey = null;
+            UpdatePresenterShaderState();
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the executor used by compiler-backed full shader packages.
+    /// </summary>
+    public ITerminalShaderPackageExecutor? ShaderPackageExecutor
+    {
+        get => _shaderPackageExecutor;
+        set
+        {
+            if (ReferenceEquals(_shaderPackageExecutor, value))
+            {
+                return;
+            }
+
+            SetAndRaise(ShaderPackageExecutorProperty, ref _shaderPackageExecutor, value);
             _lastShaderPackageDiagnosticKey = null;
             UpdatePresenterShaderState();
         }
@@ -1291,7 +1321,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         ReportShaderPackageDiagnosticsIfNeeded();
         IReadOnlyList<TerminalShaderSource>? activeShaderSources = _shaderPackage is null ? _shaderSources : null;
-        _presenter?.SetShaderState(activeShaderSources, _shaderAnimationEnabled);
+        _presenter?.SetShaderState(
+            activeShaderSources,
+            _shaderPackage,
+            _shaderBackendPreference,
+            _shaderResourceProvider,
+            _shaderDiagnosticsSink,
+            _shaderPackageExecutor,
+            _shaderAnimationEnabled);
         _presenter?.Invalidate(fullRedraw: true);
     }
 
@@ -1312,7 +1349,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         TerminalShaderBackendKind backendKind =
             TerminalShaderBackendSelector.SelectBackend(_shaderBackendPreference);
         string diagnosticKey =
-            $"{package.Name}|{package.Files.Count}|{package.Passes.Count}|{package.Resources.Count}|{_shaderBackendPreference}|{diagnosticsSink.GetHashCode()}";
+            $"{package.Name}|{package.Files.Count}|{package.Passes.Count}|{package.Resources.Count}|{_shaderBackendPreference}|{diagnosticsSink.GetHashCode()}|{_shaderPackageExecutor?.GetHashCode() ?? 0}";
         if (string.Equals(_lastShaderPackageDiagnosticKey, diagnosticKey, StringComparison.Ordinal))
         {
             return;
@@ -1324,6 +1361,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         for (int i = 0; i < validation.Diagnostics.Count; i++)
         {
             diagnosticsSink.Report(validation.Diagnostics[i]);
+        }
+
+        if (_shaderPackageExecutor is not null)
+        {
+            return;
         }
 
         diagnosticsSink.Report(new TerminalShaderDiagnostic(

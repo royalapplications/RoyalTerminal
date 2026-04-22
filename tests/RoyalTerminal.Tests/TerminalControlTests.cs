@@ -61,6 +61,7 @@ public class TerminalControlTests
         Assert.True(control.AutoScroll);
         Assert.True(control.ReflowOnResize);
         Assert.Null(control.ShaderPackage);
+        Assert.Null(control.ShaderPackageExecutor);
         Assert.Equal(TerminalShaderBackendPreference.Auto, control.ShaderBackendPreference);
         Assert.Null(control.ShaderResourceProvider);
         Assert.Null(control.ShaderDiagnosticsSink);
@@ -80,6 +81,24 @@ public class TerminalControlTests
         Assert.Same(diagnosticsSink, control.ShaderDiagnosticsSink);
         Assert.NotNull(control.ShaderPackage);
         Assert.Contains(
+            diagnosticsSink.Diagnostics,
+            static diagnostic => diagnostic.Code == "RTSHADERCONTROL001");
+    }
+
+    [AvaloniaFact]
+    public void Control_ShaderPackageWithExecutorDoesNotReportUnavailableBackendDiagnostic()
+    {
+        RecordingShaderDiagnosticsSink diagnosticsSink = new();
+        TerminalControl control = new()
+        {
+            ShaderDiagnosticsSink = diagnosticsSink,
+            ShaderBackendPreference = TerminalShaderBackendPreference.D3D11,
+            ShaderPackageExecutor = new FakeShaderPackageExecutor(TerminalShaderBackendKind.D3D11),
+            ShaderPackage = CreateSimpleShaderPackage(),
+        };
+
+        Assert.NotNull(control.ShaderPackageExecutor);
+        Assert.DoesNotContain(
             diagnosticsSink.Diagnostics,
             static diagnostic => diagnostic.Code == "RTSHADERCONTROL001");
     }
@@ -2794,6 +2813,38 @@ public class TerminalControlTests
         public void Report(TerminalShaderDiagnostic diagnostic)
         {
             Diagnostics.Add(diagnostic);
+        }
+    }
+
+    private sealed class FakeShaderPackageExecutor : ITerminalShaderPackageExecutor
+    {
+        public FakeShaderPackageExecutor(TerminalShaderBackendKind backendKind)
+        {
+            Capabilities = new TerminalShaderBackendCapabilities(
+                backendKind,
+                supportsPixelShaders: true,
+                supportsComputeShaders: true,
+                supportsUavResources: true,
+                supportsTextureInterop: true,
+                maxTextureSize: 4096);
+        }
+
+        public TerminalShaderBackendKind BackendKind => Capabilities.BackendKind;
+
+        public TerminalShaderBackendCapabilities Capabilities { get; }
+
+        public ValueTask<TerminalShaderFrameResult> RenderFrameAsync(
+            TerminalShaderPackage package,
+            TerminalShaderFrameRequest frame,
+            CancellationToken cancellationToken = default)
+        {
+            _ = package;
+            TerminalShaderFrameResult result = new(
+                BackendKind,
+                pixelData: new byte[frame.Width * frame.Height * 4],
+                width: frame.Width,
+                height: frame.Height);
+            return ValueTask.FromResult(result);
         }
     }
 

@@ -25,6 +25,22 @@ public interface ITerminalShaderRuntime : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Creates a runtime program from a package and compiled shader passes.
+    /// </summary>
+    /// <param name="package">Shader package that owns the passes and resources.</param>
+    /// <param name="compilation">Compilation result.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The runtime program.</returns>
+    ValueTask<TerminalShaderRuntimeProgram> CreateProgramAsync(
+        TerminalShaderPackage package,
+        TerminalShaderCompilationResult compilation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(package);
+        return CreateProgramAsync(compilation, cancellationToken);
+    }
+
+    /// <summary>
     /// Renders one frame through a runtime program.
     /// </summary>
     /// <param name="program">Runtime program.</param>

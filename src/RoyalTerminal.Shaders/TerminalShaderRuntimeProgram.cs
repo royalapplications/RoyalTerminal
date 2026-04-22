@@ -18,18 +18,21 @@ public sealed class TerminalShaderRuntimeProgram : IDisposable
     /// <param name="backendKind">Backend kind.</param>
     /// <param name="compilation">Compilation result used to create the program.</param>
     /// <param name="capabilities">Backend capabilities.</param>
+    /// <param name="package">Optional package used to create the program.</param>
     /// <param name="nativeHandle">Optional native program handle.</param>
     /// <param name="dispose">Optional native dispose callback.</param>
     public TerminalShaderRuntimeProgram(
         TerminalShaderBackendKind backendKind,
         TerminalShaderCompilationResult compilation,
         TerminalShaderBackendCapabilities capabilities,
+        TerminalShaderPackage? package = null,
         nint nativeHandle = 0,
         Action? dispose = null)
     {
         BackendKind = backendKind;
         Compilation = compilation ?? throw new ArgumentNullException(nameof(compilation));
         Capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
+        Package = package;
         NativeHandle = nativeHandle;
         _dispose = dispose;
     }
@@ -43,6 +46,11 @@ public sealed class TerminalShaderRuntimeProgram : IDisposable
     /// Gets the compilation result used to create the program.
     /// </summary>
     public TerminalShaderCompilationResult Compilation { get; }
+
+    /// <summary>
+    /// Gets the package used to create this runtime program, when available.
+    /// </summary>
+    public TerminalShaderPackage? Package { get; }
 
     /// <summary>
     /// Gets backend capabilities.

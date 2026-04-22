@@ -23,6 +23,11 @@ public class TerminalPresenter : Control
     private SkiaTerminalRenderer? _renderer;
     private TerminalScreen? _screen;
     private IReadOnlyList<TerminalShaderSource>? _shaderSources;
+    private TerminalShaderPackage? _shaderPackage;
+    private TerminalShaderBackendPreference _shaderBackendPreference;
+    private ITerminalShaderResourceProvider? _shaderResourceProvider;
+    private ITerminalShaderDiagnosticsSink? _shaderDiagnosticsSink;
+    private ITerminalShaderPackageExecutor? _shaderPackageExecutor;
     private bool _shaderAnimationEnabled;
     private bool _compositionCommitPending;
 
@@ -110,9 +115,21 @@ public class TerminalPresenter : Control
     /// <summary>
     /// Sets the terminal framebuffer shader sources for this presenter.
     /// </summary>
-    public void SetShaderState(IReadOnlyList<TerminalShaderSource>? shaderSources, bool animationEnabled)
+    public void SetShaderState(
+        IReadOnlyList<TerminalShaderSource>? shaderSources,
+        TerminalShaderPackage? shaderPackage,
+        TerminalShaderBackendPreference shaderBackendPreference,
+        ITerminalShaderResourceProvider? shaderResourceProvider,
+        ITerminalShaderDiagnosticsSink? shaderDiagnosticsSink,
+        ITerminalShaderPackageExecutor? shaderPackageExecutor,
+        bool animationEnabled)
     {
         _shaderSources = shaderSources;
+        _shaderPackage = shaderPackage;
+        _shaderBackendPreference = shaderBackendPreference;
+        _shaderResourceProvider = shaderResourceProvider;
+        _shaderDiagnosticsSink = shaderDiagnosticsSink;
+        _shaderPackageExecutor = shaderPackageExecutor;
         _shaderAnimationEnabled = animationEnabled;
         SendShaderUpdate();
     }
@@ -192,7 +209,14 @@ public class TerminalPresenter : Control
         }
 
         _compositionVisual.SendHandlerMessage(
-            new TerminalDrawHandler.ShaderStateMessage(_shaderSources, _shaderAnimationEnabled));
+            new TerminalDrawHandler.ShaderStateMessage(
+                _shaderSources,
+                _shaderPackage,
+                _shaderBackendPreference,
+                _shaderResourceProvider,
+                _shaderDiagnosticsSink,
+                _shaderPackageExecutor,
+                _shaderAnimationEnabled));
     }
 
     private void CompleteCompositionCommit()
