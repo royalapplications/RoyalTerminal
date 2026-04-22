@@ -81,6 +81,33 @@ public sealed class TerminalShaderPostProcessorTests
     }
 
     [Fact]
+    public void GhosttyShadertoyShader_WithDeclaredUniformsAndNestedTexture_Compiles()
+    {
+        TerminalShaderSource source = new(
+            "ghostty nested sample",
+            """
+            uniform sampler2D iChannel0;
+            uniform vec3 iResolution;
+            uniform vec3 iChannelResolution[4];
+            uniform vec4 iCurrentCursor;
+
+            void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+                vec2 uv = fragCoord / iResolution.xy;
+                vec2 offset = vec2(sin(iTime), cos(iTime)) * 0.0;
+                vec4 color = texture(iChannel0, uv + offset);
+                vec4 baseColor = texture2D(iChannel0, uv);
+                fragColor = vec4(color.rgb + baseColor.rgb * 0.0 + iCurrentCursor.xxx * 0.0, color.a);
+            }
+            """,
+            TerminalShaderLanguage.GhosttyShadertoy);
+
+        using TerminalShaderPostProcessor processor = TerminalShaderPostProcessor.Create([source]);
+
+        Assert.True(processor.HasShaders, processor.CompileLog);
+        Assert.True(string.IsNullOrWhiteSpace(processor.CompileLog), processor.CompileLog);
+    }
+
+    [Fact]
     public void WindowsTerminalHlslShader_CompilesThroughCompatibilityAdapter()
     {
         TerminalShaderSource source = new(
@@ -109,6 +136,102 @@ public sealed class TerminalShaderPostProcessorTests
 
         Assert.True(processor.HasShaders, processor.CompileLog);
         Assert.True(string.IsNullOrWhiteSpace(processor.CompileLog), processor.CompileLog);
+    }
+
+    [Fact]
+    public void WindowsTerminalHlslShader_WithCommonSamplePatterns_Compiles()
+    {
+        TerminalShaderSource source = new(
+            "windows terminal extended sample",
+            """
+            struct PixelInput { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
+            Texture2D<float4> shaderTexture : register(t0);
+            SamplerState pointSampler : register(s0);
+
+            cbuffer PixelShaderSettings : register(b0) {
+                float Time;
+                float Scale;
+                float2 Resolution;
+                float4 Background;
+            };
+
+            static const float Glow = 0.1f;
+
+            float4 main(PixelInput input) : SV_TARGET {
+                float4 baseColor = shaderTexture.Sample(pointSampler, input.uv);
+                float4 detail = shaderTexture.SampleLevel(pointSampler, input.uv + float2(0.0f, 0.0f), 0.0f);
+                float3 rgb = saturate(baseColor.rgb + detail.rgb * Glow);
+                return float4(rgb, baseColor.a);
+            }
+            """,
+            TerminalShaderLanguage.WindowsTerminalHlsl);
+
+        using TerminalShaderPostProcessor processor = TerminalShaderPostProcessor.Create([source]);
+
+        Assert.True(processor.HasShaders, processor.CompileLog);
+        Assert.True(string.IsNullOrWhiteSpace(processor.CompileLog), processor.CompileLog);
+    }
+
+    [Fact]
+    public void WindowsTerminalHlslShader_WithSemanticParameters_Compiles()
+    {
+        TerminalShaderSource source = new(
+            "windows terminal semantic parameter sample",
+            """
+            Texture2D shaderTexture : register(t0);
+            SamplerState samplerState : register(s0);
+            cbuffer PixelShaderSettings : register(b0) {
+                float Time;
+                float Scale;
+                float2 Resolution;
+                float4 Background;
+            };
+
+            float4 main(float4 pixelPosition : SV_POSITION, float2 texCoord : TEXCOORD0) : SV_TARGET {
+                float4 color = shaderTexture.Sample(samplerState, texCoord);
+                float stripe = frac(pixelPosition.y / max(Scale, 1.0));
+                return float4(color.rgb * (0.9 + stripe * 0.1), color.a);
+            }
+            """,
+            TerminalShaderLanguage.WindowsTerminalHlsl);
+
+        using TerminalShaderPostProcessor processor = TerminalShaderPostProcessor.Create([source]);
+
+        Assert.True(processor.HasShaders, processor.CompileLog);
+        Assert.True(string.IsNullOrWhiteSpace(processor.CompileLog), processor.CompileLog);
+    }
+
+    [Fact]
+    public void WindowsTerminalHlslShader_LeavesNonMatchingFunctionNamesUntouched()
+    {
+        TerminalShaderSource source = new(
+            "windows terminal boundary sample",
+            """
+            Texture2D shaderTexture : register(t0);
+            SamplerState samplerState : register(s0);
+            cbuffer PixelShaderSettings : register(b0) {
+                float Time;
+                float Scale;
+                float2 Resolution;
+                float4 Background;
+            };
+
+            float nonsaturate(float value) {
+                return value;
+            }
+
+            float4 main(float4 pixelPosition : SV_POSITION, float2 texCoord : TEXCOORD0) : SV_TARGET {
+                float4 color = shaderTexture.Sample(samplerState, texCoord);
+                float value = nonsaturate(frac(pixelPosition.x / max(Scale, 1.0)));
+                return float4(color.rgb * value, color.a);
+            }
+            """,
+            TerminalShaderLanguage.WindowsTerminalHlsl);
+
+        string translated = TerminalShaderSourceTranslator.Translate(source);
+
+        Assert.Contains("float nonsaturate(float value)", translated, StringComparison.Ordinal);
+        Assert.DoesNotContain("nonclamp", translated, StringComparison.Ordinal);
     }
 
     [Fact]

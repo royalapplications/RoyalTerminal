@@ -37,13 +37,15 @@ The translated shader samples the rendered terminal frame through `iChannel0`.
 | --- | --- |
 | `void mainImage(out vec4 fragColor, in vec2 fragCoord)` | Supported. |
 | `iResolution`, `iTime`, `iTimeDelta`, `iFrame` | Supported as optional uniforms. |
+| `iChannelResolution` | Supported. Channel 0 matches the terminal frame size. |
 | `iChannel0` | Supported and bound to the terminal frame. |
-| `texture(iChannel0, uv)` | Rewritten to the Skia child shader sampler. |
-| `texture2D(iChannel0, uv)` | Rewritten to the Skia child shader sampler. |
+| `texture(iChannel0, uv)` | Rewritten to the Skia child shader sampler, including nested coordinate expressions. |
+| `texture2D(iChannel0, uv)` | Rewritten to the Skia child shader sampler, including nested coordinate expressions. |
 | GLSL `vec2`, `vec3`, `vec4` | Rewritten to Skia `float2`, `float3`, `float4`. |
 | GLSL `ivec2`, `ivec3`, `ivec4` | Rewritten to Skia `int2`, `int3`, `int4`. |
+| GLSL `mat2`, `mat3`, `mat4` | Rewritten to Skia `float2x2`, `float3x3`, `float4x4`. |
 
-Known Ghostty/Shadertoy uniforms declared in the source are removed before the RoyalTerminal prelude is added. Declare them only when it helps keep the source portable.
+Known Ghostty/Shadertoy uniforms declared in the source are removed before the RoyalTerminal prelude is added. This includes common cursor and channel-resolution uniforms, so portable Ghostty sources can keep their original declarations.
 
 ## RoyalTerminal-specific uniforms
 
