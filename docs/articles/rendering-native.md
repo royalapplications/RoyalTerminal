@@ -4,7 +4,7 @@ title: Rendering, Text, And Graphics
 
 # Rendering, Text, And Graphics
 
-RoyalTerminal splits rendering into four layers: backend-neutral contracts, text shaping and fallback, the default Skia renderer, and optional Ghostty renderer interop. That separation keeps the default path simple while still giving advanced hosts access to GPU-level integration.
+RoyalTerminal splits rendering into five layers: backend-neutral contracts, text shaping and fallback, the default Skia renderer, the managed framebuffer shader pipeline, and optional Ghostty renderer interop. That separation keeps the default path simple while still giving advanced hosts access to GPU-level integration.
 
 ## The default render path
 
@@ -13,7 +13,8 @@ The normal path for an Avalonia application is:
 1. a VT processor updates `TerminalScreen`
 2. shaping and font fallback resolve how text should be drawn
 3. `SkiaTerminalRenderer` paints the grid, cursor, selection, and overlays
-4. the Avalonia control presents the result
+4. optional framebuffer shaders post-process the completed terminal frame
+5. the Avalonia control presents the result
 
 For most applications, this is the only rendering path you need.
 
@@ -24,6 +25,27 @@ For most applications, this is the only rendering path you need.
 | `GlyphCache` | Glyph and font resource cache for the renderer. |
 | `SkiaTerminalRenderer` | High-performance CPU renderer for the terminal screen. |
 | `CursorStyle` | Renderer cursor style enum. |
+
+## Framebuffer shaders
+
+The managed shader path runs after the terminal has been rendered into a Skia surface. It treats the completed terminal frame as a texture and applies one or more `TerminalShaderSource` entries through `TerminalShaderPostProcessor`.
+
+The main host-facing properties live on `TerminalControl`:
+
+| Member | Purpose |
+| --- | --- |
+| `ShaderSources` | Ordered shader chain applied to the completed frame. |
+| `ShaderAnimationEnabled` | Allows animated shaders to keep requesting frames while terminal output is idle. |
+
+Supported source families:
+
+| Source family | Article |
+| --- | --- |
+| Direct Skia Runtime Effect source | [Skia Runtime Effect Shaders](/articles/shaders-skia-runtime-effect) |
+| Ghostty/Shadertoy `mainImage` GLSL | [Ghostty/Shadertoy Shader Compatibility](/articles/shaders-ghostty-shadertoy) |
+| Windows Terminal-style HLSL pixel shaders | [Windows Terminal HLSL Shader Compatibility](/articles/shaders-windows-terminal-hlsl) |
+
+Start with [Shader Support](/articles/shaders) for the architecture and [Applying Shaders](/articles/shaders-applying) for the host API.
 
 ## Text shaping and font fallback
 
@@ -100,6 +122,7 @@ If you are using the Avalonia package, the host-specific handle acquisition laye
 | If you need | Start with |
 | --- | --- |
 | A normal Avalonia terminal | `SkiaTerminalRenderer` through `TerminalControl` |
+| Terminal post-process effects | `TerminalControl.ShaderSources` and `TerminalShaderSource` |
 | Font shaping and fallback insight | `HarfBuzzTextShaper` and `TerminalFontResolver` |
 | A custom render host | `RenderTargetDescriptor`, `IRenderSurface`, and the contracts package |
 | Ghostty renderer integration | `GhosttyRenderContext`, `GhosttyRenderSurface`, and `SkiaInteropRenderer` |

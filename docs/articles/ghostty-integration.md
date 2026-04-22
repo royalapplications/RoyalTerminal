@@ -6,6 +6,26 @@ title: Ghostty Integration
 
 RoyalTerminal uses Ghostty in two different ways: as a high-level native VT and rendering implementation, and as a low-level public wrapper library for hosts that want direct access to the Ghostty C ABI from .NET. The second role is what `RoyalTerminal.GhosttySharp` exists for.
 
+## Ghostty-compatible shaders
+
+RoyalTerminal also supports a Ghostty/Shadertoy-style shader compatibility mode in the managed Skia renderer. This is intentionally separate from the native Ghostty VT binding and from Ghostty renderer interop.
+
+Use `TerminalShaderLanguage.GhosttyShadertoy` when you have a single-pass `mainImage` shader that samples `iChannel0`:
+
+```csharp
+Terminal.ShaderSources =
+[
+    new TerminalShaderSource(
+        "Ghostty Compatible Shader",
+        ghosttyStyleSource,
+        TerminalShaderLanguage.GhosttyShadertoy)
+];
+```
+
+The shader runs as a RoyalTerminal framebuffer post-process effect, so it works regardless of whether the active VT engine is managed or Ghostty-backed. Native Ghostty renderer `custom-shader` injection is not part of the current interop path.
+
+See [Ghostty/Shadertoy Shader Compatibility](/articles/shaders-ghostty-shadertoy) for the supported uniforms, source shape, and limitations.
+
 ## Start with the high-level wrappers
 
 If you want Ghostty behavior inside RoyalTerminal, you usually begin with the managed wrapper types instead of the raw ABI mirror.

@@ -25,6 +25,7 @@ RoyalTerminal is published as a family of packages so you can compose the exact 
 | PTY, pipe, SSH, raw TCP, Telnet, serial, trust policy, and secret handling | [Transports And Remote Access](/articles/transports) |
 | Screen state, endpoint contracts, VT processors, input encoding, and Unicode | [Terminal Engine And Screen State](/articles/vt-modes) |
 | Rendering contracts, shaping, Skia, and Ghostty renderer interop | [Rendering, Text, And Graphics](/articles/rendering-native) |
+| Framebuffer shader architecture, application, and source compatibility | [Shader Support](/articles/shaders) |
 | High-level and low-level Ghostty wrapper layers | [Ghostty Integration](/articles/ghostty-integration) |
 
 ## API reference
@@ -81,7 +82,7 @@ The API section is generated from the packable managed libraries under `src/` an
 | --- | --- |
 | `RoyalTerminal.Rendering.Contracts` | Backend-agnostic GPU rendering contracts and validation helpers. |
 | `RoyalTerminal.Rendering.Text` | HarfBuzz-backed shaping, font fallback, and diagnostics primitives. |
-| `RoyalTerminal.Rendering.Skia` | CPU Skia terminal renderer and glyph cache. |
+| `RoyalTerminal.Rendering.Skia` | CPU Skia terminal renderer, glyph cache, and framebuffer shader post-processing. |
 | `RoyalTerminal.Rendering.Interop.Ghostty` | Managed interop wrappers for `ghostty-renderer-capi`. |
 | `RoyalTerminal.Rendering.Interop.Ghostty.Skia` | Skia bridge around Ghostty renderer interop with fallback support. |
 

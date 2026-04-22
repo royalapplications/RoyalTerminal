@@ -19,6 +19,7 @@ The main Avalonia demo is the most complete integration example. It includes:
 - capture and replay
 - search
 - theme presets and generated themes
+- framebuffer shader samples
 - snapshot copy actions
 - hyperlink and Kitty graphics showcase actions
 
@@ -32,6 +33,16 @@ Settings categories in the demo:
 - `Logging`
 
 If you want a realistic host application example, start here.
+
+The demo toolbar includes a shader button that cycles through built-in post-process effects:
+
+- `Off`
+- `CRT Amber`
+- `Hue Shift`
+- `Transparent Key`
+- `Retro Scanlines`
+
+The sample catalog is documented in [Applying Shaders](/articles/shaders-applying#demo-app-samples). The compatibility details are covered in [Shader Support](/articles/shaders).
 
 ## `RoyalTerminal.ControlCatalog`
 
