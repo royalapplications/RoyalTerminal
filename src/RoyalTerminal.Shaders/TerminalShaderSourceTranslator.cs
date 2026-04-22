@@ -37,6 +37,11 @@ public static partial class TerminalShaderSourceTranslator
             return shaderTexture.eval(clampedUv * Resolution);
         }
 
+        float4 sampleTerminalAt(float2 coord) {
+            float2 clampedCoord = clamp(coord, float2(0.0), Resolution);
+            return shaderTexture.eval(clampedCoord);
+        }
+
         float4 sampleGhosttyChannel(float2 uv) {
             float2 clampedUv = clamp(uv, float2(0.0), float2(1.0));
             return iChannel0.eval(clampedUv * iResolution.xy);
@@ -65,6 +70,7 @@ public static partial class TerminalShaderSourceTranslator
     private static string TranslateGhosttyShadertoy(string source)
     {
         string normalized = NormalizeSource(source);
+        normalized = RemoveGlslCompatibilityDirectives(normalized);
         normalized = RemoveKnownGhosttyUniforms(normalized);
         normalized = ReplaceGlslTextureCalls(normalized);
         normalized = ReplaceGlslTypeNames(normalized);
@@ -83,12 +89,15 @@ public static partial class TerminalShaderSourceTranslator
     {
         string normalized = NormalizeSource(source);
         normalized = RemoveShaderedIncludes(normalized);
+        IReadOnlyList<string> textureNames = GetWindowsTerminalTextureNames(normalized);
+        string inputStructSource = normalized;
         normalized = RemoveWindowsTerminalInputStructs(normalized);
         normalized = RemoveWindowsTerminalResourceDeclarations(normalized);
         normalized = RemoveHlslRegisterAnnotations(normalized);
         normalized = ReplaceHlslStorageQualifiers(normalized);
+        normalized = ReplaceHlslTypeNames(normalized);
         normalized = RemoveFloatSuffixes(normalized);
-        normalized = ReplaceShaderTextureSampleCalls(normalized);
+        normalized = ReplaceShaderTextureSampleCalls(normalized, textureNames);
         normalized = ReplaceHlslOperators(normalized);
         normalized = ReplaceHlslFunctions(normalized);
 
@@ -97,6 +106,7 @@ public static partial class TerminalShaderSourceTranslator
             out int mainStart,
             out int mainEnd,
             out string mainBody,
+            out string? inputParameterType,
             out string? inputParameterName,
             out string? positionParameterName,
             out string? textureCoordinateParameterName))
@@ -104,12 +114,14 @@ public static partial class TerminalShaderSourceTranslator
             return RuntimePrelude + normalized;
         }
 
+        WindowsTerminalInputFields inputFields = FindWindowsTerminalInputFields(inputStructSource, inputParameterType);
         string helperSource = normalized.Remove(mainStart, mainEnd - mainStart);
         mainBody = NormalizeWindowsTerminalInputReferences(
             mainBody,
             inputParameterName,
             positionParameterName,
-            textureCoordinateParameterName);
+            textureCoordinateParameterName,
+            inputFields);
 
         return RuntimePrelude + helperSource + """
 
@@ -126,6 +138,68 @@ public static partial class TerminalShaderSourceTranslator
     {
         return source.Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace("\r", "\n", StringComparison.Ordinal);
+    }
+
+    private static string RemoveGlslCompatibilityDirectives(string source)
+    {
+        string result = GlslVersionDirectiveRegex().Replace(source, string.Empty);
+        result = RemoveGlslEsGuardLines(result);
+        return GlslPrecisionDirectiveRegex().Replace(result, string.Empty);
+    }
+
+    private static string RemoveGlslEsGuardLines(string source)
+    {
+        StringBuilder? builder = null;
+        int copyIndex = 0;
+        int lineStart = 0;
+        int glEsGuardDepth = 0;
+
+        while (lineStart < source.Length)
+        {
+            int lineEnd = source.IndexOf('\n', lineStart);
+            int nextLineStart = lineEnd < 0 ? source.Length : lineEnd + 1;
+            ReadOnlySpan<char> line = source.AsSpan(lineStart, nextLineStart - lineStart);
+            ReadOnlySpan<char> trimmedLine = line.Trim();
+            bool removeLine = IsGlslEsStartGuard(trimmedLine);
+            if (removeLine)
+            {
+                glEsGuardDepth++;
+            }
+            else if (glEsGuardDepth > 0 && IsGlslEndGuard(trimmedLine))
+            {
+                glEsGuardDepth--;
+                removeLine = true;
+            }
+
+            if (removeLine)
+            {
+                builder ??= new StringBuilder(source.Length);
+                builder.Append(source, copyIndex, lineStart - copyIndex);
+                copyIndex = nextLineStart;
+            }
+
+            lineStart = nextLineStart;
+        }
+
+        if (builder is null)
+        {
+            return source;
+        }
+
+        builder.Append(source, copyIndex, source.Length - copyIndex);
+        return builder.ToString();
+    }
+
+    private static bool IsGlslEsStartGuard(ReadOnlySpan<char> line)
+    {
+        return line.SequenceEqual("#ifdef GL_ES".AsSpan()) ||
+               line.SequenceEqual("#ifndef GL_ES".AsSpan());
+    }
+
+    private static bool IsGlslEndGuard(ReadOnlySpan<char> line)
+    {
+        return line.SequenceEqual("#endif".AsSpan()) ||
+               line.SequenceEqual("#endif // GL_ES".AsSpan());
     }
 
     private static string RemoveKnownGhosttyUniforms(string source)
@@ -197,15 +271,50 @@ public static partial class TerminalShaderSourceTranslator
         return StaticKeywordRegex().Replace(result, string.Empty);
     }
 
-    private static string RemoveFloatSuffixes(string source)
+    private static string ReplaceHlslTypeNames(string source)
     {
-        return FloatSuffixRegex().Replace(source, string.Empty);
+        return HlslMinPrecisionFloatRegex().Replace(
+            source,
+            static match => "half" + match.Groups["width"].Value);
     }
 
-    private static string ReplaceShaderTextureSampleCalls(string source)
+    private static string RemoveFloatSuffixes(string source)
     {
-        string result = ReplaceShaderTextureSampleCalls(source, "shaderTexture");
-        return ReplaceShaderTextureSampleCalls(result, "inputTexture");
+        return FloatSuffixRegex().Replace(source, static match => match.Groups["value"].Value);
+    }
+
+    private static IReadOnlyList<string> GetWindowsTerminalTextureNames(string source)
+    {
+        List<string> names = ["shaderTexture", "inputTexture"];
+        foreach (Match match in TextureDeclarationRegex().Matches(source))
+        {
+            string name = match.Groups["name"].Value;
+            string registerName = match.Groups["register"].Value;
+            if (string.IsNullOrWhiteSpace(name) ||
+                (!string.IsNullOrWhiteSpace(registerName) &&
+                 !string.Equals(registerName, "t0", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            if (!names.Contains(name, StringComparer.Ordinal))
+            {
+                names.Add(name);
+            }
+        }
+
+        return names;
+    }
+
+    private static string ReplaceShaderTextureSampleCalls(string source, IReadOnlyList<string> textureNames)
+    {
+        string result = source;
+        foreach (string textureName in textureNames)
+        {
+            result = ReplaceShaderTextureSampleCalls(result, textureName);
+        }
+
+        return result;
     }
 
     private static string ReplaceShaderTextureSampleCalls(string source, string textureName)
@@ -214,10 +323,22 @@ public static partial class TerminalShaderSourceTranslator
             source,
             textureName + ".SampleLevel",
             static arguments => $"sampleTerminal({ExtractArgument(arguments, 1, "uv")})");
-        return ReplaceFunctionCall(
+        result = ReplaceFunctionCall(
+            result,
+            textureName + ".SampleBias",
+            static arguments => $"sampleTerminal({ExtractArgument(arguments, 1, "uv")})");
+        result = ReplaceFunctionCall(
+            result,
+            textureName + ".SampleGrad",
+            static arguments => $"sampleTerminal({ExtractArgument(arguments, 1, "uv")})");
+        result = ReplaceFunctionCall(
             result,
             textureName + ".Sample",
             static arguments => $"sampleTerminal({ExtractArgument(arguments, 1, "uv")})");
+        return ReplaceFunctionCall(
+            result,
+            textureName + ".Load",
+            static arguments => $"sampleTerminalAt(float2(({ExtractArgument(arguments, 0, "pos")}).xy))");
     }
 
     private static string ReplaceFunctionCall(
@@ -226,6 +347,7 @@ public static partial class TerminalShaderSourceTranslator
         Func<string, string?> replacementFactory)
     {
         StringBuilder? builder = null;
+        int copyIndex = 0;
         int searchIndex = 0;
 
         while (searchIndex < source.Length)
@@ -269,8 +391,9 @@ public static partial class TerminalShaderSourceTranslator
             }
 
             builder ??= new StringBuilder(source.Length);
-            builder.Append(source, searchIndex, callIndex - searchIndex);
+            builder.Append(source, copyIndex, callIndex - copyIndex);
             builder.Append(replacement);
+            copyIndex = closeParen + 1;
             searchIndex = closeParen + 1;
         }
 
@@ -279,7 +402,7 @@ public static partial class TerminalShaderSourceTranslator
             return source;
         }
 
-        builder.Append(source, searchIndex, source.Length - searchIndex);
+        builder.Append(source, copyIndex, source.Length - copyIndex);
         return builder.ToString();
     }
 
@@ -360,11 +483,24 @@ public static partial class TerminalShaderSourceTranslator
             source,
             "saturate",
             static arguments => $"clamp({arguments}, 0.0, 1.0)");
-        result = LerpFunctionRegex().Replace(result, "mix(");
-        result = FracFunctionRegex().Replace(result, "fract(");
-        result = FmodFunctionRegex().Replace(result, "mod(");
-        result = Atan2FunctionRegex().Replace(result, "atan(");
-        return RsqrtFunctionRegex().Replace(result, "inversesqrt(");
+        result = ReplaceFunctionCall(result, "lerp", static arguments => $"mix({arguments})");
+        result = ReplaceFunctionCall(result, "frac", static arguments => $"fract({arguments})");
+        result = ReplaceFunctionCall(result, "fmod", static arguments => $"mod({arguments})");
+        result = ReplaceFunctionCall(result, "atan2", static arguments => $"atan({arguments})");
+        result = ReplaceFunctionCall(result, "rsqrt", static arguments => $"inversesqrt({arguments})");
+        result = ReplaceFunctionCall(result, "mad", static arguments =>
+        {
+            string first = ExtractArgument(arguments, 0, "0.0");
+            string second = ExtractArgument(arguments, 1, "0.0");
+            string third = ExtractArgument(arguments, 2, "0.0");
+            return $"(({first}) * ({second}) + ({third}))";
+        });
+        return ReplaceFunctionCall(result, "mul", static arguments =>
+        {
+            string first = ExtractArgument(arguments, 0, "0.0");
+            string second = ExtractArgument(arguments, 1, "0.0");
+            return $"(({first}) * ({second}))";
+        });
     }
 
     private static bool TryExtractMainBody(
@@ -372,6 +508,7 @@ public static partial class TerminalShaderSourceTranslator
         out int mainStart,
         out int mainEnd,
         out string body,
+        out string? inputParameterType,
         out string? inputParameterName,
         out string? positionParameterName,
         out string? textureCoordinateParameterName)
@@ -382,6 +519,7 @@ public static partial class TerminalShaderSourceTranslator
             mainStart = 0;
             mainEnd = 0;
             body = string.Empty;
+            inputParameterType = null;
             inputParameterName = null;
             positionParameterName = null;
             textureCoordinateParameterName = null;
@@ -394,6 +532,7 @@ public static partial class TerminalShaderSourceTranslator
             mainStart = 0;
             mainEnd = 0;
             body = string.Empty;
+            inputParameterType = null;
             inputParameterName = null;
             positionParameterName = null;
             textureCoordinateParameterName = null;
@@ -406,6 +545,7 @@ public static partial class TerminalShaderSourceTranslator
             mainStart = 0;
             mainEnd = 0;
             body = string.Empty;
+            inputParameterType = null;
             inputParameterName = null;
             positionParameterName = null;
             textureCoordinateParameterName = null;
@@ -416,17 +556,21 @@ public static partial class TerminalShaderSourceTranslator
         mainEnd = closeBrace + 1;
         body = source.Substring(openBrace + 1, closeBrace - openBrace - 1);
         string parameters = match.Groups["parameters"].Value;
-        inputParameterName = TryExtractInputParameterName(parameters);
+        WindowsTerminalInputParameter? inputParameter = TryExtractInputParameter(parameters);
+        inputParameterType = inputParameter?.TypeName;
+        inputParameterName = inputParameter?.Name;
         positionParameterName = TryExtractSemanticParameterName(parameters, "SV_POSITION");
         textureCoordinateParameterName = TryExtractSemanticParameterName(parameters, "TEXCOORD");
         return true;
     }
 
-    private static string? TryExtractInputParameterName(string parameters)
+    private static WindowsTerminalInputParameter? TryExtractInputParameter(string parameters)
     {
         string firstParameter = ExtractArgument(parameters, 0, string.Empty);
         Match match = InputParameterNameRegex().Match(firstParameter);
-        return match.Success ? match.Groups["name"].Value : null;
+        return match.Success
+            ? new WindowsTerminalInputParameter(match.Groups["type"].Value, match.Groups["name"].Value)
+            : null;
     }
 
     private static string? TryExtractSemanticParameterName(string parameters, string semanticPrefix)
@@ -453,11 +597,50 @@ public static partial class TerminalShaderSourceTranslator
         }
     }
 
+    private static WindowsTerminalInputFields FindWindowsTerminalInputFields(string source, string? inputParameterType)
+    {
+        if (string.IsNullOrWhiteSpace(inputParameterType))
+        {
+            return default;
+        }
+
+        foreach (Match structMatch in HlslStructRegex().Matches(source))
+        {
+            if (!string.Equals(structMatch.Groups["name"].Value, inputParameterType, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string? positionFieldName = null;
+            string? textureCoordinateFieldName = null;
+            string body = structMatch.Groups["body"].Value;
+            foreach (Match fieldMatch in HlslSemanticFieldRegex().Matches(body))
+            {
+                string semantic = fieldMatch.Groups["semantic"].Value;
+                if (semantic.StartsWith("SV_POSITION", StringComparison.OrdinalIgnoreCase))
+                {
+                    positionFieldName = fieldMatch.Groups["name"].Value;
+                    continue;
+                }
+
+                if (semantic.StartsWith("TEXCOORD", StringComparison.OrdinalIgnoreCase))
+                {
+                    textureCoordinateFieldName = fieldMatch.Groups["name"].Value;
+                }
+            }
+
+            return new WindowsTerminalInputFields(positionFieldName, textureCoordinateFieldName);
+        }
+
+        return default;
+    }
+
     private static string NormalizeWindowsTerminalInputReferences(
         string body,
         string? inputParameterName,
         string? positionParameterName,
-        string? textureCoordinateParameterName)
+        string? textureCoordinateParameterName,
+        WindowsTerminalInputFields inputFields)
     {
         string result = body;
         if (string.IsNullOrWhiteSpace(inputParameterName))
@@ -467,28 +650,57 @@ public static partial class TerminalShaderSourceTranslator
         }
 
         string escapedName = Regex.Escape(inputParameterName);
-        result = Regex.Replace(
+        result = NormalizeInputFieldReference(
             result,
-            $@"\b(?:float4|half4)\s+pos\s*=\s*{escapedName}\s*\.\s*pos\s*;",
-            string.Empty,
-            RegexOptions.CultureInvariant);
-        result = Regex.Replace(
-            result,
-            $@"\b(?:float2|half2)\s+uv\s*=\s*{escapedName}\s*\.\s*uv\s*;",
-            string.Empty,
-            RegexOptions.CultureInvariant);
-        result = Regex.Replace(
-            result,
-            $@"\b{escapedName}\s*\.\s*pos\b",
+            escapedName,
             "pos",
-            RegexOptions.CultureInvariant);
-        result = Regex.Replace(
+            "pos",
+            @"(?:float4|half4|min16float4|min10float4)");
+        result = NormalizeInputFieldReference(
             result,
-            $@"\b{escapedName}\s*\.\s*uv\b",
+            escapedName,
+            inputFields.PositionFieldName,
+            "pos",
+            @"(?:float4|half4|min16float4|min10float4)");
+        result = NormalizeInputFieldReference(
+            result,
+            escapedName,
             "uv",
-            RegexOptions.CultureInvariant);
+            "uv",
+            @"(?:float2|half2|min16float2|min10float2)");
+        result = NormalizeInputFieldReference(
+            result,
+            escapedName,
+            inputFields.TextureCoordinateFieldName,
+            "uv",
+            @"(?:float2|half2|min16float2|min10float2)");
         result = ReplaceIdentifier(result, positionParameterName, "pos");
         return ReplaceIdentifier(result, textureCoordinateParameterName, "uv");
+    }
+
+    private static string NormalizeInputFieldReference(
+        string source,
+        string escapedInputName,
+        string? fieldName,
+        string replacement,
+        string valueTypePattern)
+    {
+        if (string.IsNullOrWhiteSpace(fieldName))
+        {
+            return source;
+        }
+
+        string escapedFieldName = Regex.Escape(fieldName);
+        string result = Regex.Replace(
+            source,
+            $@"\b{valueTypePattern}\s+{replacement}\s*=\s*{escapedInputName}\s*\.\s*{escapedFieldName}\s*;",
+            string.Empty,
+            RegexOptions.CultureInvariant);
+        return Regex.Replace(
+            result,
+            $@"\b{escapedInputName}\s*\.\s*{escapedFieldName}\b",
+            replacement,
+            RegexOptions.CultureInvariant);
     }
 
     private static string ReplaceIdentifier(string source, string? identifier, string replacement)
@@ -509,9 +721,82 @@ public static partial class TerminalShaderSourceTranslator
     private static int FindMatchingBrace(string source, int openIndex, char open, char close)
     {
         int depth = 0;
+        bool inLineComment = false;
+        bool inBlockComment = false;
+        bool inStringLiteral = false;
+        bool inCharacterLiteral = false;
+
         for (int i = openIndex; i < source.Length; i++)
         {
             char ch = source[i];
+            char next = i + 1 < source.Length ? source[i + 1] : '\0';
+            if (inLineComment)
+            {
+                inLineComment = ch != '\n';
+                continue;
+            }
+
+            if (inBlockComment)
+            {
+                if (ch == '*' && next == '/')
+                {
+                    inBlockComment = false;
+                    i++;
+                }
+
+                continue;
+            }
+
+            if (inStringLiteral)
+            {
+                if (ch == '\\')
+                {
+                    i++;
+                    continue;
+                }
+
+                inStringLiteral = ch != '"';
+                continue;
+            }
+
+            if (inCharacterLiteral)
+            {
+                if (ch == '\\')
+                {
+                    i++;
+                    continue;
+                }
+
+                inCharacterLiteral = ch != '\'';
+                continue;
+            }
+
+            if (ch == '/' && next == '/')
+            {
+                inLineComment = true;
+                i++;
+                continue;
+            }
+
+            if (ch == '/' && next == '*')
+            {
+                inBlockComment = true;
+                i++;
+                continue;
+            }
+
+            if (ch == '"')
+            {
+                inStringLiteral = true;
+                continue;
+            }
+
+            if (ch == '\'')
+            {
+                inCharacterLiteral = true;
+                continue;
+            }
+
             if (ch == open)
             {
                 depth++;
@@ -533,8 +818,20 @@ public static partial class TerminalShaderSourceTranslator
         return -1;
     }
 
+    private readonly record struct WindowsTerminalInputParameter(string TypeName, string Name);
+
+    private readonly record struct WindowsTerminalInputFields(
+        string? PositionFieldName,
+        string? TextureCoordinateFieldName);
+
     [GeneratedRegex(@"uniform\s+(?:float|int|vec[234]|sampler2D)\s+(?:iResolution|iTime|iTimeDelta|iFrame|iChannel[0-3]|iChannelResolution|iBackgroundColor|iForegroundColor|iCursorColor|iCurrentCursor|iCurrentCursorColor|iCurrentCursorStyle|iCursorVisible)\s*(?:\[[^\]]+\])?\s*;", RegexOptions.Multiline)]
     private static partial Regex GhosttyKnownUniformDeclarationRegex();
+
+    [GeneratedRegex(@"^\s*#version[^\n]*(?:\n|$)", RegexOptions.Multiline)]
+    private static partial Regex GlslVersionDirectiveRegex();
+
+    [GeneratedRegex(@"^\s*precision\s+(?:lowp|mediump|highp)\s+(?:float|int)\s*;\s*(?:\n|$)", RegexOptions.Multiline)]
+    private static partial Regex GlslPrecisionDirectiveRegex();
 
     [GeneratedRegex(@"\b(?:ivec2|ivec3|ivec4|vec2|vec3|vec4|mat2|mat3|mat4)\b")]
     private static partial Regex GlslTypeNameRegex();
@@ -545,10 +842,10 @@ public static partial class TerminalShaderSourceTranslator
     [GeneratedRegex(@"struct\s+PSInput\s*\{.*?\};", RegexOptions.Singleline)]
     private static partial Regex PsInputStructRegex();
 
-    [GeneratedRegex(@"struct\s+\w+\s*\{[^{}]*(?:SV_POSITION|TEXCOORD\d?)[^{}]*\};", RegexOptions.Singleline)]
+    [GeneratedRegex(@"struct\s+\w+\s*\{[^{}]*(?:SV_POSITION|TEXCOORD\d?)[^{}]*\};", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex SemanticInputStructRegex();
 
-    [GeneratedRegex(@"Texture2D(?:\s*<[^>]+>)?\s+shaderTexture\s*(?::\s*register\s*\(\s*t0\s*\))?\s*;")]
+    [GeneratedRegex(@"Texture2D(?:\s*<[^>]+>)?\s+(?<name>\w+)\s*(?::\s*register\s*\(\s*(?<register>t\d+)\s*\))?\s*;", RegexOptions.IgnoreCase)]
     private static partial Regex TextureDeclarationRegex();
 
     [GeneratedRegex(@"SamplerState\s+\w+\s*(?::\s*register\s*\(\s*s\d+\s*\))?\s*;")]
@@ -566,30 +863,24 @@ public static partial class TerminalShaderSourceTranslator
     [GeneratedRegex(@"\bstatic\s+")]
     private static partial Regex StaticKeywordRegex();
 
-    [GeneratedRegex(@"(?<=\d)f\b")]
+    [GeneratedRegex(@"\bmin(?:10|16)float(?<width>[234]?)\b")]
+    private static partial Regex HlslMinPrecisionFloatRegex();
+
+    [GeneratedRegex(@"(?<![A-Za-z0-9_])(?<value>(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)[fF]\b")]
     private static partial Regex FloatSuffixRegex();
 
-    [GeneratedRegex(@"\b(?:float4|half4)\s+main\s*\((?<parameters>[^)]*)\)\s*(?::\s*SV_TARGET\d?)?\s*\{", RegexOptions.Multiline)]
+    [GeneratedRegex(@"\b(?:float4|half4|min16float4|min10float4)\s+main\s*\((?<parameters>[^)]*)\)\s*(?::\s*SV_TARGET\d?)?\s*\{", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
     private static partial Regex WindowsTerminalMainRegex();
 
-    [GeneratedRegex(@"^(?:in\s+)?(?:const\s+)?\w+\s+(?<name>\w+)(?:\s*:.*)?$")]
+    [GeneratedRegex(@"^(?:(?:in|out|inout)\s+)?(?:const\s+)?(?<type>\w+)\s+(?<name>\w+)(?:\s*:.*)?$", RegexOptions.IgnoreCase)]
     private static partial Regex InputParameterNameRegex();
 
-    [GeneratedRegex(@"^(?:in\s+)?(?:const\s+)?(?:float|half)[234]\s+(?<name>\w+)\s*:\s*(?<semantic>\w+\d?)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(?:(?:in|out|inout)\s+)?(?:const\s+)?(?:float|half|min16float|min10float)[234]\s+(?<name>\w+)\s*:\s*(?<semantic>\w+\d?)$", RegexOptions.IgnoreCase)]
     private static partial Regex SemanticParameterNameRegex();
 
-    [GeneratedRegex(@"\blerp\s*\(")]
-    private static partial Regex LerpFunctionRegex();
+    [GeneratedRegex(@"struct\s+(?<name>\w+)\s*\{(?<body>.*?)\};", RegexOptions.Singleline)]
+    private static partial Regex HlslStructRegex();
 
-    [GeneratedRegex(@"\bfrac\s*\(")]
-    private static partial Regex FracFunctionRegex();
-
-    [GeneratedRegex(@"\bfmod\s*\(")]
-    private static partial Regex FmodFunctionRegex();
-
-    [GeneratedRegex(@"\batan2\s*\(")]
-    private static partial Regex Atan2FunctionRegex();
-
-    [GeneratedRegex(@"\brsqrt\s*\(")]
-    private static partial Regex RsqrtFunctionRegex();
+    [GeneratedRegex(@"(?:(?:linear|centroid|nointerpolation|noperspective|sample)\s+)*(?:float|half|min16float|min10float)[234]\s+(?<name>\w+)\s*:\s*(?<semantic>\w+\d?)", RegexOptions.IgnoreCase)]
+    private static partial Regex HlslSemanticFieldRegex();
 }

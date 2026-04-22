@@ -54,18 +54,21 @@ The adapter strips the Windows Terminal resource declarations, creates equivalen
 
 | Pattern | Status |
 | --- | --- |
-| `Texture2D shaderTexture : register(t0);` | Supported and removed during translation. Generic forms such as `Texture2D<float4>` are also accepted. |
+| `Texture2D shaderTexture : register(t0);` | Supported and removed during translation. Generic forms such as `Texture2D<float4>` are also accepted, and any `Texture2D` name bound to `t0` is treated as the terminal frame. |
 | `SamplerState samplerState : register(s0);` | Supported and removed during translation. The sampler variable name does not need to be `samplerState`. |
 | `cbuffer PixelShaderSettings : register(b0)` | Supported and removed during translation. |
-| `struct PSInput { float4 pos; float2 uv; }` | Supported and removed during translation. Input structs with `SV_POSITION` or `TEXCOORD` fields are also removed. |
-| `float4 main(PSInput pin) : SV_TARGET` | Supported. The body becomes the Skia `main(float2 fragCoord)`, and direct `pin.pos`/`pin.uv` references are mapped to generated `pos`/`uv` values. |
+| `struct PSInput { float4 pos; float2 uv; }` | Supported and removed during translation. Input structs with `SV_POSITION` or `TEXCOORD` fields are also removed, including common aliases such as `position` and `texCoord`. |
+| `float4 main(PSInput pin) : SV_TARGET` | Supported. The body becomes the Skia `main(float2 fragCoord)`, and direct `pin.pos`/`pin.uv` or semantic field aliases are mapped to generated `pos`/`uv` values. |
 | `float4 main(float4 pos : SV_POSITION, float2 uv : TEXCOORD0)` | Supported. Parameter names are normalized to generated `pos` and `uv` values. |
 | `shaderTexture.Sample(samplerState, uv)` | Rewritten to sample the terminal frame. |
 | `shaderTexture.SampleLevel(samplerState, uv, lod)` | Rewritten to sample the terminal frame. The explicit LOD is ignored by the Skia post-process path. |
+| `shaderTexture.SampleBias(...)`, `shaderTexture.SampleGrad(...)` | Rewritten to sample the terminal frame. Bias and gradient arguments are ignored by the Skia post-process path. |
+| `shaderTexture.Load(int3(pos.xy, 0))` | Rewritten to sample the terminal frame with pixel coordinates. |
 | `#include "SHADERed/..."` | Removed. |
 | `register(...)` annotations | Removed. |
 | HLSL float suffixes such as `1.0f` | Removed. |
 | `static const` values | Normalized to Skia `const` declarations. |
+| `min10float`, `min16float` vector types | Normalized to Skia `half` vector types. |
 
 The generated Skia entry point provides:
 
@@ -86,6 +89,8 @@ That matches the common Windows Terminal sample shape where `pin.pos` is pixel-s
 | `saturate(x)` | `clamp(x, 0.0, 1.0)` |
 | `atan2(y, x)` | `atan(y, x)` |
 | `rsqrt(x)` | `inversesqrt(x)` |
+| `mad(a, b, c)` | `(a * b + c)` |
+| `mul(a, b)` | `(a * b)` |
 
 The adapter also normalizes a simple bitwise-or expression pattern used by some shader samples.
 

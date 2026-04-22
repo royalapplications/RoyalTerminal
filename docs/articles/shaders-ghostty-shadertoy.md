@@ -44,6 +44,7 @@ The translated shader samples the rendered terminal frame through `iChannel0`.
 | GLSL `vec2`, `vec3`, `vec4` | Rewritten to Skia `float2`, `float3`, `float4`. |
 | GLSL `ivec2`, `ivec3`, `ivec4` | Rewritten to Skia `int2`, `int3`, `int4`. |
 | GLSL `mat2`, `mat3`, `mat4` | Rewritten to Skia `float2x2`, `float3x3`, `float4x4`. |
+| `#version`, `#ifdef GL_ES`, `precision mediump float;` | Removed for common portable GLSL/Shadertoy sources. |
 
 Known Ghostty/Shadertoy uniforms declared in the source are removed before the RoyalTerminal prelude is added. This includes common cursor and channel-resolution uniforms, so portable Ghostty sources can keep their original declarations.
 
