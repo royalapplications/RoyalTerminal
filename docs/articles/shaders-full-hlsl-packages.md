@@ -31,14 +31,16 @@ The implemented foundation includes:
 | Slang CLI compiler | Implemented through `TerminalShaderSlangCliCompiler` when a `slangc` executable is available. |
 | Compiler cache | Implemented through `TerminalShaderCachingCompiler` with deterministic cache keys. |
 | Source-side reflection preflight | Implemented through `TerminalShaderHlslReflectionScanner` for resources, entry-point semantics, compute thread groups, and basic constant-buffer packing. |
+| Compiler-assisted reflection | Implemented through D3D11 DXBC reflection, SPIR-V binary reflection, DXC listing reflection, and Slang JSON reflection, with source-scanner fallback. |
 | Runtime contracts | Implemented through `ITerminalShaderRuntime`, runtime program/frame models, capabilities, and unavailable-backend diagnostics. |
 | Runtime frame validation | Implemented through `TerminalShaderRuntimeValidator.ValidateFrameResources`. |
 | Runtime orchestration | Implemented through `TerminalShaderRuntimePipeline` for external resource resolution and validation-gated frame execution. |
 | Backend preference and diagnostics | Implemented through `TerminalShaderBackendPreference`, `TerminalShaderBackendSelector`, and `ITerminalShaderDiagnosticsSink`. |
-| Avalonia package configuration | Implemented through `TerminalControl.ShaderPackage`, `ShaderBackendPreference`, `ShaderResourceProvider`, and `ShaderDiagnosticsSink`. |
-| Native GPU execution | Not implemented yet. D3D11/D3D12/Vulkan/Metal runtime backends still need native execution code. |
+| Avalonia package configuration | Implemented through `TerminalControl.ShaderPackage`, `ShaderBackendPreference`, `ShaderResourceProvider`, `ShaderDiagnosticsSink`, `ShaderPackageExecutor`, and `ShaderNativeTexturePresenter`. |
+| Native GPU execution | Implemented first for D3D11 through `RoyalTerminal.Shaders.D3D11`, including pixel/compute execution, SRV/UAV/sampler/cbuffer binding, and CPU readback. D3D12/Vulkan/Metal runtime backends remain future work. |
+| Native texture presentation | Implemented as a descriptor and presenter boundary. The default Avalonia Skia presenter imports compatible Metal, Vulkan, and D3D12 textures. The D3D11 runtime currently presents through CPU readback until a safe shared-texture lifetime bridge exists. |
 
-The important distinction is that HLSL compilation can now be represented and executed through a real compiler backend, but applying compiled DXIL/SPIR-V/MSL to the terminal frame still requires a native runtime backend.
+The important distinction is that HLSL compilation, reflection, package execution, and the first native runtime are now represented end to end. Backends are still explicit opt-in dependencies; hosts must provide or create a compatible compiler/runtime executor before packages render.
 
 ## Package shape
 
@@ -150,7 +152,7 @@ TerminalShaderCompilationResult result =
         includeProvider);
 ```
 
-For Vulkan targets, the DXC CLI backend emits SPIR-V by adding `-spirv`. Metal targets require the Slang CLI backend.
+For Vulkan targets, the DXC CLI backend emits SPIR-V by adding `-spirv` and reflection-friendly SPIR-V metadata with `-fspv-reflect`. DXIL targets also request a DXC listing so resource bindings and signatures can be reflected from compiler output. Metal targets require the Slang CLI backend.
 
 ## Compiling with Slang
 
@@ -170,18 +172,27 @@ TerminalShaderCompilationResult result =
         includeProvider);
 ```
 
+The Slang CLI path requests `-reflection-json` and uses that output when it contains usable package metadata. Vulkan targets also request `-fspv-reflect` so SPIR-V output can be reflected directly.
+
 Use `TerminalShaderCachingCompiler` around DXC or Slang when packages are recompiled from settings or profile state. The cache key includes resolved source files, pass graph data, resources, target backend, compiler kind, defines, and debug name.
 
-## Reflection preflight
+## Reflection
 
-`TerminalShaderHlslReflectionScanner` provides deterministic source-side reflection before a native compiler or GPU backend is available:
+RoyalTerminal uses compiler-generated reflection first where possible:
+
+- D3D11 DXBC reflection through `RoyalTerminal.Shaders.D3D11`
+- SPIR-V binary reflection through `TerminalShaderSpirVReflectionReader`
+- DXC text-listing reflection through `TerminalShaderDxcReflectionListingReader`
+- Slang JSON reflection through `TerminalShaderSlangReflectionJsonReader`
+
+`TerminalShaderHlslReflectionScanner` remains as deterministic source-side fallback when compiler metadata is unavailable or incomplete:
 
 ```csharp
 TerminalShaderReflectionResult reflection =
     TerminalShaderHlslReflectionScanner.ScanPackage(package);
 ```
 
-It identifies common HLSL resources, explicit registers, entry-point input/output semantics, compute `[numthreads]`, and basic constant-buffer packing. Native compiler reflection should still be preferred by runtime backends because HLSL source scanning cannot fully resolve macros, overloads, templates, or compiler-lowered resource layouts.
+It identifies common HLSL resources, explicit registers, entry-point input/output semantics, compute `[numthreads]`, and basic constant-buffer packing. Compiler metadata is preferred because source scanning cannot fully resolve macros, overloads, templates, or compiler-lowered resource layouts.
 
 ## Runtime boundary
 
@@ -238,9 +249,18 @@ terminal.ShaderPackage = package;
 terminal.ShaderBackendPreference = TerminalShaderBackendPreference.D3D11;
 terminal.ShaderResourceProvider = resourceProvider;
 terminal.ShaderDiagnosticsSink = diagnosticsSink;
+terminal.ShaderPackageExecutor = executor;
 ```
 
-The control validates assigned packages and reports backend availability through `ShaderDiagnosticsSink`. Native execution is still pending; until a D3D/Vulkan/Metal runtime is registered and wired into the renderer, the control emits `RTSHADERCONTROL001` and continues rendering without package shaders.
+The control validates assigned packages and reports backend availability through `ShaderDiagnosticsSink`. If `ShaderPackage` is set without `ShaderPackageExecutor`, the control emits `RTSHADERCONTROL001` and continues rendering without package shaders.
+
+The demo app creates a D3D11 package executor on Windows when `TerminalShaderD3D11Compiler` and `TerminalShaderD3D11Runtime` are supported. Other hosts should make the same decision in their composition root so native compiler/runtime dependencies remain explicit.
+
+## Native texture presentation
+
+Runtime backends can return CPU pixel data, a native texture descriptor, or both in `TerminalShaderFrameResult`. The renderer draws CPU pixels first because that is the most portable presentation path. If no CPU pixels are available, `ShaderNativeTexturePresenter` can import the native texture into the active Avalonia Skia GPU context.
+
+`TerminalShaderSkiaNativeTexturePresenter` supports compatible Metal, Vulkan, and D3D12 descriptors. D3D11 package execution currently returns CPU readback frames; exposing D3D11 native textures safely requires shared-handle/lifetime management that is separate from the runtime's per-frame graph.
 
 ## Testing surface
 
@@ -255,11 +275,18 @@ The current tests cover:
 - Slang CLI unavailable diagnostics and optional compilation when `slangc` is available
 - deterministic compiler caching
 - source-side HLSL reflection for resources, semantics, thread groups, and constant buffers
+- SPIR-V binary reflection
+- DXC listing reflection
+- Slang JSON reflection
 - runtime capability validation
 - runtime frame resource validation
 - runtime pipeline resource resolution and validation-gated execution
 - backend preference selection and deterministic unavailable-runtime creation
 - `TerminalControl` full-package properties and unavailable-backend diagnostics
+- `TerminalControl` package execution with an injected executor
+- native texture frame result and presenter wiring
 - unavailable runtime diagnostics
+- D3D11 non-Windows availability gates
+- opt-in D3D11 GPU smoke tests behind `ROYALTERMINAL_TEST_D3D11=1`
 
-Native GPU runtime tests should be added with backend gates when D3D11, D3D12, Vulkan, or Metal execution backends are implemented.
+Native GPU runtime tests should be expanded with backend gates as D3D11 hardening continues and D3D12, Vulkan, or Metal execution backends are implemented.

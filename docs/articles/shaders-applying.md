@@ -82,12 +82,15 @@ Full HLSL packages use a separate control surface:
     ShaderPackage="{Binding ActiveShaderPackage}"
     ShaderBackendPreference="{Binding ShaderBackendPreference}"
     ShaderResourceProvider="{Binding ShaderResourceProvider}"
-    ShaderDiagnosticsSink="{Binding ShaderDiagnosticsSink}" />
+    ShaderDiagnosticsSink="{Binding ShaderDiagnosticsSink}"
+    ShaderPackageExecutor="{Binding ShaderPackageExecutor}" />
 ```
 
-`ShaderPackage` is the configuration entry point for compiler-backed HLSL packages. `ShaderBackendPreference` selects the requested native backend, `ShaderResourceProvider` supplies external textures and buffers, and `ShaderDiagnosticsSink` receives validation or backend availability diagnostics.
+`ShaderPackage` is the configuration entry point for compiler-backed HLSL packages. `ShaderBackendPreference` selects the requested native backend, `ShaderResourceProvider` supplies external textures and buffers, `ShaderDiagnosticsSink` receives validation or backend availability diagnostics, and `ShaderPackageExecutor` provides the concrete compiler/runtime execution path.
 
-Native full-HLSL execution backends are not implemented yet. When a package is assigned today, `TerminalControl` reports `RTSHADERCONTROL001` through the diagnostics sink and renders without package shaders. Keep using `ShaderSources` for currently executable Skia Runtime Effect, Ghostty/Shadertoy, and Windows Terminal sample-compatible shaders.
+If a package is assigned without an executor, `TerminalControl` reports `RTSHADERCONTROL001` through the diagnostics sink and renders without package shaders. The D3D11 package runtime is available through `RoyalTerminal.Shaders.D3D11` on Windows and can be supplied by the host composition root. Keep using `ShaderSources` for lightweight Skia Runtime Effect, Ghostty/Shadertoy, and Windows Terminal sample-compatible shaders when a native runtime is not available.
+
+`ShaderNativeTexturePresenter` can be set when a runtime returns native texture output. The default presenter imports compatible Metal, Vulkan, and D3D12 descriptors through the active Avalonia Skia GPU context; CPU pixel output remains the portable fallback.
 
 ## Chain multiple shaders
 
