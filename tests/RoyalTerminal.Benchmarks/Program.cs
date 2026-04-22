@@ -7,6 +7,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Shaders;
 using SkiaSharp;
 
 BenchmarkOptions options = BenchmarkOptions.Parse(args);
@@ -25,7 +26,11 @@ for (int i = 0; i < scenarios.Length; i++)
     results[i] = RenderHotPathBenchmark.Run(scenarios[i]);
 }
 
-string report = BenchmarkReportWriter.CreateReport(results);
+ShaderBenchmarkResult[] shaderResults = ShaderPackageBenchmark.RunDefaultSuite();
+
+string report = BenchmarkReportWriter.CreateReport(results) +
+    Environment.NewLine +
+    ShaderBenchmarkReportWriter.CreateReport(shaderResults);
 Console.WriteLine(report);
 
 if (!string.IsNullOrWhiteSpace(options.OutputPath))
@@ -62,6 +67,14 @@ internal readonly record struct BenchmarkResult(
     double P95FrameMs,
     double TotalTimeMs);
 
+internal readonly record struct ShaderBenchmarkResult(
+    string Name,
+    int Iterations,
+    double OperationsPerSecond,
+    double AllocBytesPerOperation,
+    double MeanOperationMs,
+    double TotalTimeMs);
+
 internal readonly record struct BenchmarkOptions(string? OutputPath)
 {
     public static BenchmarkOptions Parse(string[] args)
@@ -82,6 +95,168 @@ internal readonly record struct BenchmarkOptions(string? OutputPath)
         }
 
         return new BenchmarkOptions(outputPath);
+    }
+}
+
+internal static class ShaderPackageBenchmark
+{
+    public static ShaderBenchmarkResult[] RunDefaultSuite()
+    {
+        TerminalShaderPackage package = CreatePackage();
+        TerminalShaderCompilationOptions options = new(TerminalShaderBackendKind.D3D11);
+        TerminalShaderCompilationRequest request = new(package, package.Files, options);
+
+        return
+        [
+            Run("shader-validate", 12_000, () =>
+            {
+                TerminalShaderPackageValidationResult result = TerminalShaderPackageValidator.Validate(package);
+                if (!result.IsValid)
+                {
+                    throw new InvalidOperationException("Shader package validation failed.");
+                }
+            }),
+            Run("shader-reflect-source", 5_000, () =>
+            {
+                TerminalShaderReflectionResult result = TerminalShaderHlslReflectionScanner.ScanPackage(package);
+                if (result.Reflection.EntryPoints.Count == 0)
+                {
+                    throw new InvalidOperationException("Shader reflection failed.");
+                }
+            }),
+            Run("shader-cache-key", 7_500, () =>
+            {
+                TerminalShaderCompilationCacheKey key = TerminalShaderCompilationCacheKey.Create(request, "benchmark");
+                if (key.Value.Length == 0)
+                {
+                    throw new InvalidOperationException("Shader cache key failed.");
+                }
+            }),
+        ];
+    }
+
+    private static ShaderBenchmarkResult Run(string name, int iterations, Action action)
+    {
+        for (int i = 0; i < Math.Min(200, iterations); i++)
+        {
+            action();
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        long allocatedBefore = GC.GetTotalAllocatedBytes(true);
+        long start = Stopwatch.GetTimestamp();
+        for (int i = 0; i < iterations; i++)
+        {
+            action();
+        }
+
+        long end = Stopwatch.GetTimestamp();
+        long allocatedAfter = GC.GetTotalAllocatedBytes(true);
+
+        double totalSeconds = (end - start) / (double)Stopwatch.Frequency;
+        double totalMs = totalSeconds * 1000.0;
+        double operationsPerSecond = iterations / Math.Max(totalSeconds, 1e-9);
+        double allocPerOperation = Math.Max(0, allocatedAfter - allocatedBefore) / (double)iterations;
+        return new ShaderBenchmarkResult(
+            name,
+            iterations,
+            operationsPerSecond,
+            allocPerOperation,
+            totalMs / iterations,
+            totalMs);
+    }
+
+    private static TerminalShaderPackage CreatePackage()
+    {
+        return new TerminalShaderPackage(
+            "benchmark-package",
+            [
+                new TerminalShaderFile(
+                    "main.hlsl",
+                    """
+                    Texture2D TerminalFramebuffer : register(t0);
+                    Texture2D NoiseTexture : register(t1);
+                    SamplerState LinearSampler : register(s0);
+
+                    cbuffer TerminalFrame : register(b0)
+                    {
+                        float2 Resolution;
+                        float Time;
+                        float TimeDelta;
+                        float Scale;
+                        float3 Padding0;
+                        float4 Background;
+                    };
+
+                    cbuffer UserParams : register(b1)
+                    {
+                        float4 Tint;
+                    };
+
+                    struct PixelInput
+                    {
+                        float4 Position : SV_Position;
+                        float2 TexCoord : TEXCOORD0;
+                    };
+
+                    float4 Main(PixelInput input) : SV_Target
+                    {
+                        float2 uv = input.Position.xy / max(Resolution, 1.0);
+                        float4 color = TerminalFramebuffer.Sample(LinearSampler, uv);
+                        float4 noise = NoiseTexture.Sample(LinearSampler, uv);
+                        return saturate(color * Tint + noise * 0.05);
+                    }
+                    """),
+            ],
+            [
+                new TerminalShaderPass(
+                    "main",
+                    TerminalShaderStage.Pixel,
+                    "main.hlsl",
+                    "Main",
+                    TerminalShaderTargetProfile.PixelShader50,
+                    inputs:
+                    [
+                        new TerminalShaderPassInput(TerminalShaderBuiltInResourceNames.TerminalFramebuffer),
+                        new TerminalShaderPassInput("NoiseTexture"),
+                    ]),
+            ],
+            [
+                new TerminalShaderResourceBinding(
+                    TerminalShaderBuiltInResourceNames.TerminalFramebuffer,
+                    TerminalShaderResourceKind.TerminalFramebuffer,
+                    TerminalShaderResourceSource.BuiltIn,
+                    TerminalShaderValueType.Texture2D,
+                    registerIndex: 0),
+                new TerminalShaderResourceBinding(
+                    "NoiseTexture",
+                    TerminalShaderResourceKind.Texture2D,
+                    TerminalShaderResourceSource.External,
+                    TerminalShaderValueType.Texture2D,
+                    registerIndex: 1,
+                    optional: true),
+                new TerminalShaderResourceBinding(
+                    "LinearSampler",
+                    TerminalShaderResourceKind.Sampler,
+                    TerminalShaderResourceSource.BuiltIn,
+                    registerIndex: 0),
+                new TerminalShaderResourceBinding(
+                    "TerminalFrame",
+                    TerminalShaderResourceKind.ConstantBuffer,
+                    TerminalShaderResourceSource.BuiltIn,
+                    TerminalShaderValueType.Float4,
+                    registerIndex: 0),
+                new TerminalShaderResourceBinding(
+                    "UserParams",
+                    TerminalShaderResourceKind.ConstantBuffer,
+                    TerminalShaderResourceSource.External,
+                    TerminalShaderValueType.Float4,
+                    registerIndex: 1,
+                    optional: true),
+            ]);
     }
 }
 
@@ -292,6 +467,37 @@ internal static class BenchmarkReportWriter
                 .Append(" | ").Append(Format(result.AllocBytesPerFrame))
                 .Append(" | ").Append(Format(result.MeanFrameMs))
                 .Append(" | ").Append(Format(result.P95FrameMs))
+                .Append(" | ").Append(Format(result.TotalTimeMs))
+                .AppendLine(" |");
+        }
+
+        return sb.ToString();
+    }
+
+    private static string Format(double value)
+    {
+        return value.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+}
+
+internal static class ShaderBenchmarkReportWriter
+{
+    public static string CreateReport(ReadOnlySpan<ShaderBenchmarkResult> results)
+    {
+        StringBuilder sb = new();
+        sb.AppendLine("# RoyalTerminal Shader Package Baseline");
+        sb.AppendLine();
+        sb.AppendLine("| Scenario | Iterations | Ops/sec | Alloc/op (B) | Mean op (ms) | Total time (ms) |");
+        sb.AppendLine("|---|---:|---:|---:|---:|---:|");
+
+        for (int i = 0; i < results.Length; i++)
+        {
+            ShaderBenchmarkResult result = results[i];
+            sb.Append("| ").Append(result.Name)
+                .Append(" | ").Append(result.Iterations)
+                .Append(" | ").Append(Format(result.OperationsPerSecond))
+                .Append(" | ").Append(Format(result.AllocBytesPerOperation))
+                .Append(" | ").Append(Format(result.MeanOperationMs))
                 .Append(" | ").Append(Format(result.TotalTimeMs))
                 .AppendLine(" |");
         }
