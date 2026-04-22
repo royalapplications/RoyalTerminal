@@ -41,6 +41,8 @@ The demo toolbar includes a shader button that cycles through built-in post-proc
 - `Hue Shift`
 - `Transparent Key`
 - `Retro Scanlines`
+- `Windows Terminal CRT`
+- `Ghostty Shadertoy`
 
 The sample catalog is documented in [Applying Shaders](/articles/shaders-applying#demo-app-samples). The compatibility details are covered in [Shader Support](/articles/shaders).
 

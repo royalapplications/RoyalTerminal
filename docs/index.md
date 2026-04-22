@@ -53,7 +53,6 @@ features:
 - [Skia Runtime Effect Shaders](/articles/shaders-skia-runtime-effect)
 - [Ghostty/Shadertoy Shader Compatibility](/articles/shaders-ghostty-shadertoy)
 - [Windows Terminal HLSL Shader Compatibility](/articles/shaders-windows-terminal-hlsl)
-- [Compiler-Backed HLSL Shader Packages](/articles/shaders-full-hlsl-packages)
 - [Ghostty Integration](/articles/ghostty-integration)
 - [Samples And Tooling](/articles/samples-tooling)
 - [Build, Test, And Release](/articles/build-test-release)

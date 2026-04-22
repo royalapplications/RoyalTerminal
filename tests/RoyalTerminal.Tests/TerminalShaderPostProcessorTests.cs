@@ -31,23 +31,6 @@ public sealed class TerminalShaderPostProcessorTests
     }
 
     [Fact]
-    public void DemoShaderPackageSamples_Validate()
-    {
-        foreach (TerminalShaderSampleOption option in TerminalShaderSampleCatalog.Options)
-        {
-            TerminalShaderPackage? package = TerminalShaderSampleCatalog.GetPackage(option.Id);
-            if (package is null)
-            {
-                continue;
-            }
-
-            TerminalShaderPackageValidationResult result = TerminalShaderPackageValidator.Validate(package);
-
-            Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Diagnostics));
-        }
-    }
-
-    [Fact]
     public void SkiaRuntimeEffectShader_AppliesToFramebuffer()
     {
         TerminalShaderSource source = new(

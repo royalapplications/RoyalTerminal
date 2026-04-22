@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>RoyalTerminal.Shaders</PackageId>
-    <Description>Dependency-free shader source translation, package validation, compiler contracts, and runtime contracts.</Description>
+    <Description>Dependency-free shader source models and compatibility translation for Skia Runtime Effect terminal shaders.</Description>
     <IsPackable>true</IsPackable>
     <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>

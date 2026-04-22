@@ -4,15 +4,14 @@ title: Applying Shaders
 
 # Applying Shaders
 
-RoyalTerminal exposes shaders at three levels:
+RoyalTerminal exposes shaders at two levels:
 
 - `TerminalControl.ShaderSources` for Avalonia hosts
-- `TerminalControl.ShaderPackage` for compiler-backed full HLSL packages
 - `TerminalShaderPostProcessor` for lower-level Skia render integration and tests
 
 Most applications should use `TerminalControl`.
 
-`TerminalShaderSource`, `TerminalShaderLanguage`, and package/compiler/runtime contracts are defined in `RoyalTerminal.Shaders`. `TerminalShaderPostProcessor` and `TerminalShaderFrameContext` are Skia adapter types from `RoyalTerminal.Rendering.Skia`.
+`TerminalShaderSource`, `TerminalShaderLanguage`, and compatibility translation are defined in `RoyalTerminal.Shaders`. `TerminalShaderPostProcessor` and `TerminalShaderFrameContext` are Skia adapter types from `RoyalTerminal.Rendering.Skia`.
 
 ## Apply a shader to `TerminalControl`
 
@@ -72,37 +71,6 @@ Terminal.ShaderAnimationEnabled = true;
 ```
 
 Keep the ViewModel framework-agnostic by storing shader selections as application state and creating `TerminalShaderSource` values in a presentation service or adapter.
-
-## Bind compiler-backed packages
-
-Full HLSL packages use a separate control surface:
-
-```xml
-<rt:TerminalControl
-    ShaderPackage="{Binding ActiveShaderPackage}"
-    ShaderBackendPreference="{Binding ShaderBackendPreference}"
-    ShaderResourceProvider="{Binding ShaderResourceProvider}"
-    ShaderDiagnosticsSink="{Binding ShaderDiagnosticsSink}"
-    ShaderPackageExecutor="{Binding ShaderPackageExecutor}" />
-```
-
-`ShaderPackage` is the configuration entry point for compiler-backed HLSL packages. `ShaderBackendPreference` selects the requested native backend, `ShaderResourceProvider` supplies external textures and buffers, `ShaderDiagnosticsSink` receives validation or backend availability diagnostics, and `ShaderPackageExecutor` provides the concrete compiler/runtime execution path.
-
-If a package is assigned without an executor, `TerminalControl` reports `RTSHADERCONTROL001` through the diagnostics sink and renders without package shaders. The D3D11 package runtime is available through `RoyalTerminal.Shaders.D3D11` on Windows and can be supplied by the host composition root directly or through `TerminalShaderPackageExecutorRegistry`:
-
-```csharp
-TerminalShaderPackageExecutorRegistry registry = new();
-registry.Register(TerminalShaderD3D11PackageExecutorRegistration.Create());
-
-TerminalShaderPackageExecutorCreationResult creation =
-    registry.TryCreate(TerminalShaderBackendPreference.D3D11);
-
-Terminal.ShaderPackageExecutor = creation.Executor;
-```
-
-Keep using `ShaderSources` for lightweight Skia Runtime Effect, Ghostty/Shadertoy, and Windows Terminal sample-compatible shaders when a native runtime is not available.
-
-`ShaderNativeTexturePresenter` can be set when a runtime returns native texture output. The default presenter imports compatible Metal, Vulkan, and D3D12 descriptors through the active Avalonia Skia GPU context; CPU pixel output remains the portable fallback.
 
 ## Chain multiple shaders
 
@@ -182,8 +150,10 @@ Invalid shader sources are skipped and recorded in `CompileLog`. `TryApply` retu
 - `Hue Shift`
 - `Transparent Key`
 - `Retro Scanlines`
+- `Windows Terminal CRT`
+- `Ghostty Shadertoy`
 
-The samples live in `TerminalShaderSampleCatalog` and are intentionally small Skia Runtime Effect ports. They are useful as implementation examples and quick visual validation, not as a replacement for application-specific shader design.
+The samples live in `TerminalShaderSampleCatalog` and include direct Skia Runtime Effect source plus translated Windows Terminal HLSL and Ghostty/Shadertoy sources. They are useful as implementation examples and quick visual validation, not as a replacement for application-specific shader design.
 
 ## Performance guidance
 

@@ -60,64 +60,8 @@ public class TerminalControlTests
         Assert.Equal(10_000, control.ScrollbackLimit);
         Assert.True(control.AutoScroll);
         Assert.True(control.ReflowOnResize);
-        Assert.Null(control.ShaderPackage);
-        Assert.Null(control.ShaderPackageExecutor);
-        Assert.Same(TerminalShaderSkiaNativeTexturePresenter.Instance, control.ShaderNativeTexturePresenter);
-        Assert.Equal(TerminalShaderBackendPreference.Auto, control.ShaderBackendPreference);
-        Assert.Null(control.ShaderResourceProvider);
-        Assert.Null(control.ShaderDiagnosticsSink);
-    }
-
-    [AvaloniaFact]
-    public void Control_ShaderPackageReportsUnavailableBackendDiagnostic()
-    {
-        RecordingShaderDiagnosticsSink diagnosticsSink = new();
-        TerminalControl control = new()
-        {
-            ShaderDiagnosticsSink = diagnosticsSink,
-            ShaderBackendPreference = TerminalShaderBackendPreference.D3D11,
-            ShaderPackage = CreateSimpleShaderPackage(),
-        };
-
-        Assert.Same(diagnosticsSink, control.ShaderDiagnosticsSink);
-        Assert.NotNull(control.ShaderPackage);
-        Assert.Contains(
-            diagnosticsSink.Diagnostics,
-            static diagnostic => diagnostic.Code == "RTSHADERCONTROL001");
-    }
-
-    [AvaloniaFact]
-    public void Control_ShaderPackageWithExecutorDoesNotReportUnavailableBackendDiagnostic()
-    {
-        RecordingShaderDiagnosticsSink diagnosticsSink = new();
-        TerminalControl control = new()
-        {
-            ShaderDiagnosticsSink = diagnosticsSink,
-            ShaderBackendPreference = TerminalShaderBackendPreference.D3D11,
-            ShaderPackageExecutor = new FakeShaderPackageExecutor(TerminalShaderBackendKind.D3D11),
-            ShaderPackage = CreateSimpleShaderPackage(),
-        };
-
-        Assert.NotNull(control.ShaderPackageExecutor);
-        Assert.DoesNotContain(
-            diagnosticsSink.Diagnostics,
-            static diagnostic => diagnostic.Code == "RTSHADERCONTROL001");
-    }
-
-    [AvaloniaFact]
-    public void Control_ShaderDiagnosticsSinkReportsExistingPackageWhenAttachedLater()
-    {
-        TerminalControl control = new()
-        {
-            ShaderPackage = CreateSimpleShaderPackage(),
-        };
-        RecordingShaderDiagnosticsSink diagnosticsSink = new();
-
-        control.ShaderDiagnosticsSink = diagnosticsSink;
-
-        Assert.Contains(
-            diagnosticsSink.Diagnostics,
-            static diagnostic => diagnostic.Code == "RTSHADERCONTROL001");
+        Assert.Null(control.ShaderSources);
+        Assert.True(control.ShaderAnimationEnabled);
     }
 
     [AvaloniaFact]
@@ -2789,63 +2733,6 @@ public class TerminalControlTests
             _ = screen;
             _ = renderer;
             _ = presenter;
-        }
-    }
-
-    private static TerminalShaderPackage CreateSimpleShaderPackage()
-    {
-        return new TerminalShaderPackage(
-            "control-test",
-            [new TerminalShaderFile("main.hlsl", "float4 Main() : SV_TARGET { return 1; }")],
-            [
-                new TerminalShaderPass(
-                    "main",
-                    TerminalShaderStage.Pixel,
-                    "main.hlsl",
-                    "Main",
-                    TerminalShaderTargetProfile.PixelShader60),
-            ]);
-    }
-
-    private sealed class RecordingShaderDiagnosticsSink : ITerminalShaderDiagnosticsSink
-    {
-        public List<TerminalShaderDiagnostic> Diagnostics { get; } = [];
-
-        public void Report(TerminalShaderDiagnostic diagnostic)
-        {
-            Diagnostics.Add(diagnostic);
-        }
-    }
-
-    private sealed class FakeShaderPackageExecutor : ITerminalShaderPackageExecutor
-    {
-        public FakeShaderPackageExecutor(TerminalShaderBackendKind backendKind)
-        {
-            Capabilities = new TerminalShaderBackendCapabilities(
-                backendKind,
-                supportsPixelShaders: true,
-                supportsComputeShaders: true,
-                supportsUavResources: true,
-                supportsTextureInterop: true,
-                maxTextureSize: 4096);
-        }
-
-        public TerminalShaderBackendKind BackendKind => Capabilities.BackendKind;
-
-        public TerminalShaderBackendCapabilities Capabilities { get; }
-
-        public ValueTask<TerminalShaderFrameResult> RenderFrameAsync(
-            TerminalShaderPackage package,
-            TerminalShaderFrameRequest frame,
-            CancellationToken cancellationToken = default)
-        {
-            _ = package;
-            TerminalShaderFrameResult result = new(
-                BackendKind,
-                pixelData: new byte[frame.Width * frame.Height * 4],
-                width: frame.Width,
-                height: frame.Height);
-            return ValueTask.FromResult(result);
         }
     }
 

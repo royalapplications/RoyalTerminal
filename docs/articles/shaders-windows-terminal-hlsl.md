@@ -8,7 +8,7 @@ RoyalTerminal can load a supported subset of Windows Terminal-style HLSL pixel s
 
 This compatibility mode is source adaptation. RoyalTerminal does not currently invoke DXC, Direct2D, or the Windows Terminal rendering pipeline.
 
-For real compiler-backed HLSL packages, including includes, multiple resources, compute-stage modeling, and DXC CLI compilation, see [Compiler-Backed HLSL Shader Packages](/articles/shaders-full-hlsl-packages).
+Full HLSL packages, compute shaders, multiple resources, and native DirectX execution are outside this path. Port those effects into the supported single-pass post-process shape before assigning them to `ShaderSources`.
 
 ## Apply a Windows Terminal-style shader
 
@@ -114,11 +114,12 @@ When a shader fails translation or compilation, `TerminalShaderPostProcessor.Com
 
 ## Demo sample relationship
 
-The demo shader catalog includes Skia Runtime Effect ports inspired by common Windows Terminal shader samples:
+The demo shader catalog includes Skia Runtime Effect ports inspired by common Windows Terminal shader samples and one Windows Terminal-style HLSL sample translated at runtime:
 
 - CRT-style amber display
 - hue shift
 - transparent background keying
 - retro scanlines
+- Windows Terminal CRT
 
-Those samples are shipped as direct Skia Runtime Effect source so they remain cross-platform and do not depend on the HLSL adapter at runtime.
+All samples remain cross-platform because execution happens through Skia Runtime Effect.

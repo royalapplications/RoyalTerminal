@@ -44,7 +44,7 @@ Project documentation source lives in [docs/](docs/) and is published through th
 | `RoyalTerminal.Terminal.Services.Contracts` | Terminal session service contracts |
 | `RoyalTerminal.Terminal.Services` | Terminal session service implementations |
 | `RoyalTerminal.Rendering.Text` | Reusable text shaping/fallback subsystem (`HarfBuzzTextShaper`, `TerminalFontResolver`) |
-| `RoyalTerminal.Shaders` | Dependency-free shader source, compatibility translation, package validation, DXC/Slang CLI compiler contracts, source reflection, compiler caching, and runtime contracts |
+| `RoyalTerminal.Shaders` | Dependency-free shader source models and compatibility translation for Skia Runtime Effect terminal shaders |
 | `RoyalTerminal.Rendering.Skia` | CPU cell renderer core (`SkiaTerminalRenderer`, `GlyphCache`) with HarfBuzz shaping, fallback font resolution, and framebuffer shader post-processing |
 | `RoyalTerminal.Rendering.Contracts` | Backend-agnostic render contracts (`RenderTargetDescriptor`, capabilities) |
 | `RoyalTerminal.Rendering.Interop.Ghostty` | Managed wrapper for `ghostty-renderer-capi` |

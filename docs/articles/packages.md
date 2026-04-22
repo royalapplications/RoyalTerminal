@@ -14,7 +14,7 @@ RoyalTerminal is published as a family of packages so you can compose the exact 
 | Avalonia terminal plus reusable settings UI | `RoyalTerminal.Avalonia`, `RoyalTerminal.Avalonia.Settings` |
 | Avalonia terminal with native Ghostty VT available | `RoyalTerminal.Avalonia`, `RoyalTerminal.Terminal.Vt.Ghostty`, matching `RoyalTerminal.GhosttySharp.Native.*` |
 | Custom transport/profile orchestration without Avalonia | `RoyalTerminal.Terminal`, `RoyalTerminal.Terminal.Services`, selected `RoyalTerminal.Terminal.Transport.*` packages |
-| Shader source, compatibility translation, package validation, and compiler contracts without Avalonia or Skia | `RoyalTerminal.Shaders` |
+| Shader source models and compatibility translation without Avalonia or Skia | `RoyalTerminal.Shaders` |
 | Custom rendering integration | `RoyalTerminal.Rendering.Contracts`, `RoyalTerminal.Rendering.Skia`, optional `RoyalTerminal.Rendering.Interop.Ghostty*` |
 
 ## Deep dive guides
@@ -83,7 +83,7 @@ The API section is generated from the packable managed libraries under `src/` an
 | --- | --- |
 | `RoyalTerminal.Rendering.Contracts` | Backend-agnostic GPU rendering contracts and validation helpers. |
 | `RoyalTerminal.Rendering.Text` | HarfBuzz-backed shaping, font fallback, and diagnostics primitives. |
-| `RoyalTerminal.Shaders` | Dependency-free shader source models, Ghostty/Shadertoy and Windows Terminal translation, HLSL package validation, compiler contracts, and runtime contracts. |
+| `RoyalTerminal.Shaders` | Dependency-free shader source models plus Ghostty/Shadertoy and Windows Terminal translation into Skia Runtime Effect source. |
 | `RoyalTerminal.Rendering.Skia` | CPU Skia terminal renderer, glyph cache, and framebuffer shader post-processing. |
 | `RoyalTerminal.Rendering.Interop.Ghostty` | Managed interop wrappers for `ghostty-renderer-capi`. |
 | `RoyalTerminal.Rendering.Interop.Ghostty.Skia` | Skia bridge around Ghostty renderer interop with fallback support. |

@@ -7,7 +7,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Skia\RoyalTerminal.Rendering.Skia.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.Shaders\RoyalTerminal.Shaders.csproj" />
   </ItemGroup>
 
 </Project>

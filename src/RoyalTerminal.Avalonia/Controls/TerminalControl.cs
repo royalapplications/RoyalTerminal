@@ -151,73 +151,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private IReadOnlyList<TerminalShaderSource>? _shaderSources;
 
     /// <summary>
-    /// Configured compiler-backed full shader package.
-    /// </summary>
-    public static readonly DirectProperty<TerminalControl, TerminalShaderPackage?> ShaderPackageProperty =
-        AvaloniaProperty.RegisterDirect<TerminalControl, TerminalShaderPackage?>(
-            nameof(ShaderPackage),
-            o => o.ShaderPackage,
-            (o, v) => o.ShaderPackage = v);
-
-    private TerminalShaderPackage? _shaderPackage;
-
-    /// <summary>
-    /// Optional executor for compiler-backed full shader packages.
-    /// </summary>
-    public static readonly DirectProperty<TerminalControl, ITerminalShaderPackageExecutor?> ShaderPackageExecutorProperty =
-        AvaloniaProperty.RegisterDirect<TerminalControl, ITerminalShaderPackageExecutor?>(
-            nameof(ShaderPackageExecutor),
-            o => o.ShaderPackageExecutor,
-            (o, v) => o.ShaderPackageExecutor = v);
-
-    private ITerminalShaderPackageExecutor? _shaderPackageExecutor;
-
-    /// <summary>
-    /// Optional native texture presenter for compiler-backed full shader packages.
-    /// </summary>
-    public static readonly DirectProperty<TerminalControl, ITerminalShaderNativeTexturePresenter?> ShaderNativeTexturePresenterProperty =
-        AvaloniaProperty.RegisterDirect<TerminalControl, ITerminalShaderNativeTexturePresenter?>(
-            nameof(ShaderNativeTexturePresenter),
-            o => o.ShaderNativeTexturePresenter,
-            (o, v) => o.ShaderNativeTexturePresenter = v);
-
-    private ITerminalShaderNativeTexturePresenter? _shaderNativeTexturePresenter =
-        TerminalShaderSkiaNativeTexturePresenter.Instance;
-
-    /// <summary>
-    /// Preferred backend for compiler-backed full shader packages.
-    /// </summary>
-    public static readonly DirectProperty<TerminalControl, TerminalShaderBackendPreference> ShaderBackendPreferenceProperty =
-        AvaloniaProperty.RegisterDirect<TerminalControl, TerminalShaderBackendPreference>(
-            nameof(ShaderBackendPreference),
-            o => o.ShaderBackendPreference,
-            (o, v) => o.ShaderBackendPreference = v);
-
-    private TerminalShaderBackendPreference _shaderBackendPreference = TerminalShaderBackendPreference.Auto;
-
-    /// <summary>
-    /// Optional resource provider for compiler-backed full shader packages.
-    /// </summary>
-    public static readonly DirectProperty<TerminalControl, ITerminalShaderResourceProvider?> ShaderResourceProviderProperty =
-        AvaloniaProperty.RegisterDirect<TerminalControl, ITerminalShaderResourceProvider?>(
-            nameof(ShaderResourceProvider),
-            o => o.ShaderResourceProvider,
-            (o, v) => o.ShaderResourceProvider = v);
-
-    private ITerminalShaderResourceProvider? _shaderResourceProvider;
-
-    /// <summary>
-    /// Optional diagnostics sink for shader package validation and backend diagnostics.
-    /// </summary>
-    public static readonly DirectProperty<TerminalControl, ITerminalShaderDiagnosticsSink?> ShaderDiagnosticsSinkProperty =
-        AvaloniaProperty.RegisterDirect<TerminalControl, ITerminalShaderDiagnosticsSink?>(
-            nameof(ShaderDiagnosticsSink),
-            o => o.ShaderDiagnosticsSink,
-            (o, v) => o.ShaderDiagnosticsSink = v);
-
-    private ITerminalShaderDiagnosticsSink? _shaderDiagnosticsSink;
-
-    /// <summary>
     /// Whether configured framebuffer shaders may request continuous animation frames.
     /// </summary>
     public static readonly DirectProperty<TerminalControl, bool> ShaderAnimationEnabledProperty =
@@ -227,7 +160,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             (o, v) => o.ShaderAnimationEnabled = v);
 
     private bool _shaderAnimationEnabled = true;
-    private string? _lastShaderPackageDiagnosticKey;
 
     public string FontFamilyName
     {
@@ -331,119 +263,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
 
             SetAndRaise(ShaderSourcesProperty, ref _shaderSources, next);
-            UpdatePresenterShaderState();
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets a compiler-backed full shader package.
-    /// </summary>
-    public TerminalShaderPackage? ShaderPackage
-    {
-        get => _shaderPackage;
-        set
-        {
-            if (ReferenceEquals(_shaderPackage, value))
-            {
-                return;
-            }
-
-            SetAndRaise(ShaderPackageProperty, ref _shaderPackage, value);
-            _lastShaderPackageDiagnosticKey = null;
-            UpdatePresenterShaderState();
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets the executor used by compiler-backed full shader packages.
-    /// </summary>
-    public ITerminalShaderPackageExecutor? ShaderPackageExecutor
-    {
-        get => _shaderPackageExecutor;
-        set
-        {
-            if (ReferenceEquals(_shaderPackageExecutor, value))
-            {
-                return;
-            }
-
-            SetAndRaise(ShaderPackageExecutorProperty, ref _shaderPackageExecutor, value);
-            _lastShaderPackageDiagnosticKey = null;
-            UpdatePresenterShaderState();
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets the presenter used for native shader texture results.
-    /// </summary>
-    public ITerminalShaderNativeTexturePresenter? ShaderNativeTexturePresenter
-    {
-        get => _shaderNativeTexturePresenter;
-        set
-        {
-            if (ReferenceEquals(_shaderNativeTexturePresenter, value))
-            {
-                return;
-            }
-
-            SetAndRaise(ShaderNativeTexturePresenterProperty, ref _shaderNativeTexturePresenter, value);
-            UpdatePresenterShaderState();
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets the preferred backend for compiler-backed shader packages.
-    /// </summary>
-    public TerminalShaderBackendPreference ShaderBackendPreference
-    {
-        get => _shaderBackendPreference;
-        set
-        {
-            if (_shaderBackendPreference == value)
-            {
-                return;
-            }
-
-            SetAndRaise(ShaderBackendPreferenceProperty, ref _shaderBackendPreference, value);
-            _lastShaderPackageDiagnosticKey = null;
-            UpdatePresenterShaderState();
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets the resource provider used by compiler-backed shader packages.
-    /// </summary>
-    public ITerminalShaderResourceProvider? ShaderResourceProvider
-    {
-        get => _shaderResourceProvider;
-        set
-        {
-            if (ReferenceEquals(_shaderResourceProvider, value))
-            {
-                return;
-            }
-
-            SetAndRaise(ShaderResourceProviderProperty, ref _shaderResourceProvider, value);
-            _lastShaderPackageDiagnosticKey = null;
-            UpdatePresenterShaderState();
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets the diagnostics sink used for shader package validation and backend diagnostics.
-    /// </summary>
-    public ITerminalShaderDiagnosticsSink? ShaderDiagnosticsSink
-    {
-        get => _shaderDiagnosticsSink;
-        set
-        {
-            if (ReferenceEquals(_shaderDiagnosticsSink, value))
-            {
-                return;
-            }
-
-            SetAndRaise(ShaderDiagnosticsSinkProperty, ref _shaderDiagnosticsSink, value);
-            _lastShaderPackageDiagnosticKey = null;
             UpdatePresenterShaderState();
         }
     }
@@ -1349,60 +1168,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void UpdatePresenterShaderState()
     {
-        ReportShaderPackageDiagnosticsIfNeeded();
-        IReadOnlyList<TerminalShaderSource>? activeShaderSources = _shaderPackage is null ? _shaderSources : null;
         _presenter?.SetShaderState(
-            activeShaderSources,
-            _shaderPackage,
-            _shaderBackendPreference,
-            _shaderResourceProvider,
-            _shaderDiagnosticsSink,
-            _shaderPackageExecutor,
-            _shaderNativeTexturePresenter,
+            _shaderSources,
             _shaderAnimationEnabled);
         _presenter?.Invalidate(fullRedraw: true);
-    }
-
-    private void ReportShaderPackageDiagnosticsIfNeeded()
-    {
-        TerminalShaderPackage? package = _shaderPackage;
-        ITerminalShaderDiagnosticsSink? diagnosticsSink = _shaderDiagnosticsSink;
-        if (package is null || diagnosticsSink is null)
-        {
-            if (package is null)
-            {
-                _lastShaderPackageDiagnosticKey = null;
-            }
-
-            return;
-        }
-
-        TerminalShaderBackendKind backendKind =
-            TerminalShaderBackendSelector.SelectBackend(_shaderBackendPreference);
-        string diagnosticKey =
-            $"{package.Name}|{package.Files.Count}|{package.Passes.Count}|{package.Resources.Count}|{_shaderBackendPreference}|{diagnosticsSink.GetHashCode()}|{_shaderPackageExecutor?.GetHashCode() ?? 0}";
-        if (string.Equals(_lastShaderPackageDiagnosticKey, diagnosticKey, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        _lastShaderPackageDiagnosticKey = diagnosticKey;
-        TerminalShaderPackageValidationResult validation =
-            TerminalShaderPackageValidator.Validate(package);
-        for (int i = 0; i < validation.Diagnostics.Count; i++)
-        {
-            diagnosticsSink.Report(validation.Diagnostics[i]);
-        }
-
-        if (_shaderPackageExecutor is not null)
-        {
-            return;
-        }
-
-        diagnosticsSink.Report(new TerminalShaderDiagnostic(
-            TerminalShaderDiagnosticSeverity.Error,
-            "RTSHADERCONTROL001",
-            $"Compiler-backed shader package '{package.Name}' requested backend '{backendKind}', but native full-HLSL execution is not available in the managed Skia terminal renderer yet. Rendering continues without package shaders."));
     }
 
     private static IReadOnlyList<TerminalShaderSource>? NormalizeShaderSources(

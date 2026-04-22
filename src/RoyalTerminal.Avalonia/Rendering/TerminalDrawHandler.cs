@@ -7,7 +7,6 @@ using Avalonia.Platform;
 using Avalonia.Rendering.Composition;
 using Avalonia.Skia;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using RoyalTerminal.Shaders;
 using SkiaSharp;
 
@@ -24,18 +23,11 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     private SkiaTerminalRenderer? _renderer;
     private TerminalScreen? _screen;
     private TerminalShaderPostProcessor? _shaderPostProcessor;
-    private TerminalShaderPackage? _shaderPackage;
-    private TerminalShaderBackendPreference _shaderBackendPreference;
-    private ITerminalShaderResourceProvider? _shaderResourceProvider;
-    private ITerminalShaderDiagnosticsSink? _shaderDiagnosticsSink;
-    private ITerminalShaderPackageExecutor? _shaderPackageExecutor;
-    private ITerminalShaderNativeTexturePresenter? _shaderNativeTexturePresenter;
     private bool _shaderAnimationEnabled;
     private bool _pendingRender;
     private long _shaderStartTimestamp;
     private long _lastShaderTimestamp;
     private int _shaderFrame;
-    private string? _lastRuntimeDiagnosticKey;
 
     /// <summary>
     /// Message types for communicating with the handler from the UI thread.
@@ -45,12 +37,6 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     public readonly record struct ResizeMessage();
     public readonly record struct ShaderStateMessage(
         IReadOnlyList<TerminalShaderSource>? Sources,
-        TerminalShaderPackage? Package,
-        TerminalShaderBackendPreference BackendPreference,
-        ITerminalShaderResourceProvider? ResourceProvider,
-        ITerminalShaderDiagnosticsSink? DiagnosticsSink,
-        ITerminalShaderPackageExecutor? PackageExecutor,
-        ITerminalShaderNativeTexturePresenter? NativeTexturePresenter,
         bool AnimationEnabled);
 
     public override void OnMessage(object message)
@@ -74,12 +60,6 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             case ShaderStateMessage shaderState:
                 SetShaderState(
                     shaderState.Sources,
-                    shaderState.Package,
-                    shaderState.BackendPreference,
-                    shaderState.ResourceProvider,
-                    shaderState.DiagnosticsSink,
-                    shaderState.PackageExecutor,
-                    shaderState.NativeTexturePresenter,
                     shaderState.AnimationEnabled);
                 RequestRender();
                 break;
@@ -122,13 +102,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                 try
                 {
                     TerminalShaderPostProcessor? shaderPostProcessor = _shaderPostProcessor;
-                    TerminalShaderPackage? shaderPackage = _shaderPackage;
-                    ITerminalShaderPackageExecutor? shaderPackageExecutor = _shaderPackageExecutor;
-                    if (shaderPackage is not null && shaderPackageExecutor is not null)
-                    {
-                        RenderWithShaderPackage(lease, canvas, renderer, screen, shaderPackage, shaderPackageExecutor);
-                    }
-                    else if (shaderPostProcessor is not null && shaderPostProcessor.HasShaders)
+                    if (shaderPostProcessor is not null && shaderPostProcessor.HasShaders)
                     {
                         RenderWithShaders(canvas, renderer, screen, shaderPostProcessor);
                     }
@@ -171,38 +145,23 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
     private void SetShaderState(
         IReadOnlyList<TerminalShaderSource>? sources,
-        TerminalShaderPackage? package,
-        TerminalShaderBackendPreference backendPreference,
-        ITerminalShaderResourceProvider? resourceProvider,
-        ITerminalShaderDiagnosticsSink? diagnosticsSink,
-        ITerminalShaderPackageExecutor? packageExecutor,
-        ITerminalShaderNativeTexturePresenter? nativeTexturePresenter,
         bool animationEnabled)
     {
         _shaderPostProcessor?.Dispose();
         _shaderPostProcessor = TerminalShaderPostProcessor.Create(sources);
-        _shaderPackage = package;
-        _shaderBackendPreference = backendPreference;
-        _shaderResourceProvider = resourceProvider;
-        _shaderDiagnosticsSink = diagnosticsSink;
-        _shaderPackageExecutor = packageExecutor;
-        _shaderNativeTexturePresenter = nativeTexturePresenter;
         _shaderAnimationEnabled = animationEnabled;
         _shaderStartTimestamp = 0;
         _lastShaderTimestamp = 0;
         _shaderFrame = 0;
-        _lastRuntimeDiagnosticKey = null;
     }
 
     private bool ShouldContinueShaderAnimation()
     {
         TerminalShaderPostProcessor? shaderPostProcessor = _shaderPostProcessor;
-        bool packageAnimation = _shaderPackage is not null && _shaderPackageExecutor is not null;
         return _shaderAnimationEnabled &&
-               ((shaderPostProcessor is not null &&
-                 shaderPostProcessor.HasShaders &&
-                 shaderPostProcessor.RequiresContinuousAnimation) ||
-                packageAnimation);
+               shaderPostProcessor is not null &&
+               shaderPostProcessor.HasShaders &&
+               shaderPostProcessor.RequiresContinuousAnimation;
     }
 
     private void RenderWithShaders(
@@ -242,198 +201,6 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         {
             destinationCanvas.DrawImage(terminalFrame, destinationRect);
         }
-    }
-
-    private void RenderWithShaderPackage(
-        ISkiaSharpApiLease lease,
-        SKCanvas destinationCanvas,
-        SkiaTerminalRenderer renderer,
-        TerminalScreen screen,
-        TerminalShaderPackage package,
-        ITerminalShaderPackageExecutor executor)
-    {
-        SKRect clip = destinationCanvas.LocalClipBounds;
-        int width = Math.Max(1, (int)Math.Ceiling(clip.Width));
-        int height = Math.Max(1, (int)Math.Ceiling(clip.Height));
-        SKImageInfo imageInfo = new(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
-
-        using SKSurface? terminalSurface = SKSurface.Create(imageInfo);
-        if (terminalSurface is null)
-        {
-            destinationCanvas.Clear(new SKColor(screen.DefaultBackground));
-            renderer.RenderFull(destinationCanvas, screen);
-            return;
-        }
-
-        SKCanvas terminalCanvas = terminalSurface.Canvas;
-        terminalCanvas.Clear(new SKColor(screen.DefaultBackground));
-        renderer.RenderFull(terminalCanvas, screen);
-
-        using SKImage? terminalFrame = terminalSurface.Snapshot();
-        if (terminalFrame is null)
-        {
-            destinationCanvas.Clear(new SKColor(screen.DefaultBackground));
-            renderer.RenderFull(destinationCanvas, screen);
-            return;
-        }
-
-        SKRect destinationRect = new(0, 0, width, height);
-        byte[]? terminalPixels = CopyRgbaPixels(terminalFrame, width, height);
-        if (terminalPixels is null)
-        {
-            ReportDiagnosticOnce(new TerminalShaderDiagnostic(
-                TerminalShaderDiagnosticSeverity.Error,
-                "RTSHADERCONTROL002",
-                "Terminal framebuffer pixels could not be copied for full shader package execution."));
-            destinationCanvas.DrawImage(terminalFrame, destinationRect);
-            return;
-        }
-
-        TerminalShaderFrameContext frameContext = CreateFrameContext(renderer, screen, width, height);
-        TerminalShaderResourceValue terminalFramebuffer = new(
-            TerminalShaderBuiltInResourceNames.TerminalFramebuffer,
-            TerminalShaderResourceKind.TerminalFramebuffer,
-            data: terminalPixels,
-            width: width,
-            height: height);
-
-        TerminalShaderFrameResult result;
-        try
-        {
-            TerminalShaderFrameRequest request = TerminalShaderRuntimePipeline
-                .CreateFrameRequestAsync(
-                    package,
-                    width,
-                    height,
-                    frameContext.Time,
-                    frameContext.TimeDelta,
-                    frameContext.Frame,
-                    frameContext.Scale,
-                    [terminalFramebuffer],
-                    _shaderResourceProvider)
-                .GetAwaiter()
-                .GetResult();
-            result = executor
-                .RenderFrameAsync(package, request)
-                .GetAwaiter()
-                .GetResult();
-        }
-        catch (Exception ex)
-        {
-            ReportDiagnosticOnce(new TerminalShaderDiagnostic(
-                TerminalShaderDiagnosticSeverity.Error,
-                "RTSHADERCONTROL003",
-                $"Full shader package '{package.Name}' failed during execution: {ex.Message}"));
-            destinationCanvas.DrawImage(terminalFrame, destinationRect);
-            return;
-        }
-
-        ReportDiagnosticsOnce(result.Diagnostics);
-        if (result.IsSuccess && TryDrawPixelResult(destinationCanvas, result, destinationRect))
-        {
-            return;
-        }
-
-        if (result.IsSuccess && TryDrawNativeTextureResult(lease, destinationCanvas, result, destinationRect))
-        {
-            return;
-        }
-
-        if (result.IsSuccess && result.NativeTexture is not null)
-        {
-            ReportDiagnosticOnce(new TerminalShaderDiagnostic(
-                TerminalShaderDiagnosticSeverity.Warning,
-                "RTSHADERCONTROL004",
-                $"Full shader package '{package.Name}' produced a native {result.BackendKind} texture, but the active Skia renderer could not import it. Rendering fell back to the unshaded terminal frame."));
-        }
-
-        destinationCanvas.DrawImage(terminalFrame, destinationRect);
-    }
-
-    private static byte[]? CopyRgbaPixels(SKImage image, int width, int height)
-    {
-        using SKPixmap pixmap = image.PeekPixels();
-        if (pixmap is null || pixmap.ColorType != SKColorType.Rgba8888)
-        {
-            return null;
-        }
-
-        int targetRowBytes = checked(width * 4);
-        byte[] pixels = new byte[checked(targetRowBytes * height)];
-        IntPtr source = pixmap.GetPixels();
-        int sourceRowBytes = pixmap.RowBytes;
-        for (int y = 0; y < height; y++)
-        {
-            Marshal.Copy(
-                IntPtr.Add(source, y * sourceRowBytes),
-                pixels,
-                y * targetRowBytes,
-                targetRowBytes);
-        }
-
-        return pixels;
-    }
-
-    private static bool TryDrawPixelResult(
-        SKCanvas destinationCanvas,
-        TerminalShaderFrameResult result,
-        SKRect destinationRect)
-    {
-        if (result.PixelData.Length == 0 || result.Width <= 0 || result.Height <= 0)
-        {
-            return false;
-        }
-
-        int expectedBytes = checked(result.Width * result.Height * 4);
-        byte[] pixels = result.PixelData.ToArray();
-        if (pixels.Length < expectedBytes)
-        {
-            return false;
-        }
-
-        SKImageInfo imageInfo = new(result.Width, result.Height, SKColorType.Rgba8888, SKAlphaType.Premul);
-        using SKBitmap bitmap = new(imageInfo);
-        Marshal.Copy(pixels, 0, bitmap.GetPixels(), expectedBytes);
-        using SKImage image = SKImage.FromBitmap(bitmap);
-        destinationCanvas.DrawImage(image, destinationRect);
-        return true;
-    }
-
-    private bool TryDrawNativeTextureResult(
-        ISkiaSharpApiLease lease,
-        SKCanvas destinationCanvas,
-        TerminalShaderFrameResult result,
-        SKRect destinationRect)
-    {
-        ITerminalShaderNativeTexturePresenter? presenter = _shaderNativeTexturePresenter;
-        return presenter is not null &&
-               presenter.TryDraw(lease, destinationCanvas, result, destinationRect);
-    }
-
-    private void ReportDiagnosticsOnce(IReadOnlyList<TerminalShaderDiagnostic> diagnostics)
-    {
-        for (int i = 0; i < diagnostics.Count; i++)
-        {
-            ReportDiagnosticOnce(diagnostics[i]);
-        }
-    }
-
-    private void ReportDiagnosticOnce(TerminalShaderDiagnostic diagnostic)
-    {
-        ITerminalShaderDiagnosticsSink? diagnosticsSink = _shaderDiagnosticsSink;
-        if (diagnosticsSink is null)
-        {
-            return;
-        }
-
-        string key = $"{diagnostic.Code}|{diagnostic.Message}";
-        if (string.Equals(_lastRuntimeDiagnosticKey, key, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        _lastRuntimeDiagnosticKey = key;
-        diagnosticsSink.Report(diagnostic);
     }
 
     private TerminalShaderFrameContext CreateFrameContext(

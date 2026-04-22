@@ -8,7 +8,7 @@ RoyalTerminal supports terminal framebuffer shaders in the managed Skia render p
 
 This keeps shader support independent from the VT processor. The same shader pipeline works when the terminal state came from the managed VT engine, the Ghostty-backed VT engine, replay data, or any transport that updates `TerminalScreen`.
 
-The non-terminal shader surface lives in `RoyalTerminal.Shaders`. That package contains source descriptions, compatibility translation, HLSL package validation, compiler contracts, and backend-neutral runtime contracts without referencing Avalonia, SkiaSharp, terminal internals, or native renderer packages. The Skia-specific post-processing adapter remains in `RoyalTerminal.Rendering.Skia`.
+The non-terminal shader surface lives in `RoyalTerminal.Shaders`. That package contains source descriptions and compatibility translation without referencing Avalonia, SkiaSharp, terminal internals, or native renderer packages. The Skia-specific post-processing adapter remains in `RoyalTerminal.Rendering.Skia`.
 
 ## Supported shader paths
 
@@ -18,7 +18,6 @@ The non-terminal shader surface lives in `RoyalTerminal.Shaders`. That package c
 | [Skia Runtime Effect Shaders](/articles/shaders-skia-runtime-effect) | You can write or port the shader as Skia Runtime Effect source. This is the canonical runtime format. |
 | [Ghostty/Shadertoy Compatibility](/articles/shaders-ghostty-shadertoy) | You have a Ghostty-style or Shadertoy-style GLSL fragment shader with a `mainImage` entry point. |
 | [Windows Terminal HLSL Compatibility](/articles/shaders-windows-terminal-hlsl) | You have a Windows Terminal-style HLSL pixel shader that samples `shaderTexture` through `PixelShaderSettings`. |
-| [Compiler-Backed HLSL Shader Packages](/articles/shaders-full-hlsl-packages) | You need package validation, includes, real DXC compilation, compute/pass/resource modeling, and backend capability diagnostics. |
 
 ## Render architecture
 
@@ -37,31 +36,11 @@ Because the shader runs after terminal drawing, it affects everything in the fra
 | --- | --- | --- |
 | `TerminalControl.ShaderSources` | `RoyalTerminal.Avalonia` | Optional shader chain applied to the completed terminal frame. |
 | `TerminalControl.ShaderAnimationEnabled` | `RoyalTerminal.Avalonia` | Allows shaders that request animation to keep the render loop active between terminal updates. |
-| `TerminalControl.ShaderPackage` | `RoyalTerminal.Avalonia` | Compiler-backed full shader package configuration surface. Packages render when a compatible `ShaderPackageExecutor` is supplied. |
-| `TerminalControl.ShaderPackageExecutor` | `RoyalTerminal.Avalonia` | Optional compiler/runtime executor used to run full shader packages. |
-| `TerminalControl.ShaderNativeTexturePresenter` | `RoyalTerminal.Avalonia` | Optional native texture presenter used before CPU pixel fallback. |
-| `TerminalControl.ShaderBackendPreference` | `RoyalTerminal.Avalonia` | Preferred backend for full shader packages. |
-| `TerminalControl.ShaderResourceProvider` | `RoyalTerminal.Avalonia` | Optional external resource provider for full shader packages. |
-| `TerminalControl.ShaderDiagnosticsSink` | `RoyalTerminal.Avalonia` | Optional diagnostics sink for package validation and backend availability diagnostics. |
 | `TerminalShaderSource` | `RoyalTerminal.Shaders` | One named shader source plus language and animation metadata. |
 | `TerminalShaderLanguage` | `RoyalTerminal.Shaders` | Selects direct SkSL, Ghostty/Shadertoy compatibility, or Windows Terminal HLSL compatibility. |
 | `TerminalShaderSourceTranslator` | `RoyalTerminal.Shaders` | Dependency-free source translator used by the Skia adapter. |
 | `TerminalShaderPostProcessor` | `RoyalTerminal.Rendering.Skia` | Lower-level compiler and post-processor used by the renderer. |
 | `TerminalShaderFrameContext` | `RoyalTerminal.Rendering.Skia` | Skia/terminal frame data passed to post-process uniforms. |
-| `TerminalShaderPackage` | `RoyalTerminal.Shaders` | Full HLSL package model for compiler-backed shader work. |
-| `TerminalShaderCompilationPipeline` | `RoyalTerminal.Shaders` | Validation, include resolution, and compiler orchestration for full packages. |
-| `TerminalShaderDxcCliCompiler` | `RoyalTerminal.Shaders` | DXC command-line compiler integration. |
-| `TerminalShaderSlangCliCompiler` | `RoyalTerminal.Shaders` | Slang command-line compiler integration for DXIL, SPIR-V, and MSL targets. |
-| `TerminalShaderCachingCompiler` | `RoyalTerminal.Shaders` | Deterministic compilation cache wrapper. |
-| `TerminalShaderHlslReflectionScanner` | `RoyalTerminal.Shaders` | Source-side HLSL reflection preflight for resources and semantics. |
-| `TerminalShaderSpirVReflectionReader` | `RoyalTerminal.Shaders` | Dependency-free SPIR-V reflection reader for Vulkan compiler output. |
-| `TerminalShaderDxcReflectionListingReader` | `RoyalTerminal.Shaders` | DXC text-listing reflection reader for DXIL compiler output. |
-| `TerminalShaderSlangReflectionJsonReader` | `RoyalTerminal.Shaders` | Slang JSON reflection reader for Slang compiler output. |
-| `TerminalShaderBackendSelector` | `RoyalTerminal.Shaders` | Maps backend preferences to platform defaults and deterministic unavailable runtimes. |
-| `TerminalShaderPackageExecutorRegistry` | `RoyalTerminal.Shaders` | Host-side registry for selecting concrete compiler/runtime package executors. |
-| `TerminalShaderPackageExecutorRegistration` | `RoyalTerminal.Shaders` | Describes one registered compiler/runtime pair and its availability. |
-| `ITerminalShaderRuntime` | `RoyalTerminal.Shaders` | Backend-neutral runtime contract for compiled packages. |
-| `TerminalShaderRuntimePipeline` | `RoyalTerminal.Shaders` | Backend-neutral frame resource resolution and runtime validation orchestration. |
 
 ## Frame inputs
 
@@ -105,8 +84,8 @@ The current compatibility layer is source-level adaptation into Skia Runtime Eff
 | Skia Runtime Effect | Native support. This is the preferred production format. |
 | Ghostty/Shadertoy `mainImage` GLSL | Supported for single-pass post-process shaders that sample the terminal frame through `iChannel0`. |
 | Windows Terminal HLSL | Supported for common Windows Terminal pixel shader samples that use `shaderTexture`, `samplerState`, `PSInput`, and `PixelShaderSettings`. |
-| Compiler-backed HLSL packages | Package model, validation, include resolution, DXC/Slang CLI compilation, compiler-assisted reflection, D3D11 execution, package executor plumbing, CPU fallback, and native texture presentation boundary are implemented. D3D12/Vulkan/Metal runtime backends and D3D11 zero-copy presentation remain future work. |
-| Arbitrary HLSL/GLSL projects | Not supported without manual porting or a future compiler-backed path. |
+| Full HLSL packages, compute shaders, and native GPU runtimes | Not supported. RoyalTerminal does not ship a DXC/Slang/D3D/Vulkan/Metal shader runtime. |
+| Arbitrary HLSL/GLSL projects | Not supported without manual porting into the supported Skia post-process shape. |
 | Native Ghostty renderer custom shaders | Not injected into the native renderer yet. RoyalTerminal applies Ghostty-compatible shader source through the managed Skia post-process path. |
 
 ## Choosing a format
