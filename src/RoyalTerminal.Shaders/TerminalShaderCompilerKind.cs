@@ -12,6 +12,9 @@ public enum TerminalShaderCompilerKind
     /// <summary>Use the runtime's default compiler for the selected backend.</summary>
     Auto,
 
+    /// <summary>Use the legacy D3DCompiler DXBC compiler.</summary>
+    D3DCompiler,
+
     /// <summary>Use the Microsoft DirectX Shader Compiler.</summary>
     Dxc,
 

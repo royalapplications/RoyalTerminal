@@ -9,28 +9,21 @@ namespace RoyalTerminal.Demo.Services;
 
 internal static class TerminalShaderDemoExecutorFactory
 {
+    private static readonly TerminalShaderPackageExecutorRegistry Registry = CreateRegistry();
+
     public static ITerminalShaderPackageExecutor? TryCreate(TerminalShaderPackage package)
     {
         ArgumentNullException.ThrowIfNull(package);
 
-        if (!OperatingSystem.IsWindows() ||
-            !TerminalShaderD3D11Compiler.IsSupported ||
-            !TerminalShaderD3D11Runtime.IsSupported)
-        {
-            return null;
-        }
+        _ = package;
+        TerminalShaderPackageExecutorCreationResult result = Registry.TryCreate(TerminalShaderBackendPreference.D3D11);
+        return result.Executor;
+    }
 
-        try
-        {
-            return new TerminalShaderCompilerRuntimePackageExecutor(
-                new TerminalShaderD3D11Compiler(),
-                new TerminalShaderD3D11Runtime(),
-                new TerminalShaderCompilationOptions(TerminalShaderBackendKind.D3D11));
-        }
-        catch (Exception ex) when (ex is PlatformNotSupportedException or InvalidOperationException ||
-                                   string.Equals(ex.GetType().FullName, "SharpGen.Runtime.SharpGenException", StringComparison.Ordinal))
-        {
-            return null;
-        }
+    private static TerminalShaderPackageExecutorRegistry CreateRegistry()
+    {
+        TerminalShaderPackageExecutorRegistry registry = new();
+        registry.Register(TerminalShaderD3D11PackageExecutorRegistration.Create());
+        return registry;
     }
 }
