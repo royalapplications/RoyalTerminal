@@ -7,6 +7,7 @@
 // DEC line-drawing character set, erase, insert/delete lines & characters, and tabs.
 
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Sixel;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Unicode;
 using System.Globalization;
@@ -24,7 +25,7 @@ namespace RoyalTerminal.Terminal;
 /// of the VT protocol to render typical shell output and full-screen TUI
 /// applications such as Midnight Commander, htop, vim, etc.
 /// </summary>
-public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource, ITerminalFocusEventModeSource, ITerminalSelectionExportSource, ITerminalPasteSequenceEncoderSource, ITerminalSnapshotExportSource
+public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource, ITerminalFocusEventModeSource, ITerminalSelectionExportSource, ITerminalPasteSequenceEncoderSource, ITerminalSnapshotExportSource, ITerminalSixelOptionsSink
 {
     private const int MaxOscBufferBytes = 4096;
     private const int MaxDcsBufferBytes = 4096;
@@ -88,8 +89,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private char _intermediateChar;
     private readonly List<byte> _oscBuffer = [];
     private readonly List<byte> _dcsBuffer = [];
+    private readonly SixelDecoder _sixelDecoder;
+    private readonly BasicVtProcessorOptions _options;
     private bool _isDiscardingOscPayload;
     private bool _isDiscardingDcsPayload;
+    private bool _sixelGraphicsEnabled;
 
     // Saved cursor state (for DECSC/DECRC — ESC 7 / ESC 8)
     private int _savedCursorCol;
@@ -231,9 +235,27 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         set => _enquiryResponse = value is null ? null : value.ToArray();
     }
 
+    /// <inheritdoc />
+    public bool SixelGraphicsEnabled
+    {
+        get => _sixelGraphicsEnabled;
+        set => _sixelGraphicsEnabled = value;
+    }
+
     public BasicVtProcessor(TerminalScreen screen)
+        : this(screen, null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a managed VT processor with explicit options.
+    /// </summary>
+    public BasicVtProcessor(TerminalScreen screen, BasicVtProcessorOptions? options)
     {
         _screen = screen;
+        _options = options ?? BasicVtProcessorOptions.Default;
+        _sixelDecoder = new SixelDecoder(_options.SixelDecoderOptions);
+        _sixelGraphicsEnabled = _options.SixelGraphicsEnabled;
         _theme = screen.Theme;
         _currentFg = screen.DefaultForeground;
         _currentBg = screen.DefaultBackground;
@@ -1801,6 +1823,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         else
         {
             // Scroll within region: shift rows up, insert blank at bottom of region
+            _screen.ShiftRasterGraphicsInViewportRows(_scrollTop, _scrollBottom, rowDelta: -1);
             for (var r = _scrollTop; r < _scrollBottom && r < _screen.ViewportRows - 1; r++)
             {
                 var src = _screen.GetViewportRow(r + 1);
@@ -1819,6 +1842,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private void ScrollDownInRegion()
     {
         // Shift rows down within the scroll region, insert blank at top of region
+        _screen.ShiftRasterGraphicsInViewportRows(_scrollTop, _scrollBottom, rowDelta: 1);
         for (var r = _scrollBottom; r > _scrollTop && r > 0; r--)
         {
             var src = _screen.GetViewportRow(r - 1);
@@ -2350,8 +2374,16 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             return;
         }
 
-        string payload = Encoding.ASCII.GetString(_dcsBuffer.ToArray());
+        byte[] payloadBytes = _dcsBuffer.ToArray();
         _dcsBuffer.Clear();
+
+        if (_sixelGraphicsEnabled && IsSixelDcsPayload(payloadBytes))
+        {
+            HandleSixelDcsPayload(payloadBytes);
+            return;
+        }
+
+        string payload = Encoding.ASCII.GetString(payloadBytes);
 
         // DCS $ q Pt ST — DECRQSS request.
         if (payload.StartsWith("$q", StringComparison.Ordinal))
@@ -2361,6 +2393,124 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         }
     }
 
+    private void HandleSixelDcsPayload(ReadOnlySpan<byte> payload)
+    {
+        SixelDecodeResult result = _sixelDecoder.Decode(payload);
+        if (!result.Success || result.Image is null)
+        {
+            return;
+        }
+
+        int cellWidthPx = GetEffectiveCellWidthPx();
+        int cellHeightPx = GetEffectiveCellHeightPx();
+        int imageRows = Math.Max(1, DivideRoundUp(result.Image.Height, cellHeightPx));
+        int overflowRows = Math.Max(0, _cursorRow + imageRows - 1 - _scrollBottom);
+        for (int i = 0; i < overflowRows; i++)
+        {
+            ScrollUpInRegion();
+        }
+
+        int anchorViewportRow = Math.Clamp(_cursorRow - overflowRows, _scrollTop, _scrollBottom);
+        int anchorAbsoluteRow = _screen.GetAbsoluteRowForViewportRow(anchorViewportRow);
+        int imageId = _screen.AllocateRasterImageId();
+        TerminalRasterImageSource source = new(
+            imageId,
+            TerminalRasterImageProtocol.Sixel,
+            result.Image.Width,
+            result.Image.Height,
+            result.Image.RgbaPixels);
+        TerminalRasterImagePlacement placement = new(
+            imageId,
+            TerminalRasterImageLayer.BelowText,
+            _cursorCol,
+            anchorAbsoluteRow,
+            xOffsetPx: 0,
+            yOffsetPx: 0,
+            widthPx: result.Image.Width,
+            heightPx: result.Image.Height,
+            sourceX: 0,
+            sourceY: 0,
+            sourceWidth: result.Image.Width,
+            sourceHeight: result.Image.Height,
+            cellWidthPx,
+            cellHeightPx);
+
+        _screen.ReplaceRasterImage(source, placement);
+        AdvanceCursorAfterSixel(anchorViewportRow, result.FinalCursorX, result.FinalCursorY, cellWidthPx, cellHeightPx);
+    }
+
+    private void AdvanceCursorAfterSixel(
+        int anchorViewportRow,
+        int finalCursorX,
+        int finalCursorY,
+        int cellWidthPx,
+        int cellHeightPx)
+    {
+        int columnAdvance = DivideRoundUp(finalCursorX, cellWidthPx);
+        int rowAdvance = Math.Max(0, finalCursorY / cellHeightPx);
+        int nextColumn = _cursorCol + columnAdvance;
+        int nextRow = anchorViewportRow + rowAdvance;
+
+        while (nextColumn >= _screen.Columns)
+        {
+            nextColumn -= _screen.Columns;
+            nextRow++;
+        }
+
+        while (nextRow > _scrollBottom)
+        {
+            ScrollUpInRegion();
+            nextRow--;
+        }
+
+        _cursorCol = Math.Clamp(nextColumn, 0, Math.Max(0, _screen.Columns - 1));
+        _cursorRow = Math.Clamp(nextRow, 0, Math.Max(0, _screen.ViewportRows - 1));
+    }
+
+    private int GetEffectiveCellWidthPx()
+    {
+        return _screen.Columns > 0 && _widthPx > 0
+            ? Math.Max(1, _widthPx / _screen.Columns)
+            : 1;
+    }
+
+    private int GetEffectiveCellHeightPx()
+    {
+        return _screen.ViewportRows > 0 && _heightPx > 0
+            ? Math.Max(1, _heightPx / _screen.ViewportRows)
+            : 1;
+    }
+
+    private static int DivideRoundUp(int value, int divisor)
+    {
+        if (value <= 0)
+        {
+            return 0;
+        }
+
+        return ((value - 1) / Math.Max(1, divisor)) + 1;
+    }
+
+    private static bool IsSixelDcsPayload(ReadOnlySpan<byte> payload)
+    {
+        int index = 0;
+        while (index < payload.Length && payload[index] is >= 0x30 and <= 0x3F)
+        {
+            index++;
+        }
+
+        bool hasIntermediate = false;
+        while (index < payload.Length && payload[index] is >= 0x20 and <= 0x2F)
+        {
+            hasIntermediate = true;
+            index++;
+        }
+
+        return index < payload.Length &&
+            payload[index] == (byte)'q' &&
+            !hasIntermediate;
+    }
+
     private void AppendDcsByteOrDiscard(byte b)
     {
         if (_isDiscardingDcsPayload)
@@ -2368,7 +2518,10 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             return;
         }
 
-        if (_dcsBuffer.Count >= MaxDcsBufferBytes)
+        int maxDcsBytes = _sixelGraphicsEnabled
+            ? Math.Max(MaxDcsBufferBytes, _options.SixelDecoderOptions.MaxInputBytes)
+            : MaxDcsBufferBytes;
+        if (_dcsBuffer.Count >= maxDcsBytes)
         {
             _dcsBuffer.Clear();
             _isDiscardingDcsPayload = true;
@@ -2416,6 +2569,13 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             return false;
         }
 
+        if (_state is ParserState.DcsString or ParserState.DcsEscape &&
+            IsIgnorableSixelControl(b) &&
+            IsCurrentDcsSixelPayload())
+        {
+            return false;
+        }
+
         if (!IsBrokenStringTerminatorControl(b))
         {
             return false;
@@ -2426,6 +2586,26 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         AbortActiveControlString();
         ProcessGround(b);
         return true;
+    }
+
+    private bool IsCurrentDcsSixelPayload()
+    {
+        int index = 0;
+        while (index < _dcsBuffer.Count && _dcsBuffer[index] is >= 0x30 and <= 0x3F)
+        {
+            index++;
+        }
+
+        bool hasIntermediate = false;
+        while (index < _dcsBuffer.Count && _dcsBuffer[index] is >= 0x20 and <= 0x2F)
+        {
+            hasIntermediate = true;
+            index++;
+        }
+
+        return index < _dcsBuffer.Count &&
+            _dcsBuffer[index] == (byte)'q' &&
+            !hasIntermediate;
     }
 
     private void AbortActiveControlString()
@@ -2454,6 +2634,15 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             0x0D or // CR
             0x0E or // SO
             0x0F;   // SI
+    }
+
+    private static bool IsIgnorableSixelControl(byte b)
+    {
+        return b is 0x09 or // HT
+            0x0A or // LF
+            0x0B or // VT
+            0x0C or // FF
+            0x0D;   // CR
     }
 
     private void HandleDecRequestStatusString(string request)
@@ -2774,7 +2963,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
                 if (p0 == 0 || !_hasParam)
                 {
                     // DA1 — Primary Device Attributes (VT220 + ANSI color)
-                    ResponseCallback?.Invoke("\x1b[?62;22c"u8.ToArray());
+                    ResponseCallback?.Invoke(GetPrimaryDeviceAttributesResponse());
                 }
                 break;
 
@@ -2935,6 +3124,13 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             20 => _lineFeedNewLineMode ? 1 : 2,
             _ => 0,
         };
+    }
+
+    private byte[] GetPrimaryDeviceAttributesResponse()
+    {
+        return _sixelGraphicsEnabled
+            ? "\x1b[?62;4;22c"u8.ToArray()
+            : "\x1b[?62;22c"u8.ToArray();
     }
 
     private int GetDecPrivateModeReportStatus(int mode)
@@ -3518,6 +3714,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             _screen.GetViewportRow(r).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
         _cursorCol = 0;
         _cursorRow = 0;
+        _screen.ClearRasterGraphics();
         _screen.InvalidateAll();
     }
 
@@ -3531,11 +3728,27 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
                 EraseInLine(0);
                 for (var r = _cursorRow + 1; r < _screen.ViewportRows; r++)
                     _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                if (_cursorRow + 1 < _screen.ViewportRows)
+                {
+                    _screen.ClearRasterGraphicsInViewportRectangle(
+                        _cursorRow + 1,
+                        _screen.ViewportRows - 1,
+                        0,
+                        _screen.Columns - 1);
+                }
                 break;
 
             case 1: // From start to cursor
                 for (var r = 0; r < _cursorRow && r < _screen.ViewportRows; r++)
                     _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                if (_cursorRow > 0)
+                {
+                    _screen.ClearRasterGraphicsInViewportRectangle(
+                        0,
+                        _cursorRow - 1,
+                        0,
+                        _screen.Columns - 1);
+                }
                 if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
                 {
                     var rowToCursor = _screen.GetViewportRow(_cursorRow);
@@ -3550,11 +3763,13 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             case 2: // Entire display
                 for (var r = 0; r < _screen.ViewportRows; r++)
                     _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                _screen.ClearRasterGraphics();
                 break;
 
             case 3: // Entire display + scrollback
                 for (var r = 0; r < _screen.ViewportRows; r++)
                     _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                _screen.ClearRasterGraphics();
                 break;
         }
 
@@ -3573,15 +3788,30 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             case 0: // From cursor to end of line
                 for (var c = Math.Max(0, _cursorCol); c < _screen.Columns; c++)
                     row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+                _screen.ClearRasterGraphicsInViewportRectangle(
+                    _cursorRow,
+                    _cursorRow,
+                    _cursorCol,
+                    _screen.Columns - 1);
                 break;
 
             case 1: // From start to cursor
                 for (var c = 0; c <= _cursorCol && c < _screen.Columns; c++)
                     row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+                _screen.ClearRasterGraphicsInViewportRectangle(
+                    _cursorRow,
+                    _cursorRow,
+                    0,
+                    _cursorCol);
                 break;
 
             case 2: // Entire line
                 row.Clear(_currentFg, _currentBg);
+                _screen.ClearRasterGraphicsInViewportRectangle(
+                    _cursorRow,
+                    _cursorRow,
+                    0,
+                    _screen.Columns - 1);
                 break;
         }
 
@@ -3596,6 +3826,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
         for (var n = 0; n < count; n++)
         {
+            _screen.ShiftRasterGraphicsInViewportRows(_cursorRow, _scrollBottom, rowDelta: 1);
             // Shift rows down from cursor to scroll bottom
             for (var r = _scrollBottom; r > _cursorRow; r--)
             {
@@ -3604,7 +3835,14 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             }
             // Clear the line at cursor
             if (_cursorRow < _screen.ViewportRows)
+            {
                 _screen.GetViewportRow(_cursorRow).Clear(_currentFg, _currentBg);
+                _screen.ClearRasterGraphicsInViewportRectangle(
+                    _cursorRow,
+                    _cursorRow,
+                    0,
+                    _screen.Columns - 1);
+            }
         }
         _screen.InvalidateAll();
     }
@@ -3616,6 +3854,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
         for (var n = 0; n < count; n++)
         {
+            _screen.ShiftRasterGraphicsInViewportRows(_cursorRow, _scrollBottom, rowDelta: -1);
             // Shift rows up from cursor to scroll bottom
             for (var r = _cursorRow; r < _scrollBottom; r++)
             {
@@ -3624,7 +3863,14 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             }
             // Clear the bottom row of the scroll region
             if (_scrollBottom < _screen.ViewportRows)
+            {
                 _screen.GetViewportRow(_scrollBottom).Clear(_currentFg, _currentBg);
+                _screen.ClearRasterGraphicsInViewportRectangle(
+                    _scrollBottom,
+                    _scrollBottom,
+                    0,
+                    _screen.Columns - 1);
+            }
         }
         _screen.InvalidateAll();
     }
@@ -3642,6 +3888,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             row[c] = TerminalCell.Empty(_currentFg, _currentBg);
         NormalizeRowWideCells(row);
         row.IsDirty = true;
+        _screen.ClearRasterGraphicsInViewportRectangle(
+            _cursorRow,
+            _cursorRow,
+            _cursorCol,
+            _screen.Columns - 1);
     }
 
     private void DeleteCharacters(int count)
@@ -3657,6 +3908,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             row[c] = TerminalCell.Empty(_currentFg, _currentBg);
         NormalizeRowWideCells(row);
         row.IsDirty = true;
+        _screen.ClearRasterGraphicsInViewportRectangle(
+            _cursorRow,
+            _cursorRow,
+            _cursorCol,
+            _screen.Columns - 1);
     }
 
     private void EraseCharacters(int count)
@@ -3670,6 +3926,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             row[c] = TerminalCell.Empty(_currentFg, _currentBg);
         NormalizeRowWideCells(row);
         row.IsDirty = true;
+        _screen.ClearRasterGraphicsInViewportRectangle(
+            _cursorRow,
+            _cursorRow,
+            _cursorCol,
+            Math.Min(_screen.Columns - 1, _cursorCol + count - 1));
     }
 
     private void ClearPreservedCellsForMutation(TerminalRow row)
@@ -3927,6 +4188,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
         for (var r = 0; r < _screen.ViewportRows; r++)
             _screen.GetViewportRow(r).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+
+        _screen.ClearRasterGraphics();
 
         if (raiseModeChanged)
         {
