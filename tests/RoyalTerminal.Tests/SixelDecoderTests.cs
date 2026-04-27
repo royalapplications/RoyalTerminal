@@ -74,6 +74,17 @@ public sealed class SixelDecoderTests
     }
 
     [Fact]
+    public void Decode_ColorDefinitionWithOmittedComponents_DefaultsMissingValuesToZero()
+    {
+        SixelDecoder decoder = new();
+
+        SixelDecodeResult result = decoder.Decode(Ascii("q#1;2;100#1@"));
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal([0xFF, 0x00, 0x00, 0xFF], result.Image!.RgbaPixels.AsSpan(0, 4).ToArray());
+    }
+
+    [Fact]
     public void Decode_RasterAttributesAtStart_UpdateAspectRatioAndDeclaredSize()
     {
         SixelDecoder decoder = new();
@@ -82,6 +93,19 @@ public sealed class SixelDecoderTests
 
         Assert.True(result.Success, result.Message);
         Assert.Equal(2, result.Image!.Width);
+        Assert.Equal(6, result.Image.Height);
+        Assert.Equal([0xFF, 0x00, 0x00, 0xFF], result.Image.RgbaPixels.AsSpan(0, 4).ToArray());
+    }
+
+    [Fact]
+    public void Decode_RasterAttributesWithOmittedPan_UsesOneToOneAspectRatio()
+    {
+        SixelDecoder decoder = new();
+
+        SixelDecodeResult result = decoder.Decode(Ascii("q\";1;1;6#1;2;100;0;0#1@"));
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(1, result.Image!.Width);
         Assert.Equal(6, result.Image.Height);
         Assert.Equal([0xFF, 0x00, 0x00, 0xFF], result.Image.RgbaPixels.AsSpan(0, 4).ToArray());
     }

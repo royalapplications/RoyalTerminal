@@ -973,6 +973,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private void ApplySixelGraphicsSetting()
     {
         ApplySixelGraphicsSettingToProcessor(_vtProcessor);
+        _presenter?.Invalidate();
     }
 
     private void ApplySixelGraphicsSettingToProcessor(IVtProcessor? processor)

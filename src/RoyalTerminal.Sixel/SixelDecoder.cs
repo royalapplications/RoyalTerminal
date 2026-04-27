@@ -239,6 +239,8 @@ public sealed class SixelDecoder
     {
         Span<int> parameters = stackalloc int[5];
         Span<bool> present = stackalloc bool[5];
+        parameters.Clear();
+        present.Clear();
         int count = ParseParameterList(payload, ref index, parameters, present);
         status = SixelDecodeStatus.Success;
 
@@ -254,7 +256,7 @@ public sealed class SixelDecoder
             return false;
         }
 
-        if (count >= 5 && present[1])
+        if (count > 1 && present[1])
         {
             int colorSpace = parameters[1];
             uint color;
@@ -294,6 +296,8 @@ public sealed class SixelDecoder
     {
         Span<int> parameters = stackalloc int[4];
         Span<bool> present = stackalloc bool[4];
+        parameters.Clear();
+        present.Clear();
         int count = ParseParameterList(payload, ref index, parameters, present);
 
         if (count >= 2 && present[1] && parameters[1] > 0)

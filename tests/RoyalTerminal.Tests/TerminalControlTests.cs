@@ -124,6 +124,25 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_SixelGraphicsEnabled_DisabledAfterRender_ClearsManagedRasterPayload()
+    {
+        var control = new TerminalControl
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            SixelGraphicsEnabled = true,
+        };
+        control.WriteOutput(Encoding.ASCII.GetBytes("\u001bPq#1;2;100;0;0#1@\u001b\\"));
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        Assert.True(screen.HasRasterGraphics);
+
+        control.SixelGraphicsEnabled = false;
+
+        Assert.False(screen.HasRasterGraphics);
+        Assert.True(screen.GetRasterImagePlacements().IsEmpty);
+    }
+
+    [AvaloniaFact]
     public async Task Control_SixelGraphicsEnabled_RendersManagedRasterPayload_ToPixels()
     {
         var control = new TerminalControl
