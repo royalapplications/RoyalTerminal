@@ -450,6 +450,52 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_RasterGraphicsPlacement_ScalesFromPlacementCellMetrics()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        renderer.SetCellSize(20f, 20f);
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: string.Empty);
+        int imageId = screen.AllocateRasterImageId();
+        screen.ReplaceRasterImage(
+            new TerminalRasterImageSource(
+                imageId,
+                TerminalRasterImageProtocol.Sixel,
+                widthPx: 1,
+                heightPx: 1,
+                rgbaPixels: [0x00, 0xFF, 0x00, 0xFF]),
+            new TerminalRasterImagePlacement(
+                imageId,
+                TerminalRasterImageLayer.AboveText,
+                anchorColumn: 0,
+                anchorRow: 0,
+                xOffsetPx: 0,
+                yOffsetPx: 0,
+                widthPx: 10,
+                heightPx: 10,
+                sourceX: 0,
+                sourceY: 0,
+                sourceWidth: 1,
+                sourceHeight: 1,
+                cellWidthPx: 10,
+                cellHeightPx: 10));
+
+        using SKSurface surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int scaledInk = CountNonBackgroundPixelsInRegion(
+            pixels,
+            startX: renderer.CellWidth * 0.6f,
+            endX: renderer.CellWidth * 0.9f,
+            startY: renderer.CellHeight * 0.6f,
+            endY: renderer.CellHeight * 0.9f);
+        Assert.True(scaledInk > 0);
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_BlockHollowCursor_DrawsBorderWithoutFillingCenter()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)

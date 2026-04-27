@@ -2544,13 +2544,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     placement.SourceY,
                     placement.SourceX + placement.SourceWidth,
                     placement.SourceY + placement.SourceHeight);
-                float destLeft = (placement.AnchorColumn * _cellWidth) + placement.XOffsetPx;
-                float destTop = ((placement.AnchorRow - viewportTopAbsoluteRow) * _cellHeight) + placement.YOffsetPx;
+                float xScale = GetRasterPlacementScale(placement.CellWidthPx, _cellWidth);
+                float yScale = GetRasterPlacementScale(placement.CellHeightPx, _cellHeight);
+                float destLeft = (placement.AnchorColumn * _cellWidth) + (placement.XOffsetPx * xScale);
+                float destTop = ((placement.AnchorRow - viewportTopAbsoluteRow) * _cellHeight) +
+                    (placement.YOffsetPx * yScale);
                 SKRect destRect = new(
                     destLeft,
                     destTop,
-                    destLeft + placement.WidthPx,
-                    destTop + placement.HeightPx);
+                    destLeft + (placement.WidthPx * xScale),
+                    destTop + (placement.HeightPx * yScale));
 
                 canvas.DrawBitmap(bitmap, sourceRect, destRect);
             }
@@ -2559,6 +2562,17 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             canvas.Restore();
         }
+    }
+
+    private static float GetRasterPlacementScale(int placementCellSizePx, float rendererCellSize)
+    {
+        if (placementCellSizePx <= 0 || rendererCellSize <= 0f)
+        {
+            return 1f;
+        }
+
+        float scale = rendererCellSize / placementCellSizePx;
+        return float.IsFinite(scale) && scale > 0f ? scale : 1f;
     }
 
     private void RenderKittyLayer(
