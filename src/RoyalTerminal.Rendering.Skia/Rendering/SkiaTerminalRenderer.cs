@@ -31,6 +31,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const float GridScaleFallbackMax = 1.6f;
     private const float GridClampToleranceRatio = 0.04f;
     private const float GridClampTolerancePx = 0.25f;
+    private const float SymbolGlyphClipPaddingCells = 0.5f;
     private const float DefaultBackgroundOpacity = 0.82f;
     private static readonly CultureInfo s_renderCulture = CultureInfo.InvariantCulture;
 
@@ -1832,6 +1833,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return;
         }
 
+        float clipPadding = GetGlyphClipPadding(run.Text.AsSpan());
         SKPoint[] rentedPoints = ArrayPool<SKPoint>.Shared.Rent(run.GlyphCount);
         try
         {
@@ -1846,7 +1848,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
                 if (clampToRunWidth)
                 {
-                    x = Math.Clamp(x, 0f, runWidth);
+                    x = Math.Clamp(x, -clipPadding, runWidth + clipPadding);
                 }
 
                 points[i] = new SKPoint(x, run.YOffsets[i]);
@@ -1864,10 +1866,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
             _fgPaint.Color = color;
 
-            // Keep shaped draw inside the run cell span to preserve terminal grid boundaries.
+            // Keep normal text on-grid while letting symbol ink overhang match terminal renderers.
             canvas.Save();
             canvas.ClipRect(
-                new SKRect(originX, rowY, originX + runWidth, rowY + _cellHeight),
+                new SKRect(originX - clipPadding, rowY, originX + runWidth + clipPadding, rowY + _cellHeight),
                 SKClipOperation.Intersect,
                 antialias: false);
             canvas.DrawText(blob, originX, baselineY, _fgPaint);
@@ -1891,11 +1893,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
     {
         using SKFont font = GlyphCache.CreateFont(typeface, _fontSize);
         _fgPaint.Color = color;
+        float clipPadding = GetGlyphClipPadding(cells, startCol, endCol);
 
         canvas.Save();
         float originX = startCol * _cellWidth;
         canvas.ClipRect(
-            new SKRect(originX, y, originX + runWidth, y + _cellHeight),
+            new SKRect(originX - clipPadding, y, originX + runWidth + clipPadding, y + _cellHeight),
             SKClipOperation.Intersect,
             antialias: false);
         try
@@ -1919,6 +1922,70 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             canvas.Restore();
         }
+    }
+
+    private float GetGlyphClipPadding(ReadOnlySpan<TerminalCell> cells, int startCol, int endCol)
+    {
+        for (int col = startCol; col < endCol; col++)
+        {
+            ref readonly TerminalCell cell = ref cells[col];
+            if (string.IsNullOrEmpty(cell.Grapheme))
+            {
+                if (IsSymbolGlyphClipCandidate(cell.Codepoint))
+                {
+                    return _cellWidth * SymbolGlyphClipPaddingCells;
+                }
+
+                continue;
+            }
+
+            if (ContainsSymbolGlyphClipCandidate(cell.Grapheme.AsSpan()))
+            {
+                return _cellWidth * SymbolGlyphClipPaddingCells;
+            }
+        }
+
+        return 0f;
+    }
+
+    private float GetGlyphClipPadding(ReadOnlySpan<char> text)
+    {
+        return ContainsSymbolGlyphClipCandidate(text)
+            ? _cellWidth * SymbolGlyphClipPaddingCells
+            : 0f;
+    }
+
+    private static bool ContainsSymbolGlyphClipCandidate(ReadOnlySpan<char> text)
+    {
+        ReadOnlySpan<char> remaining = text;
+        while (!remaining.IsEmpty)
+        {
+            OperationStatus status = Rune.DecodeFromUtf16(remaining, out Rune rune, out int charsConsumed);
+            if (status != OperationStatus.Done)
+            {
+                return false;
+            }
+
+            if (IsSymbolGlyphClipCandidate(rune.Value))
+            {
+                return true;
+            }
+
+            remaining = remaining[charsConsumed..];
+        }
+
+        return false;
+    }
+
+    private static bool IsSymbolGlyphClipCandidate(int codepoint)
+    {
+        if (!Rune.IsValid(codepoint))
+        {
+            return false;
+        }
+
+        UnicodeCategory category = Rune.GetUnicodeCategory(new Rune(codepoint));
+        return category is UnicodeCategory.MathSymbol or UnicodeCategory.OtherSymbol;
     }
 
     private void DrawRunDecorations(
