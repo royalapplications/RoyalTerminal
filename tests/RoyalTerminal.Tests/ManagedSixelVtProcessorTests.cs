@@ -89,6 +89,23 @@ public sealed class ManagedSixelVtProcessorTests
     }
 
     [Fact]
+    public void BasicVtProcessor_ManagedSixelDisabled_ClearsExistingRasterPlacement()
+    {
+        TerminalScreen screen = new(10, 4, 10);
+        using BasicVtProcessor processor = new(screen)
+        {
+            SixelGraphicsEnabled = true,
+        };
+        processor.NotifyResize(10, 4, 100, 40);
+        processor.Process(Encoding.ASCII.GetBytes(RedPixelSixel));
+
+        processor.SixelGraphicsEnabled = false;
+
+        Assert.False(screen.HasRasterGraphics);
+        Assert.True(screen.GetRasterImagePlacements().IsEmpty);
+    }
+
+    [Fact]
     public void BasicVtProcessor_ManagedSixelEnabled_ReplacesIntersectingFramePlacement()
     {
         TerminalScreen screen = new(10, 4, 10);

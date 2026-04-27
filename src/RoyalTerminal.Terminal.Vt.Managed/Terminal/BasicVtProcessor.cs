@@ -239,7 +239,19 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     public bool SixelGraphicsEnabled
     {
         get => _sixelGraphicsEnabled;
-        set => _sixelGraphicsEnabled = value;
+        set
+        {
+            if (_sixelGraphicsEnabled == value)
+            {
+                return;
+            }
+
+            _sixelGraphicsEnabled = value;
+            if (!value)
+            {
+                _screen.ClearRasterGraphics();
+            }
+        }
     }
 
     public BasicVtProcessor(TerminalScreen screen)
