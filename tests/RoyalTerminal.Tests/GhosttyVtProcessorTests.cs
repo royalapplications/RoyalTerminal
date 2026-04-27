@@ -104,6 +104,80 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_SixelDisabled_DoesNotPopulateRasterOverlay_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 10, viewportRows: 4, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 10, rows: 4, widthPx: 100, heightPx: 40);
+
+        processor.Process(Encoding.ASCII.GetBytes("\u001bPq#1;2;100;0;0#1@\u001b\\"));
+
+        Assert.False(screen.HasRasterGraphics);
+        Assert.True(screen.GetRasterImagePlacements().IsEmpty);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_DA1_WhenSixelEnabled_AdvertisesSixelFeature_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 10, viewportRows: 4, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen)
+        {
+            SixelGraphicsEnabled = true,
+        };
+
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[c"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?62;4;22c", Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_SixelEnabled_PopulatesManagedRasterOverlay_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 10, viewportRows: 4, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen)
+        {
+            SixelGraphicsEnabled = true,
+        };
+        processor.NotifyResize(columns: 10, rows: 4, widthPx: 100, heightPx: 40);
+
+        processor.Process(Encoding.ASCII.GetBytes("\u001bPq#1;2;100;0;0#1@\u001b\\"));
+
+        Assert.True(screen.HasRasterGraphics);
+        ReadOnlySpan<TerminalRasterImagePlacement> placements = screen.GetRasterImagePlacements();
+        Assert.Equal(1, placements.Length);
+        TerminalRasterImagePlacement placement = placements[0];
+        Assert.Equal(TerminalRasterImageLayer.BelowText, placement.Layer);
+        Assert.Equal(0, placement.AnchorColumn);
+        Assert.True(screen.TryGetRasterImageSource(placement.ImageId, out TerminalRasterImageSource? source));
+        Assert.Equal(TerminalRasterImageProtocol.Sixel, source!.Protocol);
+        Assert.Equal(1, source.WidthPx);
+        Assert.Equal(6, source.HeightPx);
+
+        processor.Process("\u001b[2J"u8);
+
+        Assert.False(screen.HasRasterGraphics);
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_FullBufferSearch_FindsScrollbackMatches_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
