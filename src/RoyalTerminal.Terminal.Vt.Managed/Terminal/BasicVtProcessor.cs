@@ -94,6 +94,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private bool _isDiscardingOscPayload;
     private bool _isDiscardingDcsPayload;
     private bool _sixelGraphicsEnabled;
+    private bool _sixelDisplayMode;
 
     // Saved cursor state (for DECSC/DECRC — ESC 7 / ESC 8)
     private int _savedCursorCol;
@@ -250,6 +251,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             if (!value)
             {
                 _screen.ClearRasterGraphics();
+                _sixelDisplayMode = false;
             }
         }
     }
@@ -1088,6 +1090,11 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         AppendMode(builder, ansi: false, 6, _originMode);
         AppendMode(builder, ansi: false, 7, _autoWrap);
         AppendMode(builder, ansi: false, 25, _cursorVisible);
+        if (_sixelGraphicsEnabled)
+        {
+            AppendMode(builder, ansi: false, 80, _sixelDisplayMode);
+        }
+
         AppendMode(builder, ansi: false, 1049, _inAltScreen);
         AppendMode(builder, ansi: false, 1004, FocusEventsEnabled);
         AppendMode(builder, ansi: false, 2004, _bracketedPaste);
@@ -2417,14 +2424,27 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
         int cellWidthPx = GetEffectiveCellWidthPx();
         int cellHeightPx = GetEffectiveCellHeightPx();
-        int imageRows = Math.Max(1, DivideRoundUp(result.Image.Height, cellHeightPx));
-        int overflowRows = Math.Max(0, _cursorRow + imageRows - 1 - _scrollBottom);
-        for (int i = 0; i < overflowRows; i++)
+        int anchorColumn = _cursorCol;
+        int anchorViewportRow = _cursorRow;
+        int overflowRows = 0;
+
+        if (_sixelDisplayMode)
         {
-            ScrollUpInRegion();
+            anchorColumn = 0;
+            anchorViewportRow = 0;
+        }
+        else
+        {
+            int imageRows = Math.Max(1, DivideRoundUp(result.Image.Height, cellHeightPx));
+            overflowRows = Math.Max(0, _cursorRow + imageRows - 1 - _scrollBottom);
+            for (int i = 0; i < overflowRows; i++)
+            {
+                ScrollUpInRegion();
+            }
+
+            anchorViewportRow = Math.Clamp(_cursorRow - overflowRows, _scrollTop, _scrollBottom);
         }
 
-        int anchorViewportRow = Math.Clamp(_cursorRow - overflowRows, _scrollTop, _scrollBottom);
         int anchorAbsoluteRow = _screen.GetAbsoluteRowForViewportRow(anchorViewportRow);
         int imageId = _screen.AllocateRasterImageId();
         TerminalRasterImageSource source = new(
@@ -2436,7 +2456,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         TerminalRasterImagePlacement placement = new(
             imageId,
             TerminalRasterImageLayer.BelowText,
-            _cursorCol,
+            anchorColumn,
             anchorAbsoluteRow,
             xOffsetPx: 0,
             yOffsetPx: 0,
@@ -2450,7 +2470,10 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             cellHeightPx);
 
         _screen.ReplaceRasterImage(source, placement);
-        AdvanceCursorAfterSixel(anchorViewportRow, result.FinalCursorX, result.FinalCursorY, cellWidthPx, cellHeightPx);
+        if (!_sixelDisplayMode)
+        {
+            AdvanceCursorAfterSixel(anchorViewportRow, result.FinalCursorX, result.FinalCursorY, cellWidthPx, cellHeightPx);
+        }
     }
 
     private void ClearRasterGraphicsForTextMutation(int viewportRow, int startColumn, int width)
@@ -3169,6 +3192,13 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
     private int GetDecPrivateModeReportStatus(int mode)
     {
+        if (mode == 80)
+        {
+            return _sixelGraphicsEnabled
+                ? (_sixelDisplayMode ? 1 : 2)
+                : 0;
+        }
+
         int status = mode switch
         {
             1 => _applicationCursorKeys ? 1 : 2,
@@ -3418,6 +3448,13 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
             case 25: // DECTCEM — Show/hide cursor
                 _cursorVisible = set;
+                break;
+
+            case 80: // DECSDM — Sixel display mode.
+                if (_sixelGraphicsEnabled)
+                {
+                    _sixelDisplayMode = set;
+                }
                 break;
 
             case 47: // Use alternate screen buffer (no clear)
@@ -4046,6 +4083,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _keyboardLocked = false;
         _sendReceiveMode = true;
         ResetExtendedDecModesToDefaults();
+        _sixelDisplayMode = false;
         _insertMode = false;
         _lineFeedNewLineMode = false;
         _cursorStyle = 1;
@@ -4199,6 +4237,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _keyboardLocked = false;
         _sendReceiveMode = true;
         ResetExtendedDecModesToDefaults();
+        _sixelDisplayMode = false;
         _insertMode = false;
         _lineFeedNewLineMode = false;
         _cursorStyle = 1;

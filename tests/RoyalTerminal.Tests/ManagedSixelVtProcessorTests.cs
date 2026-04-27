@@ -48,8 +48,46 @@ public sealed class ManagedSixelVtProcessorTests
         Assert.True(screen.TryGetRasterImageSource(placement.ImageId, out TerminalRasterImageSource? source));
         Assert.Equal(TerminalRasterImageProtocol.Sixel, source!.Protocol);
         Assert.Equal(1, source.WidthPx);
-        Assert.Equal(6, source.HeightPx);
+        Assert.Equal(12, source.HeightPx);
         Assert.Equal(1, processor.CursorCol);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DecSixelDisplayMode_RendersFromViewportHome_AndPreservesCursor()
+    {
+        TerminalScreen screen = new(10, 4, 10);
+        using BasicVtProcessor processor = new(screen)
+        {
+            SixelGraphicsEnabled = true,
+        };
+        processor.NotifyResize(10, 4, 100, 40);
+
+        processor.Process(Encoding.ASCII.GetBytes("\u001b[2;4H\u001b[?80h" + RedPixelSixel));
+
+        ReadOnlySpan<TerminalRasterImagePlacement> placements = screen.GetRasterImagePlacements();
+        Assert.Equal(1, placements.Length);
+        Assert.Equal(0, placements[0].AnchorColumn);
+        Assert.Equal(screen.GetAbsoluteRowForViewportRow(0), placements[0].AnchorRow);
+        Assert.Equal(3, processor.CursorCol);
+        Assert.Equal(1, processor.CursorRow);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DecSixelDisplayMode_QueryReportsStateWhenSixelEnabled()
+    {
+        TerminalScreen screen = new(10, 4, 10);
+        using BasicVtProcessor processor = new(screen)
+        {
+            SixelGraphicsEnabled = true,
+        };
+        List<string> responses = [];
+        processor.ResponseCallback = bytes => responses.Add(Encoding.ASCII.GetString(bytes));
+
+        processor.Process("\u001b[?80$p"u8);
+        processor.Process("\u001b[?80h\u001b[?80$p"u8);
+
+        Assert.Equal("\u001b[?80;2$y", responses[0]);
+        Assert.Equal("\u001b[?80;1$y", responses[1]);
     }
 
     [Fact]
@@ -182,7 +220,7 @@ public sealed class ManagedSixelVtProcessorTests
             SixelGraphicsEnabled = true,
         };
         processor.NotifyResize(10, 2, 100, 20);
-        processor.Process(Encoding.ASCII.GetBytes(RedPixelSixel));
+        processor.Process(Encoding.ASCII.GetBytes("\u001bPq\"1;1;1;6#1;2;100;0;0#1@\u001b\\"));
 
         processor.Process("\n\n"u8);
 
