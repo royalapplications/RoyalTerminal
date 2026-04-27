@@ -117,6 +117,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public static readonly StyledProperty<bool> ReflowOnResizeProperty =
         AvaloniaProperty.Register<TerminalControl, bool>(nameof(ReflowOnResize), true);
 
+    /// <summary>Whether managed VT sixel image decoding is enabled.</summary>
+    public static readonly StyledProperty<bool> SixelGraphicsEnabledProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(nameof(SixelGraphicsEnabled), false);
+
     /// <summary>
     /// Preferred VT processor implementation.
     /// </summary>
@@ -228,6 +232,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         get => GetValue(ReflowOnResizeProperty);
         set => SetValue(ReflowOnResizeProperty, value);
+    }
+
+    /// <summary>Gets or sets whether managed VT sixel image decoding is enabled.</summary>
+    public bool SixelGraphicsEnabled
+    {
+        get => GetValue(SixelGraphicsEnabledProperty);
+        set => SetValue(SixelGraphicsEnabledProperty, value);
     }
 
     /// <summary>
@@ -652,6 +663,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _screen.ApplyTheme(activeTheme);
 
         _vtProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
+        ApplySixelGraphicsSettingToProcessor(_vtProcessor);
         if (_vtProcessor is ITerminalThemeSink themeSink)
         {
             lock (_screen.SyncRoot)
@@ -691,6 +703,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (change.Property == VtProcessorPreferenceProperty)
         {
             ApplyVtProcessorPreference();
+            return;
+        }
+
+        if (change.Property == SixelGraphicsEnabledProperty)
+        {
+            ApplySixelGraphicsSetting();
             return;
         }
 
@@ -936,6 +954,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         IVtProcessor nextProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
+        ApplySixelGraphicsSettingToProcessor(nextProcessor);
         IVtProcessor? previousProcessor = _vtProcessor;
         _vtProcessor = nextProcessor;
         if (_theme is not null && _vtProcessor is ITerminalThemeSink themeSink)
@@ -947,6 +966,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
         _appliedVtProcessorPreference = VtProcessorPreference;
         previousProcessor?.Dispose();
+    }
+
+    private void ApplySixelGraphicsSetting()
+    {
+        ApplySixelGraphicsSettingToProcessor(_vtProcessor);
+    }
+
+    private void ApplySixelGraphicsSettingToProcessor(IVtProcessor? processor)
+    {
+        if (processor is ITerminalSixelOptionsSink sixelOptions)
+        {
+            sixelOptions.SixelGraphicsEnabled = SixelGraphicsEnabled;
+        }
     }
 
     private void ApplyGridFromLayout(int columns, int rows, Size finalSize)

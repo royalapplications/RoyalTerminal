@@ -17,6 +17,7 @@ public sealed class TerminalSettingsTerminalBehaviorState : TerminalSettingsCate
             nameof(TerminalSettingsPanelState.BackspaceSendsControlH),
             nameof(TerminalSettingsPanelState.EnableTextShaping),
             nameof(TerminalSettingsPanelState.ReflowOnResize),
+            nameof(TerminalSettingsPanelState.SixelGraphicsEnabled),
             nameof(TerminalSettingsPanelState.EnableLigatures),
             nameof(TerminalSettingsPanelState.SelectedPasteSafetyPolicy),
             nameof(TerminalSettingsPanelState.SshRequestPty),
@@ -55,6 +56,12 @@ public sealed class TerminalSettingsTerminalBehaviorState : TerminalSettingsCate
     {
         get => Owner.ReflowOnResize;
         set => Owner.ReflowOnResize = value;
+    }
+
+    public bool SixelGraphicsEnabled
+    {
+        get => Owner.SixelGraphicsEnabled;
+        set => Owner.SixelGraphicsEnabled = value;
     }
 
     public bool EnableLigatures

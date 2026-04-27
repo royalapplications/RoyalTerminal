@@ -220,6 +220,9 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public static readonly StyledProperty<bool> ReflowOnResizeProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(ReflowOnResize), true);
 
+    public static readonly StyledProperty<bool> SixelGraphicsEnabledProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(SixelGraphicsEnabled), true);
+
     public static readonly StyledProperty<bool> EnableLigaturesProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(EnableLigatures), false);
 
@@ -687,6 +690,12 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         set => SetValue(ReflowOnResizeProperty, value);
     }
 
+    public bool SixelGraphicsEnabled
+    {
+        get => GetValue(SixelGraphicsEnabledProperty);
+        set => SetValue(SixelGraphicsEnabledProperty, value);
+    }
+
     public bool EnableLigatures
     {
         get => GetValue(EnableLigaturesProperty);
@@ -1105,6 +1114,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
                 BackspaceSendsControlH = BackspaceSendsControlH,
                 EnableTextShaping = EnableTextShaping,
                 ReflowOnResize = ReflowOnResize,
+                SixelGraphicsEnabled = SixelGraphicsEnabled,
                 EnableLigatures = EnableLigatures,
                 PasteSafetyPolicy = SelectedPasteSafetyPolicy.ToString(),
             },
@@ -1263,6 +1273,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             BackspaceSendsControlH = profile.Behavior.BackspaceSendsControlH;
             EnableTextShaping = profile.Behavior.EnableTextShaping;
             ReflowOnResize = profile.Behavior.ReflowOnResize;
+            SixelGraphicsEnabled = profile.Behavior.SixelGraphicsEnabled;
             EnableLigatures = profile.Behavior.EnableLigatures;
             SelectedPasteSafetyPolicy = ParsePasteSafetyPolicy(profile.Behavior.PasteSafetyPolicy);
 

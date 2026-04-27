@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests — Avalonia headless tests for TerminalControl.
 
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Diagnostics;
@@ -25,6 +26,7 @@ using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
 using RoyalTerminal.Terminal.Transport.Ssh;
 using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
+using SkiaSharp;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -60,6 +62,7 @@ public class TerminalControlTests
         Assert.Equal(10_000, control.ScrollbackLimit);
         Assert.True(control.AutoScroll);
         Assert.True(control.ReflowOnResize);
+        Assert.False(control.SixelGraphicsEnabled);
         Assert.Null(control.ShaderSources);
         Assert.True(control.ShaderAnimationEnabled);
     }
@@ -86,6 +89,7 @@ public class TerminalControlTests
             ScrollbackLimit = 50_000,
             AutoScroll = false,
             ReflowOnResize = false,
+            SixelGraphicsEnabled = true,
         };
 
         Assert.Equal("JetBrains Mono", control.FontFamilyName);
@@ -97,6 +101,129 @@ public class TerminalControlTests
         Assert.Equal(50_000, control.ScrollbackLimit);
         Assert.False(control.AutoScroll);
         Assert.False(control.ReflowOnResize);
+        Assert.True(control.SixelGraphicsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void Control_SixelGraphicsEnabled_RendersManagedRasterPayload_WhenEnabledAfterCreation()
+    {
+        var control = new TerminalControl
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        control.SixelGraphicsEnabled = true;
+        control.WriteOutput(Encoding.ASCII.GetBytes("\u001bPq#1;2;100;0;0#1@\u001b\\"));
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        Assert.True(screen.HasRasterGraphics);
+        ReadOnlySpan<TerminalRasterImagePlacement> placements = screen.GetRasterImagePlacements();
+        Assert.Equal(1, placements.Length);
+        Assert.True(screen.TryGetRasterImageSource(placements[0].ImageId, out TerminalRasterImageSource? source));
+        Assert.Equal(TerminalRasterImageProtocol.Sixel, source!.Protocol);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_SixelGraphicsEnabled_RendersManagedRasterPayload_ToPixels()
+    {
+        var control = new TerminalControl
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            SixelGraphicsEnabled = true,
+            Width = 800,
+            Height = 480,
+        };
+        Window window = new()
+        {
+            Content = control,
+            Width = 800,
+            Height = 480,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            control.WriteOutput(CreateSolidRedSixel(width: 80, bands: 10));
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            int width = Math.Max(1, (int)Math.Ceiling(screen.Columns * renderer.CellWidth));
+            int height = Math.Max(1, (int)Math.Ceiling(screen.ViewportRows * renderer.CellHeight));
+            using SKSurface surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888));
+            surface.Canvas.Clear(SKColors.Black);
+
+            lock (screen.SyncRoot)
+            {
+                renderer.RenderFull(surface.Canvas, screen);
+            }
+
+            using SKImage snapshot = surface.Snapshot();
+            using SKPixmap pixels = snapshot.PeekPixels();
+            Assert.NotNull(pixels);
+            Assert.True(
+                ContainsRedPixel(pixels, maxX: 100, maxY: 80),
+                "Rendered sixel raster should produce visible red pixels.");
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_SixelGraphicsEnabled_RetainsManagedRasterPayload_AfterResize()
+    {
+        var control = new TerminalControl
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            SixelGraphicsEnabled = true,
+            Width = 800,
+            Height = 480,
+        };
+        Window window = new()
+        {
+            Content = control,
+            Width = 800,
+            Height = 480,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            control.WriteOutput(CreateSolidRedSixel(width: 80, bands: 10));
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            Assert.True(screen.HasRasterGraphics);
+
+            window.Width = 520;
+            control.Width = 520;
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            Assert.True(screen.HasRasterGraphics);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            int width = Math.Max(1, (int)Math.Ceiling(screen.Columns * renderer.CellWidth));
+            int height = Math.Max(1, (int)Math.Ceiling(screen.ViewportRows * renderer.CellHeight));
+            using SKSurface surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888));
+            surface.Canvas.Clear(SKColors.Black);
+
+            lock (screen.SyncRoot)
+            {
+                renderer.RenderFull(surface.Canvas, screen);
+            }
+
+            using SKImage snapshot = surface.Snapshot();
+            using SKPixmap pixels = snapshot.PeekPixels();
+            Assert.NotNull(pixels);
+            Assert.True(
+                ContainsRedPixel(pixels, maxX: 100, maxY: 80),
+                "Rendered sixel raster should stay visible after terminal resize.");
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
     }
 
     [AvaloniaFact]
@@ -2137,6 +2264,49 @@ public class TerminalControlTests
         using MemoryStream stream = new();
         frame!.Save(stream);
         return stream.ToArray();
+    }
+
+    private static byte[] CreateSolidRedSixel(int width, int bands)
+    {
+        StringBuilder builder = new();
+        builder.Append("\u001bPq\"1;1;");
+        builder.Append(width.ToString(CultureInfo.InvariantCulture));
+        builder.Append(';');
+        builder.Append((bands * 6).ToString(CultureInfo.InvariantCulture));
+        builder.Append("#1;2;100;0;0#1");
+        for (int band = 0; band < bands; band++)
+        {
+            if (band > 0)
+            {
+                builder.Append('-');
+            }
+
+            builder.Append('!');
+            builder.Append(width.ToString(CultureInfo.InvariantCulture));
+            builder.Append('~');
+        }
+
+        builder.Append("\u001b\\");
+        return Encoding.ASCII.GetBytes(builder.ToString());
+    }
+
+    private static bool ContainsRedPixel(SKPixmap pixels, int maxX, int maxY)
+    {
+        int width = Math.Min(maxX, pixels.Width);
+        int height = Math.Min(maxY, pixels.Height);
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                if (pixel.Red > 200 && pixel.Green < 80 && pixel.Blue < 80)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)

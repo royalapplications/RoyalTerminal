@@ -249,6 +249,9 @@
                 <CheckBox Content="Reflow on Resize"
                           Margin="0,2,10,0"
                           IsChecked="{Binding ReflowOnResize}" />
+                <CheckBox Content="Enable Sixel Graphics"
+                          Margin="0,2,10,0"
+                          IsChecked="{Binding SixelGraphicsEnabled}" />
                 <CheckBox Content="Enable Ligatures"
                           Margin="0,2,10,0"
                           IsChecked="{Binding EnableLigatures}" />

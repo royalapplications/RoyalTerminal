@@ -495,6 +495,10 @@ public class MainWindowViewModelFlowTests
         Assert.False(viewModel.BackspaceSendsControlH);
         Assert.True(viewModel.EnableTextShaping);
         Assert.True(viewModel.ReflowOnResize);
+        Assert.True(viewModel.SixelGraphicsEnabled);
+        Assert.Equal("Sixel: On", viewModel.SixelButtonText);
+        viewModel.SixelGraphicsEnabled = false;
+        Assert.Equal("Sixel: Off", viewModel.SixelButtonText);
         Assert.False(viewModel.EnableLigatures);
         Assert.Equal(TerminalPasteSafetyPolicy.None, viewModel.SelectedPasteSafetyPolicy);
         Assert.Contains(TerminalPasteSafetyPolicy.BlockUnsafe, viewModel.PasteSafetyPolicies);

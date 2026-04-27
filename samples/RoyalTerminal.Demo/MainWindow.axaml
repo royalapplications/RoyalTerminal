@@ -75,6 +75,10 @@
                   FontSize="10" Padding="8,2"
                   Command="{Binding CycleRenderModeCommand}"
                   ToolTip.Tip="Switch rendering mode (Native VT / Managed VT / Rendered)" />
+          <ToggleButton Content="{Binding SixelButtonText}" Height="24"
+                        FontSize="10" Padding="8,2"
+                        IsChecked="{Binding SixelGraphicsEnabled}"
+                        ToolTip.Tip="Enable or disable sixel graphics for terminal tabs" />
           <Button Content="{Binding ShaderSampleButtonText}" Height="24"
                   FontSize="10" Padding="8,2"
                   Command="{Binding CycleShaderSampleCommand}"
@@ -390,6 +394,9 @@
             <CheckBox Content="Reflow on Resize"
                       Margin="0,2,8,0"
                       IsChecked="{Binding ReflowOnResize}" />
+            <CheckBox Content="Sixel Graphics"
+                      Margin="0,2,8,0"
+                      IsChecked="{Binding SixelGraphicsEnabled}" />
             <CheckBox Content="Enable Ligatures"
                       Margin="0,2,8,0"
                       IsChecked="{Binding EnableLigatures}" />
