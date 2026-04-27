@@ -170,7 +170,7 @@ public class GhosttyVtProcessorTests
         Assert.True(screen.TryGetRasterImageSource(placement.ImageId, out TerminalRasterImageSource? source));
         Assert.Equal(TerminalRasterImageProtocol.Sixel, source!.Protocol);
         Assert.Equal(1, source.WidthPx);
-        Assert.Equal(6, source.HeightPx);
+        Assert.Equal(12, source.HeightPx);
 
         processor.Process("\u001b[2J"u8);
 

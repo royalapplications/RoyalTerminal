@@ -61,7 +61,7 @@ public sealed class SixelDecoder
             return SixelDecodeResult.Failure(SixelDecodeStatus.InputTooLarge, "The sixel payload exceeds the input limit.");
         }
 
-        if (!TryParseSixelIntroducer(payload, out int dataIndex, out int backgroundMode))
+        if (!TryParseSixelIntroducer(payload, out int dataIndex, out int macroParameter, out int backgroundMode))
         {
             return SixelDecodeResult.Failure(SixelDecodeStatus.MissingIntroducer, "The DCS payload is not a sixel payload.");
         }
@@ -73,7 +73,8 @@ public sealed class SixelDecoder
         SixelCanvas canvas = new(_options, background);
         int x = 0;
         int y = 0;
-        uint currentColor = colors.GetColor(0);
+        int pixelAspectRatio = GetInitialPixelAspectRatio(macroParameter, _options.MaxPixelAspectRatio);
+        uint currentColor = colors.GetColor(Math.Min(_options.MaxColorRegisters - 1, 15));
 
         for (int i = dataIndex; i < payload.Length; i++)
         {
@@ -93,7 +94,7 @@ public sealed class SixelDecoder
                         return SixelDecodeResult.Failure(SixelDecodeStatus.InvalidData, "The sixel repeat command is missing a data byte.");
                     }
 
-                    if (!DrawSixelColumns(canvas, payload[i], repeatCount, ref x, y, currentColor, out SixelDecodeStatus repeatStatus))
+                    if (!DrawSixelColumns(canvas, payload[i], repeatCount, ref x, y, pixelAspectRatio, currentColor, out SixelDecodeStatus repeatStatus))
                     {
                         return SixelDecodeResult.Failure(repeatStatus, "The repeated sixel data exceeded configured limits.");
                     }
@@ -110,7 +111,7 @@ public sealed class SixelDecoder
 
                 case (byte)'"':
                     i++;
-                    if (!HandleRasterAttributes(payload, ref i, canvas, out SixelDecodeStatus rasterStatus))
+                    if (!HandleRasterAttributes(payload, ref i, canvas, _options.MaxPixelAspectRatio, ref pixelAspectRatio, ref x, out SixelDecodeStatus rasterStatus))
                     {
                         return SixelDecodeResult.Failure(rasterStatus, "The sixel raster attributes exceeded configured limits.");
                     }
@@ -123,7 +124,7 @@ public sealed class SixelDecoder
 
                 case (byte)'-':
                     x = 0;
-                    y = checked(y + 6);
+                    y = checked(y + (6 * pixelAspectRatio));
                     if (!canvas.TryEnsureSize(Math.Max(1, canvas.Width), y + 1, out SixelDecodeStatus newlineStatus))
                     {
                         return SixelDecodeResult.Failure(newlineStatus, "The sixel newline exceeded configured limits.");
@@ -133,7 +134,7 @@ public sealed class SixelDecoder
                 default:
                     if (IsSixelDataByte(command))
                     {
-                        if (!DrawSixelColumns(canvas, command, 1, ref x, y, currentColor, out SixelDecodeStatus drawStatus))
+                        if (!DrawSixelColumns(canvas, command, 1, ref x, y, pixelAspectRatio, currentColor, out SixelDecodeStatus drawStatus))
                         {
                             return SixelDecodeResult.Failure(drawStatus, "The sixel data exceeded configured limits.");
                         }
@@ -160,11 +161,17 @@ public sealed class SixelDecoder
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxHeight, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxPixels, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxColorRegisters, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxPixelAspectRatio, 1);
     }
 
-    private static bool TryParseSixelIntroducer(ReadOnlySpan<byte> payload, out int dataIndex, out int backgroundMode)
+    private static bool TryParseSixelIntroducer(
+        ReadOnlySpan<byte> payload,
+        out int dataIndex,
+        out int macroParameter,
+        out int backgroundMode)
     {
         dataIndex = 0;
+        macroParameter = 0;
         backgroundMode = -1;
         int i = 0;
         int parameterIndex = 0;
@@ -181,7 +188,11 @@ public sealed class SixelDecoder
             }
             else if (b == (byte)';')
             {
-                if (parameterIndex == 1 && hasParameter)
+                if (parameterIndex == 0 && hasParameter)
+                {
+                    macroParameter = currentParameter;
+                }
+                else if (parameterIndex == 1 && hasParameter)
                 {
                     backgroundMode = currentParameter;
                 }
@@ -194,7 +205,11 @@ public sealed class SixelDecoder
             i++;
         }
 
-        if (parameterIndex == 1 && hasParameter)
+        if (parameterIndex == 0 && hasParameter)
+        {
+            macroParameter = currentParameter;
+        }
+        else if (parameterIndex == 1 && hasParameter)
         {
             backgroundMode = currentParameter;
         }
@@ -242,9 +257,19 @@ public sealed class SixelDecoder
         if (count >= 5 && present[1])
         {
             int colorSpace = parameters[1];
-            uint color = colorSpace == 1
-                ? ConvertHlsToRgba(parameters[2], parameters[3], parameters[4])
-                : ConvertRgbPercentToRgba(parameters[2], parameters[3], parameters[4]);
+            uint color;
+            if (colorSpace == 1)
+            {
+                color = ConvertHlsToRgba(parameters[2], parameters[3], parameters[4]);
+            }
+            else if (colorSpace == 2)
+            {
+                color = ConvertRgbPercentToRgba(parameters[2], parameters[3], parameters[4]);
+            }
+            else
+            {
+                return true;
+            }
 
             if (!colors.TrySet(register, color))
             {
@@ -262,11 +287,20 @@ public sealed class SixelDecoder
         ReadOnlySpan<byte> payload,
         ref int index,
         SixelCanvas canvas,
+        int maxPixelAspectRatio,
+        ref int pixelAspectRatio,
+        ref int x,
         out SixelDecodeStatus status)
     {
         Span<int> parameters = stackalloc int[4];
         Span<bool> present = stackalloc bool[4];
         int count = ParseParameterList(payload, ref index, parameters, present);
+
+        if (count >= 2 && present[1] && parameters[1] > 0)
+        {
+            int yAspect = count >= 1 && present[0] ? parameters[0] : 0;
+            pixelAspectRatio = Math.Clamp(DivideRoundUp(yAspect, parameters[1]), 1, maxPixelAspectRatio);
+        }
 
         int width = count >= 3 && present[2] ? parameters[2] : 0;
         int height = count >= 4 && present[3] ? parameters[3] : 0;
@@ -274,9 +308,13 @@ public sealed class SixelDecoder
         {
             int requestedWidth = Math.Max(width, Math.Max(1, canvas.Width));
             int requestedHeight = Math.Max(height, Math.Max(1, canvas.Height));
-            return canvas.TryEnsureSize(requestedWidth, requestedHeight, out status);
+            if (!canvas.TryEnsureSize(requestedWidth, requestedHeight, out status))
+            {
+                return false;
+            }
         }
 
+        x = 0;
         status = SixelDecodeStatus.Success;
         return true;
     }
@@ -287,15 +325,24 @@ public sealed class SixelDecoder
         int repeatCount,
         ref int x,
         int y,
+        int pixelAspectRatio,
         uint color,
         out SixelDecodeStatus status)
     {
         int bits = sixel - SixelDataMin;
         int requestedWidth = checked(x + repeatCount);
-        int requestedHeight = checked(y + 6);
+        int sixelHeight = checked(6 * pixelAspectRatio);
+        int requestedHeight = checked(y + sixelHeight);
         if (!canvas.TryEnsureSize(requestedWidth, requestedHeight, out status))
         {
             return false;
+        }
+
+        if (bits == 0)
+        {
+            x += repeatCount;
+            status = SixelDecodeStatus.Success;
+            return true;
         }
 
         for (int repeat = 0; repeat < repeatCount; repeat++)
@@ -304,7 +351,11 @@ public sealed class SixelDecoder
             {
                 if ((bits & (1 << bit)) != 0)
                 {
-                    canvas.SetPixel(x, y + bit, color);
+                    int pixelY = y + (bit * pixelAspectRatio);
+                    for (int stretch = 0; stretch < pixelAspectRatio; stretch++)
+                    {
+                        canvas.SetPixel(x, pixelY + stretch, color);
+                    }
                 }
             }
 
@@ -313,6 +364,29 @@ public sealed class SixelDecoder
 
         status = SixelDecodeStatus.Success;
         return true;
+    }
+
+    private static int GetInitialPixelAspectRatio(int macroParameter, int maxPixelAspectRatio)
+    {
+        int ratio = macroParameter switch
+        {
+            0 or 1 or 5 or 6 => 2,
+            2 => 5,
+            3 or 4 => 3,
+            _ => 1,
+        };
+
+        return Math.Clamp(ratio, 1, maxPixelAspectRatio);
+    }
+
+    private static int DivideRoundUp(int numerator, int denominator)
+    {
+        if (denominator <= 0)
+        {
+            return 1;
+        }
+
+        return (int)Math.Max(1L, (((long)numerator + denominator - 1) / denominator));
     }
 
     private static int ParseParameterList(
@@ -392,55 +466,32 @@ public sealed class SixelDecoder
 
     private static uint ConvertHlsToRgba(int hueDegrees, int lightnessPercent, int saturationPercent)
     {
-        double h = ((hueDegrees % 360) + 360) % 360 / 360.0;
-        double l = Math.Clamp(lightnessPercent, 0, 100) / 100.0;
-        double s = Math.Clamp(saturationPercent, 0, 100) / 100.0;
+        int hue = ((hueDegrees % 360) + 360) % 360;
+        float lum = Math.Clamp(lightnessPercent, 0, 100);
+        float sat = Math.Clamp(saturationPercent, 0, 100);
+        float chroma = (50f - Math.Abs(lum - 50f)) * sat / 50f;
+        float x = chroma * (60f - Math.Abs((hue % 120) - 60f)) / 60f;
+        float lightness = lum - (chroma / 2f);
+        byte comp1 = PercentFloatToByte(chroma + lightness);
+        byte comp2 = PercentFloatToByte(x + lightness);
+        byte comp3 = PercentFloatToByte(lightness);
 
-        if (s <= double.Epsilon)
+        return hue switch
         {
-            byte gray = UnitToByte(l);
-            return PackRgba(gray, gray, gray, 0xFF);
-        }
-
-        double q = l < 0.5 ? l * (1.0 + s) : l + s - (l * s);
-        double p = (2.0 * l) - q;
-        byte r = UnitToByte(HueToRgb(p, q, h + (1.0 / 3.0)));
-        byte g = UnitToByte(HueToRgb(p, q, h));
-        byte b = UnitToByte(HueToRgb(p, q, h - (1.0 / 3.0)));
-        return PackRgba(r, g, b, 0xFF);
-    }
-
-    private static double HueToRgb(double p, double q, double t)
-    {
-        if (t < 0.0)
-        {
-            t += 1.0;
-        }
-        else if (t > 1.0)
-        {
-            t -= 1.0;
-        }
-
-        if (t < 1.0 / 6.0)
-        {
-            return p + ((q - p) * 6.0 * t);
-        }
-
-        if (t < 1.0 / 2.0)
-        {
-            return q;
-        }
-
-        if (t < 2.0 / 3.0)
-        {
-            return p + ((q - p) * ((2.0 / 3.0) - t) * 6.0);
-        }
-
-        return p;
+            < 60 => PackRgba(comp2, comp3, comp1, 0xFF),
+            < 120 => PackRgba(comp1, comp3, comp2, 0xFF),
+            < 180 => PackRgba(comp1, comp2, comp3, 0xFF),
+            < 240 => PackRgba(comp2, comp1, comp3, 0xFF),
+            < 300 => PackRgba(comp3, comp1, comp2, 0xFF),
+            _ => PackRgba(comp3, comp2, comp1, 0xFF),
+        };
     }
 
     private static byte PercentToByte(int value)
         => UnitToByte(Math.Clamp(value, 0, 100) / 100.0);
+
+    private static byte PercentFloatToByte(float value)
+        => (byte)Math.Clamp((int)((Math.Clamp(value, 0f, 100f) * 255f / 100f) + 0.5f), 0, 255);
 
     private static byte UnitToByte(double value)
         => (byte)Math.Clamp((int)Math.Round(value * 255.0, MidpointRounding.AwayFromZero), 0, 255);
@@ -466,35 +517,29 @@ public sealed class SixelDecoder
 
         public uint GetColor(int register)
         {
-            if ((uint)register >= (uint)_colors.Length)
-            {
-                return _colors[0];
-            }
-
-            return _colors[register];
+            return _colors[NormalizeRegister(register)];
         }
 
         public bool TrySelect(int register, out uint color)
         {
-            if ((uint)register >= (uint)_colors.Length)
-            {
-                color = 0;
-                return false;
-            }
-
-            color = _colors[register];
+            color = _colors[NormalizeRegister(register)];
             return true;
         }
 
         public bool TrySet(int register, uint color)
         {
-            if ((uint)register >= (uint)_colors.Length)
+            _colors[NormalizeRegister(register)] = color;
+            return true;
+        }
+
+        private int NormalizeRegister(int register)
+        {
+            if (register <= 0)
             {
-                return false;
+                return 0;
             }
 
-            _colors[register] = color;
-            return true;
+            return register % _colors.Length;
         }
 
         private static void InitializeDefaultColors(Span<uint> colors)
@@ -515,9 +560,32 @@ public sealed class SixelDecoder
 
             for (int i = count; i < colors.Length; i++)
             {
-                byte value = (byte)(i & 0xFF);
-                colors[i] = PackRgba(value, value, value, 0xFF);
+                colors[i] = i < 256
+                    ? GetExtendedXtermColor(i)
+                    : GetExtendedXtermColor(i % 256);
             }
+        }
+
+        private static uint GetExtendedXtermColor(int index)
+        {
+            if (index is >= 16 and <= 231)
+            {
+                ReadOnlySpan<byte> scale = [0x00, 0x5F, 0x87, 0xAF, 0xD7, 0xFF];
+                int offset = index - 16;
+                byte red = scale[(offset / 36) % 6];
+                byte green = scale[(offset / 6) % 6];
+                byte blue = scale[offset % 6];
+                return PackRgba(red, green, blue, 0xFF);
+            }
+
+            if (index is >= 232 and <= 255)
+            {
+                byte value = (byte)(((index - 232) * 10) + 8);
+                return PackRgba(value, value, value, 0xFF);
+            }
+
+            byte fallback = (byte)(index & 0xFF);
+            return PackRgba(fallback, fallback, fallback, 0xFF);
         }
     }
 

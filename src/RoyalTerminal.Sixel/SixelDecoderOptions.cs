@@ -27,6 +27,9 @@ public sealed record SixelDecoderOptions
     /// <summary>Maximum number of sixel color registers.</summary>
     public int MaxColorRegisters { get; init; } = 1024;
 
+    /// <summary>Maximum vertical device-pixel scale applied to one sixel pixel.</summary>
+    public int MaxPixelAspectRatio { get; init; } = 64;
+
     /// <summary>
     /// Whether a sixel payload without an explicit background mode starts with
     /// transparent pixels. DEC background mode 0 or 2 still requests an opaque

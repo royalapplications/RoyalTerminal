@@ -20,7 +20,7 @@ public sealed class SixelDecoderTests
         Assert.True(result.Success, result.Message);
         Assert.NotNull(result.Image);
         Assert.Equal(1, result.Image!.Width);
-        Assert.Equal(6, result.Image.Height);
+        Assert.Equal(12, result.Image.Height);
         Assert.Equal([0xFF, 0x00, 0x00, 0xFF], result.Image.RgbaPixels.AsSpan(0, 4).ToArray());
         Assert.Equal(1, result.FinalCursorX);
         Assert.Equal(0, result.FinalCursorY);
@@ -55,10 +55,10 @@ public sealed class SixelDecoderTests
 
         Assert.True(result.Success, result.Message);
         Assert.Equal(3, result.Image!.Width);
-        Assert.Equal(6, result.Image.Height);
-        Assert.Equal(3 * 6 * 4, result.Image.RgbaPixels.Length);
+        Assert.Equal(12, result.Image.Height);
+        Assert.Equal(3 * 12 * 4, result.Image.RgbaPixels.Length);
         Assert.Equal(3, result.FinalCursorX);
-        Assert.Equal(0xFF, GetAlpha(result.Image, x: 2, y: 1));
+        Assert.Equal(0xFF, GetAlpha(result.Image, x: 2, y: 2));
     }
 
     [Fact]
@@ -69,8 +69,49 @@ public sealed class SixelDecoderTests
         SixelDecodeResult result = decoder.Decode(Ascii("q#1;1;240;50;100#1@"));
 
         Assert.True(result.Success, result.Message);
-        Assert.True(result.Image!.RgbaPixels[2] > 200);
+        Assert.True(result.Image!.RgbaPixels[1] > 200);
         Assert.Equal(0xFF, result.Image.RgbaPixels[3]);
+    }
+
+    [Fact]
+    public void Decode_RasterAttributesAtStart_UpdateAspectRatioAndDeclaredSize()
+    {
+        SixelDecoder decoder = new();
+
+        SixelDecodeResult result = decoder.Decode(Ascii("q\"1;1;2;6#1;2;100;0;0#1@"));
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(2, result.Image!.Width);
+        Assert.Equal(6, result.Image.Height);
+        Assert.Equal([0xFF, 0x00, 0x00, 0xFF], result.Image.RgbaPixels.AsSpan(0, 4).ToArray());
+    }
+
+    [Fact]
+    public void Decode_RasterAttributes_PerformCarriageReturnWithoutShrinkingExistingContent()
+    {
+        SixelDecoder decoder = new();
+
+        SixelDecodeResult result = decoder.Decode(Ascii("q#1;2;100;0;0#1A\"1;1;2;6@"));
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(2, result.Image!.Width);
+        Assert.Equal(12, result.Image.Height);
+        Assert.Equal([0xFF, 0x00, 0x00, 0xFF], result.Image.RgbaPixels.AsSpan(0, 4).ToArray());
+        Assert.Equal(1, result.FinalCursorX);
+    }
+
+    [Fact]
+    public void Decode_ColorRegisterNumbers_WrapIntoConfiguredTable()
+    {
+        SixelDecoder decoder = new(new SixelDecoderOptions
+        {
+            MaxColorRegisters = 16,
+        });
+
+        SixelDecodeResult result = decoder.Decode(Ascii("q#17;2;100;0;0#17@"));
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal([0xFF, 0x00, 0x00, 0xFF], result.Image!.RgbaPixels.AsSpan(0, 4).ToArray());
     }
 
     [Fact]
