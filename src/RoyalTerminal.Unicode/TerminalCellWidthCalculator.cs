@@ -48,7 +48,6 @@ public static class TerminalCellWidthCalculator
         }
 
         bool hasEmojiPresentationSignal = false;
-        bool hasExtendedPictographic = first.GraphemeBreakClass == GraphemeBreakClass.ExtendedPictographic;
         bool hasRegionalIndicator = first.GraphemeBreakClass == GraphemeBreakClass.RegionalIndicator;
 
         for (int index = firstLength; index < grapheme.Length;)
@@ -68,11 +67,6 @@ public static class TerminalCellWidthCalculator
                 hasEmojiPresentationSignal = true;
             }
 
-            if (current.GraphemeBreakClass == GraphemeBreakClass.ExtendedPictographic)
-            {
-                hasExtendedPictographic = true;
-            }
-
             if (current.GraphemeBreakClass == GraphemeBreakClass.RegionalIndicator)
             {
                 hasRegionalIndicator = true;
@@ -81,7 +75,7 @@ public static class TerminalCellWidthCalculator
             index += consumed;
         }
 
-        if (hasRegionalIndicator || hasExtendedPictographic || hasEmojiPresentationSignal)
+        if (hasRegionalIndicator || hasEmojiPresentationSignal)
         {
             return 2;
         }
