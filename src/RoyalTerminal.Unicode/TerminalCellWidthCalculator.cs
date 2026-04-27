@@ -9,6 +9,7 @@ namespace RoyalTerminal.Unicode;
 
 public static class TerminalCellWidthCalculator
 {
+    private const int VariationSelector15 = 0xFE0E;
     private const int VariationSelector16 = 0xFE0F;
     private const int KeycapEnclosingCodepoint = 0x20E3;
     private const int EmojiModifierStart = 0x1F3FB;
@@ -47,6 +48,7 @@ public static class TerminalCellWidthCalculator
             return 0;
         }
 
+        bool hasTextPresentationSignal = false;
         bool hasEmojiPresentationSignal = false;
         bool hasRegionalIndicator = first.GraphemeBreakClass == GraphemeBreakClass.RegionalIndicator;
 
@@ -59,6 +61,11 @@ public static class TerminalCellWidthCalculator
             }
 
             uint value = current.Value;
+            if (value == VariationSelector15)
+            {
+                hasTextPresentationSignal = true;
+            }
+
             if (value == VariationSelector16 ||
                 value == KeycapEnclosingCodepoint ||
                 IsEmojiModifier(value) ||
@@ -73,6 +80,11 @@ public static class TerminalCellWidthCalculator
             }
 
             index += consumed;
+        }
+
+        if (hasTextPresentationSignal && !hasEmojiPresentationSignal)
+        {
+            return 1;
         }
 
         if (hasRegionalIndicator || hasEmojiPresentationSignal)

@@ -1364,6 +1364,25 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_TextPresentationSelector_KeepsSymbolSingleWidth()
+    {
+        const string sliderThumb = "\U0001F837\uFE0E";
+
+        var screen = new TerminalScreen(16, 4, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process(System.Text.Encoding.UTF8.GetBytes(sliderThumb + "-"));
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(2, processor.CursorCol);
+        Assert.Equal(0x1F837, row[0].Codepoint);
+        Assert.Equal(sliderThumb, row[0].Grapheme);
+        Assert.Equal(1, row[0].Width);
+        Assert.Equal('-', row[1].Codepoint);
+        Assert.Equal(1, row[1].Width);
+    }
+
+    [Fact]
     public void BasicVtProcessor_OverwriteWideCharSpacer_ClearsLeadingWideCell()
     {
         var screen = new TerminalScreen(16, 4, 0);
