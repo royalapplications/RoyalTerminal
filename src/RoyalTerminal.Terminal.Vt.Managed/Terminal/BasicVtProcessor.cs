@@ -1549,6 +1549,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             ClearPreservedCellsForMutation(row);
         }
 
+        ClearRasterGraphicsForTextMutation(_cursorRow, _cursorCol, width);
         ClearCellAndWideArtifacts(row, _cursorCol);
         if (width == 2 && _cursorCol + 1 < row.Columns)
         {
@@ -1661,6 +1662,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         }
 
         ClearPreservedCellsForMutation(targetRow);
+        ClearRasterGraphicsForTextMutation(targetRowIndex, targetColIndex, Math.Max(oldWidth, newWidth));
 
         targetCell.Codepoint = targetCell.Codepoint != 0
             ? targetCell.Codepoint
@@ -2437,6 +2439,26 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
         _screen.ReplaceRasterImage(source, placement);
         AdvanceCursorAfterSixel(anchorViewportRow, result.FinalCursorX, result.FinalCursorY, cellWidthPx, cellHeightPx);
+    }
+
+    private void ClearRasterGraphicsForTextMutation(int viewportRow, int startColumn, int width)
+    {
+        if (!_screen.HasRasterGraphics || width <= 0)
+        {
+            return;
+        }
+
+        int endColumn = Math.Min(_screen.Columns - 1, startColumn + width - 1);
+        if (viewportRow < 0 || viewportRow >= _screen.ViewportRows || startColumn > endColumn)
+        {
+            return;
+        }
+
+        _screen.ClearRasterGraphicsInViewportRectangle(
+            viewportRow,
+            viewportRow,
+            startColumn,
+            endColumn);
     }
 
     private void AdvanceCursorAfterSixel(

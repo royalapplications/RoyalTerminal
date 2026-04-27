@@ -705,6 +705,7 @@ public sealed class TerminalScreen
             }
         }
 
+        ClearTextContentUnderRasterPlacement(placement);
         _rasterPlacements.Add(placement);
         InvalidateViewport();
     }
@@ -728,6 +729,7 @@ public sealed class TerminalScreen
 
         _rasterPlacements.Clear();
         _rasterPlacements.AddRange(source._rasterPlacements);
+        ClearTextContentUnderRasterPlacements();
         InvalidateViewport();
     }
 
@@ -1103,6 +1105,76 @@ public sealed class TerminalScreen
         }
 
         return placement.AnchorRow + (bottomPx / placement.CellHeightPx);
+    }
+
+    private static int GetRasterPlacementStartRow(TerminalRasterImagePlacement placement)
+    {
+        int topOffset = Math.Min(0, placement.YOffsetPx);
+        int topCells = FloorDiv(topOffset, placement.CellHeightPx);
+        return placement.AnchorRow + topCells;
+    }
+
+    private void ClearTextContentUnderRasterPlacements()
+    {
+        for (int i = 0; i < _rasterPlacements.Count; i++)
+        {
+            ClearTextContentUnderRasterPlacement(_rasterPlacements[i]);
+        }
+    }
+
+    private void ClearTextContentUnderRasterPlacement(TerminalRasterImagePlacement placement)
+    {
+        int startAbsRow = Math.Max(0, GetRasterPlacementStartRow(placement));
+        int endAbsRow = Math.Min(_rows.Count - 1, GetRasterPlacementEndRow(placement));
+        if (startAbsRow > endAbsRow)
+        {
+            return;
+        }
+
+        int startColumn = Math.Clamp(GetRasterPlacementStartColumn(placement), 0, Math.Max(0, Columns - 1));
+        int endColumn = Math.Clamp(GetRasterPlacementEndColumn(placement), 0, Math.Max(0, Columns - 1));
+        if (startColumn > endColumn)
+        {
+            return;
+        }
+
+        for (int rowIndex = startAbsRow; rowIndex <= endAbsRow; rowIndex++)
+        {
+            TerminalRow row = _rows[rowIndex];
+            if (row.Columns == 0)
+            {
+                continue;
+            }
+
+            int rowStart = Math.Min(startColumn, row.Columns - 1);
+            int rowEnd = Math.Min(endColumn, row.Columns - 1);
+            if (rowStart > 0 && row[rowStart].Width == 0)
+            {
+                rowStart--;
+            }
+
+            if (rowEnd + 1 < row.Columns && row[rowEnd].Width == 2)
+            {
+                rowEnd++;
+            }
+
+            for (int column = rowStart; column <= rowEnd; column++)
+            {
+                ClearCellTextPreservingColors(ref row[column]);
+            }
+
+            row.IsDirty = true;
+        }
+    }
+
+    private static void ClearCellTextPreservingColors(ref TerminalCell cell)
+    {
+        uint foreground = cell.Foreground;
+        uint background = cell.Background;
+        bool hasBackground = cell.HasBackground;
+
+        cell = TerminalCell.Empty(foreground, background);
+        cell.HasBackground = hasBackground;
     }
 
     private static int FloorDiv(int value, int divisor)

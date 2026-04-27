@@ -142,6 +142,48 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_ReplaceRasterGraphicsFrom_ClearsCoveredTextContent()
+    {
+        TerminalScreen source = new(10, 4, 10);
+        TerminalScreen destination = new(10, 4, 10);
+        TerminalRow destinationRow = destination.GetViewportRow(0);
+        destinationRow[0].Codepoint = 'A';
+        destinationRow[1].Codepoint = 'B';
+        destinationRow[2].Codepoint = 'C';
+
+        int imageId = source.AllocateRasterImageId();
+        source.ReplaceRasterImage(
+            new TerminalRasterImageSource(
+                imageId,
+                TerminalRasterImageProtocol.Sixel,
+                widthPx: 15,
+                heightPx: 6,
+                new byte[15 * 6 * 4]),
+            new TerminalRasterImagePlacement(
+                imageId,
+                TerminalRasterImageLayer.BelowText,
+                anchorColumn: 0,
+                anchorRow: source.GetAbsoluteRowForViewportRow(0),
+                xOffsetPx: 0,
+                yOffsetPx: 0,
+                widthPx: 15,
+                heightPx: 6,
+                sourceX: 0,
+                sourceY: 0,
+                sourceWidth: 15,
+                sourceHeight: 6,
+                cellWidthPx: 10,
+                cellHeightPx: 10));
+
+        destination.ReplaceRasterGraphicsFrom(source);
+
+        Assert.False(destinationRow[0].HasContent);
+        Assert.False(destinationRow[1].HasContent);
+        Assert.Equal('C', destinationRow[2].Codepoint);
+        Assert.True(destination.HasRasterGraphics);
+    }
+
+    [Fact]
     public void TerminalScreen_AddRow_IncreasesTotalRows()
     {
         var screen = new TerminalScreen(80, 24);

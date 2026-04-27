@@ -53,6 +53,42 @@ public sealed class ManagedSixelVtProcessorTests
     }
 
     [Fact]
+    public void BasicVtProcessor_ManagedSixelEnabled_ClearsTextUnderNewPlacement()
+    {
+        TerminalScreen screen = new(10, 4, 10);
+        using BasicVtProcessor processor = new(screen)
+        {
+            SixelGraphicsEnabled = true,
+        };
+        processor.NotifyResize(10, 4, 100, 40);
+
+        processor.Process(Encoding.ASCII.GetBytes("abc\r\u001bPq#1;2;100;0;0#1!15@\u001b\\"));
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.False(row[0].HasContent);
+        Assert.False(row[1].HasContent);
+        Assert.Equal('c', row[2].Codepoint);
+        Assert.True(screen.HasRasterGraphics);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ManagedSixelEnabled_TextWriteClearsIntersectingPlacement()
+    {
+        TerminalScreen screen = new(10, 4, 10);
+        using BasicVtProcessor processor = new(screen)
+        {
+            SixelGraphicsEnabled = true,
+        };
+        processor.NotifyResize(10, 4, 100, 40);
+        processor.Process(Encoding.ASCII.GetBytes(RedPixelSixel));
+
+        processor.Process("\rX"u8);
+
+        Assert.False(screen.HasRasterGraphics);
+        Assert.Equal('X', screen.GetViewportRow(0)[0].Codepoint);
+    }
+
+    [Fact]
     public void BasicVtProcessor_ManagedSixelEnabled_AllowsWrappedSixelPayload()
     {
         TerminalScreen screen = new(10, 4, 10);
