@@ -246,6 +246,29 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalImageSources_ContentFingerprint_TracksPayload()
+    {
+        byte[] firstPixels = [0xFF, 0x00, 0x00, 0xFF];
+        byte[] secondPixels = [0x00, 0xFF, 0x00, 0xFF];
+        TerminalRasterImageSource firstRaster = new(
+            1,
+            TerminalRasterImageProtocol.Sixel,
+            widthPx: 1,
+            heightPx: 1,
+            firstPixels);
+        TerminalRasterImageSource secondRaster = new(
+            2,
+            TerminalRasterImageProtocol.Sixel,
+            widthPx: 1,
+            heightPx: 1,
+            secondPixels);
+        TerminalKittyImageSource firstKitty = new(1, widthPx: 1, heightPx: 1, firstPixels);
+
+        Assert.Equal(firstRaster.ContentFingerprint, firstKitty.ContentFingerprint);
+        Assert.NotEqual(firstRaster.ContentFingerprint, secondRaster.ContentFingerprint);
+    }
+
+    [Fact]
     public void TerminalScreen_AddRow_IncreasesTotalRows()
     {
         var screen = new TerminalScreen(80, 24);

@@ -2702,12 +2702,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private SKBitmap GetOrCreateKittyBitmap(TerminalKittyImageSource source)
     {
-        ulong fingerprint = HashBytes(source.RgbaPixels);
         if (_kittyBitmapCache.TryGetValue(source.ImageId, out KittyBitmapCacheEntry? existing) &&
             existing.WidthPx == source.WidthPx &&
             existing.HeightPx == source.HeightPx &&
             existing.ByteLength == source.RgbaPixels.Length &&
-            existing.Fingerprint == fingerprint)
+            existing.Fingerprint == source.ContentFingerprint)
         {
             return existing.Bitmap;
         }
@@ -2728,18 +2727,17 @@ public sealed class SkiaTerminalRenderer : IDisposable
             source.WidthPx,
             source.HeightPx,
             source.RgbaPixels.Length,
-            fingerprint);
+            source.ContentFingerprint);
         return bitmap;
     }
 
     private SKBitmap GetOrCreateRasterBitmap(TerminalRasterImageSource source)
     {
-        ulong fingerprint = HashBytes(source.RgbaPixels);
         if (_rasterBitmapCache.TryGetValue(source.ImageId, out KittyBitmapCacheEntry? existing) &&
             existing.WidthPx == source.WidthPx &&
             existing.HeightPx == source.HeightPx &&
             existing.ByteLength == source.RgbaPixels.Length &&
-            existing.Fingerprint == fingerprint)
+            existing.Fingerprint == source.ContentFingerprint)
         {
             return existing.Bitmap;
         }
@@ -2760,7 +2758,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             source.WidthPx,
             source.HeightPx,
             source.RgbaPixels.Length,
-            fingerprint);
+            source.ContentFingerprint);
         return bitmap;
     }
 
@@ -2822,18 +2820,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             _rasterBitmapCache.Remove(stale[i]);
         }
-    }
-
-    private static ulong HashBytes(ReadOnlySpan<byte> data)
-    {
-        ulong hash = FnvOffsetBasis;
-        for (int i = 0; i < data.Length; i++)
-        {
-            hash ^= data[i];
-            hash *= FnvPrime;
-        }
-
-        return hash;
     }
 
     public void Dispose()
