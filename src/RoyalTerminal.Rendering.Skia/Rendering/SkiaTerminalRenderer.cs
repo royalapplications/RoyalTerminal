@@ -39,6 +39,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private readonly TerminalFontResolver _fontResolver;
     private readonly ShapedRunCache _shapedRunCache;
     private readonly Dictionary<int, KittyBitmapCacheEntry> _kittyBitmapCache = new();
+    private readonly Dictionary<int, KittyBitmapCacheEntry> _rasterBitmapCache = new();
     private const float CellMetricEpsilon = 0.01f;
     private float _cellWidth;
     private float _cellHeight;
@@ -289,12 +290,15 @@ public sealed class SkiaTerminalRenderer : IDisposable
         canvas.Save();
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
         ReadOnlySpan<TerminalKittyImagePlacement> kittyPlacements = screen.GetKittyPlacements();
+        ReadOnlySpan<TerminalRasterImagePlacement> rasterPlacements = screen.GetRasterImagePlacements();
         HashSet<int>? activeKittyImageIds = kittyPlacements.IsEmpty ? null : new HashSet<int>();
+        HashSet<int>? activeRasterImageIds = rasterPlacements.IsEmpty ? null : new HashSet<int>();
         int overlayCapacity = Math.Max(1, screen.Columns);
         CellOverlayFlags[] overlayBuffer = ArrayPool<CellOverlayFlags>.Shared.Rent(overlayCapacity);
 
         try
         {
+            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowBackground, activeRasterImageIds);
             RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowBackground, activeKittyImageIds);
 
             // Render backgrounds first (batched)
@@ -316,6 +320,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowText, activeKittyImageIds);
+            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowText, activeRasterImageIds);
 
             // Render text on top of the cell layer.
             for (var row = 0; row < screen.ViewportRows; row++)
@@ -344,10 +349,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.AboveText, activeKittyImageIds);
+        RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.AboveText, activeRasterImageIds);
         IEnumerable<int> activeKittyBitmapIds = activeKittyImageIds is not null
             ? activeKittyImageIds
             : Array.Empty<int>();
         TrimKittyBitmapCache(activeKittyBitmapIds);
+        TrimRasterBitmapCache(activeRasterImageIds);
 
         // Render cursor
         if (CursorVisible)
@@ -2495,6 +2502,65 @@ public sealed class SkiaTerminalRenderer : IDisposable
         Interlocked.Exchange(ref _diagnosticScanLineSpriteCells, 0);
     }
 
+    private void RenderRasterLayer(
+        SKCanvas canvas,
+        TerminalScreen screen,
+        ReadOnlySpan<TerminalRasterImagePlacement> placements,
+        TerminalRasterImageLayer layer,
+        HashSet<int>? activeImageIds)
+    {
+        if (placements.IsEmpty)
+        {
+            return;
+        }
+
+        float viewportWidth = screen.Columns * _cellWidth;
+        float viewportHeight = screen.ViewportRows * _cellHeight;
+        int viewportTopAbsoluteRow = screen.ViewportTopAbsoluteRow;
+
+        canvas.Save();
+        canvas.ClipRect(new SKRect(0, 0, viewportWidth, viewportHeight));
+
+        try
+        {
+            for (int i = 0; i < placements.Length; i++)
+            {
+                TerminalRasterImagePlacement placement = placements[i];
+                if (placement.Layer != layer)
+                {
+                    continue;
+                }
+
+                if (!screen.TryGetRasterImageSource(placement.ImageId, out TerminalRasterImageSource? source) ||
+                    source is null)
+                {
+                    continue;
+                }
+
+                activeImageIds?.Add(placement.ImageId);
+                SKBitmap bitmap = GetOrCreateRasterBitmap(source);
+                SKRect sourceRect = new(
+                    placement.SourceX,
+                    placement.SourceY,
+                    placement.SourceX + placement.SourceWidth,
+                    placement.SourceY + placement.SourceHeight);
+                float destLeft = (placement.AnchorColumn * _cellWidth) + placement.XOffsetPx;
+                float destTop = ((placement.AnchorRow - viewportTopAbsoluteRow) * _cellHeight) + placement.YOffsetPx;
+                SKRect destRect = new(
+                    destLeft,
+                    destTop,
+                    destLeft + placement.WidthPx,
+                    destTop + placement.HeightPx);
+
+                canvas.DrawBitmap(bitmap, sourceRect, destRect);
+            }
+        }
+        finally
+        {
+            canvas.Restore();
+        }
+    }
+
     private void RenderKittyLayer(
         SKCanvas canvas,
         TerminalScreen screen,
@@ -2585,6 +2651,38 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return bitmap;
     }
 
+    private SKBitmap GetOrCreateRasterBitmap(TerminalRasterImageSource source)
+    {
+        ulong fingerprint = HashBytes(source.RgbaPixels);
+        if (_rasterBitmapCache.TryGetValue(source.ImageId, out KittyBitmapCacheEntry? existing) &&
+            existing.WidthPx == source.WidthPx &&
+            existing.HeightPx == source.HeightPx &&
+            existing.ByteLength == source.RgbaPixels.Length &&
+            existing.Fingerprint == fingerprint)
+        {
+            return existing.Bitmap;
+        }
+
+        existing?.Dispose();
+
+        SKBitmap bitmap = new(source.WidthPx, source.HeightPx, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        IntPtr pixels = bitmap.GetPixels();
+        if (pixels == IntPtr.Zero)
+        {
+            bitmap.Dispose();
+            throw new InvalidOperationException("Failed to allocate bitmap pixels for terminal raster graphics.");
+        }
+
+        Marshal.Copy(source.RgbaPixels, 0, pixels, source.RgbaPixels.Length);
+        _rasterBitmapCache[source.ImageId] = new KittyBitmapCacheEntry(
+            bitmap,
+            source.WidthPx,
+            source.HeightPx,
+            source.RgbaPixels.Length,
+            fingerprint);
+        return bitmap;
+    }
+
     private void TrimKittyBitmapCache(IEnumerable<int> activeImageIds)
     {
         HashSet<int> active = activeImageIds as HashSet<int> ?? new HashSet<int>(activeImageIds);
@@ -2613,6 +2711,38 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
     }
 
+    private void TrimRasterBitmapCache(HashSet<int>? activeImageIds)
+    {
+        if (_rasterBitmapCache.Count == 0)
+        {
+            return;
+        }
+
+        List<int>? stale = null;
+
+        foreach ((int imageId, KittyBitmapCacheEntry entry) in _rasterBitmapCache)
+        {
+            if (activeImageIds is not null && activeImageIds.Contains(imageId))
+            {
+                continue;
+            }
+
+            stale ??= new List<int>();
+            stale.Add(imageId);
+            entry.Dispose();
+        }
+
+        if (stale is null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < stale.Count; i++)
+        {
+            _rasterBitmapCache.Remove(stale[i]);
+        }
+    }
+
     private static ulong HashBytes(ReadOnlySpan<byte> data)
     {
         ulong hash = FnvOffsetBasis;
@@ -2635,7 +2765,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
             entry.Dispose();
         }
 
+        foreach (KittyBitmapCacheEntry entry in _rasterBitmapCache.Values)
+        {
+            entry.Dispose();
+        }
+
         _kittyBitmapCache.Clear();
+        _rasterBitmapCache.Clear();
         _bgPaint.Dispose();
         _fgPaint.Dispose();
         _cursorPaint.Dispose();

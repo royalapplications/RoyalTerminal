@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia - Terminal cell model.
 
+using System.Runtime.InteropServices;
 using RoyalTerminal.Terminal.Theming;
 
 namespace RoyalTerminal.Avalonia.Rendering;
@@ -333,8 +334,15 @@ public sealed class TerminalScreen
     private readonly Dictionary<int, string> _hyperlinksById = [];
     private readonly Dictionary<string, int> _hyperlinkIdsByUrl = new(StringComparer.Ordinal);
     private readonly Dictionary<int, TerminalKittyImageSource> _kittyImagesById = [];
+    private Dictionary<int, TerminalRasterImageSource> _rasterImagesById = [];
+    private List<TerminalRasterImagePlacement> _rasterPlacements = [];
+    private Dictionary<int, TerminalRasterImageSource>? _primaryRasterImagesById;
+    private List<TerminalRasterImagePlacement>? _primaryRasterPlacements;
+    private Dictionary<int, TerminalRasterImageSource>? _alternateRasterImagesById;
+    private List<TerminalRasterImagePlacement>? _alternateRasterPlacements;
     private TerminalKittyImagePlacement[] _kittyPlacements = Array.Empty<TerminalKittyImagePlacement>();
     private int _nextHyperlinkId = 1;
+    private int _nextRasterImageId = 1;
     private int _scrollbackLimit;
     private int _viewportTop;
     private int _primaryScrollOffset;
@@ -384,6 +392,12 @@ public sealed class TerminalScreen
 
     /// <summary>Gets whether the current viewport snapshot includes Kitty image placements.</summary>
     public bool HasKittyGraphics => _kittyPlacements.Length > 0;
+
+    /// <summary>Gets whether the current screen includes protocol-neutral raster image placements.</summary>
+    public bool HasRasterGraphics => _rasterPlacements.Count > 0;
+
+    /// <summary>Gets the absolute row index of the first viewport row.</summary>
+    public int ViewportTopAbsoluteRow => GetAbsoluteRowForViewportRow(0);
 
     public TerminalScreen(int columns, int viewportRows, int scrollbackLimit = 10_000)
     {
@@ -514,6 +528,21 @@ public sealed class TerminalScreen
     }
 
     /// <summary>
+    /// Gets the absolute row index for a row relative to the viewport.
+    /// </summary>
+    public int GetAbsoluteRowForViewportRow(int viewportRow)
+    {
+        if (_rows.Count == 0)
+        {
+            return -1;
+        }
+
+        int clampedViewportRow = Math.Clamp(viewportRow, 0, Math.Max(0, ViewportRows - 1));
+        int absoluteRow = TotalRows - ViewportRows - _viewportTop + clampedViewportRow;
+        return Math.Clamp(absoluteRow, 0, TotalRows - 1);
+    }
+
+    /// <summary>
     /// Gets a row by absolute index.
     /// </summary>
     public TerminalRow GetRow(int absoluteRow) => _rows[absoluteRow];
@@ -623,6 +652,178 @@ public sealed class TerminalScreen
         InvalidateViewport();
     }
 
+    /// <summary>Allocates a stable id for a protocol-neutral raster image.</summary>
+    public int AllocateRasterImageId()
+    {
+        int nextId = _nextRasterImageId;
+        if (nextId == int.MaxValue)
+        {
+            nextId = 1;
+            while (_rasterImagesById.ContainsKey(nextId))
+            {
+                nextId++;
+            }
+        }
+
+        _nextRasterImageId = nextId + 1;
+        return nextId;
+    }
+
+    /// <summary>Gets the current protocol-neutral raster image placement snapshot.</summary>
+    public ReadOnlySpan<TerminalRasterImagePlacement> GetRasterImagePlacements()
+        => CollectionsMarshal.AsSpan(_rasterPlacements);
+
+    /// <summary>Attempts to resolve a protocol-neutral raster image payload by image id.</summary>
+    public bool TryGetRasterImageSource(int imageId, out TerminalRasterImageSource? source)
+    {
+        if (imageId <= 0)
+        {
+            source = null;
+            return false;
+        }
+
+        return _rasterImagesById.TryGetValue(imageId, out source);
+    }
+
+    /// <summary>Adds or replaces a protocol-neutral raster image and placement.</summary>
+    public void ReplaceRasterImage(TerminalRasterImageSource source, TerminalRasterImagePlacement placement)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(placement);
+
+        if (source.ImageId != placement.ImageId)
+        {
+            throw new ArgumentException("Raster image source and placement ids must match.", nameof(placement));
+        }
+
+        _rasterImagesById[source.ImageId] = source;
+        for (int i = _rasterPlacements.Count - 1; i >= 0; i--)
+        {
+            if (_rasterPlacements[i].ImageId == source.ImageId)
+            {
+                _rasterPlacements.RemoveAt(i);
+            }
+        }
+
+        _rasterPlacements.Add(placement);
+        InvalidateViewport();
+    }
+
+    /// <summary>Replaces protocol-neutral raster graphics from another screen snapshot.</summary>
+    public void ReplaceRasterGraphicsFrom(TerminalScreen source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (source._rasterImagesById.Count == 0 && source._rasterPlacements.Count == 0)
+        {
+            ClearRasterGraphics();
+            return;
+        }
+
+        _rasterImagesById.Clear();
+        foreach ((int imageId, TerminalRasterImageSource image) in source._rasterImagesById)
+        {
+            _rasterImagesById[imageId] = image;
+        }
+
+        _rasterPlacements.Clear();
+        _rasterPlacements.AddRange(source._rasterPlacements);
+        InvalidateViewport();
+    }
+
+    /// <summary>Clears all protocol-neutral raster images from the active screen.</summary>
+    public void ClearRasterGraphics()
+    {
+        if (_rasterImagesById.Count == 0 && _rasterPlacements.Count == 0)
+        {
+            return;
+        }
+
+        _rasterImagesById.Clear();
+        _rasterPlacements.Clear();
+        InvalidateViewport();
+    }
+
+    /// <summary>Clears raster images intersecting a viewport rectangle.</summary>
+    public void ClearRasterGraphicsInViewportRectangle(
+        int startViewportRow,
+        int endViewportRow,
+        int startColumn,
+        int endColumn)
+    {
+        if (_rasterPlacements.Count == 0)
+        {
+            return;
+        }
+
+        int startRow = Math.Clamp(Math.Min(startViewportRow, endViewportRow), 0, Math.Max(0, ViewportRows - 1));
+        int endRow = Math.Clamp(Math.Max(startViewportRow, endViewportRow), 0, Math.Max(0, ViewportRows - 1));
+        int startAbsRow = GetAbsoluteRowForViewportRow(startRow);
+        int endAbsRow = GetAbsoluteRowForViewportRow(endRow);
+        int minColumn = Math.Clamp(Math.Min(startColumn, endColumn), 0, Math.Max(0, Columns - 1));
+        int maxColumn = Math.Clamp(Math.Max(startColumn, endColumn), 0, Math.Max(0, Columns - 1));
+
+        bool removed = false;
+        for (int i = _rasterPlacements.Count - 1; i >= 0; i--)
+        {
+            TerminalRasterImagePlacement placement = _rasterPlacements[i];
+            if (RasterPlacementIntersects(placement, startAbsRow, endAbsRow, minColumn, maxColumn))
+            {
+                _rasterPlacements.RemoveAt(i);
+                removed = true;
+            }
+        }
+
+        if (removed)
+        {
+            TrimUnreferencedRasterSources();
+            InvalidateViewport();
+        }
+    }
+
+    /// <summary>Shifts raster image anchors inside a viewport row range.</summary>
+    public void ShiftRasterGraphicsInViewportRows(int startViewportRow, int endViewportRow, int rowDelta)
+    {
+        if (_rasterPlacements.Count == 0 || rowDelta == 0)
+        {
+            return;
+        }
+
+        int startRow = Math.Clamp(Math.Min(startViewportRow, endViewportRow), 0, Math.Max(0, ViewportRows - 1));
+        int endRow = Math.Clamp(Math.Max(startViewportRow, endViewportRow), 0, Math.Max(0, ViewportRows - 1));
+        int startAbsRow = GetAbsoluteRowForViewportRow(startRow);
+        int endAbsRow = GetAbsoluteRowForViewportRow(endRow);
+        bool changed = false;
+
+        for (int i = _rasterPlacements.Count - 1; i >= 0; i--)
+        {
+            TerminalRasterImagePlacement placement = _rasterPlacements[i];
+            if (!RasterPlacementIntersectsRows(placement, startAbsRow, endAbsRow))
+            {
+                continue;
+            }
+
+            int nextAnchorRow = placement.AnchorRow + rowDelta;
+            TerminalRasterImagePlacement shifted = placement.WithAnchorRow(nextAnchorRow);
+            if (!RasterPlacementIntersectsRows(shifted, startAbsRow, endAbsRow))
+            {
+                _rasterPlacements.RemoveAt(i);
+            }
+            else
+            {
+                _rasterPlacements[i] = shifted;
+            }
+
+            changed = true;
+        }
+
+        if (changed)
+        {
+            TrimUnreferencedRasterSources();
+            InvalidateViewport();
+        }
+    }
+
     /// <summary>
     /// Adds a new row to the bottom, potentially scrolling up.
     /// </summary>
@@ -633,9 +834,16 @@ public sealed class TerminalScreen
 
         // Trim scrollback if exceeding limit
         int maxRows = ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit);
+        int removedRows = 0;
         while (_rows.Count > maxRows)
         {
             _rows.RemoveAt(0);
+            removedRows++;
+        }
+
+        if (removedRows > 0)
+        {
+            ShiftRasterGraphicsAfterTopRowsRemoved(removedRows);
         }
 
         return row;
@@ -653,6 +861,7 @@ public sealed class TerminalScreen
             if (clear)
             {
                 ClearActiveRows();
+                ClearRasterGraphics();
             }
 
             InvalidateAll();
@@ -661,16 +870,21 @@ public sealed class TerminalScreen
 
         _primaryRows = _rows;
         _primaryScrollOffset = _viewportTop;
+        _primaryRasterImagesById = _rasterImagesById;
+        _primaryRasterPlacements = _rasterPlacements;
         _alternateBufferActive = true;
         _viewportTop = 0;
 
         _alternateRows ??= new List<TerminalRow>(ViewportRows);
         _rows = _alternateRows;
+        _rasterImagesById = _alternateRasterImagesById ?? [];
+        _rasterPlacements = _alternateRasterPlacements ?? [];
         EnsureAlternateRows();
 
         if (clear)
         {
             ClearActiveRows();
+            ClearRasterGraphics();
         }
 
         InvalidateAll();
@@ -687,8 +901,14 @@ public sealed class TerminalScreen
         }
 
         _alternateRows = _rows;
+        _alternateRasterImagesById = _rasterImagesById;
+        _alternateRasterPlacements = _rasterPlacements;
         _rows = _primaryRows ?? CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
+        _rasterImagesById = _primaryRasterImagesById ?? [];
+        _rasterPlacements = _primaryRasterPlacements ?? [];
         _primaryRows = null;
+        _primaryRasterImagesById = null;
+        _primaryRasterPlacements = null;
         _alternateBufferActive = false;
 
         ResizeActiveRows(Columns);
@@ -709,6 +929,8 @@ public sealed class TerminalScreen
         }
 
         _alternateRows = null;
+        _alternateRasterImagesById = null;
+        _alternateRasterPlacements = null;
     }
 
     /// <summary>
@@ -769,11 +991,141 @@ public sealed class TerminalScreen
         }
     }
 
+    private void ShiftRasterGraphicsAfterTopRowsRemoved(int removedRows)
+    {
+        if (_rasterPlacements.Count == 0 || removedRows <= 0)
+        {
+            return;
+        }
+
+        bool changed = false;
+        for (int i = _rasterPlacements.Count - 1; i >= 0; i--)
+        {
+            TerminalRasterImagePlacement placement = _rasterPlacements[i].WithAnchorRow(
+                _rasterPlacements[i].AnchorRow - removedRows);
+            if (GetRasterPlacementEndRow(placement) < 0)
+            {
+                _rasterPlacements.RemoveAt(i);
+            }
+            else
+            {
+                _rasterPlacements[i] = placement;
+            }
+
+            changed = true;
+        }
+
+        if (changed)
+        {
+            TrimUnreferencedRasterSources();
+        }
+    }
+
+    private void TrimUnreferencedRasterSources()
+    {
+        if (_rasterImagesById.Count == 0)
+        {
+            return;
+        }
+
+        HashSet<int> activeIds = new();
+        for (int i = 0; i < _rasterPlacements.Count; i++)
+        {
+            activeIds.Add(_rasterPlacements[i].ImageId);
+        }
+
+        List<int>? staleIds = null;
+        foreach (int imageId in _rasterImagesById.Keys)
+        {
+            if (!activeIds.Contains(imageId))
+            {
+                staleIds ??= [];
+                staleIds.Add(imageId);
+            }
+        }
+
+        if (staleIds is null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < staleIds.Count; i++)
+        {
+            _rasterImagesById.Remove(staleIds[i]);
+        }
+    }
+
+    private static bool RasterPlacementIntersects(
+        TerminalRasterImagePlacement placement,
+        int startAbsRow,
+        int endAbsRow,
+        int startColumn,
+        int endColumn)
+    {
+        return RasterPlacementIntersectsRows(placement, startAbsRow, endAbsRow) &&
+            GetRasterPlacementStartColumn(placement) <= endColumn &&
+            GetRasterPlacementEndColumn(placement) >= startColumn;
+    }
+
+    private static bool RasterPlacementIntersectsRows(
+        TerminalRasterImagePlacement placement,
+        int startAbsRow,
+        int endAbsRow)
+    {
+        return placement.AnchorRow <= endAbsRow &&
+            GetRasterPlacementEndRow(placement) >= startAbsRow;
+    }
+
+    private static int GetRasterPlacementStartColumn(TerminalRasterImagePlacement placement)
+    {
+        int leftOffset = Math.Min(0, placement.XOffsetPx);
+        int leftCells = FloorDiv(leftOffset, placement.CellWidthPx);
+        return placement.AnchorColumn + leftCells;
+    }
+
+    private static int GetRasterPlacementEndColumn(TerminalRasterImagePlacement placement)
+    {
+        int rightPx = placement.XOffsetPx + Math.Max(0, placement.WidthPx) - 1;
+        if (rightPx < 0)
+        {
+            return placement.AnchorColumn;
+        }
+
+        return placement.AnchorColumn + (rightPx / placement.CellWidthPx);
+    }
+
+    private static int GetRasterPlacementEndRow(TerminalRasterImagePlacement placement)
+    {
+        int bottomPx = placement.YOffsetPx + Math.Max(0, placement.HeightPx) - 1;
+        if (bottomPx < 0)
+        {
+            return placement.AnchorRow;
+        }
+
+        return placement.AnchorRow + (bottomPx / placement.CellHeightPx);
+    }
+
+    private static int FloorDiv(int value, int divisor)
+    {
+        int quotient = value / divisor;
+        int remainder = value % divisor;
+        return remainder != 0 && ((remainder < 0) != (divisor < 0))
+            ? quotient - 1
+            : quotient;
+    }
+
     private void TrimScrollbackRows()
     {
+        int removedRows = 0;
         while (_rows.Count > ViewportRows + _scrollbackLimit)
         {
             _rows.RemoveAt(0);
+            removedRows++;
+        }
+
+        if (removedRows > 0)
+        {
+            ShiftRasterGraphicsAfterTopRowsRemoved(removedRows);
         }
     }
 
@@ -801,6 +1153,21 @@ public sealed class TerminalScreen
         ArgumentOutOfRangeException.ThrowIfLessThan(viewportRows, 1);
 
         int oldColumns = Columns;
+        List<TerminalRasterImagePlacement>? reflowRasterPlacements = null;
+        List<ReflowAnchorPosition>? reflowRasterAnchors = null;
+        if (columns != oldColumns && reflowOnResize && _rasterPlacements.Count > 0)
+        {
+            reflowRasterPlacements = new List<TerminalRasterImagePlacement>(_rasterPlacements);
+            reflowRasterAnchors = new List<ReflowAnchorPosition>(_rasterPlacements.Count);
+            for (int i = 0; i < _rasterPlacements.Count; i++)
+            {
+                TerminalRasterImagePlacement placement = _rasterPlacements[i];
+                reflowRasterAnchors.Add(new ReflowAnchorPosition(
+                    placement.AnchorRow,
+                    placement.AnchorColumn));
+            }
+        }
+
         int trackedAbsoluteRow = trackedViewportPosition is { } trackedPosition
             ? GetAbsoluteRowForViewportRow(trackedPosition.Row)
             : -1;
@@ -814,7 +1181,13 @@ public sealed class TerminalScreen
         {
             if (reflowOnResize)
             {
-                ReflowRows(columns, trackedAbsoluteRow, trackedColumn, out mappedAbsoluteRow, out mappedColumn);
+                ReflowRows(
+                    columns,
+                    trackedAbsoluteRow,
+                    trackedColumn,
+                    reflowRasterAnchors,
+                    out mappedAbsoluteRow,
+                    out mappedColumn);
             }
             else
             {
@@ -852,6 +1225,15 @@ public sealed class TerminalScreen
             mappedAbsoluteRow -= removedRows;
         }
 
+        if (reflowRasterPlacements is not null && reflowRasterAnchors is not null)
+        {
+            RemapRasterGraphicsAfterReflow(reflowRasterPlacements, reflowRasterAnchors, removedRows);
+        }
+        else if (removedRows > 0)
+        {
+            ShiftRasterGraphicsAfterTopRowsRemoved(removedRows);
+        }
+
         ScrollOffset = _viewportTop;
 
         foreach (TerminalRow row in _rows)
@@ -868,18 +1250,6 @@ public sealed class TerminalScreen
         {
             _rows[i].Resize(columns, DefaultForeground, DefaultBackground);
         }
-    }
-
-    private int GetAbsoluteRowForViewportRow(int viewportRow)
-    {
-        if (_rows.Count == 0)
-        {
-            return -1;
-        }
-
-        int clampedViewportRow = Math.Clamp(viewportRow, 0, Math.Max(0, ViewportRows - 1));
-        int absoluteRow = TotalRows - ViewportRows - _viewportTop + clampedViewportRow;
-        return Math.Clamp(absoluteRow, 0, TotalRows - 1);
     }
 
     private TerminalGridPosition GetViewportPositionForAbsoluteRow(int absoluteRow, int column)
@@ -899,11 +1269,14 @@ public sealed class TerminalScreen
         int columns,
         int trackedAbsoluteRow,
         int trackedColumn,
+        List<ReflowAnchorPosition>? additionalTrackedPositions,
         out int mappedAbsoluteRow,
         out int mappedColumn)
     {
         List<TerminalRow> reflowedRows = new(_rows.Count);
         List<TerminalCell> logicalLine = new(Math.Max(Columns, columns));
+        List<int>? lineTrackedIndexes = additionalTrackedPositions is null ? null : new List<int>();
+        List<int>? lineTrackedOffsets = additionalTrackedPositions is null ? null : new List<int>();
         mappedAbsoluteRow = trackedAbsoluteRow;
         mappedColumn = Math.Clamp(trackedColumn, 0, columns);
 
@@ -911,6 +1284,8 @@ public sealed class TerminalScreen
         while (rowIndex < _rows.Count)
         {
             logicalLine.Clear();
+            lineTrackedIndexes?.Clear();
+            lineTrackedOffsets?.Clear();
             int trackedLogicalOffset = -1;
 
             bool hasContinuation;
@@ -923,6 +1298,23 @@ public sealed class TerminalScreen
                     int clampedTrackedColumn = Math.Clamp(trackedColumn, 0, row.Columns);
                     endExclusive = Math.Max(endExclusive, clampedTrackedColumn);
                     trackedLogicalOffset = logicalLine.Count + clampedTrackedColumn;
+                }
+
+                if (additionalTrackedPositions is not null)
+                {
+                    for (int i = 0; i < additionalTrackedPositions.Count; i++)
+                    {
+                        ReflowAnchorPosition position = additionalTrackedPositions[i];
+                        if (position.OldAbsoluteRow != rowIndex)
+                        {
+                            continue;
+                        }
+
+                        int clampedColumn = Math.Clamp(position.OldColumn, 0, row.Columns);
+                        endExclusive = Math.Max(endExclusive, clampedColumn);
+                        lineTrackedIndexes!.Add(i);
+                        lineTrackedOffsets!.Add(logicalLine.Count + clampedColumn);
+                    }
                 }
 
                 if (endExclusive > 0)
@@ -951,10 +1343,59 @@ public sealed class TerminalScreen
                 mappedAbsoluteRow = destinationStartRow + mappedPosition.Row;
                 mappedColumn = mappedPosition.Column;
             }
+
+            if (additionalTrackedPositions is not null &&
+                lineTrackedIndexes is not null &&
+                lineTrackedOffsets is not null)
+            {
+                for (int i = 0; i < lineTrackedIndexes.Count; i++)
+                {
+                    TerminalGridPosition mappedAnchorPosition = MapLogicalOffsetToReflowedPosition(
+                        logicalLine,
+                        columns,
+                        lineTrackedOffsets[i]);
+                    int positionIndex = lineTrackedIndexes[i];
+                    ReflowAnchorPosition position = additionalTrackedPositions[positionIndex];
+                    position.NewAbsoluteRow = destinationStartRow + mappedAnchorPosition.Row;
+                    position.NewColumn = Math.Clamp(mappedAnchorPosition.Column, 0, Math.Max(0, columns - 1));
+                    position.IsMapped = true;
+                    additionalTrackedPositions[positionIndex] = position;
+                }
+            }
         }
 
         _rows.Clear();
         _rows.AddRange(reflowedRows);
+    }
+
+    private void RemapRasterGraphicsAfterReflow(
+        List<TerminalRasterImagePlacement> originalPlacements,
+        List<ReflowAnchorPosition> mappedAnchors,
+        int removedRows)
+    {
+        _rasterPlacements.Clear();
+
+        for (int i = 0; i < originalPlacements.Count && i < mappedAnchors.Count; i++)
+        {
+            ReflowAnchorPosition mappedAnchor = mappedAnchors[i];
+            if (!mappedAnchor.IsMapped)
+            {
+                continue;
+            }
+
+            TerminalRasterImagePlacement remapped = originalPlacements[i].WithAnchor(
+                mappedAnchor.NewColumn,
+                mappedAnchor.NewAbsoluteRow - removedRows);
+            if (GetRasterPlacementEndRow(remapped) < 0 || remapped.AnchorRow >= _rows.Count)
+            {
+                continue;
+            }
+
+            _rasterPlacements.Add(remapped);
+        }
+
+        TrimUnreferencedRasterSources();
+        InvalidateViewport();
     }
 
     private int GetReflowEndExclusive(TerminalRow row)
@@ -1077,6 +1518,75 @@ public sealed class TerminalScreen
         return mappedPosition;
     }
 
+    private static TerminalGridPosition MapLogicalOffsetToReflowedPosition(
+        List<TerminalCell> logicalLine,
+        int columns,
+        int trackedLogicalOffset)
+    {
+        if (logicalLine.Count == 0)
+        {
+            return new TerminalGridPosition(0, 0);
+        }
+
+        int sourceIndex = 0;
+        int destinationRow = 0;
+        int column = 0;
+        while (sourceIndex < logicalLine.Count)
+        {
+            if (trackedLogicalOffset <= sourceIndex)
+            {
+                return new TerminalGridPosition(column, destinationRow);
+            }
+
+            TerminalCell cell = logicalLine[sourceIndex];
+            if (cell.Width == 0)
+            {
+                sourceIndex++;
+                continue;
+            }
+
+            int sourceStep = GetReflowSourceStep(logicalLine, sourceIndex);
+            int width = cell.Width <= 1 ? 1 : 2;
+            if (width == 2 && columns == 1)
+            {
+                sourceIndex += sourceStep;
+                column++;
+
+                if (trackedLogicalOffset <= sourceIndex)
+                {
+                    return new TerminalGridPosition(column, destinationRow);
+                }
+
+                destinationRow++;
+                column = 0;
+                continue;
+            }
+
+            if (width == 2 && column == columns - 1)
+            {
+                destinationRow++;
+                column = 0;
+                continue;
+            }
+
+            sourceIndex += sourceStep;
+            column += width;
+
+            if (trackedLogicalOffset <= sourceIndex)
+            {
+                return new TerminalGridPosition(column, destinationRow);
+            }
+
+            if (column >= columns)
+            {
+                destinationRow++;
+                column = 0;
+            }
+        }
+
+        return new TerminalGridPosition(0, Math.Max(0, destinationRow));
+    }
+
     private static int GetReflowSourceStep(List<TerminalCell> logicalLine, int sourceIndex)
     {
         TerminalCell cell = logicalLine[sourceIndex];
@@ -1105,6 +1615,28 @@ public sealed class TerminalScreen
         HyperlinkId = source.HyperlinkId,
         Width = 0,
     };
+
+    private struct ReflowAnchorPosition
+    {
+        public ReflowAnchorPosition(int oldAbsoluteRow, int oldColumn)
+        {
+            OldAbsoluteRow = oldAbsoluteRow;
+            OldColumn = oldColumn;
+            NewAbsoluteRow = oldAbsoluteRow;
+            NewColumn = oldColumn;
+            IsMapped = false;
+        }
+
+        public int OldAbsoluteRow { get; }
+
+        public int OldColumn { get; }
+
+        public int NewAbsoluteRow { get; set; }
+
+        public int NewColumn { get; set; }
+
+        public bool IsMapped { get; set; }
+    }
 
     /// <summary>
     /// Marks all rows as dirty for a full repaint.
