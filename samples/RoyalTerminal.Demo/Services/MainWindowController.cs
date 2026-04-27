@@ -864,7 +864,9 @@ internal sealed class MainWindowController
         INativeVtProcessorProvider[] nativeProviders = [new GhosttyVtProcessorProvider()];
         DefaultPtyFactory ptyFactory = new();
         DemoSshCredentialProvider credentialProvider = new(_viewModel);
-        KnownHostsSshHostKeyValidator hostKeyValidator = new();
+        PromptingSshHostKeyValidator hostKeyValidator = new(
+            new KnownHostsSshHostKeyValidator(),
+            PromptForSshHostKeyTrust);
         CompositeTerminalTransportFactory transportFactory = new(
             new ITerminalTransportProvider[]
             {
@@ -892,6 +894,19 @@ internal sealed class MainWindowController
             credentialProvider,
             hostKeyValidator,
             transportFactory);
+    }
+
+    private bool PromptForSshHostKeyTrust(SshHostKeyTrustPromptRequest request)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            return false;
+        }
+
+        return Dispatcher.UIThread
+            .InvokeAsync(() => _viewModel.ShowSshHostKeyPromptAsync(request))
+            .GetAwaiter()
+            .GetResult();
     }
 
     private async Task StartStandaloneSessionAsync(TerminalControl standaloneControl)

@@ -35,6 +35,7 @@
     <KeyBinding Gesture="Ctrl+D9" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="8" />
   </Window.KeyBindings>
 
+  <Grid>
   <DockPanel>
     <Border DockPanel.Dock="Top" Background="{DynamicResource ToolbarBackgroundBrush}" Padding="4,2">
       <DockPanel>
@@ -674,6 +675,76 @@
 
     <Grid Name="TerminalHost" />
   </DockPanel>
+
+  <Border Background="#99000000"
+          IsVisible="{Binding IsSshHostKeyPromptVisible}">
+    <Grid HorizontalAlignment="Center"
+          VerticalAlignment="Center"
+          Width="520"
+          MaxWidth="880">
+      <Border Background="{DynamicResource WindowBackgroundBrush}"
+              BorderBrush="{StaticResource ToolbarDividerBrush}"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="20">
+        <StackPanel Spacing="12">
+          <TextBlock Text="{Binding SshHostKeyPromptTitle}"
+                     Foreground="{DynamicResource ToolbarForegroundBrush}"
+                     FontSize="18"
+                     FontWeight="SemiBold" />
+          <TextBlock Text="{Binding SshHostKeyPromptEndpoint}"
+                     Foreground="{DynamicResource ToolbarForegroundBrush}"
+                     FontSize="12" />
+
+          <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto">
+            <TextBlock Grid.Row="0" Grid.Column="0"
+                       Text="Algorithm"
+                       Foreground="{DynamicResource ToolbarForegroundBrush}"
+                       FontSize="12" />
+            <TextBlock Grid.Row="0" Grid.Column="1"
+                       Text="{Binding SshHostKeyPromptAlgorithm}"
+                       Foreground="{DynamicResource ToolbarForegroundBrush}"
+                       FontSize="12" />
+            <TextBlock Grid.Row="1" Grid.Column="0"
+                       Text="SHA256"
+                       Foreground="{DynamicResource ToolbarForegroundBrush}"
+                       FontSize="12" />
+            <TextBox Grid.Row="1" Grid.Column="1"
+                     Text="{Binding SshHostKeyPromptFingerprintSha256}"
+                     IsReadOnly="True"
+                     FontFamily="Consolas"
+                     FontSize="12" />
+            <TextBlock Grid.Row="2" Grid.Column="0"
+                       Text="MD5"
+                       Foreground="{DynamicResource ToolbarForegroundBrush}"
+                       FontSize="12" />
+            <TextBox Grid.Row="2" Grid.Column="1"
+                     Text="{Binding SshHostKeyPromptFingerprintMd5}"
+                     IsReadOnly="True"
+                     FontFamily="Consolas"
+                     FontSize="12" />
+          </Grid>
+
+          <TextBlock Text="{Binding SshHostKeyPromptPersistenceText}"
+                     Foreground="{DynamicResource ToolbarForegroundBrush}"
+                     FontSize="12"
+                     TextWrapping="Wrap" />
+
+          <StackPanel Orientation="Horizontal"
+                      HorizontalAlignment="Right"
+                      Spacing="8">
+            <Button Content="Decline"
+                    MinWidth="84"
+                    Command="{Binding DeclineSshHostKeyCommand}" />
+            <Button Content="Accept"
+                    MinWidth="84"
+                    Command="{Binding AcceptSshHostKeyCommand}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </Border>
+  </Grid>
 
   <Window.ContextMenu>
     <ContextMenu x:DataType="vm:MainWindowViewModel"
