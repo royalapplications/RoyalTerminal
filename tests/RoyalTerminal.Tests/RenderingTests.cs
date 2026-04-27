@@ -496,6 +496,115 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_RasterGraphics_CullsOffscreenAndDeduplicatesBitmapCache()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableImageRenderDiagnostics = true,
+        };
+        renderer.SetCellSize(10f, 10f);
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 100, rows: 5, text: string.Empty);
+        for (int i = 0; i < 100; i++)
+        {
+            screen.AddRow();
+        }
+
+        byte[] repeatedRgba = [0x00, 0xFF, 0x00, 0xFF];
+        for (int rowIndex = 0; rowIndex < 100; rowIndex++)
+        {
+            int imageId = screen.AllocateRasterImageId();
+            screen.ReplaceRasterImage(
+                new TerminalRasterImageSource(
+                    imageId,
+                    TerminalRasterImageProtocol.Sixel,
+                    widthPx: 1,
+                    heightPx: 1,
+                    rgbaPixels: repeatedRgba.ToArray()),
+                new TerminalRasterImagePlacement(
+                    imageId,
+                    TerminalRasterImageLayer.AboveText,
+                    anchorColumn: 0,
+                    anchorRow: rowIndex,
+                    xOffsetPx: 0,
+                    yOffsetPx: 0,
+                    widthPx: 10,
+                    heightPx: 10,
+                    sourceX: 0,
+                    sourceY: 0,
+                    sourceWidth: 1,
+                    sourceHeight: 1,
+                    cellWidthPx: 10,
+                    cellHeightPx: 10));
+        }
+
+        screen.ScrollOffset = screen.TotalRows - screen.ViewportRows - 50;
+        using SKSurface surface = CreateRenderSurface(renderer, columns: 100, rows: 5);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        ImageRenderDiagnostics diagnostics = renderer.GetImageRenderDiagnostics();
+
+        Assert.Equal(100, diagnostics.PlacementsVisited);
+        Assert.Equal(5, diagnostics.PlacementsVisible);
+        Assert.Equal(5, diagnostics.Draws);
+        Assert.Equal(1, diagnostics.CacheMisses);
+        Assert.Equal(4, diagnostics.CacheHits);
+        Assert.Equal(1, diagnostics.RasterBitmapCacheEntries);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_KittyGraphics_CullsOffscreenAndDeduplicatesBitmapCache()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableImageRenderDiagnostics = true,
+        };
+        renderer.SetCellSize(10f, 10f);
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 100, rows: 5, text: string.Empty);
+        var images = new TerminalKittyImageSource[100];
+        var placements = new TerminalKittyImagePlacement[100];
+        byte[] repeatedRgba = [0xFF, 0x00, 0x00, 0xFF];
+        for (int i = 0; i < 100; i++)
+        {
+            int imageId = i + 1;
+            images[i] = new TerminalKittyImageSource(
+                imageId,
+                widthPx: 1,
+                heightPx: 1,
+                rgbaPixels: repeatedRgba.ToArray());
+            placements[i] = new TerminalKittyImagePlacement(
+                imageId,
+                TerminalKittyImageLayer.AboveText,
+                viewportColumn: 0,
+                viewportRow: i - 50,
+                xOffsetPx: 0,
+                yOffsetPx: 0,
+                widthPx: 10,
+                heightPx: 10,
+                sourceX: 0,
+                sourceY: 0,
+                sourceWidth: 1,
+                sourceHeight: 1);
+        }
+
+        screen.ReplaceKittyGraphics(images, placements);
+        using SKSurface surface = CreateRenderSurface(renderer, columns: 100, rows: 5);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        ImageRenderDiagnostics diagnostics = renderer.GetImageRenderDiagnostics();
+
+        Assert.Equal(100, diagnostics.PlacementsVisited);
+        Assert.Equal(5, diagnostics.PlacementsVisible);
+        Assert.Equal(5, diagnostics.Draws);
+        Assert.Equal(1, diagnostics.CacheMisses);
+        Assert.Equal(4, diagnostics.CacheHits);
+        Assert.Equal(1, diagnostics.KittyBitmapCacheEntries);
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_BlockHollowCursor_DrawsBorderWithoutFillingCenter()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
@@ -851,6 +960,30 @@ public class RenderingTests
         Assert.Equal(0, diagnostics.BrailleSpriteCells);
         Assert.Equal(0, diagnostics.BlockSpriteCells);
         Assert.Equal(0, diagnostics.ScanLineSpriteCells);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_ImageDiagnostics_DisabledByDefault_RemainsZero()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+
+        Assert.False(renderer.EnableImageRenderDiagnostics);
+        Assert.True(renderer.ImageBitmapCacheBudgetBytes > 0);
+
+        renderer.ImageBitmapCacheBudgetBytes = -1;
+        Assert.Equal(0, renderer.ImageBitmapCacheBudgetBytes);
+
+        renderer.ResetImageRenderDiagnostics();
+        ImageRenderDiagnostics diagnostics = renderer.GetImageRenderDiagnostics(reset: true);
+
+        Assert.Equal(0, diagnostics.PlacementsVisited);
+        Assert.Equal(0, diagnostics.PlacementsVisible);
+        Assert.Equal(0, diagnostics.Draws);
+        Assert.Equal(0, diagnostics.CacheHits);
+        Assert.Equal(0, diagnostics.CacheMisses);
+        Assert.Equal(0, diagnostics.CacheEvictions);
+        Assert.Equal(0, diagnostics.KittyBitmapCacheEntries);
+        Assert.Equal(0, diagnostics.RasterBitmapCacheEntries);
     }
 
     [Fact]

@@ -33,15 +33,20 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const float GridClampTolerancePx = 0.25f;
     private const float SymbolGlyphClipPaddingCells = 0.5f;
     private const float DefaultBackgroundOpacity = 0.82f;
+    private const long DefaultImageBitmapCacheBudgetBytes = 256L * 1024L * 1024L;
     private static readonly CultureInfo s_renderCulture = CultureInfo.InvariantCulture;
 
     private readonly GlyphCache _glyphCache;
     private readonly HarfBuzzTextShaper _textShaper;
     private readonly TerminalFontResolver _fontResolver;
     private readonly ShapedRunCache _shapedRunCache;
-    private readonly Dictionary<int, KittyBitmapCacheEntry> _kittyBitmapCache = new();
-    private readonly Dictionary<int, KittyBitmapCacheEntry> _rasterBitmapCache = new();
+    private readonly Dictionary<TerminalBitmapCacheKey, TerminalBitmapCacheEntry> _kittyBitmapCache = new();
+    private readonly Dictionary<TerminalBitmapCacheKey, TerminalBitmapCacheEntry> _rasterBitmapCache = new();
     private const float CellMetricEpsilon = 0.01f;
+    private long _imageBitmapCacheBudgetBytes = DefaultImageBitmapCacheBudgetBytes;
+    private long _kittyBitmapCacheBytes;
+    private long _rasterBitmapCacheBytes;
+    private long _imageRenderFrameId;
     private float _cellWidth;
     private float _cellHeight;
     private float _fontSize;
@@ -58,6 +63,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private long _diagnosticBrailleSpriteCells;
     private long _diagnosticBlockSpriteCells;
     private long _diagnosticScanLineSpriteCells;
+    private long _diagnosticImagePlacementsVisited;
+    private long _diagnosticImagePlacementsVisible;
+    private long _diagnosticImageDraws;
+    private long _diagnosticImageCacheHits;
+    private long _diagnosticImageCacheMisses;
+    private long _diagnosticImageCacheEvictions;
     private TerminalHighlightSpan[] _highlightSpans = Array.Empty<TerminalHighlightSpan>();
 
     // Reusable paint objects to avoid per-frame allocation
@@ -144,6 +155,22 @@ public sealed class SkiaTerminalRenderer : IDisposable
     /// Disabled by default.
     /// </summary>
     public bool EnableTextRenderDiagnostics { get; set; }
+
+    /// <summary>
+    /// Enables collection of terminal image-render diagnostics counters.
+    /// Disabled by default.
+    /// </summary>
+    public bool EnableImageRenderDiagnostics { get; set; }
+
+    /// <summary>
+    /// Maximum retained Skia bitmap cache bytes per terminal image protocol.
+    /// Visible images are protected from eviction during the frame that draws them.
+    /// </summary>
+    public long ImageBitmapCacheBudgetBytes
+    {
+        get => _imageBitmapCacheBudgetBytes;
+        set => _imageBitmapCacheBudgetBytes = Math.Max(0, value);
+    }
 
     /// <summary>
     /// Enables or disables HarfBuzz shaping for terminal text rendering.
@@ -298,15 +325,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
         ReadOnlySpan<TerminalKittyImagePlacement> kittyPlacements = screen.GetKittyPlacements();
         ReadOnlySpan<TerminalRasterImagePlacement> rasterPlacements = screen.GetRasterImagePlacements();
-        HashSet<int>? activeKittyImageIds = kittyPlacements.IsEmpty ? null : new HashSet<int>();
-        HashSet<int>? activeRasterImageIds = rasterPlacements.IsEmpty ? null : new HashSet<int>();
+        long imageFrameId = unchecked(++_imageRenderFrameId);
         int overlayCapacity = Math.Max(1, screen.Columns);
         CellOverlayFlags[] overlayBuffer = ArrayPool<CellOverlayFlags>.Shared.Rent(overlayCapacity);
 
         try
         {
-            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowBackground, activeRasterImageIds);
-            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowBackground, activeKittyImageIds);
+            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowBackground, imageFrameId);
+            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowBackground, imageFrameId);
 
             // Render backgrounds first (batched)
             for (var row = 0; row < screen.ViewportRows; row++)
@@ -326,8 +352,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 RenderRowBackground(canvas, terminalRow, y, rowOverlays);
             }
 
-            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowText, activeKittyImageIds);
-            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowText, activeRasterImageIds);
+            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowText, imageFrameId);
+            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowText, imageFrameId);
 
             // Render text on top of the cell layer.
             for (var row = 0; row < screen.ViewportRows; row++)
@@ -355,13 +381,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 clearArray: false);
         }
 
-        RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.AboveText, activeKittyImageIds);
-        RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.AboveText, activeRasterImageIds);
-        IEnumerable<int> activeKittyBitmapIds = activeKittyImageIds is not null
-            ? activeKittyImageIds
-            : Array.Empty<int>();
-        TrimKittyBitmapCache(activeKittyBitmapIds);
-        TrimRasterBitmapCache(activeRasterImageIds);
+        RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.AboveText, imageFrameId);
+        RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.AboveText, imageFrameId);
+        TrimBitmapCache(_kittyBitmapCache, ref _kittyBitmapCacheBytes, imageFrameId);
+        TrimBitmapCache(_rasterBitmapCache, ref _rasterBitmapCacheBytes, imageFrameId);
 
         // Render cursor
         if (CursorVisible)
@@ -2786,12 +2809,63 @@ public sealed class SkiaTerminalRenderer : IDisposable
         Interlocked.Exchange(ref _diagnosticScanLineSpriteCells, 0);
     }
 
+    /// <summary>
+    /// Gets a snapshot of terminal image-render diagnostics.
+    /// </summary>
+    /// <param name="reset">When true, counters are reset after snapshot capture.</param>
+    public ImageRenderDiagnostics GetImageRenderDiagnostics(bool reset = false)
+    {
+        long placementsVisited = reset
+            ? Interlocked.Exchange(ref _diagnosticImagePlacementsVisited, 0)
+            : Volatile.Read(ref _diagnosticImagePlacementsVisited);
+        long placementsVisible = reset
+            ? Interlocked.Exchange(ref _diagnosticImagePlacementsVisible, 0)
+            : Volatile.Read(ref _diagnosticImagePlacementsVisible);
+        long draws = reset
+            ? Interlocked.Exchange(ref _diagnosticImageDraws, 0)
+            : Volatile.Read(ref _diagnosticImageDraws);
+        long cacheHits = reset
+            ? Interlocked.Exchange(ref _diagnosticImageCacheHits, 0)
+            : Volatile.Read(ref _diagnosticImageCacheHits);
+        long cacheMisses = reset
+            ? Interlocked.Exchange(ref _diagnosticImageCacheMisses, 0)
+            : Volatile.Read(ref _diagnosticImageCacheMisses);
+        long cacheEvictions = reset
+            ? Interlocked.Exchange(ref _diagnosticImageCacheEvictions, 0)
+            : Volatile.Read(ref _diagnosticImageCacheEvictions);
+
+        return new ImageRenderDiagnostics(
+            placementsVisited,
+            placementsVisible,
+            draws,
+            cacheHits,
+            cacheMisses,
+            cacheEvictions,
+            _kittyBitmapCache.Count,
+            Volatile.Read(ref _kittyBitmapCacheBytes),
+            _rasterBitmapCache.Count,
+            Volatile.Read(ref _rasterBitmapCacheBytes));
+    }
+
+    /// <summary>
+    /// Resets terminal image-render diagnostics counters to zero.
+    /// </summary>
+    public void ResetImageRenderDiagnostics()
+    {
+        Interlocked.Exchange(ref _diagnosticImagePlacementsVisited, 0);
+        Interlocked.Exchange(ref _diagnosticImagePlacementsVisible, 0);
+        Interlocked.Exchange(ref _diagnosticImageDraws, 0);
+        Interlocked.Exchange(ref _diagnosticImageCacheHits, 0);
+        Interlocked.Exchange(ref _diagnosticImageCacheMisses, 0);
+        Interlocked.Exchange(ref _diagnosticImageCacheEvictions, 0);
+    }
+
     private void RenderRasterLayer(
         SKCanvas canvas,
         TerminalScreen screen,
         ReadOnlySpan<TerminalRasterImagePlacement> placements,
         TerminalRasterImageLayer layer,
-        HashSet<int>? activeImageIds)
+        long imageFrameId)
     {
         if (placements.IsEmpty)
         {
@@ -2815,19 +2889,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     continue;
                 }
 
-                if (!screen.TryGetRasterImageSource(placement.ImageId, out TerminalRasterImageSource? source) ||
-                    source is null)
-                {
-                    continue;
-                }
-
-                activeImageIds?.Add(placement.ImageId);
-                SKBitmap bitmap = GetOrCreateRasterBitmap(source);
-                SKRect sourceRect = new(
-                    placement.SourceX,
-                    placement.SourceY,
-                    placement.SourceX + placement.SourceWidth,
-                    placement.SourceY + placement.SourceHeight);
+                RecordImagePlacementVisited();
                 float xScale = GetRasterPlacementScale(placement.CellWidthPx, _cellWidth);
                 float yScale = GetRasterPlacementScale(placement.CellHeightPx, _cellHeight);
                 float destLeft = (placement.AnchorColumn * _cellWidth) + (placement.XOffsetPx * xScale);
@@ -2838,8 +2900,31 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     destTop,
                     destLeft + (placement.WidthPx * xScale),
                     destTop + (placement.HeightPx * yScale));
+                if (!IntersectsViewport(destRect, viewportWidth, viewportHeight))
+                {
+                    continue;
+                }
 
+                RecordImagePlacementVisible();
+                if (!screen.TryGetRasterImageSource(placement.ImageId, out TerminalRasterImageSource? source) ||
+                    source is null)
+                {
+                    continue;
+                }
+
+                SKRect sourceRect = new(
+                    placement.SourceX,
+                    placement.SourceY,
+                    placement.SourceX + placement.SourceWidth,
+                    placement.SourceY + placement.SourceHeight);
+                if (!IsRenderableImageRect(sourceRect, destRect))
+                {
+                    continue;
+                }
+
+                SKBitmap bitmap = GetOrCreateRasterBitmap(source, imageFrameId);
                 canvas.DrawBitmap(bitmap, sourceRect, destRect);
+                RecordImageDraw();
             }
         }
         finally
@@ -2864,7 +2949,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         TerminalScreen screen,
         ReadOnlySpan<TerminalKittyImagePlacement> placements,
         TerminalKittyImageLayer layer,
-        HashSet<int>? activeImageIds)
+        long imageFrameId)
     {
         if (placements.IsEmpty)
         {
@@ -2887,19 +2972,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     continue;
                 }
 
-                if (!screen.TryGetKittyImageSource(placement.ImageId, out TerminalKittyImageSource? source) ||
-                    source is null)
-                {
-                    continue;
-                }
-
-                activeImageIds?.Add(placement.ImageId);
-                SKBitmap bitmap = GetOrCreateKittyBitmap(source);
-                SKRect sourceRect = new(
-                    placement.SourceX,
-                    placement.SourceY,
-                    placement.SourceX + placement.SourceWidth,
-                    placement.SourceY + placement.SourceHeight);
+                RecordImagePlacementVisited();
                 float destLeft = (placement.ViewportColumn * _cellWidth) + placement.XOffsetPx;
                 float destTop = (placement.ViewportRow * _cellHeight) + placement.YOffsetPx;
                 SKRect destRect = new(
@@ -2907,8 +2980,31 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     destTop,
                     destLeft + placement.WidthPx,
                     destTop + placement.HeightPx);
+                if (!IntersectsViewport(destRect, viewportWidth, viewportHeight))
+                {
+                    continue;
+                }
 
+                RecordImagePlacementVisible();
+                if (!screen.TryGetKittyImageSource(placement.ImageId, out TerminalKittyImageSource? source) ||
+                    source is null)
+                {
+                    continue;
+                }
+
+                SKRect sourceRect = new(
+                    placement.SourceX,
+                    placement.SourceY,
+                    placement.SourceX + placement.SourceWidth,
+                    placement.SourceY + placement.SourceHeight);
+                if (!IsRenderableImageRect(sourceRect, destRect))
+                {
+                    continue;
+                }
+
+                SKBitmap bitmap = GetOrCreateKittyBitmap(source, imageFrameId);
                 canvas.DrawBitmap(bitmap, sourceRect, destRect);
+                RecordImageDraw();
             }
         }
         finally
@@ -2917,125 +3013,184 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
     }
 
-    private SKBitmap GetOrCreateKittyBitmap(TerminalKittyImageSource source)
+    private static bool IntersectsViewport(SKRect rect, float viewportWidth, float viewportHeight)
     {
-        if (_kittyBitmapCache.TryGetValue(source.ImageId, out KittyBitmapCacheEntry? existing) &&
-            existing.WidthPx == source.WidthPx &&
-            existing.HeightPx == source.HeightPx &&
-            existing.ByteLength == source.RgbaPixels.Length &&
-            existing.Fingerprint == source.ContentFingerprint)
+        return rect.Right > 0f &&
+            rect.Bottom > 0f &&
+            rect.Left < viewportWidth &&
+            rect.Top < viewportHeight;
+    }
+
+    private static bool IsRenderableImageRect(SKRect sourceRect, SKRect destRect)
+    {
+        return sourceRect.Width > 0f &&
+            sourceRect.Height > 0f &&
+            destRect.Width > 0f &&
+            destRect.Height > 0f;
+    }
+
+    private SKBitmap GetOrCreateKittyBitmap(TerminalKittyImageSource source, long imageFrameId)
+    {
+        return GetOrCreateImageBitmap(
+            source.WidthPx,
+            source.HeightPx,
+            source.RgbaPixels,
+            source.ContentFingerprint,
+            _kittyBitmapCache,
+            ref _kittyBitmapCacheBytes,
+            "Kitty Graphics",
+            imageFrameId);
+    }
+
+    private SKBitmap GetOrCreateRasterBitmap(TerminalRasterImageSource source, long imageFrameId)
+    {
+        return GetOrCreateImageBitmap(
+            source.WidthPx,
+            source.HeightPx,
+            source.RgbaPixels,
+            source.ContentFingerprint,
+            _rasterBitmapCache,
+            ref _rasterBitmapCacheBytes,
+            "terminal raster graphics",
+            imageFrameId);
+    }
+
+    private SKBitmap GetOrCreateImageBitmap(
+        int widthPx,
+        int heightPx,
+        byte[] rgbaPixels,
+        ulong contentFingerprint,
+        Dictionary<TerminalBitmapCacheKey, TerminalBitmapCacheEntry> cache,
+        ref long cacheBytes,
+        string protocolName,
+        long imageFrameId)
+    {
+        TerminalBitmapCacheKey key = new(widthPx, heightPx, rgbaPixels.Length, contentFingerprint);
+        if (cache.TryGetValue(key, out TerminalBitmapCacheEntry? existing))
         {
+            existing.LastUsedFrame = imageFrameId;
+            RecordImageCacheHit();
             return existing.Bitmap;
         }
 
-        existing?.Dispose();
-
-        SKBitmap bitmap = new(source.WidthPx, source.HeightPx, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        SKBitmap bitmap = new(widthPx, heightPx, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         IntPtr pixels = bitmap.GetPixels();
         if (pixels == IntPtr.Zero)
         {
             bitmap.Dispose();
-            throw new InvalidOperationException("Failed to allocate bitmap pixels for Kitty Graphics.");
+            throw new InvalidOperationException($"Failed to allocate bitmap pixels for {protocolName}.");
         }
 
-        Marshal.Copy(source.RgbaPixels, 0, pixels, source.RgbaPixels.Length);
-        _kittyBitmapCache[source.ImageId] = new KittyBitmapCacheEntry(
-            bitmap,
-            source.WidthPx,
-            source.HeightPx,
-            source.RgbaPixels.Length,
-            source.ContentFingerprint);
+        Marshal.Copy(rgbaPixels, 0, pixels, rgbaPixels.Length);
+        TerminalBitmapCacheEntry entry = new(bitmap, rgbaPixels.Length, imageFrameId);
+        cache[key] = entry;
+        cacheBytes += entry.ByteLength;
+        RecordImageCacheMiss();
         return bitmap;
     }
 
-    private SKBitmap GetOrCreateRasterBitmap(TerminalRasterImageSource source)
+    private void TrimBitmapCache(
+        Dictionary<TerminalBitmapCacheKey, TerminalBitmapCacheEntry> cache,
+        ref long cacheBytes,
+        long imageFrameId)
     {
-        if (_rasterBitmapCache.TryGetValue(source.ImageId, out KittyBitmapCacheEntry? existing) &&
-            existing.WidthPx == source.WidthPx &&
-            existing.HeightPx == source.HeightPx &&
-            existing.ByteLength == source.RgbaPixels.Length &&
-            existing.Fingerprint == source.ContentFingerprint)
-        {
-            return existing.Bitmap;
-        }
-
-        existing?.Dispose();
-
-        SKBitmap bitmap = new(source.WidthPx, source.HeightPx, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        IntPtr pixels = bitmap.GetPixels();
-        if (pixels == IntPtr.Zero)
-        {
-            bitmap.Dispose();
-            throw new InvalidOperationException("Failed to allocate bitmap pixels for terminal raster graphics.");
-        }
-
-        Marshal.Copy(source.RgbaPixels, 0, pixels, source.RgbaPixels.Length);
-        _rasterBitmapCache[source.ImageId] = new KittyBitmapCacheEntry(
-            bitmap,
-            source.WidthPx,
-            source.HeightPx,
-            source.RgbaPixels.Length,
-            source.ContentFingerprint);
-        return bitmap;
-    }
-
-    private void TrimKittyBitmapCache(IEnumerable<int> activeImageIds)
-    {
-        HashSet<int> active = activeImageIds as HashSet<int> ?? new HashSet<int>(activeImageIds);
-        List<int>? stale = null;
-
-        foreach ((int imageId, KittyBitmapCacheEntry entry) in _kittyBitmapCache)
-        {
-            if (active.Contains(imageId))
-            {
-                continue;
-            }
-
-            stale ??= new List<int>();
-            stale.Add(imageId);
-            entry.Dispose();
-        }
-
-        if (stale is null)
+        if (cache.Count == 0 || cacheBytes <= _imageBitmapCacheBudgetBytes)
         {
             return;
         }
 
-        for (int i = 0; i < stale.Count; i++)
+        long protectedBytes = 0;
+        foreach (TerminalBitmapCacheEntry entry in cache.Values)
         {
-            _kittyBitmapCache.Remove(stale[i]);
+            if (entry.LastUsedFrame == imageFrameId)
+            {
+                protectedBytes += entry.ByteLength;
+            }
+        }
+
+        long targetBytes = Math.Max(_imageBitmapCacheBudgetBytes, protectedBytes);
+        while (cacheBytes > targetBytes)
+        {
+            TerminalBitmapCacheKey? oldestKey = null;
+            long oldestFrame = long.MaxValue;
+            foreach ((TerminalBitmapCacheKey key, TerminalBitmapCacheEntry candidate) in cache)
+            {
+                if (candidate.LastUsedFrame == imageFrameId)
+                {
+                    continue;
+                }
+
+                if (candidate.LastUsedFrame < oldestFrame)
+                {
+                    oldestFrame = candidate.LastUsedFrame;
+                    oldestKey = key;
+                }
+            }
+
+            if (oldestKey is null)
+            {
+                return;
+            }
+
+            TerminalBitmapCacheEntry entry = cache[oldestKey.Value];
+            entry.Dispose();
+            cacheBytes -= entry.ByteLength;
+            cache.Remove(oldestKey.Value);
+            RecordImageCacheEviction();
         }
     }
 
-    private void TrimRasterBitmapCache(HashSet<int>? activeImageIds)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImagePlacementVisited()
     {
-        if (_rasterBitmapCache.Count == 0)
+        if (EnableImageRenderDiagnostics)
         {
-            return;
+            Interlocked.Increment(ref _diagnosticImagePlacementsVisited);
         }
+    }
 
-        List<int>? stale = null;
-
-        foreach ((int imageId, KittyBitmapCacheEntry entry) in _rasterBitmapCache)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImagePlacementVisible()
+    {
+        if (EnableImageRenderDiagnostics)
         {
-            if (activeImageIds is not null && activeImageIds.Contains(imageId))
-            {
-                continue;
-            }
-
-            stale ??= new List<int>();
-            stale.Add(imageId);
-            entry.Dispose();
+            Interlocked.Increment(ref _diagnosticImagePlacementsVisible);
         }
+    }
 
-        if (stale is null)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImageDraw()
+    {
+        if (EnableImageRenderDiagnostics)
         {
-            return;
+            Interlocked.Increment(ref _diagnosticImageDraws);
         }
+    }
 
-        for (int i = 0; i < stale.Count; i++)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImageCacheHit()
+    {
+        if (EnableImageRenderDiagnostics)
         {
-            _rasterBitmapCache.Remove(stale[i]);
+            Interlocked.Increment(ref _diagnosticImageCacheHits);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImageCacheMiss()
+    {
+        if (EnableImageRenderDiagnostics)
+        {
+            Interlocked.Increment(ref _diagnosticImageCacheMisses);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImageCacheEviction()
+    {
+        if (EnableImageRenderDiagnostics)
+        {
+            Interlocked.Increment(ref _diagnosticImageCacheEvictions);
         }
     }
 
@@ -3044,18 +3199,20 @@ public sealed class SkiaTerminalRenderer : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        foreach (KittyBitmapCacheEntry entry in _kittyBitmapCache.Values)
+        foreach (TerminalBitmapCacheEntry entry in _kittyBitmapCache.Values)
         {
             entry.Dispose();
         }
 
-        foreach (KittyBitmapCacheEntry entry in _rasterBitmapCache.Values)
+        foreach (TerminalBitmapCacheEntry entry in _rasterBitmapCache.Values)
         {
             entry.Dispose();
         }
 
         _kittyBitmapCache.Clear();
         _rasterBitmapCache.Clear();
+        _kittyBitmapCacheBytes = 0;
+        _rasterBitmapCacheBytes = 0;
         _bgPaint.Dispose();
         _fgPaint.Dispose();
         _cursorPaint.Dispose();
@@ -3068,27 +3225,27 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _glyphCache.Dispose();
     }
 
-    private sealed class KittyBitmapCacheEntry : IDisposable
+    private readonly record struct TerminalBitmapCacheKey(
+        int WidthPx,
+        int HeightPx,
+        int ByteLength,
+        ulong Fingerprint);
+
+    private sealed class TerminalBitmapCacheEntry : IDisposable
     {
-        public KittyBitmapCacheEntry(
+        public TerminalBitmapCacheEntry(
             SKBitmap bitmap,
-            int widthPx,
-            int heightPx,
             int byteLength,
-            ulong fingerprint)
+            long lastUsedFrame)
         {
             Bitmap = bitmap;
-            WidthPx = widthPx;
-            HeightPx = heightPx;
             ByteLength = byteLength;
-            Fingerprint = fingerprint;
+            LastUsedFrame = lastUsedFrame;
         }
 
         public SKBitmap Bitmap { get; }
-        public int WidthPx { get; }
-        public int HeightPx { get; }
         public int ByteLength { get; }
-        public ulong Fingerprint { get; }
+        public long LastUsedFrame { get; set; }
 
         public void Dispose()
         {
