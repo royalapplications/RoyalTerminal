@@ -65,6 +65,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private readonly SKPaint _fgPaint;
     private readonly SKPaint _cursorPaint;
     private readonly SKPaint _spritePaint;
+    private readonly SKPaint _symbolPaint;
     private readonly SKPath _spritePath;
 
     /// <summary>Cell width in pixels.</summary>
@@ -213,6 +214,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _spritePaint = new SKPaint
         {
             IsAntialias = false,
+            Style = SKPaintStyle.Fill,
+        };
+        _symbolPaint = new SKPaint
+        {
+            IsAntialias = true,
             Style = SKPaintStyle.Fill,
         };
         _spritePath = new SKPath();
@@ -494,10 +500,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
             SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
             SKColor runColor = GetEffectiveForeground(in firstCell);
             SKTypeface runTypeface = ResolveTypefaceForCell(primaryTypeface, in firstCell);
+            bool firstIsSymbolGlyph = IsSymbolGlyphClipCandidate(in firstCell);
 
             int runEnd = col + 1;
             while (runEnd < cells.Length)
             {
+                if (firstIsSymbolGlyph)
+                {
+                    break;
+                }
+
                 if (splitRunsAroundCursor && ShouldSplitRunAroundCursor(col, runEnd, cursorSplitColumn))
                 {
                     break;
@@ -510,6 +522,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 }
 
                 if (TryGetSpriteCodepoint(in nextCell, out _))
+                {
+                    break;
+                }
+
+                if (IsSymbolGlyphClipCandidate(in nextCell))
                 {
                     break;
                 }
@@ -646,12 +663,175 @@ public sealed class SkiaTerminalRenderer : IDisposable
                         DrawScanLine(canvas, x, y, spriteWidth, spriteHeight, scanLineRatio, color);
                     }
                     break;
+
+                case SpriteCategory.Symbol:
+                    DrawGeometricSymbol(canvas, codepoint, x, y, spriteWidth, spriteHeight, color);
+                    break;
             }
         }
         finally
         {
             canvas.Restore();
         }
+    }
+
+    private void DrawGeometricSymbol(
+        SKCanvas canvas,
+        int codepoint,
+        float x,
+        float y,
+        float width,
+        float height,
+        SKColor color)
+    {
+        _symbolPaint.Color = color;
+        float diameter = MathF.Max(1f, MathF.Min(width, height) * 0.74f);
+        float radius = diameter * 0.5f;
+        float centerX = x + (width * 0.5f);
+        float centerY = y + (height * 0.5f);
+
+        switch (codepoint)
+        {
+            case 0x25A0: // Black square.
+                DrawCenteredSquare(canvas, centerX, centerY, MathF.Min(width, height) * 0.54f, fill: true);
+                break;
+
+            case 0x25CB: // White circle.
+            case 0x25EF: // Large circle.
+                _symbolPaint.Style = SKPaintStyle.Stroke;
+                _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(MathF.Min(width, height) * 0.08f));
+                canvas.DrawCircle(centerX, centerY, radius, _symbolPaint);
+                break;
+
+            case 0x25CF: // Black circle.
+            case 0x2B24: // Black large circle.
+                _symbolPaint.Style = SKPaintStyle.Fill;
+                canvas.DrawCircle(centerX, centerY, radius, _symbolPaint);
+                break;
+
+            case 0x2610: // Ballot box.
+                DrawCenteredSquare(canvas, centerX, centerY, MathF.Min(width, height) * 0.58f, fill: false);
+                break;
+
+            case 0x2611: // Ballot box with check.
+            case 0x1F5F9: // Ballot box with bold check.
+                {
+                    float size = MathF.Min(width, height) * 0.58f;
+                    DrawCenteredSquare(canvas, centerX, centerY, size, fill: false);
+                    DrawCheckMark(canvas, centerX, centerY, size);
+                    break;
+                }
+
+            case 0x2612: // Ballot box with x.
+                {
+                    float size = MathF.Min(width, height) * 0.58f;
+                    DrawCenteredSquare(canvas, centerX, centerY, size, fill: false);
+                    DrawCrossMark(canvas, centerX, centerY, size);
+                    break;
+                }
+
+            case 0x1F7D7: // Circled square.
+                DrawCenteredSquare(canvas, centerX, centerY, MathF.Min(width, height) * 0.38f, fill: true);
+                _symbolPaint.Style = SKPaintStyle.Stroke;
+                _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(MathF.Min(width, height) * 0.08f));
+                canvas.DrawCircle(centerX, centerY, radius, _symbolPaint);
+                break;
+
+            case 0x1F834: // Leftwards finger-post arrow.
+                DrawFingerPostArrow(canvas, centerX, centerY, MathF.Min(width, height) * 0.70f, horizontal: true);
+                break;
+
+            case 0x1F837: // Downwards finger-post arrow.
+                DrawFingerPostArrow(canvas, centerX, centerY, MathF.Min(width, height) * 0.70f, horizontal: false);
+                break;
+        }
+    }
+
+    private void DrawCenteredSquare(
+        SKCanvas canvas,
+        float centerX,
+        float centerY,
+        float size,
+        bool fill)
+    {
+        float half = MathF.Max(1f, size) * 0.5f;
+        _symbolPaint.Style = fill ? SKPaintStyle.Fill : SKPaintStyle.Stroke;
+        _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(size * 0.12f));
+        _symbolPaint.StrokeCap = SKStrokeCap.Square;
+        canvas.DrawRect(
+            centerX - half,
+            centerY - half,
+            half * 2f,
+            half * 2f,
+            _symbolPaint);
+    }
+
+    private void DrawCheckMark(SKCanvas canvas, float centerX, float centerY, float size)
+    {
+        float half = MathF.Max(1f, size) * 0.5f;
+        float left = centerX - (half * 0.58f);
+        float midX = centerX - (half * 0.12f);
+        float right = centerX + (half * 0.62f);
+        float lower = centerY + (half * 0.14f);
+        float bottom = centerY + (half * 0.48f);
+        float upper = centerY - (half * 0.50f);
+
+        _symbolPaint.Style = SKPaintStyle.Stroke;
+        _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(size * 0.16f));
+        _symbolPaint.StrokeCap = SKStrokeCap.Round;
+        canvas.DrawLine(left, lower, midX, bottom, _symbolPaint);
+        canvas.DrawLine(midX, bottom, right, upper, _symbolPaint);
+    }
+
+    private void DrawCrossMark(SKCanvas canvas, float centerX, float centerY, float size)
+    {
+        float inset = MathF.Max(1f, size) * 0.28f;
+
+        _symbolPaint.Style = SKPaintStyle.Stroke;
+        _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(size * 0.14f));
+        _symbolPaint.StrokeCap = SKStrokeCap.Round;
+        canvas.DrawLine(centerX - inset, centerY - inset, centerX + inset, centerY + inset, _symbolPaint);
+        canvas.DrawLine(centerX + inset, centerY - inset, centerX - inset, centerY + inset, _symbolPaint);
+    }
+
+    private void DrawFingerPostArrow(SKCanvas canvas, float centerX, float centerY, float size, bool horizontal)
+    {
+        float normalizedSize = MathF.Max(1f, size);
+        _symbolPaint.Style = SKPaintStyle.Stroke;
+        _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(normalizedSize * 0.12f));
+        _symbolPaint.StrokeCap = SKStrokeCap.Square;
+
+        if (horizontal)
+        {
+            float left = centerX - (normalizedSize * 0.34f);
+            float right = centerX + (normalizedSize * 0.24f);
+            float top = centerY - (normalizedSize * 0.22f);
+            float bottom = centerY + (normalizedSize * 0.22f);
+            canvas.DrawRect(left, top, right - left, bottom - top, _symbolPaint);
+
+            _spritePath.Reset();
+            _spritePath.MoveTo(left, centerY - (normalizedSize * 0.26f));
+            _spritePath.LineTo(centerX - (normalizedSize * 0.52f), centerY);
+            _spritePath.LineTo(left, centerY + (normalizedSize * 0.26f));
+            _spritePath.Close();
+        }
+        else
+        {
+            float left = centerX - (normalizedSize * 0.24f);
+            float right = centerX + (normalizedSize * 0.24f);
+            float top = centerY - (normalizedSize * 0.34f);
+            float bottom = centerY + (normalizedSize * 0.24f);
+            canvas.DrawRect(left, top, right - left, bottom - top, _symbolPaint);
+
+            _spritePath.Reset();
+            _spritePath.MoveTo(centerX - (normalizedSize * 0.26f), bottom);
+            _spritePath.LineTo(centerX, centerY + (normalizedSize * 0.52f));
+            _spritePath.LineTo(centerX + (normalizedSize * 0.26f), bottom);
+            _spritePath.Close();
+        }
+
+        _symbolPaint.Style = SKPaintStyle.Fill;
+        canvas.DrawPath(_spritePath, _symbolPaint);
     }
 
     private bool TryDrawSpecialBoxDrawingSymbol(
@@ -1353,7 +1533,31 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return true;
         }
 
+        if (IsGeometricSymbolCodepoint(codepoint))
+        {
+            category = SpriteCategory.Symbol;
+            return true;
+        }
+
         return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsGeometricSymbolCodepoint(int codepoint)
+    {
+        return codepoint is
+            0x25A0 or
+            0x25CB or
+            0x25CF or
+            0x25EF or
+            0x2610 or
+            0x2611 or
+            0x2612 or
+            0x2B24 or
+            0x1F834 or
+            0x1F837 or
+            0x1F5F9 or
+            0x1F7D7;
     }
 
     private static bool IsBlockElementCodepoint(int codepoint)
@@ -1400,7 +1604,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         if (!string.IsNullOrEmpty(cell.Grapheme))
         {
             if (Rune.DecodeFromUtf16(cell.Grapheme.AsSpan(), out Rune rune, out int charsConsumed) != OperationStatus.Done ||
-                charsConsumed != cell.Grapheme.Length)
+                !ContainsOnlyTextPresentationSelectors(cell.Grapheme.AsSpan(charsConsumed)))
             {
                 return false;
             }
@@ -1415,6 +1619,22 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         codepoint = cell.Codepoint;
+        return true;
+    }
+
+    private static bool ContainsOnlyTextPresentationSelectors(ReadOnlySpan<char> text)
+    {
+        while (!text.IsEmpty)
+        {
+            if (Rune.DecodeFromUtf16(text, out Rune rune, out int charsConsumed) != OperationStatus.Done ||
+                rune.Value != 0xFE0E)
+            {
+                return false;
+            }
+
+            text = text[charsConsumed..];
+        }
+
         return true;
     }
 
@@ -1929,17 +2149,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         for (int col = startCol; col < endCol; col++)
         {
             ref readonly TerminalCell cell = ref cells[col];
-            if (string.IsNullOrEmpty(cell.Grapheme))
-            {
-                if (IsSymbolGlyphClipCandidate(cell.Codepoint))
-                {
-                    return _cellWidth * SymbolGlyphClipPaddingCells;
-                }
-
-                continue;
-            }
-
-            if (ContainsSymbolGlyphClipCandidate(cell.Grapheme.AsSpan()))
+            if (IsSymbolGlyphClipCandidate(in cell))
             {
                 return _cellWidth * SymbolGlyphClipPaddingCells;
             }
@@ -1953,6 +2163,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return ContainsSymbolGlyphClipCandidate(text)
             ? _cellWidth * SymbolGlyphClipPaddingCells
             : 0f;
+    }
+
+    private static bool IsSymbolGlyphClipCandidate(ref readonly TerminalCell cell)
+    {
+        return string.IsNullOrEmpty(cell.Grapheme)
+            ? IsSymbolGlyphClipCandidate(cell.Codepoint)
+            : ContainsSymbolGlyphClipCandidate(cell.Grapheme.AsSpan());
     }
 
     private static bool ContainsSymbolGlyphClipCandidate(ReadOnlySpan<char> text)
@@ -2843,6 +3060,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _fgPaint.Dispose();
         _cursorPaint.Dispose();
         _spritePaint.Dispose();
+        _symbolPaint.Dispose();
         _spritePath.Dispose();
         _textShaper.Dispose();
         _fontResolver.Dispose();
@@ -3001,6 +3219,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         Braille = 1,
         BlockElement = 2,
         ScanLine = 3,
+        Symbol = 4,
     }
 
     private readonly record struct BoxSegments(

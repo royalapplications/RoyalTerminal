@@ -1011,6 +1011,38 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_GeometricControlSymbols_UseSpriteFallback()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableTextRenderDiagnostics = true,
+        };
+
+        var screen = new TerminalScreen(12, 1);
+        TerminalRow row = screen.GetViewportRow(0);
+        SetTestCell(row, 0, 0x25CB);
+        SetTestCell(row, 1, 0x25CF);
+        SetTestCell(row, 2, 0x25EF);
+        SetTestCell(row, 3, 0x2B24);
+        SetTestCell(row, 4, 0x2610);
+        SetTestCell(row, 5, 0x2611);
+        SetTestCell(row, 6, 0x2612);
+        SetTestCell(row, 7, 0x25A0);
+        SetTestCell(row, 8, 0x1F7D7, "\U0001F7D7\uFE0E");
+        SetTestCell(row, 9, 0x1F5F9, "\U0001F5F9\uFE0E");
+        SetTestCell(row, 10, 0x1F834);
+        SetTestCell(row, 11, 0x1F837, "\U0001F837\uFE0E");
+        row.IsDirty = true;
+
+        using var surface = CreateRenderSurface(renderer, columns: 12, rows: 1);
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.True(diagnostics.SpriteCells >= 12);
+        Assert.Equal(0, diagnostics.GridClampedRuns);
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_MixedBoxDrawingMatrix_UsesSpriteFallbackAndDrawsPixels()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
@@ -1730,6 +1762,19 @@ public class RenderingTests
         }
 
         return screen;
+    }
+
+    private static void SetTestCell(TerminalRow row, int column, int codepoint, string? grapheme = null)
+    {
+        row[column].Codepoint = codepoint;
+        row[column].Grapheme = grapheme;
+        row[column].Foreground = 0xFFFFFFFF;
+        row[column].Background = 0xFF000000;
+        row[column].HasBackground = true;
+        row[column].Attributes = CellAttributes.None;
+        row[column].UnderlineColor = 0;
+        row[column].HasUnderlineColor = false;
+        row[column].Width = 1;
     }
 
     private static TerminalScreen CreateAsciiScreen(int columns, int rows, string text)
