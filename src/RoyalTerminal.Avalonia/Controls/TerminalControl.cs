@@ -353,6 +353,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _lastAppliedRows = -1;
     private int _lastAppliedWidthPx = -1;
     private int _lastAppliedHeightPx = -1;
+    private double _lastAppliedLayoutWidth = double.NaN;
+    private double _lastAppliedLayoutHeight = double.NaN;
     private VtProcessorPreference _appliedVtProcessorPreference = VtProcessorPreference.Auto;
     private string? _activeTransportId;
     private readonly TerminalMouseModeTracker _mouseModeTracker = new();
@@ -1047,17 +1049,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
         }
 
-        int widthPx = width > 0
-            ? Math.Max(1, (int)Math.Round(width))
-            : Math.Max(1, (int)Math.Ceiling(safeColumns * _renderer.CellWidth));
-        int heightPx = height > 0
-            ? Math.Max(1, (int)Math.Round(height))
-            : Math.Max(1, (int)Math.Ceiling(safeRows * _renderer.CellHeight));
+        (int widthPx, int heightPx) = CalculateRenderedGridPixelSize(safeColumns, safeRows);
+        double layoutWidth = width > 0 ? width : widthPx;
+        double layoutHeight = height > 0 ? height : heightPx;
 
         bool gridChanged = safeColumns != _lastAppliedColumns || safeRows != _lastAppliedRows;
         bool pixelSizeChanged = widthPx != _lastAppliedWidthPx || heightPx != _lastAppliedHeightPx;
+        bool layoutSizeChanged =
+            !AreClose(layoutWidth, _lastAppliedLayoutWidth) ||
+            !AreClose(layoutHeight, _lastAppliedLayoutHeight);
 
-        if (!force && !gridChanged && !pixelSizeChanged)
+        if (!force && !gridChanged && !pixelSizeChanged && !layoutSizeChanged)
         {
             return;
         }
@@ -1125,6 +1127,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _lastAppliedRows = safeRows;
         _lastAppliedWidthPx = widthPx;
         _lastAppliedHeightPx = heightPx;
+        _lastAppliedLayoutWidth = layoutWidth;
+        _lastAppliedLayoutHeight = layoutHeight;
 
         RaiseScrollInvalidated();
         if (raiseTerminalResized && gridChanged)
@@ -1132,13 +1136,34 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             TerminalResized?.Invoke(this, new TerminalSizeEventArgs(safeColumns, safeRows));
         }
 
-        _presenter?.NotifyResize(new Size(widthPx, heightPx));
+        _presenter?.NotifyResize(new Size(layoutWidth, layoutHeight));
         _presenter?.Invalidate();
 
         if (invalidateMeasure)
         {
             InvalidateMeasure();
         }
+    }
+
+    private static bool AreClose(double left, double right)
+    {
+        return double.IsFinite(left) &&
+               double.IsFinite(right) &&
+               Math.Abs(left - right) < 0.001;
+    }
+
+    private (int WidthPx, int HeightPx) CalculateRenderedGridPixelSize(int columns, int rows)
+    {
+        if (_renderer is null)
+        {
+            return (Math.Max(1, columns), Math.Max(1, rows));
+        }
+
+        int safeColumns = Math.Max(1, columns);
+        int safeRows = Math.Max(1, rows);
+        int widthPx = Math.Max(1, (int)Math.Round(safeColumns * _renderer.CellWidth));
+        int heightPx = Math.Max(1, (int)Math.Round(safeRows * _renderer.CellHeight));
+        return (widthPx, heightPx);
     }
 
     /// <summary>
@@ -1320,12 +1345,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (_renderer is not null)
         {
-            int widthPx = Bounds.Width > 0
-                ? Math.Max(1, (int)Math.Round(Bounds.Width))
-                : Math.Max(1, (int)Math.Ceiling(Columns * _renderer.CellWidth));
-            int heightPx = Bounds.Height > 0
-                ? Math.Max(1, (int)Math.Round(Bounds.Height))
-                : Math.Max(1, (int)Math.Ceiling(Rows * _renderer.CellHeight));
+            (int widthPx, int heightPx) = CalculateRenderedGridPixelSize(Columns, Rows);
             endpoint.SetSize(widthPx, heightPx);
         }
 
@@ -2309,8 +2329,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 ? new TerminalCommandSpec(string.Empty, normalizedArguments)
                 : null)
             : new TerminalCommandSpec(shell, normalizedArguments);
-        int widthPx = Math.Max(1, (int)Math.Round(Bounds.Width > 0 ? Bounds.Width : Columns * (_renderer?.CellWidth ?? 1)));
-        int heightPx = Math.Max(1, (int)Math.Round(Bounds.Height > 0 ? Bounds.Height : Rows * (_renderer?.CellHeight ?? 1)));
+        (int widthPx, int heightPx) = CalculateRenderedGridPixelSize(Columns, Rows);
 
         PtyTransportOptions options = new(
             Command: command,

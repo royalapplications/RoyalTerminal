@@ -1119,7 +1119,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public void Control_Arrange_PixelOnlyResize_NotifiesVtProcessorWithUpdatedPixels()
+    public void Control_Arrange_PixelOnlyResize_KeepsVtProcessorOnRenderedGridPixels()
     {
         ResizeTrackingVtProcessorFactory factory = new();
         TerminalControl control = new(
@@ -1140,6 +1140,7 @@ public class TerminalControlTests
         Assert.NotNull(factory.LastProcessor);
         ResizeTrackingVtProcessor processor = factory.LastProcessor!;
         int resizeCountBefore = processor.ResizeNotifications.Count;
+        Assert.True(resizeCountBefore > 0);
 
         Assert.NotNull(control.Renderer);
         double cellWidth = control.Renderer!.CellWidth;
@@ -1156,13 +1157,13 @@ public class TerminalControlTests
 
         Assert.Equal(columnsBefore, control.Columns);
         Assert.Equal(rowsBefore, control.Rows);
-        Assert.True(processor.ResizeNotifications.Count > resizeCountBefore);
+        Assert.Equal(resizeCountBefore, processor.ResizeNotifications.Count);
 
         TerminalSessionDimensions lastResize = processor.ResizeNotifications[^1];
         Assert.Equal(columnsBefore, lastResize.Columns);
         Assert.Equal(rowsBefore, lastResize.Rows);
-        int expectedWidthPixels = Math.Max(1, (int)Math.Round(control.Bounds.Width));
-        int expectedHeightPixels = Math.Max(1, (int)Math.Round(control.Bounds.Height));
+        int expectedWidthPixels = Math.Max(1, (int)Math.Round(columnsBefore * cellWidth));
+        int expectedHeightPixels = Math.Max(1, (int)Math.Round(rowsBefore * cellHeight));
         Assert.Equal(expectedWidthPixels, lastResize.WidthPixels);
         Assert.Equal(expectedHeightPixels, lastResize.HeightPixels);
     }
