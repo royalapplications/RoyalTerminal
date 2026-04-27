@@ -1656,10 +1656,149 @@ public class TerminalControlTests
 
         control.StartSearch("L10");
 
-        Assert.Equal(7UL, processor.LastSetViewportOffsetRows);
-        Assert.Equal(7UL, processor.ViewportScrollState.OffsetRows);
+        Assert.Equal(10UL, processor.LastSetViewportOffsetRows);
+        Assert.Equal(10UL, processor.ViewportScrollState.OffsetRows);
         Assert.Equal(1, control.SearchTotal);
         Assert.Equal(0, control.SearchSelected);
+    }
+
+    [AvaloniaFact]
+    public void Control_FontSizeChange_NativeViewportScroll_UsesNativeTotalRows_NotViewportMirror()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 80, VisibleRows: 4),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        Assert.NotNull(control.ScrollData);
+        processor.SetViewportState(new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 80, VisibleRows: 4));
+        double originalCellHeight = control.ScrollData!.CellHeight;
+        control.ScrollData.Viewport = 4 * originalCellHeight;
+        control.ScrollData.Extent = 100 * originalCellHeight;
+        control.ScrollData.Offset = 80 * originalCellHeight;
+        processor.ClearLastSetViewportOffsetRows();
+
+        control.TerminalFontSize = 15;
+
+        Assert.Null(processor.LastSetViewportOffsetRows);
+        Assert.Equal(100 * control.ScrollData.CellHeight, control.ScrollData.Extent);
+        Assert.Equal(80 * control.ScrollData.CellHeight, control.ScrollData.Offset);
+    }
+
+    [AvaloniaFact]
+    public void Control_FontSizeChange_NativeViewportScroll_PreservesLiveBottom()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 0, VisibleRows: 4),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        Assert.NotNull(control.ScrollData);
+        double cellHeight = control.ScrollData!.CellHeight;
+        control.ScrollData.Viewport = 4 * cellHeight;
+        control.ScrollData.Extent = 100 * cellHeight;
+        control.ScrollData.ScrollToBottom();
+
+        control.TerminalFontSize = 15;
+        control.Measure(new Size(960, 640));
+        control.Arrange(new Rect(0, 0, 960, 640));
+
+        Assert.True(processor.ScrolledToBottom);
+        Assert.Equal(processor.ViewportScrollState.MaxOffsetRows, processor.ViewportScrollState.OffsetRows);
+        Assert.True(control.ScrollData.IsAtBottom);
+    }
+
+    [AvaloniaFact]
+    public void Control_ArrangeAfterFontSizeChange_NativeViewportScroll_PreservesLiveBottom()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 96, VisibleRows: 4),
+            [])
+        {
+            ResetViewportToTopOnResize = true,
+        };
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        Assert.NotNull(control.ScrollData);
+        double cellHeight = control.ScrollData!.CellHeight;
+        control.ScrollData.Viewport = 4 * cellHeight;
+        control.ScrollData.Extent = 100 * cellHeight;
+        control.ScrollData.ScrollToBottom();
+
+        control.TerminalFontSize = 15;
+        processor.ScrolledToBottom = false;
+        control.Measure(new Size(960, 640));
+        control.Arrange(new Rect(0, 0, 960, 640));
+
+        Assert.True(processor.ScrolledToBottom);
+        Assert.Equal(processor.ViewportScrollState.MaxOffsetRows, processor.ViewportScrollState.OffsetRows);
+        Assert.True(control.ScrollData.IsAtBottom);
+    }
+
+    [AvaloniaFact]
+    public void Control_ArrangeAfterFontSizeChange_NativeViewportScroll_DefersBottomUntilNativeResize()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 56, OffsetRows: 8, VisibleRows: 48),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 130;
+        control.Rows = 48;
+
+        Assert.NotNull(control.ScrollData);
+        double cellHeight = control.ScrollData!.CellHeight;
+        control.ScrollData.Viewport = 48 * cellHeight;
+        control.ScrollData.Extent = 56 * cellHeight;
+        control.ScrollData.ScrollToBottom();
+
+        control.TerminalFontSize = 15;
+        processor.ScrolledToBottom = false;
+        control.Measure(new Size(1172, 890));
+        control.Arrange(new Rect(0, 0, 1172, 890));
+
+        Assert.True(processor.ScrolledToBottom);
+        Assert.Equal(processor.ViewportScrollState.MaxOffsetRows, processor.ViewportScrollState.OffsetRows);
+        Assert.True(control.ScrollData.IsAtBottom);
+    }
+
+    [AvaloniaFact]
+    public void Control_ArrangeAfterFontSizeChange_UsesRowAlignedScrollViewport()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 99, OffsetRows: 55, VisibleRows: 44),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 130;
+        control.Rows = 44;
+        control.TerminalFontSize = 15;
+
+        control.Measure(new Size(1172, 890));
+        control.Arrange(new Rect(0, 0, 1172, 890));
+
+        Assert.NotNull(control.ScrollData);
+        Assert.Equal(control.Rows * control.ScrollData!.CellHeight, control.ScrollData.Viewport, precision: 6);
+        Assert.True(control.Bounds.Height > control.ScrollData.Viewport);
     }
 
     [AvaloniaFact]
@@ -2384,6 +2523,10 @@ public class TerminalControlTests
 
         public ulong? LastSetViewportOffsetRows { get; private set; }
 
+        public bool ScrolledToBottom { get; set; }
+
+        public bool ResetViewportToTopOnResize { get; set; }
+
         public event EventHandler<TerminalModeState>? ModeChanged
         {
             add { }
@@ -2404,15 +2547,15 @@ public class TerminalControlTests
         public void NotifyResize(int columns, int rows)
         {
             _ = columns;
-            _ = rows;
+            UpdateViewportRowsAfterResize(rows);
         }
 
         public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
         {
             _ = columns;
-            _ = rows;
             _ = widthPx;
             _ = heightPx;
+            UpdateViewportRowsAfterResize(rows);
         }
 
         public void ApplyTheme(TerminalTheme theme)
@@ -2452,6 +2595,7 @@ public class TerminalControlTests
 
         public void ScrollViewportToBottom()
         {
+            ScrolledToBottom = true;
             ViewportScrollState = ViewportScrollState with { OffsetRows = ViewportScrollState.MaxOffsetRows };
         }
 
@@ -2460,6 +2604,32 @@ public class TerminalControlTests
             ulong clamped = Math.Min(offsetRows, ViewportScrollState.MaxOffsetRows);
             LastSetViewportOffsetRows = clamped;
             ViewportScrollState = ViewportScrollState with { OffsetRows = clamped };
+        }
+
+        public void ClearLastSetViewportOffsetRows()
+        {
+            LastSetViewportOffsetRows = null;
+        }
+
+        public void SetViewportState(TerminalViewportScrollState viewportScrollState)
+        {
+            ViewportScrollState = viewportScrollState;
+        }
+
+        private void UpdateViewportRowsAfterResize(int rows)
+        {
+            ulong visibleRows = (ulong)Math.Max(1, rows);
+            ulong maxOffsetRows = ViewportScrollState.TotalRows > visibleRows
+                ? ViewportScrollState.TotalRows - visibleRows
+                : 0;
+            ulong offsetRows = ResetViewportToTopOnResize
+                ? 0
+                : Math.Min(ViewportScrollState.OffsetRows, maxOffsetRows);
+            ViewportScrollState = ViewportScrollState with
+            {
+                OffsetRows = offsetRows,
+                VisibleRows = visibleRows,
+            };
         }
 
         public void PopulateSearchMatches(string needle, List<TerminalSearchMatch> destination)
