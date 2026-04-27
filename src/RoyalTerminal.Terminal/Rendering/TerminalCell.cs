@@ -696,15 +696,28 @@ public sealed class TerminalScreen
             throw new ArgumentException("Raster image source and placement ids must match.", nameof(placement));
         }
 
-        _rasterImagesById[source.ImageId] = source;
+        int startAbsRow = GetRasterPlacementStartRow(placement);
+        int endAbsRow = GetRasterPlacementEndRow(placement);
+        int startColumn = GetRasterPlacementStartColumn(placement);
+        int endColumn = GetRasterPlacementEndColumn(placement);
+        bool removedExisting = false;
         for (int i = _rasterPlacements.Count - 1; i >= 0; i--)
         {
-            if (_rasterPlacements[i].ImageId == source.ImageId)
+            TerminalRasterImagePlacement existingPlacement = _rasterPlacements[i];
+            if (existingPlacement.ImageId == source.ImageId ||
+                RasterPlacementIntersects(existingPlacement, startAbsRow, endAbsRow, startColumn, endColumn))
             {
                 _rasterPlacements.RemoveAt(i);
+                removedExisting = true;
             }
         }
 
+        if (removedExisting)
+        {
+            TrimUnreferencedRasterSources();
+        }
+
+        _rasterImagesById[source.ImageId] = source;
         ClearTextContentUnderRasterPlacement(placement);
         _rasterPlacements.Add(placement);
         InvalidateViewport();
