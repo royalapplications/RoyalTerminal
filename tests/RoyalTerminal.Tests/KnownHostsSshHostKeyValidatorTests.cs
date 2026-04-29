@@ -23,6 +23,9 @@ public sealed class KnownHostsSshHostKeyValidatorTests
                 hostKey);
 
             Assert.True(trusted);
+            Assert.Equal(
+                SshKnownHostTrustStatus.Trusted,
+                validator.GetTrustStatus(new SshEndpointOptions("example.com", 22, "alice"), hostKey));
         }
         finally
         {
@@ -73,6 +76,9 @@ public sealed class KnownHostsSshHostKeyValidatorTests
                 mismatchedHostKey);
 
             Assert.False(trusted);
+            Assert.Equal(
+                SshKnownHostTrustStatus.Changed,
+                validator.GetTrustStatus(new SshEndpointOptions("example.com", 22, "alice"), mismatchedHostKey));
         }
         finally
         {
@@ -97,6 +103,9 @@ public sealed class KnownHostsSshHostKeyValidatorTests
                 malformedHostKey);
 
             Assert.False(trusted);
+            Assert.Equal(
+                SshKnownHostTrustStatus.InvalidPresentedKey,
+                validator.GetTrustStatus(new SshEndpointOptions("example.com", 22, "alice"), malformedHostKey));
         }
         finally
         {
@@ -177,6 +186,9 @@ public sealed class KnownHostsSshHostKeyValidatorTests
                 hostKey);
 
             Assert.False(trusted);
+            Assert.Equal(
+                SshKnownHostTrustStatus.Revoked,
+                validator.GetTrustStatus(new SshEndpointOptions("example.com", 22, "alice"), hostKey));
         }
         finally
         {
@@ -258,6 +270,9 @@ public sealed class KnownHostsSshHostKeyValidatorTests
                 hostKey);
 
             Assert.False(trusted);
+            Assert.Equal(
+                SshKnownHostTrustStatus.Unknown,
+                validator.GetTrustStatus(new SshEndpointOptions("other-host", 22, "alice"), hostKey));
         }
         finally
         {

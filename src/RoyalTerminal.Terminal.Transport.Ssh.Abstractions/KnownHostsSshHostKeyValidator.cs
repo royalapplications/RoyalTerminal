@@ -8,6 +8,37 @@ using System.Text;
 namespace RoyalTerminal.Terminal.Transport.Ssh;
 
 /// <summary>
+/// Describes the result of checking a presented SSH host key against known-hosts files.
+/// </summary>
+public enum SshKnownHostTrustStatus
+{
+    /// <summary>
+    /// No matching known-hosts entry was found for the endpoint and host-key algorithm.
+    /// </summary>
+    Unknown = 0,
+
+    /// <summary>
+    /// A matching trusted known-hosts entry was found.
+    /// </summary>
+    Trusted,
+
+    /// <summary>
+    /// A known-hosts entry exists for the endpoint and algorithm, but it does not match the presented key.
+    /// </summary>
+    Changed,
+
+    /// <summary>
+    /// A matching revoked known-hosts entry was found.
+    /// </summary>
+    Revoked,
+
+    /// <summary>
+    /// The presented host key cannot be validated because its supplied key material is invalid.
+    /// </summary>
+    InvalidPresentedKey,
+}
+
+/// <summary>
 /// Host-key validator that trusts keys already present in OpenSSH known-hosts files.
 /// </summary>
 public sealed class KnownHostsSshHostKeyValidator : ISshHostKeyValidator
@@ -32,6 +63,14 @@ public sealed class KnownHostsSshHostKeyValidator : ISshHostKeyValidator
     /// <inheritdoc />
     public bool IsTrusted(SshEndpointOptions endpoint, SshHostKeyInfo hostKey)
     {
+        return GetTrustStatus(endpoint, hostKey) == SshKnownHostTrustStatus.Trusted;
+    }
+
+    /// <summary>
+    /// Checks the presented host key against configured known-hosts files and returns the detailed trust status.
+    /// </summary>
+    public SshKnownHostTrustStatus GetTrustStatus(SshEndpointOptions endpoint, SshHostKeyInfo hostKey)
+    {
         ArgumentNullException.ThrowIfNull(endpoint);
 
         byte[]? presentedHostKeyBytes = null;
@@ -40,17 +79,19 @@ public sealed class KnownHostsSshHostKeyValidator : ISshHostKeyValidator
             presentedHostKeyBytes = TryDecodeBase64(hostKey.HostKeyBase64);
             if (presentedHostKeyBytes is null)
             {
-                return false;
+                return SshKnownHostTrustStatus.InvalidPresentedKey;
             }
         }
 
         string normalizedFingerprint = NormalizeFingerprint(hostKey.FingerprintSha256);
         if (presentedHostKeyBytes is null && string.IsNullOrWhiteSpace(normalizedFingerprint))
         {
-            return false;
+            return SshKnownHostTrustStatus.InvalidPresentedKey;
         }
 
-        bool matchedTrustedEntry = false;
+        bool foundTrustedEntry = false;
+        bool foundKnownEntry = false;
+        bool foundRevokedEntry = false;
         for (int i = 0; i < _knownHostsFiles.Count; i++)
         {
             string filePath = _knownHostsFiles[i];
@@ -72,30 +113,47 @@ public sealed class KnownHostsSshHostKeyValidator : ISshHostKeyValidator
                     continue;
                 }
 
+                foundKnownEntry = true;
+                bool keyMatches;
                 if (presentedHostKeyBytes is not null)
                 {
-                    if (entryKeyBytes is null ||
-                        entryKeyBytes.Length != presentedHostKeyBytes.Length ||
-                        !CryptographicOperations.FixedTimeEquals(entryKeyBytes, presentedHostKeyBytes))
-                    {
-                        continue;
-                    }
+                    keyMatches = entryKeyBytes is not null &&
+                        entryKeyBytes.Length == presentedHostKeyBytes.Length &&
+                        CryptographicOperations.FixedTimeEquals(entryKeyBytes, presentedHostKeyBytes);
                 }
-                else if (!string.Equals(entryFingerprint, normalizedFingerprint, StringComparison.Ordinal))
+                else
+                {
+                    keyMatches = string.Equals(entryFingerprint, normalizedFingerprint, StringComparison.Ordinal);
+                }
+
+                if (!keyMatches)
                 {
                     continue;
                 }
 
                 if (isRevoked)
                 {
-                    return false;
+                    foundRevokedEntry = true;
+                    continue;
                 }
 
-                matchedTrustedEntry = true;
+                foundTrustedEntry = true;
             }
         }
 
-        return matchedTrustedEntry;
+        if (foundRevokedEntry)
+        {
+            return SshKnownHostTrustStatus.Revoked;
+        }
+
+        if (foundTrustedEntry)
+        {
+            return SshKnownHostTrustStatus.Trusted;
+        }
+
+        return foundKnownEntry
+            ? SshKnownHostTrustStatus.Changed
+            : SshKnownHostTrustStatus.Unknown;
     }
 
     /// <summary>
