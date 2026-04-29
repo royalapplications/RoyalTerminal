@@ -59,6 +59,7 @@ public class TerminalControlTests
         Assert.Equal(24, control.Rows);
         Assert.Equal(10_000, control.ScrollbackLimit);
         Assert.True(control.AutoScroll);
+        Assert.True(control.ScrollToBottomOnInput);
         Assert.True(control.ReflowOnResize);
         Assert.Null(control.ShaderSources);
         Assert.True(control.ShaderAnimationEnabled);
@@ -85,6 +86,7 @@ public class TerminalControlTests
             Rows = 40,
             ScrollbackLimit = 50_000,
             AutoScroll = false,
+            ScrollToBottomOnInput = false,
             ReflowOnResize = false,
         };
 
@@ -96,6 +98,7 @@ public class TerminalControlTests
         Assert.Equal(40, control.Rows);
         Assert.Equal(50_000, control.ScrollbackLimit);
         Assert.False(control.AutoScroll);
+        Assert.False(control.ScrollToBottomOnInput);
         Assert.False(control.ReflowOnResize);
     }
 
@@ -1376,6 +1379,349 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_TextInputWhileScrolledBack_ScrollsToBottom()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            PopulateScrollableNormalBuffer(control);
+            TerminalScreen screen = control.Screen!;
+            control.ScrollByRows(-3);
+            Assert.True(screen.ScrollOffset > 0);
+
+            window.KeyTextInput("x");
+
+            Assert.Equal(0, screen.ScrollOffset);
+            Assert.Contains(transport.SentInputs, static payload =>
+                payload.Length == 1 && payload[0] == (byte)'x');
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_EscapeWhileScrolledBack_ScrollsToBottomWithoutSendingEscape()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            PopulateScrollableNormalBuffer(control);
+            TerminalScreen screen = control.Screen!;
+            control.ScrollByRows(-3);
+            Assert.True(screen.ScrollOffset > 0);
+            transport.SentInputs.Clear();
+
+            window.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
+
+            Assert.Equal(0, screen.ScrollOffset);
+            Assert.Empty(transport.SentInputs);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_EscapeAtBottom_SendsEscape()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            PopulateScrollableNormalBuffer(control);
+            TerminalScreen screen = control.Screen!;
+            control.ScrollToBottom();
+            Assert.Equal(0, screen.ScrollOffset);
+            transport.SentInputs.Clear();
+
+            window.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
+
+            Assert.Equal(0, screen.ScrollOffset);
+            Assert.Contains(transport.SentInputs, static payload =>
+                payload.Length == 1 && payload[0] == 0x1B);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_TextInputWhileScrolledBack_WhenScrollToBottomOnInputDisabled_PreservesViewport()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.ScrollToBottomOnInput = false;
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            PopulateScrollableNormalBuffer(control);
+            TerminalScreen screen = control.Screen!;
+            control.ScrollByRows(-3);
+            int scrollOffset = screen.ScrollOffset;
+            Assert.True(scrollOffset > 0);
+
+            window.KeyTextInput("x");
+
+            Assert.Equal(scrollOffset, screen.ScrollOffset);
+            Assert.Contains(transport.SentInputs, static payload =>
+                payload.Length == 1 && payload[0] == (byte)'x');
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_AfterInputScrollsToBottom_CanScrollBackAgain()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            PopulateScrollableNormalBuffer(control);
+            TerminalScreen screen = control.Screen!;
+            control.ScrollByRows(-3);
+            Assert.True(screen.ScrollOffset > 0);
+
+            window.KeyTextInput("x");
+            Assert.Equal(0, screen.ScrollOffset);
+
+            control.ScrollByRows(-3);
+
+            Assert.True(screen.ScrollOffset > 0);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public void Control_NativeViewportOutputWhileScrolledBack_PreservesViewport()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 96, VisibleRows: 4),
+            []);
+        processor.ScrollToBottomOnProcess = true;
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+
+        control.WriteOutput("initial\n"u8);
+        control.ScrollByRows(-3);
+        Assert.Equal(93UL, processor.ViewportScrollState.OffsetRows);
+
+        control.WriteOutput("output\n"u8);
+
+        Assert.Equal(93UL, processor.ViewportScrollState.OffsetRows);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeViewportWheelInsideScrollViewer_ScrollsAwayFromBottom()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 96, VisibleRows: 4),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        ScrollViewer scrollViewer = new()
+        {
+            Width = 640,
+            Height = 400,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = control,
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = scrollViewer,
+        };
+        window.Show();
+
+        try
+        {
+            await WaitUntilAsync(
+                () => control.Bounds.Width > 1 && control.Bounds.Height > 1,
+                TimeSpan.FromSeconds(2));
+
+            control.WriteOutput("initial\n"u8);
+            control.ScrollToBottom();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+            Assert.Equal(96UL, processor.ViewportScrollState.OffsetRows);
+
+            Point? translated = control.TranslatePoint(
+                new Point(control.Bounds.Width * 0.5, control.Bounds.Height * 0.5),
+                window);
+            Assert.True(translated.HasValue);
+            Point point = translated.Value;
+            window.MouseWheel(point, new Vector(0, 1), RawInputModifiers.None);
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            Assert.True(processor.ScrollViewportByRowsCallCount > 0);
+            Assert.True(
+                processor.ViewportScrollState.OffsetRows < processor.ViewportScrollState.MaxOffsetRows,
+                $"Expected wheel-up to leave bottom. State={processor.ViewportScrollState}, Calls={processor.ScrollViewportByRowsCallCount}, LastSet={processor.LastSetViewportOffsetRows}, ScrollViewerOffset={scrollViewer.Offset}.");
+            Assert.True(
+                scrollViewer.Offset.Y < scrollViewer.Extent.Height - scrollViewer.Viewport.Height,
+                $"Expected ScrollViewer offset to leave bottom. Offset={scrollViewer.Offset}, Extent={scrollViewer.Extent}, Viewport={scrollViewer.Viewport}.");
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeViewportTextInputAfterWheelScroll_UpdatesScrollViewerToBottom()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 96, VisibleRows: 4),
+            []);
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        ScrollViewer scrollViewer = new()
+        {
+            Width = 640,
+            Height = 400,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = control,
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = scrollViewer,
+        };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            await WaitUntilAsync(
+                () => control.Bounds.Width > 1 && control.Bounds.Height > 1,
+                TimeSpan.FromSeconds(2));
+
+            control.WriteOutput("initial\n"u8);
+            control.ScrollToBottom();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            Point? translated = control.TranslatePoint(
+                new Point(control.Bounds.Width * 0.5, control.Bounds.Height * 0.5),
+                window);
+            Assert.True(translated.HasValue);
+            window.MouseWheel(translated.Value, new Vector(0, 1), RawInputModifiers.None);
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+            Assert.True(processor.ViewportScrollState.OffsetRows < processor.ViewportScrollState.MaxOffsetRows);
+            Assert.True(scrollViewer.Offset.Y < scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+
+            window.KeyTextInput("x");
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            Assert.Equal(processor.ViewportScrollState.MaxOffsetRows, processor.ViewportScrollState.OffsetRows);
+            Assert.True(
+                Math.Abs(scrollViewer.Offset.Y - (scrollViewer.Extent.Height - scrollViewer.Viewport.Height)) < 1d,
+                $"Expected ScrollViewer offset at bottom. Offset={scrollViewer.Offset}, Extent={scrollViewer.Extent}, Viewport={scrollViewer.Viewport}.");
+            Assert.Contains(transport.SentInputs, static payload =>
+                payload.Length == 1 && payload[0] == (byte)'x');
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
     public void Control_AlternateScreenResize_DoesNotExposePrimaryScrollback()
     {
         TerminalControl control = new()
@@ -2128,6 +2474,18 @@ public class TerminalControlTests
         };
     }
 
+    private static void PopulateScrollableNormalBuffer(TerminalControl control)
+    {
+        for (int i = 0; i < 64; i++)
+        {
+            control.WriteOutput(Encoding.UTF8.GetBytes($"LINE-{i:000}\n"));
+        }
+
+        Assert.NotNull(control.Screen);
+        Assert.NotNull(control.ScrollData);
+        Assert.True(control.ScrollData!.MaxOffset > 0);
+    }
+
     private static byte[] CaptureFramePng(Window window)
     {
         HeadlessTerminalTestCleanup.RunDispatcherJobs();
@@ -2384,6 +2742,10 @@ public class TerminalControlTests
 
         public ulong? LastSetViewportOffsetRows { get; private set; }
 
+        public int ScrollViewportByRowsCallCount { get; private set; }
+
+        public bool ScrollToBottomOnProcess { get; set; }
+
         public event EventHandler<TerminalModeState>? ModeChanged
         {
             add { }
@@ -2399,6 +2761,10 @@ public class TerminalControlTests
         public void Process(ReadOnlySpan<byte> data)
         {
             _ = data;
+            if (ScrollToBottomOnProcess)
+            {
+                ScrollViewportToBottom();
+            }
         }
 
         public void NotifyResize(int columns, int rows)
@@ -2430,6 +2796,8 @@ public class TerminalControlTests
 
         public void ScrollViewportByRows(int deltaRows)
         {
+            ScrollViewportByRowsCallCount++;
+
             long next = checked((long)ViewportScrollState.OffsetRows + deltaRows);
             if (next < 0)
             {
