@@ -7,6 +7,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using RoyalTerminal.Terminal;
 using SkiaSharp;
@@ -34,6 +35,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const float SymbolGlyphClipPaddingCells = 0.5f;
     private const float DefaultBackgroundOpacity = 0.82f;
     private const long DefaultImageBitmapCacheBudgetBytes = 256L * 1024L * 1024L;
+    private const int MaxTextHighlightRowCacheEntries = 32_768;
+    private const int InitialTextHighlightBufferCapacity = 256;
+    private static readonly TimeSpan s_textHighlightRegexTimeout = TimeSpan.FromMilliseconds(10);
     private static readonly CultureInfo s_renderCulture = CultureInfo.InvariantCulture;
 
     private readonly GlyphCache _glyphCache;
@@ -70,6 +74,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private long _diagnosticImageCacheMisses;
     private long _diagnosticImageCacheEvictions;
     private TerminalHighlightSpan[] _highlightSpans = Array.Empty<TerminalHighlightSpan>();
+    private TerminalTextHighlightRule[] _textHighlightRules = Array.Empty<TerminalTextHighlightRule>();
+    private CompiledTextHighlightRule[] _compiledTextHighlightRules = Array.Empty<CompiledTextHighlightRule>();
+    private readonly Dictionary<TerminalRow, TextHighlightRowCacheEntry> _textHighlightRowCache = new(ReferenceEqualityComparer.Instance);
+    private char[] _textHighlightRowText = Array.Empty<char>();
+    private int[] _textHighlightColumnMap = Array.Empty<int>();
+    private int _textHighlightRuleRevision;
+    private TerminalTextHighlightingMode _textHighlightingMode = TerminalTextHighlightingMode.Static;
 
     // Reusable paint objects to avoid per-frame allocation
     private readonly SKPaint _bgPaint;
@@ -149,6 +160,30 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     /// <summary>The glyph cache used by this renderer.</summary>
     public GlyphCache GlyphCache => _glyphCache;
+
+    /// <summary>
+    /// Gets the configured text highlight rule snapshots.
+    /// </summary>
+    public IReadOnlyList<TerminalTextHighlightRule> TextHighlightRules => _textHighlightRules;
+
+    /// <summary>
+    /// Gets or sets regex-based text highlighting evaluation mode.
+    /// </summary>
+    public TerminalTextHighlightingMode TextHighlightingMode
+    {
+        get => _textHighlightingMode;
+        set
+        {
+            TerminalTextHighlightingMode next = NormalizeTextHighlightingMode(value);
+            if (_textHighlightingMode == next)
+            {
+                return;
+            }
+
+            _textHighlightingMode = next;
+            _textHighlightRowCache.Clear();
+        }
+    }
 
     /// <summary>
     /// Enables collection of text-render diagnostics counters.
@@ -313,6 +348,67 @@ public sealed class SkiaTerminalRenderer : IDisposable
     }
 
     /// <summary>
+    /// Replaces regex-based text highlight rules used for foreground/background overrides.
+    /// Invalid regular expressions are ignored so rendering cannot fail because of a user-authored rule.
+    /// </summary>
+    public void SetTextHighlightRules(IReadOnlyList<TerminalTextHighlightRule>? rules)
+    {
+        if (rules is null || rules.Count == 0)
+        {
+            ClearTextHighlightRules();
+            return;
+        }
+
+        List<TerminalTextHighlightRule> copy = new(rules.Count);
+        for (int i = 0; i < rules.Count; i++)
+        {
+            TerminalTextHighlightRule? rule = rules[i];
+            if (rule is not null)
+            {
+                copy.Add(rule);
+            }
+        }
+
+        if (copy.Count == 0)
+        {
+            ClearTextHighlightRules();
+            return;
+        }
+
+        TerminalTextHighlightRule[] nextRules = copy.ToArray();
+        if (AreTextHighlightRulesEqual(_textHighlightRules, nextRules))
+        {
+            return;
+        }
+
+        _textHighlightRules = nextRules;
+        _compiledTextHighlightRules = CompileTextHighlightRules(_textHighlightRules);
+        unchecked
+        {
+            _textHighlightRuleRevision++;
+        }
+
+        _textHighlightRowCache.Clear();
+    }
+
+    private void ClearTextHighlightRules()
+    {
+        if (_textHighlightRules.Length == 0 && _compiledTextHighlightRules.Length == 0)
+        {
+            return;
+        }
+
+        _textHighlightRules = Array.Empty<TerminalTextHighlightRule>();
+        _compiledTextHighlightRules = Array.Empty<CompiledTextHighlightRule>();
+        unchecked
+        {
+            _textHighlightRuleRevision++;
+        }
+
+        _textHighlightRowCache.Clear();
+    }
+
+    /// <summary>
     /// Renders the terminal screen to the given SKCanvas.
     /// Only re-renders rows marked as dirty unless forceFullRedraw is true.
     /// </summary>
@@ -323,11 +419,22 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         canvas.Save();
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
+        ReadOnlySpan<CompiledTextHighlightRule> textHighlightRules = _compiledTextHighlightRules;
+        TerminalTextHighlightingMode textHighlightingMode = _textHighlightingMode;
+        bool textHighlightingEnabled = textHighlightingMode != TerminalTextHighlightingMode.Disabled &&
+            !textHighlightRules.IsEmpty;
         ReadOnlySpan<TerminalKittyImagePlacement> kittyPlacements = screen.GetKittyPlacements();
         ReadOnlySpan<TerminalRasterImagePlacement> rasterPlacements = screen.GetRasterImagePlacements();
         long imageFrameId = unchecked(++_imageRenderFrameId);
         int overlayCapacity = Math.Max(1, screen.Columns);
-        CellOverlayFlags[] overlayBuffer = ArrayPool<CellOverlayFlags>.Shared.Rent(overlayCapacity);
+        bool useFullRowBuffers = TryGetPooledRowBufferCellCount(
+            screen.ViewportRows,
+            overlayCapacity,
+            out int rowBufferCellCount);
+        CellOverlayFlags[] overlayBuffer = ArrayPool<CellOverlayFlags>.Shared.Rent(rowBufferCellCount);
+        CellTextHighlightOverride[]? textHighlightBuffer = textHighlightingEnabled
+            ? ArrayPool<CellTextHighlightOverride>.Shared.Rent(rowBufferCellCount)
+            : null;
 
         try
         {
@@ -341,15 +448,31 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 if (!forceFullRedraw && !terminalRow.IsDirty) continue;
 
                 var y = row * _cellHeight;
-                Span<CellOverlayFlags> rowOverlays = overlayBuffer.AsSpan(0, terminalRow.Columns);
+                Span<CellOverlayFlags> rowOverlays = GetRowOverlayFlags(
+                    overlayBuffer,
+                    useFullRowBuffers ? row : 0,
+                    terminalRow.Columns,
+                    overlayCapacity);
                 rowOverlays.Clear();
                 PopulateRowOverlayFlags(
                     row,
                     terminalRow.Columns,
                     highlights,
                     rowOverlays);
+                Span<CellTextHighlightOverride> rowTextHighlights = GetRowTextHighlightOverrides(
+                    textHighlightBuffer,
+                    useFullRowBuffers ? row : 0,
+                    terminalRow.Columns,
+                    overlayCapacity);
+                rowTextHighlights.Clear();
+                PopulateRowTextHighlightOverrides(
+                    terminalRow,
+                    screen.Theme.DefaultBackground,
+                    textHighlightRules,
+                    textHighlightingMode,
+                    rowTextHighlights);
 
-                RenderRowBackground(canvas, terminalRow, y, rowOverlays);
+                RenderRowBackground(canvas, terminalRow, y, rowOverlays, rowTextHighlights);
             }
 
             RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowText, imageFrameId);
@@ -362,15 +485,38 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 if (!forceFullRedraw && !terminalRow.IsDirty) continue;
 
                 var y = row * _cellHeight;
-                Span<CellOverlayFlags> rowOverlays = overlayBuffer.AsSpan(0, terminalRow.Columns);
-                rowOverlays.Clear();
-                PopulateRowOverlayFlags(
-                    row,
+                Span<CellOverlayFlags> rowOverlays = GetRowOverlayFlags(
+                    overlayBuffer,
+                    useFullRowBuffers ? row : 0,
                     terminalRow.Columns,
-                    highlights,
-                    rowOverlays);
+                    overlayCapacity);
+                if (!useFullRowBuffers)
+                {
+                    rowOverlays.Clear();
+                    PopulateRowOverlayFlags(
+                        row,
+                        terminalRow.Columns,
+                        highlights,
+                        rowOverlays);
+                }
 
-                RenderRowText(canvas, terminalRow, y, row, rowOverlays);
+                Span<CellTextHighlightOverride> rowTextHighlights = GetRowTextHighlightOverrides(
+                    textHighlightBuffer,
+                    useFullRowBuffers ? row : 0,
+                    terminalRow.Columns,
+                    overlayCapacity);
+                if (!useFullRowBuffers)
+                {
+                    rowTextHighlights.Clear();
+                    PopulateRowTextHighlightOverrides(
+                        terminalRow,
+                        screen.Theme.DefaultBackground,
+                        textHighlightRules,
+                        textHighlightingMode,
+                        rowTextHighlights);
+                }
+
+                RenderRowText(canvas, terminalRow, y, row, rowOverlays, rowTextHighlights);
                 terminalRow.IsDirty = false;
             }
         }
@@ -379,6 +525,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
             ArrayPool<CellOverlayFlags>.Shared.Return(
                 overlayBuffer,
                 clearArray: false);
+            if (textHighlightBuffer is not null)
+            {
+                ArrayPool<CellTextHighlightOverride>.Shared.Return(
+                    textHighlightBuffer,
+                    clearArray: false);
+            }
         }
 
         RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.AboveText, imageFrameId);
@@ -413,20 +565,27 @@ public sealed class SkiaTerminalRenderer : IDisposable
         SKCanvas canvas,
         TerminalRow row,
         float y,
-        ReadOnlySpan<CellOverlayFlags> rowOverlays)
+        ReadOnlySpan<CellOverlayFlags> rowOverlays,
+        ReadOnlySpan<CellTextHighlightOverride> rowTextHighlights)
     {
         var cells = row.ReadOnlyCells;
         if (cells.IsEmpty) return;
 
         var batchStart = 0;
-        var batchColor = ResolveBackgroundColorForCell(in cells[0], rowOverlays[0]);
+        var batchColor = ResolveBackgroundColorForCell(
+            in cells[0],
+            rowOverlays[0],
+            GetTextHighlightOverride(rowTextHighlights, 0));
 
         for (var col = 1; col <= cells.Length; col++)
         {
             bool flush = col == cells.Length;
             uint currentColor = flush
                 ? 0
-                : ResolveBackgroundColorForCell(in cells[col], rowOverlays[col]);
+                : ResolveBackgroundColorForCell(
+                    in cells[col],
+                    rowOverlays[col],
+                    GetTextHighlightOverride(rowTextHighlights, col));
 
             if (flush || currentColor != batchColor)
             {
@@ -453,7 +612,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
         TerminalRow row,
         float y,
         int rowIndex,
-        ReadOnlySpan<CellOverlayFlags> rowOverlays)
+        ReadOnlySpan<CellOverlayFlags> rowOverlays,
+        ReadOnlySpan<CellTextHighlightOverride> rowTextHighlights)
     {
         ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
         if (cells.IsEmpty)
@@ -476,7 +636,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
             if (TryGetSpriteCodepoint(in firstCell, out _))
             {
-                SKColor spriteColor = GetEffectiveForeground(in firstCell);
+                SKColor spriteColor = ResolveForegroundColorForCell(
+                    in firstCell,
+                    GetTextHighlightOverride(rowTextHighlights, col));
                 int spriteRunEnd = col + 1;
                 while (spriteRunEnd < cells.Length)
                 {
@@ -496,7 +658,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
                         break;
                     }
 
-                    SKColor nextColor = GetEffectiveForeground(in spriteCandidate);
+                    SKColor nextColor = ResolveForegroundColorForCell(
+                        in spriteCandidate,
+                        GetTextHighlightOverride(rowTextHighlights, spriteRunEnd));
                     if (nextColor != spriteColor)
                     {
                         break;
@@ -521,7 +685,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
             bool bold = (firstCell.Attributes & CellAttributes.Bold) != 0;
             bool italic = (firstCell.Attributes & CellAttributes.Italic) != 0;
             SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
-            SKColor runColor = GetEffectiveForeground(in firstCell);
+            SKColor runColor = ResolveForegroundColorForCell(
+                in firstCell,
+                GetTextHighlightOverride(rowTextHighlights, col));
             SKTypeface runTypeface = ResolveTypefaceForCell(primaryTypeface, in firstCell);
             bool firstIsSymbolGlyph = IsSymbolGlyphClipCandidate(in firstCell);
 
@@ -561,7 +727,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     break;
                 }
 
-                SKColor nextColor = GetEffectiveForeground(in nextCell);
+                SKColor nextColor = ResolveForegroundColorForCell(
+                    in nextCell,
+                    GetTextHighlightOverride(rowTextHighlights, runEnd));
                 if (nextColor != runColor)
                 {
                     break;
@@ -2483,6 +2651,549 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return color;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static SKColor ResolveForegroundColorForCell(
+        ref readonly TerminalCell cell,
+        CellTextHighlightOverride textHighlight)
+    {
+        return textHighlight.HasForeground
+            ? new SKColor(textHighlight.Foreground)
+            : GetEffectiveForeground(in cell);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static CellTextHighlightOverride GetTextHighlightOverride(
+        ReadOnlySpan<CellTextHighlightOverride> rowTextHighlights,
+        int column)
+    {
+        return (uint)column < (uint)rowTextHighlights.Length
+            ? rowTextHighlights[column]
+            : default;
+    }
+
+    private static bool TryGetPooledRowBufferCellCount(int rows, int rowCapacity, out int cellCount)
+    {
+        if (rows <= 0)
+        {
+            cellCount = Math.Max(1, rowCapacity);
+            return true;
+        }
+
+        if (rowCapacity <= int.MaxValue / rows)
+        {
+            cellCount = Math.Max(1, rowCapacity * rows);
+            return true;
+        }
+
+        cellCount = Math.Max(1, rowCapacity);
+        return false;
+    }
+
+    private static Span<CellOverlayFlags> GetRowOverlayFlags(
+        CellOverlayFlags[] overlayBuffer,
+        int row,
+        int columnCount,
+        int rowCapacity)
+    {
+        if (columnCount <= 0)
+        {
+            return Span<CellOverlayFlags>.Empty;
+        }
+
+        int start = row * rowCapacity;
+        if ((uint)start >= (uint)overlayBuffer.Length)
+        {
+            return Span<CellOverlayFlags>.Empty;
+        }
+
+        int available = Math.Min(columnCount, overlayBuffer.Length - start);
+        return overlayBuffer.AsSpan(start, available);
+    }
+
+    private static Span<CellTextHighlightOverride> GetRowTextHighlightOverrides(
+        CellTextHighlightOverride[]? textHighlightBuffer,
+        int row,
+        int columnCount,
+        int rowCapacity)
+    {
+        if (textHighlightBuffer is null || columnCount <= 0)
+        {
+            return Span<CellTextHighlightOverride>.Empty;
+        }
+
+        int start = row * rowCapacity;
+        if ((uint)start >= (uint)textHighlightBuffer.Length)
+        {
+            return Span<CellTextHighlightOverride>.Empty;
+        }
+
+        int available = Math.Min(columnCount, textHighlightBuffer.Length - start);
+        return textHighlightBuffer.AsSpan(start, available);
+    }
+
+    private void PopulateRowTextHighlightOverrides(
+        TerminalRow row,
+        uint defaultBackground,
+        ReadOnlySpan<CompiledTextHighlightRule> rules,
+        TerminalTextHighlightingMode mode,
+        Span<CellTextHighlightOverride> rowTextHighlights)
+    {
+        if (mode == TerminalTextHighlightingMode.Disabled || rules.IsEmpty || rowTextHighlights.IsEmpty)
+        {
+            return;
+        }
+
+        bool darkTheme = IsPerceivedDarkColor(defaultBackground);
+        if (mode == TerminalTextHighlightingMode.Static)
+        {
+            ulong rowTextHash = ComputeTextHighlightRowTextHash(row);
+            if (TryCopyCachedTextHighlightOverrides(
+                    row,
+                    rowTextHash,
+                    darkTheme,
+                    rowTextHighlights))
+            {
+                return;
+            }
+
+            PopulateUncachedRowTextHighlightOverrides(row, darkTheme, rules, rowTextHighlights);
+            StoreCachedTextHighlightOverrides(row, rowTextHash, darkTheme, rowTextHighlights);
+            return;
+        }
+
+        PopulateUncachedRowTextHighlightOverrides(row, darkTheme, rules, rowTextHighlights);
+    }
+
+    private void PopulateUncachedRowTextHighlightOverrides(
+        TerminalRow row,
+        bool darkTheme,
+        ReadOnlySpan<CompiledTextHighlightRule> rules,
+        Span<CellTextHighlightOverride> rowTextHighlights)
+    {
+        if (!TryBuildTextHighlightRowTextColumnMap(row, out int rowTextLength))
+        {
+            return;
+        }
+
+        ReadOnlySpan<char> rowText = _textHighlightRowText.AsSpan(0, rowTextLength);
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        for (int i = 0; i < rules.Length; i++)
+        {
+            CompiledTextHighlightRule rule = rules[i];
+            TextHighlightResolvedColors colors = rule.GetColors(darkTheme);
+            if (!colors.HasAnyColor)
+            {
+                continue;
+            }
+
+            try
+            {
+                foreach (ValueMatch match in rule.Regex.EnumerateMatches(rowText))
+                {
+                    if (match.Length > 0)
+                    {
+                        ApplyTextHighlightMatch(
+                            cells,
+                            rowTextHighlights,
+                            rowTextLength,
+                            match.Index,
+                            match.Length,
+                            colors);
+                    }
+                }
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                // A single expensive user-authored regex should not break terminal rendering.
+            }
+        }
+    }
+
+    private bool TryCopyCachedTextHighlightOverrides(
+        TerminalRow row,
+        ulong rowTextHash,
+        bool darkTheme,
+        Span<CellTextHighlightOverride> rowTextHighlights)
+    {
+        if (!_textHighlightRowCache.TryGetValue(row, out TextHighlightRowCacheEntry? entry) ||
+            entry.Columns != rowTextHighlights.Length ||
+            entry.RuleRevision != _textHighlightRuleRevision ||
+            entry.DarkTheme != darkTheme ||
+            entry.RowTextHash != rowTextHash)
+        {
+            return false;
+        }
+
+        if (entry.Overrides.Length > 0)
+        {
+            entry.Overrides.AsSpan(0, rowTextHighlights.Length).CopyTo(rowTextHighlights);
+        }
+
+        return true;
+    }
+
+    private void StoreCachedTextHighlightOverrides(
+        TerminalRow row,
+        ulong rowTextHash,
+        bool darkTheme,
+        ReadOnlySpan<CellTextHighlightOverride> rowTextHighlights)
+    {
+        if (!_textHighlightRowCache.TryGetValue(row, out TextHighlightRowCacheEntry? entry))
+        {
+            if (_textHighlightRowCache.Count >= MaxTextHighlightRowCacheEntries)
+            {
+                _textHighlightRowCache.Clear();
+            }
+
+            entry = new TextHighlightRowCacheEntry();
+            _textHighlightRowCache.Add(row, entry);
+        }
+
+        if (!HasAnyTextHighlightOverride(rowTextHighlights))
+        {
+            entry.Overrides = Array.Empty<CellTextHighlightOverride>();
+        }
+        else
+        {
+            if (entry.Overrides.Length != rowTextHighlights.Length)
+            {
+                entry.Overrides = new CellTextHighlightOverride[rowTextHighlights.Length];
+            }
+
+            rowTextHighlights.CopyTo(entry.Overrides);
+        }
+
+        entry.Columns = rowTextHighlights.Length;
+        entry.RuleRevision = _textHighlightRuleRevision;
+        entry.DarkTheme = darkTheme;
+        entry.RowTextHash = rowTextHash;
+    }
+
+    private static bool HasAnyTextHighlightOverride(ReadOnlySpan<CellTextHighlightOverride> rowTextHighlights)
+    {
+        for (int i = 0; i < rowTextHighlights.Length; i++)
+        {
+            if (rowTextHighlights[i].HasForeground || rowTextHighlights[i].HasBackground)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void ApplyTextHighlightMatch(
+        ReadOnlySpan<TerminalCell> cells,
+        Span<CellTextHighlightOverride> rowTextHighlights,
+        int rowTextLength,
+        int matchIndex,
+        int matchLength,
+        TextHighlightResolvedColors colors)
+    {
+        int mapEnd = matchIndex + matchLength - 1;
+        if ((uint)matchIndex >= (uint)rowTextLength ||
+            (uint)mapEnd >= (uint)rowTextLength)
+        {
+            return;
+        }
+
+        int startColumn = _textHighlightColumnMap[matchIndex];
+        int endColumn = _textHighlightColumnMap[mapEnd];
+        if (endColumn < startColumn)
+        {
+            return;
+        }
+
+        endColumn = ExpandHighlightEndColumnForWideCells(cells, startColumn, endColumn);
+        startColumn = Math.Clamp(startColumn, 0, rowTextHighlights.Length - 1);
+        endColumn = Math.Clamp(endColumn, 0, rowTextHighlights.Length - 1);
+        for (int col = startColumn; col <= endColumn; col++)
+        {
+            if ((uint)col >= (uint)cells.Length)
+            {
+                continue;
+            }
+
+            ref CellTextHighlightOverride textHighlight = ref rowTextHighlights[col];
+            if (colors.HasForeground)
+            {
+                textHighlight.Foreground = colors.Foreground;
+                textHighlight.HasForeground = true;
+            }
+
+            if (colors.HasBackground)
+            {
+                textHighlight.Background = colors.Background;
+                textHighlight.HasBackground = true;
+            }
+        }
+    }
+
+    private static int ExpandHighlightEndColumnForWideCells(
+        ReadOnlySpan<TerminalCell> cells,
+        int startColumn,
+        int endColumn)
+    {
+        int expandedEnd = endColumn;
+        int boundedEnd = Math.Min(endColumn, cells.Length - 1);
+        for (int col = Math.Max(0, startColumn); col <= boundedEnd; col++)
+        {
+            int width = cells[col].Width <= 0 ? 1 : cells[col].Width;
+            expandedEnd = Math.Max(expandedEnd, col + width - 1);
+        }
+
+        return expandedEnd;
+    }
+
+    private bool TryBuildTextHighlightRowTextColumnMap(TerminalRow row, out int rowTextLength)
+    {
+        rowTextLength = 0;
+
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        for (int col = 0; col < cells.Length; col++)
+        {
+            ref readonly TerminalCell cell = ref cells[col];
+            if (cell.Width == 0 || IsCellHidden(in cell))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                ReadOnlySpan<char> text = cell.Grapheme.AsSpan();
+                EnsureTextHighlightBufferCapacity(rowTextLength + text.Length);
+                text.CopyTo(_textHighlightRowText.AsSpan(rowTextLength));
+                _textHighlightColumnMap.AsSpan(rowTextLength, text.Length).Fill(col);
+                rowTextLength += text.Length;
+            }
+            else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
+            {
+                EnsureTextHighlightBufferCapacity(rowTextLength + 2);
+                Rune rune = new(cell.Codepoint);
+                int charsWritten = rune.EncodeToUtf16(_textHighlightRowText.AsSpan(rowTextLength, 2));
+                _textHighlightColumnMap.AsSpan(rowTextLength, charsWritten).Fill(col);
+                rowTextLength += charsWritten;
+            }
+        }
+
+        return rowTextLength > 0;
+    }
+
+    private void EnsureTextHighlightBufferCapacity(int capacity)
+    {
+        if (_textHighlightRowText.Length >= capacity &&
+            _textHighlightColumnMap.Length >= capacity)
+        {
+            return;
+        }
+
+        int nextCapacity = GetTextHighlightBufferCapacity(capacity);
+        if (_textHighlightRowText.Length < capacity)
+        {
+            Array.Resize(ref _textHighlightRowText, nextCapacity);
+        }
+
+        if (_textHighlightColumnMap.Length < capacity)
+        {
+            Array.Resize(ref _textHighlightColumnMap, nextCapacity);
+        }
+    }
+
+    private int GetTextHighlightBufferCapacity(int requiredCapacity)
+    {
+        int currentCapacity = Math.Max(_textHighlightRowText.Length, _textHighlightColumnMap.Length);
+        int nextCapacity = currentCapacity == 0
+            ? InitialTextHighlightBufferCapacity
+            : currentCapacity;
+        while (nextCapacity < requiredCapacity)
+        {
+            int doubled = nextCapacity * 2;
+            if (doubled <= nextCapacity)
+            {
+                return requiredCapacity;
+            }
+
+            nextCapacity = doubled;
+        }
+
+        return nextCapacity;
+    }
+
+    private static ulong ComputeTextHighlightRowTextHash(TerminalRow row)
+    {
+        ulong hash = FnvOffsetBasis;
+        AddHashValue(ref hash, row.Columns);
+
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        for (int col = 0; col < cells.Length; col++)
+        {
+            ref readonly TerminalCell cell = ref cells[col];
+            if (cell.Width == 0 || IsCellHidden(in cell))
+            {
+                continue;
+            }
+
+            AddHashValue(ref hash, col);
+            AddHashValue(ref hash, cell.Width);
+
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                AddHashValue(ref hash, cell.Grapheme.Length);
+                for (int i = 0; i < cell.Grapheme.Length; i++)
+                {
+                    AddHashValue(ref hash, cell.Grapheme[i]);
+                }
+            }
+            else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
+            {
+                AddHashValue(ref hash, cell.Codepoint);
+            }
+            else
+            {
+                AddHashValue(ref hash, 0);
+            }
+        }
+
+        return hash;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AddHashValue(ref ulong hash, int value)
+    {
+        unchecked
+        {
+            hash ^= (uint)value;
+            hash *= FnvPrime;
+        }
+    }
+
+    private static CompiledTextHighlightRule[] CompileTextHighlightRules(
+        ReadOnlySpan<TerminalTextHighlightRule> rules)
+    {
+        List<CompiledTextHighlightRule> compiledRules = new(rules.Length);
+        for (int i = 0; i < rules.Length; i++)
+        {
+            TerminalTextHighlightRule rule = rules[i];
+            if (!rule.IsEnabled ||
+                string.IsNullOrWhiteSpace(rule.Pattern) ||
+                !HasAnyConfiguredColor(rule))
+            {
+                continue;
+            }
+
+            try
+            {
+                Regex regex = CreateTextHighlightRegex(rule.Pattern);
+                compiledRules.Add(new CompiledTextHighlightRule(
+                    regex,
+                    CreateLightTextHighlightColors(rule),
+                    CreateDarkTextHighlightColors(rule)));
+            }
+            catch (ArgumentException)
+            {
+                // Invalid user regexes remain in the public rule list but do not render.
+            }
+        }
+
+        return compiledRules.Count == 0 ? Array.Empty<CompiledTextHighlightRule>() : compiledRules.ToArray();
+    }
+
+    private static Regex CreateTextHighlightRegex(string pattern)
+    {
+        RegexOptions options = GetTextHighlightRegexOptions();
+        try
+        {
+            return new Regex(
+                pattern,
+                options | RegexOptions.NonBacktracking,
+                s_textHighlightRegexTimeout);
+        }
+        catch (NotSupportedException)
+        {
+            return new Regex(pattern, options, s_textHighlightRegexTimeout);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static RegexOptions GetTextHighlightRegexOptions()
+    {
+        RegexOptions options = RegexOptions.CultureInvariant;
+        if (RuntimeFeature.IsDynamicCodeCompiled)
+        {
+            options |= RegexOptions.Compiled;
+        }
+
+        return options;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static TerminalTextHighlightingMode NormalizeTextHighlightingMode(TerminalTextHighlightingMode mode)
+    {
+        return Enum.IsDefined(mode)
+            ? mode
+            : TerminalTextHighlightingMode.Static;
+    }
+
+    private static bool AreTextHighlightRulesEqual(
+        ReadOnlySpan<TerminalTextHighlightRule> left,
+        ReadOnlySpan<TerminalTextHighlightRule> right)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < left.Length; i++)
+        {
+            if (!left[i].Equals(right[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool HasAnyConfiguredColor(TerminalTextHighlightRule rule)
+    {
+        return rule.Foreground is not null ||
+               rule.Background is not null ||
+               rule.DarkForeground is not null ||
+               rule.DarkBackground is not null;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static TextHighlightResolvedColors CreateLightTextHighlightColors(TerminalTextHighlightRule rule)
+    {
+        return new TextHighlightResolvedColors(
+            rule.Foreground.GetValueOrDefault(),
+            rule.Background.GetValueOrDefault(),
+            rule.Foreground.HasValue,
+            rule.Background.HasValue);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static TextHighlightResolvedColors CreateDarkTextHighlightColors(TerminalTextHighlightRule rule)
+    {
+        uint? foreground = rule.DarkForeground ?? rule.Foreground;
+        uint? background = rule.DarkBackground ?? rule.Background;
+        return new TextHighlightResolvedColors(
+            foreground.GetValueOrDefault(),
+            background.GetValueOrDefault(),
+            foreground.HasValue,
+            background.HasValue);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsPerceivedDarkColor(uint argb)
+    {
+        byte red = (byte)((argb >> 16) & 0xFF);
+        byte green = (byte)((argb >> 8) & 0xFF);
+        byte blue = (byte)(argb & 0xFF);
+        return (red * 299) + (green * 587) + (blue * 114) < 128_000;
+    }
+
     private void PopulateRowOverlayFlags(
         int rowIndex,
         int columnCount,
@@ -2562,7 +3273,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private uint ResolveBackgroundColorForCell(
         ref readonly TerminalCell cell,
-        CellOverlayFlags overlays)
+        CellOverlayFlags overlays,
+        CellTextHighlightOverride textHighlight)
     {
         if ((overlays & CellOverlayFlags.Selection) != 0)
         {
@@ -2577,6 +3289,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
         if ((overlays & CellOverlayFlags.SearchMatch) != 0)
         {
             return PackColor(SearchHighlightColor);
+        }
+
+        if (textHighlight.HasBackground)
+        {
+            return textHighlight.Background;
         }
 
         uint color = GetEffectiveBackground(in cell);
@@ -3251,6 +3968,41 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             Bitmap.Dispose();
         }
+    }
+
+    private readonly record struct CompiledTextHighlightRule(
+        Regex Regex,
+        TextHighlightResolvedColors LightColors,
+        TextHighlightResolvedColors DarkColors)
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public TextHighlightResolvedColors GetColors(bool darkTheme) => darkTheme ? DarkColors : LightColors;
+    }
+
+    private readonly record struct TextHighlightResolvedColors(
+        uint Foreground,
+        uint Background,
+        bool HasForeground,
+        bool HasBackground)
+    {
+        public bool HasAnyColor => HasForeground || HasBackground;
+    }
+
+    private sealed class TextHighlightRowCacheEntry
+    {
+        public CellTextHighlightOverride[] Overrides = Array.Empty<CellTextHighlightOverride>();
+        public ulong RowTextHash;
+        public int Columns;
+        public int RuleRevision;
+        public bool DarkTheme;
+    }
+
+    private struct CellTextHighlightOverride
+    {
+        public uint Foreground;
+        public uint Background;
+        public bool HasForeground;
+        public bool HasBackground;
     }
 
     private static float ComputeBaseline(SKFontMetrics metrics, float cellHeight)
