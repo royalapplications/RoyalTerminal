@@ -85,6 +85,14 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _enableLigatures;
     private readonly IReadOnlyList<TerminalPasteSafetyPolicy> _pasteSafetyPolicies = Enum.GetValues<TerminalPasteSafetyPolicy>();
     private TerminalPasteSafetyPolicy _selectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.None;
+    private TaskCompletionSource<bool>? _sshHostKeyPromptCompletion;
+    private bool _isSshHostKeyPromptVisible;
+    private string _sshHostKeyPromptTitle = string.Empty;
+    private string _sshHostKeyPromptEndpoint = string.Empty;
+    private string _sshHostKeyPromptAlgorithm = string.Empty;
+    private string _sshHostKeyPromptFingerprintSha256 = string.Empty;
+    private string _sshHostKeyPromptFingerprintMd5 = string.Empty;
+    private string _sshHostKeyPromptPersistenceText = string.Empty;
 
     private string _sshHost = "localhost";
     private string _sshPort = "22";
@@ -210,6 +218,8 @@ public sealed class MainWindowViewModel : ReactiveObject
         ToggleGhosttyDiagnosticsInteraction = new Interaction<bool, Unit>();
         CopySnapshotInteraction = new Interaction<TerminalSnapshotExportFormat, Unit>();
         ApplyShaderSampleInteraction = new Interaction<string, Unit>();
+        AcceptSshHostKeyCommand = ReactiveCommand.Create(AcceptSshHostKeyPrompt);
+        DeclineSshHostKeyCommand = ReactiveCommand.Create(DeclineSshHostKeyPrompt);
 
         NewTabCommand = ReactiveCommand.CreateFromObservable(() => CreateNewTabInteraction.Handle(Unit.Default));
         CloseCurrentTabCommand = ReactiveCommand.CreateFromObservable(() => CloseCurrentTabInteraction.Handle(Unit.Default));
@@ -278,6 +288,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<TerminalSnapshotExportFormat, Unit> CopySnapshotInteraction { get; }
     public Interaction<string, Unit> ApplyShaderSampleInteraction { get; }
 
+    public ReactiveCommand<Unit, Unit> AcceptSshHostKeyCommand { get; }
+    public ReactiveCommand<Unit, Unit> DeclineSshHostKeyCommand { get; }
     public ReactiveCommand<Unit, Unit> NewTabCommand { get; }
     public ReactiveCommand<Unit, Unit> CloseCurrentTabCommand { get; }
     public ReactiveCommand<object?, Unit> ActivateTabCommand { get; }
@@ -315,6 +327,48 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> CycleShaderSampleCommand { get; }
 
     public TerminalSettingsPanelState SettingsPanelState => _settingsPanelState ??= new TerminalSettingsPanelState();
+
+    public bool IsSshHostKeyPromptVisible
+    {
+        get => _isSshHostKeyPromptVisible;
+        private set => this.RaiseAndSetIfChanged(ref _isSshHostKeyPromptVisible, value);
+    }
+
+    public string SshHostKeyPromptTitle
+    {
+        get => _sshHostKeyPromptTitle;
+        private set => this.RaiseAndSetIfChanged(ref _sshHostKeyPromptTitle, value);
+    }
+
+    public string SshHostKeyPromptEndpoint
+    {
+        get => _sshHostKeyPromptEndpoint;
+        private set => this.RaiseAndSetIfChanged(ref _sshHostKeyPromptEndpoint, value);
+    }
+
+    public string SshHostKeyPromptAlgorithm
+    {
+        get => _sshHostKeyPromptAlgorithm;
+        private set => this.RaiseAndSetIfChanged(ref _sshHostKeyPromptAlgorithm, value);
+    }
+
+    public string SshHostKeyPromptFingerprintSha256
+    {
+        get => _sshHostKeyPromptFingerprintSha256;
+        private set => this.RaiseAndSetIfChanged(ref _sshHostKeyPromptFingerprintSha256, value);
+    }
+
+    public string SshHostKeyPromptFingerprintMd5
+    {
+        get => _sshHostKeyPromptFingerprintMd5;
+        private set => this.RaiseAndSetIfChanged(ref _sshHostKeyPromptFingerprintMd5, value);
+    }
+
+    public string SshHostKeyPromptPersistenceText
+    {
+        get => _sshHostKeyPromptPersistenceText;
+        private set => this.RaiseAndSetIfChanged(ref _sshHostKeyPromptPersistenceText, value);
+    }
 
     public double FontSize
     {
@@ -1775,6 +1829,50 @@ public sealed class MainWindowViewModel : ReactiveObject
         this.RaisePropertyChanged(nameof(CanAdvanceSearch));
         this.RaisePropertyChanged(nameof(CanClearSearch));
         this.RaisePropertyChanged(nameof(SearchResultText));
+    }
+
+    internal Task<bool> ShowSshHostKeyPromptAsync(SshHostKeyTrustPromptRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        _sshHostKeyPromptCompletion?.TrySetResult(false);
+
+        TaskCompletionSource<bool> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _sshHostKeyPromptCompletion = completion;
+
+        SshHostKeyPromptTitle = "Unknown SSH host key";
+        SshHostKeyPromptEndpoint = $"{request.Username}@{request.Host}:{request.Port}";
+        SshHostKeyPromptAlgorithm = request.KeyLengthBits > 0
+            ? $"{request.HostKeyAlgorithm} ({request.KeyLengthBits} bits)"
+            : request.HostKeyAlgorithm;
+        SshHostKeyPromptFingerprintSha256 = request.FingerprintSha256;
+        SshHostKeyPromptFingerprintMd5 = string.IsNullOrWhiteSpace(request.FingerprintMd5)
+            ? "Unavailable"
+            : request.FingerprintMd5;
+        SshHostKeyPromptPersistenceText = request.WillPersistTrust
+            ? $"Accepting adds this key to {request.KnownHostsFilePath} and continues the SSH connection."
+            : "Accepting continues this SSH connection for the current session.";
+        IsSshHostKeyPromptVisible = true;
+
+        return completion.Task;
+    }
+
+    private void AcceptSshHostKeyPrompt()
+    {
+        CompleteSshHostKeyPrompt(accepted: true);
+    }
+
+    private void DeclineSshHostKeyPrompt()
+    {
+        CompleteSshHostKeyPrompt(accepted: false);
+    }
+
+    private void CompleteSshHostKeyPrompt(bool accepted)
+    {
+        TaskCompletionSource<bool>? completion = _sshHostKeyPromptCompletion;
+        _sshHostKeyPromptCompletion = null;
+        IsSshHostKeyPromptVisible = false;
+        completion?.TrySetResult(accepted);
     }
 
     private static string GetDefaultSessionLogPath()
