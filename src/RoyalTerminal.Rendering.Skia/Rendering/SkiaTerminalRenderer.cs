@@ -37,7 +37,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const long DefaultImageBitmapCacheBudgetBytes = 256L * 1024L * 1024L;
     private const int MaxTextHighlightRowCacheEntries = 32_768;
     private const int InitialTextHighlightBufferCapacity = 256;
-    private static readonly TimeSpan s_textHighlightRegexTimeout = TimeSpan.FromMilliseconds(10);
+    private static readonly TimeSpan s_textHighlightNonBacktrackingRegexTimeout = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan s_textHighlightBacktrackingRegexTimeout = TimeSpan.FromMilliseconds(10);
     private static readonly CultureInfo s_renderCulture = CultureInfo.InvariantCulture;
 
     private readonly GlyphCache _glyphCache;
@@ -3103,16 +3104,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
         RegexOptions options = GetTextHighlightRegexOptions();
         try
         {
-            // Keep the linear-time engine off the compiled path so first-use JIT cost
-            // cannot consume the render-time match timeout on x64 CI runners.
+            // The non-backtracking engine is linear, so give it enough headroom
+            // for cold first-use costs while keeping fallback patterns tightly bounded.
             return new Regex(
                 pattern,
                 RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
-                s_textHighlightRegexTimeout);
+                s_textHighlightNonBacktrackingRegexTimeout);
         }
         catch (NotSupportedException)
         {
-            return new Regex(pattern, options, s_textHighlightRegexTimeout);
+            return new Regex(pattern, options, s_textHighlightBacktrackingRegexTimeout);
         }
     }
 
