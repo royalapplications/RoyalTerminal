@@ -31,15 +31,22 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const float GridScaleFallbackMax = 1.6f;
     private const float GridClampToleranceRatio = 0.04f;
     private const float GridClampTolerancePx = 0.25f;
+    private const float SymbolGlyphClipPaddingCells = 0.5f;
     private const float DefaultBackgroundOpacity = 0.82f;
+    private const long DefaultImageBitmapCacheBudgetBytes = 256L * 1024L * 1024L;
     private static readonly CultureInfo s_renderCulture = CultureInfo.InvariantCulture;
 
     private readonly GlyphCache _glyphCache;
     private readonly HarfBuzzTextShaper _textShaper;
     private readonly TerminalFontResolver _fontResolver;
     private readonly ShapedRunCache _shapedRunCache;
-    private readonly Dictionary<int, KittyBitmapCacheEntry> _kittyBitmapCache = new();
+    private readonly Dictionary<TerminalBitmapCacheKey, TerminalBitmapCacheEntry> _kittyBitmapCache = new();
+    private readonly Dictionary<TerminalBitmapCacheKey, TerminalBitmapCacheEntry> _rasterBitmapCache = new();
     private const float CellMetricEpsilon = 0.01f;
+    private long _imageBitmapCacheBudgetBytes = DefaultImageBitmapCacheBudgetBytes;
+    private long _kittyBitmapCacheBytes;
+    private long _rasterBitmapCacheBytes;
+    private long _imageRenderFrameId;
     private float _cellWidth;
     private float _cellHeight;
     private float _fontSize;
@@ -56,6 +63,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private long _diagnosticBrailleSpriteCells;
     private long _diagnosticBlockSpriteCells;
     private long _diagnosticScanLineSpriteCells;
+    private long _diagnosticImagePlacementsVisited;
+    private long _diagnosticImagePlacementsVisible;
+    private long _diagnosticImageDraws;
+    private long _diagnosticImageCacheHits;
+    private long _diagnosticImageCacheMisses;
+    private long _diagnosticImageCacheEvictions;
     private TerminalHighlightSpan[] _highlightSpans = Array.Empty<TerminalHighlightSpan>();
 
     // Reusable paint objects to avoid per-frame allocation
@@ -63,6 +76,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private readonly SKPaint _fgPaint;
     private readonly SKPaint _cursorPaint;
     private readonly SKPaint _spritePaint;
+    private readonly SKPaint _symbolPaint;
     private readonly SKPath _spritePath;
 
     /// <summary>Cell width in pixels.</summary>
@@ -143,6 +157,22 @@ public sealed class SkiaTerminalRenderer : IDisposable
     public bool EnableTextRenderDiagnostics { get; set; }
 
     /// <summary>
+    /// Enables collection of terminal image-render diagnostics counters.
+    /// Disabled by default.
+    /// </summary>
+    public bool EnableImageRenderDiagnostics { get; set; }
+
+    /// <summary>
+    /// Maximum retained Skia bitmap cache bytes per terminal image protocol.
+    /// Visible images are protected from eviction during the frame that draws them.
+    /// </summary>
+    public long ImageBitmapCacheBudgetBytes
+    {
+        get => _imageBitmapCacheBudgetBytes;
+        set => _imageBitmapCacheBudgetBytes = Math.Max(0, value);
+    }
+
+    /// <summary>
     /// Enables or disables HarfBuzz shaping for terminal text rendering.
     /// When disabled, renderer falls back to cell-anchored text drawing.
     /// </summary>
@@ -211,6 +241,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _spritePaint = new SKPaint
         {
             IsAntialias = false,
+            Style = SKPaintStyle.Fill,
+        };
+        _symbolPaint = new SKPaint
+        {
+            IsAntialias = true,
             Style = SKPaintStyle.Fill,
         };
         _spritePath = new SKPath();
@@ -289,13 +324,15 @@ public sealed class SkiaTerminalRenderer : IDisposable
         canvas.Save();
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
         ReadOnlySpan<TerminalKittyImagePlacement> kittyPlacements = screen.GetKittyPlacements();
-        HashSet<int>? activeKittyImageIds = kittyPlacements.IsEmpty ? null : new HashSet<int>();
+        ReadOnlySpan<TerminalRasterImagePlacement> rasterPlacements = screen.GetRasterImagePlacements();
+        long imageFrameId = unchecked(++_imageRenderFrameId);
         int overlayCapacity = Math.Max(1, screen.Columns);
         CellOverlayFlags[] overlayBuffer = ArrayPool<CellOverlayFlags>.Shared.Rent(overlayCapacity);
 
         try
         {
-            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowBackground, activeKittyImageIds);
+            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowBackground, imageFrameId);
+            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowBackground, imageFrameId);
 
             // Render backgrounds first (batched)
             for (var row = 0; row < screen.ViewportRows; row++)
@@ -315,7 +352,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 RenderRowBackground(canvas, terminalRow, y, rowOverlays);
             }
 
-            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowText, activeKittyImageIds);
+            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowText, imageFrameId);
+            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowText, imageFrameId);
 
             // Render text on top of the cell layer.
             for (var row = 0; row < screen.ViewportRows; row++)
@@ -343,11 +381,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 clearArray: false);
         }
 
-        RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.AboveText, activeKittyImageIds);
-        IEnumerable<int> activeKittyBitmapIds = activeKittyImageIds is not null
-            ? activeKittyImageIds
-            : Array.Empty<int>();
-        TrimKittyBitmapCache(activeKittyBitmapIds);
+        RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.AboveText, imageFrameId);
+        RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.AboveText, imageFrameId);
+        TrimBitmapCache(_kittyBitmapCache, ref _kittyBitmapCacheBytes, imageFrameId);
+        TrimBitmapCache(_rasterBitmapCache, ref _rasterBitmapCacheBytes, imageFrameId);
 
         // Render cursor
         if (CursorVisible)
@@ -486,10 +523,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
             SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
             SKColor runColor = GetEffectiveForeground(in firstCell);
             SKTypeface runTypeface = ResolveTypefaceForCell(primaryTypeface, in firstCell);
+            bool firstIsSymbolGlyph = IsSymbolGlyphClipCandidate(in firstCell);
 
             int runEnd = col + 1;
             while (runEnd < cells.Length)
             {
+                if (firstIsSymbolGlyph)
+                {
+                    break;
+                }
+
                 if (splitRunsAroundCursor && ShouldSplitRunAroundCursor(col, runEnd, cursorSplitColumn))
                 {
                     break;
@@ -502,6 +545,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 }
 
                 if (TryGetSpriteCodepoint(in nextCell, out _))
+                {
+                    break;
+                }
+
+                if (IsSymbolGlyphClipCandidate(in nextCell))
                 {
                     break;
                 }
@@ -638,12 +686,175 @@ public sealed class SkiaTerminalRenderer : IDisposable
                         DrawScanLine(canvas, x, y, spriteWidth, spriteHeight, scanLineRatio, color);
                     }
                     break;
+
+                case SpriteCategory.Symbol:
+                    DrawGeometricSymbol(canvas, codepoint, x, y, spriteWidth, spriteHeight, color);
+                    break;
             }
         }
         finally
         {
             canvas.Restore();
         }
+    }
+
+    private void DrawGeometricSymbol(
+        SKCanvas canvas,
+        int codepoint,
+        float x,
+        float y,
+        float width,
+        float height,
+        SKColor color)
+    {
+        _symbolPaint.Color = color;
+        float diameter = MathF.Max(1f, MathF.Min(width, height) * 0.74f);
+        float radius = diameter * 0.5f;
+        float centerX = x + (width * 0.5f);
+        float centerY = y + (height * 0.5f);
+
+        switch (codepoint)
+        {
+            case 0x25A0: // Black square.
+                DrawCenteredSquare(canvas, centerX, centerY, MathF.Min(width, height) * 0.54f, fill: true);
+                break;
+
+            case 0x25CB: // White circle.
+            case 0x25EF: // Large circle.
+                _symbolPaint.Style = SKPaintStyle.Stroke;
+                _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(MathF.Min(width, height) * 0.08f));
+                canvas.DrawCircle(centerX, centerY, radius, _symbolPaint);
+                break;
+
+            case 0x25CF: // Black circle.
+            case 0x2B24: // Black large circle.
+                _symbolPaint.Style = SKPaintStyle.Fill;
+                canvas.DrawCircle(centerX, centerY, radius, _symbolPaint);
+                break;
+
+            case 0x2610: // Ballot box.
+                DrawCenteredSquare(canvas, centerX, centerY, MathF.Min(width, height) * 0.58f, fill: false);
+                break;
+
+            case 0x2611: // Ballot box with check.
+            case 0x1F5F9: // Ballot box with bold check.
+                {
+                    float size = MathF.Min(width, height) * 0.58f;
+                    DrawCenteredSquare(canvas, centerX, centerY, size, fill: false);
+                    DrawCheckMark(canvas, centerX, centerY, size);
+                    break;
+                }
+
+            case 0x2612: // Ballot box with x.
+                {
+                    float size = MathF.Min(width, height) * 0.58f;
+                    DrawCenteredSquare(canvas, centerX, centerY, size, fill: false);
+                    DrawCrossMark(canvas, centerX, centerY, size);
+                    break;
+                }
+
+            case 0x1F7D7: // Circled square.
+                DrawCenteredSquare(canvas, centerX, centerY, MathF.Min(width, height) * 0.38f, fill: true);
+                _symbolPaint.Style = SKPaintStyle.Stroke;
+                _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(MathF.Min(width, height) * 0.08f));
+                canvas.DrawCircle(centerX, centerY, radius, _symbolPaint);
+                break;
+
+            case 0x1F834: // Leftwards finger-post arrow.
+                DrawFingerPostArrow(canvas, centerX, centerY, MathF.Min(width, height) * 0.70f, horizontal: true);
+                break;
+
+            case 0x1F837: // Downwards finger-post arrow.
+                DrawFingerPostArrow(canvas, centerX, centerY, MathF.Min(width, height) * 0.70f, horizontal: false);
+                break;
+        }
+    }
+
+    private void DrawCenteredSquare(
+        SKCanvas canvas,
+        float centerX,
+        float centerY,
+        float size,
+        bool fill)
+    {
+        float half = MathF.Max(1f, size) * 0.5f;
+        _symbolPaint.Style = fill ? SKPaintStyle.Fill : SKPaintStyle.Stroke;
+        _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(size * 0.12f));
+        _symbolPaint.StrokeCap = SKStrokeCap.Square;
+        canvas.DrawRect(
+            centerX - half,
+            centerY - half,
+            half * 2f,
+            half * 2f,
+            _symbolPaint);
+    }
+
+    private void DrawCheckMark(SKCanvas canvas, float centerX, float centerY, float size)
+    {
+        float half = MathF.Max(1f, size) * 0.5f;
+        float left = centerX - (half * 0.58f);
+        float midX = centerX - (half * 0.12f);
+        float right = centerX + (half * 0.62f);
+        float lower = centerY + (half * 0.14f);
+        float bottom = centerY + (half * 0.48f);
+        float upper = centerY - (half * 0.50f);
+
+        _symbolPaint.Style = SKPaintStyle.Stroke;
+        _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(size * 0.16f));
+        _symbolPaint.StrokeCap = SKStrokeCap.Round;
+        canvas.DrawLine(left, lower, midX, bottom, _symbolPaint);
+        canvas.DrawLine(midX, bottom, right, upper, _symbolPaint);
+    }
+
+    private void DrawCrossMark(SKCanvas canvas, float centerX, float centerY, float size)
+    {
+        float inset = MathF.Max(1f, size) * 0.28f;
+
+        _symbolPaint.Style = SKPaintStyle.Stroke;
+        _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(size * 0.14f));
+        _symbolPaint.StrokeCap = SKStrokeCap.Round;
+        canvas.DrawLine(centerX - inset, centerY - inset, centerX + inset, centerY + inset, _symbolPaint);
+        canvas.DrawLine(centerX + inset, centerY - inset, centerX - inset, centerY + inset, _symbolPaint);
+    }
+
+    private void DrawFingerPostArrow(SKCanvas canvas, float centerX, float centerY, float size, bool horizontal)
+    {
+        float normalizedSize = MathF.Max(1f, size);
+        _symbolPaint.Style = SKPaintStyle.Stroke;
+        _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(normalizedSize * 0.12f));
+        _symbolPaint.StrokeCap = SKStrokeCap.Square;
+
+        if (horizontal)
+        {
+            float left = centerX - (normalizedSize * 0.34f);
+            float right = centerX + (normalizedSize * 0.24f);
+            float top = centerY - (normalizedSize * 0.22f);
+            float bottom = centerY + (normalizedSize * 0.22f);
+            canvas.DrawRect(left, top, right - left, bottom - top, _symbolPaint);
+
+            _spritePath.Reset();
+            _spritePath.MoveTo(left, centerY - (normalizedSize * 0.26f));
+            _spritePath.LineTo(centerX - (normalizedSize * 0.52f), centerY);
+            _spritePath.LineTo(left, centerY + (normalizedSize * 0.26f));
+            _spritePath.Close();
+        }
+        else
+        {
+            float left = centerX - (normalizedSize * 0.24f);
+            float right = centerX + (normalizedSize * 0.24f);
+            float top = centerY - (normalizedSize * 0.34f);
+            float bottom = centerY + (normalizedSize * 0.24f);
+            canvas.DrawRect(left, top, right - left, bottom - top, _symbolPaint);
+
+            _spritePath.Reset();
+            _spritePath.MoveTo(centerX - (normalizedSize * 0.26f), bottom);
+            _spritePath.LineTo(centerX, centerY + (normalizedSize * 0.52f));
+            _spritePath.LineTo(centerX + (normalizedSize * 0.26f), bottom);
+            _spritePath.Close();
+        }
+
+        _symbolPaint.Style = SKPaintStyle.Fill;
+        canvas.DrawPath(_spritePath, _symbolPaint);
     }
 
     private bool TryDrawSpecialBoxDrawingSymbol(
@@ -1345,7 +1556,31 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return true;
         }
 
+        if (IsGeometricSymbolCodepoint(codepoint))
+        {
+            category = SpriteCategory.Symbol;
+            return true;
+        }
+
         return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsGeometricSymbolCodepoint(int codepoint)
+    {
+        return codepoint is
+            0x25A0 or
+            0x25CB or
+            0x25CF or
+            0x25EF or
+            0x2610 or
+            0x2611 or
+            0x2612 or
+            0x2B24 or
+            0x1F834 or
+            0x1F837 or
+            0x1F5F9 or
+            0x1F7D7;
     }
 
     private static bool IsBlockElementCodepoint(int codepoint)
@@ -1392,7 +1627,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         if (!string.IsNullOrEmpty(cell.Grapheme))
         {
             if (Rune.DecodeFromUtf16(cell.Grapheme.AsSpan(), out Rune rune, out int charsConsumed) != OperationStatus.Done ||
-                charsConsumed != cell.Grapheme.Length)
+                !ContainsOnlyTextPresentationSelectors(cell.Grapheme.AsSpan(charsConsumed)))
             {
                 return false;
             }
@@ -1407,6 +1642,22 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         codepoint = cell.Codepoint;
+        return true;
+    }
+
+    private static bool ContainsOnlyTextPresentationSelectors(ReadOnlySpan<char> text)
+    {
+        while (!text.IsEmpty)
+        {
+            if (Rune.DecodeFromUtf16(text, out Rune rune, out int charsConsumed) != OperationStatus.Done ||
+                rune.Value != 0xFE0E)
+            {
+                return false;
+            }
+
+            text = text[charsConsumed..];
+        }
+
         return true;
     }
 
@@ -1825,6 +2076,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return;
         }
 
+        float clipPadding = GetGlyphClipPadding(run.Text.AsSpan());
         SKPoint[] rentedPoints = ArrayPool<SKPoint>.Shared.Rent(run.GlyphCount);
         try
         {
@@ -1839,7 +2091,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
                 if (clampToRunWidth)
                 {
-                    x = Math.Clamp(x, 0f, runWidth);
+                    x = Math.Clamp(x, -clipPadding, runWidth + clipPadding);
                 }
 
                 points[i] = new SKPoint(x, run.YOffsets[i]);
@@ -1857,10 +2109,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
             _fgPaint.Color = color;
 
-            // Keep shaped draw inside the run cell span to preserve terminal grid boundaries.
+            // Keep normal text on-grid while letting symbol ink overhang match terminal renderers.
             canvas.Save();
             canvas.ClipRect(
-                new SKRect(originX, rowY, originX + runWidth, rowY + _cellHeight),
+                new SKRect(originX - clipPadding, rowY, originX + runWidth + clipPadding, rowY + _cellHeight),
                 SKClipOperation.Intersect,
                 antialias: false);
             canvas.DrawText(blob, originX, baselineY, _fgPaint);
@@ -1884,11 +2136,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
     {
         using SKFont font = GlyphCache.CreateFont(typeface, _fontSize);
         _fgPaint.Color = color;
+        float clipPadding = GetGlyphClipPadding(cells, startCol, endCol);
 
         canvas.Save();
         float originX = startCol * _cellWidth;
         canvas.ClipRect(
-            new SKRect(originX, y, originX + runWidth, y + _cellHeight),
+            new SKRect(originX - clipPadding, y, originX + runWidth + clipPadding, y + _cellHeight),
             SKClipOperation.Intersect,
             antialias: false);
         try
@@ -1912,6 +2165,67 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             canvas.Restore();
         }
+    }
+
+    private float GetGlyphClipPadding(ReadOnlySpan<TerminalCell> cells, int startCol, int endCol)
+    {
+        for (int col = startCol; col < endCol; col++)
+        {
+            ref readonly TerminalCell cell = ref cells[col];
+            if (IsSymbolGlyphClipCandidate(in cell))
+            {
+                return _cellWidth * SymbolGlyphClipPaddingCells;
+            }
+        }
+
+        return 0f;
+    }
+
+    private float GetGlyphClipPadding(ReadOnlySpan<char> text)
+    {
+        return ContainsSymbolGlyphClipCandidate(text)
+            ? _cellWidth * SymbolGlyphClipPaddingCells
+            : 0f;
+    }
+
+    private static bool IsSymbolGlyphClipCandidate(ref readonly TerminalCell cell)
+    {
+        return string.IsNullOrEmpty(cell.Grapheme)
+            ? IsSymbolGlyphClipCandidate(cell.Codepoint)
+            : ContainsSymbolGlyphClipCandidate(cell.Grapheme.AsSpan());
+    }
+
+    private static bool ContainsSymbolGlyphClipCandidate(ReadOnlySpan<char> text)
+    {
+        ReadOnlySpan<char> remaining = text;
+        while (!remaining.IsEmpty)
+        {
+            OperationStatus status = Rune.DecodeFromUtf16(remaining, out Rune rune, out int charsConsumed);
+            if (status != OperationStatus.Done)
+            {
+                return false;
+            }
+
+            if (IsSymbolGlyphClipCandidate(rune.Value))
+            {
+                return true;
+            }
+
+            remaining = remaining[charsConsumed..];
+        }
+
+        return false;
+    }
+
+    private static bool IsSymbolGlyphClipCandidate(int codepoint)
+    {
+        if (!Rune.IsValid(codepoint))
+        {
+            return false;
+        }
+
+        UnicodeCategory category = Rune.GetUnicodeCategory(new Rune(codepoint));
+        return category is UnicodeCategory.MathSymbol or UnicodeCategory.OtherSymbol;
     }
 
     private void DrawRunDecorations(
@@ -2495,12 +2809,147 @@ public sealed class SkiaTerminalRenderer : IDisposable
         Interlocked.Exchange(ref _diagnosticScanLineSpriteCells, 0);
     }
 
+    /// <summary>
+    /// Gets a snapshot of terminal image-render diagnostics.
+    /// </summary>
+    /// <param name="reset">When true, counters are reset after snapshot capture.</param>
+    public ImageRenderDiagnostics GetImageRenderDiagnostics(bool reset = false)
+    {
+        long placementsVisited = reset
+            ? Interlocked.Exchange(ref _diagnosticImagePlacementsVisited, 0)
+            : Volatile.Read(ref _diagnosticImagePlacementsVisited);
+        long placementsVisible = reset
+            ? Interlocked.Exchange(ref _diagnosticImagePlacementsVisible, 0)
+            : Volatile.Read(ref _diagnosticImagePlacementsVisible);
+        long draws = reset
+            ? Interlocked.Exchange(ref _diagnosticImageDraws, 0)
+            : Volatile.Read(ref _diagnosticImageDraws);
+        long cacheHits = reset
+            ? Interlocked.Exchange(ref _diagnosticImageCacheHits, 0)
+            : Volatile.Read(ref _diagnosticImageCacheHits);
+        long cacheMisses = reset
+            ? Interlocked.Exchange(ref _diagnosticImageCacheMisses, 0)
+            : Volatile.Read(ref _diagnosticImageCacheMisses);
+        long cacheEvictions = reset
+            ? Interlocked.Exchange(ref _diagnosticImageCacheEvictions, 0)
+            : Volatile.Read(ref _diagnosticImageCacheEvictions);
+
+        return new ImageRenderDiagnostics(
+            placementsVisited,
+            placementsVisible,
+            draws,
+            cacheHits,
+            cacheMisses,
+            cacheEvictions,
+            _kittyBitmapCache.Count,
+            Volatile.Read(ref _kittyBitmapCacheBytes),
+            _rasterBitmapCache.Count,
+            Volatile.Read(ref _rasterBitmapCacheBytes));
+    }
+
+    /// <summary>
+    /// Resets terminal image-render diagnostics counters to zero.
+    /// </summary>
+    public void ResetImageRenderDiagnostics()
+    {
+        Interlocked.Exchange(ref _diagnosticImagePlacementsVisited, 0);
+        Interlocked.Exchange(ref _diagnosticImagePlacementsVisible, 0);
+        Interlocked.Exchange(ref _diagnosticImageDraws, 0);
+        Interlocked.Exchange(ref _diagnosticImageCacheHits, 0);
+        Interlocked.Exchange(ref _diagnosticImageCacheMisses, 0);
+        Interlocked.Exchange(ref _diagnosticImageCacheEvictions, 0);
+    }
+
+    private void RenderRasterLayer(
+        SKCanvas canvas,
+        TerminalScreen screen,
+        ReadOnlySpan<TerminalRasterImagePlacement> placements,
+        TerminalRasterImageLayer layer,
+        long imageFrameId)
+    {
+        if (placements.IsEmpty)
+        {
+            return;
+        }
+
+        float viewportWidth = screen.Columns * _cellWidth;
+        float viewportHeight = screen.ViewportRows * _cellHeight;
+        int viewportTopAbsoluteRow = screen.ViewportTopAbsoluteRow;
+
+        canvas.Save();
+        canvas.ClipRect(new SKRect(0, 0, viewportWidth, viewportHeight));
+
+        try
+        {
+            for (int i = 0; i < placements.Length; i++)
+            {
+                TerminalRasterImagePlacement placement = placements[i];
+                if (placement.Layer != layer)
+                {
+                    continue;
+                }
+
+                RecordImagePlacementVisited();
+                float xScale = GetRasterPlacementScale(placement.CellWidthPx, _cellWidth);
+                float yScale = GetRasterPlacementScale(placement.CellHeightPx, _cellHeight);
+                float destLeft = (placement.AnchorColumn * _cellWidth) + (placement.XOffsetPx * xScale);
+                float destTop = ((placement.AnchorRow - viewportTopAbsoluteRow) * _cellHeight) +
+                    (placement.YOffsetPx * yScale);
+                SKRect destRect = new(
+                    destLeft,
+                    destTop,
+                    destLeft + (placement.WidthPx * xScale),
+                    destTop + (placement.HeightPx * yScale));
+                if (!IntersectsViewport(destRect, viewportWidth, viewportHeight))
+                {
+                    continue;
+                }
+
+                RecordImagePlacementVisible();
+                if (!screen.TryGetRasterImageSource(placement.ImageId, out TerminalRasterImageSource? source) ||
+                    source is null)
+                {
+                    continue;
+                }
+
+                SKRect sourceRect = new(
+                    placement.SourceX,
+                    placement.SourceY,
+                    placement.SourceX + placement.SourceWidth,
+                    placement.SourceY + placement.SourceHeight);
+                if (!IsRenderableImageRect(sourceRect, destRect))
+                {
+                    continue;
+                }
+
+                SKBitmap bitmap = GetOrCreateRasterBitmap(source, imageFrameId);
+                canvas.DrawBitmap(bitmap, sourceRect, destRect);
+                RecordImageDraw();
+            }
+        }
+        finally
+        {
+            canvas.Restore();
+        }
+    }
+
+    private static float GetRasterPlacementScale(int placementCellSizePx, float rendererCellSize)
+    {
+        if (placementCellSizePx <= 0 || rendererCellSize <= 0f)
+        {
+            return 1f;
+        }
+
+        float scale = rendererCellSize / placementCellSizePx;
+        return float.IsFinite(scale) && scale > 0f ? scale : 1f;
+    }
+
     private void RenderKittyLayer(
         SKCanvas canvas,
         TerminalScreen screen,
         ReadOnlySpan<TerminalKittyImagePlacement> placements,
         TerminalKittyImageLayer layer,
-        HashSet<int>? activeImageIds)
+        long imageFrameId)
     {
         if (placements.IsEmpty)
         {
@@ -2523,19 +2972,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     continue;
                 }
 
-                if (!screen.TryGetKittyImageSource(placement.ImageId, out TerminalKittyImageSource? source) ||
-                    source is null)
-                {
-                    continue;
-                }
-
-                activeImageIds?.Add(placement.ImageId);
-                SKBitmap bitmap = GetOrCreateKittyBitmap(source);
-                SKRect sourceRect = new(
-                    placement.SourceX,
-                    placement.SourceY,
-                    placement.SourceX + placement.SourceWidth,
-                    placement.SourceY + placement.SourceHeight);
+                RecordImagePlacementVisited();
                 float destLeft = (placement.ViewportColumn * _cellWidth) + placement.XOffsetPx;
                 float destTop = (placement.ViewportRow * _cellHeight) + placement.YOffsetPx;
                 SKRect destRect = new(
@@ -2543,8 +2980,31 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     destTop,
                     destLeft + placement.WidthPx,
                     destTop + placement.HeightPx);
+                if (!IntersectsViewport(destRect, viewportWidth, viewportHeight))
+                {
+                    continue;
+                }
 
+                RecordImagePlacementVisible();
+                if (!screen.TryGetKittyImageSource(placement.ImageId, out TerminalKittyImageSource? source) ||
+                    source is null)
+                {
+                    continue;
+                }
+
+                SKRect sourceRect = new(
+                    placement.SourceX,
+                    placement.SourceY,
+                    placement.SourceX + placement.SourceWidth,
+                    placement.SourceY + placement.SourceHeight);
+                if (!IsRenderableImageRect(sourceRect, destRect))
+                {
+                    continue;
+                }
+
+                SKBitmap bitmap = GetOrCreateKittyBitmap(source, imageFrameId);
                 canvas.DrawBitmap(bitmap, sourceRect, destRect);
+                RecordImageDraw();
             }
         }
         finally
@@ -2553,76 +3013,185 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
     }
 
-    private SKBitmap GetOrCreateKittyBitmap(TerminalKittyImageSource source)
+    private static bool IntersectsViewport(SKRect rect, float viewportWidth, float viewportHeight)
     {
-        ulong fingerprint = HashBytes(source.RgbaPixels);
-        if (_kittyBitmapCache.TryGetValue(source.ImageId, out KittyBitmapCacheEntry? existing) &&
-            existing.WidthPx == source.WidthPx &&
-            existing.HeightPx == source.HeightPx &&
-            existing.ByteLength == source.RgbaPixels.Length &&
-            existing.Fingerprint == fingerprint)
+        return rect.Right > 0f &&
+            rect.Bottom > 0f &&
+            rect.Left < viewportWidth &&
+            rect.Top < viewportHeight;
+    }
+
+    private static bool IsRenderableImageRect(SKRect sourceRect, SKRect destRect)
+    {
+        return sourceRect.Width > 0f &&
+            sourceRect.Height > 0f &&
+            destRect.Width > 0f &&
+            destRect.Height > 0f;
+    }
+
+    private SKBitmap GetOrCreateKittyBitmap(TerminalKittyImageSource source, long imageFrameId)
+    {
+        return GetOrCreateImageBitmap(
+            source.WidthPx,
+            source.HeightPx,
+            source.RgbaPixels,
+            source.ContentFingerprint,
+            _kittyBitmapCache,
+            ref _kittyBitmapCacheBytes,
+            "Kitty Graphics",
+            imageFrameId);
+    }
+
+    private SKBitmap GetOrCreateRasterBitmap(TerminalRasterImageSource source, long imageFrameId)
+    {
+        return GetOrCreateImageBitmap(
+            source.WidthPx,
+            source.HeightPx,
+            source.RgbaPixels,
+            source.ContentFingerprint,
+            _rasterBitmapCache,
+            ref _rasterBitmapCacheBytes,
+            "terminal raster graphics",
+            imageFrameId);
+    }
+
+    private SKBitmap GetOrCreateImageBitmap(
+        int widthPx,
+        int heightPx,
+        byte[] rgbaPixels,
+        ulong contentFingerprint,
+        Dictionary<TerminalBitmapCacheKey, TerminalBitmapCacheEntry> cache,
+        ref long cacheBytes,
+        string protocolName,
+        long imageFrameId)
+    {
+        TerminalBitmapCacheKey key = new(widthPx, heightPx, rgbaPixels.Length, contentFingerprint);
+        if (cache.TryGetValue(key, out TerminalBitmapCacheEntry? existing))
         {
+            existing.LastUsedFrame = imageFrameId;
+            RecordImageCacheHit();
             return existing.Bitmap;
         }
 
-        existing?.Dispose();
-
-        SKBitmap bitmap = new(source.WidthPx, source.HeightPx, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        SKBitmap bitmap = new(widthPx, heightPx, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         IntPtr pixels = bitmap.GetPixels();
         if (pixels == IntPtr.Zero)
         {
             bitmap.Dispose();
-            throw new InvalidOperationException("Failed to allocate bitmap pixels for Kitty Graphics.");
+            throw new InvalidOperationException($"Failed to allocate bitmap pixels for {protocolName}.");
         }
 
-        Marshal.Copy(source.RgbaPixels, 0, pixels, source.RgbaPixels.Length);
-        _kittyBitmapCache[source.ImageId] = new KittyBitmapCacheEntry(
-            bitmap,
-            source.WidthPx,
-            source.HeightPx,
-            source.RgbaPixels.Length,
-            fingerprint);
+        Marshal.Copy(rgbaPixels, 0, pixels, rgbaPixels.Length);
+        TerminalBitmapCacheEntry entry = new(bitmap, rgbaPixels.Length, imageFrameId);
+        cache[key] = entry;
+        cacheBytes += entry.ByteLength;
+        RecordImageCacheMiss();
         return bitmap;
     }
 
-    private void TrimKittyBitmapCache(IEnumerable<int> activeImageIds)
+    private void TrimBitmapCache(
+        Dictionary<TerminalBitmapCacheKey, TerminalBitmapCacheEntry> cache,
+        ref long cacheBytes,
+        long imageFrameId)
     {
-        HashSet<int> active = activeImageIds as HashSet<int> ?? new HashSet<int>(activeImageIds);
-        List<int>? stale = null;
-
-        foreach ((int imageId, KittyBitmapCacheEntry entry) in _kittyBitmapCache)
-        {
-            if (active.Contains(imageId))
-            {
-                continue;
-            }
-
-            stale ??= new List<int>();
-            stale.Add(imageId);
-            entry.Dispose();
-        }
-
-        if (stale is null)
+        if (cache.Count == 0 || cacheBytes <= _imageBitmapCacheBudgetBytes)
         {
             return;
         }
 
-        for (int i = 0; i < stale.Count; i++)
+        long protectedBytes = 0;
+        foreach (TerminalBitmapCacheEntry entry in cache.Values)
         {
-            _kittyBitmapCache.Remove(stale[i]);
+            if (entry.LastUsedFrame == imageFrameId)
+            {
+                protectedBytes += entry.ByteLength;
+            }
+        }
+
+        long targetBytes = Math.Max(_imageBitmapCacheBudgetBytes, protectedBytes);
+        while (cacheBytes > targetBytes)
+        {
+            TerminalBitmapCacheKey? oldestKey = null;
+            long oldestFrame = long.MaxValue;
+            foreach ((TerminalBitmapCacheKey key, TerminalBitmapCacheEntry candidate) in cache)
+            {
+                if (candidate.LastUsedFrame == imageFrameId)
+                {
+                    continue;
+                }
+
+                if (candidate.LastUsedFrame < oldestFrame)
+                {
+                    oldestFrame = candidate.LastUsedFrame;
+                    oldestKey = key;
+                }
+            }
+
+            if (oldestKey is null)
+            {
+                return;
+            }
+
+            TerminalBitmapCacheEntry entry = cache[oldestKey.Value];
+            entry.Dispose();
+            cacheBytes -= entry.ByteLength;
+            cache.Remove(oldestKey.Value);
+            RecordImageCacheEviction();
         }
     }
 
-    private static ulong HashBytes(ReadOnlySpan<byte> data)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImagePlacementVisited()
     {
-        ulong hash = FnvOffsetBasis;
-        for (int i = 0; i < data.Length; i++)
+        if (EnableImageRenderDiagnostics)
         {
-            hash ^= data[i];
-            hash *= FnvPrime;
+            Interlocked.Increment(ref _diagnosticImagePlacementsVisited);
         }
+    }
 
-        return hash;
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImagePlacementVisible()
+    {
+        if (EnableImageRenderDiagnostics)
+        {
+            Interlocked.Increment(ref _diagnosticImagePlacementsVisible);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImageDraw()
+    {
+        if (EnableImageRenderDiagnostics)
+        {
+            Interlocked.Increment(ref _diagnosticImageDraws);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImageCacheHit()
+    {
+        if (EnableImageRenderDiagnostics)
+        {
+            Interlocked.Increment(ref _diagnosticImageCacheHits);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImageCacheMiss()
+    {
+        if (EnableImageRenderDiagnostics)
+        {
+            Interlocked.Increment(ref _diagnosticImageCacheMisses);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordImageCacheEviction()
+    {
+        if (EnableImageRenderDiagnostics)
+        {
+            Interlocked.Increment(ref _diagnosticImageCacheEvictions);
+        }
     }
 
     public void Dispose()
@@ -2630,16 +3199,25 @@ public sealed class SkiaTerminalRenderer : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        foreach (KittyBitmapCacheEntry entry in _kittyBitmapCache.Values)
+        foreach (TerminalBitmapCacheEntry entry in _kittyBitmapCache.Values)
+        {
+            entry.Dispose();
+        }
+
+        foreach (TerminalBitmapCacheEntry entry in _rasterBitmapCache.Values)
         {
             entry.Dispose();
         }
 
         _kittyBitmapCache.Clear();
+        _rasterBitmapCache.Clear();
+        _kittyBitmapCacheBytes = 0;
+        _rasterBitmapCacheBytes = 0;
         _bgPaint.Dispose();
         _fgPaint.Dispose();
         _cursorPaint.Dispose();
         _spritePaint.Dispose();
+        _symbolPaint.Dispose();
         _spritePath.Dispose();
         _textShaper.Dispose();
         _fontResolver.Dispose();
@@ -2647,27 +3225,27 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _glyphCache.Dispose();
     }
 
-    private sealed class KittyBitmapCacheEntry : IDisposable
+    private readonly record struct TerminalBitmapCacheKey(
+        int WidthPx,
+        int HeightPx,
+        int ByteLength,
+        ulong Fingerprint);
+
+    private sealed class TerminalBitmapCacheEntry : IDisposable
     {
-        public KittyBitmapCacheEntry(
+        public TerminalBitmapCacheEntry(
             SKBitmap bitmap,
-            int widthPx,
-            int heightPx,
             int byteLength,
-            ulong fingerprint)
+            long lastUsedFrame)
         {
             Bitmap = bitmap;
-            WidthPx = widthPx;
-            HeightPx = heightPx;
             ByteLength = byteLength;
-            Fingerprint = fingerprint;
+            LastUsedFrame = lastUsedFrame;
         }
 
         public SKBitmap Bitmap { get; }
-        public int WidthPx { get; }
-        public int HeightPx { get; }
         public int ByteLength { get; }
-        public ulong Fingerprint { get; }
+        public long LastUsedFrame { get; set; }
 
         public void Dispose()
         {
@@ -2798,6 +3376,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         Braille = 1,
         BlockElement = 2,
         ScanLine = 3,
+        Symbol = 4,
     }
 
     private readonly record struct BoxSegments(

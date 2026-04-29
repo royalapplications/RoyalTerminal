@@ -89,6 +89,24 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_DA1_WhenSixelEnabled_AdvertisesSixelFeature()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen)
+        {
+            SixelGraphicsEnabled = true,
+        };
+
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[c"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?62;4;22c", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
     public void BasicVtProcessor_DA1_AcrossChunks_SendsPrimaryDeviceAttributes()
     {
         var screen = new TerminalScreen(80, 24, 0);
@@ -1343,6 +1361,25 @@ public class TerminalQueryTests
         Assert.Equal(2, row[0].Width);
         Assert.Equal(0, row[1].Codepoint);
         Assert.Equal(0, row[1].Width);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_TextPresentationSelector_KeepsSymbolSingleWidth()
+    {
+        const string sliderThumb = "\U0001F837\uFE0E";
+
+        var screen = new TerminalScreen(16, 4, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process(System.Text.Encoding.UTF8.GetBytes(sliderThumb + "-"));
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(2, processor.CursorCol);
+        Assert.Equal(0x1F837, row[0].Codepoint);
+        Assert.Equal(sliderThumb, row[0].Grapheme);
+        Assert.Equal(1, row[0].Width);
+        Assert.Equal('-', row[1].Codepoint);
+        Assert.Equal(1, row[1].Width);
     }
 
     [Fact]

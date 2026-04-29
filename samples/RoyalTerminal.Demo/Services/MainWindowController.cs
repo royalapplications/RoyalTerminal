@@ -334,8 +334,14 @@ internal sealed class MainWindowController
                 model => model.SelectedPasteSafetyPolicy,
                 model => model.EnableTextShaping,
                 model => model.ReflowOnResize,
+                model => model.SixelGraphicsEnabled,
                 model => model.EnableLigatures)
             .Subscribe(_ => ApplyTerminalBehaviorSettingsToAllStandaloneTabs()));
+
+        disposables.Add(_viewModel
+            .WhenAnyValue(model => model.SixelGraphicsEnabled)
+            .Skip(1)
+            .Subscribe(ReportSixelGraphicsSettingChanged));
 
         disposables.Add(_viewModel
             .WhenAnyValue(model => model.SessionLoggingEnabled)
@@ -2139,6 +2145,8 @@ internal sealed class MainWindowController
             ? "inactive"
             : $"{Math.Clamp(control.SearchSelected + 1, 1, Math.Max(1, control.SearchTotal))}/{control.SearchTotal} for '{control.SearchNeedle}'");
         builder.Append("  Hovered link: ").AppendLine(control.HoveredLinkUrl ?? "(none)");
+        builder.Append("  Sixel graphics enabled: ").AppendLine(control.SixelGraphicsEnabled ? "yes" : "no");
+        builder.Append("  Sixel graphics on screen: ").AppendLine(control.Screen?.HasRasterGraphics == true ? "yes" : "no");
         builder.Append("  Kitty graphics on screen: ").AppendLine(control.Screen?.HasKittyGraphics == true ? "yes" : "no");
 
         if (control.ScrollData is { } scrollData)
@@ -2432,6 +2440,7 @@ internal sealed class MainWindowController
             current.BackspaceSendsControlH = _viewModel.BackspaceSendsControlH;
             current.EnableTextShaping = _viewModel.EnableTextShaping;
             current.ReflowOnResize = _viewModel.ReflowOnResize;
+            current.SixelGraphicsEnabled = _viewModel.SixelGraphicsEnabled;
             current.EnableLigatures = _viewModel.EnableLigatures;
             current.SelectedPasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
 
@@ -2535,6 +2544,7 @@ internal sealed class MainWindowController
         _viewModel.BackspaceSendsControlH = state.BackspaceSendsControlH;
         _viewModel.EnableTextShaping = state.EnableTextShaping;
         _viewModel.ReflowOnResize = state.ReflowOnResize;
+        _viewModel.SixelGraphicsEnabled = state.SixelGraphicsEnabled;
         _viewModel.EnableLigatures = state.EnableLigatures;
         _viewModel.SelectedPasteSafetyPolicy = state.SelectedPasteSafetyPolicy;
 
@@ -2630,6 +2640,20 @@ internal sealed class MainWindowController
         }
     }
 
+    private void ReportSixelGraphicsSettingChanged(bool enabled)
+    {
+        string status = enabled
+            ? "Sixel graphics enabled for terminal tabs."
+            : "Sixel graphics disabled for terminal tabs.";
+        UpdateStatus(status);
+        AppendEventLog(status);
+
+        if (_viewModel.ShowGhosttyDiagnostics)
+        {
+            _viewModel.SetGhosttyDiagnostics(true, BuildGhosttyDiagnosticsText());
+        }
+    }
+
     private void ApplySessionLoggingSubscriptionsToAllStandaloneTabs()
     {
         for (int i = 0; i < _tabs.Count; i++)
@@ -2670,6 +2694,7 @@ internal sealed class MainWindowController
     {
         control.PasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
         control.ReflowOnResize = _viewModel.ReflowOnResize;
+        control.SixelGraphicsEnabled = _viewModel.SixelGraphicsEnabled;
         SkiaTerminalRenderer? renderer = control.Renderer;
         if (renderer is not null)
         {

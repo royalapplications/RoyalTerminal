@@ -113,9 +113,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public static readonly StyledProperty<bool> AutoScrollProperty =
         AvaloniaProperty.Register<TerminalControl, bool>(nameof(AutoScroll), true);
 
+    /// <summary>
+    /// Whether terminal keyboard input scrolls the normal screen buffer back to the live bottom.
+    /// </summary>
+    public static readonly DirectProperty<TerminalControl, bool> ScrollToBottomOnInputProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, bool>(
+            nameof(ScrollToBottomOnInput),
+            o => o.ScrollToBottomOnInput,
+            (o, v) => o.ScrollToBottomOnInput = v);
+
+    private bool _scrollToBottomOnInput = true;
+
     /// <summary>Whether buffered terminal rows reflow when the terminal width changes.</summary>
     public static readonly StyledProperty<bool> ReflowOnResizeProperty =
         AvaloniaProperty.Register<TerminalControl, bool>(nameof(ReflowOnResize), true);
+
+    /// <summary>Whether managed VT sixel image decoding is enabled.</summary>
+    public static readonly StyledProperty<bool> SixelGraphicsEnabledProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(nameof(SixelGraphicsEnabled), false);
 
     /// <summary>
     /// Preferred VT processor implementation.
@@ -223,11 +238,27 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         set => SetValue(AutoScrollProperty, value);
     }
 
+    /// <summary>
+    /// Gets or sets whether accepted terminal keyboard input scrolls the normal screen buffer back to the live bottom.
+    /// </summary>
+    public bool ScrollToBottomOnInput
+    {
+        get => _scrollToBottomOnInput;
+        set => SetAndRaise(ScrollToBottomOnInputProperty, ref _scrollToBottomOnInput, value);
+    }
+
     /// <summary>Gets or sets whether buffered terminal rows reflow when the terminal width changes.</summary>
     public bool ReflowOnResize
     {
         get => GetValue(ReflowOnResizeProperty);
         set => SetValue(ReflowOnResizeProperty, value);
+    }
+
+    /// <summary>Gets or sets whether managed VT sixel image decoding is enabled.</summary>
+    public bool SixelGraphicsEnabled
+    {
+        get => GetValue(SixelGraphicsEnabledProperty);
+        set => SetValue(SixelGraphicsEnabledProperty, value);
     }
 
     /// <summary>
@@ -343,6 +374,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _lastAppliedWidthPx = -1;
     private int _lastAppliedHeightPx = -1;
     private bool _preserveNativeViewportBottomOnNextResize;
+    private double _lastAppliedLayoutWidth = double.NaN;
+    private double _lastAppliedLayoutHeight = double.NaN;
     private VtProcessorPreference _appliedVtProcessorPreference = VtProcessorPreference.Auto;
     private string? _activeTransportId;
     private readonly TerminalMouseModeTracker _mouseModeTracker = new();
@@ -359,6 +392,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private bool _acceptPendingTransportOutput = true;
     private readonly List<SuspendedAncestorKeyBinding> _suspendedAncestorKeyBindings = [];
     private bool _reservedAncestorKeyBindingsSuppressed;
+    private bool _suppressNextScrollbackEscapeKeyUp;
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -653,6 +687,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _screen.ApplyTheme(activeTheme);
 
         _vtProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
+        ApplySixelGraphicsSettingToProcessor(_vtProcessor);
         if (_vtProcessor is ITerminalThemeSink themeSink)
         {
             lock (_screen.SyncRoot)
@@ -692,6 +727,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (change.Property == VtProcessorPreferenceProperty)
         {
             ApplyVtProcessorPreference();
+            return;
+        }
+
+        if (change.Property == SixelGraphicsEnabledProperty)
+        {
+            ApplySixelGraphicsSetting();
             return;
         }
 
@@ -955,6 +996,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         IVtProcessor nextProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
+        ApplySixelGraphicsSettingToProcessor(nextProcessor);
         IVtProcessor? previousProcessor = _vtProcessor;
         _vtProcessor = nextProcessor;
         if (_theme is not null && _vtProcessor is ITerminalThemeSink themeSink)
@@ -966,6 +1008,20 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
         _appliedVtProcessorPreference = VtProcessorPreference;
         previousProcessor?.Dispose();
+    }
+
+    private void ApplySixelGraphicsSetting()
+    {
+        ApplySixelGraphicsSettingToProcessor(_vtProcessor);
+        _presenter?.Invalidate();
+    }
+
+    private void ApplySixelGraphicsSettingToProcessor(IVtProcessor? processor)
+    {
+        if (processor is ITerminalSixelOptionsSink sixelOptions)
+        {
+            sixelOptions.SixelGraphicsEnabled = SixelGraphicsEnabled;
+        }
     }
 
     private void ApplyGridFromLayout(int columns, int rows, Size finalSize)
@@ -1034,17 +1090,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
         }
 
-        int widthPx = width > 0
-            ? Math.Max(1, (int)Math.Round(width))
-            : Math.Max(1, (int)Math.Ceiling(safeColumns * _renderer.CellWidth));
-        int heightPx = height > 0
-            ? Math.Max(1, (int)Math.Round(height))
-            : Math.Max(1, (int)Math.Ceiling(safeRows * _renderer.CellHeight));
+        (int widthPx, int heightPx) = CalculateRenderedGridPixelSize(safeColumns, safeRows);
+        double layoutWidth = width > 0 ? width : widthPx;
+        double layoutHeight = height > 0 ? height : heightPx;
 
         bool gridChanged = safeColumns != _lastAppliedColumns || safeRows != _lastAppliedRows;
         bool pixelSizeChanged = widthPx != _lastAppliedWidthPx || heightPx != _lastAppliedHeightPx;
+        bool layoutSizeChanged =
+            !AreClose(layoutWidth, _lastAppliedLayoutWidth) ||
+            !AreClose(layoutHeight, _lastAppliedLayoutHeight);
 
-        if (!force && !gridChanged && !pixelSizeChanged)
+        if (!force && !gridChanged && !pixelSizeChanged && !layoutSizeChanged)
         {
             return;
         }
@@ -1131,6 +1187,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _lastAppliedRows = safeRows;
         _lastAppliedWidthPx = widthPx;
         _lastAppliedHeightPx = heightPx;
+        _lastAppliedLayoutWidth = layoutWidth;
+        _lastAppliedLayoutHeight = layoutHeight;
 
         RaiseScrollInvalidated();
         if (raiseTerminalResized && gridChanged)
@@ -1138,13 +1196,34 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             TerminalResized?.Invoke(this, new TerminalSizeEventArgs(safeColumns, safeRows));
         }
 
-        _presenter?.NotifyResize(new Size(widthPx, heightPx));
+        _presenter?.NotifyResize(new Size(layoutWidth, layoutHeight));
         _presenter?.Invalidate();
 
         if (invalidateMeasure)
         {
             InvalidateMeasure();
         }
+    }
+
+    private static bool AreClose(double left, double right)
+    {
+        return double.IsFinite(left) &&
+               double.IsFinite(right) &&
+               Math.Abs(left - right) < 0.001;
+    }
+
+    private (int WidthPx, int HeightPx) CalculateRenderedGridPixelSize(int columns, int rows)
+    {
+        if (_renderer is null)
+        {
+            return (Math.Max(1, columns), Math.Max(1, rows));
+        }
+
+        int safeColumns = Math.Max(1, columns);
+        int safeRows = Math.Max(1, rows);
+        int widthPx = Math.Max(1, (int)Math.Round(safeColumns * _renderer.CellWidth));
+        int heightPx = Math.Max(1, (int)Math.Round(safeRows * _renderer.CellHeight));
+        return (widthPx, heightPx);
     }
 
     /// <summary>
@@ -1326,12 +1405,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (_renderer is not null)
         {
-            int widthPx = Bounds.Width > 0
-                ? Math.Max(1, (int)Math.Round(Bounds.Width))
-                : Math.Max(1, (int)Math.Ceiling(Columns * _renderer.CellWidth));
-            int heightPx = Bounds.Height > 0
-                ? Math.Max(1, (int)Math.Round(Bounds.Height))
-                : Math.Max(1, (int)Math.Ceiling(Rows * _renderer.CellHeight));
+            (int widthPx, int heightPx) = CalculateRenderedGridPixelSize(Columns, Rows);
             endpoint.SetSize(widthPx, heightPx);
         }
 
@@ -1477,7 +1551,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
 
             int restoreScrollOffset = -1;
-            if (!TryGetViewportScrollSource(out _) && _screen.ScrollOffset != 0)
+            ulong? restoreViewportOffsetRows = null;
+            if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+            {
+                TerminalViewportScrollState viewportState = viewportScrollSource.ViewportScrollState;
+                ulong clampedOffsetRows = Math.Min(viewportState.OffsetRows, viewportState.MaxOffsetRows);
+                if (_vtProcessor?.AlternateScreen != true && clampedOffsetRows < viewportState.MaxOffsetRows)
+                {
+                    restoreViewportOffsetRows = clampedOffsetRows;
+                }
+            }
+            else if (_screen.ScrollOffset != 0)
             {
                 // The managed VT processor writes through TerminalScreen.GetViewportRow.
                 // Keep those writes anchored to the live terminal viewport, not the
@@ -1495,6 +1579,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 if (restoreScrollOffset >= 0)
                 {
                     _screen.ScrollOffset = restoreScrollOffset;
+                }
+
+                if (restoreViewportOffsetRows is { } offsetRows && viewportScrollSource is not null)
+                {
+                    viewportScrollSource.SetViewportOffsetRows(offsetRows);
                 }
             }
 
@@ -1617,8 +1706,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        if (TryHandleScrollbackEscapeKeyDown(e))
+        {
+            return;
+        }
+
         if (TerminalInputAdapter.HandleKeyDown(e, TerminalSessionService, _vtProcessor))
         {
+            ScrollToBottomForAcceptedKeyboardInput();
             e.Handled = true;
         }
     }
@@ -1642,6 +1737,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
+        ScrollToBottomForAcceptedKeyboardInput();
+        e.Handled = true;
+        return true;
+    }
+
+    private bool TryHandleScrollbackEscapeKeyDown(KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape ||
+            e.KeyModifiers != KeyModifiers.None ||
+            !ScrollToBottomOnInput ||
+            _vtProcessor?.AlternateScreen == true ||
+            !IsScrolledBackFromLiveBottom())
+        {
+            return false;
+        }
+
+        ScrollToBottom();
+        _suppressNextScrollbackEscapeKeyUp = true;
         e.Handled = true;
         return true;
     }
@@ -1662,10 +1775,32 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void HandleKeyUpCore(KeyEventArgs e)
     {
+        if (TryHandleSuppressedScrollbackEscapeKeyUp(e))
+        {
+            return;
+        }
+
         if (TerminalInputAdapter.HandleKeyUp(e, TerminalSessionService))
         {
             e.Handled = true;
         }
+    }
+
+    private bool TryHandleSuppressedScrollbackEscapeKeyUp(KeyEventArgs e)
+    {
+        if (!_suppressNextScrollbackEscapeKeyUp)
+        {
+            return false;
+        }
+
+        _suppressNextScrollbackEscapeKeyUp = false;
+        if (e.Key != Key.Escape)
+        {
+            return false;
+        }
+
+        e.Handled = true;
+        return true;
     }
 
     protected override void OnTextInput(TextInputEventArgs e)
@@ -1686,8 +1821,30 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         if (TerminalInputAdapter.HandleTextInput(e, TerminalSessionService))
         {
+            ScrollToBottomForAcceptedKeyboardInput();
             e.Handled = true;
         }
+    }
+
+    private void ScrollToBottomForAcceptedKeyboardInput()
+    {
+        if (!ScrollToBottomOnInput || _vtProcessor?.AlternateScreen == true)
+        {
+            return;
+        }
+
+        ScrollToBottom();
+    }
+
+    private bool IsScrolledBackFromLiveBottom()
+    {
+        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+        {
+            TerminalViewportScrollState viewportState = viewportScrollSource.ViewportScrollState;
+            return Math.Min(viewportState.OffsetRows, viewportState.MaxOffsetRows) < viewportState.MaxOffsetRows;
+        }
+
+        return _screen?.ScrollOffset > 0;
     }
 
     #endregion
@@ -1738,11 +1895,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private void OnPointerWheelChangedTunnel(object? sender, PointerWheelEventArgs e)
     {
         _ = sender;
-        if (!e.Handled)
-        {
-            return;
-        }
-
         HandlePointerWheelChangedCore(e);
     }
 
@@ -2004,6 +2156,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnLostFocus(e);
         RestoreReservedAncestorKeyBindings();
+        _suppressNextScrollbackEscapeKeyUp = false;
         Endpoint?.SetFocus(false);
         SendFocusEventIfNeeded(focused: false);
         EnsureCursorBlinkTimerRunning(false);
@@ -2253,6 +2406,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
+        RaiseScrollInvalidated();
     }
 
     /// <summary>
@@ -2280,6 +2434,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
+        RaiseScrollInvalidated();
     }
 
     /// <summary>
@@ -2315,8 +2470,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 ? new TerminalCommandSpec(string.Empty, normalizedArguments)
                 : null)
             : new TerminalCommandSpec(shell, normalizedArguments);
-        int widthPx = Math.Max(1, (int)Math.Round(Bounds.Width > 0 ? Bounds.Width : Columns * (_renderer?.CellWidth ?? 1)));
-        int heightPx = Math.Max(1, (int)Math.Round(Bounds.Height > 0 ? Bounds.Height : Rows * (_renderer?.CellHeight ?? 1)));
+        (int widthPx, int heightPx) = CalculateRenderedGridPixelSize(Columns, Rows);
 
         PtyTransportOptions options = new(
             Command: command,
@@ -4370,10 +4524,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         TerminalViewportScrollState viewportState = viewportScrollSource.ViewportScrollState;
         double cellHeight = Math.Max(1d, _scrollData.CellHeight);
-        int totalRows = viewportState.TotalRows > int.MaxValue
-            ? int.MaxValue
-            : (int)viewportState.TotalRows;
-        _scrollData.Extent = totalRows * cellHeight;
+        double scrollableRows = viewportState.MaxOffsetRows;
+        _scrollData.Extent = (scrollableRows * cellHeight) + _scrollData.Viewport;
 
         ulong clampedOffsetRows = Math.Min(viewportState.OffsetRows, viewportState.MaxOffsetRows);
         double targetOffset = clampedOffsetRows * cellHeight;

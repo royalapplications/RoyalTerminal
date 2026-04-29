@@ -81,6 +81,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _backspaceSendsControlH;
     private bool _enableTextShaping = true;
     private bool _reflowOnResize = true;
+    private bool _sixelGraphicsEnabled = true;
     private bool _enableLigatures;
     private readonly IReadOnlyList<TerminalPasteSafetyPolicy> _pasteSafetyPolicies = Enum.GetValues<TerminalPasteSafetyPolicy>();
     private TerminalPasteSafetyPolicy _selectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.None;
@@ -848,6 +849,23 @@ public sealed class MainWindowViewModel : ReactiveObject
         get => _reflowOnResize;
         set => this.RaiseAndSetIfChanged(ref _reflowOnResize, value);
     }
+
+    public bool SixelGraphicsEnabled
+    {
+        get => _sixelGraphicsEnabled;
+        set
+        {
+            if (_sixelGraphicsEnabled == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _sixelGraphicsEnabled, value);
+            this.RaisePropertyChanged(nameof(SixelButtonText));
+        }
+    }
+
+    public string SixelButtonText => SixelGraphicsEnabled ? "Sixel: On" : "Sixel: Off";
 
     public bool EnableLigatures
     {

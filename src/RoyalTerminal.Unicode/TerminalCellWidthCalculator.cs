@@ -9,6 +9,7 @@ namespace RoyalTerminal.Unicode;
 
 public static class TerminalCellWidthCalculator
 {
+    private const int VariationSelector15 = 0xFE0E;
     private const int VariationSelector16 = 0xFE0F;
     private const int KeycapEnclosingCodepoint = 0x20E3;
     private const int EmojiModifierStart = 0x1F3FB;
@@ -47,8 +48,8 @@ public static class TerminalCellWidthCalculator
             return 0;
         }
 
+        bool hasTextPresentationSignal = false;
         bool hasEmojiPresentationSignal = false;
-        bool hasExtendedPictographic = first.GraphemeBreakClass == GraphemeBreakClass.ExtendedPictographic;
         bool hasRegionalIndicator = first.GraphemeBreakClass == GraphemeBreakClass.RegionalIndicator;
 
         for (int index = firstLength; index < grapheme.Length;)
@@ -60,17 +61,17 @@ public static class TerminalCellWidthCalculator
             }
 
             uint value = current.Value;
+            if (value == VariationSelector15)
+            {
+                hasTextPresentationSignal = true;
+            }
+
             if (value == VariationSelector16 ||
                 value == KeycapEnclosingCodepoint ||
                 IsEmojiModifier(value) ||
                 IsTagCodepoint(value))
             {
                 hasEmojiPresentationSignal = true;
-            }
-
-            if (current.GraphemeBreakClass == GraphemeBreakClass.ExtendedPictographic)
-            {
-                hasExtendedPictographic = true;
             }
 
             if (current.GraphemeBreakClass == GraphemeBreakClass.RegionalIndicator)
@@ -81,7 +82,12 @@ public static class TerminalCellWidthCalculator
             index += consumed;
         }
 
-        if (hasRegionalIndicator || hasExtendedPictographic || hasEmojiPresentationSignal)
+        if (hasTextPresentationSignal && !hasEmojiPresentationSignal)
+        {
+            return 1;
+        }
+
+        if (hasRegionalIndicator || hasEmojiPresentationSignal)
         {
             return 2;
         }

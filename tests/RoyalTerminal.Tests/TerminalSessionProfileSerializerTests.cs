@@ -67,6 +67,7 @@ public sealed class TerminalSessionProfileSerializerTests
         TerminalSessionProfile profile = restored.Profiles[0];
         Assert.Equal("dev-ssh", profile.Id);
         Assert.Equal(TerminalTransportIds.Ssh, profile.Transport.TransportId);
+        Assert.True(profile.Behavior.SixelGraphicsEnabled);
         Assert.Equal("example.com", profile.Transport.Ssh.Host);
         Assert.Equal("alice", profile.Transport.Ssh.Username);
         Assert.True(profile.Transport.Ssh.Authentication.UsePassword);
@@ -88,6 +89,7 @@ public sealed class TerminalSessionProfileSerializerTests
                     Behavior = new TerminalSessionBehaviorSettings
                     {
                         ReflowOnResize = false,
+                        SixelGraphicsEnabled = false,
                     },
                 },
             ],
@@ -98,6 +100,7 @@ public sealed class TerminalSessionProfileSerializerTests
 
         TerminalSessionProfile profile = Assert.Single(restored.Profiles);
         Assert.False(profile.Behavior.ReflowOnResize);
+        Assert.False(profile.Behavior.SixelGraphicsEnabled);
     }
 
     [Fact]
