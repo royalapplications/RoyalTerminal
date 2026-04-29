@@ -149,5 +149,6 @@ Use `Auto` when you want the native processor when available and the managed pro
 - Read [Package Guide](/articles/packages) before composing a custom package set.
 - Use [API Reference](/api/) when you need exact public type and member contracts for the packages you selected.
 - Read [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings) if your app needs saved profiles, reusable settings UI, themes, or capture files.
+- Read [Regex Text Highlighting](/articles/text-highlighting) if your app needs user-configurable highlight rules for log levels, addresses, prompts, or other row-local tokens.
 - Read [Transports And Remote Access](/articles/transports) for PTY, SSH, raw TCP, Telnet, serial, and secret handling.
 - Read [Terminal Engine And Screen State](/articles/vt-modes) if you need deterministic managed vs native behavior, input encoding, or direct screen-model access.

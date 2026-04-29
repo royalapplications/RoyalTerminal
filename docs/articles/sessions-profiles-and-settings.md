@@ -29,7 +29,9 @@ The profile model is the durable description of a session, not the running sessi
 | `TerminalSessionProfilesDocument` | Versioned top-level profile document. |
 | `TerminalSessionProfile` | One named profile. |
 | `TerminalSessionLayoutSettings` | Grid, viewport, and scrollback settings. |
-| `TerminalSessionAppearanceSettings` | Font, size, auto-scroll, and opacity settings. |
+| `TerminalSessionAppearanceSettings` | Font, size, auto-scroll, opacity, and text highlighting settings. |
+| `TerminalTextHighlightingMode` | Regex text highlighting evaluation mode. |
+| `TerminalSessionTextHighlightRule` | Persisted regex highlight rule with optional light/dark foreground and background colors. |
 | `TerminalSessionBehaviorSettings` | Copy, bell, backspace, shaping, ligature, and paste behavior settings. |
 | `TerminalSessionTransportProfile` | All transport-specific settings for a profile. |
 | `TerminalSessionPtySettings` | Local PTY profile settings. |
@@ -56,7 +58,7 @@ The Avalonia settings package is built around those profile records. The control
 | `TerminalSettingsSessionPanel` | Session editor surface. |
 | `TerminalSettingsConnectionPanel` | Connection editor surface. |
 | `TerminalSettingsTerminalPanel` | Terminal behavior editor surface. |
-| `TerminalSettingsAppearancePanel` | Appearance editor surface. |
+| `TerminalSettingsAppearancePanel` | Appearance editor surface, including regex text highlighting. |
 | `TerminalSettingsSshPanel` | SSH editor surface. |
 | `TerminalSettingsLoggingPanel` | Logging editor surface. |
 | `TerminalSettingsCategoryStateBase` | Base state slice. |
@@ -64,6 +66,8 @@ The Avalonia settings package is built around those profile records. The control
 | `TerminalSettingsProfileItem` | Profile picker item. |
 | `TerminalSettingsTransportModeOption` | Transport picker option. |
 | `TerminalSettingsSshAuthModeOption` | SSH auth mode picker option. |
+| `TerminalSettingsTextHighlightingModeOption` | Regex highlighting mode picker option. |
+| `TerminalSettingsHighlightRuleState` | Editable regex highlight rule state. |
 | `TerminalSettingsSessionState` | Session slice. |
 | `TerminalSettingsConnectionState` | Connection slice. |
 | `TerminalSettingsTerminalBehaviorState` | Terminal behavior slice. |
@@ -86,6 +90,21 @@ The public serializer and store abstractions are how profile documents move betw
 | `TerminalSessionProfileMapper` | Converts between durable profiles and runnable transport options. |
 
 That mapping layer is critical. It prevents runtime startup code from having to understand every persisted profile detail directly.
+
+## Text highlighting profile data
+
+Regex text highlighting is stored as appearance data because it changes how the terminal is drawn, not how the transport or VT engine behaves. The persisted profile fields are:
+
+| Field | Purpose |
+| --- | --- |
+| `TextHighlightingMode` | `Static`, `Realtime`, or `Disabled`. |
+| `TextHighlightRules` | Ordered list of `TerminalSessionTextHighlightRule` entries. |
+| `ForegroundColor` / `BackgroundColor` | Optional default/light colors. |
+| `DarkForegroundColor` / `DarkBackgroundColor` | Optional dark-theme overrides. |
+
+The profile serializer normalizes color strings to `#AARRGGBB`, skips empty-pattern rules, and resets unknown mode values to `Static`. The runtime renderer uses the equivalent `TerminalTextHighlightRule` model with packed ARGB colors.
+
+See [Regex Text Highlighting](/articles/text-highlighting) for the full JSON shape, settings UI behavior, runtime API, and performance notes.
 
 ## Themes are documents too
 

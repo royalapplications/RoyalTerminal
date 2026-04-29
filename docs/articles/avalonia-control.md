@@ -38,7 +38,7 @@ That one control already owns the default session service, the active VT process
 
 ## What the control actually owns
 
-`TerminalControl` is the public host boundary. It is where Avalonia-facing configuration lives: font family, font size, grid size, scrollback size, colors, active theme, framebuffer shaders, and `VtProcessorPreference`. It also exposes the events most hosts care about, such as `DataReceived`, `TitleChanged`, `Bell`, `ProcessExited`, `CloseRequested`, and `TerminalResized`.
+`TerminalControl` is the public host boundary. It is where Avalonia-facing configuration lives: font family, font size, grid size, scrollback size, colors, active theme, regex text highlighting, framebuffer shaders, and `VtProcessorPreference`. It also exposes the events most hosts care about, such as `DataReceived`, `TitleChanged`, `Bell`, `ProcessExited`, `CloseRequested`, and `TerminalResized`.
 
 The rendering tree around the control is intentionally exposed instead of hidden:
 
@@ -77,6 +77,29 @@ Terminal.ShaderSources =
 Use `ShaderAnimationEnabled` to control whether animated shaders keep rendering between terminal output events. It defaults to `true`.
 
 RoyalTerminal supports direct Skia Runtime Effect source plus compatibility adapters for Ghostty/Shadertoy-style `mainImage` GLSL and common Windows Terminal-style HLSL pixel shaders. See [Shader Support](/articles/shaders) and [Applying Shaders](/articles/shaders-applying) for the complete API and compatibility matrix.
+
+## Applying regex text highlights
+
+`TerminalControl.TextHighlightRules` applies ordered regex rules to rendered terminal rows. The feature is useful for log levels, hostnames, IP addresses, ticket ids, prompts, and other row-local tokens that should stand out without changing terminal output itself.
+
+```csharp
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Terminal;
+
+Terminal.TextHighlightingMode = TerminalTextHighlightingMode.Static;
+Terminal.TextHighlightRules =
+[
+    new TerminalTextHighlightRule
+    {
+        Name = "Warnings",
+        Pattern = @"\b(WARN|WARNING)\b",
+        Foreground = 0xFFFFF3C4,
+        Background = 0xFF78350F,
+    },
+];
+```
+
+Foreground and background are optional independently. Unset colors preserve the cell's current foreground or background. See [Regex Text Highlighting](/articles/text-highlighting) for mode selection, persisted profile settings, dark-theme overrides, regex behavior, and performance notes.
 
 ## Input, selection, paste, and shortcuts
 
@@ -134,7 +157,7 @@ The `RoyalTerminal.Avalonia.Settings` package is not just a demo convenience. It
 | `TerminalSettingsSessionPanel` | Session identity and transport selection UI. |
 | `TerminalSettingsConnectionPanel` | Connection and endpoint details UI. |
 | `TerminalSettingsTerminalPanel` | Terminal behavior UI. |
-| `TerminalSettingsAppearancePanel` | Font, scroll, and opacity UI. |
+| `TerminalSettingsAppearancePanel` | Font, scroll, opacity, and regex text highlighting UI. |
 | `TerminalSettingsSshPanel` | SSH auth, proxy, forwarding, and X11 UI. |
 | `TerminalSettingsLoggingPanel` | Session and event logging UI. |
 
@@ -152,7 +175,7 @@ The state model is intentionally explicit: one owner object plus typed slices pe
 | `TerminalSettingsSessionState` | Session name and transport mode slice. |
 | `TerminalSettingsConnectionState` | Working directory, shell, raw TCP, Telnet, serial, and base SSH endpoint slice. |
 | `TerminalSettingsTerminalBehaviorState` | Copy, bell, shaping, ligature, paste, and terminal-type slice. |
-| `TerminalSettingsAppearanceState` | Font and appearance slice. |
+| `TerminalSettingsAppearanceState` | Font, opacity, and regex text highlighting appearance slice. |
 | `TerminalSettingsSshState` | SSH auth, trust, proxy, forwarding, and timeout slice. |
 | `TerminalSettingsLoggingState` | Log file, log format, flush, and event-log slice. |
 

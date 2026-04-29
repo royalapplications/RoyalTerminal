@@ -61,6 +61,7 @@ Project documentation source lives in [docs/](docs/) and is published through th
 - **Shared SSH bootstrap helper** (`SshShellBootstrapCommandBuilder`) for consistent POSIX `export` command composition across SSH backends.
 - **Pluggable SSH secret persistence** via `ISshSecretStore` + `ISshSecretProtector` with cross-platform secure defaults (`SshSecretProtectionFactory`).
 - **Session profiles + persistent settings model** via `TerminalSessionProfile*` contracts, `TerminalSessionProfileSerializer`, and `JsonFileTerminalSessionProfileStore`.
+- **Regex text highlighting** with one or more user-configurable rules, static cached or realtime matching, optional foreground/background colors, dark-theme overrides, and persisted settings/profile support.
 - **Thread-safe output ingestion**: `TerminalControl.WriteOutput(...)` can be called from background SSH/network callbacks (marshaled to UI thread internally).
 - **Preference-based VT selection** via `VtProcessorPreference` (`Auto`, `Managed`, `Native`).
 - **Three integration modes** with explicit trade-offs between fidelity, portability, and native dependencies.
@@ -77,6 +78,55 @@ Project documentation source lives in [docs/](docs/) and is published through th
   - Avalonia demo (`samples/RoyalTerminal.Demo`) with structured settings categories (`Session`/`Connection`/`Terminal`/`Appearance`/`SSH`/`Logging`), transport forms (`PTY`/`Pipe`/`Raw TCP`/`Telnet`/`Serial`/`SSH`), a tabbed Settings flyout with profile CRUD (`new`/`duplicate`/`delete`/`set default`) and explicit apply/save, session/event logging, shader samples, and terminal behavior toggles (copy-on-select, bell notifications, backspace mode, paste safety, text shaping/ligatures)
   - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`) that hosts GhosttyKit directly as a separate native sample, outside the managed `RoyalTerminal.GhosttySharp` surface
   - VT/PTy control catalog CLI (`samples/RoyalTerminal.ControlCatalog`) with managed/Ghostty VT probes, ncurses/TUI parity scenarios, and rich visual rendering galleries
+
+## Regex Text Highlighting
+
+`TerminalControl` can apply ordered regex highlight rules to rendered terminal rows. Each rule can set foreground color, background color, both, or neither color independently. When a color is unset, matching cells keep the color already provided by the terminal application.
+
+Runtime API:
+
+```csharp
+using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Terminal;
+
+TerminalControl terminal = new()
+{
+    TextHighlightingMode = TerminalTextHighlightingMode.Static,
+    TextHighlightRules =
+    [
+        new TerminalTextHighlightRule
+        {
+            Name = "Errors",
+            Pattern = @"\b(ERROR|FAIL|FATAL)\b",
+            Foreground = 0xFFFFE6E6,
+            Background = 0xFF7F1D1D,
+            DarkForeground = 0xFFFFB4B4,
+            DarkBackground = 0xFF450A0A,
+        },
+        new TerminalTextHighlightRule
+        {
+            Name = "IPv4 addresses",
+            Pattern = @"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b",
+            Foreground = 0xFF93C5FD,
+        },
+    ],
+};
+```
+
+Modes:
+
+| Mode | Behavior |
+|------|----------|
+| `Static` | Caches matched cells for unchanged row text, rule revision, and theme state. This is the default for normal terminal use. |
+| `Realtime` | Recomputes matching rows whenever they are rendered. |
+| `Disabled` | Keeps configured rules but skips regex matching and rendering overrides. |
+
+Persisted profiles store the feature on `TerminalSessionAppearanceSettings.TextHighlightingMode` and `TerminalSessionAppearanceSettings.TextHighlightRules`. The reusable settings panel exposes it from the Appearance tab under `Text Highlighting`, including rule add/remove, enable/disable, mode selection, foreground/background checkboxes, and dark-theme color overrides.
+
+The main foreground/background checkboxes control whether a rule changes that color. Dark foreground/background checkboxes are theme-specific overrides; when they are unchecked, the normal color is reused for dark themes.
+
+See [Regex Text Highlighting](docs/articles/text-highlighting.md) for the full profile JSON format, settings API, renderer behavior, performance details, and limitations.
 
 ## Transport Session Model
 
