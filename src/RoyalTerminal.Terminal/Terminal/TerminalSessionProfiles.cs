@@ -247,6 +247,11 @@ public sealed record TerminalSessionBehaviorSettings
     public bool ReflowOnResize { get; init; } = true;
 
     /// <summary>
+    /// Whether managed VT sixel graphics decoding is enabled.
+    /// </summary>
+    public bool SixelGraphicsEnabled { get; init; } = true;
+
+    /// <summary>
     /// Whether ligatures are enabled.
     /// </summary>
     public bool EnableLigatures { get; init; }

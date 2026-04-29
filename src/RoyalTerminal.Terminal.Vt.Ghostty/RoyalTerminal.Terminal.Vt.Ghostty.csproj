@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Terminal.Vt.Managed\RoyalTerminal.Terminal.Vt.Managed.csproj" />
     <ProjectReference Include="..\RoyalTerminal.GhosttySharp\RoyalTerminal.GhosttySharp.csproj" />
   </ItemGroup>
 

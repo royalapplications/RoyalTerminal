@@ -142,6 +142,133 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_ReplaceRasterGraphicsFrom_ClearsCoveredTextContent()
+    {
+        TerminalScreen source = new(10, 4, 10);
+        TerminalScreen destination = new(10, 4, 10);
+        TerminalRow destinationRow = destination.GetViewportRow(0);
+        destinationRow[0].Codepoint = 'A';
+        destinationRow[1].Codepoint = 'B';
+        destinationRow[2].Codepoint = 'C';
+
+        int imageId = source.AllocateRasterImageId();
+        source.ReplaceRasterImage(
+            new TerminalRasterImageSource(
+                imageId,
+                TerminalRasterImageProtocol.Sixel,
+                widthPx: 15,
+                heightPx: 6,
+                new byte[15 * 6 * 4]),
+            new TerminalRasterImagePlacement(
+                imageId,
+                TerminalRasterImageLayer.BelowText,
+                anchorColumn: 0,
+                anchorRow: source.GetAbsoluteRowForViewportRow(0),
+                xOffsetPx: 0,
+                yOffsetPx: 0,
+                widthPx: 15,
+                heightPx: 6,
+                sourceX: 0,
+                sourceY: 0,
+                sourceWidth: 15,
+                sourceHeight: 6,
+                cellWidthPx: 10,
+                cellHeightPx: 10));
+
+        destination.ReplaceRasterGraphicsFrom(source);
+
+        Assert.False(destinationRow[0].HasContent);
+        Assert.False(destinationRow[1].HasContent);
+        Assert.Equal('C', destinationRow[2].Codepoint);
+        Assert.True(destination.HasRasterGraphics);
+    }
+
+    [Fact]
+    public void TerminalScreen_ReplaceRasterImage_RemovesIntersectingPreviousPlacement()
+    {
+        TerminalScreen screen = new(10, 4, 10);
+        int firstId = screen.AllocateRasterImageId();
+        screen.ReplaceRasterImage(
+            new TerminalRasterImageSource(
+                firstId,
+                TerminalRasterImageProtocol.Sixel,
+                widthPx: 10,
+                heightPx: 6,
+                new byte[10 * 6 * 4]),
+            new TerminalRasterImagePlacement(
+                firstId,
+                TerminalRasterImageLayer.BelowText,
+                anchorColumn: 0,
+                anchorRow: screen.GetAbsoluteRowForViewportRow(0),
+                xOffsetPx: 0,
+                yOffsetPx: 0,
+                widthPx: 10,
+                heightPx: 6,
+                sourceX: 0,
+                sourceY: 0,
+                sourceWidth: 10,
+                sourceHeight: 6,
+                cellWidthPx: 10,
+                cellHeightPx: 10));
+
+        int secondId = screen.AllocateRasterImageId();
+        byte[] replacementPixels = new byte[10 * 6 * 4];
+        replacementPixels[0] = 0x44;
+        screen.ReplaceRasterImage(
+            new TerminalRasterImageSource(
+                secondId,
+                TerminalRasterImageProtocol.Sixel,
+                widthPx: 10,
+                heightPx: 6,
+                replacementPixels),
+            new TerminalRasterImagePlacement(
+                secondId,
+                TerminalRasterImageLayer.BelowText,
+                anchorColumn: 0,
+                anchorRow: screen.GetAbsoluteRowForViewportRow(0),
+                xOffsetPx: 0,
+                yOffsetPx: 0,
+                widthPx: 10,
+                heightPx: 6,
+                sourceX: 0,
+                sourceY: 0,
+                sourceWidth: 10,
+                sourceHeight: 6,
+                cellWidthPx: 10,
+                cellHeightPx: 10));
+
+        ReadOnlySpan<TerminalRasterImagePlacement> placements = screen.GetRasterImagePlacements();
+        Assert.Equal(1, placements.Length);
+        Assert.Equal(secondId, placements[0].ImageId);
+        Assert.False(screen.TryGetRasterImageSource(firstId, out _));
+        Assert.True(screen.TryGetRasterImageSource(secondId, out TerminalRasterImageSource? source));
+        Assert.Equal(0x44, source!.RgbaPixels[0]);
+    }
+
+    [Fact]
+    public void TerminalImageSources_ContentFingerprint_TracksPayload()
+    {
+        byte[] firstPixels = [0xFF, 0x00, 0x00, 0xFF];
+        byte[] secondPixels = [0x00, 0xFF, 0x00, 0xFF];
+        TerminalRasterImageSource firstRaster = new(
+            1,
+            TerminalRasterImageProtocol.Sixel,
+            widthPx: 1,
+            heightPx: 1,
+            firstPixels);
+        TerminalRasterImageSource secondRaster = new(
+            2,
+            TerminalRasterImageProtocol.Sixel,
+            widthPx: 1,
+            heightPx: 1,
+            secondPixels);
+        TerminalKittyImageSource firstKitty = new(1, widthPx: 1, heightPx: 1, firstPixels);
+
+        Assert.Equal(firstRaster.ContentFingerprint, firstKitty.ContentFingerprint);
+        Assert.NotEqual(firstRaster.ContentFingerprint, secondRaster.ContentFingerprint);
+    }
+
+    [Fact]
     public void TerminalScreen_AddRow_IncreasesTotalRows()
     {
         var screen = new TerminalScreen(80, 24);

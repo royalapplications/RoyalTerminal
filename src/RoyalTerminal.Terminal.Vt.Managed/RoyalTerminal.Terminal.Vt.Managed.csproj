@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Sixel\RoyalTerminal.Sixel.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Unicode\RoyalTerminal.Unicode.csproj" />
   </ItemGroup>

@@ -23,6 +23,7 @@ public sealed class TerminalFontResolver : IDisposable
 {
     private const int RegionalIndicatorStart = 0x1F1E6;
     private const int RegionalIndicatorEnd = 0x1F1FF;
+    private const int VariationSelector15 = 0xFE0E;
     private const int VariationSelector16 = 0xFE0F;
     private const int KeycapEnclosingCodepoint = 0x20E3;
     private const int EmojiModifierStart = 0x1F3FB;
@@ -307,19 +308,25 @@ public sealed class TerminalFontResolver : IDisposable
             return false;
         }
 
-        if (IsRegionalIndicator(firstCodepoint) || IsDefaultEmojiPresentationCodepoint(firstCodepoint))
-        {
-            return true;
-        }
-
+        bool hasTextPresentationSelector = false;
+        bool hasEmojiPresentationSelector = false;
         ReadOnlySpan<char> remaining = text;
         while (!remaining.IsEmpty &&
                Rune.DecodeFromUtf16(remaining, out Rune rune, out int charsConsumed) == OperationStatus.Done)
         {
             int codepoint = rune.Value;
 
-            if (codepoint == VariationSelector16 ||
-                codepoint == KeycapEnclosingCodepoint ||
+            if (codepoint == VariationSelector15)
+            {
+                hasTextPresentationSelector = true;
+            }
+
+            if (codepoint == VariationSelector16)
+            {
+                hasEmojiPresentationSelector = true;
+            }
+
+            if (codepoint == KeycapEnclosingCodepoint ||
                 IsEmojiModifier(codepoint) ||
                 IsTagCodepoint(codepoint))
             {
@@ -329,7 +336,17 @@ public sealed class TerminalFontResolver : IDisposable
             remaining = remaining[charsConsumed..];
         }
 
-        return false;
+        if (hasEmojiPresentationSelector)
+        {
+            return true;
+        }
+
+        if (hasTextPresentationSelector)
+        {
+            return false;
+        }
+
+        return IsRegionalIndicator(firstCodepoint) || IsDefaultEmojiPresentationCodepoint(firstCodepoint);
     }
 
     private static bool IsDefaultEmojiPresentationCodepoint(int codepoint)
