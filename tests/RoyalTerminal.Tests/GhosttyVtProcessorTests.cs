@@ -57,6 +57,77 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_ViewportScrollState_CanMoveUpFromBottom_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 80; i++)
+        {
+            builder.Append("L");
+            builder.Append(i.ToString("D2"));
+            builder.Append("\r\n");
+        }
+
+        processor.Process(Encoding.UTF8.GetBytes(builder.ToString()));
+
+        TerminalViewportScrollState bottom = processor.ViewportScrollState;
+        Assert.True(bottom.MaxOffsetRows > 3);
+        Assert.Equal(bottom.MaxOffsetRows, bottom.OffsetRows);
+
+        processor.ScrollViewportByRows(-3);
+        Assert.Equal(bottom.MaxOffsetRows - 3, processor.ViewportScrollState.OffsetRows);
+
+        processor.ScrollViewportToBottom();
+        processor.SetViewportOffsetRows(bottom.MaxOffsetRows - 3);
+        Assert.Equal(bottom.MaxOffsetRows - 3, processor.ViewportScrollState.OffsetRows);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_ViewportScrollState_CanSetNearBottomOffset_AfterLargeResize_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 130, viewportRows: 44, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 130, rows: 44, widthPx: 1172, heightPx: 890);
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 99; i++)
+        {
+            builder.Append("L");
+            builder.Append(i.ToString("D2"));
+            builder.Append("\r\n");
+        }
+
+        processor.Process(Encoding.UTF8.GetBytes(builder.ToString()));
+
+        TerminalViewportScrollState bottom = processor.ViewportScrollState;
+        Assert.True(bottom.MaxOffsetRows > 20);
+        Assert.Equal(bottom.MaxOffsetRows, bottom.OffsetRows);
+
+        ulong targetRows = bottom.MaxOffsetRows - 10;
+        processor.SetViewportOffsetRows(targetRows);
+        Assert.Equal(targetRows, processor.ViewportScrollState.OffsetRows);
+
+        processor.SetViewportOffsetRows(targetRows + 5);
+        Assert.Equal(targetRows + 5, processor.ViewportScrollState.OffsetRows);
+
+        processor.SetViewportOffsetRows(bottom.MaxOffsetRows - 3);
+        Assert.Equal(bottom.MaxOffsetRows - 3, processor.ViewportScrollState.OffsetRows);
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_KittyGraphicsAndHyperlinks_PopulateManagedScreen_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())

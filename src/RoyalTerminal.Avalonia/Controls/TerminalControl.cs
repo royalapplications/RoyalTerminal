@@ -353,6 +353,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _lastAppliedRows = -1;
     private int _lastAppliedWidthPx = -1;
     private int _lastAppliedHeightPx = -1;
+    private bool _preserveNativeViewportBottomOnNextResize;
     private double _lastAppliedLayoutWidth = double.NaN;
     private double _lastAppliedLayoutHeight = double.NaN;
     private VtProcessorPreference _appliedVtProcessorPreference = VtProcessorPreference.Auto;
@@ -757,23 +758,41 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        bool wasAtBottom = _scrollData is { CanScroll: true, IsAtBottom: true };
+        _preserveNativeViewportBottomOnNextResize |= wasAtBottom && AutoScroll;
         SkiaTerminalRenderer nextRenderer = CreateRenderer(_renderer);
         _renderer = nextRenderer;
 
         if (_scrollData is not null)
         {
             _scrollData.CellHeight = nextRenderer.CellHeight;
-            _scrollData.Viewport = Bounds.Height > 0
-                ? Bounds.Height
-                : Rows * nextRenderer.CellHeight;
-            _scrollData.UpdateExtent(_screen.TotalRows, AutoScroll);
+            _scrollData.Viewport = GetLogicalViewportHeight(Rows, nextRenderer.CellHeight);
         }
 
         if (_scrollData is not null)
         {
             _scrollViewer?.UpdateViewport(_scrollData.Viewport, nextRenderer.CellHeight);
-            SyncScreenScrollOffsetFromScrollData();
-            UpdateRendererCursorForViewport();
+
+            lock (_screen.SyncRoot)
+            {
+                if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+                {
+                    SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+                    UpdateRendererCursorForViewportLocked();
+                }
+                else
+                {
+                    _scrollData.UpdateExtent(_screen.TotalRows, AutoScroll);
+                    int nextOffset = _scrollData.ToScreenScrollOffsetRows(_screen.MaxScrollOffset);
+                    if (_screen.ScrollOffset != nextOffset)
+                    {
+                        _screen.ScrollOffset = nextOffset;
+                        _screen.InvalidateViewport();
+                    }
+
+                    UpdateRendererCursorForViewportLocked();
+                }
+            }
         }
 
         lock (_screen.SyncRoot)
@@ -1065,6 +1084,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        bool wasAtBottom = _scrollData is { CanScroll: true, IsAtBottom: true };
+        bool preserveNativeViewportBottom = AutoScroll && (wasAtBottom || _preserveNativeViewportBottomOnNextResize);
         if (_screen is not null && (force || gridChanged || pixelSizeChanged))
         {
             lock (_screen.SyncRoot)
@@ -1096,22 +1117,39 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (_scrollData is not null)
         {
-            _scrollData.Viewport = height > 0
-                ? height
-                : safeRows * _renderer.CellHeight;
+            _scrollData.Viewport = GetLogicalViewportHeight(safeRows, _renderer.CellHeight);
             _scrollViewer?.UpdateViewport(_scrollData.Viewport, _renderer.CellHeight);
             if (force || gridChanged)
             {
-                _scrollData.UpdateExtent(GetScrollableRowCount(), AutoScroll || alternateScreenActive);
+                if (!TryGetViewportScrollSource(out _))
+                {
+                    _scrollData.UpdateExtent(GetScrollableRowCount(), AutoScroll || alternateScreenActive);
+                }
             }
 
             if (alternateScreenActive)
             {
                 SyncAlternateScreenScrollState();
+                _preserveNativeViewportBottomOnNextResize = false;
+            }
+            else if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+            {
+                if (preserveNativeViewportBottom)
+                {
+                    viewportScrollSource.ScrollViewportToBottom();
+                }
+
+                lock (_screen!.SyncRoot)
+                {
+                    SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+                }
+
+                _preserveNativeViewportBottomOnNextResize = false;
             }
             else
             {
                 SyncScreenScrollOffsetFromScrollData();
+                _preserveNativeViewportBottomOnNextResize = false;
             }
 
             UpdateRendererCursorForViewport();
@@ -4289,6 +4327,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return _vtProcessor?.AlternateScreen == true
             ? _screen.ViewportRows
             : _screen.TotalRows;
+    }
+
+    private static double GetLogicalViewportHeight(int rows, double cellHeight)
+    {
+        double safeCellHeight = Math.Max(1d, cellHeight);
+        return Math.Max(1, rows) * safeCellHeight;
     }
 
     private void SyncAlternateScreenScrollState()
