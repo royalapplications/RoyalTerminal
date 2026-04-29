@@ -6,6 +6,7 @@ using RoyalTerminal.Avalonia.Rendering;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
+using RoyalTerminal.Terminal;
 using SkiaSharp;
 using Xunit;
 
@@ -353,6 +354,191 @@ public class RenderingTests
         var renderer = new SkiaTerminalRenderer("Consolas", 14f);
         renderer.CursorVisible = false;
         Assert.False(renderer.CursorVisible);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_TextHighlightRules_ApplyConfiguredForegroundAndBackground()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        renderer.SetCellSize(16f, 20f);
+        renderer.SetTextHighlightRules(
+        [
+            new TerminalTextHighlightRule
+            {
+                Name = "Error",
+                Pattern = "ERR",
+                Foreground = 0xFF00FF00,
+                Background = 0xFFFF0000,
+            },
+        ]);
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 6, rows: 1, text: "ERROR!");
+        using SKSurface surface = CreateRenderSurface(renderer, columns: 6, rows: 1);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int highlightedBackgroundPixels = CountRedDominantPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth * 3,
+            startY: 0f,
+            endY: renderer.CellHeight);
+        int unhighlightedBackgroundPixels = CountRedDominantPixelsInRegion(
+            pixels,
+            startX: renderer.CellWidth * 3,
+            endX: renderer.CellWidth * 6,
+            startY: 0f,
+            endY: renderer.CellHeight);
+        int highlightedForegroundPixels = CountGreenDominantPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth * 3,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        Assert.True(highlightedBackgroundPixels > 100);
+        Assert.True(highlightedForegroundPixels > 0);
+        Assert.True(unhighlightedBackgroundPixels < highlightedBackgroundPixels / 4);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_TextHighlightRules_KeepOriginalBackgroundWhenBackgroundUnset()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        renderer.SetCellSize(16f, 20f);
+        renderer.SetTextHighlightRules(
+        [
+            new TerminalTextHighlightRule
+            {
+                Name = "Only foreground",
+                Pattern = "OK",
+                Foreground = 0xFFFF0000,
+            },
+        ]);
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 2, rows: 1, text: "OK");
+        using SKSurface surface = CreateRenderSurface(renderer, columns: 2, rows: 1);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int foregroundPixels = CountRedDominantPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth * 2,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        Assert.True(foregroundPixels > 0);
+        Assert.True(foregroundPixels < renderer.CellWidth * renderer.CellHeight);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_TextHighlightRules_InvalidRegexIsIgnored()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        renderer.SetTextHighlightRules(
+        [
+            new TerminalTextHighlightRule
+            {
+                Name = "Broken",
+                Pattern = "[",
+                Background = 0xFFFF0000,
+            },
+        ]);
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 2, rows: 1, text: "OK");
+        using SKSurface surface = CreateRenderSurface(renderer, columns: 2, rows: 1);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        Assert.Single(renderer.TextHighlightRules);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_TextHighlightingModeDisabled_SkipsConfiguredRules()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        renderer.SetCellSize(16f, 20f);
+        renderer.TextHighlightingMode = TerminalTextHighlightingMode.Disabled;
+        renderer.SetTextHighlightRules(
+        [
+            new TerminalTextHighlightRule
+            {
+                Name = "Disabled",
+                Pattern = "OK",
+                Background = 0xFFFF0000,
+            },
+        ]);
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 2, rows: 1, text: "OK");
+        using SKSurface surface = CreateRenderSurface(renderer, columns: 2, rows: 1);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int redPixels = CountRedDominantPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth * 2,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        Assert.True(redPixels < 10);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_TextHighlightingModeStatic_InvalidatesCacheWhenRowTextChanges()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        renderer.SetCellSize(16f, 20f);
+        renderer.TextHighlightingMode = TerminalTextHighlightingMode.Static;
+        renderer.SetTextHighlightRules(
+        [
+            new TerminalTextHighlightRule
+            {
+                Name = "Static cache",
+                Pattern = "OK",
+                Background = 0xFFFF0000,
+            },
+        ]);
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 2, rows: 1, text: "OK");
+        using SKSurface surface = CreateRenderSurface(renderer, columns: 2, rows: 1);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage firstSnapshot = surface.Snapshot();
+        using SKPixmap firstPixels = firstSnapshot.PeekPixels();
+        int firstRedPixels = CountRedDominantPixelsInRegion(
+            firstPixels,
+            startX: 0f,
+            endX: renderer.CellWidth * 2,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        row[0].Codepoint = 'N';
+        row[1].Codepoint = 'O';
+        row.IsDirty = true;
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage secondSnapshot = surface.Snapshot();
+        using SKPixmap secondPixels = secondSnapshot.PeekPixels();
+        int secondRedPixels = CountRedDominantPixelsInRegion(
+            secondPixels,
+            startX: 0f,
+            endX: renderer.CellWidth * 2,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        Assert.True(firstRedPixels > 100);
+        Assert.True(secondRedPixels < 10);
     }
 
     [Fact]
@@ -1747,6 +1933,34 @@ public class RenderingTests
             {
                 SKColor pixel = pixels.GetPixelColor(x, y);
                 if (pixel.Red > pixel.Green + 20 && pixel.Red > pixel.Blue + 20)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountGreenDominantPixelsInRegion(
+        SKPixmap pixels,
+        float startX,
+        float endX,
+        float startY,
+        float endY)
+    {
+        int count = 0;
+        int minX = Math.Clamp((int)MathF.Floor(startX), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling(endX), 0, pixels.Width);
+        int minY = Math.Clamp((int)MathF.Floor(startY), 0, pixels.Height);
+        int maxY = Math.Clamp((int)MathF.Ceiling(endY), 0, pixels.Height);
+
+        for (int y = minY; y < maxY; y++)
+        {
+            for (int x = minX; x < maxX; x++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                if (pixel.Green > pixel.Red + 20 && pixel.Green > pixel.Blue + 20)
                 {
                     count++;
                 }
