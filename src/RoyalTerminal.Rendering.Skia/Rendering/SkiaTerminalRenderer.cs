@@ -3103,9 +3103,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
         RegexOptions options = GetTextHighlightRegexOptions();
         try
         {
+            // Keep the linear-time engine off the compiled path so first-use JIT cost
+            // cannot consume the render-time match timeout on x64 CI runners.
             return new Regex(
                 pattern,
-                options | RegexOptions.NonBacktracking,
+                RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
                 s_textHighlightRegexTimeout);
         }
         catch (NotSupportedException)
