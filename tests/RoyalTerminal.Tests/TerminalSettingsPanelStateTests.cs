@@ -43,6 +43,7 @@ public sealed class TerminalSettingsPanelStateTests
             current.SessionName = "Runtime";
             current.EnableLigatures = true;
             current.ReflowOnResize = false;
+            current.SixelGraphicsEnabled = false;
             current.EventLogEnabled = false;
             current.FontSize = 16;
             current.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.BlockUnsafe;
@@ -54,12 +55,26 @@ public sealed class TerminalSettingsPanelStateTests
         Assert.False(state.Logging.EventLogEnabled);
         Assert.Equal(16, state.Appearance.FontSize);
         Assert.False(state.TerminalBehavior.ReflowOnResize);
+        Assert.False(state.TerminalBehavior.SixelGraphicsEnabled);
         Assert.Equal(TerminalPasteSafetyPolicy.BlockUnsafe, state.TerminalBehavior.SelectedPasteSafetyPolicy);
 
         TerminalSessionProfilesDocument document = state.BuildDocument();
         TerminalSessionProfile profile = Assert.Single(document.Profiles);
         Assert.Equal("BlockUnsafe", profile.Behavior.PasteSafetyPolicy);
         Assert.False(profile.Behavior.ReflowOnResize);
+        Assert.False(profile.Behavior.SixelGraphicsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void DefaultProfile_EnablesSixelGraphics()
+    {
+        TerminalSettingsPanelState state = new();
+
+        Assert.True(state.SixelGraphicsEnabled);
+
+        TerminalSessionProfilesDocument document = state.BuildDocument();
+        TerminalSessionProfile profile = Assert.Single(document.Profiles);
+        Assert.True(profile.Behavior.SixelGraphicsEnabled);
     }
 
     [AvaloniaFact]

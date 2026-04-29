@@ -29,7 +29,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     ITerminalViewportScrollSource,
     ITerminalSelectionExportSource,
     ITerminalSnapshotExportSource,
-    ITerminalSearchSource
+    ITerminalSearchSource,
+    ITerminalSixelOptionsSink
 {
     private readonly TerminalScreen _screen;
     private GhosttyTerminal _terminal;
@@ -62,6 +63,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private readonly bool _kittyGraphicsSupported;
     private readonly GhosttyKittyGraphicsPlacementIterator? _kittyPlacementIterator;
     private readonly List<int> _searchRowColumnMapScratch = [];
+    private bool _sixelGraphicsEnabled;
+    private TerminalScreen? _sixelOverlayScreen;
+    private BasicVtProcessor? _sixelOverlayProcessor;
 
     private readonly TerminalWin32InputModeTracker _win32InputModeTracker = new();
     private readonly TerminalUnsupportedWindowsSequenceSanitizer _unsupportedWindowsSequenceSanitizer = new();
@@ -117,6 +121,30 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public int KittyKeyboardFlags => _kittyKeyboardFlags;
+
+    /// <inheritdoc />
+    public bool SixelGraphicsEnabled
+    {
+        get => _sixelGraphicsEnabled;
+        set
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_sixelGraphicsEnabled == value)
+            {
+                return;
+            }
+
+            _sixelGraphicsEnabled = value;
+            if (value)
+            {
+                EnsureSixelOverlayProcessor();
+                return;
+            }
+
+            DisposeSixelOverlay();
+            _screen.ClearRasterGraphics();
+        }
+    }
 
     /// <inheritdoc />
     public bool MouseReportingEnabled => _mouseReportingEnabled;
@@ -205,6 +233,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         try
         {
             _terminal.Write(input);
+            if (_sixelGraphicsEnabled)
+            {
+                ProcessSixelOverlay(input);
+            }
         }
         finally
         {
@@ -215,6 +247,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         }
 
         RefreshStateAndScreenFromNative();
+        SyncSixelOverlayRasterGraphics();
         RaiseModeChangedIfNeeded(before);
     }
 
@@ -229,8 +262,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             checked((uint)Math.Max(_cellWidthPx, 0)),
             checked((uint)Math.Max(_cellHeightPx, 0)));
 
+        ResizeSixelOverlay(columns, rows);
         _mouseEncoder.Reset();
         RefreshStateAndScreenFromNative();
+        SyncSixelOverlayRasterGraphics();
     }
 
     /// <inheritdoc />
@@ -247,8 +282,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             checked((uint)_cellWidthPx),
             checked((uint)_cellHeightPx));
 
+        ResizeSixelOverlay(columns, rows);
         _mouseEncoder.Reset();
         RefreshStateAndScreenFromNative();
+        SyncSixelOverlayRasterGraphics();
     }
 
     /// <inheritdoc />
@@ -260,7 +297,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _theme = theme;
         _screen.ApplyTheme(theme, invalidateRows: true);
         ApplyThemeToNative(theme);
+        _sixelOverlayProcessor?.ApplyTheme(theme);
         RefreshStateAndScreenFromNative();
+        SyncSixelOverlayRasterGraphics();
     }
 
     /// <inheritdoc />
@@ -279,6 +318,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         ApplyThemeToNative(_theme);
         SetupTerminalEffects();
         _mouseEncoder.Reset();
+        _sixelOverlayProcessor?.Reset();
+        _screen.ClearRasterGraphics();
         RefreshStateAndScreenFromNative();
         RaiseModeChangedIfNeeded(before);
     }
@@ -308,6 +349,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         _disposed = true;
         _kittyPlacementIterator?.Dispose();
+        DisposeSixelOverlay();
         _mouseEvent.Dispose();
         _mouseEncoder.Dispose();
         _keyEvent.Dispose();
@@ -329,6 +371,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         _terminal.ScrollViewport(GhosttyVtNative.GhosttyTerminalScrollViewport.DeltaRows(deltaRows));
         RefreshStateAndScreenFromNative();
+        SyncSixelOverlayRasterGraphics();
     }
 
     /// <inheritdoc />
@@ -337,6 +380,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         ObjectDisposedException.ThrowIf(_disposed, this);
         _terminal.ScrollViewport(GhosttyVtNative.GhosttyTerminalScrollViewport.Top());
         RefreshStateAndScreenFromNative();
+        SyncSixelOverlayRasterGraphics();
     }
 
     /// <inheritdoc />
@@ -345,6 +389,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         ObjectDisposedException.ThrowIf(_disposed, this);
         _terminal.ScrollViewport(GhosttyVtNative.GhosttyTerminalScrollViewport.Bottom());
         RefreshStateAndScreenFromNative();
+        SyncSixelOverlayRasterGraphics();
     }
 
     /// <inheritdoc />
@@ -366,6 +411,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 : (int)delta;
         _terminal.ScrollViewport(GhosttyVtNative.GhosttyTerminalScrollViewport.DeltaRows(clampedDelta));
         RefreshStateAndScreenFromNative();
+        SyncSixelOverlayRasterGraphics();
     }
 
     /// <inheritdoc />
@@ -580,6 +626,93 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _renderState.Update(_terminal);
         RefreshStateFromNative();
         SyncScreenFromNative();
+    }
+
+    private void ProcessSixelOverlay(ReadOnlySpan<byte> input)
+    {
+        BasicVtProcessor overlayProcessor = EnsureSixelOverlayProcessor();
+        overlayProcessor.Process(input);
+    }
+
+    private BasicVtProcessor EnsureSixelOverlayProcessor()
+    {
+        if (_sixelOverlayProcessor is not null)
+        {
+            return _sixelOverlayProcessor;
+        }
+
+        TerminalScreen overlayScreen = new(
+            Math.Max(1, _screen.Columns),
+            Math.Max(1, _screen.ViewportRows),
+            scrollbackLimit: 0);
+        overlayScreen.ApplyTheme(_theme, invalidateRows: true);
+
+        BasicVtProcessor overlayProcessor = new(
+            overlayScreen,
+            new BasicVtProcessorOptions
+            {
+                SixelGraphicsEnabled = true,
+            });
+        int widthPx = _cellWidthPx > 0 ? checked(_cellWidthPx * Math.Max(1, _screen.Columns)) : 0;
+        int heightPx = _cellHeightPx > 0 ? checked(_cellHeightPx * Math.Max(1, _screen.ViewportRows)) : 0;
+        overlayProcessor.ResizeScreen(
+            Math.Max(1, _screen.Columns),
+            Math.Max(1, _screen.ViewportRows),
+            widthPx,
+            heightPx,
+            reflowOnResize: false);
+
+        _sixelOverlayScreen = overlayScreen;
+        _sixelOverlayProcessor = overlayProcessor;
+        return overlayProcessor;
+    }
+
+    private void ResizeSixelOverlay(int columns, int rows)
+    {
+        if (!_sixelGraphicsEnabled || _sixelOverlayProcessor is null)
+        {
+            return;
+        }
+
+        int safeColumns = Math.Max(1, columns);
+        int safeRows = Math.Max(1, rows);
+        int widthPx = _cellWidthPx > 0 ? checked(_cellWidthPx * safeColumns) : 0;
+        int heightPx = _cellHeightPx > 0 ? checked(_cellHeightPx * safeRows) : 0;
+        _sixelOverlayProcessor.ResizeScreen(
+            safeColumns,
+            safeRows,
+            widthPx,
+            heightPx,
+            reflowOnResize: false);
+    }
+
+    private void SyncSixelOverlayRasterGraphics()
+    {
+        if (!_sixelGraphicsEnabled || _sixelOverlayScreen is null)
+        {
+            return;
+        }
+
+        TerminalViewportScrollState scrollState = ViewportScrollState;
+        if (scrollState.OffsetRows != scrollState.MaxOffsetRows)
+        {
+            _screen.ClearRasterGraphics();
+            return;
+        }
+
+        if (!_sixelOverlayScreen.HasRasterGraphics && !_screen.HasRasterGraphics)
+        {
+            return;
+        }
+
+        _screen.ReplaceRasterGraphicsFrom(_sixelOverlayScreen);
+    }
+
+    private void DisposeSixelOverlay()
+    {
+        _sixelOverlayProcessor?.Dispose();
+        _sixelOverlayProcessor = null;
+        _sixelOverlayScreen = null;
     }
 
     private void RefreshStateFromNative()
@@ -1279,15 +1412,21 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         return 1;
     }
 
-    private static unsafe byte OnNativeDeviceAttributes(
+    private unsafe byte OnNativeDeviceAttributes(
         nint terminal,
         nint userdata,
         GhosttyVtNative.GhosttyDeviceAttributes* attributes)
     {
         *attributes = GhosttyVtNative.GhosttyDeviceAttributes.Create();
         attributes->Primary.ConformanceLevel = 62;
-        attributes->Primary.SetFeature(0, 22);
-        attributes->Primary.NumFeatures = 1;
+        int featureCount = 0;
+        if (_sixelGraphicsEnabled)
+        {
+            attributes->Primary.SetFeature(featureCount++, 4);
+        }
+
+        attributes->Primary.SetFeature(featureCount++, 22);
+        attributes->Primary.NumFeatures = (nuint)featureCount;
         attributes->Secondary.DeviceType = 1;
         attributes->Secondary.FirmwareVersion = 10;
         attributes->Secondary.RomCartridge = 0;
