@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Terminal - VT mouse protocol encoder.
 
+using System.Buffers.Text;
 using System.Text;
 
 namespace RoyalTerminal.Terminal;
@@ -45,13 +46,11 @@ public static class TerminalMouseProtocolEncoder
         switch (modeState.Encoding)
         {
             case TerminalMouseEncoding.Sgr:
-                sequence = Encoding.ASCII.GetBytes(
-                    $"\x1b[<{finalCode};{column};{row}{(sgrRelease ? 'm' : 'M')}");
+                sequence = EncodeSgrProtocol(finalCode, column, row, sgrRelease);
                 return true;
 
             case TerminalMouseEncoding.Urxvt:
-                sequence = Encoding.ASCII.GetBytes(
-                    $"\x1b[{finalCode + 32};{column};{row}M");
+                sequence = EncodeUrxvtProtocol(finalCode, column, row);
                 return true;
 
             case TerminalMouseEncoding.Utf8:
@@ -212,15 +211,64 @@ public static class TerminalMouseProtocolEncoder
         ];
     }
 
+    private static byte[] EncodeSgrProtocol(int finalCode, int column, int row, bool release)
+    {
+        Span<byte> buffer = stackalloc byte[64];
+        int offset = 0;
+        buffer[offset++] = 0x1B;
+        buffer[offset++] = (byte)'[';
+        buffer[offset++] = (byte)'<';
+        AppendAsciiInt(buffer, ref offset, finalCode);
+        buffer[offset++] = (byte)';';
+        AppendAsciiInt(buffer, ref offset, column);
+        buffer[offset++] = (byte)';';
+        AppendAsciiInt(buffer, ref offset, row);
+        buffer[offset++] = release ? (byte)'m' : (byte)'M';
+        return buffer[..offset].ToArray();
+    }
+
+    private static byte[] EncodeUrxvtProtocol(int finalCode, int column, int row)
+    {
+        Span<byte> buffer = stackalloc byte[64];
+        int offset = 0;
+        buffer[offset++] = 0x1B;
+        buffer[offset++] = (byte)'[';
+        AppendAsciiInt(buffer, ref offset, finalCode + 32);
+        buffer[offset++] = (byte)';';
+        AppendAsciiInt(buffer, ref offset, column);
+        buffer[offset++] = (byte)';';
+        AppendAsciiInt(buffer, ref offset, row);
+        buffer[offset++] = (byte)'M';
+        return buffer[..offset].ToArray();
+    }
+
     private static byte[] EncodeUtf8Protocol(int finalCode, int column, int row)
     {
-        StringBuilder builder = new(capacity: 16);
-        builder.Append('\x1b');
-        builder.Append('[');
-        builder.Append('M');
-        builder.Append(char.ConvertFromUtf32(finalCode + 32));
-        builder.Append(char.ConvertFromUtf32(column + 32));
-        builder.Append(char.ConvertFromUtf32(row + 32));
-        return Encoding.UTF8.GetBytes(builder.ToString());
+        Span<byte> buffer = stackalloc byte[32];
+        int offset = 0;
+        buffer[offset++] = 0x1B;
+        buffer[offset++] = (byte)'[';
+        buffer[offset++] = (byte)'M';
+        AppendUtf8Rune(buffer, ref offset, finalCode + 32);
+        AppendUtf8Rune(buffer, ref offset, column + 32);
+        AppendUtf8Rune(buffer, ref offset, row + 32);
+        return buffer[..offset].ToArray();
+    }
+
+    private static void AppendAsciiInt(Span<byte> buffer, ref int offset, int value)
+    {
+        if (!Utf8Formatter.TryFormat(value, buffer[offset..], out int bytesWritten))
+        {
+            throw new InvalidOperationException("Mouse protocol buffer is too small.");
+        }
+
+        offset += bytesWritten;
+    }
+
+    private static void AppendUtf8Rune(Span<byte> buffer, ref int offset, int value)
+    {
+        Rune rune = new(value);
+        int bytesWritten = rune.EncodeToUtf8(buffer[offset..]);
+        offset += bytesWritten;
     }
 }
