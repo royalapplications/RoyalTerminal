@@ -42,6 +42,7 @@ public sealed class TerminalKittyImageSource
         WidthPx = widthPx;
         HeightPx = heightPx;
         RgbaPixels = rgbaPixels;
+        ContentFingerprint = TerminalImageContentHash.HashBytes(rgbaPixels);
     }
 
     /// <summary>Stable Kitty image id.</summary>
@@ -55,6 +56,9 @@ public sealed class TerminalKittyImageSource
 
     /// <summary>Decoded RGBA pixel payload.</summary>
     public byte[] RgbaPixels { get; }
+
+    /// <summary>Stable fingerprint of the decoded RGBA pixel payload.</summary>
+    public ulong ContentFingerprint { get; }
 }
 
 /// <summary>

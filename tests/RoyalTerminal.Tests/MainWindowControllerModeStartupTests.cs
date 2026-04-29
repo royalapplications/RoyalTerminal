@@ -265,6 +265,7 @@ public sealed class MainWindowControllerModeStartupTests
         viewModel.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.BlockUnsafe;
         viewModel.EnableTextShaping = false;
         viewModel.ReflowOnResize = false;
+        viewModel.SixelGraphicsEnabled = true;
         viewModel.EnableLigatures = true;
 
         Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
@@ -286,15 +287,28 @@ public sealed class MainWindowControllerModeStartupTests
 
             List<TerminalControl> controls = GetStandaloneControls(terminalHost);
             Assert.NotEmpty(controls);
-            AssertTerminalBehaviorSettings(controls, TerminalPasteSafetyPolicy.BlockUnsafe, enableTextShaping: false, reflowOnResize: false, enableLigatures: true);
+            AssertTerminalBehaviorSettings(
+                controls,
+                TerminalPasteSafetyPolicy.BlockUnsafe,
+                enableTextShaping: false,
+                reflowOnResize: false,
+                sixelGraphicsEnabled: true,
+                enableLigatures: true);
 
             viewModel.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.SanitizeControlSequences;
             viewModel.EnableTextShaping = true;
             viewModel.ReflowOnResize = true;
+            viewModel.SixelGraphicsEnabled = false;
             viewModel.EnableLigatures = false;
             Dispatcher.UIThread.RunJobs();
 
-            AssertTerminalBehaviorSettings(controls, TerminalPasteSafetyPolicy.SanitizeControlSequences, enableTextShaping: true, reflowOnResize: true, enableLigatures: false);
+            AssertTerminalBehaviorSettings(
+                controls,
+                TerminalPasteSafetyPolicy.SanitizeControlSequences,
+                enableTextShaping: true,
+                reflowOnResize: true,
+                sixelGraphicsEnabled: false,
+                enableLigatures: false);
         }
         finally
         {
@@ -701,6 +715,7 @@ public sealed class MainWindowControllerModeStartupTests
         TerminalPasteSafetyPolicy expectedPastePolicy,
         bool enableTextShaping,
         bool reflowOnResize,
+        bool sixelGraphicsEnabled,
         bool enableLigatures)
     {
         for (int i = 0; i < controls.Count; i++)
@@ -710,6 +725,7 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.NotNull(control.Renderer);
             Assert.Equal(enableTextShaping, control.Renderer!.EnableTextShaping);
             Assert.Equal(reflowOnResize, control.ReflowOnResize);
+            Assert.Equal(sixelGraphicsEnabled, control.SixelGraphicsEnabled);
             Assert.Equal(enableLigatures, control.Renderer.EnableLigatures);
         }
     }

@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests — Avalonia headless tests for TerminalControl.
 
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Diagnostics;
@@ -25,6 +26,7 @@ using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
 using RoyalTerminal.Terminal.Transport.Ssh;
 using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
+using SkiaSharp;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -61,6 +63,7 @@ public class TerminalControlTests
         Assert.True(control.AutoScroll);
         Assert.True(control.ScrollToBottomOnInput);
         Assert.True(control.ReflowOnResize);
+        Assert.False(control.SixelGraphicsEnabled);
         Assert.Null(control.ShaderSources);
         Assert.True(control.ShaderAnimationEnabled);
     }
@@ -88,6 +91,7 @@ public class TerminalControlTests
             AutoScroll = false,
             ScrollToBottomOnInput = false,
             ReflowOnResize = false,
+            SixelGraphicsEnabled = true,
         };
 
         Assert.Equal("JetBrains Mono", control.FontFamilyName);
@@ -100,6 +104,148 @@ public class TerminalControlTests
         Assert.False(control.AutoScroll);
         Assert.False(control.ScrollToBottomOnInput);
         Assert.False(control.ReflowOnResize);
+        Assert.True(control.SixelGraphicsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void Control_SixelGraphicsEnabled_RendersManagedRasterPayload_WhenEnabledAfterCreation()
+    {
+        var control = new TerminalControl
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        control.SixelGraphicsEnabled = true;
+        control.WriteOutput(Encoding.ASCII.GetBytes("\u001bPq#1;2;100;0;0#1@\u001b\\"));
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        Assert.True(screen.HasRasterGraphics);
+        ReadOnlySpan<TerminalRasterImagePlacement> placements = screen.GetRasterImagePlacements();
+        Assert.Equal(1, placements.Length);
+        Assert.True(screen.TryGetRasterImageSource(placements[0].ImageId, out TerminalRasterImageSource? source));
+        Assert.Equal(TerminalRasterImageProtocol.Sixel, source!.Protocol);
+    }
+
+    [AvaloniaFact]
+    public void Control_SixelGraphicsEnabled_DisabledAfterRender_ClearsManagedRasterPayload()
+    {
+        var control = new TerminalControl
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            SixelGraphicsEnabled = true,
+        };
+        control.WriteOutput(Encoding.ASCII.GetBytes("\u001bPq#1;2;100;0;0#1@\u001b\\"));
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        Assert.True(screen.HasRasterGraphics);
+
+        control.SixelGraphicsEnabled = false;
+
+        Assert.False(screen.HasRasterGraphics);
+        Assert.True(screen.GetRasterImagePlacements().IsEmpty);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_SixelGraphicsEnabled_RendersManagedRasterPayload_ToPixels()
+    {
+        var control = new TerminalControl
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            SixelGraphicsEnabled = true,
+            Width = 800,
+            Height = 480,
+        };
+        Window window = new()
+        {
+            Content = control,
+            Width = 800,
+            Height = 480,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            control.WriteOutput(CreateSolidRedSixel(width: 80, bands: 10));
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            int width = Math.Max(1, (int)Math.Ceiling(screen.Columns * renderer.CellWidth));
+            int height = Math.Max(1, (int)Math.Ceiling(screen.ViewportRows * renderer.CellHeight));
+            using SKSurface surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888));
+            surface.Canvas.Clear(SKColors.Black);
+
+            lock (screen.SyncRoot)
+            {
+                renderer.RenderFull(surface.Canvas, screen);
+            }
+
+            using SKImage snapshot = surface.Snapshot();
+            using SKPixmap pixels = snapshot.PeekPixels();
+            Assert.NotNull(pixels);
+            Assert.True(
+                ContainsRedPixel(pixels, maxX: 100, maxY: 80),
+                "Rendered sixel raster should produce visible red pixels.");
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_SixelGraphicsEnabled_RetainsManagedRasterPayload_AfterResize()
+    {
+        var control = new TerminalControl
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            SixelGraphicsEnabled = true,
+            Width = 800,
+            Height = 480,
+        };
+        Window window = new()
+        {
+            Content = control,
+            Width = 800,
+            Height = 480,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            control.WriteOutput(CreateSolidRedSixel(width: 80, bands: 10));
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            Assert.True(screen.HasRasterGraphics);
+
+            window.Width = 520;
+            control.Width = 520;
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            Assert.True(screen.HasRasterGraphics);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            int width = Math.Max(1, (int)Math.Ceiling(screen.Columns * renderer.CellWidth));
+            int height = Math.Max(1, (int)Math.Ceiling(screen.ViewportRows * renderer.CellHeight));
+            using SKSurface surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888));
+            surface.Canvas.Clear(SKColors.Black);
+
+            lock (screen.SyncRoot)
+            {
+                renderer.RenderFull(surface.Canvas, screen);
+            }
+
+            using SKImage snapshot = surface.Snapshot();
+            using SKPixmap pixels = snapshot.PeekPixels();
+            Assert.NotNull(pixels);
+            Assert.True(
+                ContainsRedPixel(pixels, maxX: 100, maxY: 80),
+                "Rendered sixel raster should stay visible after terminal resize.");
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
     }
 
     [AvaloniaFact]
@@ -995,7 +1141,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public void Control_Arrange_PixelOnlyResize_NotifiesVtProcessorWithUpdatedPixels()
+    public void Control_Arrange_PixelOnlyResize_KeepsVtProcessorOnRenderedGridPixels()
     {
         ResizeTrackingVtProcessorFactory factory = new();
         TerminalControl control = new(
@@ -1016,6 +1162,7 @@ public class TerminalControlTests
         Assert.NotNull(factory.LastProcessor);
         ResizeTrackingVtProcessor processor = factory.LastProcessor!;
         int resizeCountBefore = processor.ResizeNotifications.Count;
+        Assert.True(resizeCountBefore > 0);
 
         Assert.NotNull(control.Renderer);
         double cellWidth = control.Renderer!.CellWidth;
@@ -1032,13 +1179,13 @@ public class TerminalControlTests
 
         Assert.Equal(columnsBefore, control.Columns);
         Assert.Equal(rowsBefore, control.Rows);
-        Assert.True(processor.ResizeNotifications.Count > resizeCountBefore);
+        Assert.Equal(resizeCountBefore, processor.ResizeNotifications.Count);
 
         TerminalSessionDimensions lastResize = processor.ResizeNotifications[^1];
         Assert.Equal(columnsBefore, lastResize.Columns);
         Assert.Equal(rowsBefore, lastResize.Rows);
-        int expectedWidthPixels = Math.Max(1, (int)Math.Round(control.Bounds.Width));
-        int expectedHeightPixels = Math.Max(1, (int)Math.Round(control.Bounds.Height));
+        int expectedWidthPixels = Math.Max(1, (int)Math.Round(columnsBefore * cellWidth));
+        int expectedHeightPixels = Math.Max(1, (int)Math.Round(rowsBefore * cellHeight));
         Assert.Equal(expectedWidthPixels, lastResize.WidthPixels);
         Assert.Equal(expectedHeightPixels, lastResize.HeightPixels);
     }
@@ -1633,7 +1780,7 @@ public class TerminalControlTests
             control.WriteOutput("initial\n"u8);
             control.ScrollToBottom();
             HeadlessTerminalTestCleanup.RunDispatcherJobs();
-            Assert.Equal(96UL, processor.ViewportScrollState.OffsetRows);
+            Assert.Equal(processor.ViewportScrollState.MaxOffsetRows, processor.ViewportScrollState.OffsetRows);
 
             Point? translated = control.TranslatePoint(
                 new Point(control.Bounds.Width * 0.5, control.Bounds.Height * 0.5),
@@ -2002,10 +2149,149 @@ public class TerminalControlTests
 
         control.StartSearch("L10");
 
-        Assert.Equal(7UL, processor.LastSetViewportOffsetRows);
-        Assert.Equal(7UL, processor.ViewportScrollState.OffsetRows);
+        Assert.Equal(10UL, processor.LastSetViewportOffsetRows);
+        Assert.Equal(10UL, processor.ViewportScrollState.OffsetRows);
         Assert.Equal(1, control.SearchTotal);
         Assert.Equal(0, control.SearchSelected);
+    }
+
+    [AvaloniaFact]
+    public void Control_FontSizeChange_NativeViewportScroll_UsesNativeTotalRows_NotViewportMirror()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 80, VisibleRows: 4),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        Assert.NotNull(control.ScrollData);
+        processor.SetViewportState(new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 80, VisibleRows: 4));
+        double originalCellHeight = control.ScrollData!.CellHeight;
+        control.ScrollData.Viewport = 4 * originalCellHeight;
+        control.ScrollData.Extent = 100 * originalCellHeight;
+        control.ScrollData.Offset = 80 * originalCellHeight;
+        processor.ClearLastSetViewportOffsetRows();
+
+        control.TerminalFontSize = 15;
+
+        Assert.Null(processor.LastSetViewportOffsetRows);
+        Assert.Equal(100 * control.ScrollData.CellHeight, control.ScrollData.Extent);
+        Assert.Equal(80 * control.ScrollData.CellHeight, control.ScrollData.Offset);
+    }
+
+    [AvaloniaFact]
+    public void Control_FontSizeChange_NativeViewportScroll_PreservesLiveBottom()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 0, VisibleRows: 4),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        Assert.NotNull(control.ScrollData);
+        double cellHeight = control.ScrollData!.CellHeight;
+        control.ScrollData.Viewport = 4 * cellHeight;
+        control.ScrollData.Extent = 100 * cellHeight;
+        control.ScrollData.ScrollToBottom();
+
+        control.TerminalFontSize = 15;
+        control.Measure(new Size(960, 640));
+        control.Arrange(new Rect(0, 0, 960, 640));
+
+        Assert.True(processor.ScrolledToBottom);
+        Assert.Equal(processor.ViewportScrollState.MaxOffsetRows, processor.ViewportScrollState.OffsetRows);
+        Assert.True(control.ScrollData.IsAtBottom);
+    }
+
+    [AvaloniaFact]
+    public void Control_ArrangeAfterFontSizeChange_NativeViewportScroll_PreservesLiveBottom()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 96, VisibleRows: 4),
+            [])
+        {
+            ResetViewportToTopOnResize = true,
+        };
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        Assert.NotNull(control.ScrollData);
+        double cellHeight = control.ScrollData!.CellHeight;
+        control.ScrollData.Viewport = 4 * cellHeight;
+        control.ScrollData.Extent = 100 * cellHeight;
+        control.ScrollData.ScrollToBottom();
+
+        control.TerminalFontSize = 15;
+        processor.ScrolledToBottom = false;
+        control.Measure(new Size(960, 640));
+        control.Arrange(new Rect(0, 0, 960, 640));
+
+        Assert.True(processor.ScrolledToBottom);
+        Assert.Equal(processor.ViewportScrollState.MaxOffsetRows, processor.ViewportScrollState.OffsetRows);
+        Assert.True(control.ScrollData.IsAtBottom);
+    }
+
+    [AvaloniaFact]
+    public void Control_ArrangeAfterFontSizeChange_NativeViewportScroll_DefersBottomUntilNativeResize()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 56, OffsetRows: 8, VisibleRows: 48),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 130;
+        control.Rows = 48;
+
+        Assert.NotNull(control.ScrollData);
+        double cellHeight = control.ScrollData!.CellHeight;
+        control.ScrollData.Viewport = 48 * cellHeight;
+        control.ScrollData.Extent = 56 * cellHeight;
+        control.ScrollData.ScrollToBottom();
+
+        control.TerminalFontSize = 15;
+        processor.ScrolledToBottom = false;
+        control.Measure(new Size(1172, 890));
+        control.Arrange(new Rect(0, 0, 1172, 890));
+
+        Assert.True(processor.ScrolledToBottom);
+        Assert.Equal(processor.ViewportScrollState.MaxOffsetRows, processor.ViewportScrollState.OffsetRows);
+        Assert.True(control.ScrollData.IsAtBottom);
+    }
+
+    [AvaloniaFact]
+    public void Control_ArrangeAfterFontSizeChange_UsesRowAlignedScrollViewport()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 99, OffsetRows: 55, VisibleRows: 44),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 130;
+        control.Rows = 44;
+        control.TerminalFontSize = 15;
+
+        control.Measure(new Size(1172, 890));
+        control.Arrange(new Rect(0, 0, 1172, 890));
+
+        Assert.NotNull(control.ScrollData);
+        Assert.Equal(control.Rows * control.ScrollData!.CellHeight, control.ScrollData.Viewport, precision: 6);
+        Assert.True(control.Bounds.Height > control.ScrollData.Viewport);
     }
 
     [AvaloniaFact]
@@ -2497,6 +2783,49 @@ public class TerminalControlTests
         return stream.ToArray();
     }
 
+    private static byte[] CreateSolidRedSixel(int width, int bands)
+    {
+        StringBuilder builder = new();
+        builder.Append("\u001bPq\"1;1;");
+        builder.Append(width.ToString(CultureInfo.InvariantCulture));
+        builder.Append(';');
+        builder.Append((bands * 6).ToString(CultureInfo.InvariantCulture));
+        builder.Append("#1;2;100;0;0#1");
+        for (int band = 0; band < bands; band++)
+        {
+            if (band > 0)
+            {
+                builder.Append('-');
+            }
+
+            builder.Append('!');
+            builder.Append(width.ToString(CultureInfo.InvariantCulture));
+            builder.Append('~');
+        }
+
+        builder.Append("\u001b\\");
+        return Encoding.ASCII.GetBytes(builder.ToString());
+    }
+
+    private static bool ContainsRedPixel(SKPixmap pixels, int maxX, int maxY)
+    {
+        int width = Math.Min(maxX, pixels.Width);
+        int height = Math.Min(maxY, pixels.Height);
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                if (pixel.Red > 200 && pixel.Green < 80 && pixel.Blue < 80)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
     {
         return await HeadlessTerminalTestCleanup.WaitUntilAsync(predicate, timeout);
@@ -2744,7 +3073,11 @@ public class TerminalControlTests
 
         public int ScrollViewportByRowsCallCount { get; private set; }
 
+        public bool ScrolledToBottom { get; set; }
+
         public bool ScrollToBottomOnProcess { get; set; }
+
+        public bool ResetViewportToTopOnResize { get; set; }
 
         public event EventHandler<TerminalModeState>? ModeChanged
         {
@@ -2770,15 +3103,15 @@ public class TerminalControlTests
         public void NotifyResize(int columns, int rows)
         {
             _ = columns;
-            _ = rows;
+            UpdateViewportRowsAfterResize(rows);
         }
 
         public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
         {
             _ = columns;
-            _ = rows;
             _ = widthPx;
             _ = heightPx;
+            UpdateViewportRowsAfterResize(rows);
         }
 
         public void ApplyTheme(TerminalTheme theme)
@@ -2820,6 +3153,7 @@ public class TerminalControlTests
 
         public void ScrollViewportToBottom()
         {
+            ScrolledToBottom = true;
             ViewportScrollState = ViewportScrollState with { OffsetRows = ViewportScrollState.MaxOffsetRows };
         }
 
@@ -2828,6 +3162,32 @@ public class TerminalControlTests
             ulong clamped = Math.Min(offsetRows, ViewportScrollState.MaxOffsetRows);
             LastSetViewportOffsetRows = clamped;
             ViewportScrollState = ViewportScrollState with { OffsetRows = clamped };
+        }
+
+        public void ClearLastSetViewportOffsetRows()
+        {
+            LastSetViewportOffsetRows = null;
+        }
+
+        public void SetViewportState(TerminalViewportScrollState viewportScrollState)
+        {
+            ViewportScrollState = viewportScrollState;
+        }
+
+        private void UpdateViewportRowsAfterResize(int rows)
+        {
+            ulong visibleRows = (ulong)Math.Max(1, rows);
+            ulong maxOffsetRows = ViewportScrollState.TotalRows > visibleRows
+                ? ViewportScrollState.TotalRows - visibleRows
+                : 0;
+            ulong offsetRows = ResetViewportToTopOnResize
+                ? 0
+                : Math.Min(ViewportScrollState.OffsetRows, maxOffsetRows);
+            ViewportScrollState = ViewportScrollState with
+            {
+                OffsetRows = offsetRows,
+                VisibleRows = visibleRows,
+            };
         }
 
         public void PopulateSearchMatches(string needle, List<TerminalSearchMatch> destination)

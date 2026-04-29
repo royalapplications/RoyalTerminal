@@ -57,6 +57,77 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_ViewportScrollState_CanMoveUpFromBottom_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 80; i++)
+        {
+            builder.Append("L");
+            builder.Append(i.ToString("D2"));
+            builder.Append("\r\n");
+        }
+
+        processor.Process(Encoding.UTF8.GetBytes(builder.ToString()));
+
+        TerminalViewportScrollState bottom = processor.ViewportScrollState;
+        Assert.True(bottom.MaxOffsetRows > 3);
+        Assert.Equal(bottom.MaxOffsetRows, bottom.OffsetRows);
+
+        processor.ScrollViewportByRows(-3);
+        Assert.Equal(bottom.MaxOffsetRows - 3, processor.ViewportScrollState.OffsetRows);
+
+        processor.ScrollViewportToBottom();
+        processor.SetViewportOffsetRows(bottom.MaxOffsetRows - 3);
+        Assert.Equal(bottom.MaxOffsetRows - 3, processor.ViewportScrollState.OffsetRows);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_ViewportScrollState_CanSetNearBottomOffset_AfterLargeResize_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 130, viewportRows: 44, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 130, rows: 44, widthPx: 1172, heightPx: 890);
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 99; i++)
+        {
+            builder.Append("L");
+            builder.Append(i.ToString("D2"));
+            builder.Append("\r\n");
+        }
+
+        processor.Process(Encoding.UTF8.GetBytes(builder.ToString()));
+
+        TerminalViewportScrollState bottom = processor.ViewportScrollState;
+        Assert.True(bottom.MaxOffsetRows > 20);
+        Assert.Equal(bottom.MaxOffsetRows, bottom.OffsetRows);
+
+        ulong targetRows = bottom.MaxOffsetRows - 10;
+        processor.SetViewportOffsetRows(targetRows);
+        Assert.Equal(targetRows, processor.ViewportScrollState.OffsetRows);
+
+        processor.SetViewportOffsetRows(targetRows + 5);
+        Assert.Equal(targetRows + 5, processor.ViewportScrollState.OffsetRows);
+
+        processor.SetViewportOffsetRows(bottom.MaxOffsetRows - 3);
+        Assert.Equal(bottom.MaxOffsetRows - 3, processor.ViewportScrollState.OffsetRows);
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_KittyGraphicsAndHyperlinks_PopulateManagedScreen_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
@@ -101,6 +172,80 @@ public class GhosttyVtProcessorTests
         Assert.Equal(8, image.RgbaPixels.Length);
         Assert.Equal(0xFF, image.RgbaPixels[3]);
         Assert.Equal(0xFF, image.RgbaPixels[7]);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_SixelDisabled_DoesNotPopulateRasterOverlay_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 10, viewportRows: 4, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 10, rows: 4, widthPx: 100, heightPx: 40);
+
+        processor.Process(Encoding.ASCII.GetBytes("\u001bPq#1;2;100;0;0#1@\u001b\\"));
+
+        Assert.False(screen.HasRasterGraphics);
+        Assert.True(screen.GetRasterImagePlacements().IsEmpty);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_DA1_WhenSixelEnabled_AdvertisesSixelFeature_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 10, viewportRows: 4, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen)
+        {
+            SixelGraphicsEnabled = true,
+        };
+
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[c"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?62;4;22c", Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_SixelEnabled_PopulatesManagedRasterOverlay_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 10, viewportRows: 4, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen)
+        {
+            SixelGraphicsEnabled = true,
+        };
+        processor.NotifyResize(columns: 10, rows: 4, widthPx: 100, heightPx: 40);
+
+        processor.Process(Encoding.ASCII.GetBytes("\u001bPq#1;2;100;0;0#1@\u001b\\"));
+
+        Assert.True(screen.HasRasterGraphics);
+        ReadOnlySpan<TerminalRasterImagePlacement> placements = screen.GetRasterImagePlacements();
+        Assert.Equal(1, placements.Length);
+        TerminalRasterImagePlacement placement = placements[0];
+        Assert.Equal(TerminalRasterImageLayer.BelowText, placement.Layer);
+        Assert.Equal(0, placement.AnchorColumn);
+        Assert.True(screen.TryGetRasterImageSource(placement.ImageId, out TerminalRasterImageSource? source));
+        Assert.Equal(TerminalRasterImageProtocol.Sixel, source!.Protocol);
+        Assert.Equal(1, source.WidthPx);
+        Assert.Equal(12, source.HeightPx);
+
+        processor.Process("\u001b[2J"u8);
+
+        Assert.False(screen.HasRasterGraphics);
     }
 
     [Fact]

@@ -145,6 +145,7 @@ public sealed class PackageBoundaryTests
         [
             "RoyalTerminal.Avalonia.Settings",
             "RoyalTerminal.Shaders",
+            "RoyalTerminal.Sixel",
             "RoyalTerminal.Rendering.Text",
             "RoyalTerminal.Terminal.Transport.Pipe",
             "RoyalTerminal.Terminal.Transport.Pty",
