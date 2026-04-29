@@ -113,6 +113,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public static readonly StyledProperty<bool> AutoScrollProperty =
         AvaloniaProperty.Register<TerminalControl, bool>(nameof(AutoScroll), true);
 
+    /// <summary>
+    /// Whether terminal keyboard input scrolls the normal screen buffer back to the live bottom.
+    /// </summary>
+    public static readonly DirectProperty<TerminalControl, bool> ScrollToBottomOnInputProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, bool>(
+            nameof(ScrollToBottomOnInput),
+            o => o.ScrollToBottomOnInput,
+            (o, v) => o.ScrollToBottomOnInput = v);
+
+    private bool _scrollToBottomOnInput = true;
+
     /// <summary>Whether buffered terminal rows reflow when the terminal width changes.</summary>
     public static readonly StyledProperty<bool> ReflowOnResizeProperty =
         AvaloniaProperty.Register<TerminalControl, bool>(nameof(ReflowOnResize), true);
@@ -225,6 +236,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         get => GetValue(AutoScrollProperty);
         set => SetValue(AutoScrollProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether accepted terminal keyboard input scrolls the normal screen buffer back to the live bottom.
+    /// </summary>
+    public bool ScrollToBottomOnInput
+    {
+        get => _scrollToBottomOnInput;
+        set => SetAndRaise(ScrollToBottomOnInputProperty, ref _scrollToBottomOnInput, value);
     }
 
     /// <summary>Gets or sets whether buffered terminal rows reflow when the terminal width changes.</summary>
@@ -372,6 +392,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private bool _acceptPendingTransportOutput = true;
     private readonly List<SuspendedAncestorKeyBinding> _suspendedAncestorKeyBindings = [];
     private bool _reservedAncestorKeyBindingsSuppressed;
+    private bool _suppressNextScrollbackEscapeKeyUp;
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -1530,7 +1551,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
 
             int restoreScrollOffset = -1;
-            if (!TryGetViewportScrollSource(out _) && _screen.ScrollOffset != 0)
+            ulong? restoreViewportOffsetRows = null;
+            if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+            {
+                TerminalViewportScrollState viewportState = viewportScrollSource.ViewportScrollState;
+                ulong clampedOffsetRows = Math.Min(viewportState.OffsetRows, viewportState.MaxOffsetRows);
+                if (_vtProcessor?.AlternateScreen != true && clampedOffsetRows < viewportState.MaxOffsetRows)
+                {
+                    restoreViewportOffsetRows = clampedOffsetRows;
+                }
+            }
+            else if (_screen.ScrollOffset != 0)
             {
                 // The managed VT processor writes through TerminalScreen.GetViewportRow.
                 // Keep those writes anchored to the live terminal viewport, not the
@@ -1548,6 +1579,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 if (restoreScrollOffset >= 0)
                 {
                     _screen.ScrollOffset = restoreScrollOffset;
+                }
+
+                if (restoreViewportOffsetRows is { } offsetRows && viewportScrollSource is not null)
+                {
+                    viewportScrollSource.SetViewportOffsetRows(offsetRows);
                 }
             }
 
@@ -1670,8 +1706,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        if (TryHandleScrollbackEscapeKeyDown(e))
+        {
+            return;
+        }
+
         if (TerminalInputAdapter.HandleKeyDown(e, TerminalSessionService, _vtProcessor))
         {
+            ScrollToBottomForAcceptedKeyboardInput();
             e.Handled = true;
         }
     }
@@ -1695,6 +1737,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
+        ScrollToBottomForAcceptedKeyboardInput();
+        e.Handled = true;
+        return true;
+    }
+
+    private bool TryHandleScrollbackEscapeKeyDown(KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape ||
+            e.KeyModifiers != KeyModifiers.None ||
+            !ScrollToBottomOnInput ||
+            _vtProcessor?.AlternateScreen == true ||
+            !IsScrolledBackFromLiveBottom())
+        {
+            return false;
+        }
+
+        ScrollToBottom();
+        _suppressNextScrollbackEscapeKeyUp = true;
         e.Handled = true;
         return true;
     }
@@ -1715,10 +1775,32 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void HandleKeyUpCore(KeyEventArgs e)
     {
+        if (TryHandleSuppressedScrollbackEscapeKeyUp(e))
+        {
+            return;
+        }
+
         if (TerminalInputAdapter.HandleKeyUp(e, TerminalSessionService))
         {
             e.Handled = true;
         }
+    }
+
+    private bool TryHandleSuppressedScrollbackEscapeKeyUp(KeyEventArgs e)
+    {
+        if (!_suppressNextScrollbackEscapeKeyUp)
+        {
+            return false;
+        }
+
+        _suppressNextScrollbackEscapeKeyUp = false;
+        if (e.Key != Key.Escape)
+        {
+            return false;
+        }
+
+        e.Handled = true;
+        return true;
     }
 
     protected override void OnTextInput(TextInputEventArgs e)
@@ -1739,8 +1821,30 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         if (TerminalInputAdapter.HandleTextInput(e, TerminalSessionService))
         {
+            ScrollToBottomForAcceptedKeyboardInput();
             e.Handled = true;
         }
+    }
+
+    private void ScrollToBottomForAcceptedKeyboardInput()
+    {
+        if (!ScrollToBottomOnInput || _vtProcessor?.AlternateScreen == true)
+        {
+            return;
+        }
+
+        ScrollToBottom();
+    }
+
+    private bool IsScrolledBackFromLiveBottom()
+    {
+        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+        {
+            TerminalViewportScrollState viewportState = viewportScrollSource.ViewportScrollState;
+            return Math.Min(viewportState.OffsetRows, viewportState.MaxOffsetRows) < viewportState.MaxOffsetRows;
+        }
+
+        return _screen?.ScrollOffset > 0;
     }
 
     #endregion
@@ -1791,11 +1895,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private void OnPointerWheelChangedTunnel(object? sender, PointerWheelEventArgs e)
     {
         _ = sender;
-        if (!e.Handled)
-        {
-            return;
-        }
-
         HandlePointerWheelChangedCore(e);
     }
 
@@ -2057,6 +2156,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnLostFocus(e);
         RestoreReservedAncestorKeyBindings();
+        _suppressNextScrollbackEscapeKeyUp = false;
         Endpoint?.SetFocus(false);
         SendFocusEventIfNeeded(focused: false);
         EnsureCursorBlinkTimerRunning(false);
@@ -2306,6 +2406,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
+        RaiseScrollInvalidated();
     }
 
     /// <summary>
@@ -2333,6 +2434,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
+        RaiseScrollInvalidated();
     }
 
     /// <summary>
@@ -4422,10 +4524,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         TerminalViewportScrollState viewportState = viewportScrollSource.ViewportScrollState;
         double cellHeight = Math.Max(1d, _scrollData.CellHeight);
-        int totalRows = viewportState.TotalRows > int.MaxValue
-            ? int.MaxValue
-            : (int)viewportState.TotalRows;
-        _scrollData.Extent = totalRows * cellHeight;
+        double scrollableRows = viewportState.MaxOffsetRows;
+        _scrollData.Extent = (scrollableRows * cellHeight) + _scrollData.Viewport;
 
         ulong clampedOffsetRows = Math.Min(viewportState.OffsetRows, viewportState.MaxOffsetRows);
         double targetOffset = clampedOffsetRows * cellHeight;
