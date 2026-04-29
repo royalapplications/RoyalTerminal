@@ -1769,7 +1769,10 @@ public class TerminalControlTests
     [AvaloniaFact]
     public async Task Control_TextInputWhileScrolledBack_WhenScrollToBottomOnInputDisabled_PreservesViewport()
     {
-        FakeTransport transport = new();
+        FakeTransport transport = new()
+        {
+            EchoInput = false,
+        };
         TerminalControl control = CreateControlWithTransport(
             transport,
             new DefaultVtProcessorFactory(),
@@ -3690,6 +3693,7 @@ public class TerminalControlTests
 
         public bool IsRunning { get; private set; }
         public bool StopCalled { get; private set; }
+        public bool EchoInput { get; init; } = true;
         public List<byte[]> SentInputs { get; } = [];
         public List<TerminalSessionDimensions> Resizes { get; } = [];
 
@@ -3705,7 +3709,10 @@ public class TerminalControlTests
         {
             byte[] data = utf8.ToArray();
             SentInputs.Add(data);
-            _dataReceived?.Invoke(data, data.Length);
+            if (EchoInput)
+            {
+                _dataReceived?.Invoke(data, data.Length);
+            }
         }
 
         public void Resize(TerminalSessionDimensions dimensions)
