@@ -392,6 +392,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private bool _acceptPendingTransportOutput = true;
     private readonly List<SuspendedAncestorKeyBinding> _suspendedAncestorKeyBindings = [];
     private bool _reservedAncestorKeyBindingsSuppressed;
+    private bool _suppressNextScrollbackEscapeKeyUp;
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -1753,6 +1754,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         ScrollToBottom();
+        _suppressNextScrollbackEscapeKeyUp = true;
         e.Handled = true;
         return true;
     }
@@ -1773,10 +1775,32 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void HandleKeyUpCore(KeyEventArgs e)
     {
+        if (TryHandleSuppressedScrollbackEscapeKeyUp(e))
+        {
+            return;
+        }
+
         if (TerminalInputAdapter.HandleKeyUp(e, TerminalSessionService))
         {
             e.Handled = true;
         }
+    }
+
+    private bool TryHandleSuppressedScrollbackEscapeKeyUp(KeyEventArgs e)
+    {
+        if (!_suppressNextScrollbackEscapeKeyUp)
+        {
+            return false;
+        }
+
+        _suppressNextScrollbackEscapeKeyUp = false;
+        if (e.Key != Key.Escape)
+        {
+            return false;
+        }
+
+        e.Handled = true;
+        return true;
     }
 
     protected override void OnTextInput(TextInputEventArgs e)
@@ -2132,6 +2156,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnLostFocus(e);
         RestoreReservedAncestorKeyBindings();
+        _suppressNextScrollbackEscapeKeyUp = false;
         Endpoint?.SetFocus(false);
         SendFocusEventIfNeeded(focused: false);
         EnsureCursorBlinkTimerRunning(false);

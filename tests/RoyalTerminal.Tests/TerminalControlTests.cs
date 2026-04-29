@@ -1604,6 +1604,43 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_EscapeWhileScrolledBack_WithInputSink_SuppressesPressAndRelease()
+    {
+        FakeInputEndpoint endpoint = new();
+        TerminalControl control = new();
+        control.AttachEndpoint(endpoint);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            control.Focus();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            PopulateScrollableNormalBuffer(control);
+            TerminalScreen screen = control.Screen!;
+            control.ScrollByRows(-3);
+            Assert.True(screen.ScrollOffset > 0);
+            endpoint.KeyEvents.Clear();
+
+            window.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
+            RaiseEscapeKeyUp(control);
+
+            Assert.Equal(0, screen.ScrollOffset);
+            Assert.Empty(endpoint.KeyEvents);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control, control.DetachEndpoint);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_EscapeAtBottom_SendsEscape()
     {
         FakeTransport transport = new();
@@ -1640,6 +1677,92 @@ public class TerminalControlTests
         finally
         {
             await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_EscapeInAlternateScreen_SendsEscape()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            PopulateScrollableNormalBuffer(control);
+            TerminalScreen screen = control.Screen!;
+            control.ScrollByRows(-3);
+            Assert.True(screen.ScrollOffset > 0);
+
+            control.WriteOutput("\x1b[?1049h\x1b[2JALT-00\r\nALT-01"u8);
+            Assert.True(screen.AlternateBufferActive);
+            Assert.Equal(0, screen.ScrollOffset);
+            transport.SentInputs.Clear();
+
+            window.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
+
+            Assert.True(screen.AlternateBufferActive);
+            Assert.Equal(0, screen.ScrollOffset);
+            Assert.Contains(transport.SentInputs, static payload =>
+                payload.Length == 1 && payload[0] == 0x1B);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_EscapeAtBottom_WithInputSink_SendsPressAndRelease()
+    {
+        FakeInputEndpoint endpoint = new();
+        TerminalControl control = new();
+        control.AttachEndpoint(endpoint);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            control.Focus();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            PopulateScrollableNormalBuffer(control);
+            TerminalScreen screen = control.Screen!;
+            control.ScrollToBottom();
+            Assert.Equal(0, screen.ScrollOffset);
+            endpoint.KeyEvents.Clear();
+
+            window.KeyPressQwerty(PhysicalKey.Escape, RawInputModifiers.None);
+            RaiseEscapeKeyUp(control);
+
+            Assert.Equal(0, screen.ScrollOffset);
+            Assert.Equal(2, endpoint.KeyEvents.Count);
+            Assert.Equal(TerminalInputAction.Press, endpoint.KeyEvents[0].Action);
+            Assert.Equal((uint)Key.Escape, endpoint.KeyEvents[0].KeyCode);
+            Assert.Equal(TerminalInputAction.Release, endpoint.KeyEvents[1].Action);
+            Assert.Equal((uint)Key.Escape, endpoint.KeyEvents[1].KeyCode);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control, control.DetachEndpoint);
         }
     }
 
@@ -2772,6 +2895,18 @@ public class TerminalControlTests
         Assert.True(control.ScrollData!.MaxOffset > 0);
     }
 
+    private static void RaiseEscapeKeyUp(TerminalControl control)
+    {
+        KeyEventArgs keyUp = new()
+        {
+            RoutedEvent = InputElement.KeyUpEvent,
+            Source = control,
+            Key = Key.Escape,
+            KeyModifiers = KeyModifiers.None,
+        };
+        control.RaiseEvent(keyUp);
+    }
+
     private static byte[] CaptureFramePng(Window window)
     {
         HeadlessTerminalTestCleanup.RunDispatcherJobs();
@@ -2962,6 +3097,51 @@ public class TerminalControlTests
         {
             ScaleX = scaleX;
             ScaleY = scaleY;
+        }
+    }
+
+    private sealed class FakeInputEndpoint : ITerminalEndpoint, ITerminalInputSink
+    {
+        public byte[]? LastInput { get; private set; }
+        public bool Focused { get; private set; }
+        public int WidthPx { get; private set; }
+        public int HeightPx { get; private set; }
+        public List<TerminalKeyEvent> KeyEvents { get; } = [];
+        public List<string> TextInputs { get; } = [];
+        public List<TerminalPointerEvent> PointerEvents { get; } = [];
+
+        public void SendText(ReadOnlySpan<byte> utf8)
+        {
+            LastInput = utf8.ToArray();
+        }
+
+        public void SetFocus(bool focused)
+        {
+            Focused = focused;
+        }
+
+        public void SetSize(int widthPx, int heightPx)
+        {
+            WidthPx = widthPx;
+            HeightPx = heightPx;
+        }
+
+        public bool SendKey(TerminalKeyEvent keyEvent)
+        {
+            KeyEvents.Add(keyEvent);
+            return true;
+        }
+
+        public bool SendText(string text)
+        {
+            TextInputs.Add(text);
+            return true;
+        }
+
+        public bool SendPointer(TerminalPointerEvent pointerEvent)
+        {
+            PointerEvents.Add(pointerEvent);
+            return true;
         }
     }
 
