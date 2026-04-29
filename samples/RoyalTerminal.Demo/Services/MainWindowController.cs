@@ -578,6 +578,8 @@ internal sealed class MainWindowController
         TerminalTheme theme = _viewModel.ActiveTheme;
         TerminalControl standaloneControl = CreateStandaloneControl();
         ApplyFontSettings(standaloneControl);
+        standaloneControl.TextHighlightingMode = _viewModel.TextHighlightingMode;
+        standaloneControl.TextHighlightRules = _viewModel.TextHighlightRules;
         standaloneControl.Columns = 80;
         standaloneControl.Rows = 24;
         standaloneControl.ScrollbackLimit = 10_000;
@@ -2450,6 +2452,9 @@ internal sealed class MainWindowController
             current.FontSize = _viewModel.FontSize;
             current.AutoScroll = true;
             current.BackgroundOpacityEnabled = false;
+            current.SelectedTextHighlightingMode = ResolveSettingsTextHighlightingMode(
+                current,
+                _viewModel.TextHighlightingMode);
 
             current.SessionLoggingEnabled = _viewModel.SessionLoggingEnabled;
             current.SessionLogFilePath = _viewModel.SessionLogFilePath;
@@ -2487,6 +2492,25 @@ internal sealed class MainWindowController
         }
 
         return state.SshAuthModes[0];
+    }
+
+    private static TerminalSettingsTextHighlightingModeOption ResolveSettingsTextHighlightingMode(
+        TerminalSettingsPanelState state,
+        TerminalTextHighlightingMode mode)
+    {
+        TerminalTextHighlightingMode normalized = Enum.IsDefined(mode)
+            ? mode
+            : TerminalTextHighlightingMode.Static;
+
+        for (int i = 0; i < state.TextHighlightingModes.Count; i++)
+        {
+            if (state.TextHighlightingModes[i].Mode == normalized)
+            {
+                return state.TextHighlightingModes[i];
+            }
+        }
+
+        return state.TextHighlightingModes[0];
     }
 
     private void ApplySettingsPanelState()
@@ -2567,6 +2591,9 @@ internal sealed class MainWindowController
         _viewModel.SetFontSizeFromSettings(fontSize);
         ApplyFontSize(fontSize);
 
+        _viewModel.TextHighlightingMode = state.SelectedTextHighlightingMode?.Mode ?? TerminalTextHighlightingMode.Static;
+        _viewModel.TextHighlightRules = BuildRuntimeTextHighlightRules(state);
+
         for (int i = 0; i < _tabs.Count; i++)
         {
             if (_tabs[i].Control is TerminalControl standaloneControl)
@@ -2574,11 +2601,90 @@ internal sealed class MainWindowController
                 ApplyFontSettings(standaloneControl);
                 standaloneControl.AutoScroll = state.AutoScroll;
                 standaloneControl.BackgroundOpacityEnabled = state.BackgroundOpacityEnabled;
+                standaloneControl.TextHighlightingMode = _viewModel.TextHighlightingMode;
+                standaloneControl.TextHighlightRules = _viewModel.TextHighlightRules;
             }
         }
 
         ApplyTerminalBehaviorSettingsToAllStandaloneTabs();
         state.SetStatus("Applied settings to demo runtime.");
+    }
+
+    private static IReadOnlyList<TerminalTextHighlightRule> BuildRuntimeTextHighlightRules(
+        TerminalSettingsPanelState state)
+    {
+        TerminalSessionProfilesDocument document = state.BuildDocument();
+        string? selectedProfileId = state.SelectedProfile?.Id ?? document.DefaultProfileId;
+        TerminalSessionProfile? profile = null;
+        for (int i = 0; i < document.Profiles.Count; i++)
+        {
+            if (string.Equals(document.Profiles[i].Id, selectedProfileId, StringComparison.Ordinal))
+            {
+                profile = document.Profiles[i];
+                break;
+            }
+        }
+
+        profile ??= document.Profiles.Count > 0 ? document.Profiles[0] : null;
+        if (profile is null || profile.Appearance.TextHighlightRules.Count == 0)
+        {
+            return [];
+        }
+
+        List<TerminalTextHighlightRule> rules = new(profile.Appearance.TextHighlightRules.Count);
+        for (int i = 0; i < profile.Appearance.TextHighlightRules.Count; i++)
+        {
+            TerminalSessionTextHighlightRule source = profile.Appearance.TextHighlightRules[i];
+            if (string.IsNullOrWhiteSpace(source.Pattern))
+            {
+                continue;
+            }
+
+            rules.Add(new TerminalTextHighlightRule
+            {
+                Name = string.IsNullOrWhiteSpace(source.Name) ? "Highlight Rule" : source.Name.Trim(),
+                Pattern = source.Pattern.Trim(),
+                IsEnabled = source.IsEnabled,
+                Foreground = TryParseArgbColor(source.ForegroundColor, out uint foreground) ? foreground : null,
+                Background = TryParseArgbColor(source.BackgroundColor, out uint background) ? background : null,
+                DarkForeground = TryParseArgbColor(source.DarkForegroundColor, out uint darkForeground) ? darkForeground : null,
+                DarkBackground = TryParseArgbColor(source.DarkBackgroundColor, out uint darkBackground) ? darkBackground : null,
+            });
+        }
+
+        return rules.Count == 0 ? [] : rules;
+    }
+
+    private static bool TryParseArgbColor(string? value, out uint color)
+    {
+        color = 0;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> text = value.Trim().AsSpan();
+        if (text.Length > 0 && text[0] == '#')
+        {
+            text = text[1..];
+        }
+
+        if (text.Length != 6 && text.Length != 8)
+        {
+            return false;
+        }
+
+        if (!uint.TryParse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out color))
+        {
+            return false;
+        }
+
+        if (text.Length == 6)
+        {
+            color |= 0xFF000000u;
+        }
+
+        return true;
     }
 
     private async Task SaveSettingsPanelStateAsync()

@@ -337,6 +337,87 @@
                           Margin="0,2,10,0"
                           IsChecked="{Binding BackgroundOpacityEnabled}" />
               </StackPanel>
+              <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Grid.Column="0"
+                             Text="Text Highlighting"
+                             FontWeight="Bold"
+                             Margin="0,4,6,0" />
+                  <Button Grid.Column="1"
+                          Content="Add Rule"
+                          Command="{Binding AddTextHighlightRuleCommand}" />
+                </Grid>
+                <StackPanel Spacing="4">
+                  <TextBlock Text="Mode" />
+                  <ComboBox ItemsSource="{Binding TextHighlightingModes}"
+                            SelectedItem="{Binding SelectedTextHighlightingMode}">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="settings:TerminalSettingsTextHighlightingModeOption">
+                        <TextBlock Text="{Binding DisplayName}" />
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                </StackPanel>
+                <ItemsControl ItemsSource="{Binding TextHighlightRules}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="settings:TerminalSettingsHighlightRuleState">
+                      <Border BorderBrush="#606060"
+                              BorderThickness="1"
+                              CornerRadius="4"
+                              Padding="8"
+                              Margin="0,0,0,8">
+                        <StackPanel Spacing="8">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <CheckBox Grid.Column="0"
+                                      Content="Enabled"
+                                      IsChecked="{Binding IsEnabled}" />
+                            <Button Grid.Column="1"
+                                    Content="Remove"
+                                    Command="{Binding RemoveCommand}" />
+                          </Grid>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Name" />
+                            <TextBox Text="{Binding Name}" />
+                          </StackPanel>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Regex" />
+                            <TextBox Text="{Binding Pattern}" />
+                          </StackPanel>
+                          <Grid ColumnDefinitions="*,*"
+                                RowDefinitions="Auto,Auto"
+                                ColumnSpacing="8"
+                                RowSpacing="8">
+                            <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4">
+                              <CheckBox Content="Foreground"
+                                        IsChecked="{Binding IsForegroundEnabled}" />
+                              <TextBox Text="{Binding ForegroundColor}"
+                                       IsEnabled="{Binding IsForegroundEnabled}" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                              <CheckBox Content="Background"
+                                        IsChecked="{Binding IsBackgroundEnabled}" />
+                              <TextBox Text="{Binding BackgroundColor}"
+                                       IsEnabled="{Binding IsBackgroundEnabled}" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="0" Spacing="4">
+                              <CheckBox Content="Dark foreground"
+                                        IsChecked="{Binding IsDarkForegroundEnabled}" />
+                              <TextBox Text="{Binding DarkForegroundColor}"
+                                       IsEnabled="{Binding IsDarkForegroundEnabled}" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+                              <CheckBox Content="Dark background"
+                                        IsChecked="{Binding IsDarkBackgroundEnabled}" />
+                              <TextBox Text="{Binding DarkBackgroundColor}"
+                                       IsEnabled="{Binding IsDarkBackgroundEnabled}" />
+                            </StackPanel>
+                          </Grid>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
             </StackPanel>
           </ControlTemplate>
         </Setter>

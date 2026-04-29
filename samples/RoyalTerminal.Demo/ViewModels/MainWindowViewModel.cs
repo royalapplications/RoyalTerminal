@@ -9,6 +9,7 @@ using System.IO;
 using System.Reactive;
 using System.Reactive.Linq;
 using System.Runtime.InteropServices;
+using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Demo.Services;
@@ -24,6 +25,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     private TerminalFontSource _fontSource = TerminalFontSource.System;
     private string _fontFamilyName = GetDefaultMonospaceFont();
     private string _fontFilePath = string.Empty;
+    private TerminalTextHighlightingMode _textHighlightingMode = TerminalTextHighlightingMode.Static;
+    private IReadOnlyList<TerminalTextHighlightRule> _textHighlightRules = [];
     private bool _isDarkTheme = true;
     private string _themePresetButtonText = "Theme: Default";
     private bool _nativeVtAvailable;
@@ -409,6 +412,18 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _fontFilePath;
         set => this.RaiseAndSetIfChanged(ref _fontFilePath, value?.Trim() ?? string.Empty);
+    }
+
+    public IReadOnlyList<TerminalTextHighlightRule> TextHighlightRules
+    {
+        get => _textHighlightRules;
+        set => this.RaiseAndSetIfChanged(ref _textHighlightRules, value ?? []);
+    }
+
+    public TerminalTextHighlightingMode TextHighlightingMode
+    {
+        get => _textHighlightingMode;
+        set => this.RaiseAndSetIfChanged(ref _textHighlightingMode, value);
     }
 
     public bool IsDarkTheme
