@@ -6,7 +6,7 @@
       <ControlTheme x:Key="{x:Type settings:TerminalSettingsPanel}" TargetType="settings:TerminalSettingsPanel">
         <Setter Property="Template">
           <ControlTemplate TargetType="settings:TerminalSettingsPanel">
-            <Border Width="840"
+            <Border Width="720"
                     Height="700"
                     Padding="0"
                     Background="#252525"
@@ -21,10 +21,10 @@
                         Padding="18,14"
                         BorderBrush="#3A3A3A"
                         BorderThickness="0,0,0,1">
-                  <Grid ColumnDefinitions="Auto,260,*"
+                  <Grid ColumnDefinitions="Auto,220,*"
                         RowDefinitions="Auto,Auto"
                         ColumnSpacing="12"
-                        RowSpacing="10">
+                        RowSpacing="8">
                     <TextBlock Grid.Row="0"
                                Grid.Column="0"
                                VerticalAlignment="Center"
@@ -44,7 +44,18 @@
                     </ComboBox>
                     <StackPanel Grid.Row="0"
                                 Grid.Column="2"
-                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal"
+                                Spacing="16">
+                      <TextBlock Foreground="#B8B8B8"
+                                 Text="{Binding DefaultProfileId, StringFormat='Default: {0}'}" />
+                      <TextBlock Foreground="#B8B8B8"
+                                 IsVisible="{Binding IsDirty}"
+                                 Text="Unsaved changes" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="1"
+                                Grid.Column="1"
+                                Grid.ColumnSpan="2"
                                 Orientation="Horizontal"
                                 Spacing="8">
                       <Button Content="New"
@@ -60,17 +71,6 @@
                               MinWidth="104"
                               Command="{Binding SetDefaultProfileCommand}" />
                     </StackPanel>
-                    <StackPanel Grid.Row="1"
-                                Grid.Column="1"
-                                Grid.ColumnSpan="2"
-                                Orientation="Horizontal"
-                                Spacing="16">
-                      <TextBlock Foreground="#B8B8B8"
-                                 Text="{Binding DefaultProfileId, StringFormat='Default profile: {0}'}" />
-                      <TextBlock Foreground="#B8B8B8"
-                                 IsVisible="{Binding IsDirty}"
-                                 Text="Unsaved changes" />
-                    </StackPanel>
                   </Grid>
                 </Border>
 
@@ -80,9 +80,9 @@
                             FontSize="14">
                   <TabControl.Styles>
                     <Style Selector="TabItem">
-                      <Setter Property="MinWidth" Value="148" />
+                      <Setter Property="MinWidth" Value="128" />
                       <Setter Property="MinHeight" Value="42" />
-                      <Setter Property="Padding" Value="16,10" />
+                      <Setter Property="Padding" Value="14,10" />
                       <Setter Property="HorizontalContentAlignment" Value="Left" />
                       <Setter Property="FontSize" Value="14" />
                     </Style>
@@ -348,17 +348,17 @@
               DataContext="{Binding DataContext, RelativeSource={RelativeSource TemplatedParent}}"
               x:DataType="settings:TerminalSettingsAppearanceState"
               HorizontalAlignment="Left"
-              Width="620"
+              Width="520"
               Spacing="20">
               <StackPanel Spacing="10">
                 <TextBlock Text="Typography"
                            FontSize="16"
                            FontWeight="SemiBold" />
-                <Grid ColumnDefinitions="132,*"
+                <Grid ColumnDefinitions="118,*"
                       RowDefinitions="Auto,Auto,Auto,Auto"
-                      ColumnSpacing="14"
+                      ColumnSpacing="12"
                       RowSpacing="10"
-                      Width="620">
+                      Width="520">
                   <TextBlock Grid.Row="0"
                              Grid.Column="0"
                              VerticalAlignment="Center"
@@ -400,7 +400,7 @@
                              IsVisible="{Binding IsFileFontSourceSelected}" />
                   <Grid Grid.Row="2"
                         Grid.Column="1"
-                        Width="474"
+                        Width="390"
                         HorizontalAlignment="Left"
                         ColumnDefinitions="*,Auto"
                         ColumnSpacing="8"
@@ -458,9 +458,9 @@
                           Command="{Binding AddTextHighlightRuleCommand}" />
                 </Grid>
 
-                <Grid ColumnDefinitions="132,*"
-                      ColumnSpacing="14"
-                      Width="620">
+                <Grid ColumnDefinitions="118,*"
+                      ColumnSpacing="12"
+                      Width="520">
                   <TextBlock Grid.Column="0"
                              VerticalAlignment="Center"
                              Foreground="#B8B8B8"
