@@ -1931,15 +1931,3 @@ public sealed record SshAuthModeOption(string Id, string DisplayName)
     public const string AgentModeId = "agent";
     public const string PasswordAndKeyModeId = "password-key";
 }
-
-internal sealed record SshHostKeyTrustPromptRequest(
-    string Host,
-    int Port,
-    string Username,
-    string HostKeyAlgorithm,
-    string FingerprintSha256,
-    string FingerprintMd5,
-    int KeyLengthBits,
-    string? HostKeyBase64,
-    bool WillPersistTrust,
-    string KnownHostsFilePath);

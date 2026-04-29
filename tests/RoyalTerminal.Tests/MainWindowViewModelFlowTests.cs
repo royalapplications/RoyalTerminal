@@ -9,6 +9,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using RoyalTerminal.Avalonia.Services;
+using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
@@ -541,6 +542,35 @@ public class MainWindowViewModelFlowTests
     }
 
     [Fact]
+    public async Task SshHostKeyPrompt_AcceptCommand_CompletesPrompt()
+    {
+        MainWindowViewModel viewModel = new();
+
+        Task<bool> promptTask = viewModel.ShowSshHostKeyPromptAsync(CreateSshHostKeyPromptRequest());
+
+        Assert.True(viewModel.IsSshHostKeyPromptVisible);
+        Assert.Equal("alice@example.com:22", viewModel.SshHostKeyPromptEndpoint);
+        Assert.Equal("ssh-ed25519 (256 bits)", viewModel.SshHostKeyPromptAlgorithm);
+
+        viewModel.AcceptSshHostKeyCommand.Execute().Wait();
+
+        Assert.True(await promptTask.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.False(viewModel.IsSshHostKeyPromptVisible);
+    }
+
+    [Fact]
+    public async Task SshHostKeyPrompt_DeclineCommand_CompletesPrompt()
+    {
+        MainWindowViewModel viewModel = new();
+
+        Task<bool> promptTask = viewModel.ShowSshHostKeyPromptAsync(CreateSshHostKeyPromptRequest());
+        viewModel.DeclineSshHostKeyCommand.Execute().Wait();
+
+        Assert.False(await promptTask.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.False(viewModel.IsSshHostKeyPromptVisible);
+    }
+
+    [Fact]
     public void SetShellProfiles_UpdatesSelection()
     {
         MainWindowViewModel viewModel = new();
@@ -775,6 +805,21 @@ public class MainWindowViewModelFlowTests
         }
 
         throw new InvalidOperationException($"Settings category '{categoryId}' was not found.");
+    }
+
+    private static SshHostKeyTrustPromptRequest CreateSshHostKeyPromptRequest()
+    {
+        return new SshHostKeyTrustPromptRequest(
+            Host: "example.com",
+            Port: 22,
+            Username: "alice",
+            HostKeyAlgorithm: "ssh-ed25519",
+            FingerprintSha256: "SHA256:abc",
+            FingerprintMd5: "MD5:00:11",
+            KeyLengthBits: 256,
+            HostKeyBase64: Convert.ToBase64String([1, 2, 3, 4]),
+            WillPersistTrust: true,
+            KnownHostsFilePath: "/tmp/known_hosts");
     }
 
     private static Window CreateWindow(object dataContext)
