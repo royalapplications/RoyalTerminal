@@ -2,7 +2,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using RoyalTerminal.Demo.Services;
-using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Transport.Ssh;
 using Xunit;
@@ -106,6 +105,151 @@ public sealed class PromptingSshHostKeyValidatorTests
     }
 
     [Fact]
+    public void IsTrusted_WhenKnownHostsHasChangedKey_DoesNotPromptOrAppendKnownHostsEntry()
+    {
+        string filePath = CreateTemporaryKnownHostsPath();
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            File.WriteAllText(filePath, "example.com ssh-ed25519 AQIDBA==" + Environment.NewLine);
+            int promptCount = 0;
+            PromptingSshHostKeyValidator validator = new(
+                new KnownHostsSshHostKeyValidator([filePath]),
+                _ =>
+                {
+                    promptCount++;
+                    return true;
+                },
+                filePath);
+
+            bool trusted = validator.IsTrusted(
+                new SshEndpointOptions("example.com", 22, "alice"),
+                new SshHostKeyInfo(
+                    HostKeyAlgorithm: "ssh-ed25519",
+                    FingerprintSha256: "SHA256:changed",
+                    FingerprintMd5: "MD5:00:11",
+                    KeyLengthBits: 256,
+                    HostKeyBase64: Convert.ToBase64String([5, 6, 7, 8])));
+
+            Assert.False(trusted);
+            Assert.Equal(0, promptCount);
+            Assert.DoesNotContain("BQYHCA==", File.ReadAllText(filePath), StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteFileAndDirectory(filePath);
+        }
+    }
+
+    [Fact]
+    public void IsTrusted_WhenKnownHostsHasRevokedKey_DoesNotPromptOrAppendKnownHostsEntry()
+    {
+        string filePath = CreateTemporaryKnownHostsPath();
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            File.WriteAllText(filePath, "@revoked example.com ssh-ed25519 AQIDBA==" + Environment.NewLine);
+            int promptCount = 0;
+            PromptingSshHostKeyValidator validator = new(
+                new KnownHostsSshHostKeyValidator([filePath]),
+                _ =>
+                {
+                    promptCount++;
+                    return true;
+                },
+                filePath);
+
+            bool trusted = validator.IsTrusted(
+                new SshEndpointOptions("example.com", 22, "alice"),
+                new SshHostKeyInfo(
+                    HostKeyAlgorithm: "ssh-ed25519",
+                    FingerprintSha256: "SHA256:abc",
+                    FingerprintMd5: "MD5:00:11",
+                    KeyLengthBits: 256,
+                    HostKeyBase64: Convert.ToBase64String([1, 2, 3, 4])));
+
+            Assert.False(trusted);
+            Assert.Equal(0, promptCount);
+            Assert.Single(File.ReadAllLines(filePath));
+        }
+        finally
+        {
+            DeleteFileAndDirectory(filePath);
+        }
+    }
+
+    [Fact]
+    public void IsTrusted_WhenAcceptedKeyCannotBePersisted_TrustsCurrentConnectionOnly()
+    {
+        string filePath = CreateTemporaryKnownHostsPath();
+        try
+        {
+            SshHostKeyTrustPromptRequest? capturedRequest = null;
+            PromptingSshHostKeyValidator validator = new(
+                new KnownHostsSshHostKeyValidator([filePath]),
+                request =>
+                {
+                    capturedRequest = request;
+                    return true;
+                },
+                filePath);
+
+            bool trusted = validator.IsTrusted(
+                new SshEndpointOptions("example.com", 22, "alice"),
+                new SshHostKeyInfo(
+                    HostKeyAlgorithm: string.Empty,
+                    FingerprintSha256: "SHA256:abc",
+                    FingerprintMd5: "MD5:00:11",
+                    KeyLengthBits: 256,
+                    HostKeyBase64: Convert.ToBase64String([1, 2, 3, 4])));
+
+            Assert.True(trusted);
+            Assert.NotNull(capturedRequest);
+            Assert.False(capturedRequest.WillPersistTrust);
+            Assert.False(File.Exists(filePath));
+        }
+        finally
+        {
+            DeleteFileAndDirectory(filePath);
+        }
+    }
+
+    [Fact]
+    public void IsTrusted_WhenPresentedRawHostKeyIsInvalid_DoesNotPrompt()
+    {
+        string filePath = CreateTemporaryKnownHostsPath();
+        try
+        {
+            int promptCount = 0;
+            PromptingSshHostKeyValidator validator = new(
+                new KnownHostsSshHostKeyValidator([filePath]),
+                _ =>
+                {
+                    promptCount++;
+                    return true;
+                },
+                filePath);
+
+            bool trusted = validator.IsTrusted(
+                new SshEndpointOptions("example.com", 22, "alice"),
+                new SshHostKeyInfo(
+                    HostKeyAlgorithm: "ssh-ed25519",
+                    FingerprintSha256: "SHA256:abc",
+                    FingerprintMd5: "MD5:00:11",
+                    KeyLengthBits: 256,
+                    HostKeyBase64: "not-a-valid-base64-payload"));
+
+            Assert.False(trusted);
+            Assert.Equal(0, promptCount);
+            Assert.False(File.Exists(filePath));
+        }
+        finally
+        {
+            DeleteFileAndDirectory(filePath);
+        }
+    }
+
+    [Fact]
     public void IsTrusted_PassesFingerprintDetailsToPrompt()
     {
         string filePath = CreateTemporaryKnownHostsPath();
@@ -138,6 +282,8 @@ public sealed class PromptingSshHostKeyValidatorTests
             Assert.Equal("SHA256:abc", capturedRequest.FingerprintSha256);
             Assert.Equal("MD5:00:11", capturedRequest.FingerprintMd5);
             Assert.Equal(2048, capturedRequest.KeyLengthBits);
+            Assert.True(capturedRequest.WillPersistTrust);
+            Assert.Equal(filePath, capturedRequest.KnownHostsFilePath);
         }
         finally
         {

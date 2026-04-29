@@ -3,7 +3,6 @@
 // RoyalTerminal.Demo - SSH host-key prompt validator.
 
 using System.Text;
-using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Transport.Ssh;
 
@@ -31,11 +30,18 @@ internal sealed class PromptingSshHostKeyValidator : ISshHostKeyValidator
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
-        if (_knownHostsValidator.IsTrusted(endpoint, hostKey))
+        SshKnownHostTrustStatus knownHostStatus = _knownHostsValidator.GetTrustStatus(endpoint, hostKey);
+        if (knownHostStatus == SshKnownHostTrustStatus.Trusted)
         {
             return true;
         }
 
+        if (knownHostStatus != SshKnownHostTrustStatus.Unknown)
+        {
+            return false;
+        }
+
+        bool canPersistTrust = CanPersistKnownHostsEntry(endpoint, hostKey);
         SshHostKeyTrustPromptRequest request = new(
             Host: endpoint.Host,
             Port: endpoint.Port,
@@ -49,7 +55,7 @@ internal sealed class PromptingSshHostKeyValidator : ISshHostKeyValidator
             FingerprintMd5: hostKey.FingerprintMd5,
             KeyLengthBits: hostKey.KeyLengthBits,
             HostKeyBase64: hostKey.HostKeyBase64,
-            WillPersistTrust: !string.IsNullOrWhiteSpace(hostKey.HostKeyBase64),
+            WillPersistTrust: canPersistTrust,
             KnownHostsFilePath: _userKnownHostsFile);
 
         if (!_prompt(request))
@@ -57,7 +63,7 @@ internal sealed class PromptingSshHostKeyValidator : ISshHostKeyValidator
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(hostKey.HostKeyBase64))
+        if (canPersistTrust)
         {
             AppendKnownHostsEntry(endpoint, hostKey);
         }
@@ -76,10 +82,7 @@ internal sealed class PromptingSshHostKeyValidator : ISshHostKeyValidator
         string hostPattern = endpoint.Port == 22
             ? endpoint.Host
             : $"[{endpoint.Host}]:{endpoint.Port}";
-        string algorithm = string.IsNullOrWhiteSpace(hostKey.HostKeyAlgorithm)
-            ? "ssh-ed25519"
-            : hostKey.HostKeyAlgorithm;
-        string line = $"{hostPattern} {algorithm} {hostKey.HostKeyBase64}";
+        string line = $"{hostPattern} {hostKey.HostKeyAlgorithm} {hostKey.HostKeyBase64}";
 
         using FileStream stream = new(
             _userKnownHostsFile,
@@ -99,5 +102,68 @@ internal sealed class PromptingSshHostKeyValidator : ISshHostKeyValidator
         }
 
         return Path.Combine(userProfile, ".ssh", "known_hosts");
+    }
+
+    private static bool CanPersistKnownHostsEntry(SshEndpointOptions endpoint, SshHostKeyInfo hostKey)
+    {
+        return IsKnownHostsHostSafe(endpoint.Host) &&
+            IsKnownHostsTokenSafe(hostKey.HostKeyAlgorithm) &&
+            IsKnownHostsTokenSafe(hostKey.HostKeyBase64) &&
+            IsValidBase64(hostKey.HostKeyBase64);
+    }
+
+    private static bool IsKnownHostsHostSafe(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < host.Length; i++)
+        {
+            char c = host[i];
+            if (char.IsWhiteSpace(c) || c is ',' or '*' or '?' or '!' or '[' or ']')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsKnownHostsTokenSafe(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (char.IsWhiteSpace(value[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsValidBase64(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = Convert.FromBase64String(value);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 }
