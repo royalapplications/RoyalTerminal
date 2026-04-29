@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Terminal - Session profile serialization and persistence helpers.
 
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -205,7 +206,53 @@ public static class TerminalSessionProfileSerializer
             FontFamilyName = NormalizeOptional(appearance.FontFamilyName) ?? TerminalSessionProfileDefaults.DefaultMonoFont,
             FontFilePath = fontSource == TerminalFontSource.File ? fontFilePath : null,
             FontSize = appearance.FontSize > 0 ? appearance.FontSize : 14.0,
+            TextHighlightingMode = NormalizeTextHighlightingMode(appearance.TextHighlightingMode),
+            TextHighlightRules = NormalizeTextHighlightRules(appearance.TextHighlightRules),
         };
+    }
+
+    private static TerminalTextHighlightingMode NormalizeTextHighlightingMode(TerminalTextHighlightingMode mode)
+    {
+        return Enum.IsDefined(mode)
+            ? mode
+            : TerminalTextHighlightingMode.Static;
+    }
+
+    private static List<TerminalSessionTextHighlightRule> NormalizeTextHighlightRules(
+        List<TerminalSessionTextHighlightRule>? rules)
+    {
+        if (rules is null || rules.Count == 0)
+        {
+            return [];
+        }
+
+        List<TerminalSessionTextHighlightRule> normalized = new(rules.Count);
+        for (int i = 0; i < rules.Count; i++)
+        {
+            TerminalSessionTextHighlightRule? rule = rules[i];
+            if (rule is null)
+            {
+                continue;
+            }
+
+            string? pattern = NormalizeOptional(rule.Pattern);
+            if (pattern is null)
+            {
+                continue;
+            }
+
+            normalized.Add(rule with
+            {
+                Name = NormalizeOptional(rule.Name) ?? "Highlight Rule",
+                Pattern = pattern,
+                ForegroundColor = NormalizeColor(rule.ForegroundColor),
+                BackgroundColor = NormalizeColor(rule.BackgroundColor),
+                DarkForegroundColor = NormalizeColor(rule.DarkForegroundColor),
+                DarkBackgroundColor = NormalizeColor(rule.DarkBackgroundColor),
+            });
+        }
+
+        return normalized;
     }
 
     private static TerminalSessionBehaviorSettings NormalizeBehavior(TerminalSessionBehaviorSettings behavior)
@@ -660,6 +707,44 @@ public static class TerminalSessionProfileSerializer
     private static string? NormalizeOptional(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string? NormalizeColor(string? value)
+    {
+        string? normalized = NormalizeOptional(value);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        ReadOnlySpan<char> text = normalized.AsSpan();
+        if (text.Length > 0 && text[0] == '#')
+        {
+            text = text[1..];
+        }
+
+        if (text.Length != 6 && text.Length != 8)
+        {
+            return null;
+        }
+
+        if (!uint.TryParse(
+                text,
+                NumberStyles.HexNumber,
+                CultureInfo.InvariantCulture,
+                out uint color))
+        {
+            return null;
+        }
+
+        if (text.Length == 6)
+        {
+            color |= 0xFF000000u;
+        }
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"#{color:X8}");
     }
 }
 
