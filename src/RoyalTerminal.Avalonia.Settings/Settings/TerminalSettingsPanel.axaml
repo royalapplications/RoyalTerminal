@@ -88,7 +88,10 @@
                     </Style>
                   </TabControl.Styles>
                   <TabItem Header="Session">
-                    <ScrollViewer Padding="20,16"
+                    <ScrollViewer Classes="settings-tab-scroll"
+                                  MaxHeight="500"
+                                  AllowAutoHide="False"
+                                  Padding="20,16"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
                       <settings:TerminalSettingsSessionPanel DataContext="{Binding Session}" />
@@ -96,7 +99,10 @@
                   </TabItem>
 
                   <TabItem Header="Connection">
-                    <ScrollViewer Padding="20,16"
+                    <ScrollViewer Classes="settings-tab-scroll"
+                                  MaxHeight="500"
+                                  AllowAutoHide="False"
+                                  Padding="20,16"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
                       <settings:TerminalSettingsConnectionPanel
@@ -105,7 +111,10 @@
                   </TabItem>
 
                   <TabItem Header="Terminal">
-                    <ScrollViewer Padding="20,16"
+                    <ScrollViewer Classes="settings-tab-scroll"
+                                  MaxHeight="500"
+                                  AllowAutoHide="False"
+                                  Padding="20,16"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
                       <settings:TerminalSettingsTerminalPanel
@@ -114,7 +123,10 @@
                   </TabItem>
 
                   <TabItem Header="Appearance">
-                    <ScrollViewer Padding="20,16"
+                    <ScrollViewer Classes="settings-tab-scroll"
+                                  MaxHeight="500"
+                                  AllowAutoHide="False"
+                                  Padding="20,16"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
                       <settings:TerminalSettingsAppearancePanel
@@ -123,7 +135,10 @@
                   </TabItem>
 
                   <TabItem Header="SSH">
-                    <ScrollViewer Padding="20,16"
+                    <ScrollViewer Classes="settings-tab-scroll"
+                                  MaxHeight="500"
+                                  AllowAutoHide="False"
+                                  Padding="20,16"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
                       <settings:TerminalSettingsSshPanel DataContext="{Binding Ssh}" />
@@ -131,7 +146,10 @@
                   </TabItem>
 
                   <TabItem Header="Logging">
-                    <ScrollViewer Padding="20,16"
+                    <ScrollViewer Classes="settings-tab-scroll"
+                                  MaxHeight="500"
+                                  AllowAutoHide="False"
+                                  Padding="20,16"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
                       <settings:TerminalSettingsLoggingPanel DataContext="{Binding Logging}" />
@@ -728,6 +746,13 @@
 
   <Style Selector="settings|TerminalSettingsPanel NumericUpDown">
     <Setter Property="FontSize" Value="14" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel ScrollViewer.settings-tab-scroll">
+    <Setter Property="MaxHeight" Value="500" />
+    <Setter Property="AllowAutoHide" Value="False" />
+    <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+    <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
   </Style>
 
   <Style Selector="settings|TerminalSettingsSessionPanel">
