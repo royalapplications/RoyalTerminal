@@ -436,6 +436,42 @@ public class RenderingTests
         Assert.True(foregroundPixels < renderer.CellWidth * renderer.CellHeight);
     }
 
+    [Theory]
+    [InlineData(@"\b(ERROR|WARN)\b", "WARN")]
+    [InlineData("ERROR|WARN", "WARN")]
+    public void SkiaTerminalRenderer_TextHighlightRules_HandleAlternationPatterns(
+        string pattern,
+        string text)
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        renderer.SetCellSize(16f, 20f);
+        renderer.SetTextHighlightRules(
+        [
+            new TerminalTextHighlightRule
+            {
+                Name = "Regex semantics",
+                Pattern = pattern,
+                Background = 0xFFFF0000,
+            },
+        ]);
+
+        TerminalScreen screen = CreateAsciiScreen(columns: text.Length, rows: 1, text: text);
+        using SKSurface surface = CreateRenderSurface(renderer, columns: text.Length, rows: 1);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int redPixels = CountRedDominantPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth * text.Length,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        Assert.True(redPixels > 100);
+    }
+
     [Fact]
     public void SkiaTerminalRenderer_TextHighlightRules_InvalidRegexIsIgnored()
     {
