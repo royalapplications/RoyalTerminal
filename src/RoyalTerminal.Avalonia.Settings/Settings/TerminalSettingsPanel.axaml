@@ -90,9 +90,10 @@
                   </TabControl.Styles>
                   <TabItem Header="Session">
                     <ScrollViewer Classes="settings-tab-scroll"
-                                  MaxHeight="500"
                                   AllowAutoHide="False"
                                   Padding="20,16"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
                                   ClipToBounds="True"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
@@ -102,9 +103,10 @@
 
                   <TabItem Header="Connection">
                     <ScrollViewer Classes="settings-tab-scroll"
-                                  MaxHeight="500"
                                   AllowAutoHide="False"
                                   Padding="20,16"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
                                   ClipToBounds="True"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
@@ -115,9 +117,10 @@
 
                   <TabItem Header="Terminal">
                     <ScrollViewer Classes="settings-tab-scroll"
-                                  MaxHeight="500"
                                   AllowAutoHide="False"
                                   Padding="20,16"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
                                   ClipToBounds="True"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
@@ -128,9 +131,10 @@
 
                   <TabItem Header="Appearance">
                     <ScrollViewer Classes="settings-tab-scroll"
-                                  MaxHeight="500"
                                   AllowAutoHide="False"
                                   Padding="20,16"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
                                   ClipToBounds="True"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
@@ -141,9 +145,10 @@
 
                   <TabItem Header="SSH">
                     <ScrollViewer Classes="settings-tab-scroll"
-                                  MaxHeight="500"
                                   AllowAutoHide="False"
                                   Padding="20,16"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
                                   ClipToBounds="True"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
@@ -153,9 +158,10 @@
 
                   <TabItem Header="Logging">
                     <ScrollViewer Classes="settings-tab-scroll"
-                                  MaxHeight="500"
                                   AllowAutoHide="False"
                                   Padding="20,16"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
                                   ClipToBounds="True"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto">
@@ -756,35 +762,12 @@
   </Style>
 
   <Style Selector="settings|TerminalSettingsPanel ScrollViewer.settings-tab-scroll">
-    <Setter Property="MaxHeight" Value="500" />
     <Setter Property="AllowAutoHide" Value="False" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
     <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
     <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
-  </Style>
-
-  <Style Selector="settings|TerminalSettingsPanel settings|TerminalSettingsSessionPanel">
-    <Setter Property="Margin" Value="0,0,0,96" />
-  </Style>
-
-  <Style Selector="settings|TerminalSettingsPanel settings|TerminalSettingsConnectionPanel">
-    <Setter Property="Margin" Value="0,0,0,96" />
-  </Style>
-
-  <Style Selector="settings|TerminalSettingsPanel settings|TerminalSettingsTerminalPanel">
-    <Setter Property="Margin" Value="0,0,0,96" />
-  </Style>
-
-  <Style Selector="settings|TerminalSettingsPanel settings|TerminalSettingsAppearancePanel">
-    <Setter Property="Margin" Value="0,0,0,96" />
-  </Style>
-
-  <Style Selector="settings|TerminalSettingsPanel settings|TerminalSettingsSshPanel">
-    <Setter Property="Margin" Value="0,0,0,96" />
-  </Style>
-
-  <Style Selector="settings|TerminalSettingsPanel settings|TerminalSettingsLoggingPanel">
-    <Setter Property="Margin" Value="0,0,0,96" />
   </Style>
 
   <Style Selector="settings|TerminalSettingsSessionPanel">
