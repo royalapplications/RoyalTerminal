@@ -1182,6 +1182,8 @@ public class RenderingTests
         Assert.Equal(0, diagnostics.BrailleSpriteCells);
         Assert.Equal(0, diagnostics.BlockSpriteCells);
         Assert.Equal(0, diagnostics.ScanLineSpriteCells);
+        Assert.Equal(0, diagnostics.PretextRuns);
+        Assert.Equal(0, diagnostics.PretextFallbackRuns);
     }
 
     [Fact]
@@ -1295,6 +1297,8 @@ public class RenderingTests
         Assert.Equal(0, afterReset.BrailleSpriteCells);
         Assert.Equal(0, afterReset.BlockSpriteCells);
         Assert.Equal(0, afterReset.ScanLineSpriteCells);
+        Assert.Equal(0, afterReset.PretextRuns);
+        Assert.Equal(0, afterReset.PretextFallbackRuns);
     }
 
     [Fact]
@@ -1321,6 +1325,64 @@ public class RenderingTests
         Assert.Equal(0, diagnostics.BrailleSpriteCells);
         Assert.Equal(0, diagnostics.BlockSpriteCells);
         Assert.Equal(0, diagnostics.ScanLineSpriteCells);
+        Assert.Equal(0, diagnostics.PretextRuns);
+        Assert.Equal(0, diagnostics.PretextFallbackRuns);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_PretextPipeline_WhenAvailable_DoesNotUseHarfBuzzRuns()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableTextRenderDiagnostics = true,
+            TextRenderPipeline = TerminalTextRenderPipeline.Pretext,
+        };
+
+        Assert.Equal(TerminalTextRenderPipeline.Pretext, renderer.TextRenderPipeline);
+
+        if (!renderer.IsPretextTextRenderPipelineAvailable)
+        {
+            return;
+        }
+
+        using var surface = CreateRenderSurface(renderer, columns: 8, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 8, rows: 1, text: "PRETEXT!");
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.True(
+            diagnostics.PretextRuns > 0 || diagnostics.PretextFallbackRuns > 0,
+            "Pretext pipeline should handle the text run when compiled into the build.");
+        Assert.Equal(0, diagnostics.ShapedRuns);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_PretextPipeline_WhenClamped_DoesNotUseFallbackRuns()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableTextRenderDiagnostics = true,
+            TextRenderPipeline = TerminalTextRenderPipeline.Pretext,
+        };
+
+        if (!renderer.IsPretextTextRenderPipelineAvailable)
+        {
+            return;
+        }
+
+        renderer.SetCellSize(renderer.CellWidth * 0.75f, renderer.CellHeight);
+
+        using var surface = CreateRenderSurface(renderer, columns: 12, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 12, rows: 1, text: "HELLOWORLD12");
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.True(diagnostics.PretextRuns > 0);
+        Assert.True(diagnostics.GridClampedRuns > 0);
+        Assert.Equal(0, diagnostics.PretextFallbackRuns);
+        Assert.Equal(0, diagnostics.ShapedRuns);
     }
 
     [Fact]

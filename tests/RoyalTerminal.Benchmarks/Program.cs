@@ -12,13 +12,16 @@ using SkiaSharp;
 
 BenchmarkOptions options = BenchmarkOptions.Parse(args);
 
-BenchmarkScenario[] renderScenarios =
+BenchmarkScenario[] defaultRenderScenarios =
 [
-    new("full-80x24", Columns: 80, Rows: 24, Iterations: 1_200, DirtyRowsPerFrame: 24, FullRedraw: true),
-    new("full-160x48", Columns: 160, Rows: 48, Iterations: 700, DirtyRowsPerFrame: 48, FullRedraw: true),
-    new("full-240x80", Columns: 240, Rows: 80, Iterations: 300, DirtyRowsPerFrame: 80, FullRedraw: true),
-    new("dirty-160x48-r8", Columns: 160, Rows: 48, Iterations: 1_800, DirtyRowsPerFrame: 8, FullRedraw: false),
+    new("full-80x24", Columns: 80, Rows: 24, Iterations: 1_200, DirtyRowsPerFrame: 24, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz),
+    new("full-160x48", Columns: 160, Rows: 48, Iterations: 700, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz),
+    new("full-240x80", Columns: 240, Rows: 80, Iterations: 300, DirtyRowsPerFrame: 80, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz),
+    new("dirty-160x48-r8", Columns: 160, Rows: 48, Iterations: 1_800, DirtyRowsPerFrame: 8, FullRedraw: false, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz),
 ];
+BenchmarkScenario[] renderScenarios = IsPretextBenchmarkAvailable()
+    ? [.. defaultRenderScenarios, new("pretext-full-160x48", Columns: 160, Rows: 48, Iterations: 700, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.Pretext)]
+    : defaultRenderScenarios;
 
 TextHighlightBenchmarkScenario[] textHighlightScenarios =
 [
@@ -118,13 +121,20 @@ if (!string.IsNullOrWhiteSpace(options.OutputPath))
     Console.WriteLine($"Saved report: {outputPath}");
 }
 
+static bool IsPretextBenchmarkAvailable()
+{
+    using SkiaTerminalRenderer renderer = new("Consolas", 14f);
+    return renderer.IsPretextTextRenderPipelineAvailable;
+}
+
 internal readonly record struct BenchmarkScenario(
     string Name,
     int Columns,
     int Rows,
     int Iterations,
     int DirtyRowsPerFrame,
-    bool FullRedraw);
+    bool FullRedraw,
+    TerminalTextRenderPipeline TextRenderPipeline);
 
 internal readonly record struct BenchmarkResult(
     string Name,
@@ -133,6 +143,7 @@ internal readonly record struct BenchmarkResult(
     int Iterations,
     int DirtyRowsPerFrame,
     bool FullRedraw,
+    TerminalTextRenderPipeline TextRenderPipeline,
     double RowsPerSecond,
     double AllocBytesPerFrame,
     double MeanFrameMs,
@@ -212,6 +223,7 @@ internal static class RenderHotPathBenchmark
     public static BenchmarkResult Run(BenchmarkScenario scenario)
     {
         using SkiaTerminalRenderer renderer = new("Consolas", FontSize);
+        renderer.TextRenderPipeline = scenario.TextRenderPipeline;
         TerminalScreen screen = new(scenario.Columns, scenario.Rows);
         InitializeScreen(screen);
 
@@ -293,6 +305,7 @@ internal static class RenderHotPathBenchmark
             scenario.Iterations,
             dirtyRows,
             scenario.FullRedraw,
+            scenario.TextRenderPipeline,
             rowsPerSecond,
             allocPerFrame,
             meanFrameMs,
@@ -774,8 +787,8 @@ internal static class BenchmarkReportWriter
     {
         sb.AppendLine("## Render Baseline");
         sb.AppendLine();
-        sb.AppendLine("| Scenario | Grid | Mode | Iterations | Rows/frame | Rows/sec | Alloc/frame (B) | Mean frame (ms) | p95 frame (ms) | Total time (ms) |");
-        sb.AppendLine("|---|---:|---|---:|---:|---:|---:|---:|---:|---:|");
+        sb.AppendLine("| Scenario | Grid | Mode | Text pipeline | Iterations | Rows/frame | Rows/sec | Alloc/frame (B) | Mean frame (ms) | p95 frame (ms) | Total time (ms) |");
+        sb.AppendLine("|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|");
 
         for (int i = 0; i < results.Length; i++)
         {
@@ -785,6 +798,7 @@ internal static class BenchmarkReportWriter
             sb.Append("| ").Append(result.Name)
                 .Append(" | ").Append(result.Columns).Append('x').Append(result.Rows)
                 .Append(" | ").Append(mode)
+                .Append(" | ").Append(result.TextRenderPipeline)
                 .Append(" | ").Append(result.Iterations)
                 .Append(" | ").Append(result.DirtyRowsPerFrame)
                 .Append(" | ").Append(Format(result.RowsPerSecond))
