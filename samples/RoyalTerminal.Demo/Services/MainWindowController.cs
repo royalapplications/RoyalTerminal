@@ -1480,6 +1480,7 @@ internal sealed class MainWindowController
         target.Container.IsVisible = true;
         target.HeaderButton.Classes.Add("active");
         _activeTab = target;
+        UpdateTextRenderPipelineIndicator(target.Control as TerminalControl);
 
         if (target.AutoStartSession && target.Control is TerminalControl standaloneControl)
         {
@@ -2898,6 +2899,28 @@ internal sealed class MainWindowController
     private void UpdateDimensions(int columns, int rows)
     {
         _viewModel.SetDimensions(columns, rows);
+    }
+
+    private void UpdateTextRenderPipelineIndicator(TerminalControl? control)
+    {
+        _viewModel.SetTextRenderPipelineIndicator(BuildTextRenderPipelineIndicator(control?.Renderer));
+    }
+
+    private static string BuildTextRenderPipelineIndicator(SkiaTerminalRenderer? renderer)
+    {
+        if (s_disableTextShaping)
+        {
+            return "Text: cell fallback";
+        }
+
+        if (s_textRenderPipeline == TerminalTextRenderPipeline.Pretext)
+        {
+            return renderer?.IsPretextTextRenderPipelineAvailable == true
+                ? "Text: Pretext"
+                : "Text: HarfBuzz (Pretext unavailable)";
+        }
+
+        return "Text: HarfBuzz";
     }
 
     private void UpdateSessionStartedStatus(TerminalControl control, string message)

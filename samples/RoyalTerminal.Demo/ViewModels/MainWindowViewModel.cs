@@ -35,6 +35,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _useManagedVtControl;
     private string _statusText = "Ready";
     private string _dimensionsText = "80x24";
+    private string _textRenderPipelineIndicatorText = "Text: HarfBuzz";
     private string _modeButtonText = "Rendered";
     private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(nativeVtAvailable: false);
     private TerminalRenderMode _activeRenderMode = TerminalRenderMode.RenderedAuto;
@@ -494,6 +495,12 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _dimensionsText;
         private set => this.RaiseAndSetIfChanged(ref _dimensionsText, value);
+    }
+
+    public string TextRenderPipelineIndicatorText
+    {
+        get => _textRenderPipelineIndicatorText;
+        private set => this.RaiseAndSetIfChanged(ref _textRenderPipelineIndicatorText, value);
     }
 
     public string ModeButtonText
@@ -1365,6 +1372,11 @@ public sealed class MainWindowViewModel : ReactiveObject
     public void SetDimensions(int columns, int rows)
     {
         DimensionsText = $"{columns}x{rows}";
+    }
+
+    public void SetTextRenderPipelineIndicator(string text)
+    {
+        TextRenderPipelineIndicatorText = text;
     }
 
     public void SetFontSizeFromSettings(double fontSize)
