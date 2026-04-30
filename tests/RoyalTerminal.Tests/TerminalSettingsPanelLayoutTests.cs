@@ -51,6 +51,16 @@ public sealed class TerminalSettingsPanelLayoutTests
             Assert.True(TryGetVisibleSettingsScrollViewer(panel, out ScrollViewer? selectedScrollViewer));
             Assert.True(TryGetVisualWithClass(panel, "settings-highlight-rule-card", out Border selectedRuleCard));
             Assert.True(TryGetVisualWithClass(panel, "settings-footer", out Border footer));
+            ColorPicker[] colorPickers = panel.GetVisualDescendants()
+                .OfType<ColorPicker>()
+                .Where(picker => picker.Classes.Contains("settings-highlight-color-picker"))
+                .ToArray();
+            Assert.Equal(4, colorPickers.Length);
+            for (int i = 0; i < colorPickers.Length; i++)
+            {
+                Assert.True(colorPickers[i].Bounds.Width > 0);
+                Assert.True(colorPickers[i].Bounds.Height > 0);
+            }
 
             double ruleCardBottom = GetBottomRelativeToPanel(selectedRuleCard, panel);
             double footerTop = GetTopRelativeToPanel(footer, panel);

@@ -1,5 +1,6 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:colorPicker="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.ColorPicker"
         xmlns:settings="using:RoyalTerminal.Avalonia.Settings">
   <Styles.Resources>
     <ResourceDictionary>
@@ -576,10 +577,25 @@
                                         VerticalAlignment="Center"
                                         Content="Foreground"
                                         IsChecked="{Binding IsForegroundEnabled}" />
-                              <TextBox Grid.Column="1"
-                                       PlaceholderText="#FFFFFFFF"
-                                       Text="{Binding ForegroundColor}"
-                                       IsEnabled="{Binding IsForegroundEnabled}" />
+                              <Grid Grid.Column="1">
+                                <TextBox Padding="8,0,38,0"
+                                         PlaceholderText="#FFFFFFFF"
+                                         Text="{Binding ForegroundColor}"
+                                         IsEnabled="{Binding IsForegroundEnabled}" />
+                                <colorPicker:ColorPicker Classes="settings-highlight-color-picker"
+                                                         Width="30"
+                                                         Height="30"
+                                                         MinWidth="30"
+                                                         MinHeight="30"
+                                                         Margin="0,2,2,2"
+                                                         HorizontalAlignment="Right"
+                                                         VerticalAlignment="Center"
+                                                         Color="{Binding ForegroundPickerColor}"
+                                                         IsAlphaEnabled="True"
+                                                         IsAlphaVisible="True"
+                                                         IsEnabled="{Binding IsForegroundEnabled}"
+                                                         ToolTip.Tip="Pick foreground color" />
+                              </Grid>
                             </Grid>
                             <Grid Grid.Row="0"
                                   Grid.Column="1"
@@ -589,10 +605,25 @@
                                         VerticalAlignment="Center"
                                         Content="Background"
                                         IsChecked="{Binding IsBackgroundEnabled}" />
-                              <TextBox Grid.Column="1"
-                                       PlaceholderText="#FF000000"
-                                       Text="{Binding BackgroundColor}"
-                                       IsEnabled="{Binding IsBackgroundEnabled}" />
+                              <Grid Grid.Column="1">
+                                <TextBox Padding="8,0,38,0"
+                                         PlaceholderText="#FF000000"
+                                         Text="{Binding BackgroundColor}"
+                                         IsEnabled="{Binding IsBackgroundEnabled}" />
+                                <colorPicker:ColorPicker Classes="settings-highlight-color-picker"
+                                                         Width="30"
+                                                         Height="30"
+                                                         MinWidth="30"
+                                                         MinHeight="30"
+                                                         Margin="0,2,2,2"
+                                                         HorizontalAlignment="Right"
+                                                         VerticalAlignment="Center"
+                                                         Color="{Binding BackgroundPickerColor}"
+                                                         IsAlphaEnabled="True"
+                                                         IsAlphaVisible="True"
+                                                         IsEnabled="{Binding IsBackgroundEnabled}"
+                                                         ToolTip.Tip="Pick background color" />
+                              </Grid>
                             </Grid>
                             <Grid Grid.Row="1"
                                   Grid.Column="0"
@@ -602,10 +633,25 @@
                                         VerticalAlignment="Center"
                                         Content="Dark foreground"
                                         IsChecked="{Binding IsDarkForegroundEnabled}" />
-                              <TextBox Grid.Column="1"
-                                       PlaceholderText="#FFFFFFFF"
-                                       Text="{Binding DarkForegroundColor}"
-                                       IsEnabled="{Binding IsDarkForegroundEnabled}" />
+                              <Grid Grid.Column="1">
+                                <TextBox Padding="8,0,38,0"
+                                         PlaceholderText="#FFFFFFFF"
+                                         Text="{Binding DarkForegroundColor}"
+                                         IsEnabled="{Binding IsDarkForegroundEnabled}" />
+                                <colorPicker:ColorPicker Classes="settings-highlight-color-picker"
+                                                         Width="30"
+                                                         Height="30"
+                                                         MinWidth="30"
+                                                         MinHeight="30"
+                                                         Margin="0,2,2,2"
+                                                         HorizontalAlignment="Right"
+                                                         VerticalAlignment="Center"
+                                                         Color="{Binding DarkForegroundPickerColor}"
+                                                         IsAlphaEnabled="True"
+                                                         IsAlphaVisible="True"
+                                                         IsEnabled="{Binding IsDarkForegroundEnabled}"
+                                                         ToolTip.Tip="Pick dark foreground color" />
+                              </Grid>
                             </Grid>
                             <Grid Grid.Row="1"
                                   Grid.Column="1"
@@ -615,10 +661,25 @@
                                         VerticalAlignment="Center"
                                         Content="Dark background"
                                         IsChecked="{Binding IsDarkBackgroundEnabled}" />
-                              <TextBox Grid.Column="1"
-                                       PlaceholderText="#FF000000"
-                                       Text="{Binding DarkBackgroundColor}"
-                                       IsEnabled="{Binding IsDarkBackgroundEnabled}" />
+                              <Grid Grid.Column="1">
+                                <TextBox Padding="8,0,38,0"
+                                         PlaceholderText="#FF000000"
+                                         Text="{Binding DarkBackgroundColor}"
+                                         IsEnabled="{Binding IsDarkBackgroundEnabled}" />
+                                <colorPicker:ColorPicker Classes="settings-highlight-color-picker"
+                                                         Width="30"
+                                                         Height="30"
+                                                         MinWidth="30"
+                                                         MinHeight="30"
+                                                         Margin="0,2,2,2"
+                                                         HorizontalAlignment="Right"
+                                                         VerticalAlignment="Center"
+                                                         Color="{Binding DarkBackgroundPickerColor}"
+                                                         IsAlphaEnabled="True"
+                                                         IsAlphaVisible="True"
+                                                         IsEnabled="{Binding IsDarkBackgroundEnabled}"
+                                                         ToolTip.Tip="Pick dark background color" />
+                              </Grid>
                             </Grid>
                           </Grid>
                         </Grid>
@@ -748,6 +809,8 @@
       </ControlTheme>
     </ResourceDictionary>
   </Styles.Resources>
+
+  <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml" />
 
   <Style Selector="settings|TerminalSettingsPanel">
     <Setter Property="Theme" Value="{StaticResource {x:Type settings:TerminalSettingsPanel}}" />

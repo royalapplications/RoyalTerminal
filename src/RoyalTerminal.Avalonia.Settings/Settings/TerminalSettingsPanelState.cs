@@ -10,6 +10,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Collections;
+using Avalonia.Media;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Terminal;
 
@@ -39,6 +40,7 @@ public sealed record TerminalSettingsTextHighlightingModeOption(TerminalTextHigh
 public sealed class TerminalSettingsHighlightRuleState : AvaloniaObject
 {
     private readonly TerminalSettingsPanelState _owner;
+    private bool _syncingColor;
 
     public static readonly StyledProperty<string> NameProperty =
         AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, string>(nameof(Name), "Highlight Rule");
@@ -55,11 +57,17 @@ public sealed class TerminalSettingsHighlightRuleState : AvaloniaObject
     public static readonly StyledProperty<string> ForegroundColorProperty =
         AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, string>(nameof(ForegroundColor), "#FFFFFFFF");
 
+    public static readonly StyledProperty<Color> ForegroundPickerColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, Color>(nameof(ForegroundPickerColor), Colors.White);
+
     public static readonly StyledProperty<bool> IsBackgroundEnabledProperty =
         AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, bool>(nameof(IsBackgroundEnabled), false);
 
     public static readonly StyledProperty<string> BackgroundColorProperty =
         AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, string>(nameof(BackgroundColor), "#FF000000");
+
+    public static readonly StyledProperty<Color> BackgroundPickerColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, Color>(nameof(BackgroundPickerColor), Colors.Black);
 
     public static readonly StyledProperty<bool> IsDarkForegroundEnabledProperty =
         AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, bool>(nameof(IsDarkForegroundEnabled), false);
@@ -67,11 +75,17 @@ public sealed class TerminalSettingsHighlightRuleState : AvaloniaObject
     public static readonly StyledProperty<string> DarkForegroundColorProperty =
         AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, string>(nameof(DarkForegroundColor), "#FFFFFFFF");
 
+    public static readonly StyledProperty<Color> DarkForegroundPickerColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, Color>(nameof(DarkForegroundPickerColor), Colors.White);
+
     public static readonly StyledProperty<bool> IsDarkBackgroundEnabledProperty =
         AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, bool>(nameof(IsDarkBackgroundEnabled), false);
 
     public static readonly StyledProperty<string> DarkBackgroundColorProperty =
         AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, string>(nameof(DarkBackgroundColor), "#FF000000");
+
+    public static readonly StyledProperty<Color> DarkBackgroundPickerColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, Color>(nameof(DarkBackgroundPickerColor), Colors.Black);
 
     internal TerminalSettingsHighlightRuleState(
         TerminalSettingsPanelState owner,
@@ -115,6 +129,12 @@ public sealed class TerminalSettingsHighlightRuleState : AvaloniaObject
         set => SetValue(ForegroundColorProperty, value);
     }
 
+    public Color ForegroundPickerColor
+    {
+        get => GetValue(ForegroundPickerColorProperty);
+        set => SetValue(ForegroundPickerColorProperty, value);
+    }
+
     public bool IsBackgroundEnabled
     {
         get => GetValue(IsBackgroundEnabledProperty);
@@ -125,6 +145,12 @@ public sealed class TerminalSettingsHighlightRuleState : AvaloniaObject
     {
         get => GetValue(BackgroundColorProperty);
         set => SetValue(BackgroundColorProperty, value);
+    }
+
+    public Color BackgroundPickerColor
+    {
+        get => GetValue(BackgroundPickerColorProperty);
+        set => SetValue(BackgroundPickerColorProperty, value);
     }
 
     public bool IsDarkForegroundEnabled
@@ -139,6 +165,12 @@ public sealed class TerminalSettingsHighlightRuleState : AvaloniaObject
         set => SetValue(DarkForegroundColorProperty, value);
     }
 
+    public Color DarkForegroundPickerColor
+    {
+        get => GetValue(DarkForegroundPickerColorProperty);
+        set => SetValue(DarkForegroundPickerColorProperty, value);
+    }
+
     public bool IsDarkBackgroundEnabled
     {
         get => GetValue(IsDarkBackgroundEnabledProperty);
@@ -151,11 +183,56 @@ public sealed class TerminalSettingsHighlightRuleState : AvaloniaObject
         set => SetValue(DarkBackgroundColorProperty, value);
     }
 
+    public Color DarkBackgroundPickerColor
+    {
+        get => GetValue(DarkBackgroundPickerColorProperty);
+        set => SetValue(DarkBackgroundPickerColorProperty, value);
+    }
+
     public ICommand RemoveCommand { get; }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
+
+        if (_syncingColor)
+        {
+            return;
+        }
+
+        if (change.Property == ForegroundColorProperty)
+        {
+            SyncPickerColorFromText(ForegroundColor, ForegroundPickerColorProperty, Colors.White);
+        }
+        else if (change.Property == BackgroundColorProperty)
+        {
+            SyncPickerColorFromText(BackgroundColor, BackgroundPickerColorProperty, Colors.Black);
+        }
+        else if (change.Property == DarkForegroundColorProperty)
+        {
+            SyncPickerColorFromText(DarkForegroundColor, DarkForegroundPickerColorProperty, Colors.White);
+        }
+        else if (change.Property == DarkBackgroundColorProperty)
+        {
+            SyncPickerColorFromText(DarkBackgroundColor, DarkBackgroundPickerColorProperty, Colors.Black);
+        }
+        else if (change.Property == ForegroundPickerColorProperty)
+        {
+            SyncTextFromPickerColor(ForegroundColorProperty, ForegroundPickerColor);
+        }
+        else if (change.Property == BackgroundPickerColorProperty)
+        {
+            SyncTextFromPickerColor(BackgroundColorProperty, BackgroundPickerColor);
+        }
+        else if (change.Property == DarkForegroundPickerColorProperty)
+        {
+            SyncTextFromPickerColor(DarkForegroundColorProperty, DarkForegroundPickerColor);
+        }
+        else if (change.Property == DarkBackgroundPickerColorProperty)
+        {
+            SyncTextFromPickerColor(DarkBackgroundColorProperty, DarkBackgroundPickerColor);
+        }
+
         _owner.NotifyTextHighlightRuleChanged();
     }
 
@@ -186,6 +263,57 @@ public sealed class TerminalSettingsHighlightRuleState : AvaloniaObject
         DarkForegroundColor = rule.DarkForegroundColor ?? "#FFFFFFFF";
         IsDarkBackgroundEnabled = !string.IsNullOrWhiteSpace(rule.DarkBackgroundColor);
         DarkBackgroundColor = rule.DarkBackgroundColor ?? "#FF000000";
+    }
+
+    private void SyncPickerColorFromText(
+        string colorText,
+        StyledProperty<Color> pickerColorProperty,
+        Color fallbackColor)
+    {
+        Color color = TryParseHighlightColor(colorText, out Color parsedColor)
+            ? parsedColor
+            : fallbackColor;
+
+        _syncingColor = true;
+        try
+        {
+            SetValue(pickerColorProperty, color);
+        }
+        finally
+        {
+            _syncingColor = false;
+        }
+    }
+
+    private void SyncTextFromPickerColor(StyledProperty<string> colorTextProperty, Color color)
+    {
+        _syncingColor = true;
+        try
+        {
+            SetValue(colorTextProperty, FormatHighlightColor(color));
+        }
+        finally
+        {
+            _syncingColor = false;
+        }
+    }
+
+    private static bool TryParseHighlightColor(string? value, out Color color)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            color = default;
+            return false;
+        }
+
+        return Color.TryParse(value, out color);
+    }
+
+    private static string FormatHighlightColor(Color color)
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"#{color.A:X2}{color.R:X2}{color.G:X2}{color.B:X2}");
     }
 }
 
