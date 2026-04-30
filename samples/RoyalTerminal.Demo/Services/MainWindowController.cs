@@ -50,6 +50,7 @@ internal sealed class MainWindowController
 {
     private const string DisableTextShapingEnvVar = "ROYALTERMINAL_DISABLE_TEXT_SHAPING";
     private const string EnableRenderDiagnosticsEnvVar = "ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS";
+    private const string TextRenderPipelineEnvVar = "ROYALTERMINAL_TEXT_RENDER_PIPELINE";
     private static readonly byte[] s_hyperlinkShowcaseBytes = Encoding.UTF8.GetBytes(
         "\r\n\u001b[1mRoyalTerminal OSC8 hyperlink showcase\u001b[0m\r\n" +
         "\u001b]8;;https://ghostty.org\u001b\\Ghostty docs\u001b]8;;\u001b\\  |  " +
@@ -66,6 +67,7 @@ internal sealed class MainWindowController
         "Consolas";
     private static readonly bool s_disableTextShaping = ReadEnvironmentToggle(DisableTextShapingEnvVar);
     private static readonly bool s_enableRenderDiagnostics = ReadEnvironmentToggle(EnableRenderDiagnosticsEnvVar);
+    private static readonly TerminalTextRenderPipeline s_textRenderPipeline = ReadTextRenderPipeline(TextRenderPipelineEnvVar);
 
     private readonly Window _window;
     private readonly MainWindowViewModel _viewModel;
@@ -865,6 +867,7 @@ internal sealed class MainWindowController
 
         renderer.EnableTextShaping = !s_disableTextShaping;
         renderer.EnableTextRenderDiagnostics = s_enableRenderDiagnostics;
+        renderer.TextRenderPipeline = s_textRenderPipeline;
     }
 
     private TerminalControl CreateStandaloneControl()
@@ -1344,6 +1347,14 @@ internal sealed class MainWindowController
                string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static TerminalTextRenderPipeline ReadTextRenderPipeline(string variableName)
+    {
+        string? value = Environment.GetEnvironmentVariable(variableName);
+        return string.Equals(value, "pretext", StringComparison.OrdinalIgnoreCase)
+            ? TerminalTextRenderPipeline.Pretext
+            : TerminalTextRenderPipeline.HarfBuzz;
     }
 
     private static Button CreateTabHeader(string title, TabVisualMode mode)

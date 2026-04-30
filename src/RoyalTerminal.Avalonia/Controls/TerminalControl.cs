@@ -132,6 +132,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public static readonly StyledProperty<bool> SixelGraphicsEnabledProperty =
         AvaloniaProperty.Register<TerminalControl, bool>(nameof(SixelGraphicsEnabled), false);
 
+    /// <summary>Text rendering pipeline used by the Skia renderer.</summary>
+    public static readonly StyledProperty<TerminalTextRenderPipeline> TextRenderPipelineProperty =
+        AvaloniaProperty.Register<TerminalControl, TerminalTextRenderPipeline>(
+            nameof(TextRenderPipeline),
+            TerminalTextRenderPipeline.HarfBuzz);
+
     /// <summary>
     /// Preferred VT processor implementation.
     /// </summary>
@@ -281,6 +287,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         get => GetValue(SixelGraphicsEnabledProperty);
         set => SetValue(SixelGraphicsEnabledProperty, value);
+    }
+
+    /// <summary>Gets or sets the text rendering pipeline used by the Skia renderer.</summary>
+    public TerminalTextRenderPipeline TextRenderPipeline
+    {
+        get => GetValue(TextRenderPipelineProperty);
+        set => SetValue(TextRenderPipelineProperty, value);
     }
 
     /// <summary>
@@ -797,6 +810,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        if (change.Property == TextRenderPipelineProperty)
+        {
+            ApplyTextRenderPipeline();
+            return;
+        }
+
         if (change.Property == ThemeProperty)
         {
             ApplyThemeFromProperty();
@@ -907,6 +926,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         renderer.BackgroundOpacity = RendererBackgroundOpacity;
         renderer.TextHighlightingMode = _textHighlightingMode;
         renderer.SetTextHighlightRules(_textHighlightRules);
+        renderer.TextRenderPipeline = TextRenderPipeline;
 
         if (previous is null)
         {
@@ -1034,6 +1054,25 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         ScrollToBottom();
         RaiseScrollInvalidated();
+    }
+
+    private void ApplyTextRenderPipeline()
+    {
+        if (_renderer is null)
+        {
+            return;
+        }
+
+        _renderer.TextRenderPipeline = TextRenderPipeline;
+        if (_screen is not null)
+        {
+            lock (_screen.SyncRoot)
+            {
+                _screen.InvalidateAll();
+            }
+        }
+
+        _presenter?.Invalidate();
     }
 
     private void ApplyVtProcessorPreference()
