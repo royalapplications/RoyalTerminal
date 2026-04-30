@@ -2,6 +2,8 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia - Cache for shaped terminal text runs.
 
+using SkiaSharp;
+
 namespace RoyalTerminal.Avalonia.Rendering;
 
 internal readonly record struct ShapedRunCacheKey(
@@ -14,20 +16,22 @@ internal readonly record struct ShapedRunCacheKey(
     TextDirectionMode Direction,
     bool EnableLigatures);
 
-internal sealed class CachedShapedRun
+internal sealed class CachedShapedRun : IDisposable
 {
     public CachedShapedRun(
         string text,
         ushort[] glyphIds,
         float[] xOffsets,
         float[] yOffsets,
-        float totalAdvanceX)
+        float totalAdvanceX,
+        SKTextBlob? naturalTextBlob = null)
     {
         Text = text;
         GlyphIds = glyphIds;
         XOffsets = xOffsets;
         YOffsets = yOffsets;
         TotalAdvanceX = totalAdvanceX;
+        NaturalTextBlob = naturalTextBlob;
     }
 
     public string Text { get; }
@@ -40,7 +44,14 @@ internal sealed class CachedShapedRun
 
     public float TotalAdvanceX { get; }
 
+    public SKTextBlob? NaturalTextBlob { get; }
+
     public int GlyphCount => GlyphIds.Length;
+
+    public void Dispose()
+    {
+        NaturalTextBlob?.Dispose();
+    }
 }
 
 internal sealed class ShapedRunCache
@@ -91,15 +102,15 @@ internal sealed class ShapedRunCache
         {
             if (_cache.Count >= _maxEntries)
             {
-                _cache.Clear();
+                ClearCore();
             }
 
-            _cache[key] = new CachedShapedRun(
+            StoreCore(key, new CachedShapedRun(
                 new string(text),
                 glyphIds.ToArray(),
                 xOffsets.ToArray(),
                 yOffsets.ToArray(),
-                totalAdvanceX);
+                totalAdvanceX));
         }
     }
 
@@ -109,10 +120,10 @@ internal sealed class ShapedRunCache
         {
             if (_cache.Count >= _maxEntries)
             {
-                _cache.Clear();
+                ClearCore();
             }
 
-            _cache[key] = run;
+            StoreCore(key, run);
         }
     }
 
@@ -120,7 +131,28 @@ internal sealed class ShapedRunCache
     {
         lock (_sync)
         {
-            _cache.Clear();
+            ClearCore();
         }
+    }
+
+    private void StoreCore(ShapedRunCacheKey key, CachedShapedRun run)
+    {
+        if (_cache.TryGetValue(key, out CachedShapedRun? existing) &&
+            !ReferenceEquals(existing, run))
+        {
+            existing.Dispose();
+        }
+
+        _cache[key] = run;
+    }
+
+    private void ClearCore()
+    {
+        foreach (CachedShapedRun run in _cache.Values)
+        {
+            run.Dispose();
+        }
+
+        _cache.Clear();
     }
 }

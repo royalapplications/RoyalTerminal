@@ -9,4 +9,10 @@
     <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Skia\RoyalTerminal.Rendering.Skia.csproj" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == 'true'">
+    <ProjectReference Include="$(PretextSharpRoot)src/Pretext.Contracts/Pretext.Contracts.csproj" />
+    <ProjectReference Include="$(PretextSharpRoot)src/Pretext/Pretext.csproj" />
+    <ProjectReference Include="$(PretextSharpRoot)src/Pretext.SkiaSharp/Pretext.SkiaSharp.csproj" />
+  </ItemGroup>
+
 </Project>
