@@ -1,6 +1,7 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.VisualTree;
@@ -54,6 +55,19 @@ public sealed class TerminalSettingsPanelLayoutTests
             Assert.True(
                 selectedScrollViewer.Bounds.Height <= tabControl.Bounds.Height,
                 $"Expected tab ScrollViewer to stay inside the tab body. ScrollViewer={selectedScrollViewer.Bounds.Height}, TabControl={tabControl.Bounds.Height}.");
+            Assert.True(TryGetVisualWithClass(panel, "settings-content-host", out Border contentHost));
+            Assert.True(TryGetVisualWithClass(panel, "settings-footer", out Border footer));
+
+            double contentBottom = GetBottomRelativeToPanel(contentHost, panel);
+            double footerTop = GetTopRelativeToPanel(footer, panel);
+            double scrollViewerBottom = GetBottomRelativeToPanel(selectedScrollViewer, panel);
+
+            Assert.True(
+                contentBottom <= footerTop + 0.5,
+                $"Expected settings content to end before the footer. ContentBottom={contentBottom}, FooterTop={footerTop}.");
+            Assert.True(
+                scrollViewerBottom <= footerTop + 0.5,
+                $"Expected selected tab viewport to end before the footer. ScrollBottom={scrollViewerBottom}, FooterTop={footerTop}.");
         }
         finally
         {
@@ -78,5 +92,36 @@ public sealed class TerminalSettingsPanelLayoutTests
 
         scrollViewer = null!;
         return false;
+    }
+
+    private static bool TryGetVisualWithClass<T>(
+        TerminalSettingsPanel panel,
+        string className,
+        out T control)
+        where T : Control
+    {
+        foreach (T candidate in panel.GetVisualDescendants().OfType<T>())
+        {
+            if (candidate.Classes.Contains(className) && candidate.Bounds.Height > 0)
+            {
+                control = candidate;
+                return true;
+            }
+        }
+
+        control = null!;
+        return false;
+    }
+
+    private static double GetTopRelativeToPanel(Control control, TerminalSettingsPanel panel)
+    {
+        Point point = control.TranslatePoint(new Point(0, 0), panel)
+            ?? throw new InvalidOperationException("Control is not connected to the settings panel visual tree.");
+        return point.Y;
+    }
+
+    private static double GetBottomRelativeToPanel(Control control, TerminalSettingsPanel panel)
+    {
+        return GetTopRelativeToPanel(control, panel) + control.Bounds.Height;
     }
 }

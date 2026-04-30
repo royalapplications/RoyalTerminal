@@ -74,112 +74,119 @@
                   </Grid>
                 </Border>
 
-                <TabControl Grid.Row="1"
-                            TabStripPlacement="Left"
-                            Padding="0"
-                            FontSize="14"
-                            HorizontalContentAlignment="Stretch"
-                            VerticalContentAlignment="Stretch"
-                            ClipToBounds="True">
-                  <TabControl.Styles>
-                    <Style Selector="TabControl /template/ ContentPresenter#PART_SelectedContentHost">
-                      <Setter Property="HorizontalAlignment" Value="Stretch" />
-                      <Setter Property="VerticalAlignment" Value="Stretch" />
-                      <Setter Property="ClipToBounds" Value="True" />
-                    </Style>
-                    <Style Selector="TabItem">
-                      <Setter Property="MinWidth" Value="128" />
-                      <Setter Property="MinHeight" Value="42" />
-                      <Setter Property="Padding" Value="14,10" />
-                      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                      <Setter Property="VerticalContentAlignment" Value="Stretch" />
-                      <Setter Property="FontSize" Value="14" />
-                    </Style>
-                  </TabControl.Styles>
-                  <TabItem Header="Session">
-                    <ScrollViewer Classes="settings-tab-scroll"
-                                  AllowAutoHide="False"
-                                  Padding="20,16"
-                                  HorizontalAlignment="Stretch"
-                                  VerticalAlignment="Stretch"
-                                  ClipToBounds="True"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  VerticalScrollBarVisibility="Auto">
-                      <settings:TerminalSettingsSessionPanel DataContext="{Binding Session}" />
-                    </ScrollViewer>
-                  </TabItem>
+                <Border Grid.Row="1"
+                        Classes="settings-content-host"
+                        MinHeight="0"
+                        Background="#252525"
+                        ClipToBounds="True">
+                  <TabControl TabStripPlacement="Left"
+                              Padding="0"
+                              FontSize="14"
+                              HorizontalContentAlignment="Stretch"
+                              VerticalContentAlignment="Stretch"
+                              ClipToBounds="True">
+                    <TabControl.Styles>
+                      <Style Selector="TabControl /template/ ContentPresenter#PART_SelectedContentHost">
+                        <Setter Property="HorizontalAlignment" Value="Stretch" />
+                        <Setter Property="VerticalAlignment" Value="Stretch" />
+                        <Setter Property="ClipToBounds" Value="True" />
+                      </Style>
+                      <Style Selector="TabItem">
+                        <Setter Property="MinWidth" Value="128" />
+                        <Setter Property="MinHeight" Value="42" />
+                        <Setter Property="Padding" Value="14,10" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                        <Setter Property="FontSize" Value="14" />
+                      </Style>
+                    </TabControl.Styles>
+                    <TabItem Header="Session">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16,20,24"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsSessionPanel DataContext="{Binding Session}" />
+                      </ScrollViewer>
+                    </TabItem>
 
-                  <TabItem Header="Connection">
-                    <ScrollViewer Classes="settings-tab-scroll"
-                                  AllowAutoHide="False"
-                                  Padding="20,16"
-                                  HorizontalAlignment="Stretch"
-                                  VerticalAlignment="Stretch"
-                                  ClipToBounds="True"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  VerticalScrollBarVisibility="Auto">
-                      <settings:TerminalSettingsConnectionPanel
-                        DataContext="{Binding Connection}" />
-                    </ScrollViewer>
-                  </TabItem>
+                    <TabItem Header="Connection">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16,20,24"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsConnectionPanel
+                          DataContext="{Binding Connection}" />
+                      </ScrollViewer>
+                    </TabItem>
 
-                  <TabItem Header="Terminal">
-                    <ScrollViewer Classes="settings-tab-scroll"
-                                  AllowAutoHide="False"
-                                  Padding="20,16"
-                                  HorizontalAlignment="Stretch"
-                                  VerticalAlignment="Stretch"
-                                  ClipToBounds="True"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  VerticalScrollBarVisibility="Auto">
-                      <settings:TerminalSettingsTerminalPanel
-                        DataContext="{Binding TerminalBehavior}" />
-                    </ScrollViewer>
-                  </TabItem>
+                    <TabItem Header="Terminal">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16,20,24"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsTerminalPanel
+                          DataContext="{Binding TerminalBehavior}" />
+                      </ScrollViewer>
+                    </TabItem>
 
-                  <TabItem Header="Appearance">
-                    <ScrollViewer Classes="settings-tab-scroll"
-                                  AllowAutoHide="False"
-                                  Padding="20,16"
-                                  HorizontalAlignment="Stretch"
-                                  VerticalAlignment="Stretch"
-                                  ClipToBounds="True"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  VerticalScrollBarVisibility="Auto">
-                      <settings:TerminalSettingsAppearancePanel
-                        DataContext="{Binding Appearance}" />
-                    </ScrollViewer>
-                  </TabItem>
+                    <TabItem Header="Appearance">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16,20,24"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsAppearancePanel
+                          DataContext="{Binding Appearance}" />
+                      </ScrollViewer>
+                    </TabItem>
 
-                  <TabItem Header="SSH">
-                    <ScrollViewer Classes="settings-tab-scroll"
-                                  AllowAutoHide="False"
-                                  Padding="20,16"
-                                  HorizontalAlignment="Stretch"
-                                  VerticalAlignment="Stretch"
-                                  ClipToBounds="True"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  VerticalScrollBarVisibility="Auto">
-                      <settings:TerminalSettingsSshPanel DataContext="{Binding Ssh}" />
-                    </ScrollViewer>
-                  </TabItem>
+                    <TabItem Header="SSH">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16,20,24"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsSshPanel DataContext="{Binding Ssh}" />
+                      </ScrollViewer>
+                    </TabItem>
 
-                  <TabItem Header="Logging">
-                    <ScrollViewer Classes="settings-tab-scroll"
-                                  AllowAutoHide="False"
-                                  Padding="20,16"
-                                  HorizontalAlignment="Stretch"
-                                  VerticalAlignment="Stretch"
-                                  ClipToBounds="True"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  VerticalScrollBarVisibility="Auto">
-                      <settings:TerminalSettingsLoggingPanel DataContext="{Binding Logging}" />
-                    </ScrollViewer>
-                  </TabItem>
-                </TabControl>
+                    <TabItem Header="Logging">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16,20,24"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsLoggingPanel DataContext="{Binding Logging}" />
+                      </ScrollViewer>
+                    </TabItem>
+                  </TabControl>
+                </Border>
 
                 <Border Grid.Row="2"
+                        Classes="settings-footer"
                         Padding="18,12"
+                        Background="#252525"
                         BorderBrush="#3A3A3A"
                         BorderThickness="0,1,0,0">
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
