@@ -4,7 +4,7 @@ title: Rendering, Text, And Graphics
 
 # Rendering, Text, And Graphics
 
-RoyalTerminal splits rendering into five layers: backend-neutral contracts, text shaping and fallback, the default Skia renderer, the managed framebuffer shader pipeline, and optional Ghostty renderer interop. That separation keeps the default path simple while still giving advanced hosts access to GPU-level integration.
+RoyalTerminal splits rendering into five layers: backend-neutral contracts, text shaping and fallback, the default Skia renderer, the managed framebuffer shader pipeline, and optional Ghostty renderer interop. The default Skia renderer also owns row-local regex text highlighting because highlighting is a rendering concern rather than VT state. That separation keeps the default path simple while still giving advanced hosts access to GPU-level integration.
 
 ## The default render path
 
@@ -12,7 +12,7 @@ The normal path for an Avalonia application is:
 
 1. a VT processor updates `TerminalScreen`
 2. shaping and font fallback resolve how text should be drawn
-3. `SkiaTerminalRenderer` paints the grid, cursor, selection, and overlays
+3. `SkiaTerminalRenderer` resolves search, selection, regex text highlights, and cell colors
 4. optional framebuffer shaders post-process the completed terminal frame
 5. the Avalonia control presents the result
 
@@ -23,8 +23,11 @@ For most applications, this is the only rendering path you need.
 | Type | Purpose |
 | --- | --- |
 | `GlyphCache` | Glyph and font resource cache for the renderer. |
-| `SkiaTerminalRenderer` | High-performance CPU renderer for the terminal screen. |
+| `SkiaTerminalRenderer` | High-performance CPU renderer for the terminal screen, including regex text highlighting. |
+| `TerminalTextHighlightRule` | Runtime regex highlight rule with optional foreground/background color overrides. |
 | `CursorStyle` | Renderer cursor style enum. |
+
+Regex text highlighting uses compiled row-local regexes, span-based matching, reusable row buffers, and a static row cache mode for unchanged text. See [Regex Text Highlighting](/articles/text-highlighting) for the host API and performance details.
 
 ## Framebuffer shaders
 

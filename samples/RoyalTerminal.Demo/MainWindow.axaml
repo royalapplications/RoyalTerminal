@@ -37,10 +37,29 @@
 
   <Grid>
   <DockPanel>
-    <Border DockPanel.Dock="Top" Background="{DynamicResource ToolbarBackgroundBrush}" Padding="4,2">
-      <DockPanel>
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4"
+    <Border DockPanel.Dock="Top"
+            Background="{DynamicResource ToolbarBackgroundBrush}"
+            Padding="4,2"
+            ClipToBounds="True">
+      <Grid ColumnDefinitions="Auto,*"
+            ColumnSpacing="8"
+            ClipToBounds="True">
+        <StackPanel Grid.Column="0"
+                    Orientation="Horizontal"
+                    Spacing="4"
                     VerticalAlignment="Center">
+          <Button Content="+ New Tab" Height="24"
+                  FontSize="11" Padding="8,2"
+                  Command="{Binding NewTabCommand}"
+                  ToolTip.Tip="New terminal tab (Ctrl+T)" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="4"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    ClipToBounds="True">
           <Button Content="A-" Width="28" Height="24"
                   FontSize="10" Padding="2"
                   Command="{Binding DecreaseFontSizeCommand}"
@@ -66,7 +85,8 @@
                   Command="{Binding PrepareSettingsPanelCommand}"
                   ToolTip.Tip="Open tabbed terminal settings flyout">
             <Button.Flyout>
-              <Flyout Placement="BottomEdgeAlignedRight">
+              <Flyout Placement="BottomEdgeAlignedRight"
+                      FlyoutPresenterClasses="settings-popup">
                 <settings:TerminalSettingsPanel DataContext="{Binding SettingsPanelState}" />
               </Flyout>
             </Button.Flyout>
@@ -99,23 +119,22 @@
                   Command="{Binding LoadReplayCommand}"
                   ToolTip.Tip="Load a capture file and open a replay tab" />
         </StackPanel>
-
-        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-          <Button Content="+ New Tab" Height="24"
-                  FontSize="11" Padding="8,2"
-                  Command="{Binding NewTabCommand}"
-                  ToolTip.Tip="New terminal tab (Ctrl+T)" />
-        </StackPanel>
-      </DockPanel>
+      </Grid>
     </Border>
 
     <Border DockPanel.Dock="Top"
             Background="{DynamicResource ToolbarBackgroundBrush}"
             BorderBrush="{StaticResource ToolbarDividerBrush}"
             BorderThickness="0,0,0,1"
-            Padding="6,4">
-      <DockPanel>
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+            Padding="6,4"
+            ClipToBounds="True">
+      <Grid ColumnDefinitions="*,Auto"
+            ColumnSpacing="8"
+            ClipToBounds="True">
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="4"
+                    VerticalAlignment="Center">
           <Button Content="Hyperlink Sample"
                   Height="24"
                   FontSize="10"
@@ -154,7 +173,11 @@
                   ToolTip.Tip="Show or hide Ghostty VT capability and active-tab diagnostics" />
         </StackPanel>
 
-        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+        <StackPanel Grid.Column="0"
+                    Orientation="Horizontal"
+                    Spacing="4"
+                    VerticalAlignment="Center"
+                    ClipToBounds="True">
           <TextBlock Text="Search"
                      Margin="0,4,0,0"
                      Foreground="{DynamicResource ToolbarForegroundBrush}"
@@ -195,7 +218,7 @@
                      Foreground="{DynamicResource ToolbarForegroundBrush}"
                      FontSize="11" />
         </StackPanel>
-      </DockPanel>
+      </Grid>
     </Border>
 
     <Border DockPanel.Dock="Top"

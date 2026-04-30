@@ -4,7 +4,7 @@ layout: home
 hero:
   name: RoyalTerminal
   text: Professional terminal infrastructure for .NET and Avalonia
-  tagline: Multi-transport sessions, managed and native VT processing, framebuffer shaders, modular rendering packages, and first-class sample and validation tooling.
+  tagline: Multi-transport sessions, managed and native VT processing, regex text highlighting, framebuffer shaders, modular rendering packages, and first-class sample and validation tooling.
   image:
     src: /assets/royalterminal-mark.svg
     alt: RoyalTerminal
@@ -24,7 +24,7 @@ hero:
 
 features:
   - title: Avalonia-first terminal UI
-    details: "`RoyalTerminal.Avalonia` provides a backend-neutral `TerminalControl` with theming, virtualization, framebuffer shaders, capture/replay, snapshot export, and rich input handling."
+    details: "`RoyalTerminal.Avalonia` provides a backend-neutral `TerminalControl` with theming, virtualization, regex text highlighting, framebuffer shaders, capture/replay, snapshot export, and rich input handling."
   - title: Multi-transport runtime
     details: "PTY, pipe, SSH, raw TCP, Telnet, and serial transports share a single session model and option surface."
   - title: Managed and native VT engines
@@ -45,6 +45,7 @@ features:
 - [API Reference](/api/)
 - [Embedding In Avalonia](/articles/avalonia-control)
 - [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings)
+- [Regex Text Highlighting](/articles/text-highlighting)
 - [Transports And Remote Access](/articles/transports)
 - [Terminal Engine And Screen State](/articles/vt-modes)
 - [Rendering, Text, And Graphics](/articles/rendering-native)

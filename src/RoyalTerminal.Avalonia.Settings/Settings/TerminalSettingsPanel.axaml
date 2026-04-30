@@ -1,23 +1,40 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:colorPicker="clr-namespace:Avalonia.Controls;assembly=Avalonia.Controls.ColorPicker"
         xmlns:settings="using:RoyalTerminal.Avalonia.Settings">
   <Styles.Resources>
     <ResourceDictionary>
       <ControlTheme x:Key="{x:Type settings:TerminalSettingsPanel}" TargetType="settings:TerminalSettingsPanel">
         <Setter Property="Template">
           <ControlTemplate TargetType="settings:TerminalSettingsPanel">
-            <Border Padding="12"
+            <Border Width="720"
+                    Height="700"
+                    Padding="0"
+                    Background="#252525"
+                    BorderBrush="#4A4A4A"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    ClipToBounds="True"
                     DataContext="{Binding DataContext, RelativeSource={RelativeSource TemplatedParent}}"
                     x:DataType="settings:TerminalSettingsPanelState">
-              <DockPanel LastChildFill="True">
-                <StackPanel DockPanel.Dock="Top" Spacing="10">
-                  <Grid ColumnDefinitions="Auto,*"
-                        RowDefinitions="Auto,Auto,Auto"
-                        ColumnSpacing="10"
+              <Grid RowDefinitions="Auto,*,Auto">
+                <Border Grid.Row="0"
+                        Padding="18,14"
+                        BorderBrush="#3A3A3A"
+                        BorderThickness="0,0,0,1">
+                  <Grid ColumnDefinitions="Auto,220,*"
+                        RowDefinitions="Auto,Auto"
+                        ColumnSpacing="12"
                         RowSpacing="8">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,4,0,0" Text="Profile" />
+                    <TextBlock Grid.Row="0"
+                               Grid.Column="0"
+                               VerticalAlignment="Center"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Text="Profile" />
                     <ComboBox Grid.Row="0"
                               Grid.Column="1"
+                              MinHeight="34"
                               ItemsSource="{Binding Profiles}"
                               SelectedItem="{Binding SelectedProfile}">
                       <ComboBox.ItemTemplate>
@@ -26,79 +43,169 @@
                         </DataTemplate>
                       </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <WrapPanel Grid.Row="1"
-                               Grid.ColumnSpan="2"
-                               Orientation="Horizontal">
-                      <Button Content="New" Margin="0,0,6,0"
-                              Command="{Binding NewProfileCommand}" />
-                      <Button Content="Duplicate" Margin="0,0,6,0"
-                              Command="{Binding DuplicateProfileCommand}" />
-                      <Button Content="Delete" Margin="0,0,6,0"
-                              Command="{Binding DeleteProfileCommand}" />
-                      <Button Content="Set Default" Command="{Binding SetDefaultProfileCommand}" />
-                    </WrapPanel>
-                    <WrapPanel Grid.Row="2"
-                               Grid.ColumnSpan="2"
-                               Orientation="Horizontal">
-                      <TextBlock Margin="0,4,8,0"
+                    <StackPanel Grid.Row="0"
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal"
+                                Spacing="16">
+                      <TextBlock Foreground="#B8B8B8"
                                  Text="{Binding DefaultProfileId, StringFormat='Default: {0}'}" />
-                      <TextBlock Margin="0,4,0,0"
-                                 Text="{Binding IsDirty, StringFormat='Unsaved: {0}'}" />
-                    </WrapPanel>
-                  </Grid>
-                </StackPanel>
-
-                <Border DockPanel.Dock="Bottom" Margin="0,10,0,0" Padding="0,8,0,0">
-                  <DockPanel>
-                    <TextBlock Margin="0,4,8,0" Text="{Binding LastOperationStatus}" />
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
-                      <Button Content="Apply" Command="{Binding ApplyCommand}" />
-                      <Button Content="Save" Command="{Binding SaveCommand}" />
+                      <TextBlock Foreground="#B8B8B8"
+                                 IsVisible="{Binding IsDirty}"
+                                 Text="Unsaved changes" />
                     </StackPanel>
-                  </DockPanel>
+                    <StackPanel Grid.Row="1"
+                                Grid.Column="1"
+                                Grid.ColumnSpan="2"
+                                Orientation="Horizontal"
+                                Spacing="8">
+                      <Button Content="New"
+                              MinWidth="72"
+                              Command="{Binding NewProfileCommand}" />
+                      <Button Content="Duplicate"
+                              MinWidth="96"
+                              Command="{Binding DuplicateProfileCommand}" />
+                      <Button Content="Delete"
+                              MinWidth="76"
+                              Command="{Binding DeleteProfileCommand}" />
+                      <Button Content="Set Default"
+                              MinWidth="104"
+                              Command="{Binding SetDefaultProfileCommand}" />
+                    </StackPanel>
+                  </Grid>
                 </Border>
 
-                <TabControl TabStripPlacement="Left" Margin="0,4,0,0">
-                  <TabItem Header="Session">
-                    <ScrollViewer>
-                      <settings:TerminalSettingsSessionPanel DataContext="{Binding Session}" />
-                    </ScrollViewer>
-                  </TabItem>
+                <Border Grid.Row="1"
+                        Classes="settings-content-host"
+                        MinHeight="0"
+                        Background="#252525"
+                        ClipToBounds="True">
+                  <TabControl TabStripPlacement="Left"
+                              Padding="0"
+                              FontSize="14"
+                              HorizontalContentAlignment="Stretch"
+                              VerticalContentAlignment="Stretch"
+                              ClipToBounds="True">
+                    <TabControl.Styles>
+                      <Style Selector="TabControl /template/ ContentPresenter#PART_SelectedContentHost">
+                        <Setter Property="HorizontalAlignment" Value="Stretch" />
+                        <Setter Property="VerticalAlignment" Value="Stretch" />
+                        <Setter Property="ClipToBounds" Value="True" />
+                      </Style>
+                      <Style Selector="TabItem">
+                        <Setter Property="MinWidth" Value="128" />
+                        <Setter Property="MinHeight" Value="42" />
+                        <Setter Property="Padding" Value="14,10" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                        <Setter Property="FontSize" Value="14" />
+                      </Style>
+                    </TabControl.Styles>
+                    <TabItem Header="Session">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsSessionPanel DataContext="{Binding Session}" />
+                      </ScrollViewer>
+                    </TabItem>
 
-                  <TabItem Header="Connection">
-                    <ScrollViewer>
-                      <settings:TerminalSettingsConnectionPanel
-                        DataContext="{Binding Connection}" />
-                    </ScrollViewer>
-                  </TabItem>
+                    <TabItem Header="Connection">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsConnectionPanel
+                          DataContext="{Binding Connection}" />
+                      </ScrollViewer>
+                    </TabItem>
 
-                  <TabItem Header="Terminal">
-                    <ScrollViewer>
-                      <settings:TerminalSettingsTerminalPanel
-                        DataContext="{Binding TerminalBehavior}" />
-                    </ScrollViewer>
-                  </TabItem>
+                    <TabItem Header="Terminal">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsTerminalPanel
+                          DataContext="{Binding TerminalBehavior}" />
+                      </ScrollViewer>
+                    </TabItem>
 
-                  <TabItem Header="Appearance">
-                    <ScrollViewer>
-                      <settings:TerminalSettingsAppearancePanel
-                        DataContext="{Binding Appearance}" />
-                    </ScrollViewer>
-                  </TabItem>
+                    <TabItem Header="Appearance">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsAppearancePanel
+                          DataContext="{Binding Appearance}" />
+                      </ScrollViewer>
+                    </TabItem>
 
-                  <TabItem Header="SSH">
-                    <ScrollViewer>
-                      <settings:TerminalSettingsSshPanel DataContext="{Binding Ssh}" />
-                    </ScrollViewer>
-                  </TabItem>
+                    <TabItem Header="SSH">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsSshPanel DataContext="{Binding Ssh}" />
+                      </ScrollViewer>
+                    </TabItem>
 
-                  <TabItem Header="Logging">
-                    <ScrollViewer>
-                      <settings:TerminalSettingsLoggingPanel DataContext="{Binding Logging}" />
-                    </ScrollViewer>
-                  </TabItem>
-                </TabControl>
-              </DockPanel>
+                    <TabItem Header="Logging">
+                      <ScrollViewer Classes="settings-tab-scroll"
+                                    AllowAutoHide="False"
+                                    Padding="20,16"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto">
+                        <settings:TerminalSettingsLoggingPanel DataContext="{Binding Logging}" />
+                      </ScrollViewer>
+                    </TabItem>
+                  </TabControl>
+                </Border>
+
+                <Border Grid.Row="2"
+                        Classes="settings-footer"
+                        Padding="18,12"
+                        Background="#252525"
+                        BorderBrush="#3A3A3A"
+                        BorderThickness="0,1,0,0">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <TextBlock Grid.Column="0"
+                               VerticalAlignment="Center"
+                               Foreground="#B8B8B8"
+                               Text="{Binding LastOperationStatus}" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                      <Button Content="Apply"
+                              MinWidth="84"
+                              Command="{Binding ApplyCommand}" />
+                      <Button Content="Save"
+                              MinWidth="84"
+                              Command="{Binding SaveCommand}" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </Grid>
             </Border>
           </ControlTemplate>
         </Setter>
@@ -287,55 +394,311 @@
             <StackPanel
               DataContext="{Binding DataContext, RelativeSource={RelativeSource TemplatedParent}}"
               x:DataType="settings:TerminalSettingsAppearanceState"
-              Spacing="12"
-              Margin="0,10,0,0">
-              <StackPanel Spacing="4">
-                <TextBlock Text="Font Source" Margin="0,4,6,0" />
-                <ComboBox
-                  ItemsSource="{Binding FontSources}"
-                  SelectedValue="{Binding SelectedFontSource}"
-                  SelectedValueBinding="{Binding Source}">
-                  <ComboBox.ItemTemplate>
-                    <DataTemplate x:DataType="settings:TerminalSettingsFontSourceOption">
-                      <TextBlock Text="{Binding DisplayName}" />
-                    </DataTemplate>
-                  </ComboBox.ItemTemplate>
-                </ComboBox>
-              </StackPanel>
-              <StackPanel Spacing="4" IsVisible="{Binding IsSystemFontSourceSelected}">
-                <TextBlock Text="System Font" Margin="0,4,6,0" />
-                <ComboBox
-                  Margin="0,0,8,0"
-                  ItemsSource="{Binding SystemFontFamilies}"
-                  SelectedItem="{Binding FontFamilyName}" />
-              </StackPanel>
-              <StackPanel Spacing="4" IsVisible="{Binding IsFileFontSourceSelected}">
-                <TextBlock Text="Font File" Margin="0,4,6,0" />
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                  <TextBox Grid.Column="0"
-                           IsReadOnly="True"
-                           Text="{Binding FontFilePath}" />
-                  <Button Grid.Column="1"
-                          Content="Browse"
-                          Command="{Binding BrowseFontFileCommand}" />
+              HorizontalAlignment="Left"
+              Width="520"
+              Spacing="14">
+              <StackPanel Spacing="8">
+                <TextBlock Text="Typography"
+                           FontSize="16"
+                           FontWeight="SemiBold" />
+                <Grid ColumnDefinitions="118,*"
+                      RowDefinitions="Auto,Auto,Auto,Auto"
+                      ColumnSpacing="12"
+                      RowSpacing="8"
+                      Width="520">
+                  <TextBlock Grid.Row="0"
+                             Grid.Column="0"
+                             VerticalAlignment="Center"
+                             Foreground="#B8B8B8"
+                             Text="Font source" />
+                  <ComboBox Grid.Row="0"
+                            Grid.Column="1"
+                            Width="240"
+                            HorizontalAlignment="Left"
+                            ItemsSource="{Binding FontSources}"
+                            SelectedValue="{Binding SelectedFontSource}"
+                            SelectedValueBinding="{Binding Source}">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="settings:TerminalSettingsFontSourceOption">
+                        <TextBlock Text="{Binding DisplayName}" />
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+
+                  <TextBlock Grid.Row="1"
+                             Grid.Column="0"
+                             VerticalAlignment="Center"
+                             Foreground="#B8B8B8"
+                             Text="System font"
+                             IsVisible="{Binding IsSystemFontSourceSelected}" />
+                  <ComboBox Grid.Row="1"
+                            Grid.Column="1"
+                            Width="240"
+                            HorizontalAlignment="Left"
+                            ItemsSource="{Binding SystemFontFamilies}"
+                            SelectedItem="{Binding FontFamilyName}"
+                            IsVisible="{Binding IsSystemFontSourceSelected}" />
+
+                  <TextBlock Grid.Row="2"
+                             Grid.Column="0"
+                             VerticalAlignment="Center"
+                             Foreground="#B8B8B8"
+                             Text="Font file"
+                             IsVisible="{Binding IsFileFontSourceSelected}" />
+                  <Grid Grid.Row="2"
+                        Grid.Column="1"
+                        Width="390"
+                        HorizontalAlignment="Left"
+                        ColumnDefinitions="*,Auto"
+                        ColumnSpacing="8"
+                        IsVisible="{Binding IsFileFontSourceSelected}">
+                    <TextBox Grid.Column="0"
+                             IsReadOnly="True"
+                             Text="{Binding FontFilePath}" />
+                    <Button Grid.Column="1"
+                            Content="Browse"
+                            Command="{Binding BrowseFontFileCommand}" />
+                  </Grid>
+
+                  <TextBlock Grid.Row="3"
+                             Grid.Column="0"
+                             VerticalAlignment="Center"
+                             Foreground="#B8B8B8"
+                             Text="Font size" />
+                  <NumericUpDown Grid.Row="3"
+                                 Grid.Column="1"
+                                 Width="160"
+                                 HorizontalAlignment="Left"
+                                 Minimum="8"
+                                 Maximum="72"
+                                 Increment="1"
+                                 Value="{Binding FontSize}" />
                 </Grid>
-                <TextBlock Text="{Binding FontFamilyName, StringFormat='Family: {0}'}" />
+                <TextBlock Foreground="#9F9F9F"
+                           IsVisible="{Binding IsFileFontSourceSelected}"
+                           Text="{Binding FontFamilyName, StringFormat='Resolved family: {0}'}" />
               </StackPanel>
-              <StackPanel Spacing="4">
-                <TextBlock Text="Font Size" Margin="0,4,6,0" />
-                <NumericUpDown
-                  Minimum="8"
-                  Maximum="72"
-                  Increment="1"
-                  Value="{Binding FontSize}" />
+
+              <StackPanel Spacing="8">
+                <TextBlock Text="Behavior"
+                           FontSize="16"
+                           FontWeight="SemiBold" />
+                <WrapPanel Orientation="Horizontal">
+                  <CheckBox Content="Auto scroll"
+                            Margin="0,0,24,0"
+                            IsChecked="{Binding AutoScroll}" />
+                  <CheckBox Content="Background opacity"
+                            IsChecked="{Binding BackgroundOpacityEnabled}" />
+                </WrapPanel>
               </StackPanel>
-              <StackPanel Spacing="4">
-                <CheckBox Content="Auto Scroll"
-                          Margin="0,2,10,0"
-                          IsChecked="{Binding AutoScroll}" />
-                <CheckBox Content="Background Opacity"
-                          Margin="0,2,10,0"
-                          IsChecked="{Binding BackgroundOpacityEnabled}" />
+
+              <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                  <StackPanel Grid.Column="0">
+                    <TextBlock Text="Text Highlighting"
+                               FontSize="16"
+                               FontWeight="SemiBold" />
+                  </StackPanel>
+                  <Button Grid.Column="1"
+                          Content="Add Rule"
+                          MinWidth="96"
+                          Command="{Binding AddTextHighlightRuleCommand}" />
+                </Grid>
+
+                <Grid ColumnDefinitions="118,*"
+                      ColumnSpacing="12"
+                      Width="520">
+                  <TextBlock Grid.Column="0"
+                             VerticalAlignment="Center"
+                             Foreground="#B8B8B8"
+                             Text="Evaluation" />
+                  <ComboBox Grid.Column="1"
+                            Width="220"
+                            HorizontalAlignment="Left"
+                            ItemsSource="{Binding TextHighlightingModes}"
+                            SelectedItem="{Binding SelectedTextHighlightingMode}">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="settings:TerminalSettingsTextHighlightingModeOption">
+                        <TextBlock Text="{Binding DisplayName}" />
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                </Grid>
+
+                <ItemsControl ItemsSource="{Binding TextHighlightRules}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="settings:TerminalSettingsHighlightRuleState">
+                      <Border Classes="settings-highlight-rule-card"
+                              BorderBrush="#505050"
+                              BorderThickness="1"
+                              CornerRadius="6"
+                              Padding="10"
+                              Margin="0,0,0,8">
+                        <Grid RowDefinitions="Auto,Auto,Auto"
+                              RowSpacing="8">
+                          <Grid Grid.Row="0"
+                                ColumnDefinitions="Auto,*,Auto"
+                                ColumnSpacing="10">
+                            <CheckBox Grid.Column="0"
+                                      VerticalAlignment="Center"
+                                      Content="Enabled"
+                                      IsChecked="{Binding IsEnabled}" />
+                            <TextBox Grid.Column="1"
+                                     PlaceholderText="Rule name"
+                                     Text="{Binding Name}" />
+                            <Button Grid.Column="2"
+                                    Content="Remove"
+                                    MinWidth="82"
+                                    Command="{Binding RemoveCommand}" />
+                          </Grid>
+
+                          <Grid Grid.Row="1"
+                                ColumnDefinitions="86,*"
+                                ColumnSpacing="10">
+                            <TextBlock Grid.Column="0"
+                                       VerticalAlignment="Center"
+                                       Foreground="#B8B8B8"
+                                       Text="Regex" />
+                            <TextBox Grid.Column="1"
+                                     PlaceholderText="\b(ERROR|WARN)\b"
+                                     Text="{Binding Pattern}" />
+                          </Grid>
+
+                          <Grid Grid.Row="2"
+                                ColumnDefinitions="*,*"
+                                RowDefinitions="Auto,Auto"
+                                ColumnSpacing="10"
+                                RowSpacing="8">
+                            <Grid Grid.Row="0"
+                                  Grid.Column="0"
+                                  ColumnDefinitions="Auto,*"
+                                  ColumnSpacing="8"
+                                  MinHeight="34"
+                                  VerticalAlignment="Center">
+                              <CheckBox Grid.Column="0"
+                                        Classes="settings-highlight-color-toggle"
+                                        VerticalAlignment="Center"
+                                        Content="Foreground"
+                                        IsChecked="{Binding IsForegroundEnabled}" />
+                              <Grid Grid.Column="1">
+                                <TextBox Classes="settings-highlight-color-input"
+                                         PlaceholderText="#FFFFFFFF"
+                                         Text="{Binding ForegroundColor}"
+                                         IsEnabled="{Binding IsForegroundEnabled}" />
+                                <colorPicker:ColorPicker Classes="settings-highlight-color-picker"
+                                                         Width="30"
+                                                         Height="30"
+                                                         MinWidth="30"
+                                                         MinHeight="30"
+                                                         Margin="0,2,2,2"
+                                                         HorizontalAlignment="Right"
+                                                         VerticalAlignment="Center"
+                                                         Color="{Binding ForegroundPickerColor}"
+                                                         IsAlphaEnabled="True"
+                                                         IsAlphaVisible="True"
+                                                         IsEnabled="{Binding IsForegroundEnabled}"
+                                                         ToolTip.Tip="Pick foreground color" />
+                              </Grid>
+                            </Grid>
+                            <Grid Grid.Row="0"
+                                  Grid.Column="1"
+                                  ColumnDefinitions="Auto,*"
+                                  ColumnSpacing="8"
+                                  MinHeight="34"
+                                  VerticalAlignment="Center">
+                              <CheckBox Grid.Column="0"
+                                        Classes="settings-highlight-color-toggle"
+                                        VerticalAlignment="Center"
+                                        Content="Background"
+                                        IsChecked="{Binding IsBackgroundEnabled}" />
+                              <Grid Grid.Column="1">
+                                <TextBox Classes="settings-highlight-color-input"
+                                         PlaceholderText="#FF000000"
+                                         Text="{Binding BackgroundColor}"
+                                         IsEnabled="{Binding IsBackgroundEnabled}" />
+                                <colorPicker:ColorPicker Classes="settings-highlight-color-picker"
+                                                         Width="30"
+                                                         Height="30"
+                                                         MinWidth="30"
+                                                         MinHeight="30"
+                                                         Margin="0,2,2,2"
+                                                         HorizontalAlignment="Right"
+                                                         VerticalAlignment="Center"
+                                                         Color="{Binding BackgroundPickerColor}"
+                                                         IsAlphaEnabled="True"
+                                                         IsAlphaVisible="True"
+                                                         IsEnabled="{Binding IsBackgroundEnabled}"
+                                                         ToolTip.Tip="Pick background color" />
+                              </Grid>
+                            </Grid>
+                            <Grid Grid.Row="1"
+                                  Grid.Column="0"
+                                  ColumnDefinitions="Auto,*"
+                                  ColumnSpacing="8"
+                                  MinHeight="34"
+                                  VerticalAlignment="Center">
+                              <CheckBox Grid.Column="0"
+                                        Classes="settings-highlight-color-toggle"
+                                        VerticalAlignment="Center"
+                                        Content="Dark foreground"
+                                        IsChecked="{Binding IsDarkForegroundEnabled}" />
+                              <Grid Grid.Column="1">
+                                <TextBox Classes="settings-highlight-color-input"
+                                         PlaceholderText="#FFFFFFFF"
+                                         Text="{Binding DarkForegroundColor}"
+                                         IsEnabled="{Binding IsDarkForegroundEnabled}" />
+                                <colorPicker:ColorPicker Classes="settings-highlight-color-picker"
+                                                         Width="30"
+                                                         Height="30"
+                                                         MinWidth="30"
+                                                         MinHeight="30"
+                                                         Margin="0,2,2,2"
+                                                         HorizontalAlignment="Right"
+                                                         VerticalAlignment="Center"
+                                                         Color="{Binding DarkForegroundPickerColor}"
+                                                         IsAlphaEnabled="True"
+                                                         IsAlphaVisible="True"
+                                                         IsEnabled="{Binding IsDarkForegroundEnabled}"
+                                                         ToolTip.Tip="Pick dark foreground color" />
+                              </Grid>
+                            </Grid>
+                            <Grid Grid.Row="1"
+                                  Grid.Column="1"
+                                  ColumnDefinitions="Auto,*"
+                                  ColumnSpacing="8"
+                                  MinHeight="34"
+                                  VerticalAlignment="Center">
+                              <CheckBox Grid.Column="0"
+                                        Classes="settings-highlight-color-toggle"
+                                        VerticalAlignment="Center"
+                                        Content="Dark background"
+                                        IsChecked="{Binding IsDarkBackgroundEnabled}" />
+                              <Grid Grid.Column="1">
+                                <TextBox Classes="settings-highlight-color-input"
+                                         PlaceholderText="#FF000000"
+                                         Text="{Binding DarkBackgroundColor}"
+                                         IsEnabled="{Binding IsDarkBackgroundEnabled}" />
+                                <colorPicker:ColorPicker Classes="settings-highlight-color-picker"
+                                                         Width="30"
+                                                         Height="30"
+                                                         MinWidth="30"
+                                                         MinHeight="30"
+                                                         Margin="0,2,2,2"
+                                                         HorizontalAlignment="Right"
+                                                         VerticalAlignment="Center"
+                                                         Color="{Binding DarkBackgroundPickerColor}"
+                                                         IsAlphaEnabled="True"
+                                                         IsAlphaVisible="True"
+                                                         IsEnabled="{Binding IsDarkBackgroundEnabled}"
+                                                         ToolTip.Tip="Pick dark background color" />
+                              </Grid>
+                            </Grid>
+                          </Grid>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
               </StackPanel>
             </StackPanel>
           </ControlTemplate>
@@ -459,8 +822,55 @@
     </ResourceDictionary>
   </Styles.Resources>
 
+  <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml" />
+
   <Style Selector="settings|TerminalSettingsPanel">
     <Setter Property="Theme" Value="{StaticResource {x:Type settings:TerminalSettingsPanel}}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel TextBlock">
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel Button">
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel ComboBox">
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel TextBox">
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel TextBox.settings-highlight-color-input">
+    <Setter Property="Height" Value="34" />
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="Padding" Value="8,0,38,0" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel CheckBox">
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel CheckBox.settings-highlight-color-toggle">
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel NumericUpDown">
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel ScrollViewer.settings-tab-scroll">
+    <Setter Property="AllowAutoHide" Value="False" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+    <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+    <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
   </Style>
 
   <Style Selector="settings|TerminalSettingsSessionPanel">

@@ -20,13 +20,18 @@ public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategorySt
             nameof(TerminalSettingsPanelState.IsSystemFontSourceSelected),
             nameof(TerminalSettingsPanelState.IsFileFontSourceSelected),
             nameof(TerminalSettingsPanelState.AutoScroll),
-            nameof(TerminalSettingsPanelState.BackgroundOpacityEnabled))
+            nameof(TerminalSettingsPanelState.BackgroundOpacityEnabled),
+            nameof(TerminalSettingsPanelState.SelectedTextHighlightingMode))
     {
     }
 
     public IReadOnlyList<TerminalSettingsFontSourceOption> FontSources => Owner.FontSources;
 
     public AvaloniaList<string> SystemFontFamilies => Owner.SystemFontFamilies;
+
+    public AvaloniaList<TerminalSettingsHighlightRuleState> TextHighlightRules => Owner.TextHighlightRules;
+
+    public IReadOnlyList<TerminalSettingsTextHighlightingModeOption> TextHighlightingModes => Owner.TextHighlightingModes;
 
     public TerminalFontSource SelectedFontSource
     {
@@ -58,6 +63,8 @@ public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategorySt
 
     public ICommand BrowseFontFileCommand => Owner.BrowseFontFileCommand;
 
+    public ICommand AddTextHighlightRuleCommand => Owner.AddTextHighlightRuleCommand;
+
     public bool AutoScroll
     {
         get => Owner.AutoScroll;
@@ -68,5 +75,11 @@ public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategorySt
     {
         get => Owner.BackgroundOpacityEnabled;
         set => Owner.BackgroundOpacityEnabled = value;
+    }
+
+    public TerminalSettingsTextHighlightingModeOption? SelectedTextHighlightingMode
+    {
+        get => Owner.SelectedTextHighlightingMode;
+        set => Owner.SelectedTextHighlightingMode = value;
     }
 }

@@ -7,6 +7,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Services;
+using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.Terminal;
@@ -46,6 +47,12 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.Equal(TerminalFontSource.File, viewModel.SettingsPanelState.SelectedFontSource);
             Assert.Equal(GetStoredFontPath(), viewModel.SettingsPanelState.FontFilePath);
             Assert.Equal(18, viewModel.SettingsPanelState.FontSize);
+            Assert.Equal(
+                TerminalTextHighlightingMode.Realtime,
+                viewModel.SettingsPanelState.SelectedTextHighlightingMode?.Mode);
+            TerminalSettingsHighlightRuleState storedRule = Assert.Single(viewModel.SettingsPanelState.TextHighlightRules);
+            Assert.Equal("Stored highlight", storedRule.Name);
+            Assert.Equal("ERROR", storedRule.Pattern);
 
             viewModel.SettingsPanelState.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.SanitizeControlSequences;
             viewModel.SettingsPanelState.EnableTextShaping = false;
@@ -77,6 +84,8 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.Equal(17, control.TerminalFontSize);
             Assert.True(control.ReflowOnResize);
             Assert.False(control.SixelGraphicsEnabled);
+            Assert.Equal(TerminalTextHighlightingMode.Realtime, control.TextHighlightingMode);
+            Assert.Single(control.TextHighlightRules!);
         }
         finally
         {
@@ -198,6 +207,16 @@ public sealed class MainWindowControllerSettingsPanelTests
                         FontFamilyName = "Stored Font",
                         FontFilePath = GetStoredFontPath(),
                         FontSize = 18,
+                        TextHighlightingMode = TerminalTextHighlightingMode.Realtime,
+                        TextHighlightRules =
+                        [
+                            new TerminalSessionTextHighlightRule
+                            {
+                                Name = "Stored highlight",
+                                Pattern = "ERROR",
+                                ForegroundColor = "#FFFF0000",
+                            },
+                        ],
                     },
                     Behavior = new TerminalSessionBehaviorSettings
                     {

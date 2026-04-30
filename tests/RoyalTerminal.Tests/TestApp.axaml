@@ -3,5 +3,6 @@
              x:Class="RoyalTerminal.Tests.TestApp">
     <Application.Styles>
         <FluentTheme />
+        <StyleInclude Source="avares://RoyalTerminal.Avalonia.Settings/Settings/TerminalSettingsPanel.axaml" />
     </Application.Styles>
 </Application>

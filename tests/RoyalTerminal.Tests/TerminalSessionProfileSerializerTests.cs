@@ -136,6 +136,79 @@ public sealed class TerminalSessionProfileSerializerTests
     }
 
     [Fact]
+    public void Serializer_RoundTripsTextHighlightRules_AndNormalizesColors()
+    {
+        TerminalSessionProfilesDocument document = new()
+        {
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "highlighting",
+                    DisplayName = "Highlighting",
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        TextHighlightingMode = TerminalTextHighlightingMode.Realtime,
+                        TextHighlightRules =
+                        [
+                            new TerminalSessionTextHighlightRule
+                            {
+                                Name = "Errors",
+                                Pattern = "ERROR|WARN",
+                                ForegroundColor = "#ff0000",
+                                BackgroundColor = "#40101010",
+                                DarkForegroundColor = "#00ff00",
+                                DarkBackgroundColor = "202020",
+                            },
+                        ],
+                    },
+                },
+            ],
+        };
+
+        string json = TerminalSessionProfileSerializer.ToJson(document);
+        TerminalSessionProfilesDocument restored = TerminalSessionProfileSerializer.FromJson(json);
+
+        TerminalSessionProfile profile = Assert.Single(restored.Profiles);
+        Assert.Equal(TerminalTextHighlightingMode.Realtime, profile.Appearance.TextHighlightingMode);
+        TerminalSessionTextHighlightRule rule = Assert.Single(profile.Appearance.TextHighlightRules);
+        Assert.Equal("Errors", rule.Name);
+        Assert.Equal("ERROR|WARN", rule.Pattern);
+        Assert.Equal("#FFFF0000", rule.ForegroundColor);
+        Assert.Equal("#40101010", rule.BackgroundColor);
+        Assert.Equal("#FF00FF00", rule.DarkForegroundColor);
+        Assert.Equal("#FF202020", rule.DarkBackgroundColor);
+    }
+
+    [Fact]
+    public void Serializer_NormalizesInvalidTextHighlightingMode_AndSkipsNullRules()
+    {
+        TerminalSessionProfilesDocument document = new()
+        {
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "highlighting",
+                    DisplayName = "Highlighting",
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        TextHighlightingMode = (TerminalTextHighlightingMode)999,
+                        TextHighlightRules = [null!],
+                    },
+                },
+            ],
+        };
+
+        TerminalSessionProfilesDocument restored = TerminalSessionProfileSerializer.FromJson(
+            TerminalSessionProfileSerializer.ToJson(document));
+
+        TerminalSessionProfile profile = Assert.Single(restored.Profiles);
+        Assert.Equal(TerminalTextHighlightingMode.Static, profile.Appearance.TextHighlightingMode);
+        Assert.Empty(profile.Appearance.TextHighlightRules);
+    }
+
+    [Fact]
     public void Serializer_FileFontWithoutPath_NormalizesToSystemFont()
     {
         TerminalSessionProfilesDocument document = new()

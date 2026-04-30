@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using Avalonia.Headless.XUnit;
+using Avalonia.Media;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Terminal;
@@ -99,5 +100,60 @@ public sealed class TerminalSettingsPanelStateTests
         Assert.Equal(TerminalFontSource.File, profile.Appearance.FontSource);
         Assert.Equal(fontPath, profile.Appearance.FontFilePath);
         Assert.Equal("RoyalTerminal.CustomFont", profile.Appearance.FontFamilyName);
+    }
+
+    [AvaloniaFact]
+    public void TextHighlightRules_CanBeEditedAndPersisted()
+    {
+        TerminalSettingsPanelState state = new();
+        state.MarkSaved();
+
+        state.Appearance.AddTextHighlightRuleCommand.Execute(null);
+        TerminalSettingsTextHighlightingModeOption realtimeMode = Assert.Single(
+            state.Appearance.TextHighlightingModes,
+            mode => mode.Mode == TerminalTextHighlightingMode.Realtime);
+        state.Appearance.SelectedTextHighlightingMode = realtimeMode;
+        TerminalSettingsHighlightRuleState rule = Assert.Single(state.Appearance.TextHighlightRules);
+        rule.Name = "Errors";
+        rule.Pattern = "ERROR";
+        rule.IsForegroundEnabled = true;
+        rule.ForegroundColor = "#FF4DFF";
+        rule.IsBackgroundEnabled = true;
+        rule.BackgroundColor = "#3B003B";
+
+        Assert.True(state.IsDirty);
+
+        TerminalSessionProfilesDocument document = state.BuildDocument();
+        TerminalSessionProfile profile = Assert.Single(document.Profiles);
+        Assert.Equal(TerminalTextHighlightingMode.Realtime, profile.Appearance.TextHighlightingMode);
+        TerminalSessionTextHighlightRule persisted = Assert.Single(profile.Appearance.TextHighlightRules);
+        Assert.Equal("Errors", persisted.Name);
+        Assert.Equal("ERROR", persisted.Pattern);
+        Assert.Equal("#FF4DFF", persisted.ForegroundColor);
+        Assert.Equal("#3B003B", persisted.BackgroundColor);
+        Assert.Null(persisted.DarkForegroundColor);
+        Assert.Null(persisted.DarkBackgroundColor);
+    }
+
+    [AvaloniaFact]
+    public void TextHighlightRules_SyncColorPickerValuesWithHexText()
+    {
+        TerminalSettingsPanelState state = new();
+        state.MarkSaved();
+
+        state.Appearance.AddTextHighlightRuleCommand.Execute(null);
+        TerminalSettingsHighlightRuleState rule = Assert.Single(state.Appearance.TextHighlightRules);
+
+        rule.ForegroundColor = "#FF4DFF";
+        Assert.Equal(Color.FromRgb(0xFF, 0x4D, 0xFF), rule.ForegroundPickerColor);
+        Assert.Equal("#FF4DFF", rule.ForegroundColor);
+
+        rule.ForegroundPickerColor = Color.FromArgb(0x80, 0x10, 0x20, 0x30);
+        Assert.Equal("#80102030", rule.ForegroundColor);
+
+        rule.BackgroundColor = "not-a-color";
+        Assert.Equal(Colors.Black, rule.BackgroundPickerColor);
+        Assert.Equal("not-a-color", rule.BackgroundColor);
+        Assert.True(state.IsDirty);
     }
 }

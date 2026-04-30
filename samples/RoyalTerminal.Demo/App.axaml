@@ -13,5 +13,15 @@
     <FluentTheme />
     <StyleInclude Source="avares://RoyalTerminal.Avalonia.Settings/Settings/TerminalSettingsPanel.axaml" />
     <StyleInclude Source="avares://RoyalTerminal.Demo/Styles/Tabs.axaml" />
+
+    <Style Selector="FlyoutPresenter.settings-popup">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="MaxWidth" Value="720" />
+      <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+    </Style>
+
+    <Style Selector="FlyoutPresenter.settings-popup ScrollViewer">
+      <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+    </Style>
   </Application.Styles>
 </Application>

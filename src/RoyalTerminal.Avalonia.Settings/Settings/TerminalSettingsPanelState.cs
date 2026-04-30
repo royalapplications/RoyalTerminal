@@ -10,6 +10,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Collections;
+using Avalonia.Media;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Terminal;
 
@@ -25,6 +26,296 @@ public sealed record TerminalSettingsTransportModeOption(string Id, string Displ
 /// <param name="Source">Font source value.</param>
 /// <param name="DisplayName">Human-readable display name.</param>
 public sealed record TerminalSettingsFontSourceOption(TerminalFontSource Source, string DisplayName);
+
+/// <summary>
+/// Text highlighting evaluation mode displayed by the appearance panel.
+/// </summary>
+/// <param name="Mode">Mode value.</param>
+/// <param name="DisplayName">Human-readable display name.</param>
+public sealed record TerminalSettingsTextHighlightingModeOption(TerminalTextHighlightingMode Mode, string DisplayName);
+
+/// <summary>
+/// Editable regex-based text highlight rule state.
+/// </summary>
+public sealed class TerminalSettingsHighlightRuleState : AvaloniaObject
+{
+    private readonly TerminalSettingsPanelState _owner;
+    private bool _syncingColor;
+
+    public static readonly StyledProperty<string> NameProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, string>(nameof(Name), "Highlight Rule");
+
+    public static readonly StyledProperty<string> PatternProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, string>(nameof(Pattern), string.Empty);
+
+    public static readonly StyledProperty<bool> IsEnabledProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, bool>(nameof(IsEnabled), true);
+
+    public static readonly StyledProperty<bool> IsForegroundEnabledProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, bool>(nameof(IsForegroundEnabled), false);
+
+    public static readonly StyledProperty<string> ForegroundColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, string>(nameof(ForegroundColor), "#FFFFFFFF");
+
+    public static readonly StyledProperty<Color> ForegroundPickerColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, Color>(nameof(ForegroundPickerColor), Colors.White);
+
+    public static readonly StyledProperty<bool> IsBackgroundEnabledProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, bool>(nameof(IsBackgroundEnabled), false);
+
+    public static readonly StyledProperty<string> BackgroundColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, string>(nameof(BackgroundColor), "#FF000000");
+
+    public static readonly StyledProperty<Color> BackgroundPickerColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, Color>(nameof(BackgroundPickerColor), Colors.Black);
+
+    public static readonly StyledProperty<bool> IsDarkForegroundEnabledProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, bool>(nameof(IsDarkForegroundEnabled), false);
+
+    public static readonly StyledProperty<string> DarkForegroundColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, string>(nameof(DarkForegroundColor), "#FFFFFFFF");
+
+    public static readonly StyledProperty<Color> DarkForegroundPickerColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, Color>(nameof(DarkForegroundPickerColor), Colors.White);
+
+    public static readonly StyledProperty<bool> IsDarkBackgroundEnabledProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, bool>(nameof(IsDarkBackgroundEnabled), false);
+
+    public static readonly StyledProperty<string> DarkBackgroundColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, string>(nameof(DarkBackgroundColor), "#FF000000");
+
+    public static readonly StyledProperty<Color> DarkBackgroundPickerColorProperty =
+        AvaloniaProperty.Register<TerminalSettingsHighlightRuleState, Color>(nameof(DarkBackgroundPickerColor), Colors.Black);
+
+    internal TerminalSettingsHighlightRuleState(
+        TerminalSettingsPanelState owner,
+        TerminalSessionTextHighlightRule? rule = null)
+    {
+        _owner = owner ?? throw new ArgumentNullException(nameof(owner));
+        RemoveCommand = new RelayCommand(() => _owner.RemoveTextHighlightRule(this));
+        if (rule is not null)
+        {
+            Load(rule);
+        }
+    }
+
+    public string Name
+    {
+        get => GetValue(NameProperty);
+        set => SetValue(NameProperty, value);
+    }
+
+    public string Pattern
+    {
+        get => GetValue(PatternProperty);
+        set => SetValue(PatternProperty, value);
+    }
+
+    public bool IsEnabled
+    {
+        get => GetValue(IsEnabledProperty);
+        set => SetValue(IsEnabledProperty, value);
+    }
+
+    public bool IsForegroundEnabled
+    {
+        get => GetValue(IsForegroundEnabledProperty);
+        set => SetValue(IsForegroundEnabledProperty, value);
+    }
+
+    public string ForegroundColor
+    {
+        get => GetValue(ForegroundColorProperty);
+        set => SetValue(ForegroundColorProperty, value);
+    }
+
+    public Color ForegroundPickerColor
+    {
+        get => GetValue(ForegroundPickerColorProperty);
+        set => SetValue(ForegroundPickerColorProperty, value);
+    }
+
+    public bool IsBackgroundEnabled
+    {
+        get => GetValue(IsBackgroundEnabledProperty);
+        set => SetValue(IsBackgroundEnabledProperty, value);
+    }
+
+    public string BackgroundColor
+    {
+        get => GetValue(BackgroundColorProperty);
+        set => SetValue(BackgroundColorProperty, value);
+    }
+
+    public Color BackgroundPickerColor
+    {
+        get => GetValue(BackgroundPickerColorProperty);
+        set => SetValue(BackgroundPickerColorProperty, value);
+    }
+
+    public bool IsDarkForegroundEnabled
+    {
+        get => GetValue(IsDarkForegroundEnabledProperty);
+        set => SetValue(IsDarkForegroundEnabledProperty, value);
+    }
+
+    public string DarkForegroundColor
+    {
+        get => GetValue(DarkForegroundColorProperty);
+        set => SetValue(DarkForegroundColorProperty, value);
+    }
+
+    public Color DarkForegroundPickerColor
+    {
+        get => GetValue(DarkForegroundPickerColorProperty);
+        set => SetValue(DarkForegroundPickerColorProperty, value);
+    }
+
+    public bool IsDarkBackgroundEnabled
+    {
+        get => GetValue(IsDarkBackgroundEnabledProperty);
+        set => SetValue(IsDarkBackgroundEnabledProperty, value);
+    }
+
+    public string DarkBackgroundColor
+    {
+        get => GetValue(DarkBackgroundColorProperty);
+        set => SetValue(DarkBackgroundColorProperty, value);
+    }
+
+    public Color DarkBackgroundPickerColor
+    {
+        get => GetValue(DarkBackgroundPickerColorProperty);
+        set => SetValue(DarkBackgroundPickerColorProperty, value);
+    }
+
+    public ICommand RemoveCommand { get; }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        if (_syncingColor)
+        {
+            return;
+        }
+
+        if (change.Property == ForegroundColorProperty)
+        {
+            SyncPickerColorFromText(ForegroundColor, ForegroundPickerColorProperty, Colors.White);
+        }
+        else if (change.Property == BackgroundColorProperty)
+        {
+            SyncPickerColorFromText(BackgroundColor, BackgroundPickerColorProperty, Colors.Black);
+        }
+        else if (change.Property == DarkForegroundColorProperty)
+        {
+            SyncPickerColorFromText(DarkForegroundColor, DarkForegroundPickerColorProperty, Colors.White);
+        }
+        else if (change.Property == DarkBackgroundColorProperty)
+        {
+            SyncPickerColorFromText(DarkBackgroundColor, DarkBackgroundPickerColorProperty, Colors.Black);
+        }
+        else if (change.Property == ForegroundPickerColorProperty)
+        {
+            SyncTextFromPickerColor(ForegroundColorProperty, ForegroundPickerColor);
+        }
+        else if (change.Property == BackgroundPickerColorProperty)
+        {
+            SyncTextFromPickerColor(BackgroundColorProperty, BackgroundPickerColor);
+        }
+        else if (change.Property == DarkForegroundPickerColorProperty)
+        {
+            SyncTextFromPickerColor(DarkForegroundColorProperty, DarkForegroundPickerColor);
+        }
+        else if (change.Property == DarkBackgroundPickerColorProperty)
+        {
+            SyncTextFromPickerColor(DarkBackgroundColorProperty, DarkBackgroundPickerColor);
+        }
+
+        _owner.NotifyTextHighlightRuleChanged();
+    }
+
+    internal TerminalSessionTextHighlightRule ToProfileRule()
+    {
+        return new TerminalSessionTextHighlightRule
+        {
+            Name = Name,
+            Pattern = Pattern,
+            IsEnabled = IsEnabled,
+            ForegroundColor = IsForegroundEnabled ? ForegroundColor : null,
+            BackgroundColor = IsBackgroundEnabled ? BackgroundColor : null,
+            DarkForegroundColor = IsDarkForegroundEnabled ? DarkForegroundColor : null,
+            DarkBackgroundColor = IsDarkBackgroundEnabled ? DarkBackgroundColor : null,
+        };
+    }
+
+    private void Load(TerminalSessionTextHighlightRule rule)
+    {
+        Name = rule.Name;
+        Pattern = rule.Pattern;
+        IsEnabled = rule.IsEnabled;
+        IsForegroundEnabled = !string.IsNullOrWhiteSpace(rule.ForegroundColor);
+        ForegroundColor = rule.ForegroundColor ?? "#FFFFFFFF";
+        IsBackgroundEnabled = !string.IsNullOrWhiteSpace(rule.BackgroundColor);
+        BackgroundColor = rule.BackgroundColor ?? "#FF000000";
+        IsDarkForegroundEnabled = !string.IsNullOrWhiteSpace(rule.DarkForegroundColor);
+        DarkForegroundColor = rule.DarkForegroundColor ?? "#FFFFFFFF";
+        IsDarkBackgroundEnabled = !string.IsNullOrWhiteSpace(rule.DarkBackgroundColor);
+        DarkBackgroundColor = rule.DarkBackgroundColor ?? "#FF000000";
+    }
+
+    private void SyncPickerColorFromText(
+        string colorText,
+        StyledProperty<Color> pickerColorProperty,
+        Color fallbackColor)
+    {
+        Color color = TryParseHighlightColor(colorText, out Color parsedColor)
+            ? parsedColor
+            : fallbackColor;
+
+        _syncingColor = true;
+        try
+        {
+            SetValue(pickerColorProperty, color);
+        }
+        finally
+        {
+            _syncingColor = false;
+        }
+    }
+
+    private void SyncTextFromPickerColor(StyledProperty<string> colorTextProperty, Color color)
+    {
+        _syncingColor = true;
+        try
+        {
+            SetValue(colorTextProperty, FormatHighlightColor(color));
+        }
+        finally
+        {
+            _syncingColor = false;
+        }
+    }
+
+    private static bool TryParseHighlightColor(string? value, out Color color)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            color = default;
+            return false;
+        }
+
+        return Color.TryParse(value, out color);
+    }
+
+    private static string FormatHighlightColor(Color color)
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"#{color.A:X2}{color.R:X2}{color.G:X2}{color.B:X2}");
+    }
+}
 
 public sealed record TerminalSettingsSshAuthModeOption(string Id, string DisplayName)
 {
@@ -253,6 +544,11 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public static readonly StyledProperty<bool> BackgroundOpacityEnabledProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(BackgroundOpacityEnabled), false);
 
+    public static readonly StyledProperty<TerminalSettingsTextHighlightingModeOption?> SelectedTextHighlightingModeProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, TerminalSettingsTextHighlightingModeOption?>(
+            nameof(SelectedTextHighlightingMode),
+            null);
+
     public static readonly StyledProperty<bool> SessionLoggingEnabledProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(SessionLoggingEnabled), false);
 
@@ -301,6 +597,12 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             new TerminalSettingsFontSourceOption(TerminalFontSource.System, "System Font"),
             new TerminalSettingsFontSourceOption(TerminalFontSource.File, "Font File"),
         ];
+        TextHighlightingModes =
+        [
+            new TerminalSettingsTextHighlightingModeOption(TerminalTextHighlightingMode.Static, "Static (cached)"),
+            new TerminalSettingsTextHighlightingModeOption(TerminalTextHighlightingMode.Realtime, "Realtime"),
+            new TerminalSettingsTextHighlightingModeOption(TerminalTextHighlightingMode.Disabled, "Disabled"),
+        ];
         SystemFontFamilies = CreateSystemFontFamilies();
 
         Session = new TerminalSettingsSessionState(this);
@@ -317,9 +619,11 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         ApplyCommand = new RelayCommand(Apply, CanModifySelectedProfile);
         SaveCommand = new RelayCommand(Save, CanSaveDocument);
         BrowseFontFileCommand = new RelayCommand(RequestBrowseFontFile);
+        AddTextHighlightRuleCommand = new RelayCommand(AddTextHighlightRule);
 
         SelectedTransportMode = TransportModes[0];
         SelectedSshAuthMode = SshAuthModes[0];
+        SelectedTextHighlightingMode = TextHighlightingModes[0];
 
         LoadDocument(new TerminalSessionProfilesDocument());
     }
@@ -350,7 +654,11 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
 
     public IReadOnlyList<TerminalSettingsFontSourceOption> FontSources { get; }
 
+    public IReadOnlyList<TerminalSettingsTextHighlightingModeOption> TextHighlightingModes { get; }
+
     public AvaloniaList<string> SystemFontFamilies { get; }
+
+    public AvaloniaList<TerminalSettingsHighlightRuleState> TextHighlightRules { get; } = [];
 
     public TerminalSettingsSessionState Session { get; }
 
@@ -377,6 +685,8 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public ICommand SaveCommand { get; }
 
     public ICommand BrowseFontFileCommand { get; }
+
+    public ICommand AddTextHighlightRuleCommand { get; }
 
     public TerminalSettingsProfileItem? SelectedProfile
     {
@@ -756,6 +1066,12 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         set => SetValue(BackgroundOpacityEnabledProperty, value);
     }
 
+    public TerminalSettingsTextHighlightingModeOption? SelectedTextHighlightingMode
+    {
+        get => GetValue(SelectedTextHighlightingModeProperty);
+        set => SetValue(SelectedTextHighlightingModeProperty, value);
+    }
+
     public bool SessionLoggingEnabled
     {
         get => GetValue(SessionLoggingEnabledProperty);
@@ -1055,11 +1371,70 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         BrowseFontFileRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    private void AddTextHighlightRule()
+    {
+        string name = GenerateUniqueTextHighlightRuleName("Highlight Rule");
+        TextHighlightRules.Add(new TerminalSettingsHighlightRuleState(
+            this,
+            new TerminalSessionTextHighlightRule
+            {
+                Name = name,
+                Pattern = string.Empty,
+                IsEnabled = true,
+            }));
+        NotifyTextHighlightRuleChanged();
+    }
+
+    internal void RemoveTextHighlightRule(TerminalSettingsHighlightRuleState rule)
+    {
+        if (TextHighlightRules.Remove(rule))
+        {
+            NotifyTextHighlightRuleChanged();
+        }
+    }
+
+    internal void NotifyTextHighlightRuleChanged()
+    {
+        if (!_suppressDirtyTracking)
+        {
+            IsDirty = true;
+        }
+    }
+
     private bool CanModifySelectedProfile() => SelectedProfile is not null;
 
     private bool CanDeleteSelectedProfile() => SelectedProfile is not null && _profiles.Count > 1;
 
     private bool CanSaveDocument() => _profiles.Count > 0 && SelectedProfile is not null;
+
+    private List<TerminalSessionTextHighlightRule> BuildTextHighlightRules()
+    {
+        if (TextHighlightRules.Count == 0)
+        {
+            return [];
+        }
+
+        List<TerminalSessionTextHighlightRule> rules = new(TextHighlightRules.Count);
+        for (int i = 0; i < TextHighlightRules.Count; i++)
+        {
+            TerminalSessionTextHighlightRule rule = TextHighlightRules[i].ToProfileRule();
+            if (NormalizeOptional(rule.Pattern) is not null)
+            {
+                rules.Add(rule);
+            }
+        }
+
+        return rules;
+    }
+
+    private void LoadTextHighlightRules(List<TerminalSessionTextHighlightRule> rules)
+    {
+        TextHighlightRules.Clear();
+        for (int i = 0; i < rules.Count; i++)
+        {
+            TextHighlightRules.Add(new TerminalSettingsHighlightRuleState(this, rules[i]));
+        }
+    }
 
     private void CaptureEditorIntoSelectedProfile()
     {
@@ -1106,6 +1481,8 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
                 FontSize = FontSize > 0 ? FontSize : 14.0,
                 AutoScroll = AutoScroll,
                 BackgroundOpacityEnabled = BackgroundOpacityEnabled,
+                TextHighlightingMode = SelectedTextHighlightingMode?.Mode ?? TerminalTextHighlightingMode.Static,
+                TextHighlightRules = BuildTextHighlightRules(),
             },
             Behavior = source.Behavior with
             {
@@ -1283,6 +1660,8 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             FontSize = profile.Appearance.FontSize;
             AutoScroll = profile.Appearance.AutoScroll;
             BackgroundOpacityEnabled = profile.Appearance.BackgroundOpacityEnabled;
+            SelectedTextHighlightingMode = ResolveTextHighlightingMode(profile.Appearance.TextHighlightingMode);
+            LoadTextHighlightRules(profile.Appearance.TextHighlightRules);
 
             SessionLoggingEnabled = profile.Logging.Enabled;
             SessionLogFilePath = profile.Logging.FilePath ?? GetDefaultSessionLogPath();
@@ -1419,6 +1798,57 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         }
 
         return false;
+    }
+
+    private string GenerateUniqueTextHighlightRuleName(string baseName)
+    {
+        string normalizedBase = NormalizeDisplayName(baseName, "Highlight Rule");
+        if (!ContainsTextHighlightRuleName(normalizedBase))
+        {
+            return normalizedBase;
+        }
+
+        int suffix = 2;
+        while (true)
+        {
+            string candidate = $"{normalizedBase} {suffix}";
+            if (!ContainsTextHighlightRuleName(candidate))
+            {
+                return candidate;
+            }
+
+            suffix++;
+        }
+    }
+
+    private bool ContainsTextHighlightRuleName(string name)
+    {
+        for (int i = 0; i < TextHighlightRules.Count; i++)
+        {
+            if (string.Equals(TextHighlightRules[i].Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private TerminalSettingsTextHighlightingModeOption ResolveTextHighlightingMode(TerminalTextHighlightingMode mode)
+    {
+        TerminalTextHighlightingMode normalized = Enum.IsDefined(mode)
+            ? mode
+            : TerminalTextHighlightingMode.Static;
+
+        for (int i = 0; i < TextHighlightingModes.Count; i++)
+        {
+            if (TextHighlightingModes[i].Mode == normalized)
+            {
+                return TextHighlightingModes[i];
+            }
+        }
+
+        return TextHighlightingModes[0];
     }
 
     private static string NormalizeIdentifier(string value)

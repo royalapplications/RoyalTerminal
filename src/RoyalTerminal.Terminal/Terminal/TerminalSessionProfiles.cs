@@ -47,6 +47,27 @@ public enum TerminalFontSource
 }
 
 /// <summary>
+/// Regex-based text highlighting evaluation mode.
+/// </summary>
+public enum TerminalTextHighlightingMode
+{
+    /// <summary>
+    /// Cache matched cells for unchanged rows and rules.
+    /// </summary>
+    Static = 0,
+
+    /// <summary>
+    /// Evaluate matching rows whenever they are rendered.
+    /// </summary>
+    Realtime = 1,
+
+    /// <summary>
+    /// Do not apply configured text highlighting rules.
+    /// </summary>
+    Disabled = 2,
+}
+
+/// <summary>
 /// Supported proxy profile types.
 /// </summary>
 public enum TerminalSessionProxyType
@@ -214,6 +235,57 @@ public sealed record TerminalSessionAppearanceSettings
     /// Whether background opacity rendering is enabled.
     /// </summary>
     public bool BackgroundOpacityEnabled { get; init; }
+
+    /// <summary>
+    /// Regex-based text highlighting evaluation mode.
+    /// </summary>
+    public TerminalTextHighlightingMode TextHighlightingMode { get; init; } = TerminalTextHighlightingMode.Static;
+
+    /// <summary>
+    /// Regex-based text highlighting rules.
+    /// </summary>
+    public List<TerminalSessionTextHighlightRule> TextHighlightRules { get; init; } = [];
+}
+
+/// <summary>
+/// Persisted regex-based text highlighting rule.
+/// </summary>
+public sealed record TerminalSessionTextHighlightRule
+{
+    /// <summary>
+    /// Human-readable rule name.
+    /// </summary>
+    public string Name { get; init; } = "Highlight Rule";
+
+    /// <summary>
+    /// Regular expression pattern matched against terminal row text.
+    /// </summary>
+    public string Pattern { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets whether this rule participates in rendering.
+    /// </summary>
+    public bool IsEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Optional foreground color in #RRGGBB or #AARRGGBB form.
+    /// </summary>
+    public string? ForegroundColor { get; init; }
+
+    /// <summary>
+    /// Optional background color in #RRGGBB or #AARRGGBB form.
+    /// </summary>
+    public string? BackgroundColor { get; init; }
+
+    /// <summary>
+    /// Optional dark-theme foreground color in #RRGGBB or #AARRGGBB form.
+    /// </summary>
+    public string? DarkForegroundColor { get; init; }
+
+    /// <summary>
+    /// Optional dark-theme background color in #RRGGBB or #AARRGGBB form.
+    /// </summary>
+    public string? DarkBackgroundColor { get; init; }
 }
 
 /// <summary>

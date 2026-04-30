@@ -23,6 +23,7 @@ RoyalTerminal is published as a family of packages so you can compose the exact 
 | --- | --- |
 | Hosting the control, input, selection, capture, and Avalonia GPU interop | [Embedding In Avalonia](/articles/avalonia-control) |
 | Session documents, settings panels, themes, capture files, and profile stores | [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings) |
+| User-configurable regex text highlighting and persisted highlight rules | [Regex Text Highlighting](/articles/text-highlighting) |
 | PTY, pipe, SSH, raw TCP, Telnet, serial, trust policy, and secret handling | [Transports And Remote Access](/articles/transports) |
 | Screen state, endpoint contracts, VT processors, input encoding, and Unicode | [Terminal Engine And Screen State](/articles/vt-modes) |
 | Rendering contracts, shaping, Skia, and Ghostty renderer interop | [Rendering, Text, And Graphics](/articles/rendering-native) |
@@ -39,15 +40,15 @@ The API section is generated from the packable managed libraries under `src/` an
 
 | Package | Responsibility |
 | --- | --- |
-| `RoyalTerminal.Avalonia` | Backend-neutral Avalonia terminal control, presentation services, scrolling, input adaptation, and default session composition. |
-| `RoyalTerminal.Avalonia.Settings` | Reusable settings panel controls and state for session, connection, terminal, appearance, SSH, and logging categories. |
+| `RoyalTerminal.Avalonia` | Backend-neutral Avalonia terminal control, presentation services, scrolling, input adaptation, regex text highlighting, and default session composition. |
+| `RoyalTerminal.Avalonia.Settings` | Reusable settings panel controls and state for session, connection, terminal, appearance, regex highlighting, SSH, and logging categories. |
 | `RoyalTerminal.Avalonia.Rendering.GhosttyInterop` | Avalonia-specific render-target acquisition and draw-loop adapters for Ghostty renderer interop. |
 
 ## Core model and orchestration packages
 
 | Package | Responsibility |
 | --- | --- |
-| `RoyalTerminal.Terminal` | Core contracts, terminal screen model, transport option records, themes, capture/snapshot contracts, shell profiles, profile persistence, and SSH support contracts. |
+| `RoyalTerminal.Terminal` | Core contracts, terminal screen model, transport option records, themes, regex highlight profile settings, capture/snapshot contracts, shell profiles, profile persistence, and SSH support contracts. |
 | `RoyalTerminal.Terminal.Services.Contracts` | Contracts for terminal session lifecycle services. |
 | `RoyalTerminal.Terminal.Services` | The default `TerminalSessionService` implementation. |
 | `RoyalTerminal.Unicode` | Deterministic Unicode width helpers used by the terminal stack. |
@@ -84,7 +85,7 @@ The API section is generated from the packable managed libraries under `src/` an
 | `RoyalTerminal.Rendering.Contracts` | Backend-agnostic GPU rendering contracts and validation helpers. |
 | `RoyalTerminal.Rendering.Text` | HarfBuzz-backed shaping, font fallback, and diagnostics primitives. |
 | `RoyalTerminal.Shaders` | Dependency-free shader source models plus Ghostty/Shadertoy and Windows Terminal translation into Skia Runtime Effect source. |
-| `RoyalTerminal.Rendering.Skia` | CPU Skia terminal renderer, glyph cache, and framebuffer shader post-processing. |
+| `RoyalTerminal.Rendering.Skia` | CPU Skia terminal renderer, regex text highlighting engine, glyph cache, and framebuffer shader post-processing. |
 | `RoyalTerminal.Rendering.Interop.Ghostty` | Managed interop wrappers for `ghostty-renderer-capi`. |
 | `RoyalTerminal.Rendering.Interop.Ghostty.Skia` | Skia bridge around Ghostty renderer interop with fallback support. |
 

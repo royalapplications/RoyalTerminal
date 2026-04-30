@@ -166,6 +166,28 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private IReadOnlyList<TerminalShaderSource>? _shaderSources;
 
     /// <summary>
+    /// Regex-based foreground/background text highlight rules.
+    /// </summary>
+    public static readonly DirectProperty<TerminalControl, IReadOnlyList<TerminalTextHighlightRule>?> TextHighlightRulesProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, IReadOnlyList<TerminalTextHighlightRule>?>(
+            nameof(TextHighlightRules),
+            o => o.TextHighlightRules,
+            (o, v) => o.TextHighlightRules = v);
+
+    private IReadOnlyList<TerminalTextHighlightRule>? _textHighlightRules;
+
+    /// <summary>
+    /// Regex-based text highlighting evaluation mode.
+    /// </summary>
+    public static readonly DirectProperty<TerminalControl, TerminalTextHighlightingMode> TextHighlightingModeProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, TerminalTextHighlightingMode>(
+            nameof(TextHighlightingMode),
+            o => o.TextHighlightingMode,
+            (o, v) => o.TextHighlightingMode = v);
+
+    private TerminalTextHighlightingMode _textHighlightingMode = TerminalTextHighlightingMode.Static;
+
+    /// <summary>
     /// Whether configured framebuffer shaders may request continuous animation frames.
     /// </summary>
     public static readonly DirectProperty<TerminalControl, bool> ShaderAnimationEnabledProperty =
@@ -299,6 +321,44 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
+    /// Gets or sets regex-based foreground/background text highlight rules.
+    /// </summary>
+    public IReadOnlyList<TerminalTextHighlightRule>? TextHighlightRules
+    {
+        get => _textHighlightRules;
+        set
+        {
+            IReadOnlyList<TerminalTextHighlightRule>? next = NormalizeTextHighlightRules(value);
+            if (AreTextHighlightRulesEqual(_textHighlightRules, next))
+            {
+                return;
+            }
+
+            SetAndRaise(TextHighlightRulesProperty, ref _textHighlightRules, next);
+            ApplyTextHighlightRules();
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets regex-based text highlighting evaluation mode.
+    /// </summary>
+    public TerminalTextHighlightingMode TextHighlightingMode
+    {
+        get => _textHighlightingMode;
+        set
+        {
+            TerminalTextHighlightingMode next = NormalizeTextHighlightingMode(value);
+            if (_textHighlightingMode == next)
+            {
+                return;
+            }
+
+            SetAndRaise(TextHighlightingModeProperty, ref _textHighlightingMode, next);
+            ApplyTextHighlightingMode();
+        }
+    }
+
+    /// <summary>
     /// Gets or sets whether configured shaders can animate without terminal output.
     /// </summary>
     public bool ShaderAnimationEnabled
@@ -359,11 +419,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private string? _searchNeedle;
     private int _searchTotal;
     private int _searchSelected = -1;
+    private const int InitialRowTextScratchCapacity = 256;
     private readonly List<TerminalHighlightSpan> _highlightSpanScratch = [];
     private readonly List<TerminalSearchMatch> _searchMatchScratch = [];
-    private readonly StringBuilder _rowTextScratch = new();
+    private char[] _rowTextScratch = Array.Empty<char>();
     private readonly StringBuilder _linkTokenScratch = new();
-    private readonly List<int> _rowColumnMapScratch = [];
+    private int[] _rowColumnMapScratch = Array.Empty<int>();
     private DispatcherTimer? _cursorBlinkTimer;
     private bool _cursorBlinkVisiblePhase = true;
     private int _lastBlinkCursorColumn = -1;
@@ -844,6 +905,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         renderer.BackgroundOpacityEnabled = _backgroundOpacityEnabled;
         renderer.BackgroundOpacityCells = RendererBackgroundOpacityCells;
         renderer.BackgroundOpacity = RendererBackgroundOpacity;
+        renderer.TextHighlightingMode = _textHighlightingMode;
+        renderer.SetTextHighlightRules(_textHighlightRules);
 
         if (previous is null)
         {
@@ -1308,6 +1371,95 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         return copy;
+    }
+
+    private static IReadOnlyList<TerminalTextHighlightRule>? NormalizeTextHighlightRules(
+        IReadOnlyList<TerminalTextHighlightRule>? rules)
+    {
+        if (rules is null || rules.Count == 0)
+        {
+            return null;
+        }
+
+        TerminalTextHighlightRule[] copy = new TerminalTextHighlightRule[rules.Count];
+        for (int i = 0; i < rules.Count; i++)
+        {
+            copy[i] = rules[i] ?? throw new ArgumentException(
+                "Text highlight rule collection cannot contain null entries.",
+                nameof(rules));
+        }
+
+        return copy;
+    }
+
+    private static TerminalTextHighlightingMode NormalizeTextHighlightingMode(TerminalTextHighlightingMode mode)
+    {
+        return Enum.IsDefined(mode)
+            ? mode
+            : TerminalTextHighlightingMode.Static;
+    }
+
+    private static bool AreTextHighlightRulesEqual(
+        IReadOnlyList<TerminalTextHighlightRule>? left,
+        IReadOnlyList<TerminalTextHighlightRule>? right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        int leftCount = left?.Count ?? 0;
+        int rightCount = right?.Count ?? 0;
+        if (leftCount != rightCount)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < leftCount; i++)
+        {
+            if (!left![i].Equals(right![i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void ApplyTextHighlightRules()
+    {
+        if (_renderer is not null)
+        {
+            _renderer.SetTextHighlightRules(_textHighlightRules);
+        }
+
+        if (_screen is not null)
+        {
+            lock (_screen.SyncRoot)
+            {
+                _screen.InvalidateAll();
+            }
+        }
+
+        _presenter?.Invalidate(fullRedraw: true);
+    }
+
+    private void ApplyTextHighlightingMode()
+    {
+        if (_renderer is not null)
+        {
+            _renderer.TextHighlightingMode = _textHighlightingMode;
+        }
+
+        if (_screen is not null)
+        {
+            lock (_screen.SyncRoot)
+            {
+                _screen.InvalidateAll();
+            }
+        }
+
+        _presenter?.Invalidate(fullRedraw: true);
     }
 
     private void RefreshPresenterRenderState(bool fullRedraw)
@@ -3631,6 +3783,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         int start = Math.Clamp(startColumn, 0, cells.Length - 1);
         int end = Math.Clamp(endColumn, start, cells.Length - 1);
+        Span<char> runeChars = stackalloc char[2];
         for (int col = start; col <= end; col++)
         {
             ref readonly TerminalCell cell = ref cells[col];
@@ -3647,7 +3800,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
             if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
             {
-                _linkTokenScratch.Append(char.ConvertFromUtf32(cell.Codepoint));
+                Rune rune = new(cell.Codepoint);
+                int charsWritten = rune.EncodeToUtf16(runeChars);
+                _linkTokenScratch.Append(runeChars[..charsWritten]);
             }
         }
 
@@ -3823,33 +3978,36 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        ReadOnlySpan<char> needleText = needle.AsSpan();
         for (int absoluteRow = 0; absoluteRow < _screen.TotalRows; absoluteRow++)
         {
             TerminalRow terminalRow = _screen.GetRow(absoluteRow);
-            if (!TryBuildRowTextColumnMap(terminalRow, out string rowText))
+            if (!TryBuildRowTextColumnMap(terminalRow, out int rowTextLength))
             {
                 continue;
             }
 
+            ReadOnlySpan<char> rowText = _rowTextScratch.AsSpan(0, rowTextLength);
             int searchFrom = 0;
-            while (searchFrom <= rowText.Length - needle.Length)
+            while (searchFrom <= rowText.Length - needleText.Length)
             {
-                int found = rowText.IndexOf(needle, searchFrom, StringComparison.Ordinal);
-                if (found < 0)
+                int relativeFound = rowText[searchFrom..].IndexOf(needleText, StringComparison.Ordinal);
+                if (relativeFound < 0)
                 {
                     break;
                 }
 
-                int mapEnd = found + needle.Length - 1;
-                if ((uint)found < (uint)_rowColumnMapScratch.Count &&
-                    (uint)mapEnd < (uint)_rowColumnMapScratch.Count)
+                int found = searchFrom + relativeFound;
+                int mapEnd = found + needleText.Length - 1;
+                if ((uint)found < (uint)rowTextLength &&
+                    (uint)mapEnd < (uint)rowTextLength)
                 {
                     int startColumn = _rowColumnMapScratch[found];
                     int endColumn = _rowColumnMapScratch[mapEnd];
                     _searchMatchScratch.Add(new TerminalSearchMatch(absoluteRow, startColumn, endColumn));
                 }
 
-                searchFrom = found + Math.Max(needle.Length, 1);
+                searchFrom = found + Math.Max(needleText.Length, 1);
             }
         }
     }
@@ -3941,20 +4099,23 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         TerminalRow terminalRow = _screen.GetViewportRow(row);
-        if (TryBuildRowTextColumnMap(terminalRow, out string rowText))
+        if (TryBuildRowTextColumnMap(terminalRow, out int rowTextLength))
         {
+            ReadOnlySpan<char> rowText = _rowTextScratch.AsSpan(0, rowTextLength);
+            ReadOnlySpan<char> urlText = url.AsSpan();
             int searchFrom = 0;
-            while (searchFrom <= rowText.Length - url.Length)
+            while (searchFrom <= rowText.Length - urlText.Length)
             {
-                int found = rowText.IndexOf(url, searchFrom, StringComparison.Ordinal);
-                if (found < 0)
+                int relativeFound = rowText[searchFrom..].IndexOf(urlText, StringComparison.Ordinal);
+                if (relativeFound < 0)
                 {
                     break;
                 }
 
-                int mapEnd = found + url.Length - 1;
-                if ((uint)found < (uint)_rowColumnMapScratch.Count &&
-                    (uint)mapEnd < (uint)_rowColumnMapScratch.Count)
+                int found = searchFrom + relativeFound;
+                int mapEnd = found + urlText.Length - 1;
+                if ((uint)found < (uint)rowTextLength &&
+                    (uint)mapEnd < (uint)rowTextLength)
                 {
                     int startColumn = _rowColumnMapScratch[found];
                     int endColumn = _rowColumnMapScratch[mapEnd];
@@ -3969,7 +4130,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                     }
                 }
 
-                searchFrom = found + Math.Max(url.Length, 1);
+                searchFrom = found + Math.Max(urlText.Length, 1);
             }
         }
 
@@ -3991,10 +4152,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return true;
     }
 
-    private bool TryBuildRowTextColumnMap(TerminalRow row, out string rowText)
+    private bool TryBuildRowTextColumnMap(TerminalRow row, out int rowTextLength)
     {
-        _rowTextScratch.Clear();
-        _rowColumnMapScratch.Clear();
+        rowTextLength = 0;
 
         ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
         for (int col = 0; col < cells.Length; col++)
@@ -4005,38 +4165,65 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 continue;
             }
 
-            string? text = null;
             if (!string.IsNullOrEmpty(cell.Grapheme))
             {
-                text = cell.Grapheme;
+                ReadOnlySpan<char> text = cell.Grapheme.AsSpan();
+                EnsureRowTextScratchCapacity(rowTextLength + text.Length);
+                text.CopyTo(_rowTextScratch.AsSpan(rowTextLength));
+                _rowColumnMapScratch.AsSpan(rowTextLength, text.Length).Fill(col);
+                rowTextLength += text.Length;
             }
             else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
             {
-                text = char.ConvertFromUtf32(cell.Codepoint);
-            }
-
-            if (string.IsNullOrEmpty(text))
-            {
-                continue;
-            }
-
-            int start = _rowTextScratch.Length;
-            _rowTextScratch.Append(text);
-            int end = _rowTextScratch.Length;
-            for (int i = start; i < end; i++)
-            {
-                _rowColumnMapScratch.Add(col);
+                EnsureRowTextScratchCapacity(rowTextLength + 2);
+                Rune rune = new(cell.Codepoint);
+                int charsWritten = rune.EncodeToUtf16(_rowTextScratch.AsSpan(rowTextLength, 2));
+                _rowColumnMapScratch.AsSpan(rowTextLength, charsWritten).Fill(col);
+                rowTextLength += charsWritten;
             }
         }
 
-        if (_rowTextScratch.Length == 0)
+        return rowTextLength > 0;
+    }
+
+    private void EnsureRowTextScratchCapacity(int capacity)
+    {
+        if (_rowTextScratch.Length >= capacity &&
+            _rowColumnMapScratch.Length >= capacity)
         {
-            rowText = string.Empty;
-            return false;
+            return;
         }
 
-        rowText = _rowTextScratch.ToString();
-        return true;
+        int nextCapacity = GetRowTextScratchCapacity(capacity);
+        if (_rowTextScratch.Length < capacity)
+        {
+            Array.Resize(ref _rowTextScratch, nextCapacity);
+        }
+
+        if (_rowColumnMapScratch.Length < capacity)
+        {
+            Array.Resize(ref _rowColumnMapScratch, nextCapacity);
+        }
+    }
+
+    private int GetRowTextScratchCapacity(int requiredCapacity)
+    {
+        int currentCapacity = Math.Max(_rowTextScratch.Length, _rowColumnMapScratch.Length);
+        int nextCapacity = currentCapacity == 0
+            ? InitialRowTextScratchCapacity
+            : currentCapacity;
+        while (nextCapacity < requiredCapacity)
+        {
+            int doubled = nextCapacity * 2;
+            if (doubled <= nextCapacity)
+            {
+                return requiredCapacity;
+            }
+
+            nextCapacity = doubled;
+        }
+
+        return nextCapacity;
     }
 
     private static bool TryResolveLinkTokenSpanLocked(
