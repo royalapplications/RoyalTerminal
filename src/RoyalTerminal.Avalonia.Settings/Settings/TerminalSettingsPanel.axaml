@@ -103,7 +103,7 @@
                     <TabItem Header="Session">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16,20,24"
+                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
@@ -116,7 +116,7 @@
                     <TabItem Header="Connection">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16,20,24"
+                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
@@ -130,7 +130,7 @@
                     <TabItem Header="Terminal">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16,20,24"
+                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
@@ -144,7 +144,7 @@
                     <TabItem Header="Appearance">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16,20,24"
+                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
@@ -158,7 +158,7 @@
                     <TabItem Header="SSH">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16,20,24"
+                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
@@ -171,7 +171,7 @@
                     <TabItem Header="Logging">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16,20,24"
+                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
@@ -395,15 +395,15 @@
               x:DataType="settings:TerminalSettingsAppearanceState"
               HorizontalAlignment="Left"
               Width="520"
-              Spacing="20">
-              <StackPanel Spacing="10">
+              Spacing="14">
+              <StackPanel Spacing="8">
                 <TextBlock Text="Typography"
                            FontSize="16"
                            FontWeight="SemiBold" />
                 <Grid ColumnDefinitions="118,*"
                       RowDefinitions="Auto,Auto,Auto,Auto"
                       ColumnSpacing="12"
-                      RowSpacing="10"
+                      RowSpacing="8"
                       Width="520">
                   <TextBlock Grid.Row="0"
                              Grid.Column="0"
@@ -478,7 +478,7 @@
                            Text="{Binding FontFamilyName, StringFormat='Resolved family: {0}'}" />
               </StackPanel>
 
-              <StackPanel Spacing="10">
+              <StackPanel Spacing="8">
                 <TextBlock Text="Behavior"
                            FontSize="16"
                            FontWeight="SemiBold" />
@@ -491,8 +491,8 @@
                 </WrapPanel>
               </StackPanel>
 
-              <StackPanel Spacing="12">
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+              <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                   <StackPanel Grid.Column="0">
                     <TextBlock Text="Text Highlighting"
                                FontSize="16"
@@ -527,16 +527,17 @@
                 <ItemsControl ItemsSource="{Binding TextHighlightRules}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="settings:TerminalSettingsHighlightRuleState">
-                      <Border BorderBrush="#505050"
+                      <Border Classes="settings-highlight-rule-card"
+                              BorderBrush="#505050"
                               BorderThickness="1"
                               CornerRadius="6"
-                              Padding="12"
-                              Margin="0,0,0,10">
+                              Padding="10"
+                              Margin="0,0,0,8">
                         <Grid RowDefinitions="Auto,Auto,Auto"
-                              RowSpacing="10">
+                              RowSpacing="8">
                           <Grid Grid.Row="0"
                                 ColumnDefinitions="Auto,*,Auto"
-                                ColumnSpacing="12">
+                                ColumnSpacing="10">
                             <CheckBox Grid.Column="0"
                                       VerticalAlignment="Center"
                                       Content="Enabled"
@@ -552,7 +553,7 @@
 
                           <Grid Grid.Row="1"
                                 ColumnDefinitions="86,*"
-                                ColumnSpacing="12">
+                                ColumnSpacing="10">
                             <TextBlock Grid.Column="0"
                                        VerticalAlignment="Center"
                                        Foreground="#B8B8B8"
@@ -565,8 +566,8 @@
                           <Grid Grid.Row="2"
                                 ColumnDefinitions="*,*"
                                 RowDefinitions="Auto,Auto"
-                                ColumnSpacing="12"
-                                RowSpacing="10">
+                                ColumnSpacing="10"
+                                RowSpacing="8">
                             <Grid Grid.Row="0"
                                   Grid.Column="0"
                                   ColumnDefinitions="Auto,*"

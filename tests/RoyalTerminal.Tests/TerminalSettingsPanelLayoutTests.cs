@@ -13,6 +13,63 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalSettingsPanelLayoutTests
 {
     [AvaloniaFact]
+    public async Task AppearanceTab_ShowsSingleHighlightRuleAboveFooter()
+    {
+        TerminalSettingsPanelState state = new();
+        state.Appearance.AddTextHighlightRuleCommand.Execute(null);
+        TerminalSettingsHighlightRuleState rule = Assert.Single(state.Appearance.TextHighlightRules);
+        rule.Pattern = @"\b(WARN|WARNING)\b";
+
+        TerminalSettingsPanel panel = new()
+        {
+            DataContext = state,
+        };
+
+        Window window = new()
+        {
+            Width = 760,
+            Height = 740,
+            Content = panel,
+        };
+
+        try
+        {
+            window.Show();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            TabControl tabControl = Assert.Single(panel.GetVisualDescendants().OfType<TabControl>());
+            tabControl.SelectedIndex = 3;
+
+            bool layoutReady = await HeadlessTerminalTestCleanup.WaitUntilAsync(
+                () => TryGetVisibleSettingsScrollViewer(panel, out ScrollViewer? scrollViewer)
+                    && scrollViewer.Viewport.Height > 0
+                    && TryGetVisualWithClass(panel, "settings-highlight-rule-card", out Border ruleCard)
+                    && ruleCard.Bounds.Height > 0,
+                TimeSpan.FromSeconds(2));
+
+            Assert.True(layoutReady, "The selected Appearance tab did not produce a measured highlight rule card.");
+            Assert.True(TryGetVisibleSettingsScrollViewer(panel, out ScrollViewer? selectedScrollViewer));
+            Assert.True(TryGetVisualWithClass(panel, "settings-highlight-rule-card", out Border selectedRuleCard));
+            Assert.True(TryGetVisualWithClass(panel, "settings-footer", out Border footer));
+
+            double ruleCardBottom = GetBottomRelativeToPanel(selectedRuleCard, panel);
+            double footerTop = GetTopRelativeToPanel(footer, panel);
+            double scrollViewerBottom = GetBottomRelativeToPanel(selectedScrollViewer, panel);
+
+            Assert.True(
+                ruleCardBottom <= footerTop + 0.5,
+                $"Expected one highlight rule to fit above the footer. RuleBottom={ruleCardBottom}, FooterTop={footerTop}.");
+            Assert.True(
+                ruleCardBottom <= scrollViewerBottom + 0.5,
+                $"Expected one highlight rule to fit inside the visible scroll viewport. RuleBottom={ruleCardBottom}, ScrollBottom={scrollViewerBottom}.");
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task AppearanceTab_UsesConstrainedScrollableViewport()
     {
         TerminalSettingsPanelState state = new();
