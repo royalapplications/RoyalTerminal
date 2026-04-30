@@ -4,6 +4,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Layout;
 using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Settings;
 using Xunit;
@@ -60,6 +61,28 @@ public sealed class TerminalSettingsPanelLayoutTests
             {
                 Assert.True(colorPickers[i].Bounds.Width > 0);
                 Assert.True(colorPickers[i].Bounds.Height > 0);
+            }
+
+            TextBox[] colorInputs = panel.GetVisualDescendants()
+                .OfType<TextBox>()
+                .Where(input => input.Classes.Contains("settings-highlight-color-input"))
+                .ToArray();
+            Assert.Equal(4, colorInputs.Length);
+            for (int i = 0; i < colorInputs.Length; i++)
+            {
+                Assert.Equal(VerticalAlignment.Center, colorInputs[i].VerticalContentAlignment);
+                Assert.InRange(colorInputs[i].Bounds.Height, 33.5, 34.5);
+            }
+
+            CheckBox[] colorToggles = panel.GetVisualDescendants()
+                .OfType<CheckBox>()
+                .Where(toggle => toggle.Classes.Contains("settings-highlight-color-toggle"))
+                .ToArray();
+            Assert.Equal(4, colorToggles.Length);
+            for (int i = 0; i < colorToggles.Length; i++)
+            {
+                Assert.Equal(VerticalAlignment.Center, colorToggles[i].VerticalContentAlignment);
+                Assert.True(colorToggles[i].Bounds.Height >= 34);
             }
 
             double ruleCardBottom = GetBottomRelativeToPanel(selectedRuleCard, panel);

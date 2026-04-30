@@ -572,13 +572,16 @@
                             <Grid Grid.Row="0"
                                   Grid.Column="0"
                                   ColumnDefinitions="Auto,*"
-                                  ColumnSpacing="8">
+                                  ColumnSpacing="8"
+                                  MinHeight="34"
+                                  VerticalAlignment="Center">
                               <CheckBox Grid.Column="0"
+                                        Classes="settings-highlight-color-toggle"
                                         VerticalAlignment="Center"
                                         Content="Foreground"
                                         IsChecked="{Binding IsForegroundEnabled}" />
                               <Grid Grid.Column="1">
-                                <TextBox Padding="8,0,38,0"
+                                <TextBox Classes="settings-highlight-color-input"
                                          PlaceholderText="#FFFFFFFF"
                                          Text="{Binding ForegroundColor}"
                                          IsEnabled="{Binding IsForegroundEnabled}" />
@@ -600,13 +603,16 @@
                             <Grid Grid.Row="0"
                                   Grid.Column="1"
                                   ColumnDefinitions="Auto,*"
-                                  ColumnSpacing="8">
+                                  ColumnSpacing="8"
+                                  MinHeight="34"
+                                  VerticalAlignment="Center">
                               <CheckBox Grid.Column="0"
+                                        Classes="settings-highlight-color-toggle"
                                         VerticalAlignment="Center"
                                         Content="Background"
                                         IsChecked="{Binding IsBackgroundEnabled}" />
                               <Grid Grid.Column="1">
-                                <TextBox Padding="8,0,38,0"
+                                <TextBox Classes="settings-highlight-color-input"
                                          PlaceholderText="#FF000000"
                                          Text="{Binding BackgroundColor}"
                                          IsEnabled="{Binding IsBackgroundEnabled}" />
@@ -628,13 +634,16 @@
                             <Grid Grid.Row="1"
                                   Grid.Column="0"
                                   ColumnDefinitions="Auto,*"
-                                  ColumnSpacing="8">
+                                  ColumnSpacing="8"
+                                  MinHeight="34"
+                                  VerticalAlignment="Center">
                               <CheckBox Grid.Column="0"
+                                        Classes="settings-highlight-color-toggle"
                                         VerticalAlignment="Center"
                                         Content="Dark foreground"
                                         IsChecked="{Binding IsDarkForegroundEnabled}" />
                               <Grid Grid.Column="1">
-                                <TextBox Padding="8,0,38,0"
+                                <TextBox Classes="settings-highlight-color-input"
                                          PlaceholderText="#FFFFFFFF"
                                          Text="{Binding DarkForegroundColor}"
                                          IsEnabled="{Binding IsDarkForegroundEnabled}" />
@@ -656,13 +665,16 @@
                             <Grid Grid.Row="1"
                                   Grid.Column="1"
                                   ColumnDefinitions="Auto,*"
-                                  ColumnSpacing="8">
+                                  ColumnSpacing="8"
+                                  MinHeight="34"
+                                  VerticalAlignment="Center">
                               <CheckBox Grid.Column="0"
+                                        Classes="settings-highlight-color-toggle"
                                         VerticalAlignment="Center"
                                         Content="Dark background"
                                         IsChecked="{Binding IsDarkBackgroundEnabled}" />
                               <Grid Grid.Column="1">
-                                <TextBox Padding="8,0,38,0"
+                                <TextBox Classes="settings-highlight-color-input"
                                          PlaceholderText="#FF000000"
                                          Text="{Binding DarkBackgroundColor}"
                                          IsEnabled="{Binding IsDarkBackgroundEnabled}" />
@@ -832,8 +844,20 @@
     <Setter Property="FontSize" Value="14" />
   </Style>
 
+  <Style Selector="settings|TerminalSettingsPanel TextBox.settings-highlight-color-input">
+    <Setter Property="Height" Value="34" />
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="Padding" Value="8,0,38,0" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
   <Style Selector="settings|TerminalSettingsPanel CheckBox">
     <Setter Property="FontSize" Value="14" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel CheckBox.settings-highlight-color-toggle">
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
 
   <Style Selector="settings|TerminalSettingsPanel NumericUpDown">
