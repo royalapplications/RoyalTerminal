@@ -53,7 +53,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
     private readonly PretextRunCache _pretextRunCache;
 #endif
-    private readonly SingleGlyphBlobCache _singleGlyphBlobCache;
+    private readonly SingleGlyphIdCache _singleGlyphIdCache;
     private readonly TextRowFontCache _textRowFontCache;
     private readonly SimpleTextRowBatchGroup[] _simpleTextRowBatchGroups = new SimpleTextRowBatchGroup[MaxSimpleTextRowBatchGroups];
     private ushort[] _simpleTextRowCellGlyphIds = Array.Empty<ushort>();
@@ -320,7 +320,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
         _pretextRunCache = new PretextRunCache();
 #endif
-        _singleGlyphBlobCache = new SingleGlyphBlobCache();
+        _singleGlyphIdCache = new SingleGlyphIdCache();
         _textRowFontCache = new TextRowFontCache();
 
         var (w, h) = _glyphCache.MeasureCellSize(fontSize);
@@ -396,7 +396,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private void ClearTextRenderCaches()
     {
         _shapedRunCache.Clear();
-        _singleGlyphBlobCache.Clear();
+        _singleGlyphIdCache.Clear();
         _textRowFontCache.Clear();
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
         _pretextRunCache.Clear();
@@ -2256,14 +2256,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
             bool italic = (cell.Attributes & CellAttributes.Italic) != 0;
             SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
             SKTypeface typeface = ResolveTypefaceForCell(primaryTypeface, in cell);
-            CachedSingleGlyphBlob? cachedGlyph = _singleGlyphBlobCache.GetOrCreate(
-                new SingleGlyphBlobCacheKey(
+            if (!_singleGlyphIdCache.TryGetOrCreate(
+                new SingleGlyphIdCacheKey(
                     cell.Codepoint,
-                    typeface.Handle,
-                    BitConverter.SingleToInt32Bits(_fontSize)),
-                typeface);
-
-            if (cachedGlyph is null)
+                    typeface.Handle),
+                typeface,
+                out ushort glyphId))
             {
                 return false;
             }
@@ -2291,7 +2289,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 };
             }
 
-            _simpleTextRowCellGlyphIds[col] = cachedGlyph.GlyphId;
+            _simpleTextRowCellGlyphIds[col] = glyphId;
             _simpleTextRowGroupIndexes[col] = (byte)groupIndex;
             _simpleTextRowBatchGroups[groupIndex].Count++;
             glyphCount++;
@@ -4882,27 +4880,21 @@ public sealed class SkiaTerminalRenderer : IDisposable
         UnsafeFallback,
     }
 
-    private sealed class SingleGlyphBlobCache
+    private sealed class SingleGlyphIdCache
     {
-        private readonly Dictionary<SingleGlyphBlobCacheKey, CachedSingleGlyphBlob> _cache = new();
+        private readonly Dictionary<SingleGlyphIdCacheKey, ushort> _cache = new();
         private readonly int _maxEntries;
 
-        public SingleGlyphBlobCache(int maxEntries = 4096)
+        public SingleGlyphIdCache(int maxEntries = 4096)
         {
             _maxEntries = Math.Max(64, maxEntries);
         }
 
-        public CachedSingleGlyphBlob? GetOrCreate(SingleGlyphBlobCacheKey key, SKTypeface typeface)
+        public bool TryGetOrCreate(SingleGlyphIdCacheKey key, SKTypeface typeface, out ushort glyphId)
         {
-            if (_cache.TryGetValue(key, out CachedSingleGlyphBlob? glyph))
+            if (_cache.TryGetValue(key, out glyphId))
             {
-                return glyph;
-            }
-
-            glyph = CreateGlyph(key.Codepoint, typeface);
-            if (glyph is null)
-            {
-                return null;
+                return glyphId != 0;
             }
 
             if (_cache.Count >= _maxEntries)
@@ -4910,19 +4902,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 ClearCore();
             }
 
-            _cache[key] = glyph;
-            return glyph;
+            glyphId = typeface.GetGlyph(key.Codepoint);
+            _cache[key] = glyphId;
+            return glyphId != 0;
         }
 
         public void Clear()
         {
             ClearCore();
-        }
-
-        private static CachedSingleGlyphBlob? CreateGlyph(int codepoint, SKTypeface typeface)
-        {
-            ushort glyphId = typeface.GetGlyph(codepoint);
-            return glyphId == 0 ? null : new CachedSingleGlyphBlob(glyphId);
         }
 
         private void ClearCore()
@@ -4931,10 +4918,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
     }
 
-    private readonly record struct SingleGlyphBlobCacheKey(
+    private readonly record struct SingleGlyphIdCacheKey(
         int Codepoint,
-        nint TypefaceHandle,
-        int FontSizeBits);
+        nint TypefaceHandle);
 
     private sealed class TextRowFontCache
     {
@@ -4967,16 +4953,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private readonly record struct TextRowFontCacheKey(
         nint TypefaceHandle,
         int FontSizeBits);
-
-    private sealed class CachedSingleGlyphBlob
-    {
-        public CachedSingleGlyphBlob(ushort glyphId)
-        {
-            GlyphId = glyphId;
-        }
-
-        public ushort GlyphId { get; }
-    }
 
     private struct SimpleTextRowBatchGroup
     {
