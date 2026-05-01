@@ -24,6 +24,7 @@ internal sealed class CachedShapedRun : IDisposable
         float[] xOffsets,
         float[] yOffsets,
         float totalAdvanceX,
+        float clipPadding = 0f,
         SKTextBlob? naturalTextBlob = null)
     {
         Text = text;
@@ -31,6 +32,7 @@ internal sealed class CachedShapedRun : IDisposable
         XOffsets = xOffsets;
         YOffsets = yOffsets;
         TotalAdvanceX = totalAdvanceX;
+        ClipPadding = clipPadding;
         NaturalTextBlob = naturalTextBlob;
     }
 
@@ -44,13 +46,43 @@ internal sealed class CachedShapedRun : IDisposable
 
     public float TotalAdvanceX { get; }
 
+    public float ClipPadding { get; }
+
     public SKTextBlob? NaturalTextBlob { get; }
 
     public int GlyphCount => GlyphIds.Length;
 
+    private int _gridTextBlobRunWidthBits;
+
+    private SKTextBlob? _gridTextBlob;
+
+    public bool TryGetGridTextBlob(int runWidthBits, out SKTextBlob textBlob)
+    {
+        if (_gridTextBlob is { } cachedBlob && _gridTextBlobRunWidthBits == runWidthBits)
+        {
+            textBlob = cachedBlob;
+            return true;
+        }
+
+        textBlob = null!;
+        return false;
+    }
+
+    public void SetGridTextBlob(int runWidthBits, SKTextBlob textBlob)
+    {
+        if (_gridTextBlob is { } existing && !ReferenceEquals(existing, textBlob))
+        {
+            existing.Dispose();
+        }
+
+        _gridTextBlobRunWidthBits = runWidthBits;
+        _gridTextBlob = textBlob;
+    }
+
     public void Dispose()
     {
         NaturalTextBlob?.Dispose();
+        _gridTextBlob?.Dispose();
     }
 }
 
