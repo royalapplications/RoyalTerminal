@@ -10,8 +10,7 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <VersionPrefix>0.1.4</VersionPrefix>
     <VersionSuffix></VersionSuffix>
-    <PretextSharpRoot Condition="'$(PretextSharpRoot)' == ''">$(MSBuildThisFileDirectory)../PretextSharp/</PretextSharpRoot>
-    <RoyalTerminalEnablePretextTextPipeline Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == '' and Exists('$(PretextSharpRoot)src/Pretext.Contracts/Pretext.Contracts.csproj') and Exists('$(PretextSharpRoot)src/Pretext/Pretext.csproj') and Exists('$(PretextSharpRoot)src/Pretext.SkiaSharp/Pretext.SkiaSharp.csproj')">true</RoyalTerminalEnablePretextTextPipeline>
+    <RoyalTerminalEnablePretextTextPipeline Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == ''">true</RoyalTerminalEnablePretextTextPipeline>
     <DefineConstants Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == 'true'">$(DefineConstants);ROYALTERMINAL_PRETEXT_TEXT_PIPELINE</DefineConstants>
   </PropertyGroup>
 
