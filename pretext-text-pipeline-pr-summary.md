@@ -2,7 +2,7 @@
 
 ## Overview
 
-This PR adds an optional PretextSharp-backed text rendering pipeline for RoyalTerminal and optimizes the Skia text path for terminal workloads. HarfBuzz remains the default runtime rendering pipeline. The Pretext pipeline is compiled by default through the stable PretextSharp `0.1.0` NuGet packages and can still be excluded with `RoyalTerminalEnablePretextTextPipeline=false`.
+This PR adds a PretextSharp-backed text rendering pipeline for RoyalTerminal and optimizes the Skia text path for terminal workloads. HarfBuzz remains the default runtime rendering pipeline. The Pretext pipeline is available through the stable PretextSharp `0.1.0` NuGet packages, remains opt-in at runtime, and can still be excluded from builds with `RoyalTerminalEnablePretextTextPipeline=false`.
 
 The main goal is to reduce text rendering overhead in color-fragmented terminal rows, where the existing HarfBuzz path spends significant time shaping and drawing many small runs. The latest round also brings HarfBuzz memory usage in the benchmark down to the same per-frame allocation class as Pretext for simple ASCII rows.
 
@@ -116,7 +116,7 @@ All validation commands succeeded with zero errors.
 
 ## Review Notes
 
-- The Pretext pipeline is intentionally optional and does not change default behavior.
+- The Pretext pipeline is compiled from packages by default, but remains opt-in at runtime and does not change the default HarfBuzz rendering behavior.
 - The simple-row fast path is narrowly gated to avoid changing behavior for complex text, decorations, overlays, wide glyphs, grapheme clusters, sprites, symbol clip candidates, highlighted text, ligature shaping, or explicit RTL shaping.
 - The batched simple-row path trades a small amount of per-frame managed allocation for a large reduction in Skia draw calls and frame time.
 - HarfBuzz remains the fallback for cases Pretext cannot handle or when the optional pipeline is unavailable.
