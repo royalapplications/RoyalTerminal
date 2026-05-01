@@ -41,9 +41,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const long DefaultImageBitmapCacheBudgetBytes = 256L * 1024L * 1024L;
     private const int MaxTextHighlightRowCacheEntries = 32_768;
     private const int InitialTextHighlightBufferCapacity = 256;
-#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-    private const int MaxSimplePretextRowBatchGroups = 16;
-#endif
+    private const int MaxSimpleTextRowBatchGroups = 16;
     private static readonly TimeSpan s_textHighlightNonBacktrackingRegexTimeout = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan s_textHighlightBacktrackingRegexTimeout = TimeSpan.FromMilliseconds(10);
     private static readonly CultureInfo s_renderCulture = CultureInfo.InvariantCulture;
@@ -54,16 +52,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private readonly ShapedRunCache _shapedRunCache;
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
     private readonly PretextRunCache _pretextRunCache;
-    private readonly SingleGlyphBlobCache _singleGlyphBlobCache;
-    private readonly PretextFontCache _pretextFontCache;
-    private readonly SimplePretextRowBatchGroup[] _simplePretextRowBatchGroups = new SimplePretextRowBatchGroup[MaxSimplePretextRowBatchGroups];
-    private ushort[] _simplePretextRowCellGlyphIds = Array.Empty<ushort>();
-    private ushort[] _simplePretextRowBatchGlyphIds = Array.Empty<ushort>();
-    private byte[] _simplePretextRowGroupIndexes = Array.Empty<byte>();
-    private SKPoint[] _simplePretextRowGlyphPositions = Array.Empty<SKPoint>();
-    private readonly int[] _simplePretextRowGroupOffsets = new int[MaxSimplePretextRowBatchGroups];
-    private readonly int[] _simplePretextRowGroupWriteIndexes = new int[MaxSimplePretextRowBatchGroups];
 #endif
+    private readonly SingleGlyphBlobCache _singleGlyphBlobCache;
+    private readonly TextRowFontCache _textRowFontCache;
+    private readonly SimpleTextRowBatchGroup[] _simpleTextRowBatchGroups = new SimpleTextRowBatchGroup[MaxSimpleTextRowBatchGroups];
+    private ushort[] _simpleTextRowCellGlyphIds = Array.Empty<ushort>();
+    private ushort[] _simpleTextRowBatchGlyphIds = Array.Empty<ushort>();
+    private byte[] _simpleTextRowGroupIndexes = Array.Empty<byte>();
+    private SKPoint[] _simpleTextRowGlyphPositions = Array.Empty<SKPoint>();
+    private readonly int[] _simpleTextRowGroupOffsets = new int[MaxSimpleTextRowBatchGroups];
+    private readonly int[] _simpleTextRowGroupWriteIndexes = new int[MaxSimpleTextRowBatchGroups];
     private readonly Dictionary<TerminalBitmapCacheKey, TerminalBitmapCacheEntry> _kittyBitmapCache = new();
     private readonly Dictionary<TerminalBitmapCacheKey, TerminalBitmapCacheEntry> _rasterBitmapCache = new();
     private const float CellMetricEpsilon = 0.01f;
@@ -266,12 +264,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             _textRenderPipeline = value;
-            _shapedRunCache.Clear();
-#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-            _pretextRunCache.Clear();
-            _singleGlyphBlobCache.Clear();
-            _pretextFontCache.Clear();
-#endif
+            ClearTextRenderCaches();
         }
     }
 
@@ -290,12 +283,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             _textDirectionMode = value;
-            _shapedRunCache.Clear();
-#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-            _pretextRunCache.Clear();
-            _singleGlyphBlobCache.Clear();
-            _pretextFontCache.Clear();
-#endif
+            ClearTextRenderCaches();
         }
     }
 
@@ -314,12 +302,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             _enableLigatures = value;
-            _shapedRunCache.Clear();
-#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-            _pretextRunCache.Clear();
-            _singleGlyphBlobCache.Clear();
-            _pretextFontCache.Clear();
-#endif
+            ClearTextRenderCaches();
         }
     }
 
@@ -336,9 +319,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _shapedRunCache = new ShapedRunCache();
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
         _pretextRunCache = new PretextRunCache();
-        _singleGlyphBlobCache = new SingleGlyphBlobCache();
-        _pretextFontCache = new PretextFontCache();
 #endif
+        _singleGlyphBlobCache = new SingleGlyphBlobCache();
+        _textRowFontCache = new TextRowFontCache();
 
         var (w, h) = _glyphCache.MeasureCellSize(fontSize);
         _measuredCellWidth = w;
@@ -379,12 +362,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _baseline = ComputeBaseline(font.Metrics, _cellHeight);
 
         _glyphCache.Clear();
-        _shapedRunCache.Clear();
-#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-        _pretextRunCache.Clear();
-        _singleGlyphBlobCache.Clear();
-        _pretextFontCache.Clear();
-#endif
+        ClearTextRenderCaches();
     }
 
     /// <summary>
@@ -412,11 +390,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         using var font = _glyphCache.CreateFont(_fontSize);
         _baseline = ComputeBaseline(font.Metrics, _cellHeight);
+        ClearTextRenderCaches();
+    }
+
+    private void ClearTextRenderCaches()
+    {
         _shapedRunCache.Clear();
+        _singleGlyphBlobCache.Clear();
+        _textRowFontCache.Clear();
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
         _pretextRunCache.Clear();
-        _singleGlyphBlobCache.Clear();
-        _pretextFontCache.Clear();
 #endif
     }
 
@@ -718,11 +701,30 @@ public sealed class SkiaTerminalRenderer : IDisposable
             PretextPipelineInitializer.TryEnsureInitialized();
         if (usePretextPipeline &&
             Math.Abs(_cellWidth - _measuredCellWidth) < CellMetricEpsilon &&
-            TryDrawSimplePretextTextRow(canvas, cells, rowOverlays, rowTextHighlights, y))
+            TryDrawSimpleTextRowBatch(
+                canvas,
+                cells,
+                rowOverlays,
+                rowTextHighlights,
+                y,
+                requireAscii: false,
+                recordPretextRuns: true))
         {
             return;
         }
 #endif
+        if (CanUseSimpleHarfBuzzTextRowBatch() &&
+            TryDrawSimpleTextRowBatch(
+                canvas,
+                cells,
+                rowOverlays,
+                rowTextHighlights,
+                y,
+                requireAscii: true,
+                recordPretextRuns: false))
+        {
+            return;
+        }
 
         int col = 0;
         while (col < cells.Length)
@@ -881,6 +883,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 runColor);
             col = runEnd;
         }
+    }
+
+    private bool CanUseSimpleHarfBuzzTextRowBatch()
+    {
+        return EnableTextShaping &&
+               !EnableTextRenderDiagnostics &&
+               _textRenderPipeline == TerminalTextRenderPipeline.HarfBuzz &&
+               !_enableLigatures &&
+               _textDirectionMode != TextDirectionMode.RightToLeft &&
+               Math.Abs(_cellWidth - _measuredCellWidth) < CellMetricEpsilon;
     }
 
     private void DrawSpriteRun(
@@ -2193,22 +2205,23 @@ public sealed class SkiaTerminalRenderer : IDisposable
 #endif
     }
 
-#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-    private bool TryDrawSimplePretextTextRow(
+    private bool TryDrawSimpleTextRowBatch(
         SKCanvas canvas,
         ReadOnlySpan<TerminalCell> cells,
         ReadOnlySpan<CellOverlayFlags> rowOverlays,
         ReadOnlySpan<CellTextHighlightOverride> rowTextHighlights,
-        float y)
+        float y,
+        bool requireAscii,
+        bool recordPretextRuns)
     {
-        EnsureSimplePretextRowBatchCapacity(cells.Length);
+        EnsureSimpleTextRowBatchCapacity(cells.Length);
         int groupCount = 0;
         int glyphCount = 0;
 
-        Array.Fill(_simplePretextRowGroupIndexes, byte.MaxValue, 0, cells.Length);
-        for (int i = 0; i < MaxSimplePretextRowBatchGroups; i++)
+        Array.Fill(_simpleTextRowGroupIndexes, byte.MaxValue, 0, cells.Length);
+        for (int i = 0; i < MaxSimpleTextRowBatchGroups; i++)
         {
-            _simplePretextRowBatchGroups[i] = default;
+            _simpleTextRowBatchGroups[i] = default;
         }
 
         for (int col = 0; col < cells.Length; col++)
@@ -2234,7 +2247,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             if (GetEffectiveUnderlineStyle(in cell) != TerminalUnderlineStyle.None ||
                 (cell.Attributes & CellAttributes.Strikethrough) != 0 ||
                 (cell.Decorations & CellDecorations.Overline) != 0 ||
-                !IsSimplePretextRowGlyphCell(in cell))
+                !IsSimpleTextRowGlyphCell(in cell, requireAscii))
             {
                 return false;
             }
@@ -2248,8 +2261,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     cell.Codepoint,
                     typeface.Handle,
                     BitConverter.SingleToInt32Bits(_fontSize)),
-                typeface,
-                _fontSize);
+                typeface);
 
             if (cachedGlyph is null)
             {
@@ -2257,21 +2269,21 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             SKColor color = GetEffectiveForeground(in cell);
-            int groupIndex = FindSimplePretextRowBatchGroup(
-                _simplePretextRowBatchGroups,
+            int groupIndex = FindSimpleTextRowBatchGroup(
+                _simpleTextRowBatchGroups,
                 groupCount,
                 color,
                 typeface.Handle);
 
             if (groupIndex < 0)
             {
-                if (groupCount >= MaxSimplePretextRowBatchGroups)
+                if (groupCount >= MaxSimpleTextRowBatchGroups)
                 {
                     return false;
                 }
 
                 groupIndex = groupCount++;
-                _simplePretextRowBatchGroups[groupIndex] = new SimplePretextRowBatchGroup
+                _simpleTextRowBatchGroups[groupIndex] = new SimpleTextRowBatchGroup
                 {
                     Color = color,
                     TypefaceHandle = typeface.Handle,
@@ -2279,9 +2291,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 };
             }
 
-            _simplePretextRowCellGlyphIds[col] = cachedGlyph.GlyphId;
-            _simplePretextRowGroupIndexes[col] = (byte)groupIndex;
-            _simplePretextRowBatchGroups[groupIndex].Count++;
+            _simpleTextRowCellGlyphIds[col] = cachedGlyph.GlyphId;
+            _simpleTextRowGroupIndexes[col] = (byte)groupIndex;
+            _simpleTextRowBatchGroups[groupIndex].Count++;
             glyphCount++;
         }
 
@@ -2293,42 +2305,42 @@ public sealed class SkiaTerminalRenderer : IDisposable
         int offset = 0;
         for (int groupIndex = 0; groupIndex < groupCount; groupIndex++)
         {
-            _simplePretextRowGroupOffsets[groupIndex] = offset;
-            _simplePretextRowGroupWriteIndexes[groupIndex] = 0;
-            offset += _simplePretextRowBatchGroups[groupIndex].Count;
+            _simpleTextRowGroupOffsets[groupIndex] = offset;
+            _simpleTextRowGroupWriteIndexes[groupIndex] = 0;
+            offset += _simpleTextRowBatchGroups[groupIndex].Count;
         }
 
         for (int col = 0; col < cells.Length; col++)
         {
-            byte groupIndex = _simplePretextRowGroupIndexes[col];
+            byte groupIndex = _simpleTextRowGroupIndexes[col];
             if (groupIndex == byte.MaxValue)
             {
                 continue;
             }
 
-            int writeIndex = _simplePretextRowGroupOffsets[groupIndex] +
-                _simplePretextRowGroupWriteIndexes[groupIndex]++;
-            _simplePretextRowBatchGlyphIds[writeIndex] = _simplePretextRowCellGlyphIds[col];
-            _simplePretextRowGlyphPositions[writeIndex] = new SKPoint(col * _cellWidth, 0f);
+            int writeIndex = _simpleTextRowGroupOffsets[groupIndex] +
+                _simpleTextRowGroupWriteIndexes[groupIndex]++;
+            _simpleTextRowBatchGlyphIds[writeIndex] = _simpleTextRowCellGlyphIds[col];
+            _simpleTextRowGlyphPositions[writeIndex] = new SKPoint(col * _cellWidth, 0f);
         }
 
         float baselineY = y + _baseline;
         for (int groupIndex = 0; groupIndex < groupCount; groupIndex++)
         {
-            ref SimplePretextRowBatchGroup group = ref _simplePretextRowBatchGroups[groupIndex];
+            ref SimpleTextRowBatchGroup group = ref _simpleTextRowBatchGroups[groupIndex];
             int count = group.Count;
             if (count <= 0)
             {
                 continue;
             }
 
-            SKFont font = _pretextFontCache.GetOrCreate(group.Typeface, _fontSize);
+            SKFont font = _textRowFontCache.GetOrCreate(group.Typeface, _fontSize);
             using SKTextBlobBuilder builder = new();
-            int groupOffset = _simplePretextRowGroupOffsets[groupIndex];
+            int groupOffset = _simpleTextRowGroupOffsets[groupIndex];
             builder.AddPositionedRun(
-                _simplePretextRowBatchGlyphIds.AsSpan(groupOffset, count),
+                _simpleTextRowBatchGlyphIds.AsSpan(groupOffset, count),
                 font,
-                _simplePretextRowGlyphPositions.AsSpan(groupOffset, count));
+                _simpleTextRowGlyphPositions.AsSpan(groupOffset, count));
 
             using SKTextBlob? textBlob = builder.Build();
             if (textBlob is null)
@@ -2338,37 +2350,40 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
             _fgPaint.Color = group.Color;
             canvas.DrawText(textBlob, 0f, baselineY, _fgPaint);
-            RecordPretextRun();
+            if (recordPretextRuns)
+            {
+                RecordPretextRun();
+            }
         }
 
         return true;
     }
 
-    private void EnsureSimplePretextRowBatchCapacity(int cellCount)
+    private void EnsureSimpleTextRowBatchCapacity(int cellCount)
     {
-        if (_simplePretextRowCellGlyphIds.Length < cellCount)
+        if (_simpleTextRowCellGlyphIds.Length < cellCount)
         {
-            _simplePretextRowCellGlyphIds = new ushort[cellCount];
+            _simpleTextRowCellGlyphIds = new ushort[cellCount];
         }
 
-        if (_simplePretextRowGroupIndexes.Length < cellCount)
+        if (_simpleTextRowGroupIndexes.Length < cellCount)
         {
-            _simplePretextRowGroupIndexes = new byte[cellCount];
+            _simpleTextRowGroupIndexes = new byte[cellCount];
         }
 
-        if (_simplePretextRowBatchGlyphIds.Length < cellCount)
+        if (_simpleTextRowBatchGlyphIds.Length < cellCount)
         {
-            _simplePretextRowBatchGlyphIds = new ushort[cellCount];
+            _simpleTextRowBatchGlyphIds = new ushort[cellCount];
         }
 
-        if (_simplePretextRowGlyphPositions.Length < cellCount)
+        if (_simpleTextRowGlyphPositions.Length < cellCount)
         {
-            _simplePretextRowGlyphPositions = new SKPoint[cellCount];
+            _simpleTextRowGlyphPositions = new SKPoint[cellCount];
         }
     }
 
-    private static int FindSimplePretextRowBatchGroup(
-        ReadOnlySpan<SimplePretextRowBatchGroup> groups,
+    private static int FindSimpleTextRowBatchGroup(
+        ReadOnlySpan<SimpleTextRowBatchGroup> groups,
         int groupCount,
         SKColor color,
         nint typefaceHandle)
@@ -2385,7 +2400,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return -1;
     }
 
-    private static bool IsSimplePretextRowGlyphCell(ref readonly TerminalCell cell)
+    private static bool IsSimpleTextRowGlyphCell(ref readonly TerminalCell cell, bool requireAscii)
     {
         if (cell.Width != 1 ||
             !cell.HasContent ||
@@ -2395,6 +2410,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
             cell.Codepoint > char.MaxValue ||
             char.IsSurrogate((char)cell.Codepoint) ||
             TryGetSpriteCodepoint(in cell, out _))
+        {
+            return false;
+        }
+
+        if (requireAscii && (uint)(cell.Codepoint - 0x20) > 0x5Eu)
         {
             return false;
         }
@@ -2414,6 +2434,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                (uint)((codepoint | 0x20) - 'a') <= 25u;
     }
 
+#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
     private CachedPretextRun GetOrCreateCachedPretextRun(
         ReadOnlySpan<char> runText,
         ulong textHash,
@@ -4698,12 +4719,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _spritePath.Dispose();
         _textShaper.Dispose();
         _fontResolver.Dispose();
-        _shapedRunCache.Clear();
-#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-        _pretextRunCache.Clear();
-        _singleGlyphBlobCache.Clear();
-        _pretextFontCache.Clear();
-#endif
+        ClearTextRenderCaches();
         _glyphCache.Dispose();
     }
 
@@ -4866,7 +4882,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
         UnsafeFallback,
     }
 
-#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
     private sealed class SingleGlyphBlobCache
     {
         private readonly Dictionary<SingleGlyphBlobCacheKey, CachedSingleGlyphBlob> _cache = new();
@@ -4877,14 +4892,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
             _maxEntries = Math.Max(64, maxEntries);
         }
 
-        public CachedSingleGlyphBlob? GetOrCreate(SingleGlyphBlobCacheKey key, SKTypeface typeface, float fontSize)
+        public CachedSingleGlyphBlob? GetOrCreate(SingleGlyphBlobCacheKey key, SKTypeface typeface)
         {
             if (_cache.TryGetValue(key, out CachedSingleGlyphBlob? glyph))
             {
                 return glyph;
             }
 
-            glyph = CreateTextBlob(key.Codepoint, typeface, fontSize);
+            glyph = CreateGlyph(key.Codepoint, typeface);
             if (glyph is null)
             {
                 return null;
@@ -4904,28 +4919,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
             ClearCore();
         }
 
-        private static CachedSingleGlyphBlob? CreateTextBlob(int codepoint, SKTypeface typeface, float fontSize)
+        private static CachedSingleGlyphBlob? CreateGlyph(int codepoint, SKTypeface typeface)
         {
             ushort glyphId = typeface.GetGlyph(codepoint);
-            Span<ushort> glyphIds = stackalloc ushort[1];
-            glyphIds[0] = glyphId;
-
-            using SKFont font = GlyphCache.CreateFont(typeface, fontSize);
-            using SKTextBlobBuilder builder = new();
-            builder.AddRun(glyphIds, font, SKPoint.Empty);
-            SKTextBlob? textBlob = builder.Build();
-            return textBlob is null
-                ? null
-                : new CachedSingleGlyphBlob(glyphId, textBlob);
+            return glyphId == 0 ? null : new CachedSingleGlyphBlob(glyphId);
         }
 
         private void ClearCore()
         {
-            foreach (CachedSingleGlyphBlob glyph in _cache.Values)
-            {
-                glyph.Dispose();
-            }
-
             _cache.Clear();
         }
     }
@@ -4935,13 +4936,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
         nint TypefaceHandle,
         int FontSizeBits);
 
-    private sealed class PretextFontCache
+    private sealed class TextRowFontCache
     {
-        private readonly Dictionary<PretextFontCacheKey, SKFont> _cache = new();
+        private readonly Dictionary<TextRowFontCacheKey, SKFont> _cache = new();
 
         public SKFont GetOrCreate(SKTypeface typeface, float fontSize)
         {
-            PretextFontCacheKey key = new(typeface.Handle, BitConverter.SingleToInt32Bits(fontSize));
+            TextRowFontCacheKey key = new(typeface.Handle, BitConverter.SingleToInt32Bits(fontSize));
             if (_cache.TryGetValue(key, out SKFont? font))
             {
                 return font;
@@ -4963,29 +4964,21 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
     }
 
-    private readonly record struct PretextFontCacheKey(
+    private readonly record struct TextRowFontCacheKey(
         nint TypefaceHandle,
         int FontSizeBits);
 
-    private sealed class CachedSingleGlyphBlob : IDisposable
+    private sealed class CachedSingleGlyphBlob
     {
-        public CachedSingleGlyphBlob(ushort glyphId, SKTextBlob textBlob)
+        public CachedSingleGlyphBlob(ushort glyphId)
         {
             GlyphId = glyphId;
-            TextBlob = textBlob;
         }
 
         public ushort GlyphId { get; }
-
-        public SKTextBlob TextBlob { get; }
-
-        public void Dispose()
-        {
-            TextBlob.Dispose();
-        }
     }
 
-    private struct SimplePretextRowBatchGroup
+    private struct SimpleTextRowBatchGroup
     {
         public SKColor Color;
         public nint TypefaceHandle;
@@ -4993,6 +4986,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         public int Count;
     }
 
+#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
     private sealed class PretextRunCache
     {
         private readonly Dictionary<PretextRunCacheKey, CachedPretextRun> _cache = new();
