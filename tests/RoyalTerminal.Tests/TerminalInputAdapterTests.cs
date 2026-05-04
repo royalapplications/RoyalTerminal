@@ -441,6 +441,44 @@ public sealed class TerminalInputAdapterTests
     }
 
     [Fact]
+    public async Task HandleKeyDown_UsesSessionModeSourceForBackarrowKeyMode()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetModeState(vtProcessor.ModeState with { BackarrowKeyMode = true });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Back,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal(new byte[] { 0x08 }, transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
     public async Task HandleKeyDown_WithActiveTransport_EncodesModifierAwareArrowKeys()
     {
         DefaultTerminalInputAdapter adapter = new();

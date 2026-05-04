@@ -212,7 +212,7 @@ public class GhosttyVtProcessorTests
         processor.Process("\x1b[c"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1b[?62;4;22c", Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1b[?62;1;4;6;22c", Encoding.ASCII.GetString(response));
     }
 
     [Fact]

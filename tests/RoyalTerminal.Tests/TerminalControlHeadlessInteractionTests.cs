@@ -630,7 +630,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             transport.RaiseData("\x1b[c"u8.ToArray());
 
             bool daResponseObserved = await WaitUntilAsync(
-                () => transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;22c"),
+                () => transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;1;6;22c"),
                 TimeSpan.FromSeconds(2));
 
             Assert.True(daResponseObserved, "Expected DA response to be forwarded for PTY sessions when no urgent control suppression is active.");
@@ -677,7 +677,7 @@ public sealed class TerminalControlHeadlessInteractionTests
                 inputCountAfterCtrlC,
                 transport.GetInputCount());
             Assert.False(
-                transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;22c"),
+                transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;1;6;22c"),
                 "Did not expect a late DA response to be injected into the PTY after Ctrl+C.");
         }
         finally
@@ -708,7 +708,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             transport.RaiseData("\x1b[c"u8.ToArray());
 
             bool daResponseObserved = await WaitUntilAsync(
-                () => transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;22c"),
+                () => transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;1;6;22c"),
                 TimeSpan.FromSeconds(2));
 
             Assert.True(daResponseObserved, "Expected DA response to be forwarded for transport sessions when no urgent control suppression is active.");
@@ -753,7 +753,7 @@ public sealed class TerminalControlHeadlessInteractionTests
 
             Assert.Equal(inputCountAfterCtrlC, transport.GetInputCount());
             Assert.False(
-                transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;22c"),
+                transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;1;6;22c"),
                 "Did not expect a late DA response to be injected into the transport after Ctrl+C.");
         }
         finally
