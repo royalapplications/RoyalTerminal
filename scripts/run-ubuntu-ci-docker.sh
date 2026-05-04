@@ -127,7 +127,7 @@ mkdir -p \
 
 (
   cd external/ghostty
-  zig build -Doptimize=ReleaseFast -Dapp-runtime=none \
+  zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false \
     -fsys=freetype \
     -fsys=fontconfig \
     -fsys=libpng \

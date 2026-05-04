@@ -6,6 +6,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ZIG_COMPAT="$ROOT_DIR/scripts/zig-compat.sh"
+
 if ! command -v zig &> /dev/null; then
     echo "Error: Zig is not installed or not in PATH."
     exit 1
@@ -14,11 +17,11 @@ fi
 case "${1:-debug}" in
     release|Release|ReleaseFast)
         echo "Building libghostty-renderer-capi (ReleaseFast)..."
-        zig build -Doptimize=ReleaseFast
+        "$ZIG_COMPAT" build -Doptimize=ReleaseFast
         ;;
     release-safe|ReleaseSafe)
         echo "Building libghostty-renderer-capi (ReleaseSafe)..."
-        zig build -Doptimize=ReleaseSafe
+        "$ZIG_COMPAT" build -Doptimize=ReleaseSafe
         ;;
     clean)
         rm -rf zig-out .zig-cache
@@ -27,16 +30,16 @@ case "${1:-debug}" in
         ;;
     debug|Debug)
         echo "Building libghostty-renderer-capi (Debug)..."
-        zig build
+        "$ZIG_COMPAT" build
         ;;
     test)
         echo "Running renderer-capi tests..."
-        zig build test
+        "$ZIG_COMPAT" build test
         exit 0
         ;;
     sample)
         echo "Running Metal texture smoke sample..."
-        zig build sample-metal
+        "$ZIG_COMPAT" build sample-metal
         exit 0
         ;;
     *)

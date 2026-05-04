@@ -11,6 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 GHOSTTY_DIR="$ROOT_DIR/external/ghostty"
+ZIG_COMPAT="$ROOT_DIR/scripts/zig-compat.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -89,7 +90,7 @@ if [ "$SKIP_BUILD" = false ]; then
 
     cd "$GHOSTTY_DIR"
     info "Building libghostty-vt with ReleaseFast..."
-    zig build lib-vt -Doptimize=ReleaseFast 2>&1
+    "$ZIG_COMPAT" build -Doptimize=ReleaseFast -Dtarget=native -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false 2>&1
 
     # Find the built library
     BUILT_LIB=$(find zig-out -name "libghostty-vt*" -type f \( -name "*.dylib" -o -name "*.so" \) | head -1)
