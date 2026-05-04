@@ -955,9 +955,11 @@ public class RenderingTests
         var renderer = new SkiaTerminalRenderer("Consolas", 14f);
         renderer.SelectionStart = (0, 0);
         renderer.SelectionEnd = (10, 5);
+        renderer.SelectionIsRectangle = true;
 
         Assert.Equal((0, 0), renderer.SelectionStart);
         Assert.Equal((10, 5), renderer.SelectionEnd);
+        Assert.True(renderer.SelectionIsRectangle);
     }
 
     [Fact]
@@ -996,6 +998,37 @@ public class RenderingTests
 
         Assert.True(selectedCell.Blue > selectedCell.Red);
         Assert.True(searchCell.Green > searchCell.Red);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_RectangularSelection_RestrictsMiddleRowsToColumnBand()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+            SelectionColor = new SKColor(0x10, 0x20, 0xE0, 0xFF),
+            SelectionStart = (1, 0),
+            SelectionEnd = (3, 1),
+            SelectionIsRectangle = true,
+        };
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 4, rows: 2, text: string.Empty);
+        using var surface = CreateRenderSurface(renderer, columns: 4, rows: 2);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+
+        SKColor outsideBand = pixels.GetPixelColor(
+            (int)MathF.Floor(renderer.CellWidth * 0.5f),
+            (int)MathF.Floor(renderer.CellHeight * 1.5f));
+        SKColor insideBand = pixels.GetPixelColor(
+            (int)MathF.Floor(renderer.CellWidth * 1.5f),
+            (int)MathF.Floor(renderer.CellHeight * 1.5f));
+
+        Assert.True(outsideBand.Blue < insideBand.Blue);
+        Assert.True(insideBand.Blue > insideBand.Red);
     }
 
     [Fact]

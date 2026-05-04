@@ -28,25 +28,22 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         SkiaTerminalRenderer? renderer)
     {
         string? text = null;
+        bool usedRendererSelection = false;
 
-        ITerminalSelectionSource? selectionSource = sessionService.SelectionSource;
-        if (selectionSource is not null)
+        if (screen is not null &&
+            renderer is not null &&
+            TryCreateSelectionRange(renderer, out TerminalSelectionRange selection))
         {
-            text = selectionSource.ReadSelection();
+            usedRendererSelection = true;
+            text = GetSelectedText(screen, selection);
         }
 
-        if (string.IsNullOrEmpty(text) && screen is not null && renderer is not null)
+        if (!usedRendererSelection && string.IsNullOrEmpty(text))
         {
-            if (owner is TerminalControl terminalControl &&
-                terminalControl.ActiveVtProcessor is ITerminalSelectionExportSource selectionExporter &&
-                TryCreateSelectionRange(renderer, out TerminalSelectionRange selection))
+            ITerminalSelectionSource? selectionSource = sessionService.SelectionSource;
+            if (selectionSource is not null)
             {
-                text = selectionExporter.ReadSelection(selection);
-            }
-
-            if (string.IsNullOrEmpty(text))
-            {
-                text = GetSelectedText(screen, renderer);
+                text = selectionSource.ReadSelection();
             }
         }
 
@@ -179,6 +176,7 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
 
         renderer.SelectionStart = null;
         renderer.SelectionEnd = null;
+        renderer.SelectionIsRectangle = false;
         if (screen is not null)
         {
             lock (screen.SyncRoot)
@@ -198,7 +196,7 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
             return false;
         }
 
-        selection = new TerminalSelectionRange(start.Item1, start.Item2, end.Item1, end.Item2);
+        selection = new TerminalSelectionRange(start.Item1, start.Item2, end.Item1, end.Item2, renderer.SelectionIsRectangle);
         return true;
     }
 
@@ -218,20 +216,13 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         return false;
     }
 
-    private static string? GetSelectedText(TerminalScreen screen, SkiaTerminalRenderer renderer)
+    private static string? GetSelectedText(TerminalScreen screen, TerminalSelectionRange selection)
     {
-        if (renderer.SelectionStart is null || renderer.SelectionEnd is null)
-        {
-            return null;
-        }
-
-        (int startCol, int startRow) = renderer.SelectionStart.Value;
-        (int endCol, int endRow) = renderer.SelectionEnd.Value;
-
-        if (startRow > endRow || (startRow == endRow && startCol > endCol))
-        {
-            (startCol, startRow, endCol, endRow) = (endCol, endRow, startCol, startRow);
-        }
+        TerminalSelectionRange normalizedSelection = selection.Normalize();
+        int startCol = normalizedSelection.StartColumn;
+        int startRow = normalizedSelection.StartRow;
+        int endCol = normalizedSelection.EndColumn;
+        int endRow = normalizedSelection.EndRow;
 
         StringBuilder sb = new();
         lock (screen.SyncRoot)
@@ -244,8 +235,8 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
                 }
 
                 TerminalRow termRow = screen.GetViewportRow(row);
-                int colStart = row == startRow ? startCol : 0;
-                int colEnd = row == endRow ? endCol : screen.Columns - 1;
+                int colStart = normalizedSelection.Rectangle || row == startRow ? startCol : 0;
+                int colEnd = normalizedSelection.Rectangle || row == endRow ? endCol : screen.Columns - 1;
                 if (colEnd < 0 || colStart >= screen.Columns)
                 {
                     continue;

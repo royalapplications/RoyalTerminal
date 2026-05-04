@@ -147,6 +147,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
     /// <summary>Selection end (column, row) in viewport coordinates.</summary>
     public (int Column, int Row)? SelectionEnd { get; set; }
 
+    /// <summary>Whether the active selection should be rendered as a rectangular block.</summary>
+    public bool SelectionIsRectangle { get; set; }
+
     /// <summary>Selection highlight color.</summary>
     public SKColor SelectionColor { get; set; } = new(0x40, 0x60, 0xA0, 0x80);
 
@@ -4150,8 +4153,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
             if (rowIndex >= startRow && rowIndex <= endRow)
             {
-                int left = rowIndex == startRow ? startCol : 0;
-                int rightExclusive = rowIndex == endRow ? endCol : columnCount;
+                int left = SelectionIsRectangle || rowIndex == startRow ? startCol : 0;
+                int rightExclusive = SelectionIsRectangle || rowIndex == endRow ? endCol : columnCount;
                 left = Math.Clamp(left, 0, columnCount);
                 rightExclusive = Math.Clamp(rightExclusive, 0, columnCount);
 
