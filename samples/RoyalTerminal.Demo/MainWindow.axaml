@@ -694,10 +694,15 @@
 
     <Border DockPanel.Dock="Bottom" Background="{DynamicResource StatusBarBackgroundBrush}" Padding="8,2" Height="24">
       <DockPanel>
-        <TextBlock DockPanel.Dock="Right"
-                   Text="{Binding DimensionsText}"
-                   Foreground="{DynamicResource StatusBarForegroundBrush}" FontSize="11"
-                   VerticalAlignment="Center" />
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+          <TextBlock Text="{Binding TextRenderPipelineIndicatorText}"
+                     Foreground="{DynamicResource StatusBarForegroundBrush}" FontSize="11"
+                     VerticalAlignment="Center" />
+          <Border Width="1" Height="12" Background="{DynamicResource StatusBarForegroundBrush}" Opacity="0.35" />
+          <TextBlock Text="{Binding DimensionsText}"
+                     Foreground="{DynamicResource StatusBarForegroundBrush}" FontSize="11"
+                     VerticalAlignment="Center" />
+        </StackPanel>
         <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource StatusBarForegroundBrush}"
                    FontSize="11" VerticalAlignment="Center" />
       </DockPanel>

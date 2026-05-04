@@ -35,6 +35,7 @@ public sealed class TerminalFontResolver : IDisposable
     private readonly SKFontManager _fontManager;
     private readonly bool _ownsFontManager;
     private readonly Dictionary<FontFallbackCacheKey, FontFallbackCacheEntry> _fallbackCache = new();
+    private readonly Dictionary<nint, SKFont> _containsGlyphFontCache = new();
     private readonly object _sync = new();
     private int _disposeState;
 
@@ -140,7 +141,7 @@ public sealed class TerminalFontResolver : IDisposable
             }
         }
 
-        if (primaryTypeface.ContainsGlyph(codepoint))
+        if (ContainsGlyph(primaryTypeface, codepoint))
         {
             return new TerminalFontResolution(primaryTypeface, UsedFallback: false);
         }
@@ -157,13 +158,11 @@ public sealed class TerminalFontResolver : IDisposable
         CultureInfo usedCulture = culture ?? CultureInfo.CurrentUICulture;
         string cultureName = usedCulture.Name;
 
-        SKFontStyle style = primaryTypeface.FontStyle;
         FontFallbackCacheKey key = new(
             primaryTypeface.Handle,
-            primaryTypeface.FamilyName ?? string.Empty,
-            (int)style.Weight,
-            (int)style.Width,
-            style.Slant,
+            primaryTypeface.FontWeight,
+            primaryTypeface.FontWidth,
+            primaryTypeface.FontSlant,
             codepoint,
             cultureName,
             preferEmojiPresentation);
@@ -208,6 +207,13 @@ public sealed class TerminalFontResolver : IDisposable
         lock (_sync)
         {
             HashSet<SKTypeface> disposedTypefaces = new(ReferenceEqualityComparer.Instance);
+
+            foreach (SKFont font in _containsGlyphFontCache.Values)
+            {
+                font.Dispose();
+            }
+
+            _containsGlyphFontCache.Clear();
 
             foreach (FontFallbackCacheEntry entry in _fallbackCache.Values)
             {
@@ -256,7 +262,7 @@ public sealed class TerminalFontResolver : IDisposable
             return FontFallbackCacheEntry.NoFallback;
         }
 
-        if (!fallbackTypeface.ContainsGlyph(codepoint))
+        if (!ContainsGlyph(fallbackTypeface, codepoint))
         {
             fallbackTypeface.Dispose();
             return FontFallbackCacheEntry.NoFallback;
@@ -274,6 +280,33 @@ public sealed class TerminalFontResolver : IDisposable
         }
 
         return new FontFallbackCacheEntry(fallbackTypeface);
+    }
+
+    private bool ContainsGlyph(SKTypeface typeface, int codepoint)
+    {
+        SKFont font = GetContainsGlyphFont(typeface);
+        return font.ContainsGlyph(codepoint);
+    }
+
+    private SKFont GetContainsGlyphFont(SKTypeface typeface)
+    {
+        lock (_sync)
+        {
+            if (Volatile.Read(ref _disposeState) != 0)
+            {
+                throw new ObjectDisposedException(nameof(TerminalFontResolver));
+            }
+
+            nint typefaceHandle = typeface.Handle;
+            if (_containsGlyphFontCache.TryGetValue(typefaceHandle, out SKFont? font))
+            {
+                return font;
+            }
+
+            font = new SKFont(typeface);
+            _containsGlyphFontCache.Add(typefaceHandle, font);
+            return font;
+        }
     }
 
     private static string[]? GetLanguageTags(CultureInfo culture, bool preferEmojiPresentation)
@@ -376,7 +409,6 @@ public sealed class TerminalFontResolver : IDisposable
 
     private readonly record struct FontFallbackCacheKey(
         nint PrimaryHandle,
-        string FamilyName,
         int Weight,
         int Width,
         SKFontStyleSlant Slant,

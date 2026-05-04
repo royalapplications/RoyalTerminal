@@ -50,6 +50,7 @@ internal sealed class MainWindowController
 {
     private const string DisableTextShapingEnvVar = "ROYALTERMINAL_DISABLE_TEXT_SHAPING";
     private const string EnableRenderDiagnosticsEnvVar = "ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS";
+    private const string TextRenderPipelineEnvVar = "ROYALTERMINAL_TEXT_RENDER_PIPELINE";
     private static readonly byte[] s_hyperlinkShowcaseBytes = Encoding.UTF8.GetBytes(
         "\r\n\u001b[1mRoyalTerminal OSC8 hyperlink showcase\u001b[0m\r\n" +
         "\u001b]8;;https://ghostty.org\u001b\\Ghostty docs\u001b]8;;\u001b\\  |  " +
@@ -66,6 +67,7 @@ internal sealed class MainWindowController
         "Consolas";
     private static readonly bool s_disableTextShaping = ReadEnvironmentToggle(DisableTextShapingEnvVar);
     private static readonly bool s_enableRenderDiagnostics = ReadEnvironmentToggle(EnableRenderDiagnosticsEnvVar);
+    private static readonly TerminalTextRenderPipeline s_textRenderPipeline = ReadTextRenderPipeline(TextRenderPipelineEnvVar);
 
     private readonly Window _window;
     private readonly MainWindowViewModel _viewModel;
@@ -865,6 +867,7 @@ internal sealed class MainWindowController
 
         renderer.EnableTextShaping = !s_disableTextShaping;
         renderer.EnableTextRenderDiagnostics = s_enableRenderDiagnostics;
+        renderer.TextRenderPipeline = s_textRenderPipeline;
     }
 
     private TerminalControl CreateStandaloneControl()
@@ -1346,6 +1349,14 @@ internal sealed class MainWindowController
                string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static TerminalTextRenderPipeline ReadTextRenderPipeline(string variableName)
+    {
+        string? value = Environment.GetEnvironmentVariable(variableName);
+        return string.Equals(value, "pretext", StringComparison.OrdinalIgnoreCase)
+            ? TerminalTextRenderPipeline.Pretext
+            : TerminalTextRenderPipeline.HarfBuzz;
+    }
+
     private static Button CreateTabHeader(string title, TabVisualMode mode)
     {
         TextBlock modeIndicator = new()
@@ -1469,6 +1480,7 @@ internal sealed class MainWindowController
         target.Container.IsVisible = true;
         target.HeaderButton.Classes.Add("active");
         _activeTab = target;
+        UpdateTextRenderPipelineIndicator(target.Control as TerminalControl);
 
         if (target.AutoStartSession && target.Control is TerminalControl standaloneControl)
         {
@@ -2887,6 +2899,28 @@ internal sealed class MainWindowController
     private void UpdateDimensions(int columns, int rows)
     {
         _viewModel.SetDimensions(columns, rows);
+    }
+
+    private void UpdateTextRenderPipelineIndicator(TerminalControl? control)
+    {
+        _viewModel.SetTextRenderPipelineIndicator(BuildTextRenderPipelineIndicator(control?.Renderer));
+    }
+
+    private static string BuildTextRenderPipelineIndicator(SkiaTerminalRenderer? renderer)
+    {
+        if (s_disableTextShaping)
+        {
+            return "Text: cell fallback";
+        }
+
+        if (s_textRenderPipeline == TerminalTextRenderPipeline.Pretext)
+        {
+            return renderer?.IsPretextTextRenderPipelineAvailable == true
+                ? "Text: Pretext"
+                : "Text: HarfBuzz (Pretext unavailable)";
+        }
+
+        return "Text: HarfBuzz";
     }
 
     private void UpdateSessionStartedStatus(TerminalControl control, string message)

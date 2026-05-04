@@ -17,4 +17,10 @@
     <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == 'true'">
+    <PackageReference Include="Pretext" />
+    <PackageReference Include="Pretext.Contracts" />
+    <PackageReference Include="Pretext.SkiaSharp" />
+  </ItemGroup>
+
 </Project>

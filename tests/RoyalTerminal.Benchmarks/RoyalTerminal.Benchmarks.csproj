@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\RoyalTerminal.Unicode\RoyalTerminal.Unicode.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Skia\RoyalTerminal.Rendering.Skia.csproj" />
   </ItemGroup>
 

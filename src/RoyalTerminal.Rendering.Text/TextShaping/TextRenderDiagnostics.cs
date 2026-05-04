@@ -16,4 +16,6 @@ public readonly record struct TextRenderDiagnostics(
     long BoxDrawingSpriteCells = 0,
     long BrailleSpriteCells = 0,
     long BlockSpriteCells = 0,
-    long ScanLineSpriteCells = 0);
+    long ScanLineSpriteCells = 0,
+    long PretextRuns = 0,
+    long PretextFallbackRuns = 0);

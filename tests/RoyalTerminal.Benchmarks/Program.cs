@@ -8,17 +8,38 @@ using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
+using RoyalTerminal.Unicode;
 using SkiaSharp;
 
 BenchmarkOptions options = BenchmarkOptions.Parse(args);
 
-BenchmarkScenario[] renderScenarios =
+BenchmarkScenario[] defaultRenderScenarios =
 [
-    new("full-80x24", Columns: 80, Rows: 24, Iterations: 1_200, DirtyRowsPerFrame: 24, FullRedraw: true),
-    new("full-160x48", Columns: 160, Rows: 48, Iterations: 700, DirtyRowsPerFrame: 48, FullRedraw: true),
-    new("full-240x80", Columns: 240, Rows: 80, Iterations: 300, DirtyRowsPerFrame: 80, FullRedraw: true),
-    new("dirty-160x48-r8", Columns: 160, Rows: 48, Iterations: 1_800, DirtyRowsPerFrame: 8, FullRedraw: false),
+    new("full-80x24", Columns: 80, Rows: 24, Iterations: 1_200, DirtyRowsPerFrame: 24, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz),
+    new("full-160x48", Columns: 160, Rows: 48, Iterations: 700, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz),
+    new("full-240x80", Columns: 240, Rows: 80, Iterations: 300, DirtyRowsPerFrame: 80, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz),
+    new("dirty-160x48-r8", Columns: 160, Rows: 48, Iterations: 1_800, DirtyRowsPerFrame: 8, FullRedraw: false, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz),
 ];
+BenchmarkScenario[] complexRenderScenarios =
+[
+    new("complex-ligatures-160x48", Columns: 160, Rows: 48, Iterations: 500, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz, Workload: RenderWorkload.LigatureAscii, EnableLigatures: true),
+    new("complex-combining-160x48", Columns: 160, Rows: 48, Iterations: 500, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz, Workload: RenderWorkload.CombiningMarks),
+    new("complex-cjk-wide-160x48", Columns: 160, Rows: 48, Iterations: 500, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz, Workload: RenderWorkload.CjkWide),
+    new("complex-emoji-symbols-160x48", Columns: 160, Rows: 48, Iterations: 500, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz, Workload: RenderWorkload.EmojiSymbols),
+    new("complex-rtl-arabic-160x48", Columns: 160, Rows: 48, Iterations: 500, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.HarfBuzz, Workload: RenderWorkload.RtlArabic, TextDirectionMode: TextDirectionMode.RightToLeft),
+];
+BenchmarkScenario[] pretextRenderScenarios =
+[
+    new("pretext-full-160x48", Columns: 160, Rows: 48, Iterations: 700, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.Pretext),
+    new("pretext-complex-ligatures-160x48", Columns: 160, Rows: 48, Iterations: 500, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.Pretext, Workload: RenderWorkload.LigatureAscii, EnableLigatures: true),
+    new("pretext-complex-combining-160x48", Columns: 160, Rows: 48, Iterations: 500, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.Pretext, Workload: RenderWorkload.CombiningMarks),
+    new("pretext-complex-cjk-wide-160x48", Columns: 160, Rows: 48, Iterations: 500, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.Pretext, Workload: RenderWorkload.CjkWide),
+    new("pretext-complex-emoji-symbols-160x48", Columns: 160, Rows: 48, Iterations: 500, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.Pretext, Workload: RenderWorkload.EmojiSymbols),
+    new("pretext-complex-rtl-arabic-160x48", Columns: 160, Rows: 48, Iterations: 500, DirtyRowsPerFrame: 48, FullRedraw: true, TextRenderPipeline: TerminalTextRenderPipeline.Pretext, Workload: RenderWorkload.RtlArabic, TextDirectionMode: TextDirectionMode.RightToLeft),
+];
+BenchmarkScenario[] renderScenarios = IsPretextBenchmarkAvailable()
+    ? [.. defaultRenderScenarios, .. complexRenderScenarios, .. pretextRenderScenarios]
+    : [.. defaultRenderScenarios, .. complexRenderScenarios];
 
 TextHighlightBenchmarkScenario[] textHighlightScenarios =
 [
@@ -118,13 +139,33 @@ if (!string.IsNullOrWhiteSpace(options.OutputPath))
     Console.WriteLine($"Saved report: {outputPath}");
 }
 
+static bool IsPretextBenchmarkAvailable()
+{
+    using SkiaTerminalRenderer renderer = new("Consolas", 14f);
+    return renderer.IsPretextTextRenderPipelineAvailable;
+}
+
 internal readonly record struct BenchmarkScenario(
     string Name,
     int Columns,
     int Rows,
     int Iterations,
     int DirtyRowsPerFrame,
-    bool FullRedraw);
+    bool FullRedraw,
+    TerminalTextRenderPipeline TextRenderPipeline,
+    RenderWorkload Workload = RenderWorkload.SimpleAscii,
+    bool EnableLigatures = false,
+    TextDirectionMode TextDirectionMode = TextDirectionMode.Auto);
+
+internal enum RenderWorkload
+{
+    SimpleAscii,
+    LigatureAscii,
+    CombiningMarks,
+    CjkWide,
+    EmojiSymbols,
+    RtlArabic,
+}
 
 internal readonly record struct BenchmarkResult(
     string Name,
@@ -133,8 +174,10 @@ internal readonly record struct BenchmarkResult(
     int Iterations,
     int DirtyRowsPerFrame,
     bool FullRedraw,
+    TerminalTextRenderPipeline TextRenderPipeline,
     double RowsPerSecond,
     double AllocBytesPerFrame,
+    double RenderAllocBytesPerFrame,
     double MeanFrameMs,
     double P95FrameMs,
     double TotalTimeMs);
@@ -212,8 +255,19 @@ internal static class RenderHotPathBenchmark
     public static BenchmarkResult Run(BenchmarkScenario scenario)
     {
         using SkiaTerminalRenderer renderer = new("Consolas", FontSize);
+        renderer.TextRenderPipeline = scenario.TextRenderPipeline;
+        renderer.EnableLigatures = scenario.EnableLigatures;
+        renderer.TextDirectionMode = scenario.TextDirectionMode;
+
+        TerminalCell[][]? baseRows = scenario.Workload == RenderWorkload.SimpleAscii
+            ? null
+            : CreateRenderRowTemplates(scenario.Workload, scenario.Columns, scenario.Rows, variant: 0);
+        TerminalCell[][]? mutatedRows = scenario.Workload == RenderWorkload.SimpleAscii
+            ? null
+            : CreateRenderRowTemplates(scenario.Workload, scenario.Columns, scenario.Rows, variant: 1);
+
         TerminalScreen screen = new(scenario.Columns, scenario.Rows);
-        InitializeScreen(screen);
+        InitializeScreen(screen, scenario, baseRows);
 
         int width = Math.Max(1, (int)Math.Ceiling(renderer.CellWidth * scenario.Columns));
         int height = Math.Max(1, (int)Math.Ceiling(renderer.CellHeight * scenario.Rows));
@@ -221,7 +275,7 @@ internal static class RenderHotPathBenchmark
         using SKSurface surface = SKSurface.Create(new SKImageInfo(width, height));
         SKCanvas canvas = surface.Canvas;
 
-        Warmup(renderer, screen, canvas, scenario);
+        Warmup(renderer, screen, canvas, scenario, baseRows, mutatedRows);
 
         long[] frameTicks = new long[scenario.Iterations];
 
@@ -231,13 +285,15 @@ internal static class RenderHotPathBenchmark
 
         long allocatedBefore = GC.GetTotalAllocatedBytes(true);
         long totalStart = Stopwatch.GetTimestamp();
+        long renderAllocatedBytes = 0;
 
         int dirtyRows = Math.Clamp(scenario.DirtyRowsPerFrame, 1, scenario.Rows);
 
         for (int frame = 0; frame < scenario.Iterations; frame++)
         {
-            MutateFrame(screen, frame, dirtyRows, scenario.FullRedraw);
+            MutateFrame(screen, frame, dirtyRows, scenario, baseRows, mutatedRows);
 
+            long renderAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             long frameStart = Stopwatch.GetTimestamp();
             if (scenario.FullRedraw)
             {
@@ -249,7 +305,9 @@ internal static class RenderHotPathBenchmark
             }
 
             long frameEnd = Stopwatch.GetTimestamp();
+            long renderAllocatedAfter = GC.GetAllocatedBytesForCurrentThread();
             frameTicks[frame] = frameEnd - frameStart;
+            renderAllocatedBytes += Math.Max(0, renderAllocatedAfter - renderAllocatedBefore);
         }
 
         long totalEnd = Stopwatch.GetTimestamp();
@@ -262,7 +320,8 @@ internal static class RenderHotPathBenchmark
             totalStart,
             totalEnd,
             allocatedBefore,
-            allocatedAfter);
+            allocatedAfter,
+            renderAllocatedBytes);
     }
 
     private static BenchmarkResult CreateResult(
@@ -272,7 +331,8 @@ internal static class RenderHotPathBenchmark
         long totalStart,
         long totalEnd,
         long allocatedBefore,
-        long allocatedAfter)
+        long allocatedAfter,
+        long renderAllocatedBytes)
     {
         double totalSeconds = (totalEnd - totalStart) / (double)Stopwatch.Frequency;
         double totalMs = totalSeconds * 1000.0;
@@ -282,6 +342,7 @@ internal static class RenderHotPathBenchmark
 
         long allocatedBytes = Math.Max(0, allocatedAfter - allocatedBefore);
         double allocPerFrame = allocatedBytes / (double)scenario.Iterations;
+        double renderAllocPerFrame = renderAllocatedBytes / (double)scenario.Iterations;
 
         double meanFrameMs = totalMs / scenario.Iterations;
         double p95FrameMs = BenchmarkMath.PercentileMs(frameTicks, 0.95);
@@ -293,8 +354,10 @@ internal static class RenderHotPathBenchmark
             scenario.Iterations,
             dirtyRows,
             scenario.FullRedraw,
+            scenario.TextRenderPipeline,
             rowsPerSecond,
             allocPerFrame,
+            renderAllocPerFrame,
             meanFrameMs,
             p95FrameMs,
             totalMs);
@@ -304,14 +367,16 @@ internal static class RenderHotPathBenchmark
         SkiaTerminalRenderer renderer,
         TerminalScreen screen,
         SKCanvas canvas,
-        BenchmarkScenario scenario)
+        BenchmarkScenario scenario,
+        TerminalCell[][]? baseRows,
+        TerminalCell[][]? mutatedRows)
     {
         int dirtyRows = Math.Clamp(scenario.DirtyRowsPerFrame, 1, scenario.Rows);
         int warmupFrames = Math.Min(120, Math.Max(30, scenario.Iterations / 10));
 
         for (int i = 0; i < warmupFrames; i++)
         {
-            MutateFrame(screen, i, dirtyRows, scenario.FullRedraw);
+            MutateFrame(screen, i, dirtyRows, scenario, baseRows, mutatedRows);
             if (scenario.FullRedraw)
             {
                 renderer.RenderFull(canvas, screen);
@@ -323,8 +388,17 @@ internal static class RenderHotPathBenchmark
         }
     }
 
-    private static void InitializeScreen(TerminalScreen screen)
+    private static void InitializeScreen(
+        TerminalScreen screen,
+        BenchmarkScenario scenario,
+        TerminalCell[][]? baseRows)
     {
+        if (scenario.Workload != RenderWorkload.SimpleAscii && baseRows is not null)
+        {
+            InitializeComplexScreen(screen, baseRows);
+            return;
+        }
+
         for (int rowIndex = 0; rowIndex < screen.ViewportRows; rowIndex++)
         {
             TerminalRow row = screen.GetViewportRow(rowIndex);
@@ -350,12 +424,36 @@ internal static class RenderHotPathBenchmark
         }
     }
 
-    private static void MutateFrame(TerminalScreen screen, int frameIndex, int dirtyRows, bool fullRedraw)
+    private static void InitializeComplexScreen(TerminalScreen screen, TerminalCell[][] baseRows)
     {
+        for (int rowIndex = 0; rowIndex < screen.ViewportRows; rowIndex++)
+        {
+            TerminalRow row = screen.GetViewportRow(rowIndex);
+            CopyTemplateRow(baseRows[rowIndex], row);
+            row.IsDirty = true;
+        }
+    }
+
+    private static void MutateFrame(
+        TerminalScreen screen,
+        int frameIndex,
+        int dirtyRows,
+        BenchmarkScenario scenario,
+        TerminalCell[][]? baseRows,
+        TerminalCell[][]? mutatedRows)
+    {
+        if (scenario.Workload != RenderWorkload.SimpleAscii &&
+            baseRows is not null &&
+            mutatedRows is not null)
+        {
+            MutateComplexFrame(screen, frameIndex, dirtyRows, scenario, baseRows, mutatedRows);
+            return;
+        }
+
         int rows = screen.ViewportRows;
         int columns = screen.Columns;
 
-        if (!fullRedraw)
+        if (!scenario.FullRedraw)
         {
             for (int rowIndex = 0; rowIndex < rows; rowIndex++)
             {
@@ -363,7 +461,7 @@ internal static class RenderHotPathBenchmark
             }
         }
 
-        int rowsToMutate = fullRedraw ? rows : dirtyRows;
+        int rowsToMutate = scenario.FullRedraw ? rows : dirtyRows;
         for (int rowIndex = 0; rowIndex < rowsToMutate; rowIndex++)
         {
             TerminalRow row = screen.GetViewportRow(rowIndex);
@@ -380,6 +478,150 @@ internal static class RenderHotPathBenchmark
             cell.Width = 1;
             row.IsDirty = true;
         }
+    }
+
+    private static void MutateComplexFrame(
+        TerminalScreen screen,
+        int frameIndex,
+        int dirtyRows,
+        BenchmarkScenario scenario,
+        TerminalCell[][] baseRows,
+        TerminalCell[][] mutatedRows)
+    {
+        int rows = screen.ViewportRows;
+
+        if (!scenario.FullRedraw)
+        {
+            for (int rowIndex = 0; rowIndex < rows; rowIndex++)
+            {
+                screen.GetViewportRow(rowIndex).IsDirty = false;
+            }
+        }
+
+        TerminalCell[][] sourceRows = (frameIndex & 1) == 0 ? mutatedRows : baseRows;
+        int rowsToMutate = scenario.FullRedraw ? rows : dirtyRows;
+        for (int i = 0; i < rowsToMutate; i++)
+        {
+            int rowIndex = scenario.FullRedraw ? i : (frameIndex + i) % rows;
+            TerminalRow row = screen.GetViewportRow(rowIndex);
+            CopyTemplateRow(sourceRows[rowIndex], row);
+            row.IsDirty = true;
+        }
+    }
+
+    private static TerminalCell[][] CreateRenderRowTemplates(
+        RenderWorkload workload,
+        int columns,
+        int rows,
+        int variant)
+    {
+        TerminalCell[][] rowTemplates = new TerminalCell[rows][];
+        for (int rowIndex = 0; rowIndex < rows; rowIndex++)
+        {
+            rowTemplates[rowIndex] = CreateRenderRowTemplate(workload, columns, rowIndex, variant);
+        }
+
+        return rowTemplates;
+    }
+
+    private static TerminalCell[] CreateRenderRowTemplate(
+        RenderWorkload workload,
+        int columns,
+        int rowIndex,
+        int variant)
+    {
+        TerminalCell[] cells = new TerminalCell[columns];
+        for (int i = 0; i < cells.Length; i++)
+        {
+            cells[i] = TerminalCell.Empty();
+        }
+
+        string text = CreateRenderWorkloadText(workload, rowIndex, variant);
+        GraphemeEnumerator enumerator = new(text.AsSpan());
+        int col = 0;
+        while (col < columns && enumerator.MoveNext(out Grapheme grapheme))
+        {
+            ReadOnlySpan<char> graphemeText = text.AsSpan(grapheme.Offset, grapheme.Length);
+            int width = Math.Clamp(TerminalCellWidthCalculator.GetCellWidth(graphemeText), 0, 2);
+            if (width == 0)
+            {
+                continue;
+            }
+
+            if (col + width > columns)
+            {
+                break;
+            }
+
+            ref TerminalCell cell = ref cells[col];
+            cell = CreateBenchmarkCell(grapheme.FirstCodepoint, graphemeText, rowIndex, col);
+            cell.Width = (byte)width;
+
+            if (width == 2)
+            {
+                cells[col + 1] = TerminalCell.Empty(cell.Foreground, cell.Background);
+                cells[col + 1].Width = 0;
+            }
+
+            col += width;
+        }
+
+        return cells;
+    }
+
+    private static TerminalCell CreateBenchmarkCell(
+        Codepoint firstCodepoint,
+        ReadOnlySpan<char> graphemeText,
+        int rowIndex,
+        int column)
+    {
+        bool isSingleCodepoint = graphemeText.Length == (firstCodepoint.Value > 0xFFFF ? 2 : 1);
+        uint foreground = ((rowIndex + (column / 12)) & 1) == 0 ? 0xFFD4D4D4 : 0xFF9FE8C7;
+
+        return new TerminalCell
+        {
+            Codepoint = isSingleCodepoint ? (int)firstCodepoint.Value : 0,
+            Grapheme = isSingleCodepoint ? null : new string(graphemeText),
+            Foreground = foreground,
+            Background = 0xFF1E1E1E,
+            Attributes = (column % 37 == 0)
+                ? CellAttributes.Bold
+                : (column % 41 == 0)
+                    ? CellAttributes.Italic
+                    : CellAttributes.None,
+            UnderlineStyle = TerminalUnderlineStyle.None,
+            UnderlineColor = 0,
+            HasUnderlineColor = false,
+            Decorations = CellDecorations.None,
+            HasBackground = true,
+            HyperlinkId = 0,
+            Width = 1,
+        };
+    }
+
+    private static string CreateRenderWorkloadText(RenderWorkload workload, int rowIndex, int variant)
+    {
+        string prefix = ((rowIndex + variant) & 1) == 0 ? "main" : "alt";
+        return workload switch
+        {
+            RenderWorkload.LigatureAscii =>
+                $"{prefix} office affine efficient filesystem buffer => === != <= >= -> <- www ffi ffl fi fl iteration {rowIndex:D2} ",
+            RenderWorkload.CombiningMarks =>
+                $"{prefix} cafe\u0301 resume\u0301 nai\u0308ve coo\u0308perate jalapen\u0303o a\u0301e\u0301i\u0301o\u0301u\u0301 row {rowIndex:D2} ",
+            RenderWorkload.CjkWide =>
+                $"{prefix} 日本語ログ 接続成功 測定値 正常 東京大阪 字符宽度 渲染缓存 行 {rowIndex:D2} ",
+            RenderWorkload.EmojiSymbols =>
+                $"{prefix} status ✅ build ⚠️ deploy 🚀 cpu ▰▱ ◼︎ ◻︎ ♥︎ ★ ☆ ✦ row {rowIndex:D2} ",
+            RenderWorkload.RtlArabic =>
+                $"{prefix} مرحبا بالعالم حالة الاتصال ناجحة قياس الذاكرة وسرعة الرسم صف {rowIndex:D2} ",
+            _ =>
+                $"{prefix} simple ascii render row {rowIndex:D2} ",
+        };
+    }
+
+    private static void CopyTemplateRow(TerminalCell[] source, TerminalRow row)
+    {
+        source.AsSpan(0, row.Columns).CopyTo(row.Cells);
     }
 }
 
@@ -774,8 +1016,8 @@ internal static class BenchmarkReportWriter
     {
         sb.AppendLine("## Render Baseline");
         sb.AppendLine();
-        sb.AppendLine("| Scenario | Grid | Mode | Iterations | Rows/frame | Rows/sec | Alloc/frame (B) | Mean frame (ms) | p95 frame (ms) | Total time (ms) |");
-        sb.AppendLine("|---|---:|---|---:|---:|---:|---:|---:|---:|---:|");
+        sb.AppendLine("| Scenario | Grid | Mode | Text pipeline | Iterations | Rows/frame | Rows/sec | Alloc/frame (B) | Render alloc/frame (B) | Mean frame (ms) | p95 frame (ms) | Total time (ms) |");
+        sb.AppendLine("|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
 
         for (int i = 0; i < results.Length; i++)
         {
@@ -785,10 +1027,12 @@ internal static class BenchmarkReportWriter
             sb.Append("| ").Append(result.Name)
                 .Append(" | ").Append(result.Columns).Append('x').Append(result.Rows)
                 .Append(" | ").Append(mode)
+                .Append(" | ").Append(result.TextRenderPipeline)
                 .Append(" | ").Append(result.Iterations)
                 .Append(" | ").Append(result.DirtyRowsPerFrame)
                 .Append(" | ").Append(Format(result.RowsPerSecond))
                 .Append(" | ").Append(Format(result.AllocBytesPerFrame))
+                .Append(" | ").Append(Format(result.RenderAllocBytesPerFrame))
                 .Append(" | ").Append(Format(result.MeanFrameMs))
                 .Append(" | ").Append(Format(result.P95FrameMs))
                 .Append(" | ").Append(Format(result.TotalTimeMs))
