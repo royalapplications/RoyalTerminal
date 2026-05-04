@@ -1026,6 +1026,45 @@ public class RenderingTests
         SKColor insideBand = pixels.GetPixelColor(
             (int)MathF.Floor(renderer.CellWidth * 1.5f),
             (int)MathF.Floor(renderer.CellHeight * 1.5f));
+        SKColor insideBandEnd = pixels.GetPixelColor(
+            (int)MathF.Floor(renderer.CellWidth * 2.5f),
+            (int)MathF.Floor(renderer.CellHeight * 1.5f));
+        SKColor outsideBandEnd = pixels.GetPixelColor(
+            (int)MathF.Floor(renderer.CellWidth * 3.5f),
+            (int)MathF.Floor(renderer.CellHeight * 1.5f));
+
+        Assert.True(outsideBand.Blue < insideBand.Blue);
+        Assert.True(insideBand.Blue > insideBand.Red);
+        Assert.True(insideBandEnd.Blue > insideBandEnd.Red);
+        Assert.True(outsideBandEnd.Blue < insideBandEnd.Blue);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_RectangularSelection_NormalizesReversedColumns()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+            SelectionColor = new SKColor(0x10, 0x20, 0xE0, 0xFF),
+            SelectionStart = (3, 0),
+            SelectionEnd = (1, 1),
+            SelectionIsRectangle = true,
+        };
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 4, rows: 2, text: string.Empty);
+        using var surface = CreateRenderSurface(renderer, columns: 4, rows: 2);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+
+        SKColor outsideBand = pixels.GetPixelColor(
+            (int)MathF.Floor(renderer.CellWidth * 0.5f),
+            (int)MathF.Floor(renderer.CellHeight * 1.5f));
+        SKColor insideBand = pixels.GetPixelColor(
+            (int)MathF.Floor(renderer.CellWidth * 1.5f),
+            (int)MathF.Floor(renderer.CellHeight * 1.5f));
 
         Assert.True(outsideBand.Blue < insideBand.Blue);
         Assert.True(insideBand.Blue > insideBand.Red);

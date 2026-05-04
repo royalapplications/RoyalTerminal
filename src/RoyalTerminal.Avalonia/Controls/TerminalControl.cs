@@ -2449,7 +2449,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _renderer.SelectionStart = (0, 0);
-        _renderer.SelectionEnd = (_screen.Columns - 1, _screen.ViewportRows - 1);
+        _renderer.SelectionEnd = (_screen.Columns, _screen.ViewportRows - 1);
         _renderer.SelectionIsRectangle = false;
         InvalidateScreen();
         _presenter?.Invalidate();

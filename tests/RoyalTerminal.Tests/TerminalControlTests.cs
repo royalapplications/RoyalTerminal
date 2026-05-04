@@ -2678,6 +2678,37 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_SelectAll_UsesLinearEndExclusiveRendererSelection()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 4,
+            Rows = 1,
+        };
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            TerminalScreen? screen = control.Screen;
+            SkiaTerminalRenderer? renderer = control.Renderer;
+            Assert.NotNull(screen);
+            Assert.NotNull(renderer);
+            renderer!.SelectionIsRectangle = true;
+
+            control.SelectAll();
+
+            Assert.Equal((0, 0), renderer.SelectionStart);
+            Assert.Equal((screen!.Columns, screen.ViewportRows - 1), renderer.SelectionEnd);
+            Assert.False(renderer.SelectionIsRectangle);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_CopySelection_RendererSelectionDoesNotFallbackToSessionSelection()
     {
         FakeInputEndpoint endpoint = new()

@@ -4146,21 +4146,42 @@ public sealed class SkiaTerminalRenderer : IDisposable
             int endCol = SelectionEnd.Value.Column;
             int endRow = SelectionEnd.Value.Row;
 
-            if (startRow > endRow || (startRow == endRow && startCol > endCol))
+            if (SelectionIsRectangle)
             {
-                (startCol, startRow, endCol, endRow) = (endCol, endRow, startCol, startRow);
-            }
+                int left = Math.Min(startCol, endCol);
+                int rightExclusive = Math.Max(startCol, endCol);
+                int top = Math.Min(startRow, endRow);
+                int bottom = Math.Max(startRow, endRow);
 
-            if (rowIndex >= startRow && rowIndex <= endRow)
-            {
-                int left = SelectionIsRectangle || rowIndex == startRow ? startCol : 0;
-                int rightExclusive = SelectionIsRectangle || rowIndex == endRow ? endCol : columnCount;
-                left = Math.Clamp(left, 0, columnCount);
-                rightExclusive = Math.Clamp(rightExclusive, 0, columnCount);
-
-                for (int col = left; col < rightExclusive; col++)
+                if (rowIndex >= top && rowIndex <= bottom)
                 {
-                    rowOverlays[col] |= CellOverlayFlags.Selection;
+                    left = Math.Clamp(left, 0, columnCount);
+                    rightExclusive = Math.Clamp(rightExclusive, 0, columnCount);
+
+                    for (int col = left; col < rightExclusive; col++)
+                    {
+                        rowOverlays[col] |= CellOverlayFlags.Selection;
+                    }
+                }
+            }
+            else
+            {
+                if (startRow > endRow || (startRow == endRow && startCol > endCol))
+                {
+                    (startCol, startRow, endCol, endRow) = (endCol, endRow, startCol, startRow);
+                }
+
+                if (rowIndex >= startRow && rowIndex <= endRow)
+                {
+                    int left = rowIndex == startRow ? startCol : 0;
+                    int rightExclusive = rowIndex == endRow ? endCol : columnCount;
+                    left = Math.Clamp(left, 0, columnCount);
+                    rightExclusive = Math.Clamp(rightExclusive, 0, columnCount);
+
+                    for (int col = left; col < rightExclusive; col++)
+                    {
+                        rowOverlays[col] |= CellOverlayFlags.Selection;
+                    }
                 }
             }
         }
