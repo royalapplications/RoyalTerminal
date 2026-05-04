@@ -195,7 +195,25 @@ public static partial class GhosttyVtNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult CellGet(ulong cell, GhosttyCellData data, void* output);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_cell_get_multi")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult CellGetMulti(
+        ulong cell,
+        nuint count,
+        GhosttyCellData* keys,
+        void** values,
+        nuint* outWritten);
+
     [LibraryImport(LibName, EntryPoint = "ghostty_row_get")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult RowGet(ulong row, GhosttyRowData data, void* output);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_row_get_multi")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult RowGetMulti(
+        ulong row,
+        nuint count,
+        GhosttyRowData* keys,
+        void** values,
+        nuint* outWritten);
 }

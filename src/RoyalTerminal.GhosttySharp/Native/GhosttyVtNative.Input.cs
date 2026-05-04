@@ -37,6 +37,7 @@ public static partial class GhosttyVtNative
         ModifyOtherKeysState2 = 4,
         KittyFlags = 5,
         MacOsOptionAsAlt = 6,
+        BackarrowKeyMode = 7,
     }
 
     public enum GhosttyMouseAction : int

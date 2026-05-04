@@ -126,6 +126,15 @@ public static partial class GhosttyVtNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult RenderStateGet(nint state, GhosttyRenderStateData data, void* output);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_render_state_get_multi")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult RenderStateGetMulti(
+        nint state,
+        nuint count,
+        GhosttyRenderStateData* keys,
+        void** values,
+        nuint* outWritten);
+
     [LibraryImport(LibName, EntryPoint = "ghostty_render_state_set")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult RenderStateSet(nint state, GhosttyRenderStateOption option, void* value);
@@ -151,6 +160,15 @@ public static partial class GhosttyVtNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult RenderStateRowGet(nint iterator, GhosttyRenderStateRowData data, void* output);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_render_state_row_get_multi")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult RenderStateRowGetMulti(
+        nint iterator,
+        nuint count,
+        GhosttyRenderStateRowData* keys,
+        void** values,
+        nuint* outWritten);
+
     [LibraryImport(LibName, EntryPoint = "ghostty_render_state_row_set")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult RenderStateRowSet(nint iterator, GhosttyRenderStateRowOption option, void* value);
@@ -171,6 +189,15 @@ public static partial class GhosttyVtNative
     [LibraryImport(LibName, EntryPoint = "ghostty_render_state_row_cells_get")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult RenderStateRowCellsGet(nint cells, GhosttyRenderStateRowCellsData data, void* output);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_render_state_row_cells_get_multi")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult RenderStateRowCellsGetMulti(
+        nint cells,
+        nuint count,
+        GhosttyRenderStateRowCellsData* keys,
+        void** values,
+        nuint* outWritten);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_render_state_row_cells_free")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

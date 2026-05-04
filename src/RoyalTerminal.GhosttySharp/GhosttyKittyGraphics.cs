@@ -344,6 +344,30 @@ public sealed class GhosttyKittyGraphicsPlacementIterator : IDisposable
         return true;
     }
 
+    /// <summary>Gets the current placement's resolved render geometry in one native call.</summary>
+    public unsafe bool TryGetRenderInfo(
+        GhosttyKittyGraphicsImage image,
+        GhosttyTerminal terminal,
+        out GhosttyVtNative.GhosttyKittyGraphicsPlacementRenderInfo renderInfo)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyKittyGraphicsPlacementRenderInfo info =
+            GhosttyVtNative.GhosttyKittyGraphicsPlacementRenderInfo.CreateSized();
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.KittyGraphicsPlacementRenderInfoGet(
+            _handle,
+            image.Handle,
+            terminal.Handle,
+            &info);
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            renderInfo = default;
+            return false;
+        }
+
+        renderInfo = info;
+        return true;
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {

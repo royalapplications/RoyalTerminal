@@ -247,6 +247,24 @@ public sealed class GhosttyTerminal : IDisposable
             "ghostty_terminal_set(kitty_image_medium_shared_mem)");
     }
 
+    /// <summary>Sets the maximum accepted APC payload size in bytes.</summary>
+    public void SetApcMaxBytes(ulong bytes)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.ApcMaxBytes,
+            bytes,
+            "ghostty_terminal_set(apc_max_bytes)");
+    }
+
+    /// <summary>Sets the maximum accepted Kitty Graphics APC payload size in bytes.</summary>
+    public void SetApcMaxBytesKitty(ulong bytes)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.ApcMaxBytesKitty,
+            bytes,
+            "ghostty_terminal_set(apc_max_bytes_kitty)");
+    }
+
     /// <summary>Gets the terminal width in cells.</summary>
     public ushort GetColumns() => GetValue<ushort>(GhosttyVtNative.GhosttyTerminalData.Cols);
 
