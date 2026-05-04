@@ -407,7 +407,8 @@ FodyWeavers.xsd
 /native/ghostty-terminal/zig-out
 *.dylib
 /native/include
-/plan
+/plan/*
+!/plan/ghostling-comparison-and-implementation-plan-2026-05-04.md
 /.codex
 /.zig-global-cache
 /native/win-x64
