@@ -941,6 +941,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         renderer.SelectionColor = previous.SelectionColor;
         renderer.SelectionStart = previous.SelectionStart;
         renderer.SelectionEnd = previous.SelectionEnd;
+        renderer.SelectionIsRectangle = previous.SelectionIsRectangle;
         renderer.EnableTextRenderDiagnostics = previous.EnableTextRenderDiagnostics;
         renderer.EnableTextShaping = previous.EnableTextShaping;
         renderer.TextDirectionMode = previous.TextDirectionMode;
@@ -1878,6 +1879,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void HandleKeyDownCore(KeyEventArgs e)
     {
+        if (e.Key == Key.Escape && HasRendererSelection())
+        {
+            ClearSelection();
+            e.Handled = true;
+            return;
+        }
+
         if (TryHandleUrgentTransportControlKeyDown(e))
         {
             return;
@@ -2148,6 +2156,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             var row = (int)(point.Y / _renderer.CellHeight);
             _renderer.SelectionStart = (col, row);
             _renderer.SelectionEnd = (col, row);
+            _renderer.SelectionIsRectangle = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
             InvalidateScreen();
             _presenter?.Invalidate();
         }
@@ -2188,6 +2197,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             var col = (int)(point.X / _renderer.CellWidth);
             var row = (int)(point.Y / _renderer.CellHeight);
             _renderer.SelectionEnd = (col, row);
+            _renderer.SelectionIsRectangle = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
             InvalidateScreen();
             _presenter?.Invalidate();
         }
@@ -2239,6 +2249,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         else
         {
             SyncPointerButtonState(props);
+        }
+
+        if (_isMouseSelecting && _renderer is not null)
+        {
+            _renderer.SelectionIsRectangle = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+            InvalidateScreen();
+            _presenter?.Invalidate();
         }
 
         _isMouseSelecting = false;
@@ -2432,7 +2449,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _renderer.SelectionStart = (0, 0);
-        _renderer.SelectionEnd = (_screen.Columns - 1, _screen.ViewportRows - 1);
+        _renderer.SelectionEnd = (_screen.Columns, _screen.ViewportRows - 1);
+        _renderer.SelectionIsRectangle = false;
         InvalidateScreen();
         _presenter?.Invalidate();
     }
@@ -2444,6 +2462,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         TerminalSelectionService.ClearSelection(_screen, _renderer, _presenter);
     }
+
+    private bool HasRendererSelection() =>
+        _renderer is { SelectionStart: not null, SelectionEnd: not null };
 
     /// <summary>
     /// Updates the hovered hyperlink URL used for hyperlink-hover underline styling.
