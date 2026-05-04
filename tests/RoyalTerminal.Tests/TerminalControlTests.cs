@@ -2740,6 +2740,47 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_CopySelection_SelectionRowsOutsideViewport_UsesScrollbackRows()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            PopulateScrollableNormalBuffer(control);
+            control.ScrollByRows(-5);
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            int topRow = screen.ViewportTopAbsoluteRow;
+            Assert.True(topRow > 0);
+
+            renderer.SelectionStart = (0, -1);
+            renderer.SelectionEnd = (4, 1);
+            renderer.SelectionIsRectangle = true;
+
+            await control.CopySelectionAsync();
+
+            string expected = string.Join(
+                Environment.NewLine,
+                ReadRowPrefix(screen.GetRow(topRow - 1), 4),
+                ReadRowPrefix(screen.GetRow(topRow), 4),
+                ReadRowPrefix(screen.GetRow(topRow + 1), 4));
+            string? copied = await window.Clipboard!.TryGetTextAsync();
+            Assert.Equal(expected, copied);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_AltDragSelection_SetsRectangularSelection()
     {
         TerminalControl control = new()
@@ -2770,6 +2811,224 @@ public class TerminalControlTests
             Assert.Equal((1, 0), renderer.SelectionStart);
             Assert.Equal((3, 1), renderer.SelectionEnd);
             Assert.True(renderer.SelectionIsRectangle);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_DragSelectionAboveViewport_AutoScrollsUp()
+    {
+        TerminalControl control = new()
+        {
+            Width = 640,
+            Height = 400,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            PopulateScrollableNormalBuffer(control);
+            control.ScrollToBottom();
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            Assert.Equal(0, screen.ScrollOffset);
+
+            Point start = new(renderer.CellWidth * 2.5, renderer.CellHeight * (screen.ViewportRows - 1.5));
+            Point above = new(renderer.CellWidth * 2.5, -renderer.CellHeight);
+
+            window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+            window.MouseMove(above, RawInputModifiers.LeftMouseButton);
+
+            bool scrolled = await WaitUntilAsync(
+                () => screen.ScrollOffset > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(scrolled);
+
+            window.MouseUp(above, MouseButton.Left, RawInputModifiers.None);
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            Assert.NotNull(renderer.SelectionStart);
+            Assert.NotNull(renderer.SelectionEnd);
+            Assert.True(renderer.SelectionStart!.Value.Row > renderer.SelectionEnd!.Value.Row);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_DragSelectionBelowViewport_AutoScrollsDown()
+    {
+        TerminalControl control = new()
+        {
+            Width = 640,
+            Height = 400,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            PopulateScrollableNormalBuffer(control);
+            control.ScrollByRows(-10);
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            int initialScrollOffset = screen.ScrollOffset;
+            Assert.True(initialScrollOffset > 0);
+
+            Point start = new(renderer.CellWidth * 2.5, renderer.CellHeight * 0.5);
+            Point below = new(renderer.CellWidth * 2.5, control.Bounds.Height + renderer.CellHeight);
+
+            window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+            window.MouseMove(below, RawInputModifiers.LeftMouseButton);
+
+            bool scrolled = await WaitUntilAsync(
+                () => screen.ScrollOffset < initialScrollOffset,
+                TimeSpan.FromSeconds(2));
+            Assert.True(scrolled);
+
+            window.MouseUp(below, MouseButton.Left, RawInputModifiers.None);
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            Assert.NotNull(renderer.SelectionStart);
+            Assert.NotNull(renderer.SelectionEnd);
+            Assert.True(renderer.SelectionStart!.Value.Row < renderer.SelectionEnd!.Value.Row);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_DragSelectionAboveViewport_WithNativeViewport_KeepsAnchorAbsolute()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 120, OffsetRows: 80, VisibleRows: 24),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Width = 640;
+        control.Height = 400;
+
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            bool layoutReady = await WaitUntilAsync(
+                () => control.Bounds.Width > 1 && control.Bounds.Height > 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(layoutReady);
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            processor.SetViewportState(new TerminalViewportScrollState(
+                TotalRows: (ulong)screen.ViewportRows + 100,
+                OffsetRows: 80,
+                VisibleRows: (ulong)screen.ViewportRows));
+            ulong initialOffset = processor.ViewportScrollState.OffsetRows;
+            int startRow = Math.Max(1, screen.ViewportRows - 2);
+
+            Point start = new(renderer.CellWidth * 2.5, renderer.CellHeight * (startRow + 0.5));
+            Point above = new(renderer.CellWidth * 2.5, -renderer.CellHeight);
+
+            window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+            window.MouseMove(above, RawInputModifiers.LeftMouseButton);
+
+            bool scrolled = await WaitUntilAsync(
+                () => processor.ViewportScrollState.OffsetRows < initialOffset,
+                TimeSpan.FromSeconds(2));
+            Assert.True(scrolled);
+
+            window.MouseUp(above, MouseButton.Left, RawInputModifiers.None);
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            int scrolledRows = checked((int)(initialOffset - processor.ViewportScrollState.OffsetRows));
+            Assert.Equal(startRow + scrolledRows, renderer.SelectionStart?.Row);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_DragSelectionAboveViewport_AtNativeTop_SkipsAutoScrollRequests()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 120, OffsetRows: 0, VisibleRows: 24),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Width = 640;
+        control.Height = 400;
+
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            bool layoutReady = await WaitUntilAsync(
+                () => control.Bounds.Width > 1 && control.Bounds.Height > 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(layoutReady);
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            processor.SetViewportState(new TerminalViewportScrollState(
+                TotalRows: (ulong)screen.ViewportRows + 100,
+                OffsetRows: 0,
+                VisibleRows: (ulong)screen.ViewportRows));
+
+            Point start = new(renderer.CellWidth * 2.5, renderer.CellHeight * 1.5);
+            Point above = new(renderer.CellWidth * 2.5, -renderer.CellHeight);
+
+            window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+            window.MouseMove(above, RawInputModifiers.LeftMouseButton);
+
+            bool requestObserved = await WaitUntilAsync(
+                () => processor.ScrollViewportByRowsCallCount > 0,
+                TimeSpan.FromMilliseconds(200));
+            Assert.False(requestObserved);
+
+            window.MouseUp(above, MouseButton.Left, RawInputModifiers.None);
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
         }
         finally
         {
@@ -3165,6 +3424,19 @@ public class TerminalControlTests
             row[column].Codepoint = text[column];
             row[column].Width = 1;
         }
+    }
+
+    private static string ReadRowPrefix(TerminalRow row, int length)
+    {
+        StringBuilder builder = new(length);
+        int columnCount = Math.Min(length, row.Columns);
+        for (int column = 0; column < columnCount; column++)
+        {
+            int codepoint = row[column].Codepoint;
+            builder.Append(codepoint <= 0 ? ' ' : (char)codepoint);
+        }
+
+        return builder.ToString();
     }
 
     private static byte[] CaptureFramePng(Window window)
