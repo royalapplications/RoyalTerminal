@@ -2592,7 +2592,39 @@ public class TerminalControlTests
             SetViewportRowText(screen!, rowIndex: 1, "EFGH");
 
             renderer!.SelectionStart = (1, 0);
-            renderer.SelectionEnd = (2, 1);
+            renderer.SelectionEnd = (3, 1);
+            renderer.SelectionIsRectangle = true;
+
+            await control.CopySelectionAsync();
+
+            string? copied = await window.Clipboard!.TryGetTextAsync();
+            Assert.Equal($"BC{Environment.NewLine}FG", copied);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_CopySelection_RectangularSelection_NormalizesReversedColumns()
+    {
+        TerminalControl control = new();
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            TerminalScreen? screen = control.Screen;
+            SkiaTerminalRenderer? renderer = control.Renderer;
+            Assert.NotNull(screen);
+            Assert.NotNull(renderer);
+
+            SetViewportRowText(screen!, rowIndex: 0, "ABCD");
+            SetViewportRowText(screen!, rowIndex: 1, "EFGH");
+
+            renderer!.SelectionStart = (3, 0);
+            renderer.SelectionEnd = (1, 1);
             renderer.SelectionIsRectangle = true;
 
             await control.CopySelectionAsync();
@@ -2631,7 +2663,7 @@ public class TerminalControlTests
             SetViewportRowText(screen!, rowIndex: 1, "EFGH");
 
             renderer!.SelectionStart = (1, 0);
-            renderer.SelectionEnd = (2, 1);
+            renderer.SelectionEnd = (3, 1);
             renderer.SelectionIsRectangle = true;
 
             await control.CopySelectionAsync();
@@ -2732,7 +2764,7 @@ public class TerminalControlTests
             row[0].Codepoint = 'A';
 
             renderer!.SelectionStart = (-5, 0);
-            renderer.SelectionEnd = (0, 0);
+            renderer.SelectionEnd = (1, 0);
 
             await control.CopySelectionAsync();
 

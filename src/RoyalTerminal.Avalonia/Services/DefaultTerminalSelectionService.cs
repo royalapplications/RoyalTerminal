@@ -32,7 +32,7 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
 
         if (screen is not null &&
             renderer is not null &&
-            TryCreateSelectionRange(renderer, out TerminalSelectionRange selection))
+            TryCreateRendererSelectionRange(renderer, out RendererSelectionRange selection))
         {
             usedRendererSelection = true;
             text = GetSelectedText(screen, selection);
@@ -188,7 +188,7 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         presenter?.Invalidate();
     }
 
-    private static bool TryCreateSelectionRange(SkiaTerminalRenderer renderer, out TerminalSelectionRange selection)
+    private static bool TryCreateRendererSelectionRange(SkiaTerminalRenderer renderer, out RendererSelectionRange selection)
     {
         if (renderer.SelectionStart is not { } start || renderer.SelectionEnd is not { } end)
         {
@@ -196,7 +196,27 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
             return false;
         }
 
-        selection = new TerminalSelectionRange(start.Item1, start.Item2, end.Item1, end.Item2, renderer.SelectionIsRectangle);
+        if (renderer.SelectionIsRectangle)
+        {
+            selection = new RendererSelectionRange(
+                Math.Min(start.Column, end.Column),
+                Math.Min(start.Row, end.Row),
+                Math.Max(start.Column, end.Column),
+                Math.Max(start.Row, end.Row),
+                Rectangle: true);
+            return true;
+        }
+
+        int startColumn = start.Column;
+        int startRow = start.Row;
+        int endColumnExclusive = end.Column;
+        int endRow = end.Row;
+        if (startRow > endRow || (startRow == endRow && startColumn > endColumnExclusive))
+        {
+            (startColumn, startRow, endColumnExclusive, endRow) = (endColumnExclusive, endRow, startColumn, startRow);
+        }
+
+        selection = new RendererSelectionRange(startColumn, startRow, endColumnExclusive, endRow, Rectangle: false);
         return true;
     }
 
@@ -216,13 +236,12 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         return false;
     }
 
-    private static string? GetSelectedText(TerminalScreen screen, TerminalSelectionRange selection)
+    private static string? GetSelectedText(TerminalScreen screen, RendererSelectionRange selection)
     {
-        TerminalSelectionRange normalizedSelection = selection.Normalize();
-        int startCol = normalizedSelection.StartColumn;
-        int startRow = normalizedSelection.StartRow;
-        int endCol = normalizedSelection.EndColumn;
-        int endRow = normalizedSelection.EndRow;
+        int startCol = selection.StartColumn;
+        int startRow = selection.StartRow;
+        int endColExclusive = selection.EndColumnExclusive;
+        int endRow = selection.EndRow;
 
         StringBuilder sb = new();
         lock (screen.SyncRoot)
@@ -235,17 +254,17 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
                 }
 
                 TerminalRow termRow = screen.GetViewportRow(row);
-                int colStart = normalizedSelection.Rectangle || row == startRow ? startCol : 0;
-                int colEnd = normalizedSelection.Rectangle || row == endRow ? endCol : screen.Columns - 1;
-                if (colEnd < 0 || colStart >= screen.Columns)
+                int colStart = selection.Rectangle || row == startRow ? startCol : 0;
+                int colEndExclusive = selection.Rectangle || row == endRow ? endColExclusive : screen.Columns;
+                if (colEndExclusive <= 0 || colStart >= screen.Columns)
                 {
                     continue;
                 }
 
                 colStart = Math.Max(0, colStart);
-                colEnd = Math.Min(screen.Columns - 1, colEnd);
+                colEndExclusive = Math.Min(screen.Columns, colEndExclusive);
 
-                for (int col = colStart; col <= colEnd; col++)
+                for (int col = colStart; col < colEndExclusive; col++)
                 {
                     ref TerminalCell cell = ref termRow[col];
                     if (cell.Width == 0)
@@ -276,6 +295,13 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
 
         return sb.ToString();
     }
+
+    private readonly record struct RendererSelectionRange(
+        int StartColumn,
+        int StartRow,
+        int EndColumnExclusive,
+        int EndRow,
+        bool Rectangle);
 
     private static TerminalPasteRisk EvaluatePasteRisk(string text)
     {
