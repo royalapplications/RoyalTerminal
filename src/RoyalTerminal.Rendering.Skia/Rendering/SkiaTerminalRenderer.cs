@@ -147,6 +147,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
     /// <summary>Selection end (column, row) in viewport coordinates.</summary>
     public (int Column, int Row)? SelectionEnd { get; set; }
 
+    /// <summary>Whether the active selection should be rendered as a rectangular block.</summary>
+    public bool SelectionIsRectangle { get; set; }
+
     /// <summary>Selection highlight color.</summary>
     public SKColor SelectionColor { get; set; } = new(0x40, 0x60, 0xA0, 0x80);
 
@@ -4143,21 +4146,42 @@ public sealed class SkiaTerminalRenderer : IDisposable
             int endCol = SelectionEnd.Value.Column;
             int endRow = SelectionEnd.Value.Row;
 
-            if (startRow > endRow || (startRow == endRow && startCol > endCol))
+            if (SelectionIsRectangle)
             {
-                (startCol, startRow, endCol, endRow) = (endCol, endRow, startCol, startRow);
-            }
+                int left = Math.Min(startCol, endCol);
+                int rightExclusive = Math.Max(startCol, endCol);
+                int top = Math.Min(startRow, endRow);
+                int bottom = Math.Max(startRow, endRow);
 
-            if (rowIndex >= startRow && rowIndex <= endRow)
-            {
-                int left = rowIndex == startRow ? startCol : 0;
-                int rightExclusive = rowIndex == endRow ? endCol : columnCount;
-                left = Math.Clamp(left, 0, columnCount);
-                rightExclusive = Math.Clamp(rightExclusive, 0, columnCount);
-
-                for (int col = left; col < rightExclusive; col++)
+                if (rowIndex >= top && rowIndex <= bottom)
                 {
-                    rowOverlays[col] |= CellOverlayFlags.Selection;
+                    left = Math.Clamp(left, 0, columnCount);
+                    rightExclusive = Math.Clamp(rightExclusive, 0, columnCount);
+
+                    for (int col = left; col < rightExclusive; col++)
+                    {
+                        rowOverlays[col] |= CellOverlayFlags.Selection;
+                    }
+                }
+            }
+            else
+            {
+                if (startRow > endRow || (startRow == endRow && startCol > endCol))
+                {
+                    (startCol, startRow, endCol, endRow) = (endCol, endRow, startCol, startRow);
+                }
+
+                if (rowIndex >= startRow && rowIndex <= endRow)
+                {
+                    int left = rowIndex == startRow ? startCol : 0;
+                    int rightExclusive = rowIndex == endRow ? endCol : columnCount;
+                    left = Math.Clamp(left, 0, columnCount);
+                    rightExclusive = Math.Clamp(rightExclusive, 0, columnCount);
+
+                    for (int col = left; col < rightExclusive; col++)
+                    {
+                        rowOverlays[col] |= CellOverlayFlags.Selection;
+                    }
                 }
             }
         }
