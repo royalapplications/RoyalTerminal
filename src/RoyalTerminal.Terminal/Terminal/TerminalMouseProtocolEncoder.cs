@@ -28,6 +28,36 @@ public static class TerminalMouseProtocolEncoder
         int row,
         out byte[] sequence)
     {
+        return TryEncode(
+            pointerEvent,
+            modeState,
+            column,
+            row,
+            pixelX: column,
+            pixelY: row,
+            out sequence);
+    }
+
+    /// <summary>
+    /// Encodes a pointer event according to the supplied VT mouse mode.
+    /// </summary>
+    /// <param name="pointerEvent">Pointer event to encode.</param>
+    /// <param name="modeState">Active mouse mode and encoding.</param>
+    /// <param name="column">Pointer column (1-based cell coordinate).</param>
+    /// <param name="row">Pointer row (1-based cell coordinate).</param>
+    /// <param name="pixelX">Pointer x position (1-based pixel coordinate).</param>
+    /// <param name="pixelY">Pointer y position (1-based pixel coordinate).</param>
+    /// <param name="sequence">Encoded VT byte sequence when successful.</param>
+    /// <returns><see langword="true"/> when the event should be sent to the terminal.</returns>
+    public static bool TryEncode(
+        in TerminalPointerEvent pointerEvent,
+        in TerminalMouseModeState modeState,
+        int column,
+        int row,
+        int pixelX,
+        int pixelY,
+        out byte[] sequence)
+    {
         sequence = Array.Empty<byte>();
 
         if (!modeState.IsMouseReportingEnabled || column <= 0 || row <= 0)
@@ -47,6 +77,10 @@ public static class TerminalMouseProtocolEncoder
         {
             case TerminalMouseEncoding.Sgr:
                 sequence = EncodeSgrProtocol(finalCode, column, row, sgrRelease);
+                return true;
+
+            case TerminalMouseEncoding.SgrPixels:
+                sequence = EncodeSgrProtocol(finalCode, Math.Max(1, pixelX), Math.Max(1, pixelY), sgrRelease);
                 return true;
 
             case TerminalMouseEncoding.Urxvt:
@@ -83,7 +117,8 @@ public static class TerminalMouseProtocolEncoder
                     }
 
                     // In SGR mode releases preserve the released button code and use 'm'.
-                    if (modeState.Encoding == TerminalMouseEncoding.Sgr &&
+                    if ((modeState.Encoding == TerminalMouseEncoding.Sgr ||
+                         modeState.Encoding == TerminalMouseEncoding.SgrPixels) &&
                         TryGetButtonBaseCode(pointerEvent.Button, out int sgrReleaseCode))
                     {
                         mouseCode = sgrReleaseCode;

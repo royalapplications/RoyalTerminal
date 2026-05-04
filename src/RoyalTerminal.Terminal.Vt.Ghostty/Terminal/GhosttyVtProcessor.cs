@@ -50,6 +50,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private bool _cursorBlinking = true;
     private bool _applicationCursorKeys;
     private bool _applicationKeypad;
+    private bool _backarrowKeyMode;
     private bool _alternateScreen;
     private bool _bracketedPaste;
     private bool _mouseReportingEnabled;
@@ -156,7 +157,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         ApplicationKeypad,
         AlternateScreen,
         BracketedPaste,
-        Win32InputMode);
+        Win32InputMode,
+        _backarrowKeyMode);
 
     /// <inheritdoc />
     public event EventHandler<TerminalModeState>? ModeChanged;
@@ -601,6 +603,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         GhosttySys.EnsureSkiaPngDecoderInstalled();
         _terminal.SetKittyImageStorageLimit(32UL * 1024UL * 1024UL);
+        _terminal.SetApcMaxBytesKitty(64UL * 1024UL * 1024UL);
         _terminal.SetKittyImageMediumFile(enabled: true);
         _terminal.SetKittyImageMediumTempFile(enabled: true);
         _terminal.SetKittyImageMediumSharedMemory(enabled: true);
@@ -725,6 +728,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _cursorBlinking = _renderState.GetCursorBlinking();
         _applicationCursorKeys = _terminal.GetMode(GhosttyVtNative.ModeDecckm);
         _applicationKeypad = _terminal.GetMode(GhosttyVtNative.ModeKeypadKeys);
+        _backarrowKeyMode = _terminal.GetMode(GhosttyVtNative.ModeBackarrowKeyMode);
         _alternateScreen =
             _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate ||
             _terminal.GetMode(GhosttyVtNative.ModeAltScreen) ||
@@ -746,6 +750,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _cursorBlinking = true;
         _applicationCursorKeys = false;
         _applicationKeypad = false;
+        _backarrowKeyMode = false;
         _alternateScreen = false;
         _bracketedPaste = false;
         _mouseReportingEnabled = false;
@@ -980,41 +985,29 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 images[imageId] = imageSource;
             }
 
-            if (!_kittyPlacementIterator.TryGetViewportPosition(image, _terminal, out int viewportColumn, out int viewportRow))
+            if (!_kittyPlacementIterator.TryGetRenderInfo(
+                    image,
+                    _terminal,
+                    out GhosttyVtNative.GhosttyKittyGraphicsPlacementRenderInfo renderInfo) ||
+                !renderInfo.ViewportVisible)
             {
                 continue;
             }
-
-            if (!_kittyPlacementIterator.TryGetPixelSize(image, _terminal, out uint widthPx, out uint heightPx))
-            {
-                continue;
-            }
-
-            uint sourceX = 0;
-            uint sourceY = 0;
-            uint sourceWidth = image.GetWidth();
-            uint sourceHeight = image.GetHeight();
-            _ = _kittyPlacementIterator.TryGetSourceRect(
-                image,
-                out sourceX,
-                out sourceY,
-                out sourceWidth,
-                out sourceHeight);
 
             TerminalKittyImageLayer layer = ClassifyKittyLayer(_kittyPlacementIterator.GetZIndex());
             placements.Add(new TerminalKittyImagePlacement(
                 imageId,
                 layer,
-                viewportColumn,
-                viewportRow,
+                renderInfo.ViewportColumn,
+                renderInfo.ViewportRow,
                 checked((int)_kittyPlacementIterator.GetXOffset()),
                 checked((int)_kittyPlacementIterator.GetYOffset()),
-                checked((int)widthPx),
-                checked((int)heightPx),
-                checked((int)sourceX),
-                checked((int)sourceY),
-                checked((int)sourceWidth),
-                checked((int)sourceHeight)));
+                checked((int)renderInfo.PixelWidth),
+                checked((int)renderInfo.PixelHeight),
+                checked((int)renderInfo.SourceX),
+                checked((int)renderInfo.SourceY),
+                checked((int)renderInfo.SourceWidth),
+                checked((int)renderInfo.SourceHeight)));
         }
 
         if (placements.Count == 0)
@@ -1300,6 +1293,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             PaddingLeft = checked((uint)Math.Max(0, context.PaddingLeftPx)),
         });
         _mouseEncoder.SetAnyButtonPressed(IsAnyMouseButtonPressed(pointerEvent));
+        _mouseEncoder.SetTrackLastCell(true);
 
         _mouseEvent.SetModifiers(MapModifiers(pointerEvent.Modifiers));
         _mouseEvent.SetPosition((float)pointerEvent.X, (float)pointerEvent.Y);
@@ -1420,11 +1414,13 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         *attributes = GhosttyVtNative.GhosttyDeviceAttributes.Create();
         attributes->Primary.ConformanceLevel = 62;
         int featureCount = 0;
+        attributes->Primary.SetFeature(featureCount++, 1);
         if (_sixelGraphicsEnabled)
         {
             attributes->Primary.SetFeature(featureCount++, 4);
         }
 
+        attributes->Primary.SetFeature(featureCount++, 6);
         attributes->Primary.SetFeature(featureCount++, 22);
         attributes->Primary.NumFeatures = (nuint)featureCount;
         attributes->Secondary.DeviceType = 1;
