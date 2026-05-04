@@ -62,10 +62,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const int ResumePendingOutputQueueBytes = MaxPendingOutputQueueBytes / 2;
     private const int MaxPendingOutputQueueChunks = 256;
     private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
+    private const double SelectionAutoScrollMargin = 60d;
+    private const int SelectionAutoScrollSpeed = 50;
     // Managed VT parsing already yields in small UI batches, so draining at
     // Background priority avoids starvation without monopolizing the UI thread.
     private static readonly DispatcherPriority ManagedPendingOutputDrainPriority = DispatcherPriority.Background;
     private static readonly DispatcherPriority NativePendingOutputDrainPriority = DispatcherPriority.Background;
+    private static readonly TimeSpan SelectionAutoScrollInterval = TimeSpan.FromMilliseconds(SelectionAutoScrollSpeed);
     private static readonly long UrgentControlVtResponseSuppressionWindowTicks =
         (long)(TimeSpan.FromSeconds(1).TotalSeconds * Stopwatch.Frequency);
 
@@ -420,6 +423,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private VirtualizedTerminalScrollViewer? _scrollViewer;
     private IVtProcessor? _vtProcessor;
     private bool _isMouseSelecting;
+    private DispatcherTimer? _selectionAutoScrollTimer;
+    private int _selectionAnchorColumn;
+    private int _selectionAnchorAbsoluteRow;
+    private int _selectionActiveColumn;
+    private int _selectionActiveAbsoluteRow;
+    private Point _lastSelectionPointerPoint;
+    private KeyModifiers _lastSelectionKeyModifiers;
     private bool _leftPointerDown;
     private bool _middlePointerDown;
     private bool _rightPointerDown;
@@ -1355,6 +1365,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        StopMouseSelectionDrag();
         EnsureCursorBlinkTimerRunning(false);
         RestoreReservedAncestorKeyBindings();
     }
@@ -2148,17 +2159,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // Start text selection on left click
         if ((!IsMouseReportingActiveForInput() || !pointerSent) &&
             (button == TerminalMouseButton.Left || props.IsLeftButtonPressed) &&
-            _renderer is not null)
+            _renderer is not null &&
+            _screen is not null)
         {
             _isMouseSelecting = true;
+            e.Pointer.Capture(this);
 
-            var col = (int)(point.X / _renderer.CellWidth);
-            var row = (int)(point.Y / _renderer.CellHeight);
-            _renderer.SelectionStart = (col, row);
-            _renderer.SelectionEnd = (col, row);
+            UpdateMouseSelectionFromPointer(point, e.KeyModifiers, resetAnchor: true);
             _renderer.SelectionIsRectangle = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
-            InvalidateScreen();
-            _presenter?.Invalidate();
+            StopSelectionAutoScroll();
         }
 
         e.Handled = true;
@@ -2192,14 +2201,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             Action: TerminalInputAction.Press,
             Modifiers: ConvertTerminalModifiers(e.KeyModifiers)));
 
-        if (_isMouseSelecting && _renderer is not null)
+        if (_isMouseSelecting && _renderer is not null && _screen is not null)
         {
-            var col = (int)(point.X / _renderer.CellWidth);
-            var row = (int)(point.Y / _renderer.CellHeight);
-            _renderer.SelectionEnd = (col, row);
+            UpdateMouseSelectionFromPointer(point, e.KeyModifiers, resetAnchor: false);
             _renderer.SelectionIsRectangle = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
-            InvalidateScreen();
-            _presenter?.Invalidate();
+            UpdateSelectionAutoScroll(point);
         }
     }
 
@@ -2251,15 +2257,248 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             SyncPointerButtonState(props);
         }
 
-        if (_isMouseSelecting && _renderer is not null)
+        bool wasMouseSelecting = _isMouseSelecting;
+        if (wasMouseSelecting)
         {
-            _renderer.SelectionIsRectangle = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
-            InvalidateScreen();
-            _presenter?.Invalidate();
+            StopSelectionAutoScroll();
+            if (_renderer is not null && _screen is not null)
+            {
+                UpdateMouseSelectionFromPointer(point, e.KeyModifiers, resetAnchor: false);
+                _renderer.SelectionIsRectangle = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+            }
         }
 
         _isMouseSelecting = false;
+        if (wasMouseSelecting)
+        {
+            e.Pointer.Capture(null);
+        }
         e.Handled = true;
+    }
+
+    private void UpdateMouseSelectionFromPointer(Point point, KeyModifiers keyModifiers, bool resetAnchor)
+    {
+        if (_renderer is null || _screen is null)
+        {
+            return;
+        }
+
+        _lastSelectionPointerPoint = point;
+        _lastSelectionKeyModifiers = keyModifiers;
+
+        int column = (int)(point.X / _renderer.CellWidth);
+        int topRow;
+        int absoluteRow;
+        lock (_screen.SyncRoot)
+        {
+            topRow = GetViewportTopAbsoluteRowLocked();
+            long unclampedAbsoluteRow = (long)topRow + GetClampedSelectionViewportRow(point);
+            int maxAbsoluteRow = GetSelectionMaxAbsoluteRowLocked();
+            absoluteRow = (int)Math.Clamp(unclampedAbsoluteRow, 0, maxAbsoluteRow);
+        }
+
+        if (resetAnchor)
+        {
+            _selectionAnchorColumn = column;
+            _selectionAnchorAbsoluteRow = absoluteRow;
+        }
+
+        _selectionActiveColumn = column;
+        _selectionActiveAbsoluteRow = absoluteRow;
+        ApplyMouseSelectionToRenderer(topRow);
+    }
+
+    private int GetClampedSelectionViewportRow(Point point)
+    {
+        if (_renderer is null || _screen is null || _screen.ViewportRows <= 0)
+        {
+            return 0;
+        }
+
+        int row = (int)(point.Y / _renderer.CellHeight);
+        return Math.Clamp(row, 0, _screen.ViewportRows - 1);
+    }
+
+    private int GetSelectionMaxAbsoluteRowLocked()
+    {
+        if (_screen is null)
+        {
+            return 0;
+        }
+
+        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+        {
+            ulong totalRows = viewportScrollSource.ViewportScrollState.TotalRows;
+            if (totalRows == 0)
+            {
+                return 0;
+            }
+
+            ulong maxAbsoluteRow = totalRows - 1;
+            return maxAbsoluteRow > int.MaxValue
+                ? int.MaxValue
+                : (int)maxAbsoluteRow;
+        }
+
+        return Math.Max(0, _screen.TotalRows - 1);
+    }
+
+    private void ApplyMouseSelectionToRenderer(int topRow)
+    {
+        if (_renderer is null || _screen is null)
+        {
+            return;
+        }
+
+        _renderer.SelectionStart = (_selectionAnchorColumn, _selectionAnchorAbsoluteRow - topRow);
+        _renderer.SelectionEnd = (_selectionActiveColumn, _selectionActiveAbsoluteRow - topRow);
+        InvalidateScreen();
+        _presenter?.Invalidate();
+    }
+
+    private void UpdateSelectionAutoScroll(Point point)
+    {
+        if (GetSelectionAutoScrollRows(point) == 0)
+        {
+            StopSelectionAutoScroll();
+            return;
+        }
+
+        _selectionAutoScrollTimer ??= CreateSelectionAutoScrollTimer();
+        if (!_selectionAutoScrollTimer.IsEnabled)
+        {
+            _selectionAutoScrollTimer.Start();
+            OnSelectionAutoScrollTick(null, EventArgs.Empty);
+        }
+    }
+
+    private DispatcherTimer CreateSelectionAutoScrollTimer()
+    {
+        DispatcherTimer timer = new()
+        {
+            Interval = SelectionAutoScrollInterval,
+        };
+        timer.Tick += OnSelectionAutoScrollTick;
+        return timer;
+    }
+
+    private void OnSelectionAutoScrollTick(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+
+        if (!_isMouseSelecting)
+        {
+            StopSelectionAutoScroll();
+            return;
+        }
+
+        int rows = GetSelectionAutoScrollRows(_lastSelectionPointerPoint);
+        if (rows == 0)
+        {
+            StopSelectionAutoScroll();
+            return;
+        }
+
+        if (!TryScrollSelectionViewportByRows(rows))
+        {
+            StopSelectionAutoScroll();
+            return;
+        }
+
+        UpdateMouseSelectionFromPointer(_lastSelectionPointerPoint, _lastSelectionKeyModifiers, resetAnchor: false);
+    }
+
+    private bool TryScrollSelectionViewportByRows(int rows)
+    {
+        if (_screen is null || rows == 0)
+        {
+            return false;
+        }
+
+        int beforeTopRow;
+        bool canScroll;
+        lock (_screen.SyncRoot)
+        {
+            beforeTopRow = GetViewportTopAbsoluteRowLocked();
+            canScroll = CanScrollSelectionViewportByRowsLocked(rows, beforeTopRow);
+        }
+
+        if (!canScroll)
+        {
+            return false;
+        }
+
+        ScrollByRows(rows);
+
+        int afterTopRow;
+        lock (_screen.SyncRoot)
+        {
+            afterTopRow = GetViewportTopAbsoluteRowLocked();
+        }
+
+        return beforeTopRow != afterTopRow;
+    }
+
+    private bool CanScrollSelectionViewportByRowsLocked(int rows, int topRow)
+    {
+        if (rows < 0)
+        {
+            return topRow > 0;
+        }
+
+        int maxTopRow = GetSelectionMaxTopAbsoluteRowLocked();
+        return topRow < maxTopRow;
+    }
+
+    private int GetSelectionMaxTopAbsoluteRowLocked()
+    {
+        if (_screen is null)
+        {
+            return 0;
+        }
+
+        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+        {
+            return GetViewportMaxTopAbsoluteRow(viewportScrollSource.ViewportScrollState);
+        }
+
+        return Math.Max(0, _screen.TotalRows - _screen.ViewportRows);
+    }
+
+    private int GetSelectionAutoScrollRows(Point point)
+    {
+        if (_renderer is null || _screen is null || Bounds.Height <= 0)
+        {
+            return 0;
+        }
+
+        double autoScrollMargin = Math.Min(SelectionAutoScrollMargin, Bounds.Height * 0.5d);
+        if (point.Y < autoScrollMargin)
+        {
+            return -1;
+        }
+
+        if (point.Y > Bounds.Height - autoScrollMargin)
+        {
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private void StopMouseSelectionDrag()
+    {
+        StopSelectionAutoScroll();
+        _isMouseSelecting = false;
+    }
+
+    private void StopSelectionAutoScroll()
+    {
+        if (_selectionAutoScrollTimer is not null && _selectionAutoScrollTimer.IsEnabled)
+        {
+            _selectionAutoScrollTimer.Stop();
+        }
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
@@ -2287,6 +2526,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 UpdateRendererParityStateFromScreen();
             }
         }
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        StopMouseSelectionDrag();
     }
 
     private void HandlePointerWheelChangedCore(PointerWheelEventArgs e)
@@ -2792,7 +3037,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _activeTransportId = null;
         _mouseModeTracker.Reset();
         ResetPointerButtons();
-        _isMouseSelecting = false;
+        StopMouseSelectionDrag();
         EnsureCursorBlinkTimerRunning(false);
     }
 
