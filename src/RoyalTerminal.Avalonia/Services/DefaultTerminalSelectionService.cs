@@ -246,14 +246,16 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         StringBuilder sb = new();
         lock (screen.SyncRoot)
         {
+            int viewportTopAbsoluteRow = screen.ViewportTopAbsoluteRow;
             for (int row = startRow; row <= endRow; row++)
             {
-                if (row < 0 || row >= screen.ViewportRows)
+                int absoluteRow = viewportTopAbsoluteRow + row;
+                if (absoluteRow < 0 || absoluteRow >= screen.TotalRows)
                 {
                     continue;
                 }
 
-                TerminalRow termRow = screen.GetViewportRow(row);
+                TerminalRow termRow = screen.GetRow(absoluteRow);
                 int colStart = selection.Rectangle || row == startRow ? startCol : 0;
                 int colEndExclusive = selection.Rectangle || row == endRow ? endColExclusive : screen.Columns;
                 if (colEndExclusive <= 0 || colStart >= screen.Columns)
