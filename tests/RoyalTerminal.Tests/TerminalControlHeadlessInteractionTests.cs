@@ -1856,6 +1856,8 @@ public sealed class TerminalControlHeadlessInteractionTests
                     $"Mode={SnapshotModeState(control.TerminalSessionService.ModeSource)}, Kitty={SnapshotKittyKeyboardFlags(control.TerminalSessionService.ModeSource)}, " +
                     $"Inputs={SnapshotInputs(inputSync, inputs)}");
 
+                await WaitForRepeatedFloodControlEchoAsync(expectedInputByte, outputSync, output);
+
                 string cycleMarker = $"__ROYALTERMINAL_REPEAT_{physicalKey}_{cycle}__";
                 control.SendInput($"echo {cycleMarker}\n");
 
@@ -2016,6 +2018,27 @@ public sealed class TerminalControlHeadlessInteractionTests
 
             return false;
         }
+    }
+
+    private static async Task WaitForRepeatedFloodControlEchoAsync(byte expectedInputByte, object sync, StringBuilder output)
+    {
+        string? controlEcho = expectedInputByte switch
+        {
+            0x03 => "^C",
+            0x1A => "^Z",
+            _ => null,
+        };
+
+        if (controlEcho is null)
+        {
+            return;
+        }
+
+        // The tty line discipline may flush bytes written immediately after
+        // INTR/SUSP. Use the echoed control character as the recovery boundary.
+        _ = await WaitUntilAsync(
+            () => ContainsOutput(sync, output, controlEcho),
+            TimeSpan.FromSeconds(2));
     }
 
     private static bool ContainsInputByteAfterIndex(object sync, List<byte[]> inputs, byte expectedByte, int startIndex)
