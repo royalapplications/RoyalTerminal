@@ -64,6 +64,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
     private const double SelectionAutoScrollMargin = 60d;
     private const int SelectionAutoScrollSpeed = 50;
+    private const ulong ComparableRowFnvOffsetBasis = 14695981039346656037UL;
+    private const ulong ComparableRowFnvPrime = 1099511628211UL;
+    private const int ComparableRowStackCharLimit = 256;
     // Managed VT parsing already yields in small UI batches, so draining at
     // Background priority avoids starvation without monopolizing the UI thread.
     private static readonly DispatcherPriority ManagedPendingOutputDrainPriority = DispatcherPriority.Background;
@@ -428,6 +431,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _selectionAnchorAbsoluteRow;
     private int _selectionActiveColumn;
     private int _selectionActiveAbsoluteRow;
+    private bool _hasAnchoredSelection;
+    private TerminalHighlightSpan[] _selectionAnchorSpans = Array.Empty<TerminalHighlightSpan>();
+    private TerminalHighlightSpan[]? _selectionViewportSpansSource;
+    private SkiaTerminalRenderer? _selectionViewportSpansRenderer;
+    private int _selectionViewportSpansTopRow = int.MinValue;
     private Point _lastSelectionPointerPoint;
     private KeyModifiers _lastSelectionKeyModifiers;
     private bool _leftPointerDown;
@@ -477,6 +485,35 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private readonly List<SuspendedAncestorKeyBinding> _suspendedAncestorKeyBindings = [];
     private bool _reservedAncestorKeyBindingsSuppressed;
     private bool _suppressNextScrollbackEscapeKeyUp;
+
+    private enum SelectionResizeAnchorSpace
+    {
+        Absolute,
+        NativeViewport,
+    }
+
+    private sealed class NativeSelectionResizeContext
+    {
+        public NativeSelectionResizeContext(
+            TerminalScreen snapshot,
+            TerminalGridPosition[] anchors,
+            bool anchorsAreSpans)
+        {
+            Snapshot = snapshot;
+            Anchors = anchors;
+            AnchorsAreSpans = anchorsAreSpans;
+        }
+
+        public TerminalScreen Snapshot { get; }
+
+        public TerminalGridPosition[] Anchors { get; }
+
+        public bool AnchorsAreSpans { get; }
+    }
+
+    private readonly record struct ComparableRowKey(int TextLength, ulong Hash);
+
+    private readonly record struct NativeSelectionOffsetScore(int Matches, long Score);
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -594,8 +631,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public bool HasSelection =>
         (TerminalSessionService.SelectionSource?.HasSelection).GetValueOrDefault() ||
         (_renderer is not null &&
-         _renderer.SelectionStart is not null &&
-         _renderer.SelectionEnd is not null);
+         ((_renderer.SelectionStart is not null &&
+           _renderer.SelectionEnd is not null) ||
+          !_renderer.GetSelectionSpans().IsEmpty));
 
     #region ILogicalScrollable
 
@@ -640,10 +678,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             if (_scrollData is not null)
             {
+                CaptureRendererSelectionForCurrentViewport();
                 _scrollData.Offset = value.Y;
                 SyncScreenScrollOffsetFromScrollData();
                 UpdateRendererCursorForViewport();
                 UpdateRendererParityStateFromScreen();
+                _presenter?.Invalidate();
                 RaiseScrollInvalidated();
             }
         }
@@ -952,6 +992,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         renderer.SelectionStart = previous.SelectionStart;
         renderer.SelectionEnd = previous.SelectionEnd;
         renderer.SelectionIsRectangle = previous.SelectionIsRectangle;
+        renderer.SetSelectionSpans(previous.GetSelectionSpans());
         renderer.EnableTextRenderDiagnostics = previous.EnableTextRenderDiagnostics;
         renderer.EnableTextShaping = previous.EnableTextShaping;
         renderer.TextDirectionMode = previous.TextDirectionMode;
@@ -1220,15 +1261,46 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         bool wasAtBottom = _scrollData is { CanScroll: true, IsAtBottom: true };
         bool preserveNativeViewportBottom = AutoScroll && (wasAtBottom || _preserveNativeViewportBottomOnNextResize);
+        NativeSelectionResizeContext? nativeSelectionResizeContext = null;
         if (_screen is not null && (force || gridChanged || pixelSizeChanged))
         {
             lock (_screen.SyncRoot)
             {
+                TerminalGridPosition[]? selectionResizeAnchors = null;
+                bool selectionResizeAnchorsAreSpans = false;
+                SelectionResizeAnchorSpace selectionResizeAnchorSpace = SelectionResizeAnchorSpace.Absolute;
+                NativeSelectionResizeContext? selectionResizeContext = null;
+                if (force || gridChanged)
+                {
+                    CaptureRendererSelectionForCurrentViewportLocked();
+                    if (_vtProcessor is BasicVtProcessor || !TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+                    {
+                        selectionResizeAnchors = CreateSelectionResizeAnchorsLocked(out selectionResizeAnchorsAreSpans);
+                    }
+                    else
+                    {
+                        selectionResizeContext = CreateSelectionNativeViewportResizeContextLocked(
+                            safeColumns,
+                            safeRows,
+                            ReflowOnResize && _vtProcessor?.AlternateScreen != true,
+                            GetViewportTopAbsoluteRowLocked(viewportScrollSource));
+                        selectionResizeAnchors = selectionResizeContext?.Anchors;
+                        selectionResizeAnchorsAreSpans = selectionResizeContext?.AnchorsAreSpans == true;
+                        selectionResizeAnchorSpace = SelectionResizeAnchorSpace.NativeViewport;
+                    }
+                }
+
                 if (_vtProcessor is BasicVtProcessor basicVtProcessor)
                 {
                     if (force || gridChanged)
                     {
-                        basicVtProcessor.ResizeScreen(safeColumns, safeRows, widthPx, heightPx, ReflowOnResize);
+                        basicVtProcessor.ResizeScreen(
+                            safeColumns,
+                            safeRows,
+                            widthPx,
+                            heightPx,
+                            ReflowOnResize,
+                            selectionResizeAnchors.AsSpan());
                     }
                     else
                     {
@@ -1239,10 +1311,36 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 {
                     if (force || gridChanged)
                     {
-                        _screen.Resize(safeColumns, safeRows, ReflowOnResize && _vtProcessor?.AlternateScreen != true);
+                        bool resizeMirrorWithReflow = ReflowOnResize &&
+                            _vtProcessor?.AlternateScreen != true &&
+                            selectionResizeAnchorSpace != SelectionResizeAnchorSpace.NativeViewport;
+                        // Native processors own scrollback reflow. Keep the mirror dimensions current,
+                        // but use a compact viewport snapshot for selection anchors and fallback paint.
+                        _screen.Resize(
+                            safeColumns,
+                            safeRows,
+                            resizeMirrorWithReflow,
+                            trackedViewportPosition: null,
+                            selectionResizeAnchorSpace == SelectionResizeAnchorSpace.NativeViewport
+                                ? Span<TerminalGridPosition>.Empty
+                                : selectionResizeAnchors.AsSpan());
+                        if (selectionResizeContext is not null)
+                        {
+                            CopyViewportRows(selectionResizeContext.Snapshot, _screen);
+                        }
                     }
 
                     _vtProcessor?.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
+                }
+
+                if (selectionResizeAnchorSpace == SelectionResizeAnchorSpace.NativeViewport)
+                {
+                    ApplyNativeSelectionResizeContextLocked(selectionResizeContext);
+                    nativeSelectionResizeContext = selectionResizeContext;
+                }
+                else
+                {
+                    ApplySelectionResizeAnchorsLocked(selectionResizeAnchors, selectionResizeAnchorsAreSpans);
                 }
             }
         }
@@ -1276,6 +1374,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 lock (_screen!.SyncRoot)
                 {
                     SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+                    ApplyNativeSelectionResizeContextLocked(nativeSelectionResizeContext);
                 }
 
                 _preserveNativeViewportBottomOnNextResize = false;
@@ -1731,6 +1830,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
 
             UpdateRendererCursorForViewportLocked();
+            ApplyAnchoredSelectionToRendererLocked();
         }
 
         NotifyOutputUiUpdatedOnUiThread();
@@ -1806,6 +1906,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         ResetPointerButtons();
         _isMouseSelecting = false;
+        ClearAnchoredSelection();
         TerminalSelectionService.ClearSelection(_screen, _renderer, _presenter);
     }
 
@@ -2305,6 +2406,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         _selectionActiveColumn = column;
         _selectionActiveAbsoluteRow = absoluteRow;
+        _hasAnchoredSelection = true;
+        SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
         ApplyMouseSelectionToRenderer(topRow);
     }
 
@@ -2350,10 +2453,751 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        _renderer.SelectionStart = (_selectionAnchorColumn, _selectionAnchorAbsoluteRow - topRow);
-        _renderer.SelectionEnd = (_selectionActiveColumn, _selectionActiveAbsoluteRow - topRow);
+        ApplyAnchoredSelectionToRenderer(topRow);
         InvalidateScreen();
         _presenter?.Invalidate();
+    }
+
+    private void CaptureRendererSelectionForCurrentViewport()
+    {
+        if (_screen is null)
+        {
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            CaptureRendererSelectionForCurrentViewportLocked();
+        }
+    }
+
+    private void CaptureRendererSelectionForCurrentViewportLocked()
+    {
+        if (_hasAnchoredSelection ||
+            _renderer?.SelectionStart is not { } start ||
+            _renderer.SelectionEnd is not { } end)
+        {
+            return;
+        }
+
+        int topRow = GetViewportTopAbsoluteRowLocked();
+        _selectionAnchorColumn = start.Column;
+        _selectionAnchorAbsoluteRow = topRow + start.Row;
+        _selectionActiveColumn = end.Column;
+        _selectionActiveAbsoluteRow = topRow + end.Row;
+        _hasAnchoredSelection = true;
+    }
+
+    private void ApplyAnchoredSelectionToRendererLocked()
+    {
+        if (!_hasAnchoredSelection || _screen is null)
+        {
+            return;
+        }
+
+        ApplyAnchoredSelectionToRenderer(GetViewportTopAbsoluteRowLocked());
+    }
+
+    private void ApplyAnchoredSelectionToRenderer(int topRow)
+    {
+        if (!_hasAnchoredSelection || _renderer is null)
+        {
+            return;
+        }
+
+        _renderer.SelectionStart = (_selectionAnchorColumn, _selectionAnchorAbsoluteRow - topRow);
+        _renderer.SelectionEnd = (_selectionActiveColumn, _selectionActiveAbsoluteRow - topRow);
+        ApplySelectionSpansToRenderer(topRow);
+    }
+
+    private void ApplySelectionSpansToRenderer(int topRow)
+    {
+        if (_renderer is null)
+        {
+            ResetSelectionViewportSpanCache();
+            return;
+        }
+
+        if (_selectionAnchorSpans.Length == 0)
+        {
+            ResetSelectionViewportSpanCache();
+            _renderer.SetSelectionSpans(ReadOnlySpan<TerminalHighlightSpan>.Empty);
+            return;
+        }
+
+        if (ReferenceEquals(_selectionViewportSpansSource, _selectionAnchorSpans) &&
+            ReferenceEquals(_selectionViewportSpansRenderer, _renderer) &&
+            _selectionViewportSpansTopRow == topRow)
+        {
+            return;
+        }
+
+        TerminalHighlightSpan[] visibleSpans = new TerminalHighlightSpan[_selectionAnchorSpans.Length];
+        int visibleSpanCount = 0;
+        for (int i = 0; i < _selectionAnchorSpans.Length; i++)
+        {
+            TerminalHighlightSpan span = _selectionAnchorSpans[i];
+            int viewportRow = span.Row - topRow;
+            if (_screen is not null && (viewportRow < 0 || viewportRow >= _screen.ViewportRows))
+            {
+                continue;
+            }
+
+            visibleSpans[visibleSpanCount++] = new TerminalHighlightSpan(
+                viewportRow,
+                span.StartColumn,
+                span.EndColumn,
+                span.Kind);
+        }
+
+        if (visibleSpanCount == 0)
+        {
+            visibleSpans = Array.Empty<TerminalHighlightSpan>();
+        }
+        else if (visibleSpanCount != visibleSpans.Length)
+        {
+            Array.Resize(ref visibleSpans, visibleSpanCount);
+        }
+
+        _selectionViewportSpansSource = _selectionAnchorSpans;
+        _selectionViewportSpansRenderer = _renderer;
+        _selectionViewportSpansTopRow = topRow;
+        _renderer.SetSelectionSpans(visibleSpans);
+    }
+
+    private void SetSelectionAnchorSpans(TerminalHighlightSpan[] spans)
+    {
+        _selectionAnchorSpans = spans;
+        ResetSelectionViewportSpanCache();
+    }
+
+    private void ResetSelectionViewportSpanCache()
+    {
+        _selectionViewportSpansSource = null;
+        _selectionViewportSpansRenderer = null;
+        _selectionViewportSpansTopRow = int.MinValue;
+    }
+
+    private TerminalGridPosition[]? CreateSelectionResizeAnchorsLocked(out bool anchorsAreSpans)
+    {
+        anchorsAreSpans = false;
+        if (!_hasAnchoredSelection)
+        {
+            return null;
+        }
+
+        TerminalHighlightSpan[] spans = CreateCurrentSelectionAbsoluteSpansLocked();
+        if (spans.Length > 0)
+        {
+            anchorsAreSpans = true;
+            return CreateSelectionSpanResizeAnchors(spans);
+        }
+
+        return
+        [
+            new TerminalGridPosition(_selectionAnchorColumn, _selectionAnchorAbsoluteRow),
+            new TerminalGridPosition(_selectionActiveColumn, _selectionActiveAbsoluteRow),
+        ];
+    }
+
+    private TerminalHighlightSpan[] CreateCurrentSelectionAbsoluteSpansLocked()
+    {
+        if (_selectionAnchorSpans.Length > 0)
+        {
+            return _selectionAnchorSpans;
+        }
+
+        if (_renderer?.SelectionIsRectangle != true)
+        {
+            return Array.Empty<TerminalHighlightSpan>();
+        }
+
+        int left = Math.Min(_selectionAnchorColumn, _selectionActiveColumn);
+        int rightExclusive = Math.Max(_selectionAnchorColumn, _selectionActiveColumn);
+        if (rightExclusive <= left)
+        {
+            return Array.Empty<TerminalHighlightSpan>();
+        }
+
+        int top = Math.Min(_selectionAnchorAbsoluteRow, _selectionActiveAbsoluteRow);
+        int bottom = Math.Max(_selectionAnchorAbsoluteRow, _selectionActiveAbsoluteRow);
+        int rowCount = checked(bottom - top + 1);
+        TerminalHighlightSpan[] spans = new TerminalHighlightSpan[rowCount];
+        for (int i = 0; i < spans.Length; i++)
+        {
+            spans[i] = new TerminalHighlightSpan(
+                top + i,
+                left,
+                rightExclusive - 1,
+                TerminalHighlightKind.Selection);
+        }
+
+        return spans;
+    }
+
+    private static TerminalGridPosition[] CreateSelectionSpanResizeAnchors(ReadOnlySpan<TerminalHighlightSpan> spans)
+    {
+        TerminalGridPosition[] anchors = new TerminalGridPosition[checked(spans.Length * 2)];
+        for (int i = 0; i < spans.Length; i++)
+        {
+            TerminalHighlightSpan span = spans[i];
+            int anchorIndex = i * 2;
+            anchors[anchorIndex] = new TerminalGridPosition(span.StartColumn, span.Row);
+            anchors[anchorIndex + 1] = new TerminalGridPosition(span.EndColumn + 1, span.Row);
+        }
+
+        return anchors;
+    }
+
+    private NativeSelectionResizeContext? CreateSelectionNativeViewportResizeContextLocked(
+        int columns,
+        int viewportRows,
+        bool reflowOnResize,
+        int topRow)
+    {
+        if (!_hasAnchoredSelection || _screen is null)
+        {
+            return null;
+        }
+
+        TerminalHighlightSpan[] absoluteSpans = CreateCurrentSelectionAbsoluteSpansLocked();
+        bool anchorsAreSpans = absoluteSpans.Length > 0;
+        int selectionTopRow = Math.Min(_selectionAnchorAbsoluteRow, _selectionActiveAbsoluteRow);
+        int selectionBottomRow = Math.Max(_selectionAnchorAbsoluteRow, _selectionActiveAbsoluteRow);
+        if (anchorsAreSpans)
+        {
+            for (int i = 0; i < absoluteSpans.Length; i++)
+            {
+                TerminalHighlightSpan span = absoluteSpans[i];
+                selectionTopRow = Math.Min(selectionTopRow, span.Row);
+                selectionBottomRow = Math.Max(selectionBottomRow, span.Row);
+            }
+        }
+
+        bool selectionFitsViewport = selectionTopRow >= topRow &&
+            selectionBottomRow < topRow + _screen.ViewportRows;
+        int snapshotFirstAbsoluteRow = topRow;
+        TerminalScreen viewportSnapshot;
+        if (selectionFitsViewport)
+        {
+            // Native mirrors can contain padded scrollback rows and style-only blank cells.
+            // Selection resize only needs the visible text cells that can affect anchor rows.
+                viewportSnapshot = new(
+                    _screen.Columns,
+                    _screen.ViewportRows,
+                    CalculateSnapshotScrollbackLimit(_screen.Columns, _screen.ViewportRows, viewportRows))
+            {
+                DefaultForeground = _screen.DefaultForeground,
+                DefaultBackground = _screen.DefaultBackground,
+            };
+
+            for (int row = 0; row < _screen.ViewportRows; row++)
+            {
+                TerminalRow snapshotRow = viewportSnapshot.GetViewportRow(row);
+                snapshotRow.CopyFrom(
+                    _screen.GetViewportRow(row),
+                    _screen.DefaultForeground,
+                    _screen.DefaultBackground);
+                ClearStyleOnlyTrailingCells(
+                    snapshotRow,
+                    _screen.DefaultForeground,
+                    _screen.DefaultBackground);
+            }
+        }
+        else if (_vtProcessor is ITerminalScreenSnapshotSource snapshotSource)
+        {
+            int maxAbsoluteRow = GetSelectionMaxAbsoluteRowLocked();
+            int paddingRows = Math.Max(1, _screen.ViewportRows);
+            int snapshotLastAbsoluteRow = Math.Min(
+                maxAbsoluteRow,
+                Math.Max(selectionBottomRow, topRow + _screen.ViewportRows - 1) + paddingRows);
+            snapshotFirstAbsoluteRow = Math.Max(0, Math.Min(selectionTopRow, topRow) - paddingRows);
+            int snapshotRowCount = checked(snapshotLastAbsoluteRow - snapshotFirstAbsoluteRow + 1);
+            int snapshotScrollbackLimit = CalculateSnapshotScrollbackLimit(
+                _screen.Columns,
+                snapshotRowCount,
+                viewportRows);
+            if (!snapshotSource.TryCreateScreenSnapshot(
+                    snapshotFirstAbsoluteRow,
+                    snapshotRowCount,
+                    snapshotScrollbackLimit,
+                    out viewportSnapshot))
+            {
+                return null;
+            }
+        }
+        else
+        {
+            return null;
+        }
+
+        TerminalGridPosition[] anchors;
+        if (anchorsAreSpans)
+        {
+            TerminalHighlightSpan[] viewportSpans = new TerminalHighlightSpan[absoluteSpans.Length];
+            for (int i = 0; i < absoluteSpans.Length; i++)
+            {
+                TerminalHighlightSpan span = absoluteSpans[i];
+                viewportSpans[i] = new TerminalHighlightSpan(
+                    span.Row - snapshotFirstAbsoluteRow,
+                    span.StartColumn,
+                    span.EndColumn,
+                    span.Kind);
+            }
+
+            anchors = CreateSelectionSpanResizeAnchors(viewportSpans);
+        }
+        else
+        {
+            anchors =
+            [
+                new TerminalGridPosition(_selectionAnchorColumn, _selectionAnchorAbsoluteRow - snapshotFirstAbsoluteRow),
+                new TerminalGridPosition(_selectionActiveColumn, _selectionActiveAbsoluteRow - snapshotFirstAbsoluteRow),
+            ];
+        }
+
+        viewportSnapshot.Resize(
+            columns,
+            viewportRows,
+            reflowOnResize,
+            trackedViewportPosition: null,
+            anchors);
+        return new NativeSelectionResizeContext(viewportSnapshot, anchors, anchorsAreSpans);
+    }
+
+    private static int CalculateSnapshotScrollbackLimit(
+        int columns,
+        int snapshotRows,
+        int resizedViewportRows)
+    {
+        long maxReflowedRows = (long)Math.Max(1, columns) * Math.Max(1, snapshotRows);
+        long neededScrollback = maxReflowedRows - Math.Max(1, resizedViewportRows);
+        return neededScrollback <= 0
+            ? 0
+            : neededScrollback >= int.MaxValue
+                ? int.MaxValue
+                : (int)neededScrollback;
+    }
+
+    private static void CopyViewportRows(TerminalScreen source, TerminalScreen destination)
+    {
+        int rowCount = Math.Min(source.ViewportRows, destination.ViewportRows);
+        for (int row = 0; row < rowCount; row++)
+        {
+            destination.GetViewportRow(row).CopyFrom(
+                source.GetViewportRow(row),
+                destination.DefaultForeground,
+                destination.DefaultBackground);
+        }
+    }
+
+    private static void ClearStyleOnlyTrailingCells(TerminalRow row, uint foreground, uint background)
+    {
+        int lastContentColumn = -1;
+        for (int column = 0; column < row.Columns; column++)
+        {
+            TerminalCell cell = row[column];
+            if (!cell.HasContent)
+            {
+                continue;
+            }
+
+            lastContentColumn = cell.Width == 2
+                ? Math.Min(row.Columns - 1, column + 1)
+                : column;
+        }
+
+        for (int column = lastContentColumn + 1; column < row.Columns; column++)
+        {
+            row[column] = TerminalCell.Empty(foreground, background);
+        }
+    }
+
+    private void ApplySelectionResizeAnchorsLocked(
+        TerminalGridPosition[]? selectionResizeAnchors,
+        bool anchorsAreSpans)
+    {
+        if (!_hasAnchoredSelection ||
+            selectionResizeAnchors is not { Length: >= 2 })
+        {
+            return;
+        }
+
+        if (anchorsAreSpans)
+        {
+            SetSelectionAnchorSpans(CreateSelectionSpansFromResizeAnchors(
+                selectionResizeAnchors,
+                rowOffset: 0,
+                _screen?.Columns ?? 1));
+            UpdateSelectionEndpointsFromSpans();
+            ApplyAnchoredSelectionToRendererLocked();
+            return;
+        }
+
+        SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
+        _selectionAnchorColumn = selectionResizeAnchors[0].Column;
+        _selectionActiveColumn = selectionResizeAnchors[1].Column;
+        _selectionAnchorAbsoluteRow = selectionResizeAnchors[0].Row;
+        _selectionActiveAbsoluteRow = selectionResizeAnchors[1].Row;
+
+        ApplyAnchoredSelectionToRendererLocked();
+    }
+
+    private void ApplyNativeSelectionResizeContextLocked(NativeSelectionResizeContext? context)
+    {
+        if (!_hasAnchoredSelection ||
+            _screen is null ||
+            context?.Anchors is not { Length: >= 2 } anchors)
+        {
+            return;
+        }
+
+        int rowOffset = FindNativeSelectionSnapshotViewportRowOffset(context, _screen);
+        int topRow = GetViewportTopAbsoluteRowLocked();
+        int absoluteRowOffset = topRow + rowOffset;
+        if (context.AnchorsAreSpans)
+        {
+            SetSelectionAnchorSpans(CreateSelectionSpansFromResizeAnchors(
+                anchors,
+                absoluteRowOffset,
+                _screen.Columns));
+            UpdateSelectionEndpointsFromSpans();
+            ApplyAnchoredSelectionToRendererLocked();
+            return;
+        }
+
+        SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
+        _selectionAnchorColumn = anchors[0].Column;
+        _selectionAnchorAbsoluteRow = anchors[0].Row + absoluteRowOffset;
+        _selectionActiveColumn = anchors[1].Column;
+        _selectionActiveAbsoluteRow = anchors[1].Row + absoluteRowOffset;
+
+        ApplyAnchoredSelectionToRendererLocked();
+    }
+
+    private static TerminalHighlightSpan[] CreateSelectionSpansFromResizeAnchors(
+        ReadOnlySpan<TerminalGridPosition> anchors,
+        int rowOffset,
+        int columns)
+    {
+        List<TerminalHighlightSpan> spans = new(anchors.Length);
+        int clampedColumns = Math.Max(1, columns);
+        for (int i = 0; i + 1 < anchors.Length; i += 2)
+        {
+            TerminalGridPosition start = anchors[i];
+            TerminalGridPosition end = anchors[i + 1];
+            if (start.Row > end.Row || (start.Row == end.Row && start.Column > end.Column))
+            {
+                (start, end) = (end, start);
+            }
+
+            for (int row = start.Row; row <= end.Row; row++)
+            {
+                int left = row == start.Row ? start.Column : 0;
+                int rightExclusive = row == end.Row ? end.Column : clampedColumns;
+                left = Math.Clamp(left, 0, clampedColumns);
+                rightExclusive = Math.Clamp(rightExclusive, 0, clampedColumns);
+                if (rightExclusive <= left)
+                {
+                    continue;
+                }
+
+                spans.Add(new TerminalHighlightSpan(
+                    row + rowOffset,
+                    left,
+                    rightExclusive - 1,
+                    TerminalHighlightKind.Selection));
+            }
+        }
+
+        return spans.ToArray();
+    }
+
+    private void UpdateSelectionEndpointsFromSpans()
+    {
+        if (_selectionAnchorSpans.Length == 0)
+        {
+            return;
+        }
+
+        TerminalHighlightSpan first = _selectionAnchorSpans[0];
+        TerminalHighlightSpan last = _selectionAnchorSpans[^1];
+        _selectionAnchorColumn = first.StartColumn;
+        _selectionAnchorAbsoluteRow = first.Row;
+        _selectionActiveColumn = last.EndColumn + 1;
+        _selectionActiveAbsoluteRow = last.Row;
+    }
+
+    private static int FindNativeSelectionSnapshotViewportRowOffset(
+        NativeSelectionResizeContext context,
+        TerminalScreen destination)
+    {
+        int snapshotRowCount = context.Snapshot.TotalRows;
+        int destinationRowCount = destination.ViewportRows;
+        if (snapshotRowCount <= 0 || destinationRowCount <= 0)
+        {
+            return 0;
+        }
+
+        ComparableRowKey[] snapshotRows = CreateComparableScreenRowKeys(context.Snapshot);
+        ComparableRowKey[] destinationRows = CreateComparableViewportRowKeys(destination);
+        GetNativeSelectionSnapshotAnchorRange(context.Anchors, out int anchorTop, out int anchorBottom);
+
+        Dictionary<int, NativeSelectionOffsetScore>? offsetScores = null;
+        for (int snapshotRow = 0; snapshotRow < snapshotRowCount; snapshotRow++)
+        {
+            ComparableRowKey rowKey = snapshotRows[snapshotRow];
+            if (rowKey.TextLength == 0)
+            {
+                continue;
+            }
+
+            for (int destinationRow = 0; destinationRow < destinationRowCount; destinationRow++)
+            {
+                if (rowKey != destinationRows[destinationRow] ||
+                    !ComparableRowsEqual(
+                        context.Snapshot.GetRow(snapshotRow),
+                        destination.GetViewportRow(destinationRow),
+                        rowKey.TextLength))
+                {
+                    continue;
+                }
+
+                int offset = destinationRow - snapshotRow;
+                long scoreDelta = 1024 - Math.Min(1024, GetDistanceFromRange(snapshotRow, anchorTop, anchorBottom));
+                offsetScores ??= [];
+                offsetScores.TryGetValue(offset, out NativeSelectionOffsetScore score);
+                offsetScores[offset] = new NativeSelectionOffsetScore(
+                    score.Matches + 1,
+                    score.Score + scoreDelta);
+            }
+        }
+
+        int bestOffset = 0;
+        int bestMatches = 0;
+        long bestScore = long.MinValue;
+        if (offsetScores is null)
+        {
+            return 0;
+        }
+
+        foreach (KeyValuePair<int, NativeSelectionOffsetScore> offsetScore in offsetScores)
+        {
+            int offset = offsetScore.Key;
+            NativeSelectionOffsetScore score = offsetScore.Value;
+            if (score.Matches > bestMatches ||
+                (score.Matches == bestMatches &&
+                 (score.Score > bestScore ||
+                  (score.Score == bestScore && offset < bestOffset))))
+            {
+                bestMatches = score.Matches;
+                bestScore = score.Score;
+                bestOffset = offset;
+            }
+        }
+
+        return bestMatches > 0 ? bestOffset : 0;
+    }
+
+    private static void GetNativeSelectionSnapshotAnchorRange(
+        ReadOnlySpan<TerminalGridPosition> anchors,
+        out int anchorTop,
+        out int anchorBottom)
+    {
+        anchorTop = int.MaxValue;
+        anchorBottom = int.MinValue;
+        for (int i = 0; i < anchors.Length; i++)
+        {
+            int row = anchors[i].Row;
+            anchorTop = Math.Min(anchorTop, row);
+            anchorBottom = Math.Max(anchorBottom, row);
+        }
+
+        if (anchorTop == int.MaxValue)
+        {
+            anchorTop = 0;
+            anchorBottom = 0;
+        }
+    }
+
+    private static int GetDistanceFromRange(int value, int start, int end)
+    {
+        if (value < start)
+        {
+            return start - value;
+        }
+
+        return value > end ? value - end : 0;
+    }
+
+    private static ComparableRowKey[] CreateComparableViewportRowKeys(TerminalScreen screen)
+    {
+        ComparableRowKey[] rows = new ComparableRowKey[screen.ViewportRows];
+        for (int row = 0; row < rows.Length; row++)
+        {
+            rows[row] = CreateComparableRowKey(screen.GetViewportRow(row));
+        }
+
+        return rows;
+    }
+
+    private static ComparableRowKey[] CreateComparableScreenRowKeys(TerminalScreen screen)
+    {
+        ComparableRowKey[] rows = new ComparableRowKey[screen.TotalRows];
+        for (int row = 0; row < rows.Length; row++)
+        {
+            rows[row] = CreateComparableRowKey(screen.GetRow(row));
+        }
+
+        return rows;
+    }
+
+    private static ComparableRowKey CreateComparableRowKey(TerminalRow row)
+    {
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        int lastContentColumn = FindComparableLastContentColumn(cells);
+
+        if (lastContentColumn < 0)
+        {
+            return default;
+        }
+
+        ulong hash = ComparableRowFnvOffsetBasis;
+        int textLength = 0;
+        Span<char> runeChars = stackalloc char[2];
+        for (int column = 0; column <= lastContentColumn; column++)
+        {
+            ref readonly TerminalCell cell = ref cells[column];
+            if (cell.Width == 0 || (cell.Attributes & CellAttributes.Hidden) != 0)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                string grapheme = cell.Grapheme;
+                for (int i = 0; i < grapheme.Length; i++)
+                {
+                    hash = AddComparableRowChar(hash, grapheme[i]);
+                }
+
+                textLength += grapheme.Length;
+            }
+            else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
+            {
+                Rune rune = new(cell.Codepoint);
+                int charsWritten = rune.EncodeToUtf16(runeChars);
+                for (int i = 0; i < charsWritten; i++)
+                {
+                    hash = AddComparableRowChar(hash, runeChars[i]);
+                }
+
+                textLength += charsWritten;
+            }
+            else
+            {
+                hash = AddComparableRowChar(hash, ' ');
+                textLength++;
+            }
+        }
+
+        return new ComparableRowKey(textLength, hash);
+    }
+
+    private static bool ComparableRowsEqual(TerminalRow left, TerminalRow right, int textLength)
+    {
+        if (textLength <= ComparableRowStackCharLimit)
+        {
+            Span<char> leftText = stackalloc char[textLength];
+            Span<char> rightText = stackalloc char[textLength];
+            WriteComparableRowText(left, leftText);
+            WriteComparableRowText(right, rightText);
+            return leftText.SequenceEqual(rightText);
+        }
+
+        char[] leftRented = ArrayPool<char>.Shared.Rent(textLength);
+        char[] rightRented = ArrayPool<char>.Shared.Rent(textLength);
+        try
+        {
+            Span<char> leftText = leftRented.AsSpan(0, textLength);
+            Span<char> rightText = rightRented.AsSpan(0, textLength);
+            WriteComparableRowText(left, leftText);
+            WriteComparableRowText(right, rightText);
+            return leftText.SequenceEqual(rightText);
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(leftRented);
+            ArrayPool<char>.Shared.Return(rightRented);
+        }
+    }
+
+    private static int FindComparableLastContentColumn(ReadOnlySpan<TerminalCell> cells)
+    {
+        int lastContentColumn = -1;
+        for (int column = 0; column < cells.Length; column++)
+        {
+            ref readonly TerminalCell cell = ref cells[column];
+            if (cell.Width == 0 ||
+                (cell.Attributes & CellAttributes.Hidden) != 0 ||
+                !cell.HasContent)
+            {
+                continue;
+            }
+
+            lastContentColumn = column;
+        }
+
+        return lastContentColumn;
+    }
+
+    private static void WriteComparableRowText(TerminalRow row, Span<char> destination)
+    {
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        int lastContentColumn = FindComparableLastContentColumn(cells);
+        int written = 0;
+        Span<char> runeChars = stackalloc char[2];
+        for (int column = 0; column <= lastContentColumn; column++)
+        {
+            ref readonly TerminalCell cell = ref cells[column];
+            if (cell.Width == 0 || (cell.Attributes & CellAttributes.Hidden) != 0)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                string grapheme = cell.Grapheme;
+                grapheme.AsSpan().CopyTo(destination[written..]);
+                written += grapheme.Length;
+            }
+            else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
+            {
+                Rune rune = new(cell.Codepoint);
+                int charsWritten = rune.EncodeToUtf16(runeChars);
+                runeChars[..charsWritten].CopyTo(destination[written..]);
+                written += charsWritten;
+            }
+            else
+            {
+                destination[written++] = ' ';
+            }
+        }
+
+        Debug.Assert(written == destination.Length);
+    }
+
+    private static ulong AddComparableRowChar(ulong hash, char value)
+    {
+        hash ^= value;
+        return hash * ComparableRowFnvPrime;
+    }
+
+    private void ClearAnchoredSelection()
+    {
+        _hasAnchoredSelection = false;
+        SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
+        _renderer?.SetSelectionSpans(ReadOnlySpan<TerminalHighlightSpan>.Empty);
     }
 
     private void UpdateSelectionAutoScroll(Point point)
@@ -2565,11 +3409,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                     : 0;
             if (deltaRows != 0)
             {
+                CaptureRendererSelectionForCurrentViewport();
                 viewportScrollSource.ScrollViewportByRows(deltaRows);
                 lock (_screen!.SyncRoot)
                 {
                     SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
                     UpdateRendererCursorForViewportLocked();
+                    ApplyAnchoredSelectionToRendererLocked();
                 }
 
                 _presenter?.Invalidate();
@@ -2580,6 +3426,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        CaptureRendererSelectionForCurrentViewport();
         TerminalScrollService.HandlePointerWheel(
             e,
             _scrollViewer,
@@ -2587,6 +3434,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _presenter,
             RaiseScrollInvalidated);
         UpdateRendererCursorForViewport();
+        UpdateRendererParityStateFromScreen();
         e.Handled = true;
     }
 
@@ -2693,9 +3541,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        int topRow;
+        lock (_screen.SyncRoot)
+        {
+            topRow = GetViewportTopAbsoluteRowLocked();
+        }
+
+        _selectionAnchorColumn = 0;
+        _selectionAnchorAbsoluteRow = topRow;
+        _selectionActiveColumn = _screen.Columns;
+        _selectionActiveAbsoluteRow = topRow + _screen.ViewportRows - 1;
+        _hasAnchoredSelection = true;
+        SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
         _renderer.SelectionStart = (0, 0);
         _renderer.SelectionEnd = (_screen.Columns, _screen.ViewportRows - 1);
         _renderer.SelectionIsRectangle = false;
+        _renderer.SetSelectionSpans(ReadOnlySpan<TerminalHighlightSpan>.Empty);
         InvalidateScreen();
         _presenter?.Invalidate();
     }
@@ -2705,11 +3566,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void ClearSelection()
     {
+        ClearAnchoredSelection();
         TerminalSelectionService.ClearSelection(_screen, _renderer, _presenter);
     }
 
     private bool HasRendererSelection() =>
-        _renderer is { SelectionStart: not null, SelectionEnd: not null };
+        _renderer is not null &&
+        ((_renderer.SelectionStart is not null && _renderer.SelectionEnd is not null) ||
+         !_renderer.GetSelectionSpans().IsEmpty);
 
     /// <summary>
     /// Updates the hovered hyperlink URL used for hyperlink-hover underline styling.
@@ -2843,6 +3707,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void ScrollByRows(int rows)
     {
+        CaptureRendererSelectionForCurrentViewport();
         if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
         {
             viewportScrollSource.ScrollViewportByRows(rows);
@@ -2851,6 +3716,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 lock (_screen.SyncRoot)
                 {
                     SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+                    ApplyAnchoredSelectionToRendererLocked();
                 }
             }
 
@@ -2871,6 +3737,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void ScrollToBottom()
     {
+        CaptureRendererSelectionForCurrentViewport();
         if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
         {
             viewportScrollSource.ScrollViewportToBottom();
@@ -2879,6 +3746,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 lock (_screen.SyncRoot)
                 {
                     SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+                    ApplyAnchoredSelectionToRendererLocked();
                 }
             }
 
@@ -4186,6 +5054,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _ = TryUpdateHoveredLinkFromPointerLocked();
+        ApplyAnchoredSelectionToRendererLocked();
         _renderer.BackgroundOpacityEnabled = _backgroundOpacityEnabled;
         _renderer.BackgroundOpacityCells = RendererBackgroundOpacityCells;
         _renderer.BackgroundOpacity = RendererBackgroundOpacity;

@@ -328,6 +328,60 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_ResizeWithReflow_MapsAbsoluteAnchorsToOriginalContent()
+    {
+        TerminalScreen screen = new(12, 3);
+        TerminalRow row = screen.GetViewportRow(0);
+        for (int column = 0; column < 12; column++)
+        {
+            row[column].Codepoint = 'A' + column;
+            row[column].Width = 1;
+        }
+
+        TerminalGridPosition[] anchors =
+        [
+            new(8, 0),
+            new(11, 0),
+            new(12, 0),
+        ];
+
+        screen.Resize(6, 3, reflowOnResize: true, trackedViewportPosition: null, anchors);
+
+        Assert.Equal(new TerminalGridPosition(2, 1), anchors[0]);
+        Assert.Equal(new TerminalGridPosition(5, 1), anchors[1]);
+        Assert.Equal(new TerminalGridPosition(6, 1), anchors[2]);
+        Assert.Equal('I', screen.GetRow(anchors[0].Row)[anchors[0].Column].Codepoint);
+        Assert.Equal('L', screen.GetRow(anchors[1].Row)[anchors[1].Column].Codepoint);
+
+        screen.Resize(12, 3, reflowOnResize: true, trackedViewportPosition: null, anchors);
+
+        Assert.Equal(new TerminalGridPosition(8, 0), anchors[0]);
+        Assert.Equal(new TerminalGridPosition(11, 0), anchors[1]);
+        Assert.Equal(new TerminalGridPosition(12, 0), anchors[2]);
+    }
+
+    [Fact]
+    public void TerminalScreen_ResizeWithReflow_DoesNotExtendAnchorsThroughTrailingBlankCells()
+    {
+        TerminalScreen screen = new(12, 3);
+        SetAscii(screen.GetViewportRow(0), "ABCD");
+        SetAscii(screen.GetViewportRow(1), "NEXT");
+
+        TerminalGridPosition[] anchors =
+        [
+            new(12, 0),
+            new(0, 1),
+        ];
+
+        screen.Resize(6, 3, reflowOnResize: true, trackedViewportPosition: null, anchors);
+
+        Assert.Equal(new TerminalGridPosition(4, 0), anchors[0]);
+        Assert.Equal(new TerminalGridPosition(0, 1), anchors[1]);
+        Assert.Equal("ABCD", ReadAscii(screen.GetRow(0), 4));
+        Assert.Equal("NEXT", ReadAscii(screen.GetRow(1), 4));
+    }
+
+    [Fact]
     public void TerminalScreen_ResizeWithReflowToOneColumn_DropsWideCharacterAsBlankCell()
     {
         TerminalScreen screen = new(2, 1);
@@ -695,5 +749,26 @@ public class TerminalScreenTests
         var newRow = screen.AddRow();
         // The default color args in TerminalRow constructor apply
         Assert.NotNull(newRow);
+    }
+
+    private static void SetAscii(TerminalRow row, string text)
+    {
+        for (int column = 0; column < text.Length; column++)
+        {
+            row[column].Codepoint = text[column];
+            row[column].Width = 1;
+        }
+    }
+
+    private static string ReadAscii(TerminalRow row, int length)
+    {
+        char[] chars = new char[length];
+        for (int column = 0; column < length; column++)
+        {
+            int codepoint = row[column].Codepoint;
+            chars[column] = codepoint <= 0 ? ' ' : (char)codepoint;
+        }
+
+        return new string(chars);
     }
 }

@@ -2,6 +2,8 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Terminal - Optional selection export and paste encoding contracts.
 
+using RoyalTerminal.Avalonia.Rendering;
+
 namespace RoyalTerminal.Terminal;
 
 /// <summary>
@@ -47,6 +49,26 @@ public interface ITerminalSelectionExportSource
     /// Reads the supplied viewport-relative selection.
     /// </summary>
     string? ReadSelection(in TerminalSelectionRange selection);
+}
+
+/// <summary>
+/// Optional VT processor capability for exporting a screen-row snapshot.
+/// </summary>
+public interface ITerminalScreenSnapshotSource
+{
+    /// <summary>
+    /// Creates a screen snapshot for the requested absolute row range.
+    /// </summary>
+    /// <param name="firstAbsoluteRow">The first absolute row to include.</param>
+    /// <param name="rowCount">The maximum number of rows to include.</param>
+    /// <param name="scrollbackLimit">The scrollback limit to use for the returned snapshot.</param>
+    /// <param name="snapshot">The created screen snapshot when successful.</param>
+    /// <returns><see langword="true" /> when the requested snapshot was created.</returns>
+    bool TryCreateScreenSnapshot(
+        int firstAbsoluteRow,
+        int rowCount,
+        int scrollbackLimit,
+        out TerminalScreen snapshot);
 }
 
 /// <summary>

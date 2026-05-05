@@ -128,6 +128,30 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_MirrorRowsPreserveNativeWrapFlags_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
+
+        processor.Process("ABCDEFGHIJKLMN"u8);
+
+        Assert.True(screen.GetViewportRow(0).WrapsToNext);
+        Assert.False(screen.GetViewportRow(1).WrapsToNext);
+
+        processor.NotifyResize(columns: 6, rows: 4, widthPx: 48, heightPx: 64);
+
+        Assert.True(screen.GetViewportRow(0).WrapsToNext);
+        Assert.True(screen.GetViewportRow(1).WrapsToNext);
+        Assert.False(screen.GetViewportRow(2).WrapsToNext);
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_KittyGraphicsAndHyperlinks_PopulateManagedScreen_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())

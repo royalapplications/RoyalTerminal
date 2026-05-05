@@ -4401,6 +4401,26 @@ public sealed class BasicVtProcessor : IVtProcessor,
     /// </summary>
     public void ResizeScreen(int columns, int rows, int widthPx, int heightPx, bool reflowOnResize)
     {
+        ResizeScreen(
+            columns,
+            rows,
+            widthPx,
+            heightPx,
+            reflowOnResize,
+            Span<TerminalGridPosition>.Empty);
+    }
+
+    /// <summary>
+    /// Resizes the associated screen buffer and remaps the managed cursor plus absolute grid anchors through row reflow.
+    /// </summary>
+    public void ResizeScreen(
+        int columns,
+        int rows,
+        int widthPx,
+        int heightPx,
+        bool reflowOnResize,
+        Span<TerminalGridPosition> trackedAbsolutePositions)
+    {
         _widthPx = Math.Max(0, widthPx);
         _heightPx = Math.Max(0, heightPx);
 
@@ -4423,7 +4443,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 columns,
                 rows,
                 reflowOnResize && !alternateScreen,
-                alternateScreen ? null : new TerminalGridPosition(_cursorCol, _cursorRow));
+                alternateScreen ? null : new TerminalGridPosition(_cursorCol, _cursorRow),
+                trackedAbsolutePositions);
         }
         finally
         {

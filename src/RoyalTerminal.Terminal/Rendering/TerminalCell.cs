@@ -130,6 +130,7 @@ public enum TerminalHighlightKind : byte
     SearchMatch = 0,
     SearchSelected = 1,
     HyperlinkHover = 2,
+    Selection = 3,
 }
 
 /// <summary>
@@ -1234,20 +1235,63 @@ public sealed class TerminalScreen
         bool reflowOnResize = true,
         TerminalGridPosition? trackedViewportPosition = null)
     {
+        return Resize(
+            columns,
+            viewportRows,
+            reflowOnResize,
+            trackedViewportPosition,
+            Span<TerminalGridPosition>.Empty);
+    }
+
+    /// <summary>
+    /// Resizes the screen to new dimensions and maps absolute grid anchors through row reflow.
+    /// </summary>
+    /// <param name="columns">The new column count.</param>
+    /// <param name="viewportRows">The new viewport row count.</param>
+    /// <param name="reflowOnResize">Whether existing rows should be reflowed when the width changes.</param>
+    /// <param name="trackedViewportPosition">Optional viewport-relative position to map and return.</param>
+    /// <param name="trackedAbsolutePositions">
+    /// Absolute row positions to map in place. The <see cref="TerminalGridPosition.Row"/> value is treated as an
+    /// absolute row before resizing and is replaced with the mapped absolute row after resizing.
+    /// </param>
+    public TerminalGridPosition Resize(
+        int columns,
+        int viewportRows,
+        bool reflowOnResize,
+        TerminalGridPosition? trackedViewportPosition,
+        Span<TerminalGridPosition> trackedAbsolutePositions)
+    {
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(viewportRows, 1);
 
         int oldColumns = Columns;
         List<TerminalRasterImagePlacement>? reflowRasterPlacements = null;
-        List<ReflowAnchorPosition>? reflowRasterAnchors = null;
-        if (columns != oldColumns && reflowOnResize && _rasterPlacements.Count > 0)
+        List<ReflowAnchorPosition>? reflowAnchors = null;
+        int trackedAbsolutePositionCount = trackedAbsolutePositions.Length;
+        if (columns != oldColumns &&
+            reflowOnResize &&
+            (trackedAbsolutePositionCount > 0 || _rasterPlacements.Count > 0))
         {
-            reflowRasterPlacements = new List<TerminalRasterImagePlacement>(_rasterPlacements);
-            reflowRasterAnchors = new List<ReflowAnchorPosition>(_rasterPlacements.Count);
+            if (_rasterPlacements.Count > 0)
+            {
+                reflowRasterPlacements = new List<TerminalRasterImagePlacement>(_rasterPlacements);
+            }
+
+            reflowAnchors = new List<ReflowAnchorPosition>(trackedAbsolutePositionCount + _rasterPlacements.Count);
+            for (int i = 0; i < trackedAbsolutePositionCount; i++)
+            {
+                TerminalGridPosition trackedAbsolutePosition = trackedAbsolutePositions[i];
+                reflowAnchors.Add(new ReflowAnchorPosition(
+                    trackedAbsolutePosition.Row,
+                    trackedAbsolutePosition.Column,
+                    allowEndColumn: true,
+                    extendLineToColumn: false));
+            }
+
             for (int i = 0; i < _rasterPlacements.Count; i++)
             {
                 TerminalRasterImagePlacement placement = _rasterPlacements[i];
-                reflowRasterAnchors.Add(new ReflowAnchorPosition(
+                reflowAnchors.Add(new ReflowAnchorPosition(
                     placement.AnchorRow,
                     placement.AnchorColumn));
             }
@@ -1270,7 +1314,7 @@ public sealed class TerminalScreen
                     columns,
                     trackedAbsoluteRow,
                     trackedColumn,
-                    reflowRasterAnchors,
+                    reflowAnchors,
                     out mappedAbsoluteRow,
                     out mappedColumn);
             }
@@ -1310,13 +1354,27 @@ public sealed class TerminalScreen
             mappedAbsoluteRow -= removedRows;
         }
 
-        if (reflowRasterPlacements is not null && reflowRasterAnchors is not null)
+        if (reflowRasterPlacements is not null && reflowAnchors is not null)
         {
-            RemapRasterGraphicsAfterReflow(reflowRasterPlacements, reflowRasterAnchors, removedRows);
+            RemapTrackedAbsolutePositionsAfterReflow(trackedAbsolutePositions, reflowAnchors, removedRows);
+            RemapRasterGraphicsAfterReflow(
+                reflowRasterPlacements,
+                reflowAnchors,
+                trackedAbsolutePositionCount,
+                removedRows);
+        }
+        else if (reflowAnchors is not null)
+        {
+            RemapTrackedAbsolutePositionsAfterReflow(trackedAbsolutePositions, reflowAnchors, removedRows);
         }
         else if (removedRows > 0)
         {
+            RemapTrackedAbsolutePositionsWithoutReflow(trackedAbsolutePositions, columns, removedRows);
             ShiftRasterGraphicsAfterTopRowsRemoved(removedRows);
+        }
+        else
+        {
+            RemapTrackedAbsolutePositionsWithoutReflow(trackedAbsolutePositions, columns, removedRows);
         }
 
         ScrollOffset = _viewportTop;
@@ -1327,6 +1385,40 @@ public sealed class TerminalScreen
         }
 
         return GetViewportPositionForAbsoluteRow(mappedAbsoluteRow, mappedColumn);
+    }
+
+    private void RemapTrackedAbsolutePositionsAfterReflow(
+        Span<TerminalGridPosition> trackedAbsolutePositions,
+        IReadOnlyList<ReflowAnchorPosition> mappedAnchors,
+        int removedRows)
+    {
+        for (int i = 0; i < trackedAbsolutePositions.Length && i < mappedAnchors.Count; i++)
+        {
+            ReflowAnchorPosition mappedAnchor = mappedAnchors[i];
+            int absoluteRow = mappedAnchor.IsMapped
+                ? mappedAnchor.NewAbsoluteRow - removedRows
+                : mappedAnchor.OldAbsoluteRow - removedRows;
+            int column = mappedAnchor.IsMapped
+                ? mappedAnchor.NewColumn
+                : mappedAnchor.OldColumn;
+            trackedAbsolutePositions[i] = new TerminalGridPosition(
+                Math.Clamp(column, 0, Columns),
+                Math.Clamp(absoluteRow, 0, Math.Max(0, _rows.Count - 1)));
+        }
+    }
+
+    private void RemapTrackedAbsolutePositionsWithoutReflow(
+        Span<TerminalGridPosition> trackedAbsolutePositions,
+        int columns,
+        int removedRows)
+    {
+        for (int i = 0; i < trackedAbsolutePositions.Length; i++)
+        {
+            TerminalGridPosition position = trackedAbsolutePositions[i];
+            trackedAbsolutePositions[i] = new TerminalGridPosition(
+                Math.Clamp(position.Column, 0, columns),
+                Math.Clamp(position.Row - removedRows, 0, Math.Max(0, _rows.Count - 1)));
+        }
     }
 
     private void ResizeRows(int columns)
@@ -1360,11 +1452,14 @@ public sealed class TerminalScreen
     {
         List<TerminalRow> reflowedRows = new(_rows.Count);
         List<TerminalCell> logicalLine = new(Math.Max(Columns, columns));
-        List<int>? lineTrackedIndexes = additionalTrackedPositions is null ? null : new List<int>();
-        List<int>? lineTrackedOffsets = additionalTrackedPositions is null ? null : new List<int>();
+        ReflowAnchorProcessingIndex[]? trackedPositionIndexes =
+            CreateReflowAnchorProcessingOrder(additionalTrackedPositions);
+        List<int>? lineTrackedIndexes = trackedPositionIndexes is null ? null : new List<int>();
+        List<int>? lineTrackedOffsets = trackedPositionIndexes is null ? null : new List<int>();
         mappedAbsoluteRow = trackedAbsoluteRow;
         mappedColumn = Math.Clamp(trackedColumn, 0, columns);
 
+        int nextTrackedPositionIndex = 0;
         int rowIndex = 0;
         while (rowIndex < _rows.Count)
         {
@@ -1385,20 +1480,39 @@ public sealed class TerminalScreen
                     trackedLogicalOffset = logicalLine.Count + clampedTrackedColumn;
                 }
 
-                if (additionalTrackedPositions is not null)
+                if (additionalTrackedPositions is not null && trackedPositionIndexes is not null)
                 {
-                    for (int i = 0; i < additionalTrackedPositions.Count; i++)
+                    while (nextTrackedPositionIndex < trackedPositionIndexes.Length)
                     {
-                        ReflowAnchorPosition position = additionalTrackedPositions[i];
-                        if (position.OldAbsoluteRow != rowIndex)
+                        ReflowAnchorProcessingIndex processingIndex =
+                            trackedPositionIndexes[nextTrackedPositionIndex];
+                        int positionIndex = processingIndex.Index;
+                        ReflowAnchorPosition position = additionalTrackedPositions[positionIndex];
+                        if (processingIndex.Row < rowIndex)
                         {
+                            nextTrackedPositionIndex++;
                             continue;
                         }
 
+                        if (processingIndex.Row != rowIndex)
+                        {
+                            break;
+                        }
+
                         int clampedColumn = Math.Clamp(position.OldColumn, 0, row.Columns);
-                        endExclusive = Math.Max(endExclusive, clampedColumn);
-                        lineTrackedIndexes!.Add(i);
-                        lineTrackedOffsets!.Add(logicalLine.Count + clampedColumn);
+                        int effectiveTrackedColumn = position.ExtendLineToColumn
+                            ? clampedColumn
+                            : endExclusive == 0
+                                ? clampedColumn
+                                : Math.Min(clampedColumn, endExclusive);
+                        if (position.ExtendLineToColumn)
+                        {
+                            endExclusive = Math.Max(endExclusive, clampedColumn);
+                        }
+
+                        lineTrackedIndexes!.Add(positionIndex);
+                        lineTrackedOffsets!.Add(logicalLine.Count + effectiveTrackedColumn);
+                        nextTrackedPositionIndex++;
                     }
                 }
 
@@ -1441,8 +1555,9 @@ public sealed class TerminalScreen
                         lineTrackedOffsets[i]);
                     int positionIndex = lineTrackedIndexes[i];
                     ReflowAnchorPosition position = additionalTrackedPositions[positionIndex];
+                    int maxColumn = position.AllowEndColumn ? columns : Math.Max(0, columns - 1);
                     position.NewAbsoluteRow = destinationStartRow + mappedAnchorPosition.Row;
-                    position.NewColumn = Math.Clamp(mappedAnchorPosition.Column, 0, Math.Max(0, columns - 1));
+                    position.NewColumn = Math.Clamp(mappedAnchorPosition.Column, 0, maxColumn);
                     position.IsMapped = true;
                     additionalTrackedPositions[positionIndex] = position;
                 }
@@ -1453,16 +1568,41 @@ public sealed class TerminalScreen
         _rows.AddRange(reflowedRows);
     }
 
+    private static ReflowAnchorProcessingIndex[]? CreateReflowAnchorProcessingOrder(
+        List<ReflowAnchorPosition>? additionalTrackedPositions)
+    {
+        if (additionalTrackedPositions is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        ReflowAnchorProcessingIndex[] indexes = new ReflowAnchorProcessingIndex[additionalTrackedPositions.Count];
+        for (int i = 0; i < additionalTrackedPositions.Count; i++)
+        {
+            indexes[i] = new ReflowAnchorProcessingIndex(i, additionalTrackedPositions[i].OldAbsoluteRow);
+        }
+
+        Array.Sort(indexes, static (left, right) =>
+        {
+            int rowComparison = left.Row.CompareTo(right.Row);
+            return rowComparison != 0
+                ? rowComparison
+                : left.Index.CompareTo(right.Index);
+        });
+        return indexes;
+    }
+
     private void RemapRasterGraphicsAfterReflow(
         List<TerminalRasterImagePlacement> originalPlacements,
         List<ReflowAnchorPosition> mappedAnchors,
+        int mappedAnchorOffset,
         int removedRows)
     {
         _rasterPlacements.Clear();
 
-        for (int i = 0; i < originalPlacements.Count && i < mappedAnchors.Count; i++)
+        for (int i = 0; i < originalPlacements.Count && i + mappedAnchorOffset < mappedAnchors.Count; i++)
         {
-            ReflowAnchorPosition mappedAnchor = mappedAnchors[i];
+            ReflowAnchorPosition mappedAnchor = mappedAnchors[i + mappedAnchorOffset];
             if (!mappedAnchor.IsMapped)
             {
                 continue;
@@ -1528,7 +1668,7 @@ public sealed class TerminalScreen
         {
             destination.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground));
             return trackedLogicalOffset >= 0
-                ? new TerminalGridPosition(0, 0)
+                ? new TerminalGridPosition(Math.Clamp(trackedLogicalOffset, 0, columns), 0)
                 : null;
         }
 
@@ -1610,7 +1750,7 @@ public sealed class TerminalScreen
     {
         if (logicalLine.Count == 0)
         {
-            return new TerminalGridPosition(0, 0);
+            return new TerminalGridPosition(Math.Clamp(trackedLogicalOffset, 0, columns), 0);
         }
 
         int sourceIndex = 0;
@@ -1703,10 +1843,16 @@ public sealed class TerminalScreen
 
     private struct ReflowAnchorPosition
     {
-        public ReflowAnchorPosition(int oldAbsoluteRow, int oldColumn)
+        public ReflowAnchorPosition(
+            int oldAbsoluteRow,
+            int oldColumn,
+            bool allowEndColumn = false,
+            bool extendLineToColumn = true)
         {
             OldAbsoluteRow = oldAbsoluteRow;
             OldColumn = oldColumn;
+            AllowEndColumn = allowEndColumn;
+            ExtendLineToColumn = extendLineToColumn;
             NewAbsoluteRow = oldAbsoluteRow;
             NewColumn = oldColumn;
             IsMapped = false;
@@ -1716,12 +1862,18 @@ public sealed class TerminalScreen
 
         public int OldColumn { get; }
 
+        public bool AllowEndColumn { get; }
+
+        public bool ExtendLineToColumn { get; }
+
         public int NewAbsoluteRow { get; set; }
 
         public int NewColumn { get; set; }
 
         public bool IsMapped { get; set; }
     }
+
+    private readonly record struct ReflowAnchorProcessingIndex(int Index, int Row);
 
     /// <summary>
     /// Marks all rows as dirty for a full repaint.
