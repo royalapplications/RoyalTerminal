@@ -8,7 +8,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest</AnalysisLevel>
-    <VersionPrefix>0.1.6</VersionPrefix>
+    <VersionPrefix>0.1.7</VersionPrefix>
     <VersionSuffix></VersionSuffix>
     <RoyalTerminalEnablePretextTextPipeline Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == ''">true</RoyalTerminalEnablePretextTextPipeline>
     <DefineConstants Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == 'true'">$(DefineConstants);ROYALTERMINAL_PRETEXT_TEXT_PIPELINE</DefineConstants>
