@@ -3036,6 +3036,71 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_NativeViewportRectangularSelectionResize_TracksSelectionSpanningMoreThanViewport()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 14, OffsetRows: 5, VisibleRows: 5),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        Window window = new()
+        {
+            Width = 320,
+            Height = 120,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            ArrangeControlToGrid(control, window, renderer, columns: 24, rows: 5);
+            processor.SetViewportState(new TerminalViewportScrollState(
+                TotalRows: 14,
+                OffsetRows: 5,
+                VisibleRows: (ulong)screen.ViewportRows));
+
+            TerminalScreen nativeSnapshot = new(24, 14, scrollbackLimit: 0);
+            for (int row = 0; row < nativeSnapshot.TotalRows; row++)
+            {
+                SetRowText(nativeSnapshot.GetRow(row), $"ROW{row:00}-ABCDEFGHIJKLMNO");
+            }
+
+            processor.ScreenSnapshot = nativeSnapshot;
+            for (int row = 0; row < screen.ViewportRows; row++)
+            {
+                screen.GetViewportRow(row).CopyFrom(
+                    nativeSnapshot.GetRow(5 + row),
+                    screen.DefaultForeground,
+                    screen.DefaultBackground);
+            }
+
+            renderer.SelectionStart = (6, -4);
+            renderer.SelectionEnd = (24, 8);
+            renderer.SelectionIsRectangle = true;
+
+            ArrangeControlToGrid(control, window, renderer, columns: 12, rows: 5);
+
+            TerminalHighlightSpan[] spans = renderer.GetSelectionSpans().ToArray();
+            string diagnostics =
+                $"SelectionStart={renderer.SelectionStart}, SelectionEnd={renderer.SelectionEnd}\n" +
+                DumpViewportRows(screen);
+            Assert.NotEmpty(spans);
+            Assert.True(
+                spans.Any(static span => span.StartColumn == 0),
+                diagnostics);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_NativeViewportSelectionResize_UsesFinalViewportAfterPreservingBottom()
     {
         FakeSearchViewportVtProcessor processor = new(
@@ -3988,8 +4053,12 @@ public class TerminalControlTests
 
     private static void SetViewportRowText(TerminalScreen screen, int rowIndex, string text)
     {
-        TerminalRow row = screen.GetViewportRow(rowIndex);
-        int columnCount = Math.Min(text.Length, screen.Columns);
+        SetRowText(screen.GetViewportRow(rowIndex), text);
+    }
+
+    private static void SetRowText(TerminalRow row, string text)
+    {
+        int columnCount = Math.Min(text.Length, row.Columns);
         for (int column = 0; column < columnCount; column++)
         {
             row[column].Codepoint = text[column];
@@ -4553,7 +4622,11 @@ public class TerminalControlTests
 
     private sealed class FakeSearchViewportVtProcessor(
         TerminalViewportScrollState viewportScrollState,
-        IReadOnlyList<TerminalSearchMatch> matches) : IVtProcessor, ITerminalViewportScrollSource, ITerminalSearchSource
+        IReadOnlyList<TerminalSearchMatch> matches) :
+        IVtProcessor,
+        ITerminalViewportScrollSource,
+        ITerminalSearchSource,
+        ITerminalScreenSnapshotSource
     {
         private readonly List<TerminalSearchMatch> _matches = [.. matches];
 
@@ -4584,6 +4657,8 @@ public class TerminalControlTests
         public bool ScrollToBottomOnProcess { get; set; }
 
         public bool ResetViewportToTopOnResize { get; set; }
+
+        public TerminalScreen? ScreenSnapshot { get; set; }
 
         public event EventHandler<TerminalModeState>? ModeChanged
         {
@@ -4701,6 +4776,43 @@ public class TerminalControlTests
             _ = needle;
             destination.Clear();
             destination.AddRange(_matches);
+        }
+
+        public bool TryCreateScreenSnapshot(
+            int firstAbsoluteRow,
+            int rowCount,
+            int scrollbackLimit,
+            out TerminalScreen snapshot)
+        {
+            snapshot = null!;
+            if (ScreenSnapshot is null || rowCount <= 0)
+            {
+                return false;
+            }
+
+            int firstRow = Math.Clamp(firstAbsoluteRow, 0, Math.Max(0, ScreenSnapshot.TotalRows - 1));
+            int snapshotRows = Math.Min(rowCount, ScreenSnapshot.TotalRows - firstRow);
+            if (snapshotRows <= 0)
+            {
+                return false;
+            }
+
+            TerminalScreen result = new(ScreenSnapshot.Columns, snapshotRows, scrollbackLimit)
+            {
+                DefaultForeground = ScreenSnapshot.DefaultForeground,
+                DefaultBackground = ScreenSnapshot.DefaultBackground,
+            };
+
+            for (int row = 0; row < snapshotRows; row++)
+            {
+                result.GetRow(row).CopyFrom(
+                    ScreenSnapshot.GetRow(firstRow + row),
+                    result.DefaultForeground,
+                    result.DefaultBackground);
+            }
+
+            snapshot = result;
+            return true;
         }
     }
 

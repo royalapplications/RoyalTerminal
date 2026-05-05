@@ -28,6 +28,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     ITerminalMouseReportingStateSource,
     ITerminalViewportScrollSource,
     ITerminalSelectionExportSource,
+    ITerminalScreenSnapshotSource,
     ITerminalSnapshotExportSource,
     ITerminalSearchSource,
     ITerminalSixelOptionsSink
@@ -480,6 +481,53 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     }
 
     /// <inheritdoc />
+    public bool TryCreateScreenSnapshot(
+        int firstAbsoluteRow,
+        int rowCount,
+        int scrollbackLimit,
+        out TerminalScreen snapshot)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        snapshot = null!;
+        if (rowCount <= 0 || _screen.Columns <= 0)
+        {
+            return false;
+        }
+
+        TerminalViewportScrollState viewportState = ViewportScrollState;
+        int totalRows = viewportState.TotalRows > int.MaxValue
+            ? int.MaxValue
+            : (int)viewportState.TotalRows;
+        if (totalRows <= 0)
+        {
+            return false;
+        }
+
+        int firstRow = Math.Clamp(firstAbsoluteRow, 0, totalRows - 1);
+        int availableRows = totalRows - firstRow;
+        int snapshotRows = Math.Min(rowCount, availableRows);
+        if (snapshotRows <= 0)
+        {
+            return false;
+        }
+
+        TerminalScreen result = new(_screen.Columns, snapshotRows, scrollbackLimit)
+        {
+            DefaultForeground = _screen.DefaultForeground,
+            DefaultBackground = _screen.DefaultBackground,
+        };
+
+        for (int row = 0; row < snapshotRows; row++)
+        {
+            PopulateSnapshotRow(result.GetRow(row), checked(firstRow + row));
+        }
+
+        snapshot = result;
+        return true;
+    }
+
+    /// <inheritdoc />
     public bool IsPasteSafe(string text)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -845,6 +893,74 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         }
 
         nativeSelection = new RoyalTerminal.GhosttySharp.GhosttySelection(startRef, endRef, normalized.Rectangle);
+        return true;
+    }
+
+    private unsafe void PopulateSnapshotRow(TerminalRow target, int absoluteRow)
+    {
+        target.Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+        bool rowWrapResolved = false;
+        for (int column = 0; column < target.Columns; column++)
+        {
+            if (!_terminal.TryGetGridReference(
+                    GhosttyVtNative.GhosttyPoint.Screen((ushort)column, checked((uint)absoluteRow)),
+                    out GhosttyVtNative.GhosttyGridRef reference))
+            {
+                continue;
+            }
+
+            if (!rowWrapResolved)
+            {
+                target.WrapsToNext = TryGetGridReferenceRowWrap(reference, out bool wrapsToNext) && wrapsToNext;
+                rowWrapResolved = true;
+            }
+
+            if (GhosttyVtNative.GridRefCell(in reference, out ulong rawCell) != GhosttyVtNative.GhosttyResult.Success)
+            {
+                continue;
+            }
+
+            ref TerminalCell targetCell = ref target[column];
+            targetCell = TerminalCell.Empty(_screen.DefaultForeground, _screen.DefaultBackground);
+
+            bool hasText = false;
+            GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.HasText, &hasText);
+            if (hasText)
+            {
+                uint codepoint = 0;
+                GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.Codepoint, &codepoint);
+                targetCell.Codepoint = checked((int)codepoint);
+            }
+
+            GhosttyVtNative.GhosttyCellWide wide = default;
+            GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.Wide, &wide);
+            targetCell.Width = wide switch
+            {
+                GhosttyVtNative.GhosttyCellWide.Wide => 2,
+                GhosttyVtNative.GhosttyCellWide.SpacerHead or GhosttyVtNative.GhosttyCellWide.SpacerTail => 0,
+                _ => 1,
+            };
+        }
+    }
+
+    private static unsafe bool TryGetGridReferenceRowWrap(
+        GhosttyVtNative.GhosttyGridRef reference,
+        out bool wrapsToNext)
+    {
+        wrapsToNext = false;
+        if (GhosttyVtNative.GridRefRow(in reference, out ulong rawRow) != GhosttyVtNative.GhosttyResult.Success)
+        {
+            return false;
+        }
+
+        bool value = false;
+        if (GhosttyVtNative.RowGet(rawRow, GhosttyVtNative.GhosttyRowData.Wrap, &value) !=
+            GhosttyVtNative.GhosttyResult.Success)
+        {
+            return false;
+        }
+
+        wrapsToNext = value;
         return true;
     }
 

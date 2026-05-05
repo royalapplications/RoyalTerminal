@@ -496,19 +496,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         public NativeSelectionResizeContext(
             TerminalScreen snapshot,
-            int snapshotTopAbsoluteRow,
             TerminalGridPosition[] anchors,
             bool anchorsAreSpans)
         {
             Snapshot = snapshot;
-            SnapshotTopAbsoluteRow = snapshotTopAbsoluteRow;
             Anchors = anchors;
             AnchorsAreSpans = anchorsAreSpans;
         }
 
         public TerminalScreen Snapshot { get; }
-
-        public int SnapshotTopAbsoluteRow { get; }
 
         public TerminalGridPosition[] Anchors { get; }
 
@@ -516,6 +512,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     private readonly record struct ComparableRowKey(int TextLength, ulong Hash);
+
+    private readonly record struct NativeSelectionOffsetScore(int Matches, long Score);
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -2664,47 +2662,73 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         TerminalHighlightSpan[] absoluteSpans = CreateCurrentSelectionAbsoluteSpansLocked();
         bool anchorsAreSpans = absoluteSpans.Length > 0;
-        int anchorRow = _selectionAnchorAbsoluteRow - topRow;
-        int activeRow = _selectionActiveAbsoluteRow - topRow;
+        int selectionTopRow = Math.Min(_selectionAnchorAbsoluteRow, _selectionActiveAbsoluteRow);
+        int selectionBottomRow = Math.Max(_selectionAnchorAbsoluteRow, _selectionActiveAbsoluteRow);
         if (anchorsAreSpans)
         {
             for (int i = 0; i < absoluteSpans.Length; i++)
             {
-                int row = absoluteSpans[i].Row - topRow;
-                if (!IsSelectionResizeViewportRowMappable(row, _screen))
-                {
-                    return null;
-                }
+                TerminalHighlightSpan span = absoluteSpans[i];
+                selectionTopRow = Math.Min(selectionTopRow, span.Row);
+                selectionBottomRow = Math.Max(selectionBottomRow, span.Row);
             }
         }
-        else if (!IsSelectionResizeViewportRowMappable(anchorRow, _screen) ||
-            !IsSelectionResizeViewportRowMappable(activeRow, _screen))
+
+        bool selectionFitsViewport = selectionTopRow >= topRow &&
+            selectionBottomRow < topRow + _screen.ViewportRows;
+        int snapshotFirstAbsoluteRow = topRow;
+        TerminalScreen viewportSnapshot;
+        if (selectionFitsViewport)
+        {
+            // Native mirrors can contain padded scrollback rows and style-only blank cells.
+            // Selection resize only needs the visible text cells that can affect anchor rows.
+                viewportSnapshot = new(
+                    _screen.Columns,
+                    _screen.ViewportRows,
+                    CalculateSnapshotScrollbackLimit(_screen.Columns, _screen.ViewportRows, viewportRows))
+            {
+                DefaultForeground = _screen.DefaultForeground,
+                DefaultBackground = _screen.DefaultBackground,
+            };
+
+            for (int row = 0; row < _screen.ViewportRows; row++)
+            {
+                TerminalRow snapshotRow = viewportSnapshot.GetViewportRow(row);
+                snapshotRow.CopyFrom(
+                    _screen.GetViewportRow(row),
+                    _screen.DefaultForeground,
+                    _screen.DefaultBackground);
+                ClearStyleOnlyTrailingCells(
+                    snapshotRow,
+                    _screen.DefaultForeground,
+                    _screen.DefaultBackground);
+            }
+        }
+        else if (_vtProcessor is ITerminalScreenSnapshotSource snapshotSource)
+        {
+            int maxAbsoluteRow = GetSelectionMaxAbsoluteRowLocked();
+            int paddingRows = Math.Max(1, _screen.ViewportRows);
+            int snapshotLastAbsoluteRow = Math.Min(
+                maxAbsoluteRow,
+                Math.Max(selectionBottomRow, topRow + _screen.ViewportRows - 1) + paddingRows);
+            snapshotFirstAbsoluteRow = Math.Max(0, Math.Min(selectionTopRow, topRow) - paddingRows);
+            int snapshotRowCount = checked(snapshotLastAbsoluteRow - snapshotFirstAbsoluteRow + 1);
+            int snapshotScrollbackLimit = CalculateSnapshotScrollbackLimit(
+                _screen.Columns,
+                snapshotRowCount,
+                viewportRows);
+            if (!snapshotSource.TryCreateScreenSnapshot(
+                    snapshotFirstAbsoluteRow,
+                    snapshotRowCount,
+                    snapshotScrollbackLimit,
+                    out viewportSnapshot))
+            {
+                return null;
+            }
+        }
+        else
         {
             return null;
-        }
-
-        // Native mirrors can contain padded scrollback rows and style-only blank cells.
-        // Selection resize only needs the visible text cells that can affect anchor rows.
-        TerminalScreen viewportSnapshot = new(
-            _screen.Columns,
-            _screen.ViewportRows,
-            CalculateViewportSnapshotScrollbackLimit(_screen.Columns, _screen.ViewportRows, viewportRows))
-        {
-            DefaultForeground = _screen.DefaultForeground,
-            DefaultBackground = _screen.DefaultBackground,
-        };
-
-        for (int row = 0; row < _screen.ViewportRows; row++)
-        {
-            TerminalRow snapshotRow = viewportSnapshot.GetViewportRow(row);
-            snapshotRow.CopyFrom(
-                _screen.GetViewportRow(row),
-                _screen.DefaultForeground,
-                _screen.DefaultBackground);
-            ClearStyleOnlyTrailingCells(
-                snapshotRow,
-                _screen.DefaultForeground,
-                _screen.DefaultBackground);
         }
 
         TerminalGridPosition[] anchors;
@@ -2715,7 +2739,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             {
                 TerminalHighlightSpan span = absoluteSpans[i];
                 viewportSpans[i] = new TerminalHighlightSpan(
-                    span.Row - topRow,
+                    span.Row - snapshotFirstAbsoluteRow,
                     span.StartColumn,
                     span.EndColumn,
                     span.Kind);
@@ -2727,8 +2751,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             anchors =
             [
-                new TerminalGridPosition(_selectionAnchorColumn, anchorRow),
-                new TerminalGridPosition(_selectionActiveColumn, activeRow),
+                new TerminalGridPosition(_selectionAnchorColumn, _selectionAnchorAbsoluteRow - snapshotFirstAbsoluteRow),
+                new TerminalGridPosition(_selectionActiveColumn, _selectionActiveAbsoluteRow - snapshotFirstAbsoluteRow),
             ];
         }
 
@@ -2738,16 +2762,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             reflowOnResize,
             trackedViewportPosition: null,
             anchors);
-        int snapshotTopRow = viewportSnapshot.GetAbsoluteRowForViewportRow(0);
-        return new NativeSelectionResizeContext(viewportSnapshot, snapshotTopRow, anchors, anchorsAreSpans);
+        return new NativeSelectionResizeContext(viewportSnapshot, anchors, anchorsAreSpans);
     }
 
-    private static int CalculateViewportSnapshotScrollbackLimit(
+    private static int CalculateSnapshotScrollbackLimit(
         int columns,
-        int viewportRows,
+        int snapshotRows,
         int resizedViewportRows)
     {
-        long maxReflowedRows = (long)Math.Max(1, columns) * Math.Max(1, viewportRows);
+        long maxReflowedRows = (long)Math.Max(1, columns) * Math.Max(1, snapshotRows);
         long neededScrollback = maxReflowedRows - Math.Max(1, resizedViewportRows);
         return neededScrollback <= 0
             ? 0
@@ -2790,9 +2813,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
     }
 
-    private static bool IsSelectionResizeViewportRowMappable(int row, TerminalScreen screen) =>
-        row >= 0 && row < screen.ViewportRows;
-
     private void ApplySelectionResizeAnchorsLocked(
         TerminalGridPosition[]? selectionResizeAnchors,
         bool anchorsAreSpans)
@@ -2834,7 +2854,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         int rowOffset = FindNativeSelectionSnapshotViewportRowOffset(context, _screen);
         int topRow = GetViewportTopAbsoluteRowLocked();
-        int absoluteRowOffset = topRow + rowOffset - context.SnapshotTopAbsoluteRow;
+        int absoluteRowOffset = topRow + rowOffset;
         if (context.AnchorsAreSpans)
         {
             SetSelectionAnchorSpans(CreateSelectionSpansFromResizeAnchors(
@@ -2912,61 +2932,92 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         NativeSelectionResizeContext context,
         TerminalScreen destination)
     {
-        int snapshotRowCount = context.Snapshot.ViewportRows;
+        int snapshotRowCount = context.Snapshot.TotalRows;
         int destinationRowCount = destination.ViewportRows;
         if (snapshotRowCount <= 0 || destinationRowCount <= 0)
         {
             return 0;
         }
 
-        ComparableRowKey[] snapshotRows = CreateComparableViewportRowKeys(context.Snapshot);
+        ComparableRowKey[] snapshotRows = CreateComparableScreenRowKeys(context.Snapshot);
         ComparableRowKey[] destinationRows = CreateComparableViewportRowKeys(destination);
-        int anchorTop = Math.Min(
-            context.Anchors[0].Row,
-            context.Anchors[1].Row) - context.SnapshotTopAbsoluteRow;
-        int anchorBottom = Math.Max(
-            context.Anchors[0].Row,
-            context.Anchors[1].Row) - context.SnapshotTopAbsoluteRow;
+        GetNativeSelectionSnapshotAnchorRange(context.Anchors, out int anchorTop, out int anchorBottom);
 
-        int bestOffset = 0;
-        int bestMatches = 0;
-        int bestScore = int.MinValue;
-        for (int offset = -snapshotRowCount + 1; offset < destinationRowCount; offset++)
+        Dictionary<int, NativeSelectionOffsetScore>? offsetScores = null;
+        for (int snapshotRow = 0; snapshotRow < snapshotRowCount; snapshotRow++)
         {
-            int matches = 0;
-            int score = 0;
-            for (int snapshotRow = 0; snapshotRow < snapshotRowCount; snapshotRow++)
+            ComparableRowKey rowKey = snapshotRows[snapshotRow];
+            if (rowKey.TextLength == 0)
             {
-                int destinationRow = snapshotRow + offset;
-                if (destinationRow < 0 || destinationRow >= destinationRowCount)
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                ComparableRowKey rowKey = snapshotRows[snapshotRow];
-                if (rowKey.TextLength == 0 ||
-                    rowKey != destinationRows[destinationRow] ||
+            for (int destinationRow = 0; destinationRow < destinationRowCount; destinationRow++)
+            {
+                if (rowKey != destinationRows[destinationRow] ||
                     !ComparableRowsEqual(
-                        context.Snapshot.GetViewportRow(snapshotRow),
+                        context.Snapshot.GetRow(snapshotRow),
                         destination.GetViewportRow(destinationRow),
                         rowKey.TextLength))
                 {
                     continue;
                 }
 
-                matches++;
-                score += 1024 - Math.Min(1024, GetDistanceFromRange(snapshotRow, anchorTop, anchorBottom));
+                int offset = destinationRow - snapshotRow;
+                long scoreDelta = 1024 - Math.Min(1024, GetDistanceFromRange(snapshotRow, anchorTop, anchorBottom));
+                offsetScores ??= [];
+                offsetScores.TryGetValue(offset, out NativeSelectionOffsetScore score);
+                offsetScores[offset] = new NativeSelectionOffsetScore(
+                    score.Matches + 1,
+                    score.Score + scoreDelta);
             }
+        }
 
-            if (matches > bestMatches || (matches == bestMatches && score > bestScore))
+        int bestOffset = 0;
+        int bestMatches = 0;
+        long bestScore = long.MinValue;
+        if (offsetScores is null)
+        {
+            return 0;
+        }
+
+        foreach (KeyValuePair<int, NativeSelectionOffsetScore> offsetScore in offsetScores)
+        {
+            int offset = offsetScore.Key;
+            NativeSelectionOffsetScore score = offsetScore.Value;
+            if (score.Matches > bestMatches ||
+                (score.Matches == bestMatches &&
+                 (score.Score > bestScore ||
+                  (score.Score == bestScore && offset < bestOffset))))
             {
-                bestMatches = matches;
-                bestScore = score;
+                bestMatches = score.Matches;
+                bestScore = score.Score;
                 bestOffset = offset;
             }
         }
 
         return bestMatches > 0 ? bestOffset : 0;
+    }
+
+    private static void GetNativeSelectionSnapshotAnchorRange(
+        ReadOnlySpan<TerminalGridPosition> anchors,
+        out int anchorTop,
+        out int anchorBottom)
+    {
+        anchorTop = int.MaxValue;
+        anchorBottom = int.MinValue;
+        for (int i = 0; i < anchors.Length; i++)
+        {
+            int row = anchors[i].Row;
+            anchorTop = Math.Min(anchorTop, row);
+            anchorBottom = Math.Max(anchorBottom, row);
+        }
+
+        if (anchorTop == int.MaxValue)
+        {
+            anchorTop = 0;
+            anchorBottom = 0;
+        }
     }
 
     private static int GetDistanceFromRange(int value, int start, int end)
@@ -2985,6 +3036,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         for (int row = 0; row < rows.Length; row++)
         {
             rows[row] = CreateComparableRowKey(screen.GetViewportRow(row));
+        }
+
+        return rows;
+    }
+
+    private static ComparableRowKey[] CreateComparableScreenRowKeys(TerminalScreen screen)
+    {
+        ComparableRowKey[] rows = new ComparableRowKey[screen.TotalRows];
+        for (int row = 0; row < rows.Length; row++)
+        {
+            rows[row] = CreateComparableRowKey(screen.GetRow(row));
         }
 
         return rows;
