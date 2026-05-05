@@ -57,6 +57,11 @@ public enum TerminalMouseEncoding
     /// URXVT decimal protocol (<c>DECSET ?1015</c>).
     /// </summary>
     Urxvt = 3,
+
+    /// <summary>
+    /// SGR protocol using pixel coordinates (<c>DECSET ?1016</c>).
+    /// </summary>
+    SgrPixels = 4,
 }
 
 /// <summary>

@@ -32,6 +32,7 @@ public sealed class TerminalMouseModeTracker
     private bool _mode1005;
     private bool _mode1006;
     private bool _mode1015;
+    private bool _mode1016;
     private bool _mode9;
 
     /// <summary>
@@ -232,6 +233,9 @@ public sealed class TerminalMouseModeTracker
             case 1015:
                 _mode1015 = set;
                 break;
+            case 1016:
+                _mode1016 = set;
+                break;
             case 9:
                 _mode9 = set;
                 break;
@@ -281,6 +285,7 @@ public sealed class TerminalMouseModeTracker
         _mode1005 = false;
         _mode1006 = false;
         _mode1015 = false;
+        _mode1016 = false;
         _mode9 = false;
     }
 
@@ -311,6 +316,11 @@ public sealed class TerminalMouseModeTracker
 
     private TerminalMouseEncoding GetEncodingMode()
     {
+        if (_mode1016)
+        {
+            return TerminalMouseEncoding.SgrPixels;
+        }
+
         if (_mode1006)
         {
             return TerminalMouseEncoding.Sgr;

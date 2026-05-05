@@ -630,7 +630,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             transport.RaiseData("\x1b[c"u8.ToArray());
 
             bool daResponseObserved = await WaitUntilAsync(
-                () => transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;22c"),
+                () => transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;1;6;22c"),
                 TimeSpan.FromSeconds(2));
 
             Assert.True(daResponseObserved, "Expected DA response to be forwarded for PTY sessions when no urgent control suppression is active.");
@@ -677,7 +677,7 @@ public sealed class TerminalControlHeadlessInteractionTests
                 inputCountAfterCtrlC,
                 transport.GetInputCount());
             Assert.False(
-                transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;22c"),
+                transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;1;6;22c"),
                 "Did not expect a late DA response to be injected into the PTY after Ctrl+C.");
         }
         finally
@@ -708,7 +708,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             transport.RaiseData("\x1b[c"u8.ToArray());
 
             bool daResponseObserved = await WaitUntilAsync(
-                () => transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;22c"),
+                () => transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;1;6;22c"),
                 TimeSpan.FromSeconds(2));
 
             Assert.True(daResponseObserved, "Expected DA response to be forwarded for transport sessions when no urgent control suppression is active.");
@@ -753,7 +753,7 @@ public sealed class TerminalControlHeadlessInteractionTests
 
             Assert.Equal(inputCountAfterCtrlC, transport.GetInputCount());
             Assert.False(
-                transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;22c"),
+                transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;1;6;22c"),
                 "Did not expect a late DA response to be injected into the transport after Ctrl+C.");
         }
         finally
@@ -1856,6 +1856,8 @@ public sealed class TerminalControlHeadlessInteractionTests
                     $"Mode={SnapshotModeState(control.TerminalSessionService.ModeSource)}, Kitty={SnapshotKittyKeyboardFlags(control.TerminalSessionService.ModeSource)}, " +
                     $"Inputs={SnapshotInputs(inputSync, inputs)}");
 
+                await WaitForRepeatedFloodControlEchoAsync(expectedInputByte, outputSync, output);
+
                 string cycleMarker = $"__ROYALTERMINAL_REPEAT_{physicalKey}_{cycle}__";
                 control.SendInput($"echo {cycleMarker}\n");
 
@@ -2016,6 +2018,27 @@ public sealed class TerminalControlHeadlessInteractionTests
 
             return false;
         }
+    }
+
+    private static async Task WaitForRepeatedFloodControlEchoAsync(byte expectedInputByte, object sync, StringBuilder output)
+    {
+        string? controlEcho = expectedInputByte switch
+        {
+            0x03 => "^C",
+            0x1A => "^Z",
+            _ => null,
+        };
+
+        if (controlEcho is null)
+        {
+            return;
+        }
+
+        // The tty line discipline may flush bytes written immediately after
+        // INTR/SUSP. Use the echoed control character as the recovery boundary.
+        _ = await WaitUntilAsync(
+            () => ContainsOutput(sync, output, controlEcho),
+            TimeSpan.FromSeconds(2));
     }
 
     private static bool ContainsInputByteAfterIndex(object sync, List<byte[]> inputs, byte expectedByte, int startIndex)

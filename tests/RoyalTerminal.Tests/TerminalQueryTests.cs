@@ -85,7 +85,7 @@ public class TerminalQueryTests
         processor.Process("\x1b[c"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1b[?62;22c", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1b[?62;1;6;22c", System.Text.Encoding.ASCII.GetString(response));
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public class TerminalQueryTests
         processor.Process("\x1b[c"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1b[?62;4;22c", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1b[?62;1;4;6;22c", System.Text.Encoding.ASCII.GetString(response));
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public class TerminalQueryTests
         processor.Process("c"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1b[?62;22c", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1b[?62;1;6;22c", System.Text.Encoding.ASCII.GetString(response));
     }
 
     [Fact]

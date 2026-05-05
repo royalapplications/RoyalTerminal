@@ -65,7 +65,14 @@ internal static class TerminalKeySequenceEncoder
             return true;
         }
 
-        if (TryEncodeNavigationOrEditingKey(key, shift, alt, ctrl, modeState.ApplicationCursorKeys, out sequence))
+        if (TryEncodeNavigationOrEditingKey(
+                key,
+                shift,
+                alt,
+                ctrl,
+                modeState.ApplicationCursorKeys,
+                modeState.BackarrowKeyMode,
+                out sequence))
         {
             return true;
         }
@@ -96,6 +103,7 @@ internal static class TerminalKeySequenceEncoder
         bool alt,
         bool ctrl,
         bool applicationCursorKeys,
+        bool backarrowKeyMode,
         out string sequence)
     {
         sequence = string.Empty;
@@ -139,8 +147,8 @@ internal static class TerminalKeySequenceEncoder
                 return true;
 
             case Key.Back:
-                // ctrl+backspace maps to BS; default backspace maps to DEL.
-                sequence = PrefixWithEscape(ctrl ? "\b" : "\x7F", alt);
+                // DECBKM changes non-control backspace from DEL to BS.
+                sequence = PrefixWithEscape(ctrl || backarrowKeyMode ? "\b" : "\x7F", alt);
                 return true;
 
             case Key.Escape:

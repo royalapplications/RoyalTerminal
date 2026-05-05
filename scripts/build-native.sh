@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 GHOSTTY_DIR="$ROOT_DIR/external/ghostty"
 NATIVE_OUT_DIR="$ROOT_DIR/native"
+ZIG_COMPAT="$ROOT_DIR/scripts/zig-compat.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -125,9 +126,9 @@ fi
 
 # Build shared libraries
 info "Building libghostty-vt..."
-info "Command: zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none"
+info "Command: zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false"
 
-zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none 2>&1 || {
+"$ZIG_COMPAT" build $OPTIMIZE -Dtarget=native -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false 2>&1 || {
     error "Zig build failed."
     warn "This may be expected if platform-specific dependencies are missing."
     warn "On macOS, ensure Xcode command line tools are installed: xcode-select --install"
@@ -213,7 +214,7 @@ if [ -f "$RENDERER_DIR/build.zig" ]; then
         linux) RENDERER_LIB_NAME="libghostty-renderer-capi.so" ;;
     esac
 
-    zig build $OPTIMIZE 2>&1 || {
+    "$ZIG_COMPAT" build $OPTIMIZE 2>&1 || {
         warn "libghostty-renderer-capi build failed — skipping."
         warn "Texture interop managed APIs will require manual native library setup."
         RENDERER_LIB_NAME=""

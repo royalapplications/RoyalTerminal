@@ -25,7 +25,17 @@ namespace RoyalTerminal.Terminal;
 /// of the VT protocol to render typical shell output and full-screen TUI
 /// applications such as Midnight Commander, htop, vim, etc.
 /// </summary>
-public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyKeyboardStateSource, ITerminalCursorStyleSource, ITerminalFocusEventModeSource, ITerminalSelectionExportSource, ITerminalPasteSequenceEncoderSource, ITerminalSnapshotExportSource, ITerminalSixelOptionsSink
+public sealed class BasicVtProcessor : IVtProcessor,
+    ITerminalThemeSink,
+    IKittyKeyboardStateSource,
+    ITerminalCursorStyleSource,
+    ITerminalFocusEventModeSource,
+    ITerminalSelectionExportSource,
+    ITerminalPasteSequenceEncoderSource,
+    ITerminalSnapshotExportSource,
+    ITerminalPointerSequenceEncoderSource,
+    ITerminalMouseReportingStateSource,
+    ITerminalSixelOptionsSink
 {
     private const int MaxOscBufferBytes = 4096;
     private const int MaxDcsBufferBytes = 4096;
@@ -130,6 +140,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private bool _originMode;          // DECOM (mode 6)
     private bool _applicationCursorKeys; // DECCKM (mode 1)
     private bool _applicationKeypad;   // DECKPAM/DECKPNM
+    private bool _backarrowKeyMode;    // DECBKM (mode 67)
     private bool _saveCursorMode;      // DECSC/DECRC via mode 1048
     private bool _bracketedPaste;      // Bracketed paste mode (mode 2004)
     private bool _win32InputMode;      // Win32 input mode (mode 9001)
@@ -197,6 +208,9 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     public bool FocusEventsEnabled => _extendedDecModesEnabled.Contains(1004);
 
     /// <inheritdoc />
+    public bool MouseReportingEnabled => MouseModeState.IsMouseReportingEnabled;
+
+    /// <inheritdoc />
     public TerminalCursorStyle CursorStyle => MapCursorStyle(_cursorStyle);
 
     /// <inheritdoc />
@@ -212,7 +226,12 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         ApplicationKeypad,
         AlternateScreen,
         BracketedPaste,
-        Win32InputMode);
+        Win32InputMode,
+        _backarrowKeyMode);
+
+    private TerminalMouseModeState MouseModeState => new(
+        GetMouseTrackingMode(),
+        GetMouseEncodingMode());
 
     /// <inheritdoc />
     public event EventHandler<TerminalModeState>? ModeChanged;
@@ -337,6 +356,35 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         }
 
         RaiseModeChangedIfNeeded(before);
+    }
+
+    /// <inheritdoc />
+    public bool TryEncodePointer(
+        in TerminalPointerEvent pointerEvent,
+        in TerminalPointerEncodingContext context,
+        out byte[] sequence)
+    {
+        sequence = [];
+        if (context.CellWidthPx <= 0 || context.CellHeightPx <= 0)
+        {
+            return false;
+        }
+
+        double contentX = pointerEvent.X - context.PaddingLeftPx;
+        double contentY = pointerEvent.Y - context.PaddingTopPx;
+        int column = Math.Clamp((int)Math.Floor(contentX / context.CellWidthPx) + 1, 1, Math.Max(1, _screen.Columns));
+        int row = Math.Clamp((int)Math.Floor(contentY / context.CellHeightPx) + 1, 1, Math.Max(1, _screen.ViewportRows));
+        int pixelX = Math.Max(1, (int)Math.Floor(pointerEvent.X) + 1);
+        int pixelY = Math.Max(1, (int)Math.Floor(pointerEvent.Y) + 1);
+
+        return TerminalMouseProtocolEncoder.TryEncode(
+            pointerEvent,
+            MouseModeState,
+            column,
+            row,
+            pixelX,
+            pixelY,
+            out sequence);
     }
 
     /// <inheritdoc />
@@ -1118,6 +1166,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     {
         AppendMode(builder, ansi: false, 1, _applicationCursorKeys);
         builder.Append(_applicationKeypad ? "\x1b=" : "\x1b>");
+        AppendMode(builder, ansi: false, 67, _backarrowKeyMode);
         AppendMode(builder, ansi: true, 2, _keyboardLocked);
         AppendMode(builder, ansi: true, 4, _insertMode);
         AppendMode(builder, ansi: true, 12, _sendReceiveMode);
@@ -3186,8 +3235,8 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
     private byte[] GetPrimaryDeviceAttributesResponse()
     {
         return _sixelGraphicsEnabled
-            ? "\x1b[?62;4;22c"u8.ToArray()
-            : "\x1b[?62;22c"u8.ToArray();
+            ? "\x1b[?62;1;4;6;22c"u8.ToArray()
+            : "\x1b[?62;1;6;22c"u8.ToArray();
     }
 
     private int GetDecPrivateModeReportStatus(int mode)
@@ -3206,6 +3255,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
             7 => _autoWrap ? 1 : 2,
             25 => _cursorVisible ? 1 : 2,
             66 => _applicationKeypad ? 1 : 2,
+            67 => _backarrowKeyMode ? 1 : 2,
             47 => _inAltScreen ? 1 : 2,
             1047 => _inAltScreen ? 1 : 2,
             1048 => _saveCursorMode ? 1 : 2,
@@ -3364,6 +3414,56 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         return true;
     }
 
+    private TerminalMouseTrackingMode GetMouseTrackingMode()
+    {
+        if (_extendedDecModesEnabled.Contains(1003))
+        {
+            return TerminalMouseTrackingMode.AnyMotion;
+        }
+
+        if (_extendedDecModesEnabled.Contains(1002))
+        {
+            return TerminalMouseTrackingMode.ButtonMotion;
+        }
+
+        if (_extendedDecModesEnabled.Contains(1000))
+        {
+            return TerminalMouseTrackingMode.PressRelease;
+        }
+
+        if (_extendedDecModesEnabled.Contains(9))
+        {
+            return TerminalMouseTrackingMode.X10Press;
+        }
+
+        return TerminalMouseTrackingMode.None;
+    }
+
+    private TerminalMouseEncoding GetMouseEncodingMode()
+    {
+        if (_extendedDecModesEnabled.Contains(1016))
+        {
+            return TerminalMouseEncoding.SgrPixels;
+        }
+
+        if (_extendedDecModesEnabled.Contains(1006))
+        {
+            return TerminalMouseEncoding.Sgr;
+        }
+
+        if (_extendedDecModesEnabled.Contains(1015))
+        {
+            return TerminalMouseEncoding.Urxvt;
+        }
+
+        if (_extendedDecModesEnabled.Contains(1005))
+        {
+            return TerminalMouseEncoding.Utf8;
+        }
+
+        return TerminalMouseEncoding.Default;
+    }
+
     private void ResetExtendedDecModesToDefaults()
     {
         _extendedDecModesEnabled.Clear();
@@ -3444,6 +3544,10 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
 
             case 66: // DECNKM — Application keypad keys
                 _applicationKeypad = set;
+                break;
+
+            case 67: // DECBKM — Backarrow key mode
+                _backarrowKeyMode = set;
                 break;
 
             case 25: // DECTCEM — Show/hide cursor
@@ -4077,6 +4181,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _autoWrap = true;
         _applicationCursorKeys = false;
         _applicationKeypad = false;
+        _backarrowKeyMode = false;
         _saveCursorMode = false;
         _bracketedPaste = false;
         _win32InputMode = false;
@@ -4231,6 +4336,7 @@ public sealed class BasicVtProcessor : IVtProcessor, ITerminalThemeSink, IKittyK
         _originMode = false;
         _applicationCursorKeys = false;
         _applicationKeypad = false;
+        _backarrowKeyMode = false;
         _saveCursorMode = false;
         _bracketedPaste = false;
         _win32InputMode = false;

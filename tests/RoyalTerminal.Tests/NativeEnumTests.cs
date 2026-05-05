@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests — Enum and type validation tests.
 
+using System.Runtime.InteropServices;
 using RoyalTerminal.GhosttySharp.Native;
 using Xunit;
 
@@ -98,6 +99,23 @@ public class NativeEnumTests
         Assert.True(Enum.IsDefined(typeof(GhosttyMouseButton), GhosttyMouseButton.Left));
         Assert.True(Enum.IsDefined(typeof(GhosttyMouseButton), GhosttyMouseButton.Right));
         Assert.True(Enum.IsDefined(typeof(GhosttyMouseButton), GhosttyMouseButton.Middle));
+    }
+
+    [Fact]
+    public void GhosttyLatestVtBindings_HaveExpectedValues()
+    {
+        Assert.Equal(7, (int)GhosttyVtNative.GhosttyKeyEncoderOption.BackarrowKeyMode);
+        Assert.Equal(19, (int)GhosttyVtNative.GhosttyTerminalOption.ApcMaxBytes);
+        Assert.Equal(20, (int)GhosttyVtNative.GhosttyTerminalOption.ApcMaxBytesKitty);
+        Assert.Equal(2, (int)GhosttyVtNative.GhosttySysOption.Log);
+        Assert.Equal(0, (int)GhosttyVtNative.GhosttySysLogLevel.Error);
+        Assert.Equal(3, (int)GhosttyVtNative.GhosttySysLogLevel.Debug);
+        Assert.Equal(4, (int)GhosttyVtNative.GhosttyMouseFormat.SgrPixels);
+        Assert.Equal(67, GhosttyVtNative.ModeValue(GhosttyVtNative.ModeBackarrowKeyMode));
+        Assert.False(GhosttyVtNative.ModeIsAnsi(GhosttyVtNative.ModeBackarrowKeyMode));
+        Assert.Equal(
+            IntPtr.Size == 8 ? 56 : 48,
+            Marshal.SizeOf<GhosttyVtNative.GhosttyKittyGraphicsPlacementRenderInfo>());
     }
 
     [Fact]

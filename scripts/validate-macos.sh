@@ -8,6 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ZIG_COMPAT="$ROOT_DIR/scripts/zig-compat.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -51,7 +52,7 @@ step "1/7 — Checking prerequisites..."
 check "dotnet SDK installed" "command -v dotnet"
 check "dotnet SDK version" "dotnet --version"
 check "Zig compiler installed" "command -v zig"
-check "Zig version ≥ 0.15" "zig version | grep -qE '0\.(1[5-9]|[2-9])'"
+check "Zig version matches Ghostty requirement" "test \"\$(zig version)\" = \"0.15.2\""
 check "Git submodule present" "test -f external/ghostty/build.zig"
 check "macOS platform" "test $(uname -s) = Darwin"
 
@@ -66,7 +67,7 @@ RID="osx-$( [ "$ARCH" = "arm64" ] && echo "arm64" || echo "x64" )"
 LIB_NAME="libghostty-vt.dylib"
 
 cd external/ghostty
-zig build lib-vt -Doptimize=ReleaseFast 2>&1
+"$ZIG_COMPAT" build -Doptimize=ReleaseFast -Dtarget=native -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false 2>&1
 BUILT_LIB=$(find zig-out -name "libghostty-vt*" -type f -name "*.dylib" | head -1)
 cd "$ROOT_DIR"
 

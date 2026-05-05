@@ -124,6 +124,8 @@ public static partial class GhosttyVtNative
         KittyImageMediumFile = 16,
         KittyImageMediumTempFile = 17,
         KittyImageMediumSharedMemory = 18,
+        ApcMaxBytes = 19,
+        ApcMaxBytesKitty = 20,
     }
 
     public enum GhosttyTerminalData : int
@@ -220,6 +222,15 @@ public static partial class GhosttyVtNative
         nint terminal,
         GhosttyTerminalData data,
         void* output);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_get_multi")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult TerminalGetMulti(
+        nint terminal,
+        nuint count,
+        GhosttyTerminalData* keys,
+        void** values,
+        nuint* outWritten);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_grid_ref")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

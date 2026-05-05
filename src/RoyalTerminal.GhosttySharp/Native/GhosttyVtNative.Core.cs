@@ -121,6 +121,7 @@ public static partial class GhosttyVtNative
     }
 
     public static GhosttyMode ModeDecckm => CreateMode(1, ansi: false);
+    public static GhosttyMode ModeBackarrowKeyMode => CreateMode(67, ansi: false);
     public static GhosttyMode ModeKeypadKeys => CreateMode(66, ansi: false);
     public static GhosttyMode ModeAltScreen => CreateMode(1047, ansi: false);
     public static GhosttyMode ModeAltScreenSave => CreateMode(1049, ansi: false);

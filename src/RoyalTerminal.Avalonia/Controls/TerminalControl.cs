@@ -3801,6 +3801,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 _mouseModeTracker.ModeState,
                 column,
                 row,
+                Math.Max(1, (int)Math.Floor(pointerEvent.X) + 1),
+                Math.Max(1, (int)Math.Floor(pointerEvent.Y) + 1),
                 out byte[] encoded))
         {
             return false;

@@ -3,6 +3,7 @@
 // Tests for terminal mouse mode tracking and protocol encoding.
 
 using System.Text;
+using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
 using Xunit;
 
@@ -24,7 +25,11 @@ public sealed class TerminalMouseProtocolTests
         Assert.True(changed);
         Assert.Equal(TerminalMouseEncoding.Sgr, tracker.ModeState.Encoding);
 
-        changed = tracker.Process("\x1b[?1000l\x1b[?1006l"u8);
+        changed = tracker.Process("\x1b[?1016h"u8);
+        Assert.True(changed);
+        Assert.Equal(TerminalMouseEncoding.SgrPixels, tracker.ModeState.Encoding);
+
+        changed = tracker.Process("\x1b[?1000l\x1b[?1006l\x1b[?1016l"u8);
         Assert.True(changed);
         Assert.Equal(TerminalMouseTrackingMode.None, tracker.ModeState.TrackingMode);
         Assert.Equal(TerminalMouseEncoding.Default, tracker.ModeState.Encoding);
@@ -181,6 +186,61 @@ public sealed class TerminalMouseProtocolTests
 
         Assert.True(encoded);
         Assert.Equal("\x1b[<35;9;6M", Encoding.ASCII.GetString(sequence));
+    }
+
+    [Fact]
+    public void Encoder_SgrPixels_UsesPixelCoordinates()
+    {
+        TerminalMouseModeState mode = new(
+            TerminalMouseTrackingMode.PressRelease,
+            TerminalMouseEncoding.SgrPixels);
+        TerminalPointerEvent pointerEvent = new(
+            Kind: TerminalPointerEventKind.Button,
+            X: 40,
+            Y: 80,
+            Button: TerminalMouseButton.Left,
+            Action: TerminalInputAction.Press,
+            Modifiers: TerminalModifiers.None);
+
+        bool encoded = TerminalMouseProtocolEncoder.TryEncode(
+            pointerEvent,
+            mode,
+            column: 5,
+            row: 7,
+            pixelX: 41,
+            pixelY: 81,
+            out byte[] sequence);
+
+        Assert.True(encoded);
+        Assert.Equal("\x1b[<0;41;81M", Encoding.ASCII.GetString(sequence));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_SgrPixelsMouseMode_EncodesPointerFromManagedState()
+    {
+        TerminalScreen screen = new(80, 24, 0);
+        BasicVtProcessor processor = new(screen);
+        processor.Process("\x1b[?1000h\x1b[?1016h"u8);
+
+        Assert.True(((ITerminalMouseReportingStateSource)processor).MouseReportingEnabled);
+
+        TerminalPointerEvent pointerEvent = new(
+            Kind: TerminalPointerEventKind.Button,
+            X: 40,
+            Y: 80,
+            Button: TerminalMouseButton.Left,
+            Action: TerminalInputAction.Press,
+            Modifiers: TerminalModifiers.None);
+        TerminalPointerEncodingContext context = new(
+            ScreenWidthPx: 800,
+            ScreenHeightPx: 384,
+            CellWidthPx: 10,
+            CellHeightPx: 16);
+
+        bool encoded = processor.TryEncodePointer(pointerEvent, context, out byte[] sequence);
+
+        Assert.True(encoded);
+        Assert.Equal("\x1b[<0;41;81M", Encoding.ASCII.GetString(sequence));
     }
 
     [Fact]

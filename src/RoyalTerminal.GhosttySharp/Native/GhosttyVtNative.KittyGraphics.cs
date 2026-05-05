@@ -72,6 +72,34 @@ public static partial class GhosttyVtNative
         DataLength = 8,
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GhosttyKittyGraphicsPlacementRenderInfo
+    {
+        public nuint Size;
+        public uint PixelWidth;
+        public uint PixelHeight;
+        public uint GridColumns;
+        public uint GridRows;
+        public int ViewportColumn;
+        public int ViewportRow;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool ViewportVisible;
+
+        public uint SourceX;
+        public uint SourceY;
+        public uint SourceWidth;
+        public uint SourceHeight;
+
+        public static GhosttyKittyGraphicsPlacementRenderInfo CreateSized()
+        {
+            return new GhosttyKittyGraphicsPlacementRenderInfo
+            {
+                Size = (nuint)Marshal.SizeOf<GhosttyKittyGraphicsPlacementRenderInfo>(),
+            };
+        }
+    }
+
     [LibraryImport(LibName, EntryPoint = "ghostty_kitty_graphics_get")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult KittyGraphicsGet(
@@ -89,6 +117,15 @@ public static partial class GhosttyVtNative
         nint image,
         GhosttyKittyGraphicsImageData data,
         void* output);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_kitty_graphics_image_get_multi")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult KittyGraphicsImageGetMulti(
+        nint image,
+        nuint count,
+        GhosttyKittyGraphicsImageData* keys,
+        void** values,
+        nuint* outWritten);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_kitty_graphics_placement_iterator_new")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
@@ -116,6 +153,23 @@ public static partial class GhosttyVtNative
         nint iterator,
         GhosttyKittyGraphicsPlacementData data,
         void* output);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_kitty_graphics_placement_get_multi")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult KittyGraphicsPlacementGetMulti(
+        nint iterator,
+        nuint count,
+        GhosttyKittyGraphicsPlacementData* keys,
+        void** values,
+        nuint* outWritten);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_kitty_graphics_placement_render_info")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult KittyGraphicsPlacementRenderInfoGet(
+        nint iterator,
+        nint image,
+        nint terminal,
+        GhosttyKittyGraphicsPlacementRenderInfo* output);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_kitty_graphics_placement_rect")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
