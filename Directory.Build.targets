@@ -49,6 +49,8 @@
       <_RoyalTerminalGhosttyRuntimeJsonLine Include="}" />
     </ItemGroup>
 
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+
     <WriteLinesToFile
       File="$(_RoyalTerminalGhosttyRuntimeJsonPath)"
       Lines="@(_RoyalTerminalGhosttyRuntimeJsonLine)"

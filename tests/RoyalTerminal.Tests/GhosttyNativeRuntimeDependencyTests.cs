@@ -54,6 +54,14 @@ public sealed class GhosttyNativeRuntimeDependencyTests
 
         Assert.Contains(
             target.Descendants(),
+            element => element.Name.LocalName == "MakeDir"
+                    && string.Equals(
+                        element.Attribute("Directories")?.Value,
+                        "$(IntermediateOutputPath)",
+                        StringComparison.Ordinal));
+
+        Assert.Contains(
+            target.Descendants(),
             element => element.Name.LocalName == "WriteLinesToFile"
                     && string.Equals(
                         element.Attribute("File")?.Value,
