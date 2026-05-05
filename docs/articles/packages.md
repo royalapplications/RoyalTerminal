@@ -12,7 +12,7 @@ RoyalTerminal is published as a family of packages so you can compose the exact 
 | --- | --- |
 | Managed Avalonia terminal | `RoyalTerminal.Avalonia` |
 | Avalonia terminal plus reusable settings UI | `RoyalTerminal.Avalonia`, `RoyalTerminal.Avalonia.Settings` |
-| Avalonia terminal with native Ghostty VT available | `RoyalTerminal.Avalonia`, `RoyalTerminal.Terminal.Vt.Ghostty`, matching `RoyalTerminal.GhosttySharp.Native.*` |
+| Avalonia terminal with native Ghostty VT available | `RoyalTerminal.Avalonia`, `RoyalTerminal.Terminal.Vt.Ghostty`; RID-aware restore/publish selects the matching `RoyalTerminal.GhosttySharp.Native.*` package |
 | Custom transport/profile orchestration without Avalonia | `RoyalTerminal.Terminal`, `RoyalTerminal.Terminal.Services`, selected `RoyalTerminal.Terminal.Transport.*` packages |
 | Shader source models and compatibility translation without Avalonia or Skia | `RoyalTerminal.Shaders` |
 | Custom rendering integration | `RoyalTerminal.Rendering.Contracts`, `RoyalTerminal.Rendering.Skia`, optional `RoyalTerminal.Rendering.Interop.Ghostty*` |
@@ -60,7 +60,7 @@ The API section is generated from the packable managed libraries under `src/` an
 | `RoyalTerminal.Terminal.Vt.Managed` | Managed `BasicVtProcessor` implementation. |
 | `RoyalTerminal.Terminal.Vt.Ghostty` | Native `GhosttyVtProcessor` over the official `libghostty-vt` API. |
 | `RoyalTerminal.Terminal.Vt.Default` | `DefaultVtProcessorFactory` with managed fallback and optional native providers. |
-| `RoyalTerminal.GhosttySharp` | Managed Ghostty VT bindings and wrappers. |
+| `RoyalTerminal.GhosttySharp` | Managed Ghostty VT bindings and wrappers. Its package-level `runtime.json` selects the matching native asset package for RID-aware restores. |
 
 ## Transport and PTY packages
 
@@ -86,7 +86,7 @@ The API section is generated from the packable managed libraries under `src/` an
 | `RoyalTerminal.Rendering.Text` | HarfBuzz-backed shaping, font fallback, and diagnostics primitives. |
 | `RoyalTerminal.Shaders` | Dependency-free shader source models plus Ghostty/Shadertoy and Windows Terminal translation into Skia Runtime Effect source. |
 | `RoyalTerminal.Rendering.Skia` | CPU Skia terminal renderer, regex text highlighting engine, glyph cache, and framebuffer shader post-processing. |
-| `RoyalTerminal.Rendering.Interop.Ghostty` | Managed interop wrappers for `ghostty-renderer-capi`. |
+| `RoyalTerminal.Rendering.Interop.Ghostty` | Managed interop wrappers for `ghostty-renderer-capi`. Its package-level `runtime.json` selects the matching native asset package for RID-aware restores. |
 | `RoyalTerminal.Rendering.Interop.Ghostty.Skia` | Skia bridge around Ghostty renderer interop with fallback support. |
 
 ## Native asset packages
@@ -96,6 +96,11 @@ The API section is generated from the packable managed libraries under `src/` an
 | `RoyalTerminal.GhosttySharp.Native.OSX` | `libghostty-vt.dylib` and `libghostty-renderer-capi.dylib` for macOS x64 and arm64 |
 | `RoyalTerminal.GhosttySharp.Native.Win64` | `ghostty-vt.dll` and `ghostty-renderer-capi.dll` for Windows x64 and arm64 |
 | `RoyalTerminal.GhosttySharp.Native.Linux64` | `libghostty-vt.so` and `libghostty-renderer-capi.so` for Linux x64 and arm64 |
+
+These packages are normally selected through the `runtime.json` files in
+`RoyalTerminal.GhosttySharp` and `RoyalTerminal.Rendering.Interop.Ghostty`.
+Restore or publish with a concrete RID, for example `dotnet publish -r osx-arm64`,
+to let NuGet resolve only the native package for that target.
 
 ## Sample and validation projects
 

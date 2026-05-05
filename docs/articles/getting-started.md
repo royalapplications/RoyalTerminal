@@ -15,11 +15,11 @@ RoyalTerminal is a modular terminal stack, not a single UI control package. The 
 | Scenario | Required packages |
 | --- | --- |
 | Avalonia terminal with managed VT fallback | `RoyalTerminal.Avalonia` |
-| Avalonia terminal with native Ghostty VT available | `RoyalTerminal.Avalonia`, `RoyalTerminal.Terminal.Vt.Ghostty`, and the matching native asset package for your OS |
+| Avalonia terminal with native Ghostty VT available | `RoyalTerminal.Avalonia`, `RoyalTerminal.Terminal.Vt.Ghostty`; restore or publish with your target RID so NuGet selects the matching native asset package |
 | Avalonia settings surface | add `RoyalTerminal.Avalonia.Settings` |
 | SSH agent auth for the SSH.NET transport | add `RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent` |
 
-Native asset packages:
+Native asset packages selected by `runtime.json`:
 
 - macOS: `RoyalTerminal.GhosttySharp.Native.OSX`
 - Windows: `RoyalTerminal.GhosttySharp.Native.Win64`
@@ -38,10 +38,13 @@ Avalonia plus native Ghostty VT:
 ```bash
 dotnet add package RoyalTerminal.Avalonia
 dotnet add package RoyalTerminal.Terminal.Vt.Ghostty
-dotnet add package RoyalTerminal.GhosttySharp.Native.OSX
+dotnet publish -r osx-arm64
 ```
 
-Replace the last package with the correct Windows or Linux native package for your target runtime.
+Replace `osx-arm64` with the RID you publish or restore for, such as `win-x64`,
+`win-arm64`, `linux-x64`, `linux-arm64`, or `osx-x64`. Direct native package
+references are only needed when you intentionally want to force a specific
+native asset package.
 
 ## Add a `TerminalControl`
 

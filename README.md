@@ -20,10 +20,10 @@ Project documentation source lives in [docs/](docs/) and is published through th
 | Package | NuGet | Description |
 |---------|-------|-------------|
 | **RoyalTerminal.Avalonia** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.Avalonia.svg)](https://www.nuget.org/packages/RoyalTerminal.Avalonia) | Backend-neutral Avalonia terminal control (`TerminalControl`) and presentation services (no Ghostty dependency) |
-| **RoyalTerminal.GhosttySharp** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp) | Core Ghostty VT bindings (`libghostty-vt`) |
-| **RoyalTerminal.GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.OSX) | Native runtime assets for macOS (`libghostty-vt`, `libghostty-renderer-capi`) |
-| **RoyalTerminal.GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Win64) | Native runtime assets for Windows x64/arm64 (`ghostty-vt.dll`, `ghostty-renderer-capi.dll`) |
-| **RoyalTerminal.GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Linux64) | Native runtime assets for Linux (`libghostty-vt.so`, `libghostty-renderer-capi.so`) |
+| **RoyalTerminal.GhosttySharp** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp) | Core Ghostty VT bindings (`libghostty-vt`) with RID-aware native package selection |
+| **RoyalTerminal.GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.OSX) | Native runtime assets selected for macOS by `runtime.json` (`libghostty-vt`, `libghostty-renderer-capi`) |
+| **RoyalTerminal.GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Win64) | Native runtime assets selected for Windows x64/arm64 by `runtime.json` (`ghostty-vt.dll`, `ghostty-renderer-capi.dll`) |
+| **RoyalTerminal.GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Linux64) | Native runtime assets selected for Linux by `runtime.json` (`libghostty-vt.so`, `libghostty-renderer-capi.so`) |
 
 ### Modular Managed Packages (Packable Composition Units)
 
@@ -782,11 +782,15 @@ dotnet add package RoyalTerminal.Avalonia
 
 dotnet add package RoyalTerminal.Terminal.Vt.Ghostty
 
-# Native runtime assets (pick your target platforms)
-dotnet add package RoyalTerminal.GhosttySharp.Native.OSX
-dotnet add package RoyalTerminal.GhosttySharp.Native.Linux64
-dotnet add package RoyalTerminal.GhosttySharp.Native.Win64
+# Restore/publish for the RID you target so NuGet selects the matching native package.
+dotnet publish -r osx-arm64
 ```
+
+`RoyalTerminal.GhosttySharp` and `RoyalTerminal.Rendering.Interop.Ghostty` ship
+`runtime.json` metadata that maps supported RIDs to the matching
+`RoyalTerminal.GhosttySharp.Native.*` package. Direct native package references
+are only needed when you intentionally want to force a specific native asset
+package.
 
 ### Optional SSH Transport Packages
 
@@ -961,6 +965,10 @@ Primary runtime package locations:
 - `src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/<rid>/native/`
 - `src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/<rid>/native/`
 - `src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/<rid>/native/`
+
+Package consumers normally do not reference those native packages directly.
+RID-aware restore/publish resolves them from the `runtime.json` files in
+`RoyalTerminal.GhosttySharp` and `RoyalTerminal.Rendering.Interop.Ghostty`.
 
 ## Project Structure
 
