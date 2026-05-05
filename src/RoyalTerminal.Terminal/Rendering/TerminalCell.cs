@@ -1452,11 +1452,14 @@ public sealed class TerminalScreen
     {
         List<TerminalRow> reflowedRows = new(_rows.Count);
         List<TerminalCell> logicalLine = new(Math.Max(Columns, columns));
-        List<int>? lineTrackedIndexes = additionalTrackedPositions is null ? null : new List<int>();
-        List<int>? lineTrackedOffsets = additionalTrackedPositions is null ? null : new List<int>();
+        ReflowAnchorProcessingIndex[]? trackedPositionIndexes =
+            CreateReflowAnchorProcessingOrder(additionalTrackedPositions);
+        List<int>? lineTrackedIndexes = trackedPositionIndexes is null ? null : new List<int>();
+        List<int>? lineTrackedOffsets = trackedPositionIndexes is null ? null : new List<int>();
         mappedAbsoluteRow = trackedAbsoluteRow;
         mappedColumn = Math.Clamp(trackedColumn, 0, columns);
 
+        int nextTrackedPositionIndex = 0;
         int rowIndex = 0;
         while (rowIndex < _rows.Count)
         {
@@ -1477,14 +1480,23 @@ public sealed class TerminalScreen
                     trackedLogicalOffset = logicalLine.Count + clampedTrackedColumn;
                 }
 
-                if (additionalTrackedPositions is not null)
+                if (additionalTrackedPositions is not null && trackedPositionIndexes is not null)
                 {
-                    for (int i = 0; i < additionalTrackedPositions.Count; i++)
+                    while (nextTrackedPositionIndex < trackedPositionIndexes.Length)
                     {
-                        ReflowAnchorPosition position = additionalTrackedPositions[i];
-                        if (position.OldAbsoluteRow != rowIndex)
+                        ReflowAnchorProcessingIndex processingIndex =
+                            trackedPositionIndexes[nextTrackedPositionIndex];
+                        int positionIndex = processingIndex.Index;
+                        ReflowAnchorPosition position = additionalTrackedPositions[positionIndex];
+                        if (processingIndex.Row < rowIndex)
                         {
+                            nextTrackedPositionIndex++;
                             continue;
+                        }
+
+                        if (processingIndex.Row != rowIndex)
+                        {
+                            break;
                         }
 
                         int clampedColumn = Math.Clamp(position.OldColumn, 0, row.Columns);
@@ -1498,8 +1510,9 @@ public sealed class TerminalScreen
                             endExclusive = Math.Max(endExclusive, clampedColumn);
                         }
 
-                        lineTrackedIndexes!.Add(i);
+                        lineTrackedIndexes!.Add(positionIndex);
                         lineTrackedOffsets!.Add(logicalLine.Count + effectiveTrackedColumn);
+                        nextTrackedPositionIndex++;
                     }
                 }
 
@@ -1553,6 +1566,30 @@ public sealed class TerminalScreen
 
         _rows.Clear();
         _rows.AddRange(reflowedRows);
+    }
+
+    private static ReflowAnchorProcessingIndex[]? CreateReflowAnchorProcessingOrder(
+        List<ReflowAnchorPosition>? additionalTrackedPositions)
+    {
+        if (additionalTrackedPositions is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        ReflowAnchorProcessingIndex[] indexes = new ReflowAnchorProcessingIndex[additionalTrackedPositions.Count];
+        for (int i = 0; i < additionalTrackedPositions.Count; i++)
+        {
+            indexes[i] = new ReflowAnchorProcessingIndex(i, additionalTrackedPositions[i].OldAbsoluteRow);
+        }
+
+        Array.Sort(indexes, static (left, right) =>
+        {
+            int rowComparison = left.Row.CompareTo(right.Row);
+            return rowComparison != 0
+                ? rowComparison
+                : left.Index.CompareTo(right.Index);
+        });
+        return indexes;
     }
 
     private void RemapRasterGraphicsAfterReflow(
@@ -1835,6 +1872,8 @@ public sealed class TerminalScreen
 
         public bool IsMapped { get; set; }
     }
+
+    private readonly record struct ReflowAnchorProcessingIndex(int Index, int Row);
 
     /// <summary>
     /// Marks all rows as dirty for a full repaint.

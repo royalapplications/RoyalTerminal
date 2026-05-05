@@ -64,6 +64,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
     private const double SelectionAutoScrollMargin = 60d;
     private const int SelectionAutoScrollSpeed = 50;
+    private const ulong ComparableRowFnvOffsetBasis = 14695981039346656037UL;
+    private const ulong ComparableRowFnvPrime = 1099511628211UL;
+    private const int ComparableRowStackCharLimit = 256;
     // Managed VT parsing already yields in small UI batches, so draining at
     // Background priority avoids starvation without monopolizing the UI thread.
     private static readonly DispatcherPriority ManagedPendingOutputDrainPriority = DispatcherPriority.Background;
@@ -430,6 +433,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _selectionActiveAbsoluteRow;
     private bool _hasAnchoredSelection;
     private TerminalHighlightSpan[] _selectionAnchorSpans = Array.Empty<TerminalHighlightSpan>();
+    private TerminalHighlightSpan[]? _selectionViewportSpansSource;
+    private SkiaTerminalRenderer? _selectionViewportSpansRenderer;
+    private int _selectionViewportSpansTopRow = int.MinValue;
     private Point _lastSelectionPointerPoint;
     private KeyModifiers _lastSelectionKeyModifiers;
     private bool _leftPointerDown;
@@ -508,6 +514,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         public bool AnchorsAreSpans { get; }
     }
+
+    private readonly record struct ComparableRowKey(int TextLength, ulong Hash);
 
     /// <summary>
     /// Gets the session service responsible for surface and PTY lifecycle.
@@ -2401,7 +2409,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _selectionActiveColumn = column;
         _selectionActiveAbsoluteRow = absoluteRow;
         _hasAnchoredSelection = true;
-        _selectionAnchorSpans = Array.Empty<TerminalHighlightSpan>();
+        SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
         ApplyMouseSelectionToRenderer(topRow);
     }
 
@@ -2506,13 +2514,28 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void ApplySelectionSpansToRenderer(int topRow)
     {
-        if (_renderer is null || _selectionAnchorSpans.Length == 0)
+        if (_renderer is null)
         {
-            _renderer?.SetSelectionSpans(ReadOnlySpan<TerminalHighlightSpan>.Empty);
+            ResetSelectionViewportSpanCache();
             return;
         }
 
-        List<TerminalHighlightSpan> visibleSpans = new(_selectionAnchorSpans.Length);
+        if (_selectionAnchorSpans.Length == 0)
+        {
+            ResetSelectionViewportSpanCache();
+            _renderer.SetSelectionSpans(ReadOnlySpan<TerminalHighlightSpan>.Empty);
+            return;
+        }
+
+        if (ReferenceEquals(_selectionViewportSpansSource, _selectionAnchorSpans) &&
+            ReferenceEquals(_selectionViewportSpansRenderer, _renderer) &&
+            _selectionViewportSpansTopRow == topRow)
+        {
+            return;
+        }
+
+        TerminalHighlightSpan[] visibleSpans = new TerminalHighlightSpan[_selectionAnchorSpans.Length];
+        int visibleSpanCount = 0;
         for (int i = 0; i < _selectionAnchorSpans.Length; i++)
         {
             TerminalHighlightSpan span = _selectionAnchorSpans[i];
@@ -2522,14 +2545,39 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 continue;
             }
 
-            visibleSpans.Add(new TerminalHighlightSpan(
+            visibleSpans[visibleSpanCount++] = new TerminalHighlightSpan(
                 viewportRow,
                 span.StartColumn,
                 span.EndColumn,
-                span.Kind));
+                span.Kind);
         }
 
-        _renderer.SetSelectionSpans(visibleSpans.ToArray());
+        if (visibleSpanCount == 0)
+        {
+            visibleSpans = Array.Empty<TerminalHighlightSpan>();
+        }
+        else if (visibleSpanCount != visibleSpans.Length)
+        {
+            Array.Resize(ref visibleSpans, visibleSpanCount);
+        }
+
+        _selectionViewportSpansSource = _selectionAnchorSpans;
+        _selectionViewportSpansRenderer = _renderer;
+        _selectionViewportSpansTopRow = topRow;
+        _renderer.SetSelectionSpans(visibleSpans);
+    }
+
+    private void SetSelectionAnchorSpans(TerminalHighlightSpan[] spans)
+    {
+        _selectionAnchorSpans = spans;
+        ResetSelectionViewportSpanCache();
+    }
+
+    private void ResetSelectionViewportSpanCache()
+    {
+        _selectionViewportSpansSource = null;
+        _selectionViewportSpansRenderer = null;
+        _selectionViewportSpansTopRow = int.MinValue;
     }
 
     private TerminalGridPosition[]? CreateSelectionResizeAnchorsLocked(out bool anchorsAreSpans)
@@ -2757,16 +2805,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (anchorsAreSpans)
         {
-            _selectionAnchorSpans = CreateSelectionSpansFromResizeAnchors(
+            SetSelectionAnchorSpans(CreateSelectionSpansFromResizeAnchors(
                 selectionResizeAnchors,
                 rowOffset: 0,
-                _screen?.Columns ?? 1);
+                _screen?.Columns ?? 1));
             UpdateSelectionEndpointsFromSpans();
             ApplyAnchoredSelectionToRendererLocked();
             return;
         }
 
-        _selectionAnchorSpans = Array.Empty<TerminalHighlightSpan>();
+        SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
         _selectionAnchorColumn = selectionResizeAnchors[0].Column;
         _selectionActiveColumn = selectionResizeAnchors[1].Column;
         _selectionAnchorAbsoluteRow = selectionResizeAnchors[0].Row;
@@ -2789,16 +2837,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         int absoluteRowOffset = topRow + rowOffset - context.SnapshotTopAbsoluteRow;
         if (context.AnchorsAreSpans)
         {
-            _selectionAnchorSpans = CreateSelectionSpansFromResizeAnchors(
+            SetSelectionAnchorSpans(CreateSelectionSpansFromResizeAnchors(
                 anchors,
                 absoluteRowOffset,
-                _screen.Columns);
+                _screen.Columns));
             UpdateSelectionEndpointsFromSpans();
             ApplyAnchoredSelectionToRendererLocked();
             return;
         }
 
-        _selectionAnchorSpans = Array.Empty<TerminalHighlightSpan>();
+        SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
         _selectionAnchorColumn = anchors[0].Column;
         _selectionAnchorAbsoluteRow = anchors[0].Row + absoluteRowOffset;
         _selectionActiveColumn = anchors[1].Column;
@@ -2864,15 +2912,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         NativeSelectionResizeContext context,
         TerminalScreen destination)
     {
-        int snapshotRows = context.Snapshot.ViewportRows;
-        int destinationRows = destination.ViewportRows;
-        if (snapshotRows <= 0 || destinationRows <= 0)
+        int snapshotRowCount = context.Snapshot.ViewportRows;
+        int destinationRowCount = destination.ViewportRows;
+        if (snapshotRowCount <= 0 || destinationRowCount <= 0)
         {
             return 0;
         }
 
-        string[] snapshotText = CreateComparableViewportRows(context.Snapshot);
-        string[] destinationText = CreateComparableViewportRows(destination);
+        ComparableRowKey[] snapshotRows = CreateComparableViewportRowKeys(context.Snapshot);
+        ComparableRowKey[] destinationRows = CreateComparableViewportRowKeys(destination);
         int anchorTop = Math.Min(
             context.Anchors[0].Row,
             context.Anchors[1].Row) - context.SnapshotTopAbsoluteRow;
@@ -2883,21 +2931,25 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         int bestOffset = 0;
         int bestMatches = 0;
         int bestScore = int.MinValue;
-        for (int offset = -snapshotRows + 1; offset < destinationRows; offset++)
+        for (int offset = -snapshotRowCount + 1; offset < destinationRowCount; offset++)
         {
             int matches = 0;
             int score = 0;
-            for (int snapshotRow = 0; snapshotRow < snapshotRows; snapshotRow++)
+            for (int snapshotRow = 0; snapshotRow < snapshotRowCount; snapshotRow++)
             {
                 int destinationRow = snapshotRow + offset;
-                if (destinationRow < 0 || destinationRow >= destinationRows)
+                if (destinationRow < 0 || destinationRow >= destinationRowCount)
                 {
                     continue;
                 }
 
-                string rowText = snapshotText[snapshotRow];
-                if (rowText.Length == 0 ||
-                    !string.Equals(rowText, destinationText[destinationRow], StringComparison.Ordinal))
+                ComparableRowKey rowKey = snapshotRows[snapshotRow];
+                if (rowKey.TextLength == 0 ||
+                    rowKey != destinationRows[destinationRow] ||
+                    !ComparableRowsEqual(
+                        context.Snapshot.GetViewportRow(snapshotRow),
+                        destination.GetViewportRow(destinationRow),
+                        rowKey.TextLength))
                 {
                     continue;
                 }
@@ -2927,20 +2979,99 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return value > end ? value - end : 0;
     }
 
-    private static string[] CreateComparableViewportRows(TerminalScreen screen)
+    private static ComparableRowKey[] CreateComparableViewportRowKeys(TerminalScreen screen)
     {
-        string[] rows = new string[screen.ViewportRows];
+        ComparableRowKey[] rows = new ComparableRowKey[screen.ViewportRows];
         for (int row = 0; row < rows.Length; row++)
         {
-            rows[row] = CreateComparableRowText(screen.GetViewportRow(row));
+            rows[row] = CreateComparableRowKey(screen.GetViewportRow(row));
         }
 
         return rows;
     }
 
-    private static string CreateComparableRowText(TerminalRow row)
+    private static ComparableRowKey CreateComparableRowKey(TerminalRow row)
     {
         ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        int lastContentColumn = FindComparableLastContentColumn(cells);
+
+        if (lastContentColumn < 0)
+        {
+            return default;
+        }
+
+        ulong hash = ComparableRowFnvOffsetBasis;
+        int textLength = 0;
+        Span<char> runeChars = stackalloc char[2];
+        for (int column = 0; column <= lastContentColumn; column++)
+        {
+            ref readonly TerminalCell cell = ref cells[column];
+            if (cell.Width == 0 || (cell.Attributes & CellAttributes.Hidden) != 0)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                string grapheme = cell.Grapheme;
+                for (int i = 0; i < grapheme.Length; i++)
+                {
+                    hash = AddComparableRowChar(hash, grapheme[i]);
+                }
+
+                textLength += grapheme.Length;
+            }
+            else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
+            {
+                Rune rune = new(cell.Codepoint);
+                int charsWritten = rune.EncodeToUtf16(runeChars);
+                for (int i = 0; i < charsWritten; i++)
+                {
+                    hash = AddComparableRowChar(hash, runeChars[i]);
+                }
+
+                textLength += charsWritten;
+            }
+            else
+            {
+                hash = AddComparableRowChar(hash, ' ');
+                textLength++;
+            }
+        }
+
+        return new ComparableRowKey(textLength, hash);
+    }
+
+    private static bool ComparableRowsEqual(TerminalRow left, TerminalRow right, int textLength)
+    {
+        if (textLength <= ComparableRowStackCharLimit)
+        {
+            Span<char> leftText = stackalloc char[textLength];
+            Span<char> rightText = stackalloc char[textLength];
+            WriteComparableRowText(left, leftText);
+            WriteComparableRowText(right, rightText);
+            return leftText.SequenceEqual(rightText);
+        }
+
+        char[] leftRented = ArrayPool<char>.Shared.Rent(textLength);
+        char[] rightRented = ArrayPool<char>.Shared.Rent(textLength);
+        try
+        {
+            Span<char> leftText = leftRented.AsSpan(0, textLength);
+            Span<char> rightText = rightRented.AsSpan(0, textLength);
+            WriteComparableRowText(left, leftText);
+            WriteComparableRowText(right, rightText);
+            return leftText.SequenceEqual(rightText);
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(leftRented);
+            ArrayPool<char>.Shared.Return(rightRented);
+        }
+    }
+
+    private static int FindComparableLastContentColumn(ReadOnlySpan<TerminalCell> cells)
+    {
         int lastContentColumn = -1;
         for (int column = 0; column < cells.Length; column++)
         {
@@ -2955,12 +3086,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             lastContentColumn = column;
         }
 
-        if (lastContentColumn < 0)
-        {
-            return string.Empty;
-        }
+        return lastContentColumn;
+    }
 
-        StringBuilder builder = new(lastContentColumn + 1);
+    private static void WriteComparableRowText(TerminalRow row, Span<char> destination)
+    {
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        int lastContentColumn = FindComparableLastContentColumn(cells);
+        int written = 0;
         Span<char> runeChars = stackalloc char[2];
         for (int column = 0; column <= lastContentColumn; column++)
         {
@@ -2972,27 +3105,36 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
             if (!string.IsNullOrEmpty(cell.Grapheme))
             {
-                builder.Append(cell.Grapheme);
+                string grapheme = cell.Grapheme;
+                grapheme.AsSpan().CopyTo(destination[written..]);
+                written += grapheme.Length;
             }
             else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
             {
                 Rune rune = new(cell.Codepoint);
                 int charsWritten = rune.EncodeToUtf16(runeChars);
-                builder.Append(runeChars[..charsWritten]);
+                runeChars[..charsWritten].CopyTo(destination[written..]);
+                written += charsWritten;
             }
             else
             {
-                builder.Append(' ');
+                destination[written++] = ' ';
             }
         }
 
-        return builder.ToString();
+        Debug.Assert(written == destination.Length);
+    }
+
+    private static ulong AddComparableRowChar(ulong hash, char value)
+    {
+        hash ^= value;
+        return hash * ComparableRowFnvPrime;
     }
 
     private void ClearAnchoredSelection()
     {
         _hasAnchoredSelection = false;
-        _selectionAnchorSpans = Array.Empty<TerminalHighlightSpan>();
+        SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
         _renderer?.SetSelectionSpans(ReadOnlySpan<TerminalHighlightSpan>.Empty);
     }
 
@@ -3348,7 +3490,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _selectionActiveColumn = _screen.Columns;
         _selectionActiveAbsoluteRow = topRow + _screen.ViewportRows - 1;
         _hasAnchoredSelection = true;
-        _selectionAnchorSpans = Array.Empty<TerminalHighlightSpan>();
+        SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
         _renderer.SelectionStart = (0, 0);
         _renderer.SelectionEnd = (_screen.Columns, _screen.ViewportRows - 1);
         _renderer.SelectionIsRectangle = false;

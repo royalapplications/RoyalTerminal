@@ -444,6 +444,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         TerminalHighlightSpan[] copy = new TerminalHighlightSpan[spans.Length];
         spans.CopyTo(copy);
+        if (copy.Length > 1 && !AreHighlightSpansSorted(copy))
+        {
+            Array.Sort(copy, CompareHighlightSpanRows);
+        }
+
         _selectionSpans = copy;
     }
 
@@ -4167,10 +4172,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         if (!selectionSpans.IsEmpty)
         {
-            for (int i = 0; i < selectionSpans.Length; i++)
+            int firstSelectionSpan = FindFirstHighlightSpanForRow(selectionSpans, rowIndex);
+            for (int i = firstSelectionSpan; i < selectionSpans.Length; i++)
             {
                 TerminalHighlightSpan span = selectionSpans[i];
-                if (span.Row != rowIndex)
+                if (span.Row > rowIndex)
+                {
+                    break;
+                }
+
+                if (span.Row < rowIndex)
                 {
                     continue;
                 }
@@ -4268,6 +4279,47 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 }
             }
         }
+    }
+
+    private static int CompareHighlightSpanRows(TerminalHighlightSpan left, TerminalHighlightSpan right)
+    {
+        int rowComparison = left.Row.CompareTo(right.Row);
+        return rowComparison != 0
+            ? rowComparison
+            : left.StartColumn.CompareTo(right.StartColumn);
+    }
+
+    private static bool AreHighlightSpansSorted(ReadOnlySpan<TerminalHighlightSpan> spans)
+    {
+        for (int i = 1; i < spans.Length; i++)
+        {
+            if (CompareHighlightSpanRows(spans[i - 1], spans[i]) > 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static int FindFirstHighlightSpanForRow(ReadOnlySpan<TerminalHighlightSpan> spans, int row)
+    {
+        int lower = 0;
+        int upper = spans.Length;
+        while (lower < upper)
+        {
+            int middle = lower + ((upper - lower) >> 1);
+            if (spans[middle].Row < row)
+            {
+                lower = middle + 1;
+            }
+            else
+            {
+                upper = middle;
+            }
+        }
+
+        return lower;
     }
 
     private uint ResolveBackgroundColorForCell(
