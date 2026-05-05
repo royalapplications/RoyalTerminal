@@ -11,14 +11,14 @@ This page focuses on the most common setup and runtime failures in the repositor
 Typical causes:
 
 - `RoyalTerminal.Terminal.Vt.Ghostty` was not referenced
-- the matching `RoyalTerminal.GhosttySharp.Native.*` package was not installed
+- restore or publish did not use a concrete RID, so `runtime.json` could not select the matching `RoyalTerminal.GhosttySharp.Native.*` package
 - native runtime files were not copied or restored correctly
 - the current machine architecture does not match the available native binaries
 
 First check:
 
 - package references
-- OS/RID match
+- OS/RID match, for example `dotnet publish -r osx-arm64`
 - whether `VtProcessorPreference` is `Native` instead of `Auto`
 
 If your host should remain resilient, switch to `Auto` so the managed VT processor can take over when native VT is unavailable.
