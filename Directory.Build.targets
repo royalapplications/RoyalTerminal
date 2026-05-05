@@ -1,0 +1,63 @@
+<Project>
+  <PropertyGroup Condition="'$(RoyalTerminalGenerateGhosttyNativeRuntimeJson)' == 'true'">
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);GenerateRoyalTerminalGhosttyNativeRuntimeJson</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <Target Name="GenerateRoyalTerminalGhosttyNativeRuntimeJson"
+          Condition="'$(RoyalTerminalGenerateGhosttyNativeRuntimeJson)' == 'true'">
+    <PropertyGroup>
+      <_RoyalTerminalGhosttyNativePackageVersion>$(PackageVersion)</_RoyalTerminalGhosttyNativePackageVersion>
+      <_RoyalTerminalGhosttyNativePackageVersion Condition="'$(_RoyalTerminalGhosttyNativePackageVersion)' == ''">$(Version)</_RoyalTerminalGhosttyNativePackageVersion>
+      <_RoyalTerminalGhosttyRuntimeJsonPath>$(IntermediateOutputPath)runtime.json</_RoyalTerminalGhosttyRuntimeJsonPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <_RoyalTerminalGhosttyRuntimeJsonLine Remove="@(_RoyalTerminalGhosttyRuntimeJsonLine)" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="{" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="  &quot;runtimes&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    &quot;linux-arm64&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      &quot;$(PackageId)&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="        &quot;RoyalTerminal.GhosttySharp.Native.Linux64&quot;: &quot;$(_RoyalTerminalGhosttyNativePackageVersion)&quot;" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      }" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    }," />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    &quot;linux-x64&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      &quot;$(PackageId)&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="        &quot;RoyalTerminal.GhosttySharp.Native.Linux64&quot;: &quot;$(_RoyalTerminalGhosttyNativePackageVersion)&quot;" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      }" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    }," />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    &quot;osx-arm64&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      &quot;$(PackageId)&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="        &quot;RoyalTerminal.GhosttySharp.Native.OSX&quot;: &quot;$(_RoyalTerminalGhosttyNativePackageVersion)&quot;" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      }" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    }," />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    &quot;osx-x64&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      &quot;$(PackageId)&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="        &quot;RoyalTerminal.GhosttySharp.Native.OSX&quot;: &quot;$(_RoyalTerminalGhosttyNativePackageVersion)&quot;" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      }" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    }," />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    &quot;win-arm64&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      &quot;$(PackageId)&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="        &quot;RoyalTerminal.GhosttySharp.Native.Win64&quot;: &quot;$(_RoyalTerminalGhosttyNativePackageVersion)&quot;" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      }" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    }," />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    &quot;win-x64&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      &quot;$(PackageId)&quot;: {" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="        &quot;RoyalTerminal.GhosttySharp.Native.Win64&quot;: &quot;$(_RoyalTerminalGhosttyNativePackageVersion)&quot;" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="      }" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="    }" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="  }" />
+      <_RoyalTerminalGhosttyRuntimeJsonLine Include="}" />
+    </ItemGroup>
+
+    <WriteLinesToFile
+      File="$(_RoyalTerminalGhosttyRuntimeJsonPath)"
+      Lines="@(_RoyalTerminalGhosttyRuntimeJsonLine)"
+      Overwrite="true" />
+
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="$(_RoyalTerminalGhosttyRuntimeJsonPath)"
+                              PackagePath="runtime.json"
+                              Visible="false" />
+    </ItemGroup>
+  </Target>
+</Project>
