@@ -483,6 +483,55 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_TransportOutputLargeRead_SplitsIntoBoundedChunks()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+
+        object sync = new();
+        List<int> chunkLengths = [];
+        control.DataReceived += (_, args) =>
+        {
+            lock (sync)
+            {
+                chunkLengths.Add(args.Data.Length);
+            }
+        };
+
+        byte[] payload = new byte[10_000];
+        Array.Fill(payload, (byte)'x');
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await Task.Run(() => transport.RaiseData(payload));
+
+            bool drained = await WaitUntilAsync(
+                () =>
+                {
+                    lock (sync)
+                    {
+                        return chunkLengths.Sum() == payload.Length;
+                    }
+                },
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(drained, "Expected all split transport chunks to reach DataReceived.");
+            lock (sync)
+            {
+                Assert.Equal([4096, 4096, 1808], chunkLengths);
+            }
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_StopPty_DrainsPendingOutput_AndNextSessionStartsClean()
     {
         FakeTransport transport = new();

@@ -50,7 +50,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private static readonly TimeSpan CursorBlinkInterval = TimeSpan.FromMilliseconds(530);
     // Managed VT transport output is parsed off the UI thread, but UI finalize
     // work still stays bounded so input and layout can preempt output floods.
-    private const int MaxQueuedOutputChunkBytes = 1024;
+    private const int MaxQueuedOutputChunkBytes = 4096;
     private const int MaxPendingOutputChunksPerDispatch = 4;
     private const int MaxPendingOutputBytesPerDispatch = 8 * 1024;
     private static readonly TimeSpan MaxPendingOutputDispatchDuration = TimeSpan.FromMilliseconds(2);
@@ -1876,6 +1876,67 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             try
             {
                 _vtProcessor?.Process(data);
+            }
+            finally
+            {
+                if (restoreScrollOffset >= 0)
+                {
+                    _screen.ScrollOffset = restoreScrollOffset;
+                }
+
+                if (restoreViewportOffsetRows is { } offsetRows && viewportScrollSource is not null)
+                {
+                    viewportScrollSource.SetViewportOffsetRows(offsetRows);
+                }
+            }
+
+            TryUpdateHoveredLinkFromPointerLocked();
+            UpdateRendererParityStateLocked();
+        }
+
+        return resetMouseSelection;
+    }
+
+    private bool ProcessOutputBatchCore(IReadOnlyList<byte[]> chunks)
+    {
+        if (_screen is null)
+        {
+            return false;
+        }
+
+        bool resetMouseSelection = false;
+        lock (_screen.SyncRoot)
+        {
+            int restoreScrollOffset = -1;
+            ulong? restoreViewportOffsetRows = null;
+            if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+            {
+                TerminalViewportScrollState viewportState = viewportScrollSource.ViewportScrollState;
+                ulong clampedOffsetRows = Math.Min(viewportState.OffsetRows, viewportState.MaxOffsetRows);
+                if (_vtProcessor?.AlternateScreen != true && clampedOffsetRows < viewportState.MaxOffsetRows)
+                {
+                    restoreViewportOffsetRows = clampedOffsetRows;
+                }
+            }
+            else if (_screen.ScrollOffset != 0)
+            {
+                restoreScrollOffset = _screen.ScrollOffset;
+                _screen.ScrollOffset = 0;
+            }
+
+            try
+            {
+                for (int i = 0; i < chunks.Count; i++)
+                {
+                    byte[] chunk = chunks[i];
+                    bool mouseModeChanged = _mouseModeTracker.Process(chunk);
+                    if (mouseModeChanged && IsMouseReportingActiveForInput())
+                    {
+                        resetMouseSelection = true;
+                    }
+
+                    _vtProcessor?.Process(chunk);
+                }
             }
             finally
             {
@@ -4342,30 +4403,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private PendingTransportUiBatch ProcessPendingTransportOutputBatch(List<byte[]> chunks, int totalBytes)
     {
-        if (chunks.Count == 1)
-        {
-            bool resetMouseSelection = ProcessOutputCore(chunks[0]);
-            return new PendingTransportUiBatch(chunks, totalBytes, resetMouseSelection);
-        }
-
-        byte[] mergedBuffer = ArrayPool<byte>.Shared.Rent(totalBytes);
-        int offset = 0;
-        try
-        {
-            for (int i = 0; i < chunks.Count; i++)
-            {
-                byte[] chunk = chunks[i];
-                Buffer.BlockCopy(chunk, 0, mergedBuffer, offset, chunk.Length);
-                offset += chunk.Length;
-            }
-
-            bool resetMouseSelection = ProcessOutputCore(mergedBuffer.AsSpan(0, totalBytes));
-            return new PendingTransportUiBatch(chunks, totalBytes, resetMouseSelection);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(mergedBuffer);
-        }
+        bool resetMouseSelection = chunks.Count == 1
+            ? ProcessOutputCore(chunks[0])
+            : ProcessOutputBatchCore(chunks);
+        return new PendingTransportUiBatch(chunks, totalBytes, resetMouseSelection);
     }
 
     private void EnqueuePendingTransportUiBatch(PendingTransportUiBatch batch)
@@ -4469,31 +4510,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        byte[] mergedBuffer = ArrayPool<byte>.Shared.Rent(totalBytes);
-        int offset = 0;
-        try
+        bool resetMouseSelection = ProcessOutputBatchCore(chunks);
+        if (resetMouseSelection)
         {
-            for (int i = 0; i < chunks.Count; i++)
-            {
-                byte[] chunk = chunks[i];
-                Buffer.BlockCopy(chunk, 0, mergedBuffer, offset, chunk.Length);
-                offset += chunk.Length;
-            }
-
-            bool resetMouseSelection = ProcessOutputCore(mergedBuffer.AsSpan(0, totalBytes));
-            if (resetMouseSelection)
-            {
-                ApplyMouseModeSelectionResetOnUiThread();
-            }
-
-            for (int i = 0; i < chunks.Count; i++)
-            {
-                DataReceived?.Invoke(this, new TerminalDataEventArgs(chunks[i]));
-            }
+            ApplyMouseModeSelectionResetOnUiThread();
         }
-        finally
+
+        for (int i = 0; i < chunks.Count; i++)
         {
-            ArrayPool<byte>.Shared.Return(mergedBuffer);
+            DataReceived?.Invoke(this, new TerminalDataEventArgs(chunks[i]));
         }
     }
 
