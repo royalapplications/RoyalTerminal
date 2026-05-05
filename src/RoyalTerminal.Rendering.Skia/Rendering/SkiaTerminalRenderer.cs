@@ -101,6 +101,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private long _diagnosticImageCacheMisses;
     private long _diagnosticImageCacheEvictions;
     private TerminalHighlightSpan[] _highlightSpans = Array.Empty<TerminalHighlightSpan>();
+    private TerminalHighlightSpan[] _selectionSpans = Array.Empty<TerminalHighlightSpan>();
     private TerminalTextHighlightRule[] _textHighlightRules = Array.Empty<TerminalTextHighlightRule>();
     private CompiledTextHighlightRule[] _compiledTextHighlightRules = Array.Empty<CompiledTextHighlightRule>();
     private readonly Dictionary<TerminalRow, TextHighlightRowCacheEntry> _textHighlightRowCache = new(ReferenceEqualityComparer.Instance);
@@ -431,6 +432,27 @@ public sealed class SkiaTerminalRenderer : IDisposable
     }
 
     /// <summary>
+    /// Replaces row-local selection spans. When present, these spans override the endpoint-based selection overlay.
+    /// </summary>
+    public void SetSelectionSpans(ReadOnlySpan<TerminalHighlightSpan> spans)
+    {
+        if (spans.IsEmpty)
+        {
+            _selectionSpans = Array.Empty<TerminalHighlightSpan>();
+            return;
+        }
+
+        TerminalHighlightSpan[] copy = new TerminalHighlightSpan[spans.Length];
+        spans.CopyTo(copy);
+        _selectionSpans = copy;
+    }
+
+    /// <summary>
+    /// Gets row-local selection spans used for non-rectangular reflowed selections.
+    /// </summary>
+    public ReadOnlySpan<TerminalHighlightSpan> GetSelectionSpans() => _selectionSpans;
+
+    /// <summary>
     /// Replaces regex-based text highlight rules used for foreground/background overrides.
     /// Invalid regular expressions are ignored so rendering cannot fail because of a user-authored rule.
     /// </summary>
@@ -502,6 +524,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         canvas.Save();
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
+        ReadOnlySpan<TerminalHighlightSpan> selectionSpans = _selectionSpans;
         ReadOnlySpan<CompiledTextHighlightRule> textHighlightRules = _compiledTextHighlightRules;
         TerminalTextHighlightingMode textHighlightingMode = _textHighlightingMode;
         bool textHighlightingEnabled = textHighlightingMode != TerminalTextHighlightingMode.Disabled &&
@@ -540,6 +563,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 PopulateRowOverlayFlags(
                     row,
                     terminalRow.Columns,
+                    selectionSpans,
                     highlights,
                     rowOverlays);
                 Span<CellTextHighlightOverride> rowTextHighlights = GetRowTextHighlightOverrides(
@@ -579,6 +603,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     PopulateRowOverlayFlags(
                         row,
                         terminalRow.Columns,
+                        selectionSpans,
                         highlights,
                         rowOverlays);
                 }
@@ -4131,6 +4156,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private void PopulateRowOverlayFlags(
         int rowIndex,
         int columnCount,
+        ReadOnlySpan<TerminalHighlightSpan> selectionSpans,
         ReadOnlySpan<TerminalHighlightSpan> highlights,
         Span<CellOverlayFlags> rowOverlays)
     {
@@ -4139,7 +4165,25 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return;
         }
 
-        if (SelectionStart is not null && SelectionEnd is not null)
+        if (!selectionSpans.IsEmpty)
+        {
+            for (int i = 0; i < selectionSpans.Length; i++)
+            {
+                TerminalHighlightSpan span = selectionSpans[i];
+                if (span.Row != rowIndex)
+                {
+                    continue;
+                }
+
+                int start = Math.Clamp(span.StartColumn, 0, columnCount);
+                int end = Math.Clamp(span.EndColumn, 0, Math.Max(0, columnCount - 1));
+                for (int col = start; col <= end; col++)
+                {
+                    rowOverlays[col] |= CellOverlayFlags.Selection;
+                }
+            }
+        }
+        else if (SelectionStart is not null && SelectionEnd is not null)
         {
             int startCol = SelectionStart.Value.Column;
             int startRow = SelectionStart.Value.Row;

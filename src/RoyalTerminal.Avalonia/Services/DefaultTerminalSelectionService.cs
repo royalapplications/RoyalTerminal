@@ -32,6 +32,13 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
 
         if (screen is not null &&
             renderer is not null &&
+            !renderer.GetSelectionSpans().IsEmpty)
+        {
+            usedRendererSelection = true;
+            text = GetSelectedText(screen, renderer.GetSelectionSpans());
+        }
+        else if (screen is not null &&
+            renderer is not null &&
             TryCreateRendererSelectionRange(renderer, out RendererSelectionRange selection))
         {
             usedRendererSelection = true;
@@ -177,6 +184,7 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         renderer.SelectionStart = null;
         renderer.SelectionEnd = null;
         renderer.SelectionIsRectangle = false;
+        renderer.SetSelectionSpans(ReadOnlySpan<TerminalHighlightSpan>.Empty);
         if (screen is not null)
         {
             lock (screen.SyncRoot)
@@ -296,6 +304,88 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         }
 
         return sb.ToString();
+    }
+
+    private static string? GetSelectedText(TerminalScreen screen, ReadOnlySpan<TerminalHighlightSpan> selectionSpans)
+    {
+        if (selectionSpans.IsEmpty)
+        {
+            return null;
+        }
+
+        TerminalHighlightSpan[] spans = selectionSpans.ToArray();
+        Array.Sort(spans, static (left, right) =>
+        {
+            int rowComparison = left.Row.CompareTo(right.Row);
+            return rowComparison != 0
+                ? rowComparison
+                : left.StartColumn.CompareTo(right.StartColumn);
+        });
+
+        StringBuilder sb = new();
+        lock (screen.SyncRoot)
+        {
+            int viewportTopAbsoluteRow = screen.ViewportTopAbsoluteRow;
+            int previousRow = int.MinValue;
+            int previousEndColumn = -1;
+            for (int i = 0; i < spans.Length; i++)
+            {
+                TerminalHighlightSpan span = spans[i];
+                int absoluteRow = viewportTopAbsoluteRow + span.Row;
+                if (absoluteRow < 0 || absoluteRow >= screen.TotalRows)
+                {
+                    continue;
+                }
+
+                bool wrappedContinuation = previousRow != int.MinValue &&
+                    span.Row == previousRow + 1 &&
+                    previousEndColumn >= screen.Columns - 1 &&
+                    span.StartColumn == 0;
+                if (previousRow != int.MinValue && span.Row != previousRow && !wrappedContinuation)
+                {
+                    sb.AppendLine();
+                }
+
+                previousRow = span.Row;
+                previousEndColumn = span.EndColumn;
+                TerminalRow termRow = screen.GetRow(absoluteRow);
+                int colStart = Math.Clamp(span.StartColumn, 0, screen.Columns);
+                int colEndInclusive = Math.Clamp(span.EndColumn, -1, Math.Max(0, screen.Columns - 1));
+                if (colStart > colEndInclusive)
+                {
+                    continue;
+                }
+
+                AppendCells(sb, termRow, colStart, colEndInclusive + 1);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static void AppendCells(StringBuilder sb, TerminalRow termRow, int colStart, int colEndExclusive)
+    {
+        for (int col = colStart; col < colEndExclusive; col++)
+        {
+            ref TerminalCell cell = ref termRow[col];
+            if (cell.Width == 0)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                sb.Append(cell.Grapheme);
+            }
+            else if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
+            {
+                sb.Append(char.ConvertFromUtf32(cell.Codepoint));
+            }
+            else
+            {
+                sb.Append(' ');
+            }
+        }
     }
 
     private readonly record struct RendererSelectionRange(
