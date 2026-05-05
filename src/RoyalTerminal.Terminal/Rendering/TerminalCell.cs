@@ -324,14 +324,226 @@ public sealed class TerminalRow
 }
 
 /// <summary>
+/// Ring-backed terminal row buffer optimized for scrollback trimming at the top.
+/// </summary>
+internal sealed class TerminalRowBuffer
+{
+    private TerminalRow?[] _items;
+    private int _head;
+
+    public TerminalRowBuffer(int capacity = 0)
+    {
+        _items = capacity > 0
+            ? new TerminalRow[capacity]
+            : Array.Empty<TerminalRow>();
+    }
+
+    public int Count { get; private set; }
+
+    public TerminalRow this[int index]
+    {
+        get
+        {
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)Count);
+            return _items[PhysicalIndex(index)]!;
+        }
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)Count);
+            _items[PhysicalIndex(index)] = value;
+        }
+    }
+
+    public void Add(TerminalRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        EnsureCapacity(Count + 1);
+        _items[PhysicalIndex(Count)] = row;
+        Count++;
+    }
+
+    public void AddRange(IEnumerable<TerminalRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        if (rows is ICollection<TerminalRow> collection)
+        {
+            EnsureCapacity(Count + collection.Count);
+        }
+
+        foreach (TerminalRow row in rows)
+        {
+            Add(row);
+        }
+    }
+
+    public void Clear()
+    {
+        if (Count == 0)
+        {
+            return;
+        }
+
+        if (_head + Count <= _items.Length)
+        {
+            Array.Clear(_items, _head, Count);
+        }
+        else
+        {
+            int firstSegmentLength = _items.Length - _head;
+            Array.Clear(_items, _head, firstSegmentLength);
+            Array.Clear(_items, 0, Count - firstSegmentLength);
+        }
+
+        _head = 0;
+        Count = 0;
+    }
+
+    public void RemoveFirst(int count = 1)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(count, Count);
+        if (count == 0)
+        {
+            return;
+        }
+
+        ClearPhysicalRange(_head, count);
+        _head = Count == count ? 0 : (_head + count) % _items.Length;
+        Count -= count;
+    }
+
+    public void RemoveRange(int index, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (index > Count || count > Count - index)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count));
+        }
+
+        if (count == 0)
+        {
+            return;
+        }
+
+        if (index == 0)
+        {
+            RemoveFirst(count);
+            return;
+        }
+
+        if (index + count == Count)
+        {
+            RemoveTail(count);
+            return;
+        }
+
+        Compact();
+        Array.Copy(
+            _items,
+            index + count,
+            _items,
+            index,
+            Count - index - count);
+        Array.Clear(_items, Count - count, count);
+        Count -= count;
+    }
+
+    public IEnumerator<TerminalRow> GetEnumerator()
+    {
+        for (int i = 0; i < Count; i++)
+        {
+            yield return this[i];
+        }
+    }
+
+    private void RemoveTail(int count)
+    {
+        ClearPhysicalRange(PhysicalIndex(Count - count), count);
+        Count -= count;
+        if (Count == 0)
+        {
+            _head = 0;
+        }
+    }
+
+    private void EnsureCapacity(int desiredCapacity)
+    {
+        if (desiredCapacity <= _items.Length)
+        {
+            return;
+        }
+
+        int nextCapacity = _items.Length == 0 ? 4 : _items.Length * 2;
+        while (nextCapacity < desiredCapacity)
+        {
+            nextCapacity *= 2;
+        }
+
+        TerminalRow?[] nextItems = new TerminalRow[nextCapacity];
+        CopyLogicalTo(nextItems);
+        _items = nextItems;
+        _head = 0;
+    }
+
+    private void Compact()
+    {
+        if (_head == 0 || Count == 0)
+        {
+            return;
+        }
+
+        TerminalRow?[] compacted = new TerminalRow[Math.Max(Count, _items.Length)];
+        CopyLogicalTo(compacted);
+        _items = compacted;
+        _head = 0;
+    }
+
+    private void CopyLogicalTo(TerminalRow?[] destination)
+    {
+        if (Count == 0)
+        {
+            return;
+        }
+
+        if (_head + Count <= _items.Length)
+        {
+            Array.Copy(_items, _head, destination, 0, Count);
+            return;
+        }
+
+        int firstSegmentLength = _items.Length - _head;
+        Array.Copy(_items, _head, destination, 0, firstSegmentLength);
+        Array.Copy(_items, 0, destination, firstSegmentLength, Count - firstSegmentLength);
+    }
+
+    private void ClearPhysicalRange(int physicalIndex, int count)
+    {
+        if (physicalIndex + count <= _items.Length)
+        {
+            Array.Clear(_items, physicalIndex, count);
+            return;
+        }
+
+        int firstSegmentLength = _items.Length - physicalIndex;
+        Array.Clear(_items, physicalIndex, firstSegmentLength);
+        Array.Clear(_items, 0, count - firstSegmentLength);
+    }
+
+    private int PhysicalIndex(int logicalIndex) => (_head + logicalIndex) % _items.Length;
+}
+
+/// <summary>
 /// Screen buffer holding a grid of terminal cells with optional scrollback.
 /// Supports virtualized access for large scroll buffers.
 /// </summary>
 public sealed class TerminalScreen
 {
-    private List<TerminalRow> _rows;
-    private List<TerminalRow>? _primaryRows;
-    private List<TerminalRow>? _alternateRows;
+    private TerminalRowBuffer _rows;
+    private TerminalRowBuffer? _primaryRows;
+    private TerminalRowBuffer? _alternateRows;
     private readonly Dictionary<int, string> _hyperlinksById = [];
     private readonly Dictionary<string, int> _hyperlinkIdsByUrl = new(StringComparer.Ordinal);
     private readonly Dictionary<int, TerminalKittyImageSource> _kittyImagesById = [];
@@ -405,7 +617,7 @@ public sealed class TerminalScreen
         Columns = columns;
         ViewportRows = viewportRows;
         _scrollbackLimit = scrollbackLimit;
-        _rows = new List<TerminalRow>(viewportRows);
+        _rows = new TerminalRowBuffer(viewportRows);
         _theme = _theme
             .WithDefaultForeground(DefaultForeground)
             .WithDefaultBackground(DefaultBackground)
@@ -457,7 +669,7 @@ public sealed class TerminalScreen
         }
     }
 
-    private static void RemapRowColors(List<TerminalRow> rows, IReadOnlyDictionary<uint, uint> colorRemap)
+    private static void RemapRowColors(TerminalRowBuffer rows, IReadOnlyDictionary<uint, uint> colorRemap)
     {
         for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
         {
@@ -851,10 +1063,11 @@ public sealed class TerminalScreen
         // Trim scrollback if exceeding limit
         int maxRows = ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit);
         int removedRows = 0;
-        while (_rows.Count > maxRows)
+        int overflowRows = _rows.Count - maxRows;
+        if (overflowRows > 0)
         {
-            _rows.RemoveAt(0);
-            removedRows++;
+            _rows.RemoveFirst(overflowRows);
+            removedRows = overflowRows;
         }
 
         if (removedRows > 0)
@@ -891,7 +1104,7 @@ public sealed class TerminalScreen
         _alternateBufferActive = true;
         _viewportTop = 0;
 
-        _alternateRows ??= new List<TerminalRow>(ViewportRows);
+        _alternateRows ??= new TerminalRowBuffer(ViewportRows);
         _rows = _alternateRows;
         _rasterImagesById = _alternateRasterImagesById ?? [];
         _rasterPlacements = _alternateRasterPlacements ?? [];
@@ -1203,10 +1416,11 @@ public sealed class TerminalScreen
     private void TrimScrollbackRows()
     {
         int removedRows = 0;
-        while (_rows.Count > ViewportRows + _scrollbackLimit)
+        int overflowRows = _rows.Count - (ViewportRows + _scrollbackLimit);
+        if (overflowRows > 0)
         {
-            _rows.RemoveAt(0);
-            removedRows++;
+            _rows.RemoveFirst(overflowRows);
+            removedRows = overflowRows;
         }
 
         if (removedRows > 0)
@@ -1215,9 +1429,9 @@ public sealed class TerminalScreen
         }
     }
 
-    private static List<TerminalRow> CreateRows(int columns, int rows, uint defaultForeground, uint defaultBackground)
+    private static TerminalRowBuffer CreateRows(int columns, int rows, uint defaultForeground, uint defaultBackground)
     {
-        List<TerminalRow> result = new(rows);
+        TerminalRowBuffer result = new(rows);
         for (int i = 0; i < rows; i++)
         {
             result.Add(new TerminalRow(columns, defaultForeground, defaultBackground));
@@ -1342,10 +1556,11 @@ public sealed class TerminalScreen
         }
         else
         {
-            while (_rows.Count > ViewportRows + _scrollbackLimit)
+            int overflowRows = _rows.Count - (ViewportRows + _scrollbackLimit);
+            if (overflowRows > 0)
             {
-                _rows.RemoveAt(0);
-                removedRows++;
+                _rows.RemoveFirst(overflowRows);
+                removedRows = overflowRows;
             }
         }
 

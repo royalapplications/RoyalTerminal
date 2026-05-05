@@ -567,6 +567,28 @@ public class TerminalScreenTests
         return builder.ToString();
     }
 
+    private static void ClearAllDirtyRows(TerminalScreen screen)
+    {
+        for (int row = 0; row < screen.TotalRows; row++)
+        {
+            screen.GetRow(row).IsDirty = false;
+        }
+    }
+
+    private static int CountDirtyRows(TerminalScreen screen)
+    {
+        int dirtyRows = 0;
+        for (int row = 0; row < screen.TotalRows; row++)
+        {
+            if (screen.GetRow(row).IsDirty)
+            {
+                dirtyRows++;
+            }
+        }
+
+        return dirtyRows;
+    }
+
     [Fact]
     public async Task TerminalScreen_InvalidateAll_DoesNotThrow_WhenRowsChangeUnderScreenLock()
     {
@@ -636,6 +658,58 @@ public class TerminalScreenTests
         }
 
         Assert.Equal(screen.ViewportRows, dirtyRows);
+    }
+
+    [Fact]
+    public void TerminalScreen_AddRow_TrimsScrollbackPreservingNewestRows()
+    {
+        TerminalScreen screen = new(1, 3, scrollbackLimit: 5);
+
+        for (int i = 0; i < 20; i++)
+        {
+            TerminalRow row = screen.AddRow();
+            row[0].Codepoint = 1000 + i;
+        }
+
+        Assert.Equal(8, screen.TotalRows);
+        for (int rowIndex = 0; rowIndex < screen.TotalRows; rowIndex++)
+        {
+            Assert.Equal(1012 + rowIndex, screen.GetRow(rowIndex)[0].Codepoint);
+        }
+    }
+
+    [Fact]
+    public void BasicVtProcessor_WholeScreenScroll_DirtiesOnlyViewportRows()
+    {
+        TerminalScreen screen = new(8, 4, scrollbackLimit: 64);
+        using BasicVtProcessor processor = new(screen);
+
+        for (int i = 0; i < 24; i++)
+        {
+            processor.Process(Encoding.UTF8.GetBytes($"line {i}\r\n"));
+        }
+
+        ClearAllDirtyRows(screen);
+        processor.Process("next\r\n"u8);
+
+        Assert.Equal(screen.ViewportRows, CountDirtyRows(screen));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_RegionScroll_DirtiesOnlyViewportRows()
+    {
+        TerminalScreen screen = new(8, 4, scrollbackLimit: 64);
+        using BasicVtProcessor processor = new(screen);
+
+        for (int i = 0; i < 24; i++)
+        {
+            processor.Process(Encoding.UTF8.GetBytes($"line {i}\r\n"));
+        }
+
+        ClearAllDirtyRows(screen);
+        processor.Process("\x1b[2;3r\x1b[3;1H\n"u8);
+
+        Assert.Equal(screen.ViewportRows, CountDirtyRows(screen));
     }
 
     [Fact]

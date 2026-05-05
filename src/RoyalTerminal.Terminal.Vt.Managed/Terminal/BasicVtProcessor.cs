@@ -1888,7 +1888,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             // Whole-screen scroll — push to scrollback
             _screen.AddRow();
-            _screen.InvalidateAll();
+            _screen.InvalidateViewport();
         }
         else
         {
@@ -1905,7 +1905,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
             {
                 _screen.GetViewportRow(_scrollBottom).Clear(_currentFg, _currentBg);
             }
-            _screen.InvalidateAll();
+            _screen.InvalidateViewport();
         }
     }
 
@@ -1924,7 +1924,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             _screen.GetViewportRow(_scrollTop).Clear(_currentFg, _currentBg);
         }
-        _screen.InvalidateAll();
+        _screen.InvalidateViewport();
     }
 
     private void CopyRow(TerminalRow src, TerminalRow dst)
