@@ -790,6 +790,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             bool rowDirty = fullRefresh || _renderState.GetCurrentRowDirty();
             if (rowDirty)
             {
+                row.WrapsToNext = _renderState.GetCurrentRowWrap();
                 _renderState.BeginCurrentRowCells();
 
                 int colIndex = 0;

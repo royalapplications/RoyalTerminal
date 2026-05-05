@@ -142,6 +142,13 @@ public sealed class GhosttyRenderState : IDisposable
     public ulong GetCurrentRowRaw()
         => GetRowValue<ulong>(GhosttyVtNative.GhosttyRenderStateRowData.Raw);
 
+    /// <summary>Gets whether the current row soft-wraps into the next row.</summary>
+    public bool GetCurrentRowWrap()
+    {
+        ulong row = GetCurrentRowRaw();
+        return GetNativeRowFlag(row, GhosttyVtNative.GhosttyRowData.Wrap);
+    }
+
     /// <summary>Sets the current row dirty flag.</summary>
     public unsafe void SetCurrentRowDirty(bool value)
     {
@@ -282,6 +289,14 @@ public sealed class GhosttyRenderState : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         T value = default;
         ThrowIfFailed(GhosttyVtNative.RenderStateRowGet(_rowIterator, data, &value), $"ghostty_render_state_row_get({data})");
+        return value;
+    }
+
+    private unsafe bool GetNativeRowFlag(ulong row, GhosttyVtNative.GhosttyRowData data)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        bool value = false;
+        ThrowIfFailed(GhosttyVtNative.RowGet(row, data, &value), $"ghostty_row_get({data})");
         return value;
     }
 
