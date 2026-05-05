@@ -4584,7 +4584,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void NotifyOutputUiUpdatedOnUiThread()
     {
-        _presenter?.Invalidate();
+        _presenter?.Invalidate(dirtyRowsOnly: true);
         RaiseScrollInvalidated();
     }
 

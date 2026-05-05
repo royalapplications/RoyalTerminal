@@ -31,7 +31,7 @@ public sealed class DefaultTerminalScrollService : ITerminalScrollService
 
         SyncScreenScrollOffset(scrollData, screen);
 
-        presenter?.Invalidate();
+        presenter?.Invalidate(dirtyRowsOnly: screen is not null);
         raiseScrollInvalidated();
     }
 
