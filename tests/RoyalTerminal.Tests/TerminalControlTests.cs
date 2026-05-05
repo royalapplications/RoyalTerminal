@@ -2819,6 +2819,577 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_RectangularSelection_ScrollsWithOriginalRows()
+    {
+        TerminalControl control = new()
+        {
+            Width = 640,
+            Height = 200,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 200,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            PopulateScrollableNormalBuffer(control);
+            control.ScrollToBottom();
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            Assert.True(screen.ViewportRows > 3);
+
+            const int startColumn = 5;
+            const int endColumnExclusive = 8;
+            const int startViewportRow = 1;
+            const int endViewportRow = 2;
+            int selectedTopAbsoluteRow = screen.ViewportTopAbsoluteRow;
+            string expected = string.Join(
+                Environment.NewLine,
+                ReadRowSlice(screen.GetRow(selectedTopAbsoluteRow + startViewportRow), startColumn, endColumnExclusive),
+                ReadRowSlice(screen.GetRow(selectedTopAbsoluteRow + endViewportRow), startColumn, endColumnExclusive));
+
+            renderer.SelectionStart = (startColumn, startViewportRow);
+            renderer.SelectionEnd = (endColumnExclusive, endViewportRow);
+            renderer.SelectionIsRectangle = true;
+
+            Assert.Equal((startColumn, startViewportRow), renderer.SelectionStart);
+            Assert.Equal((endColumnExclusive, endViewportRow), renderer.SelectionEnd);
+            Assert.True(renderer.SelectionIsRectangle);
+
+            int scrollRows = Math.Min(screen.MaxScrollOffset, screen.ViewportRows + 2);
+            Assert.True(scrollRows > screen.ViewportRows);
+
+            control.ScrollByRows(-scrollRows);
+
+            int rowDelta = selectedTopAbsoluteRow - screen.ViewportTopAbsoluteRow;
+            Assert.True(rowDelta > 0);
+            Assert.Equal((startColumn, startViewportRow + rowDelta), renderer.SelectionStart);
+            Assert.Equal((endColumnExclusive, endViewportRow + rowDelta), renderer.SelectionEnd);
+            (int Column, int Row) shiftedSelectionStart = renderer.SelectionStart.GetValueOrDefault();
+            Assert.True(shiftedSelectionStart.Row >= screen.ViewportRows);
+
+            await control.CopySelectionAsync();
+            string? copiedWhileOffscreen = await window.Clipboard!.TryGetTextAsync();
+            Assert.Equal(expected, copiedWhileOffscreen);
+
+            control.ScrollToBottom();
+
+            Assert.Equal((startColumn, startViewportRow), renderer.SelectionStart);
+            Assert.Equal((endColumnExclusive, endViewportRow), renderer.SelectionEnd);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_RectangularSelection_TracksOriginalContentAcrossReflowResize()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new()
+        {
+            Width = 160,
+            Height = 80,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            ArrangeControlToGrid(control, window, renderer, columns: 12, rows: 3);
+            Assert.Equal(12, screen.Columns);
+
+            SetViewportRowText(screen, rowIndex: 0, "ABCDEFGHIJKL");
+
+            renderer.SelectionStart = (8, 0);
+            renderer.SelectionEnd = (12, 0);
+            renderer.SelectionIsRectangle = true;
+
+            ArrangeControlToGrid(control, window, renderer, columns: 6, rows: 3);
+
+            Assert.Equal(6, screen.Columns);
+            Assert.True(screen.GetViewportRow(0).WrapsToNext);
+            Assert.Equal((2, 1), renderer.SelectionStart);
+            Assert.Equal((6, 1), renderer.SelectionEnd);
+
+            await control.CopySelectionAsync();
+            string? copiedAfterShrink = await window.Clipboard!.TryGetTextAsync();
+            Assert.Equal("IJKL", copiedAfterShrink);
+
+            ArrangeControlToGrid(control, window, renderer, columns: 12, rows: 3);
+
+            Assert.Equal(12, screen.Columns);
+            Assert.Equal((8, 0), renderer.SelectionStart);
+            Assert.Equal((12, 0), renderer.SelectionEnd);
+
+            await control.CopySelectionAsync();
+            string? copiedAfterRestore = await window.Clipboard!.TryGetTextAsync();
+            Assert.Equal("IJKL", copiedAfterRestore);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeViewportSelectionResize_PreservesNativeAbsoluteRows()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 120, OffsetRows: 80, VisibleRows: 24),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 80;
+        control.Rows = 24;
+        Window window = new() { Content = control };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            processor.SetViewportState(new TerminalViewportScrollState(
+                TotalRows: 120,
+                OffsetRows: 80,
+                VisibleRows: (ulong)screen.ViewportRows));
+
+            renderer.SelectionStart = (1, 2);
+            renderer.SelectionEnd = (4, 2);
+
+            control.Columns = 40;
+
+            Assert.Equal((1, 2), renderer.SelectionStart);
+            Assert.Equal((4, 2), renderer.SelectionEnd);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeViewportSelectionResize_ReflowsVisibleSelectionAnchors()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 120, OffsetRows: 80, VisibleRows: 3),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        Window window = new()
+        {
+            Width = 160,
+            Height = 80,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            ArrangeControlToGrid(control, window, renderer, columns: 12, rows: 3);
+            processor.SetViewportState(new TerminalViewportScrollState(
+                TotalRows: 120,
+                OffsetRows: 80,
+                VisibleRows: (ulong)screen.ViewportRows));
+            SetViewportRowText(screen, rowIndex: 0, "ABCDEFGHIJKL");
+
+            renderer.SelectionStart = (8, 0);
+            renderer.SelectionEnd = (12, 0);
+
+            ArrangeControlToGrid(control, window, renderer, columns: 6, rows: 3);
+
+            (int Column, int Row) selectionStart = renderer.SelectionStart.GetValueOrDefault();
+            (int Column, int Row) selectionEnd = renderer.SelectionEnd.GetValueOrDefault();
+            Assert.Equal(2, selectionStart.Column);
+            Assert.Equal(6, selectionEnd.Column);
+            Assert.Equal(selectionStart.Row, selectionEnd.Row);
+            Assert.Equal(
+                "IJKL",
+                ReadRowSlice(screen.GetViewportRow(selectionStart.Row), selectionStart.Column, selectionEnd.Column));
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeViewportSelectionResize_UsesFinalViewportAfterPreservingBottom()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 120, OffsetRows: 117, VisibleRows: 3),
+            [])
+        {
+            ResetViewportToTopOnResize = true,
+        };
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        Window window = new()
+        {
+            Width = 160,
+            Height = 80,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            ArrangeControlToGrid(control, window, renderer, columns: 12, rows: 3);
+            processor.SetViewportState(new TerminalViewportScrollState(
+                TotalRows: 120,
+                OffsetRows: 117,
+                VisibleRows: (ulong)screen.ViewportRows));
+            control.ScrollToBottom();
+            SetViewportRowText(screen, rowIndex: 1, "SELECTED");
+
+            renderer.SelectionStart = (0, 1);
+            renderer.SelectionEnd = (8, 1);
+
+            ArrangeControlToGrid(control, window, renderer, columns: 6, rows: 3);
+
+            Assert.True(processor.ScrolledToBottom);
+            Assert.Equal(processor.ViewportScrollState.MaxOffsetRows, processor.ViewportScrollState.OffsetRows);
+            (int Column, int Row) selectionStart = renderer.SelectionStart.GetValueOrDefault();
+            (int Column, int Row) selectionEnd = renderer.SelectionEnd.GetValueOrDefault();
+            Assert.InRange(selectionStart.Row, 0, screen.ViewportRows - 1);
+            Assert.InRange(selectionEnd.Row, 0, screen.ViewportRows - 1);
+            Assert.Contains("SELECT", ReadViewportTextRange(screen, selectionStart.Row, selectionEnd.Row), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeGhosttySelectionResize_KeepsSelectionOnOriginalLines()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(nativeProviders),
+            VtProcessorPreference.Native);
+        Window window = new()
+        {
+            Width = 480,
+            Height = 220,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            ArrangeControlToGrid(control, window, renderer, columns: 40, rows: 10);
+
+            StringBuilder builder = new();
+            builder.Append("header-");
+            builder.Append('A', 30);
+            builder.Append("\r\n");
+            for (int i = 0; i < 6; i++)
+            {
+                builder.Append("pre-");
+                builder.Append(i);
+                builder.Append("\r\n");
+            }
+
+            for (int i = 0; i < 4; i++)
+            {
+                builder.Append("SEL-");
+                builder.Append(i);
+                builder.Append("\r\n");
+            }
+
+            builder.Append("prompt\r\n");
+            control.WriteOutput(Encoding.UTF8.GetBytes(builder.ToString()));
+            control.ScrollToBottom();
+
+            int selectionStartRow = FindViewportRowContaining(screen, "SEL-0");
+            int selectionEndRow = FindViewportRowContaining(screen, "SEL-3");
+            Assert.True(selectionStartRow >= 0);
+            Assert.True(selectionEndRow > selectionStartRow);
+            renderer.SelectionStart = (0, selectionStartRow);
+            renderer.SelectionEnd = (5, selectionEndRow);
+
+            ArrangeControlToGrid(control, window, renderer, columns: 20, rows: 10);
+
+            (int Column, int Row) mappedStart = renderer.SelectionStart.GetValueOrDefault();
+            (int Column, int Row) mappedEnd = renderer.SelectionEnd.GetValueOrDefault();
+            string mappedStartText = ReadRowText(screen.GetViewportRow(mappedStart.Row));
+            string mappedEndText = ReadRowText(screen.GetViewportRow(mappedEnd.Row));
+            string diagnostics =
+                $"InitialStart={selectionStartRow}, InitialEnd={selectionEndRow}, MappedStart={mappedStart}, MappedEnd={mappedEnd}\n" +
+                DumpViewportRows(screen);
+            Assert.True(
+                mappedStartText.Contains("SEL-0", StringComparison.Ordinal),
+                diagnostics);
+            Assert.True(
+                mappedEndText.Contains("SEL-3", StringComparison.Ordinal),
+                diagnostics);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeGhosttySelectionResize_WithLsStyleOutputKeepsSelectedFiles()
+    {
+        await RunNativeGhosttyLsStyleSelectionResizeTest(reverseSelection: false);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeGhosttySelectionResize_WithReverseLsStyleOutputKeepsSelectedFiles()
+    {
+        await RunNativeGhosttyLsStyleSelectionResizeTest(reverseSelection: true);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeGhosttySelectionResize_WithContinuousLsStyleOutputKeepsSelectedFiles()
+    {
+        await RunNativeGhosttyLsStyleSelectionResizeTest(reverseSelection: false, resizeColumns: [110, 100, 92, 84]);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeGhosttySelectionResize_ShrinkThenExpandKeepsSelectedFiles()
+    {
+        await RunNativeGhosttyLsStyleSelectionResizeTest(reverseSelection: false, resizeColumns: [84, 92, 100, 110, 119]);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeGhosttySelectionResize_ReverseShrinkThenExpandKeepsSelectedFiles()
+    {
+        await RunNativeGhosttyLsStyleSelectionResizeTest(reverseSelection: true, resizeColumns: [84, 92, 100, 110, 119]);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeGhosttyRectangularSelectionResize_ShrinkKeepsSelectedColumnsOnWrappedNames()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(nativeProviders),
+            VtProcessorPreference.Native);
+        Window window = new()
+        {
+            Width = 1040,
+            Height = 600,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            ArrangeControlToGrid(control, window, renderer, columns: 97, rows: 33);
+
+            string[] selectedNames =
+            [
+                ".zcompdump.MacBook-Pro.local.47585",
+                ".zcompdump.MacBook-Pro.local.5576",
+                ".zcompdump.MacBook-Pro.local.6133",
+                ".zcompdump.MacBook-Pro.local.71593",
+                ".zcompdump.MacBook-Pro.local.73447",
+                ".zcompdump.MacBook-Pro.local.78198",
+                ".zcompdump.MacBook-Pro.local.79864",
+            ];
+            string output = BuildZcompdumpStyleOutput(selectedNames);
+            control.WriteOutput(Encoding.UTF8.GetBytes(output));
+            control.ScrollToBottom();
+
+            int firstRow = FindViewportRowContaining(screen, selectedNames[0]);
+            int lastRow = FindViewportRowContaining(screen, selectedNames[^1]);
+            Assert.True(firstRow >= 0);
+            Assert.True(lastRow > firstRow);
+            int filenameColumn = ReadRowText(screen.GetViewportRow(firstRow)).IndexOf(selectedNames[0], StringComparison.Ordinal);
+            Assert.True(filenameColumn > 0);
+
+            renderer.SelectionStart = (filenameColumn, firstRow);
+            renderer.SelectionEnd = (97, lastRow);
+            renderer.SelectionIsRectangle = true;
+
+            ArrangeControlToGrid(control, window, renderer, columns: 87, rows: 33);
+
+            TerminalHighlightSpan[] spans = renderer.GetSelectionSpans().ToArray();
+            string diagnostics =
+                $"FilenameColumn={filenameColumn}, FirstRow={firstRow}, LastRow={lastRow}, SelectionStart={renderer.SelectionStart}, SelectionEnd={renderer.SelectionEnd}\n" +
+                DumpViewportRows(screen);
+            Assert.NotEmpty(spans);
+
+            int mappedFirstRow = FindViewportRowContaining(screen, selectedNames[0][..^5]);
+            Assert.True(mappedFirstRow >= 0, diagnostics);
+            Assert.Contains(
+                spans,
+                span => span.Row == mappedFirstRow &&
+                    span.StartColumn == filenameColumn &&
+                    span.EndColumn == screen.Columns - 1);
+            Assert.Contains(
+                spans,
+                span => span.Row == mappedFirstRow + 1 &&
+                    span.StartColumn == 0 &&
+                    span.EndColumn >= 4);
+
+            await control.CopySelectionAsync();
+            string? copied = await window.Clipboard!.TryGetTextAsync();
+            Assert.NotNull(copied);
+            foreach (string selectedName in selectedNames)
+            {
+                Assert.Contains(selectedName, copied, StringComparison.Ordinal);
+            }
+
+            Assert.DoesNotContain("wieslawsoltes", copied, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    private static async Task RunNativeGhosttyLsStyleSelectionResizeTest(bool reverseSelection)
+    {
+        await RunNativeGhosttyLsStyleSelectionResizeTest(reverseSelection, resizeColumns: [84]);
+    }
+
+    private static async Task RunNativeGhosttyLsStyleSelectionResizeTest(
+        bool reverseSelection,
+        IReadOnlyList<int> resizeColumns)
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(nativeProviders),
+            VtProcessorPreference.Native);
+        Window window = new()
+        {
+            Width = 1280,
+            Height = 600,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            ArrangeControlToGrid(control, window, renderer, columns: 119, rows: 33);
+
+            control.WriteOutput(Encoding.UTF8.GetBytes(BuildLsStyleOutput()));
+            control.ScrollToBottom();
+
+            const string firstSelectedFile = "java_error_in_rider_2125.log";
+            const string lastSelectedFile = "java_error_in_rider_86673.log";
+            int selectionStartRow = FindViewportRowContaining(screen, firstSelectedFile);
+            int selectionEndRow = FindViewportRowContaining(screen, lastSelectedFile);
+            Assert.True(selectionStartRow >= 0);
+            Assert.True(selectionEndRow > selectionStartRow);
+
+            if (reverseSelection)
+            {
+                renderer.SelectionStart = (119, selectionEndRow);
+                renderer.SelectionEnd = (0, selectionStartRow);
+            }
+            else
+            {
+                renderer.SelectionStart = (0, selectionStartRow);
+                renderer.SelectionEnd = (119, selectionEndRow);
+            }
+
+            StringBuilder resizeTrace = new();
+            AppendSelectionResizeTrace(resizeTrace, 119, screen, renderer);
+            for (int i = 0; i < resizeColumns.Count; i++)
+            {
+                ArrangeControlToGrid(control, window, renderer, columns: resizeColumns[i], rows: 33);
+                AppendSelectionResizeTrace(resizeTrace, resizeColumns[i], screen, renderer);
+            }
+
+            (int Column, int Row) mappedStart = renderer.SelectionStart.GetValueOrDefault();
+            (int Column, int Row) mappedEnd = renderer.SelectionEnd.GetValueOrDefault();
+            int mappedTopRow = Math.Min(mappedStart.Row, mappedEnd.Row);
+            int mappedBottomRow = Math.Max(mappedStart.Row, mappedEnd.Row);
+            string mappedTopText = ReadRowText(screen.GetViewportRow(mappedTopRow));
+            string selectedText = ReadViewportTextRange(screen, mappedTopRow, mappedBottomRow);
+            string unwrappedSelectedText = selectedText.Replace("\n", string.Empty, StringComparison.Ordinal);
+            string diagnostics =
+                $"InitialStart={selectionStartRow}, InitialEnd={selectionEndRow}, MappedStart={mappedStart}, MappedEnd={mappedEnd}\n" +
+                resizeTrace +
+                DumpViewportRows(screen);
+            Assert.True(
+                mappedTopText.Contains("java_error_in_rider_2125", StringComparison.Ordinal),
+                diagnostics);
+            Assert.True(
+                unwrappedSelectedText.Contains(firstSelectedFile, StringComparison.Ordinal),
+                diagnostics);
+            Assert.True(
+                unwrappedSelectedText.Contains(lastSelectedFile, StringComparison.Ordinal),
+                diagnostics);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_DragSelectionAboveViewport_AutoScrollsUp()
     {
         TerminalControl control = new()
@@ -3426,6 +3997,24 @@ public class TerminalControlTests
         }
     }
 
+    private static void ArrangeControlToGrid(
+        TerminalControl control,
+        Window window,
+        SkiaTerminalRenderer renderer,
+        int columns,
+        int rows)
+    {
+        double width = (columns * renderer.CellWidth) + (renderer.CellWidth * 0.25);
+        double height = (rows * renderer.CellHeight) + (renderer.CellHeight * 0.25);
+        control.Width = width;
+        control.Height = height;
+        window.Width = width;
+        window.Height = height;
+        control.Measure(new Size(width, height));
+        control.Arrange(new Rect(0, 0, width, height));
+        HeadlessTerminalTestCleanup.RunDispatcherJobs();
+    }
+
     private static string ReadRowPrefix(TerminalRow row, int length)
     {
         StringBuilder builder = new(length);
@@ -3434,6 +4023,200 @@ public class TerminalControlTests
         {
             int codepoint = row[column].Codepoint;
             builder.Append(codepoint <= 0 ? ' ' : (char)codepoint);
+        }
+
+        return builder.ToString();
+    }
+
+    private static string ReadRowSlice(TerminalRow row, int startColumn, int endColumnExclusive)
+    {
+        int columnStart = Math.Clamp(startColumn, 0, row.Columns);
+        int columnEnd = Math.Clamp(endColumnExclusive, columnStart, row.Columns);
+        StringBuilder builder = new(columnEnd - columnStart);
+        for (int column = columnStart; column < columnEnd; column++)
+        {
+            int codepoint = row[column].Codepoint;
+            builder.Append(codepoint <= 0 ? ' ' : (char)codepoint);
+        }
+
+        return builder.ToString();
+    }
+
+    private static int FindViewportRowContaining(TerminalScreen screen, string text)
+    {
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            if (ReadRowText(screen.GetViewportRow(row)).Contains(text, StringComparison.Ordinal))
+            {
+                return row;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string ReadRowText(TerminalRow row)
+    {
+        StringBuilder builder = new(row.Columns);
+        for (int column = 0; column < row.Columns; column++)
+        {
+            int codepoint = row[column].Codepoint;
+            builder.Append(codepoint <= 0 ? ' ' : (char)codepoint);
+        }
+
+        return builder.ToString();
+    }
+
+    private static string DumpViewportRows(TerminalScreen screen)
+    {
+        StringBuilder builder = new();
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            builder.Append(row.ToString(CultureInfo.InvariantCulture));
+            builder.Append(": ");
+            builder.AppendLine(ReadRowText(screen.GetViewportRow(row)));
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendSelectionResizeTrace(
+        StringBuilder builder,
+        int columns,
+        TerminalScreen screen,
+        SkiaTerminalRenderer renderer)
+    {
+        (int Column, int Row) start = renderer.SelectionStart.GetValueOrDefault();
+        (int Column, int Row) end = renderer.SelectionEnd.GetValueOrDefault();
+        builder.Append("After ");
+        builder.Append(columns.ToString(CultureInfo.InvariantCulture));
+        builder.Append(": Start=");
+        builder.Append(start);
+        builder.Append(", End=");
+        builder.Append(end);
+        builder.Append(", TopRow=");
+        builder.AppendLine(ReadRowText(screen.GetViewportRow(0)));
+    }
+
+    private static string ReadViewportTextRange(TerminalScreen screen, int startRow, int endRow)
+    {
+        int rowStart = Math.Clamp(Math.Min(startRow, endRow), 0, Math.Max(0, screen.ViewportRows - 1));
+        int rowEnd = Math.Clamp(Math.Max(startRow, endRow), rowStart, Math.Max(0, screen.ViewportRows - 1));
+        StringBuilder builder = new();
+        for (int row = rowStart; row <= rowEnd; row++)
+        {
+            if (builder.Length > 0)
+            {
+                builder.Append('\n');
+            }
+
+            builder.Append(ReadRowText(screen.GetViewportRow(row)));
+        }
+
+        return builder.ToString();
+    }
+
+    private static string BuildLsStyleOutput()
+    {
+        string[] lines =
+        [
+            "lrwxr-xr-x   1 wieslawsoltes  staff      49 Feb 14  2023 Dropbox -> /Users/wieslawsoltes/Library/CloudStorage/Dropbox",
+            "-rw-r--r--   1 wieslawsoltes  staff   10527 Aug 27  2025 DxfToCSharp_crash.log",
+            "drwxr-xr-x@ 279 wieslawsoltes  staff    8928 May  4 14:10 GitHub",
+            "drwx------@ 117 wieslawsoltes  staff    3744 Apr 20 10:32 Library",
+            "drwx------+   8 wieslawsoltes  staff     256 Apr  8 15:03 Movies",
+            "drwx------+   7 wieslawsoltes  staff     224 Apr 19  2024 Music",
+            "-rw-r--r--@   1 wieslawsoltes  staff  114807 Jun 26  2025 P1030269.JPG",
+            "drwx------    2 wieslawsoltes  staff      64 Aug 24  2022 Parallels",
+            "drwx------+  11 wieslawsoltes  staff     352 Sep  5  2024 Pictures",
+            "drwxr-xr-x@   2 wieslawsoltes  staff      64 Dec 10  2022 Projects",
+            "drwxr-xr-x+   4 wieslawsoltes  staff     128 Feb 18  2022 Public",
+            "drwxr-xr-x    7 wieslawsoltes  staff     224 Apr 19  2024 RiderProjects",
+            "drwxr-xr-x@   3 wieslawsoltes  staff      96 Apr 23  2024 RiderSnapshots",
+            "drwxr-xr-x+   3 wieslawsoltes  staff      96 Mar 20  2024 Sites",
+            "drwxr-xr-x    3 wieslawsoltes  staff      96 Nov 14  2024 VirtualBox VMs",
+            "drwxr-xr-x    6 wieslawsoltes  staff     192 Jan 21  2025 dotTraceSnapshots",
+            "drwxr-xr-x@  11 wieslawsoltes  staff     352 Apr 19  2024 eDOSign",
+            "-rw-r--r--    1 wieslawsoltes  staff  564097 Dec  6  2023 java_error_in_rider_2125.log",
+            "-rw-r--r--    1 wieslawsoltes  staff  557858 Nov 28  2023 java_error_in_rider_44675.log",
+            "-rw-r--r--    1 wieslawsoltes  staff  693764 Nov 16  2024 java_error_in_rider_86136.log",
+            "-rw-r--r--    1 wieslawsoltes  staff  702616 May  8  2025 java_error_in_rider_86673.log",
+            "-rw-r--r--@   1 wieslawsoltes  staff    3827 Dec  6  2023 jbr_err_pid2125.log",
+            "-rw-r--r--@   1 wieslawsoltes  staff    6197 Nov 28  2023 jbr_err_pid44675.log",
+            "-rw-r--r--@   1 wieslawsoltes  staff    2846 Nov 16  2024 jbr_err_pid86136.log",
+            "-rw-r--r--    1 wieslawsoltes  staff       0 Apr 18  2025 jcef_61703.log",
+            "-rw-r--r--    1 wieslawsoltes  staff       0 Apr 18  2025 jcef_64516.log",
+            "-rw-r--r--    1 wieslawsoltes  staff       0 May 10  2025 jcef_65333.log",
+            "-rw-r--r--    1 wieslawsoltes  staff       0 May 11  2025 jcef_82508.log",
+            "-rw-r--r--    1 wieslawsoltes  staff       0 May  6  2025 jcef_86673.log",
+            "-rw-r--r--@   1 wieslawsoltes  staff    2197 Feb 20  2024 nest-13-27-13.patch",
+            "-rw-r--r--@   1 wieslawsoltes  staff 2598103 Jul  7  2025 rider64_DGIJfiYW0n.mp4",
+            "drwxr-xr-x@   3 wieslawsoltes  staff      96 Feb 25 14:32 tmp",
+            "wieslawsoltes@MacBook-Pro ~ %",
+        ];
+
+        StringBuilder builder = new();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            builder.Append(lines[i]);
+            builder.Append("\r\n");
+        }
+
+        return builder.ToString();
+    }
+
+    private static string BuildZcompdumpStyleOutput(IReadOnlyList<string> selectedNames)
+    {
+        string[] before =
+        [
+            "drwxr-xr-x    6 wieslawsoltes  staff     192 Apr 30 10:48 .swiftpm",
+            "drwxr-xr-x    7 wieslawsoltes  staff     224 Nov 16  2022 .templateengine",
+            "drwxr-xr-x@   3 wieslawsoltes  staff      96 Feb  4 16:28 .tmp",
+            "drwxr-xr-x@   6 wieslawsoltes  staff     192 Jul 28  2025 .trae-aicc",
+            "-rw-------@   1 wieslawsoltes  staff   21678 Feb 18 13:11 .viminfo",
+            "drwxr-xr-x    5 wieslawsoltes  staff     160 Jan 13 11:16 .vscode",
+            "drwxr-xr-x    3 wieslawsoltes  staff      96 Apr 30 20:06 .vscode-shared",
+            "drwxr-xr-x    4 wieslawsoltes  staff     128 Jan 28 20:31 .walletwasabi",
+            "drwxr-xr-x@   3 wieslawsoltes  staff      96 Aug 17  2025 .xcodegen",
+            "-rw-r--r--@   1 wieslawsoltes  staff   49604 May  5 14:08 .zcompdump",
+        ];
+        int[] sizes = [16395, 17285, 37809, 30146, 37809, 36535, 41456];
+        string[] times = ["14:00", "14:37", "14:37", "14:15", "14:16", "14:19", "20:21"];
+        string[] after =
+        [
+            "-rw-r--r--@   1 wieslawsoltes  staff     303 Apr 19 19:38 .zprofile",
+            "-rw-------@   1 wieslawsoltes  staff   62519 May  5 14:08 .zsh_history",
+            "drwx------   11 wieslawsoltes  staff     352 Apr 30 22:48 .zsh_sessions",
+            "-rw-r--r--    1 wieslawsoltes  staff      21 Sep 24  2025 .zshenv",
+            "-rw-r--r--    1 wieslawsoltes  staff     208 Dec  9 11:21 .zshrc",
+            "drwxrwxrwx    3 wieslawsoltes  staff      96 Dec 18  2023 Adlm",
+            "drwx------@  11 wieslawsoltes  staff     352 Apr 30 20:06 Applications",
+            "drwxr-xr-x@   6 wieslawsoltes  staff     192 Sep 10  2024 Applications (Parallels)",
+            "drwxr-xr-x    3 wieslawsoltes  staff      96 Nov 26 14:42 Autodesk",
+        ];
+
+        StringBuilder builder = new();
+        for (int i = 0; i < before.Length; i++)
+        {
+            builder.Append(before[i]);
+            builder.Append("\r\n");
+        }
+
+        for (int i = 0; i < selectedNames.Count; i++)
+        {
+            builder.Append("-rw-r--r--@   1 wieslawsoltes  staff  ");
+            builder.Append(sizes[i].ToString(CultureInfo.InvariantCulture).PadLeft(6));
+            builder.Append(" Feb 24 ");
+            builder.Append(times[i]);
+            builder.Append(' ');
+            builder.Append(selectedNames[i]);
+            builder.Append("\r\n");
+        }
+
+        for (int i = 0; i < after.Length; i++)
+        {
+            builder.Append(after[i]);
+            builder.Append("\r\n");
         }
 
         return builder.ToString();
