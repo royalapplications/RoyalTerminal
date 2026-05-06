@@ -1483,7 +1483,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 {
                     _cursorCol = 0;
                 }
-                LineFeed();
+                LineFeed(wrapForced: false);
                 break;
 
             case (byte)'\r': // CR
@@ -1600,10 +1600,9 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             if (_autoWrap)
             {
-                row.WrapsToNext = true;
                 ResetDelayedWrap();
                 _cursorCol = 0;
-                LineFeed();
+                LineFeed(wrapForced: true);
                 ClampCursor();
             }
             else
@@ -1850,13 +1849,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
-        {
-            _screen.GetViewportRow(_cursorRow).WrapsToNext = true;
-        }
-
         _cursorCol = 0;
-        LineFeed();
+        LineFeed(wrapForced: true);
         return true;
     }
 
@@ -1921,8 +1915,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
     }
 
-    private void LineFeed()
+    private void LineFeed(bool wrapForced)
     {
+        if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
+        {
+            _screen.GetViewportRow(_cursorRow).WrapsToNext = wrapForced;
+        }
+
         if (_cursorRow == _scrollBottom)
         {
             // At bottom of scroll region — scroll the region up
@@ -2067,14 +2066,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
             case (byte)'D': // IND — Index (move cursor down, scroll if at bottom)
                 ResetDelayedWrap();
-                LineFeed();
+                LineFeed(wrapForced: false);
                 _state = ParserState.Ground;
                 break;
 
             case (byte)'E': // NEL — Next line
                 ResetDelayedWrap();
                 _cursorCol = 0;
-                LineFeed();
+                LineFeed(wrapForced: false);
                 _state = ParserState.Ground;
                 break;
 

@@ -728,6 +728,33 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void BasicVtProcessor_ExplicitLineFeedClearsStaleWrapMetadataAfterReflow()
+    {
+        TerminalScreen screen = new(20, 5, scrollbackLimit: 20);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process(Encoding.UTF8.GetBytes("ABCDEFGHIJKLMNO\r\nTAIL\r\n"));
+        processor.ResizeScreen(columns: 10, rows: 5, widthPx: 100, heightPx: 80, reflowOnResize: true);
+
+        Assert.True(screen.GetRow(0).WrapsToNext);
+
+        screen.ScrollOffset = 1;
+        processor.Process(Encoding.UTF8.GetBytes("\x1b[1;1Hshort\r\nnext"));
+
+        Assert.False(screen.GetRow(0).WrapsToNext);
+
+        ITerminalSnapshotExportSource exporter = processor;
+        Assert.True(
+            exporter.TryExportSnapshot(
+                TerminalSnapshotExportFormat.PlainText,
+                new TerminalSnapshotExportOptions(Unwrap: true, TrimTrailingWhitespace: true),
+                out string snapshot));
+
+        Assert.Contains($"shortFGHIJ{Environment.NewLine}nextO", snapshot, StringComparison.Ordinal);
+        Assert.DoesNotContain("shortFGHIJnextO", snapshot, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TerminalScreen_InvalidateAll_MarksDirty()
     {
         var screen = new TerminalScreen(80, 24);
