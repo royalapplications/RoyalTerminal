@@ -1590,11 +1590,6 @@ public sealed class TerminalScreen
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(viewportRows, 1);
 
-        if (preserveViewportTopOnRowsIncrease)
-        {
-            DiscardTransientResizeRows();
-        }
-
         int oldColumns = Columns;
         int oldViewportRows = ViewportRows;
         bool preserveLiveViewportTop =
@@ -1602,9 +1597,18 @@ public sealed class TerminalScreen
             !_alternateBufferActive &&
             _viewportTop == 0 &&
             _rows.Count >= oldViewportRows;
+        // Capture before dropping transient bottom padding. Height-only resizes
+        // after a previous grow would otherwise move the bottom-anchored live
+        // viewport and cause repaint rows to land on the wrong backing rows.
         int oldLiveViewportTopAbsoluteRow = preserveLiveViewportTop
             ? Math.Max(0, _rows.Count - oldViewportRows)
             : -1;
+
+        if (preserveViewportTopOnRowsIncrease)
+        {
+            DiscardTransientResizeRows();
+        }
+
         bool shouldAppendRowsForViewportGrowth =
             preserveLiveViewportTop &&
             viewportRows > oldViewportRows &&
