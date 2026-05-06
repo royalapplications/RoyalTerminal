@@ -152,6 +152,28 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_Resize_CanSuppressLocalReflow_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen)
+        {
+            LocalReflowOnResize = false,
+        };
+        processor.NotifyResize(columns: 8, rows: 4, widthPx: 80, heightPx: 64);
+
+        processor.Process("ABCDEFGHIJKLMN"u8);
+        processor.NotifyResize(columns: 6, rows: 4, widthPx: 60, heightPx: 64);
+
+        Assert.Equal("ABCDEF", ReadAsciiPrefix(screen, 0, 6));
+        Assert.NotEqual("GHIJKL", ReadAsciiPrefix(screen, 1, 6));
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_Resize_TrimsTrailingStyledSpaces_WhenAvailable()
     {
         if (!OperatingSystem.IsWindows())

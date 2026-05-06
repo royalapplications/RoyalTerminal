@@ -641,6 +641,80 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void BasicVtProcessor_ResizeWithReflow_PreservesPowerShellTableRows()
+    {
+        TerminalScreen screen = new(133, 33, scrollbackLimit: 100);
+        using BasicVtProcessor processor = new(screen);
+
+        StringBuilder output = new();
+        output.Append("PowerShell 7.5.5\r\n\r\n");
+        output.Append("PS C:\\Users\\wiesl> ls\r\n\r\n");
+        output.Append("    Directory: C:\\Users\\wiesl\r\n\r\n");
+        output.Append("\x1b[1;38;2;163;190;140mMode                 LastWriteTime        Length Name\x1b[0m\r\n");
+        output.Append("\x1b[1;38;2;163;190;140m----                 -------------        ------ ----\x1b[0m\r\n");
+
+        string[] names =
+        [
+            ".android",
+            ".cargo",
+            ".codex",
+            ".config",
+            ".copilot",
+            ".dbus-keyrings",
+            ".dotnet",
+            ".gnupg",
+            ".ms-ad",
+            ".nuget",
+            ".rustup",
+            ".skiko",
+            ".templateengine",
+            ".vscode",
+            ".vscode-shared",
+            "Contacts",
+            "Documents",
+            "dotnet",
+            "dotTraceSnapshots",
+            "Downloads",
+            "Dropbox",
+            "Favorites",
+            "GitHub",
+            "iCloudDrive",
+            "iCloudPhotos",
+            "Links",
+            "Music",
+            "OneDrive",
+            "Pictures",
+            "Saved Games",
+            "Searches",
+            "source",
+            "Videos",
+        ];
+
+        foreach (string name in names)
+        {
+            output.Append("d----          12.10.2025    22:36                ");
+            output.Append("\x1b[1;38;2;216;222;233;48;2;129;161;193m");
+            output.Append(name);
+            output.Append("\x1b[0m\r\n");
+        }
+
+        output.Append("PS C:\\Users\\wiesl> ");
+        processor.Process(Encoding.UTF8.GetBytes(output.ToString()));
+
+        processor.ResizeScreen(columns: 51, rows: 31, widthPx: 510, heightPx: 496, reflowOnResize: true);
+        processor.ResizeScreen(columns: 133, rows: 33, widthPx: 1330, heightPx: 528, reflowOnResize: true);
+
+        string allRows = GetAllText(screen);
+        foreach (string name in names)
+        {
+            Assert.Contains(name, allRows, StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("\nhotos", allRows, StringComparison.Ordinal);
+        Assert.Contains("PS C:\\Users\\wiesl> ", allRows, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TerminalScreen_InvalidateAll_MarksDirty()
     {
         var screen = new TerminalScreen(80, 24);
@@ -660,6 +734,29 @@ public class TerminalScreenTests
         for (int rowIndex = 0; rowIndex < screen.ViewportRows; rowIndex++)
         {
             TerminalRow row = screen.GetViewportRow(rowIndex);
+            for (int column = 0; column < row.Columns; column++)
+            {
+                TerminalCell cell = row[column];
+                if (cell.Width == 0)
+                {
+                    continue;
+                }
+
+                builder.Append(cell.Codepoint == 0 ? ' ' : (char)cell.Codepoint);
+            }
+
+            builder.AppendLine();
+        }
+
+        return builder.ToString();
+    }
+
+    private static string GetAllText(TerminalScreen screen)
+    {
+        StringBuilder builder = new();
+        for (int rowIndex = 0; rowIndex < screen.TotalRows; rowIndex++)
+        {
+            TerminalRow row = screen.GetRow(rowIndex);
             for (int column = 0; column < row.Columns; column++)
             {
                 TerminalCell cell = row[column];

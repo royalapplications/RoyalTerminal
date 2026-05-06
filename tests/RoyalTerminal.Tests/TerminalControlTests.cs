@@ -1149,7 +1149,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public async Task Control_WindowsPtyManagedResize_UsesConptyBuildReflowPolicy()
+    public async Task Control_WindowsPtyManagedResize_LetsBackendOwnReflow()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -1178,14 +1178,50 @@ public class TerminalControlTests
             control.Columns = 32;
 
             Assert.Equal(32, control.Screen!.Columns);
-            Assert.Equal(WindowsConptySupportsLocalReflow(), ContainsScreenText(control, "070-END"));
+            Assert.False(ContainsScreenText(control, "070-END"));
             Assert.Contains(transport.Resizes, resize => resize.Columns == 32);
 
             control.Columns = 80;
 
             Assert.Equal(80, control.Screen.Columns);
-            Assert.Equal(WindowsConptySupportsLocalReflow(), ContainsScreenText(control, "070-END"));
+            Assert.False(ContainsScreenText(control, "070-END"));
             Assert.Contains(transport.Resizes, resize => resize.Columns == 80);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyNativeResize_DisablesLocalProcessorReflow()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 24, OffsetRows: 0, VisibleRows: 24),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 80;
+        control.Rows = 24;
+        control.ReflowOnResize = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            control.Columns = 32;
+
+            Assert.False(processor.LocalReflowOnResize);
+            Assert.Contains(transport.Resizes, resize => resize.Columns == 32);
         }
         finally
         {
@@ -4521,11 +4557,6 @@ public class TerminalControlTests
         return false;
     }
 
-    private static bool WindowsConptySupportsLocalReflow()
-    {
-        return Environment.OSVersion.Version.Build >= 21376;
-    }
-
     private static void WriteAscii(TerminalRow row, string text)
     {
         int count = Math.Min(row.Columns, text.Length);
@@ -4787,7 +4818,8 @@ public class TerminalControlTests
         IVtProcessor,
         ITerminalViewportScrollSource,
         ITerminalSearchSource,
-        ITerminalScreenSnapshotSource
+        ITerminalScreenSnapshotSource,
+        ITerminalResizeReflowPolicySink
     {
         private readonly List<TerminalSearchMatch> _matches = [.. matches];
 
@@ -4808,6 +4840,8 @@ public class TerminalControlTests
             Win32InputMode);
 
         public TerminalViewportScrollState ViewportScrollState { get; private set; } = viewportScrollState;
+
+        public bool LocalReflowOnResize { get; set; } = true;
 
         public ulong? LastSetViewportOffsetRows { get; private set; }
 

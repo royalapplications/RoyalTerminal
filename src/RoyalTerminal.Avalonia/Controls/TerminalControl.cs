@@ -1294,7 +1294,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 {
                     if (force || gridChanged)
                     {
-                        bool managedReflowOnResize = ShouldReflowManagedScreenOnResize();
+                        bool managedReflowOnResize = ShouldUseLocalResizeReflow();
                         basicVtProcessor.ResizeScreen(
                             safeColumns,
                             safeRows,
@@ -1313,7 +1313,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 {
                     if (force || gridChanged)
                     {
-                        bool resizeMirrorWithReflow = ReflowOnResize &&
+                        bool resizeMirrorWithReflow = ShouldUseLocalResizeReflow() &&
                             _vtProcessor?.AlternateScreen != true &&
                             selectionResizeAnchorSpace != SelectionResizeAnchorSpace.NativeViewport;
                         // Native processors own scrollback reflow. Keep the mirror dimensions current,
@@ -1334,6 +1334,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                         DiscardWindowsPtyBackendHiddenCellsIfNeeded();
                     }
 
+                    ApplyResizeReflowPolicyToProcessor(ShouldUseLocalResizeReflow());
                     _vtProcessor?.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
                     DiscardWindowsPtyBackendHiddenCellsIfNeeded();
                 }
@@ -1429,14 +1430,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                Math.Abs(left - right) < 0.001;
     }
 
-    private bool ShouldReflowManagedScreenOnResize()
+    private bool ShouldUseLocalResizeReflow()
     {
-        return ReflowOnResize && !ShouldDisableManagedReflowForWindowsPty();
+        return ReflowOnResize && !ShouldUseWindowsPtyBackendResizeReflow();
     }
 
-    private bool ShouldDisableManagedReflowForWindowsPty()
+    private bool ShouldUseWindowsPtyBackendResizeReflow()
     {
-        return IsWindowsPtySession() && !IsModernWindowsConptyReflowAvailable();
+        return IsWindowsPtySession();
+    }
+
+    private void ApplyResizeReflowPolicyToProcessor(bool localReflowOnResize)
+    {
+        if (_vtProcessor is ITerminalResizeReflowPolicySink reflowPolicySink)
+        {
+            reflowPolicySink.LocalReflowOnResize = localReflowOnResize;
+        }
     }
 
     private void DiscardWindowsPtyBackendHiddenCellsIfNeeded()
@@ -1451,11 +1460,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         return OperatingSystem.IsWindows() &&
                string.Equals(_activeTransportId, TerminalTransportIds.Pty, StringComparison.Ordinal);
-    }
-
-    private static bool IsModernWindowsConptyReflowAvailable()
-    {
-        return Environment.OSVersion.Version.Build >= 21376;
     }
 
     private (int WidthPx, int HeightPx) CalculateRenderedGridPixelSize(int columns, int rows)
