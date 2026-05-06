@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Diagnostics;
 using System.Reflection;
+using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
 using Xunit;
 
@@ -604,6 +605,213 @@ public class PtyContractTests
     }
 
     [Fact]
+    public void WindowsPty_PwshManagedProcessorResize_PreservesPowerShellTableAfterConptyResize()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        if (!TryResolvePwshPath(out string? pwshPath))
+        {
+            return;
+        }
+
+        const string marker = "__ROYALTERMINAL_PWSH_REFLOW_DONE__";
+        TerminalScreen screen = new(133, 33, scrollbackLimit: 400);
+        using BasicVtProcessor processor = new(screen);
+        using WindowsPty pty = new();
+        using ManualResetEventSlim sawMarker = new(false);
+        object sync = new();
+        StringBuilder rawOutput = new();
+        int outputVersion = 0;
+
+#pragma warning disable CA1416
+        processor.ResponseCallback = bytes => pty.Write(bytes, 0, bytes.Length);
+#pragma warning restore CA1416
+        pty.DataReceived += (data, length) =>
+        {
+            lock (sync)
+            {
+                processor.Process(data.AsSpan(0, length));
+                rawOutput.Append(Encoding.UTF8.GetString(data, 0, length));
+                outputVersion++;
+                if (rawOutput.ToString().Contains(marker, StringComparison.Ordinal))
+                {
+                    sawMarker.Set();
+                }
+            }
+        };
+
+        try
+        {
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            pty.Start(
+                shell: pwshPath,
+                columns: 133,
+                rows: 33,
+                workingDirectory: home,
+                environment: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["POWERSHELL_UPDATECHECK"] = "Off",
+                },
+                arguments:
+                [
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NoExit",
+                ]);
+
+            pty.Write($"$PSStyle.OutputRendering='Ansi'; Get-ChildItem $HOME; Write-Output '{marker}'\r");
+
+            Assert.True(
+                sawMarker.Wait(TimeSpan.FromSeconds(10)),
+                $"Did not observe PowerShell marker. Current output: {rawOutput}");
+            WaitForStableOutput(() => Volatile.Read(ref outputVersion), TimeSpan.FromSeconds(2));
+
+            string beforeResize;
+            lock (sync)
+            {
+                beforeResize = ReadAllRows(screen);
+            }
+
+            if (!beforeResize.Contains("iCloudPhotos", StringComparison.Ordinal) ||
+                !beforeResize.Contains("Music", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            string[] expectedRows = GetKnownPowerShellHomeRowsPresentIn(beforeResize);
+
+            foreach (int width in new[] { 120, 100, 80, 60, 51 })
+            {
+                lock (sync)
+                {
+                    processor.ResizeScreen(
+                        columns: width,
+                        rows: 31,
+                        widthPx: width * 10,
+                        heightPx: 496,
+                        reflowOnResize: true,
+                        preserveViewportTopOnRowsIncrease: true);
+                }
+
+                pty.Resize(width, 31);
+                WaitForStableOutput(() => Volatile.Read(ref outputVersion), TimeSpan.FromMilliseconds(500));
+            }
+
+            foreach (int width in new[] { 60, 80, 100, 120, 133 })
+            {
+                lock (sync)
+                {
+                    processor.ResizeScreen(
+                        columns: width,
+                        rows: 33,
+                        widthPx: width * 10,
+                        heightPx: 528,
+                        reflowOnResize: true,
+                        preserveViewportTopOnRowsIncrease: true);
+                }
+
+                pty.Resize(width, 33);
+                WaitForStableOutput(() => Volatile.Read(ref outputVersion), TimeSpan.FromMilliseconds(500));
+            }
+
+            string afterResize;
+            string styledSnapshot;
+            int cursorRow;
+            lock (sync)
+            {
+                afterResize = ReadAllRows(screen);
+                cursorRow = processor.CursorRow;
+                ITerminalSnapshotExportSource exporter = processor;
+                Assert.True(
+                    exporter.TryExportSnapshot(
+                        TerminalSnapshotExportFormat.StyledVt,
+                        CreateStyledSnapshotOptions(),
+                        out styledSnapshot));
+            }
+
+            AssertPowerShellHomeRowsPreserved(expectedRows, afterResize);
+            Assert.DoesNotContain("iCloudhotos", afterResize, StringComparison.Ordinal);
+            Assert.DoesNotContain("Saved Games                                                    Searches", afterResize, StringComparison.Ordinal);
+            AssertPowerShellHomeRowsPreserved(expectedRows, styledSnapshot);
+            Assert.DoesNotContain("iCloudhotos", styledSnapshot, StringComparison.Ordinal);
+            Assert.True(cursorRow >= 30, $"Expected cursor near bottom after resize, observed row {cursorRow}. Screen: {afterResize}");
+        }
+        finally
+        {
+            pty.Stop();
+        }
+    }
+
+    private static string[] GetKnownPowerShellHomeRowsPresentIn(string text)
+    {
+        string[] knownRows =
+        [
+            ".android",
+            ".cargo",
+            ".codex",
+            ".config",
+            ".copilot",
+            ".dbus-keyrings",
+            ".dotnet",
+            ".gnupg",
+            ".ms-ad",
+            ".nuget",
+            ".rustup",
+            ".skiko",
+            ".templateengine",
+            ".vscode",
+            ".vscode-shared",
+            "Contacts",
+            "Documents",
+            "dotnet",
+            "dotTraceSnapshots",
+            "Downloads",
+            "Dropbox",
+            "Favorites",
+            "GitHub",
+            "iCloudDrive",
+            "iCloudPhotos",
+            "Links",
+            "Music",
+            "OneDrive",
+            "Pictures",
+            "Saved Games",
+            "Searches",
+            "source",
+            "Videos",
+            ".bash_history",
+            ".gitconfig",
+            ".lesshst",
+            "dotnet-install.sh",
+            "java_error_in_rider_12460.log",
+            "java_error_in_rider64_26852.log",
+            "java_error_in_rider64.hprof",
+        ];
+
+        List<string> present = [];
+        foreach (string row in knownRows)
+        {
+            if (text.Contains(row, StringComparison.Ordinal))
+            {
+                present.Add(row);
+            }
+        }
+
+        return present.ToArray();
+    }
+
+    private static void AssertPowerShellHomeRowsPreserved(IReadOnlyList<string> expectedRows, string actual)
+    {
+        foreach (string row in expectedRows)
+        {
+            Assert.Contains(row, actual, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void WindowsPty_DataReceived_ProvidesStableBuffersAcrossReads()
     {
         if (!OperatingSystem.IsWindows())
@@ -831,6 +1039,35 @@ public class PtyContractTests
         return false;
     }
 
+    private static bool TryResolvePwshPath(out string? pwshPath)
+    {
+        string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        string installedPwsh = Path.Combine(programFiles, "PowerShell", "7", "pwsh.exe");
+        if (File.Exists(installedPwsh))
+        {
+            pwshPath = installedPwsh;
+            return true;
+        }
+
+        string? path = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            string[] directories = path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (int i = 0; i < directories.Length; i++)
+            {
+                string candidate = Path.Combine(directories[i], "pwsh.exe");
+                if (File.Exists(candidate))
+                {
+                    pwshPath = candidate;
+                    return true;
+                }
+            }
+        }
+
+        pwshPath = null;
+        return false;
+    }
+
     private static bool TryGetWindowsContractCmdPath(out string? cmdPath)
     {
         (bool supported, string? resolvedCmdPath) = WindowsPtyContractCapability.Value;
@@ -960,5 +1197,85 @@ public class PtyContractTests
         byte[] preview = new byte[count];
         bytes.CopyTo(0, preview, 0, count);
         return Convert.ToHexString(preview);
+    }
+
+    private static void WaitForStableOutput(Func<int> getVersion, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow + timeout;
+        int previousVersion = getVersion();
+        DateTime stableSince = DateTime.UtcNow;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(25);
+            int currentVersion = getVersion();
+            if (currentVersion != previousVersion)
+            {
+                previousVersion = currentVersion;
+                stableSince = DateTime.UtcNow;
+                continue;
+            }
+
+            if (DateTime.UtcNow - stableSince >= TimeSpan.FromMilliseconds(150))
+            {
+                return;
+            }
+        }
+    }
+
+    private static string ReadAllRows(TerminalScreen screen)
+    {
+        StringBuilder builder = new();
+        for (int row = 0; row < screen.TotalRows; row++)
+        {
+            AppendRowText(builder, screen.GetRow(row));
+            builder.AppendLine();
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendRowText(StringBuilder builder, TerminalRow row)
+    {
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        for (int column = 0; column < cells.Length; column++)
+        {
+            TerminalCell cell = cells[column];
+            if (cell.Width == 0)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                builder.Append(cell.Grapheme);
+            }
+            else if (cell.Codepoint != 0 && Rune.IsValid(cell.Codepoint))
+            {
+                builder.Append(char.ConvertFromUtf32(cell.Codepoint));
+            }
+            else
+            {
+                builder.Append(' ');
+            }
+        }
+    }
+
+    private static TerminalSnapshotExportOptions CreateStyledSnapshotOptions()
+    {
+        return new TerminalSnapshotExportOptions(
+            Unwrap: true,
+            TrimTrailingWhitespace: true,
+            Extras: new TerminalSnapshotExportExtras(
+                IncludeCursor: true,
+                IncludeStyle: true,
+                IncludeHyperlinks: true,
+                IncludeKittyKeyboard: true,
+                IncludeCharsets: true,
+                IncludePalette: true,
+                IncludeModes: true,
+                IncludeScrollingRegion: true,
+                IncludeTabstops: true,
+                IncludeKeyboardModes: true));
     }
 }
