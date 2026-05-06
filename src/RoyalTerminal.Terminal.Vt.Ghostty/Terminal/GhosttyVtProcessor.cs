@@ -69,6 +69,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private TerminalScreen? _sixelOverlayScreen;
     private BasicVtProcessor? _sixelOverlayProcessor;
     private bool _trimTrailingWhitespaceAfterResize;
+    private bool _forceFullScreenSyncAfterResize;
 
     private readonly TerminalWin32InputModeTracker _win32InputModeTracker = new();
     private readonly TerminalUnsupportedWindowsSequenceSanitizer _unsupportedWindowsSequenceSanitizer = new();
@@ -260,7 +261,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        _trimTrailingWhitespaceAfterResize = true;
+        PrepareResizeSync();
         _terminal.Resize(
             checked((ushort)columns),
             checked((ushort)rows),
@@ -281,7 +282,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _cellWidthPx = columns > 0 ? Math.Max(0, widthPx / columns) : 0;
         _cellHeightPx = rows > 0 ? Math.Max(0, heightPx / rows) : 0;
 
-        _trimTrailingWhitespaceAfterResize = true;
+        PrepareResizeSync();
         _terminal.Resize(
             checked((ushort)columns),
             checked((ushort)rows),
@@ -317,6 +318,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _win32InputModeTracker.Reset();
         _unsupportedWindowsSequenceSanitizer.Reset();
         _trimTrailingWhitespaceAfterResize = false;
+        _forceFullScreenSyncAfterResize = false;
         _win32InputMode = false;
         _pressedMouseButtons = 0;
 
@@ -365,6 +367,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _terminal.Dispose();
         _unsupportedWindowsSequenceSanitizer.Reset();
         _trimTrailingWhitespaceAfterResize = false;
+        _forceFullScreenSyncAfterResize = false;
         ResetManagedState();
     }
 
@@ -684,6 +687,12 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         SyncScreenFromNative();
     }
 
+    private void PrepareResizeSync()
+    {
+        _trimTrailingWhitespaceAfterResize = true;
+        _forceFullScreenSyncAfterResize = true;
+    }
+
     private void ProcessSixelOverlay(ReadOnlySpan<byte> input)
     {
         BasicVtProcessor overlayProcessor = EnsureSixelOverlayProcessor();
@@ -818,7 +827,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         GhosttyVtNative.GhosttyRenderStateDirty dirty = _renderState.GetDirty();
         bool trimTrailingWhitespaceAfterResize = _trimTrailingWhitespaceAfterResize;
-        bool fullRefresh = dirty == GhosttyVtNative.GhosttyRenderStateDirty.Full ||
+        bool forceFullScreenSyncAfterResize = _forceFullScreenSyncAfterResize;
+        bool fullRefresh = forceFullScreenSyncAfterResize ||
+            dirty == GhosttyVtNative.GhosttyRenderStateDirty.Full ||
             _renderState.GetColumns() != _screen.Columns ||
             _renderState.GetRows() != _screen.ViewportRows;
         bool syncKittyGraphics = _kittyGraphicsSupported;
@@ -827,6 +838,11 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             if (trimTrailingWhitespaceAfterResize)
             {
                 _trimTrailingWhitespaceAfterResize = false;
+            }
+
+            if (forceFullScreenSyncAfterResize)
+            {
+                _forceFullScreenSyncAfterResize = false;
             }
 
             return;
@@ -885,6 +901,11 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         if (trimTrailingWhitespaceAfterResize)
         {
             _trimTrailingWhitespaceAfterResize = false;
+        }
+
+        if (forceFullScreenSyncAfterResize)
+        {
+            _forceFullScreenSyncAfterResize = false;
         }
     }
 
