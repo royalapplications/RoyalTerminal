@@ -712,6 +712,19 @@ public class TerminalScreenTests
 
         Assert.DoesNotContain("\nhotos", allRows, StringComparison.Ordinal);
         Assert.Contains("PS C:\\Users\\wiesl> ", allRows, StringComparison.Ordinal);
+
+        ITerminalSnapshotExportSource exporter = processor;
+        Assert.True(
+            exporter.TryExportSnapshot(
+                TerminalSnapshotExportFormat.PlainText,
+                new TerminalSnapshotExportOptions(Unwrap: true, TrimTrailingWhitespace: true),
+                out string snapshot));
+
+        string savedGamesLine = snapshot
+            .Split(Environment.NewLine)
+            .Single(line => line.Contains("Saved Games", StringComparison.Ordinal));
+        Assert.DoesNotContain("Searches", savedGamesLine, StringComparison.Ordinal);
+        Assert.DoesNotContain(Environment.NewLine + "hotos", snapshot, StringComparison.Ordinal);
     }
 
     [Fact]

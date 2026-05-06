@@ -1302,7 +1302,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                             heightPx,
                             managedReflowOnResize,
                             selectionResizeAnchors.AsSpan());
-                        DiscardWindowsPtyBackendHiddenCellsIfNeeded();
                     }
                     else
                     {
@@ -1330,13 +1329,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                         {
                             CopyViewportRows(selectionResizeContext.Snapshot, _screen);
                         }
-
-                        DiscardWindowsPtyBackendHiddenCellsIfNeeded();
                     }
 
                     ApplyResizeReflowPolicyToProcessor(ShouldUseLocalResizeReflow());
                     _vtProcessor?.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
-                    DiscardWindowsPtyBackendHiddenCellsIfNeeded();
                 }
 
                 if (selectionResizeAnchorSpace == SelectionResizeAnchorSpace.NativeViewport)
@@ -1432,12 +1428,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool ShouldUseLocalResizeReflow()
     {
-        return ReflowOnResize && !ShouldUseWindowsPtyBackendResizeReflow();
-    }
-
-    private bool ShouldUseWindowsPtyBackendResizeReflow()
-    {
-        return IsWindowsPtySession();
+        return ReflowOnResize;
     }
 
     private void ApplyResizeReflowPolicyToProcessor(bool localReflowOnResize)
@@ -1446,20 +1437,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             reflowPolicySink.LocalReflowOnResize = localReflowOnResize;
         }
-    }
-
-    private void DiscardWindowsPtyBackendHiddenCellsIfNeeded()
-    {
-        if (IsWindowsPtySession())
-        {
-            _screen?.DiscardHiddenCells();
-        }
-    }
-
-    private bool IsWindowsPtySession()
-    {
-        return OperatingSystem.IsWindows() &&
-               string.Equals(_activeTransportId, TerminalTransportIds.Pty, StringComparison.Ordinal);
     }
 
     private (int WidthPx, int HeightPx) CalculateRenderedGridPixelSize(int columns, int rows)

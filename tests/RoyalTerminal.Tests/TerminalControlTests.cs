@@ -1149,7 +1149,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public async Task Control_WindowsPtyManagedResize_LetsBackendOwnReflow()
+    public async Task Control_WindowsPtyManagedResize_UsesLocalReflowLikeWindowsTerminal()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -1178,13 +1178,13 @@ public class TerminalControlTests
             control.Columns = 32;
 
             Assert.Equal(32, control.Screen!.Columns);
-            Assert.False(ContainsScreenText(control, "070-END"));
+            Assert.True(ContainsScreenText(control, "070-END"));
             Assert.Contains(transport.Resizes, resize => resize.Columns == 32);
 
             control.Columns = 80;
 
             Assert.Equal(80, control.Screen.Columns);
-            Assert.False(ContainsScreenText(control, "070-END"));
+            Assert.True(ContainsScreenText(control, "070-END"));
             Assert.Contains(transport.Resizes, resize => resize.Columns == 80);
         }
         finally
@@ -1194,7 +1194,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public async Task Control_WindowsPtyNativeResize_DisablesLocalProcessorReflow()
+    public async Task Control_WindowsPtyNativeResize_KeepsLocalProcessorReflowEnabled()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -1220,7 +1220,7 @@ public class TerminalControlTests
 
             control.Columns = 32;
 
-            Assert.False(processor.LocalReflowOnResize);
+            Assert.True(processor.LocalReflowOnResize);
             Assert.Contains(transport.Resizes, resize => resize.Columns == 32);
         }
         finally
@@ -1230,7 +1230,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public async Task Control_WindowsPtyNativeResize_DiscardsPreResizeMirrorHiddenTail()
+    public async Task Control_WindowsPtyNativeResize_PreservesPreResizeMirrorHiddenTail()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -1262,13 +1262,12 @@ public class TerminalControlTests
             control.Columns = 32;
 
             Assert.Equal(32, control.Screen.Columns);
-            Assert.Equal(32, control.Screen.GetViewportRow(0).PreservedColumns);
             Assert.False(ContainsScreenText(control, "070-END"));
 
             control.Columns = 80;
 
             Assert.Equal(80, control.Screen.Columns);
-            Assert.False(ContainsScreenText(control, "070-END"));
+            Assert.True(ContainsScreenText(control, "070-END"));
             Assert.Contains(transport.Resizes, resize => resize.Columns == 32);
             Assert.Contains(transport.Resizes, resize => resize.Columns == 80);
         }
