@@ -1192,6 +1192,114 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_ResizeRowsDecrease_AfterTransientPadding_PreservesLiveViewportTop()
+    {
+        var screen = new TerminalScreen(12, 3, scrollbackLimit: 100);
+
+        SetAscii(screen.GetViewportRow(0), "old0");
+        SetAscii(screen.GetViewportRow(1), "old1");
+        SetAscii(screen.GetViewportRow(2), "old2");
+        SetAscii(screen.AddRow(), "Music");
+        SetAscii(screen.AddRow(), "Prompt");
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+
+        screen.Resize(
+            columns: 12,
+            viewportRows: 5,
+            reflowOnResize: false,
+            trackedViewportPosition: null,
+            trackedAbsolutePositions: Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+        Assert.True(screen.GetViewportRow(3).IsTransientResizeRow);
+        Assert.True(screen.GetViewportRow(4).IsTransientResizeRow);
+
+        screen.Resize(
+            columns: 12,
+            viewportRows: 4,
+            reflowOnResize: false,
+            trackedViewportPosition: null,
+            trackedAbsolutePositions: Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+        Assert.True(screen.GetViewportRow(3).IsTransientResizeRow);
+
+        screen.Resize(
+            columns: 12,
+            viewportRows: 3,
+            reflowOnResize: false,
+            trackedViewportPosition: null,
+            trackedAbsolutePositions: Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+
+        string allRows = GetAllText(screen);
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Music"));
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Prompt"));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_VerticalWindowsPtyResize_AfterTransientPadding_PreservesRows()
+    {
+        TerminalScreen screen = new(12, 3, scrollbackLimit: 100);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process(Encoding.UTF8.GetBytes("old0\r\nold1\r\nold2\r\nMusic\r\nPrompt"));
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+
+        processor.ResizeScreen(
+            columns: 12,
+            rows: 5,
+            widthPx: 120,
+            heightPx: 80,
+            reflowOnResize: false,
+            preserveViewportTopOnRowsIncrease: true);
+
+        processor.ResizeScreen(
+            columns: 12,
+            rows: 4,
+            widthPx: 120,
+            heightPx: 64,
+            reflowOnResize: false,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+
+        processor.ResizeScreen(
+            columns: 12,
+            rows: 3,
+            widthPx: 120,
+            heightPx: 48,
+            reflowOnResize: false,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+
+        string allRows = GetAllText(screen);
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Music"));
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Prompt"));
+    }
+
+    [Fact]
     public void BasicVtProcessor_ProcessAfterWindowsPtyResize_ActivatesRowsTouchedByRepaint()
     {
         var screen = new TerminalScreen(12, 3, scrollbackLimit: 100);

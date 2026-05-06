@@ -1433,6 +1433,58 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_WindowsPtyRowsDecrease_AfterRowsIncrease_PreservesLiveViewportTop()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 12;
+        control.Rows = 3;
+        control.ReflowOnResize = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            control.WriteOutput(Encoding.UTF8.GetBytes("old0\r\nold1\r\nold2\r\nMusic\r\nPrompt"));
+            control.ScrollToBottom();
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            Assert.Contains("old2", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
+            Assert.Contains("Music", ReadRowText(screen.GetViewportRow(1)), StringComparison.Ordinal);
+            Assert.Contains("Prompt", ReadRowText(screen.GetViewportRow(2)), StringComparison.Ordinal);
+
+            control.Rows = 5;
+            control.Rows = 4;
+
+            Assert.Contains("old2", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
+            Assert.Contains("Music", ReadRowText(screen.GetViewportRow(1)), StringComparison.Ordinal);
+            Assert.Contains("Prompt", ReadRowText(screen.GetViewportRow(2)), StringComparison.Ordinal);
+
+            control.Rows = 3;
+
+            string screenText = ReadAllRows(screen);
+            Assert.Contains("old2", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
+            Assert.Contains("Music", ReadRowText(screen.GetViewportRow(1)), StringComparison.Ordinal);
+            Assert.Contains("Prompt", ReadRowText(screen.GetViewportRow(2)), StringComparison.Ordinal);
+            Assert.Equal(1, CountOccurrences(screenText, "Music"));
+            Assert.Equal(1, CountOccurrences(screenText, "Prompt"));
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_WindowsPtyManagedRealPwshResize_PreservesPowerShellTableAndCursor()
     {
         if (!OperatingSystem.IsWindows() || !TryResolvePwshPath(out string? pwshPath))
