@@ -1294,12 +1294,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 {
                     if (force || gridChanged)
                     {
+                        bool managedReflowOnResize = ShouldReflowManagedScreenOnResize();
                         basicVtProcessor.ResizeScreen(
                             safeColumns,
                             safeRows,
                             widthPx,
                             heightPx,
-                            ReflowOnResize,
+                            managedReflowOnResize,
                             selectionResizeAnchors.AsSpan());
                     }
                     else
@@ -1422,6 +1423,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return double.IsFinite(left) &&
                double.IsFinite(right) &&
                Math.Abs(left - right) < 0.001;
+    }
+
+    private bool ShouldReflowManagedScreenOnResize()
+    {
+        return ReflowOnResize && !ShouldLetWindowsPtyOwnResizeReflow();
+    }
+
+    private bool ShouldLetWindowsPtyOwnResizeReflow()
+    {
+        return OperatingSystem.IsWindows() &&
+               _vtProcessor is BasicVtProcessor &&
+               string.Equals(_activeTransportId, TerminalTransportIds.Pty, StringComparison.Ordinal);
     }
 
     private (int WidthPx, int HeightPx) CalculateRenderedGridPixelSize(int columns, int rows)

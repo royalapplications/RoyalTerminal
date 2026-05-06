@@ -1149,6 +1149,51 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_WindowsPtyManagedResize_LetsBackendOwnReflow()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 80;
+        control.Rows = 24;
+        control.ReflowOnResize = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            string line = "COLUMN-000-010-020-030-040-050-060-070-END";
+            control.WriteOutput(Encoding.UTF8.GetBytes(line));
+
+            Assert.True(ContainsScreenText(control, "070-END"));
+
+            control.Columns = 32;
+
+            Assert.Equal(32, control.Screen!.Columns);
+            Assert.False(ContainsScreenText(control, "070-END"));
+            Assert.Contains(transport.Resizes, resize => resize.Columns == 32);
+
+            control.Columns = 80;
+
+            Assert.Equal(80, control.Screen.Columns);
+            Assert.True(ContainsScreenText(control, "070-END"));
+            Assert.Contains(transport.Resizes, resize => resize.Columns == 80);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_Arrange_PixelOnlyResize_DoesNotPropagateTransportResize()
     {
         FakeTransport transport = new();
@@ -4053,12 +4098,13 @@ public class TerminalControlTests
         FakeTransport transport,
         IVtProcessorFactory vtProcessorFactory,
         VtProcessorPreference preference,
-        ITerminalScrollService? scrollService = null)
+        ITerminalScrollService? scrollService = null,
+        string transportId = "fake")
     {
         CompositeTerminalTransportFactory factory = new(
             new ITerminalTransportProvider[]
             {
-                new FakeTransportProvider(transport),
+                new FakeTransportProvider(transport, transportId),
             });
 
         return new TerminalControl(
@@ -5139,13 +5185,15 @@ public class TerminalControlTests
     private sealed class FakeTransportProvider : ITerminalTransportProvider
     {
         private readonly ITerminalTransport _transport;
+        private readonly string _transportId;
 
-        public FakeTransportProvider(ITerminalTransport transport)
+        public FakeTransportProvider(ITerminalTransport transport, string transportId = "fake")
         {
             _transport = transport;
+            _transportId = transportId;
         }
 
-        public string TransportId => "fake";
+        public string TransportId => _transportId;
 
         public bool CanHandle(ITerminalTransportOptions options)
         {
