@@ -314,6 +314,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
     /// </summary>
     public void Process(ReadOnlySpan<byte> data)
     {
+        if (data.IsEmpty)
+        {
+            return;
+        }
+
         TerminalModeState before = ModeState;
 
         for (var i = 0; i < data.Length; i++)
@@ -2015,7 +2020,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void CopyRow(TerminalRow src, TerminalRow dst)
     {
-        dst.CopyFrom(src, _screen.DefaultForeground, _screen.DefaultBackground);
+        dst.CopyActiveFrom(src, _screen.DefaultForeground, _screen.DefaultBackground);
         NormalizeRowWideCells(dst);
     }
 
@@ -4247,6 +4252,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void ClearPreservedCellsForMutation(TerminalRow row)
     {
+        row.MarkContentMutation();
+
         if (row.PreservedColumns > row.Columns)
         {
             row.ClearPreservedCellsFrom(row.Columns, _screen.DefaultForeground, _screen.DefaultBackground);
@@ -4538,7 +4545,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
     /// <summary>
     /// Resizes the associated screen buffer and remaps the managed cursor through any row reflow.
     /// </summary>
-    public void ResizeScreen(int columns, int rows, int widthPx, int heightPx, bool reflowOnResize)
+    public void ResizeScreen(
+        int columns,
+        int rows,
+        int widthPx,
+        int heightPx,
+        bool reflowOnResize,
+        bool preserveViewportTopOnRowsIncrease = false)
     {
         ResizeScreen(
             columns,
@@ -4546,7 +4559,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
             widthPx,
             heightPx,
             reflowOnResize,
-            Span<TerminalGridPosition>.Empty);
+            Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease);
     }
 
     /// <summary>
@@ -4558,7 +4572,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
         int widthPx,
         int heightPx,
         bool reflowOnResize,
-        Span<TerminalGridPosition> trackedAbsolutePositions)
+        Span<TerminalGridPosition> trackedAbsolutePositions,
+        bool preserveViewportTopOnRowsIncrease = false)
     {
         _widthPx = Math.Max(0, widthPx);
         _heightPx = Math.Max(0, heightPx);
@@ -4585,7 +4600,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 rows,
                 reflowOnResize && !alternateScreen,
                 alternateScreen ? null : new TerminalGridPosition(resizeCursorCol, _cursorRow),
-                trackedAbsolutePositions);
+                trackedAbsolutePositions,
+                preserveViewportTopOnRowsIncrease && !alternateScreen);
         }
         finally
         {
