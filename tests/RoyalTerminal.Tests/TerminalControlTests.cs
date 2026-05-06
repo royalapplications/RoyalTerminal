@@ -1149,7 +1149,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public async Task Control_WindowsPtyManagedResize_LetsBackendOwnReflow()
+    public async Task Control_WindowsPtyManagedResize_UsesConptyBuildReflowPolicy()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -1178,13 +1178,62 @@ public class TerminalControlTests
             control.Columns = 32;
 
             Assert.Equal(32, control.Screen!.Columns);
-            Assert.False(ContainsScreenText(control, "070-END"));
+            Assert.Equal(WindowsConptySupportsLocalReflow(), ContainsScreenText(control, "070-END"));
             Assert.Contains(transport.Resizes, resize => resize.Columns == 32);
 
             control.Columns = 80;
 
             Assert.Equal(80, control.Screen.Columns);
+            Assert.Equal(WindowsConptySupportsLocalReflow(), ContainsScreenText(control, "070-END"));
+            Assert.Contains(transport.Resizes, resize => resize.Columns == 80);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyNativeResize_DiscardsPreResizeMirrorHiddenTail()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 24, OffsetRows: 0, VisibleRows: 24),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 80;
+        control.Rows = 24;
+        control.ReflowOnResize = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            string line = "COLUMN-000-010-020-030-040-050-060-070-END";
+            WriteAscii(control.Screen!.GetViewportRow(0), line);
+
             Assert.True(ContainsScreenText(control, "070-END"));
+
+            control.Columns = 32;
+
+            Assert.Equal(32, control.Screen.Columns);
+            Assert.Equal(32, control.Screen.GetViewportRow(0).PreservedColumns);
+            Assert.False(ContainsScreenText(control, "070-END"));
+
+            control.Columns = 80;
+
+            Assert.Equal(80, control.Screen.Columns);
+            Assert.False(ContainsScreenText(control, "070-END"));
+            Assert.Contains(transport.Resizes, resize => resize.Columns == 32);
             Assert.Contains(transport.Resizes, resize => resize.Columns == 80);
         }
         finally
@@ -4470,6 +4519,23 @@ public class TerminalControlTests
         }
 
         return false;
+    }
+
+    private static bool WindowsConptySupportsLocalReflow()
+    {
+        return Environment.OSVersion.Version.Build >= 21376;
+    }
+
+    private static void WriteAscii(TerminalRow row, string text)
+    {
+        int count = Math.Min(row.Columns, text.Length);
+        for (int column = 0; column < count; column++)
+        {
+            row[column].Codepoint = text[column];
+            row[column].Width = 1;
+        }
+
+        row.IsDirty = true;
     }
 
     private static string[] ReadVisibleAsciiRows(TerminalScreen screen)

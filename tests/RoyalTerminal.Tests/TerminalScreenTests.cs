@@ -112,6 +112,28 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_DiscardHiddenCells_DropsHiddenStorageAcrossRows()
+    {
+        TerminalScreen screen = new(12, 3);
+        screen.GetViewportRow(0)[10].Codepoint = 'K';
+        screen.GetViewportRow(1)[11].Codepoint = 'L';
+
+        screen.Resize(6, 3, reflowOnResize: false);
+
+        Assert.Equal(12, screen.GetViewportRow(0).PreservedColumns);
+
+        screen.DiscardHiddenCells();
+
+        Assert.Equal(6, screen.GetViewportRow(0).PreservedColumns);
+        Assert.Equal(6, screen.GetViewportRow(1).PreservedColumns);
+
+        screen.Resize(12, 3, reflowOnResize: false);
+
+        Assert.False(screen.GetViewportRow(0)[10].HasContent);
+        Assert.False(screen.GetViewportRow(1)[11].HasContent);
+    }
+
+    [Fact]
     public void TerminalRow_SpanAccess_ReturnsCells()
     {
         var row = new TerminalRow(10);

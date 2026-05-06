@@ -1302,6 +1302,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                             heightPx,
                             managedReflowOnResize,
                             selectionResizeAnchors.AsSpan());
+                        DiscardWindowsPtyBackendHiddenCellsIfNeeded();
                     }
                     else
                     {
@@ -1329,9 +1330,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                         {
                             CopyViewportRows(selectionResizeContext.Snapshot, _screen);
                         }
+
+                        DiscardWindowsPtyBackendHiddenCellsIfNeeded();
                     }
 
                     _vtProcessor?.NotifyResize(safeColumns, safeRows, widthPx, heightPx);
+                    DiscardWindowsPtyBackendHiddenCellsIfNeeded();
                 }
 
                 if (selectionResizeAnchorSpace == SelectionResizeAnchorSpace.NativeViewport)
@@ -1427,14 +1431,31 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool ShouldReflowManagedScreenOnResize()
     {
-        return ReflowOnResize && !ShouldLetWindowsPtyOwnResizeReflow();
+        return ReflowOnResize && !ShouldDisableManagedReflowForWindowsPty();
     }
 
-    private bool ShouldLetWindowsPtyOwnResizeReflow()
+    private bool ShouldDisableManagedReflowForWindowsPty()
+    {
+        return IsWindowsPtySession() && !IsModernWindowsConptyReflowAvailable();
+    }
+
+    private void DiscardWindowsPtyBackendHiddenCellsIfNeeded()
+    {
+        if (IsWindowsPtySession())
+        {
+            _screen?.DiscardHiddenCells();
+        }
+    }
+
+    private bool IsWindowsPtySession()
     {
         return OperatingSystem.IsWindows() &&
-               _vtProcessor is BasicVtProcessor &&
                string.Equals(_activeTransportId, TerminalTransportIds.Pty, StringComparison.Ordinal);
+    }
+
+    private static bool IsModernWindowsConptyReflowAvailable()
+    {
+        return Environment.OSVersion.Version.Build >= 21376;
     }
 
     private (int WidthPx, int HeightPx) CalculateRenderedGridPixelSize(int columns, int rows)

@@ -1184,6 +1184,21 @@ public sealed class TerminalScreen
         ScrollOffset = 0;
     }
 
+    /// <summary>
+    /// Drops cells retained outside each active row width after an external backend resize.
+    /// </summary>
+    public void DiscardHiddenCells()
+    {
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            TerminalRow row = _rows[i];
+            if (row.PreservedColumns > row.Columns)
+            {
+                row.ClearPreservedCellsFrom(row.Columns, DefaultForeground, DefaultBackground);
+            }
+        }
+    }
+
     private void EnsureAlternateRows()
     {
         ResizeActiveRows(Columns);
