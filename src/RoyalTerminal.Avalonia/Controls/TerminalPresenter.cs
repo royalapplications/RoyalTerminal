@@ -142,7 +142,7 @@ public class TerminalPresenter : Control
     /// Requests a re-render of dirty rows.
     /// Retries composition initialization if the visual isn't ready yet.
     /// </summary>
-    public void Invalidate(bool fullRedraw = false)
+    public void Invalidate(bool fullRedraw = false, bool dirtyRowsOnly = false)
     {
         if (_compositionVisual is null)
         {
@@ -150,16 +150,14 @@ public class TerminalPresenter : Control
             if (_compositionVisual is null) return;
         }
 
-        if (fullRedraw && _renderer is not null && _screen is not null)
+        if (fullRedraw && (_renderer is null || _screen is null))
         {
-            // Force a full handler refresh when callers require a complete redraw
-            // (for example, theme changes that can update defaults/palette mappings).
             SendUpdate();
             return;
         }
 
         _compositionVisual.SendHandlerMessage(
-            new TerminalDrawHandler.InvalidateMessage());
+            new TerminalDrawHandler.InvalidateMessage(fullRedraw, dirtyRowsOnly));
         RequestCompositionCommit();
     }
 

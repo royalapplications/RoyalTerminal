@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // Tests for terminal query detection and response generation.
 
+using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
@@ -1303,6 +1304,25 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_ZwjSequence_WithLegacyEmojiComponent_AppendsToSingleCellGrapheme()
+    {
+        const string coupleWithHeart = "\U0001F469\u200D\u2764\uFE0F\u200D\U0001F469";
+
+        var screen = new TerminalScreen(16, 4, 0);
+        var processor = new BasicVtProcessor(screen);
+
+        processor.Process(System.Text.Encoding.UTF8.GetBytes(coupleWithHeart));
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal(2, processor.CursorCol);
+        Assert.Equal(0x1F469, row[0].Codepoint);
+        Assert.Equal(coupleWithHeart, row[0].Grapheme);
+        Assert.Equal(2, row[0].Width);
+        Assert.Equal(0, row[1].Codepoint);
+        Assert.Equal(0, row[1].Width);
+    }
+
+    [Fact]
     public void BasicVtProcessor_RegionalIndicatorPair_AppendsToSingleCellGrapheme()
     {
         const string canadaFlag = "\U0001F1E8\U0001F1E6";
@@ -1413,6 +1433,41 @@ public class TerminalQueryTests
         Assert.Equal(0, processor.CursorRow);
         Assert.Equal("B\u0301", row0[1].Grapheme);
         Assert.False(row1[0].HasContent);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_BoxDrawingFlood_DoesNotAllocateGraphemeMergeStrings()
+    {
+        const string glyphs = "Line ░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀";
+        StringBuilder builder = new(glyphs.Length * 64);
+        for (int i = 0; i < 64; i++)
+        {
+            builder.Append(glyphs);
+        }
+
+        byte[] payload = System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+
+        // Warm the width tables and parser state outside the measured processor.
+        var warmScreen = new TerminalScreen(builder.Length + 1, 1, 0);
+        var warmProcessor = new BasicVtProcessor(warmScreen);
+        warmProcessor.Process(payload);
+
+        var screen = new TerminalScreen(builder.Length + 1, 1, 0);
+        var processor = new BasicVtProcessor(screen);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        processor.Process(payload);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.InRange(allocated, 0, 64 * 1024);
+        TerminalRow row = screen.GetViewportRow(0);
+        for (int column = 0; column < builder.Length; column++)
+        {
+            Assert.Null(row[column].Grapheme);
+        }
     }
 
     [Fact]

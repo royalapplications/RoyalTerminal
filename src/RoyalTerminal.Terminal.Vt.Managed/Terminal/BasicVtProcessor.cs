@@ -41,6 +41,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private const int MaxDcsBufferBytes = 4096;
     private const int KittyKeyboardFlagMask = 0x1F;
     private const int KittyKeyboardMaxStackDepth = 32;
+    private const int ZeroWidthJoinerCodepoint = 0x200D;
+    private const int CombiningKeycapCodepoint = 0x20E3;
     private static readonly int[] ExtendedDecModes =
     [
         3,
@@ -1559,7 +1561,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
         // If we're sitting at wrapped EOL, a combining/emoji continuation should
         // still be allowed to merge into the previous cell before forcing a wrap.
-        if (_cursorCol >= _screen.Columns && TryAppendToPreviousCellGrapheme(codepoint))
+        bool shouldAttemptGraphemeAppend = ShouldAttemptGraphemeAppend(codepoint);
+        if (_cursorCol >= _screen.Columns &&
+            shouldAttemptGraphemeAppend &&
+            TryAppendToPreviousCellGrapheme(codepoint))
         {
             return;
         }
@@ -1569,7 +1574,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
             ClampCursor();
         }
 
-        if (TryAppendToPreviousCellGrapheme(codepoint))
+        if (shouldAttemptGraphemeAppend && TryAppendToPreviousCellGrapheme(codepoint))
         {
             return;
         }
@@ -1660,6 +1665,61 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _cursorCol += width;
         _lastGraphicCodepoint = codepoint;
     }
+
+    private static bool ShouldAttemptGraphemeAppend(int codepoint)
+    {
+        if (!Rune.IsValid(codepoint))
+        {
+            return false;
+        }
+
+        if (codepoint == ZeroWidthJoinerCodepoint ||
+            codepoint == CombiningKeycapCodepoint ||
+            IsVariationSelector(codepoint) ||
+            IsEmojiModifier(codepoint) ||
+            IsRegionalIndicator(codepoint) ||
+            IsEmojiTag(codepoint) ||
+            IsDefaultEmojiPresentation(codepoint) ||
+            IsLegacyEmojiPresentation(codepoint))
+        {
+            return true;
+        }
+
+        UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(codepoint);
+        return category is UnicodeCategory.NonSpacingMark or
+            UnicodeCategory.SpacingCombiningMark or
+            UnicodeCategory.EnclosingMark or
+            UnicodeCategory.Format;
+    }
+
+    private static bool IsVariationSelector(int codepoint)
+        => (codepoint >= 0xFE00 && codepoint <= 0xFE0F) ||
+           (codepoint >= 0xE0100 && codepoint <= 0xE01EF);
+
+    private static bool IsEmojiModifier(int codepoint)
+        => codepoint >= 0x1F3FB && codepoint <= 0x1F3FF;
+
+    private static bool IsRegionalIndicator(int codepoint)
+        => codepoint >= 0x1F1E6 && codepoint <= 0x1F1FF;
+
+    private static bool IsEmojiTag(int codepoint)
+        => codepoint >= 0xE0020 && codepoint <= 0xE007F;
+
+    private static bool IsDefaultEmojiPresentation(int codepoint)
+        => codepoint >= 0x1F300 && codepoint <= 0x1FAFF;
+
+    private static bool IsLegacyEmojiPresentation(int codepoint)
+        => codepoint is 0x00A9 or 0x00AE or 0x203C or 0x2049 or 0x2122 or 0x2139 or 0x2328 or 0x23CF or 0x24C2 or
+               0x25B6 or 0x25C0 or 0x3030 or 0x303D or 0x3297 or 0x3299 ||
+           (codepoint >= 0x2194 && codepoint <= 0x21AA) ||
+           (codepoint >= 0x231A && codepoint <= 0x231B) ||
+           (codepoint >= 0x23E9 && codepoint <= 0x23F3) ||
+           (codepoint >= 0x23F8 && codepoint <= 0x23FA) ||
+           (codepoint >= 0x25AA && codepoint <= 0x25AB) ||
+           (codepoint >= 0x25FB && codepoint <= 0x25FE) ||
+           (codepoint >= 0x2600 && codepoint <= 0x27BF) ||
+           (codepoint >= 0x2934 && codepoint <= 0x2935) ||
+           (codepoint >= 0x2B05 && codepoint <= 0x2B55);
 
     private bool TryAppendToPreviousCellGrapheme(int codepoint)
     {
@@ -1888,7 +1948,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             // Whole-screen scroll — push to scrollback
             _screen.AddRow();
-            _screen.InvalidateAll();
+            _screen.InvalidateViewport();
         }
         else
         {
@@ -1905,7 +1965,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
             {
                 _screen.GetViewportRow(_scrollBottom).Clear(_currentFg, _currentBg);
             }
-            _screen.InvalidateAll();
+            _screen.InvalidateViewport();
         }
     }
 
@@ -1924,7 +1984,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             _screen.GetViewportRow(_scrollTop).Clear(_currentFg, _currentBg);
         }
-        _screen.InvalidateAll();
+        _screen.InvalidateViewport();
     }
 
     private void CopyRow(TerminalRow src, TerminalRow dst)
