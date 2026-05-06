@@ -382,6 +382,30 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_ResizeWithReflow_TrimsTrailingStyledSpaces()
+    {
+        TerminalScreen screen = new(12, 3);
+        TerminalRow first = screen.GetViewportRow(0);
+        SetAscii(first, "DIR");
+        for (int column = 3; column < first.Columns; column++)
+        {
+            first[column].Codepoint = ' ';
+            first[column].Width = 1;
+            first[column].Background = 0xFF0000AA;
+            first[column].HasBackground = true;
+            first[column].Attributes = CellAttributes.Bold;
+        }
+
+        SetAscii(screen.GetViewportRow(1), "NEXT");
+
+        screen.Resize(4, 3, reflowOnResize: true);
+
+        Assert.False(screen.GetRow(0).WrapsToNext);
+        Assert.Equal("DIR ", ReadAscii(screen.GetRow(0), 4));
+        Assert.Equal("NEXT", ReadAscii(screen.GetRow(1), 4));
+    }
+
+    [Fact]
     public void TerminalScreen_ResizeWithReflowToOneColumn_DropsWideCharacterAsBlankCell()
     {
         TerminalScreen screen = new(2, 1);

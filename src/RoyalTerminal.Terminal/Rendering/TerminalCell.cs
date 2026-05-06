@@ -1633,7 +1633,7 @@ public sealed class TerminalScreen
         ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
         for (int i = cells.Length - 1; i >= 0; i--)
         {
-            if (IsReflowMeaningfulCell(in cells[i]))
+            if (IsReflowLineEndCell(in cells[i]))
             {
                 return i + 1;
             }
@@ -1642,17 +1642,32 @@ public sealed class TerminalScreen
         return 0;
     }
 
-    private bool IsReflowMeaningfulCell(ref readonly TerminalCell cell)
+    private static bool IsReflowLineEndCell(ref readonly TerminalCell cell)
     {
-        return cell.HasContent ||
-            cell.Attributes != CellAttributes.None ||
-            cell.UnderlineStyle != TerminalUnderlineStyle.None ||
-            cell.HasUnderlineColor ||
-            cell.Decorations != CellDecorations.None ||
-            cell.HyperlinkId != 0 ||
-            cell.Foreground != DefaultForeground ||
-            cell.Background != DefaultBackground ||
-            !cell.HasBackground;
+        if (cell.Width == 0)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(cell.Grapheme))
+        {
+            return !IsAsciiSpaceGrapheme(cell.Grapheme);
+        }
+
+        return cell.Codepoint != 0 && cell.Codepoint != ' ';
+    }
+
+    private static bool IsAsciiSpaceGrapheme(string grapheme)
+    {
+        for (int i = 0; i < grapheme.Length; i++)
+        {
+            if (grapheme[i] != ' ')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private TerminalGridPosition? AppendReflowedLogicalLine(

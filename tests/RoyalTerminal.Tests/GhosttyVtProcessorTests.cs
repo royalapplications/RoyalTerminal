@@ -152,6 +152,31 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_Resize_TrimsTrailingStyledSpaces_WhenAvailable()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 12, viewportRows: 3, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 12, rows: 3, widthPx: 120, heightPx: 48);
+
+        processor.Process(Encoding.UTF8.GetBytes("\x1b[44;1mDIR         \x1b[0m\r\nNEXT"));
+        processor.NotifyResize(columns: 4, rows: 3, widthPx: 40, heightPx: 48);
+
+        Assert.False(screen.GetViewportRow(0).WrapsToNext);
+        Assert.Equal("DIR ", ReadAsciiPrefix(screen, 0, 4));
+        Assert.Equal("NEXT", ReadAsciiPrefix(screen, 1, 4));
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_KittyGraphicsAndHyperlinks_PopulateManagedScreen_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())

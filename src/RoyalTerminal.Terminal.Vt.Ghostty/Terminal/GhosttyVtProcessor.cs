@@ -68,6 +68,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private bool _sixelGraphicsEnabled;
     private TerminalScreen? _sixelOverlayScreen;
     private BasicVtProcessor? _sixelOverlayProcessor;
+    private bool _trimTrailingWhitespaceAfterResize;
 
     private readonly TerminalWin32InputModeTracker _win32InputModeTracker = new();
     private readonly TerminalUnsupportedWindowsSequenceSanitizer _unsupportedWindowsSequenceSanitizer = new();
@@ -259,6 +260,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        _trimTrailingWhitespaceAfterResize = true;
         _terminal.Resize(
             checked((ushort)columns),
             checked((ushort)rows),
@@ -279,6 +281,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _cellWidthPx = columns > 0 ? Math.Max(0, widthPx / columns) : 0;
         _cellHeightPx = rows > 0 ? Math.Max(0, heightPx / rows) : 0;
 
+        _trimTrailingWhitespaceAfterResize = true;
         _terminal.Resize(
             checked((ushort)columns),
             checked((ushort)rows),
@@ -313,6 +316,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         TerminalModeState before = ModeState;
         _win32InputModeTracker.Reset();
         _unsupportedWindowsSequenceSanitizer.Reset();
+        _trimTrailingWhitespaceAfterResize = false;
         _win32InputMode = false;
         _pressedMouseButtons = 0;
 
@@ -360,6 +364,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _renderState.Dispose();
         _terminal.Dispose();
         _unsupportedWindowsSequenceSanitizer.Reset();
+        _trimTrailingWhitespaceAfterResize = false;
         ResetManagedState();
     }
 
@@ -812,12 +817,18 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private unsafe void SyncScreenFromNative()
     {
         GhosttyVtNative.GhosttyRenderStateDirty dirty = _renderState.GetDirty();
+        bool trimTrailingWhitespaceAfterResize = _trimTrailingWhitespaceAfterResize;
         bool fullRefresh = dirty == GhosttyVtNative.GhosttyRenderStateDirty.Full ||
             _renderState.GetColumns() != _screen.Columns ||
             _renderState.GetRows() != _screen.ViewportRows;
         bool syncKittyGraphics = _kittyGraphicsSupported;
         if (!fullRefresh && dirty == GhosttyVtNative.GhosttyRenderStateDirty.False && !syncKittyGraphics)
         {
+            if (trimTrailingWhitespaceAfterResize)
+            {
+                _trimTrailingWhitespaceAfterResize = false;
+            }
+
             return;
         }
 
@@ -853,6 +864,11 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                     ClearCell(ref row[colIndex]);
                 }
 
+                if (trimTrailingWhitespaceAfterResize && !row.WrapsToNext)
+                {
+                    TrimTrailingWhitespaceForReflow(row);
+                }
+
                 row.IsDirty = true;
                 _renderState.SetCurrentRowDirty(false);
             }
@@ -866,6 +882,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         SyncKittyGraphicsFromNative();
         _renderState.SetDirty(GhosttyVtNative.GhosttyRenderStateDirty.False);
+        if (trimTrailingWhitespaceAfterResize)
+        {
+            _trimTrailingWhitespaceAfterResize = false;
+        }
     }
 
     private bool TryCreateNativeSelection(
@@ -1032,6 +1052,47 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         target.HasBackground = true;
         target.HyperlinkId = 0;
         target.Width = 1;
+    }
+
+    private void TrimTrailingWhitespaceForReflow(TerminalRow row)
+    {
+        for (int column = row.Columns - 1; column >= 0; column--)
+        {
+            if (!IsTrailingReflowWhitespace(in row[column]))
+            {
+                return;
+            }
+
+            ClearCell(ref row[column]);
+        }
+    }
+
+    private static bool IsTrailingReflowWhitespace(ref readonly TerminalCell cell)
+    {
+        if (cell.Width == 0)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(cell.Grapheme))
+        {
+            return IsAsciiWhitespaceGrapheme(cell.Grapheme);
+        }
+
+        return cell.Codepoint is 0 or ' ';
+    }
+
+    private static bool IsAsciiWhitespaceGrapheme(string grapheme)
+    {
+        for (int i = 0; i < grapheme.Length; i++)
+        {
+            if (grapheme[i] != ' ')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private unsafe int TryResolveHyperlinkId(int rowIndex, int columnIndex, ulong rawCell, int width)

@@ -78,6 +78,46 @@ public sealed class GhosttyUnsupportedWindowsSequenceSanitizerTests
     }
 
     [Fact]
+    public void TrySanitize_TrailingPlainSpacesBeforeLineBreak_PreservesSpaces()
+    {
+        TerminalUnsupportedWindowsSequenceSanitizer sanitizer = new();
+
+        bool changed = sanitizer.TrySanitize("alpha   \r\nbeta"u8, out byte[]? sanitized, out int length);
+
+        Assert.False(changed);
+        Assert.Null(sanitized);
+        Assert.Equal("alpha   \r\nbeta".Length, length);
+    }
+
+    [Fact]
+    public void TrySanitize_TrailingStyledSpacesBeforeSgrResetAndLineBreak_TrimsSpaces()
+    {
+        TerminalUnsupportedWindowsSequenceSanitizer sanitizer = new();
+
+        bool changed = sanitizer.TrySanitize(
+            "\x1b[44;1mDIR   \x1b[0m\r\nNEXT"u8,
+            out byte[]? sanitized,
+            out int length);
+
+        Assert.True(changed);
+        Assert.NotNull(sanitized);
+        Assert.Equal("\x1b[44;1mDIR\x1b[0m\r\nNEXT", Encoding.ASCII.GetString(sanitized!, 0, length));
+        Return(sanitized);
+    }
+
+    [Fact]
+    public void TrySanitize_InternalSpacesBeforeStyleChange_PreservesSpaces()
+    {
+        TerminalUnsupportedWindowsSequenceSanitizer sanitizer = new();
+
+        bool changed = sanitizer.TrySanitize("A  \x1b[31mB\r\n"u8, out byte[]? sanitized, out int length);
+
+        Assert.False(changed);
+        Assert.Null(sanitized);
+        Assert.Equal("A  \x1b[31mB\r\n".Length, length);
+    }
+
+    [Fact]
     public void Reset_ClearsPendingCarry()
     {
         TerminalUnsupportedWindowsSequenceSanitizer sanitizer = new();
