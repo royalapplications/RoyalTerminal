@@ -529,6 +529,70 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void BasicVtProcessor_EraseLineAfterLastColumnWrite_ClearsLastCell()
+    {
+        TerminalScreen screen = new(4, 2);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process("ABCD"u8);
+        processor.Process("\x1b[K"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal("ABC ", ReadAscii(row, 4));
+        Assert.False(row.WrapsToNext);
+        Assert.Equal(3, processor.CursorCol);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_EraseLineToRight_ClearsWrapMetadata()
+    {
+        TerminalScreen screen = new(5, 3);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process("ABCDE1"u8);
+        Assert.True(screen.GetViewportRow(0).WrapsToNext);
+
+        processor.Process("\x1b[1;1H\x1b[K"u8);
+
+        Assert.False(screen.GetViewportRow(0).WrapsToNext);
+        Assert.Equal("     ", ReadAscii(screen.GetViewportRow(0), 5));
+        Assert.Equal("1    ", ReadAscii(screen.GetViewportRow(1), 5));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ResizeWithDelayedWrap_PreservesLogicalLineEnd()
+    {
+        TerminalScreen screen = new(4, 4, 10);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process("ABCD"u8);
+        processor.ResizeScreen(columns: 2, rows: 4, widthPx: 20, heightPx: 64, reflowOnResize: true);
+        processor.Process("E"u8);
+
+        Assert.Equal("AB", ReadAscii(screen.GetRow(0), 2));
+        Assert.Equal("CD", ReadAscii(screen.GetRow(1), 2));
+        Assert.Equal("E ", ReadAscii(screen.GetRow(2), 2));
+        Assert.True(screen.GetRow(0).WrapsToNext);
+        Assert.True(screen.GetRow(1).WrapsToNext);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ResizeWithoutDelayedWrap_ClampsCursorWithoutPendingWrap()
+    {
+        TerminalScreen screen = new(10, 3);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process("ABCDEFGHI"u8);
+        processor.ResizeScreen(columns: 5, rows: 3, widthPx: 50, heightPx: 48, reflowOnResize: false);
+        processor.Process("Z"u8);
+
+        Assert.Equal("ABCDZ", ReadAscii(screen.GetViewportRow(0), 5));
+        Assert.False(screen.GetViewportRow(0).WrapsToNext);
+        Assert.Equal(4, processor.CursorCol);
+        Assert.Equal(0, processor.CursorRow);
+    }
+
+    [Fact]
     public void BasicVtProcessor_ResizeWithoutReflow_CopiesHiddenTailWhenRowsShift()
     {
         TerminalScreen screen = new(12, 3);
