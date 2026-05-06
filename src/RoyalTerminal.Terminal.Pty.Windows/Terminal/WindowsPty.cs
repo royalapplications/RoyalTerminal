@@ -3,6 +3,7 @@
 // RoyalTerminal.Avalonia — Windows pseudo-terminal using the ConPTY API.
 // Spawns a shell process with a real PTY so terminal features work on Windows.
 
+using System.Buffers;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -20,6 +21,9 @@ namespace RoyalTerminal.Terminal;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsPty : IPty
 {
+    private const int PipeBufferSize = 128 * 1024;
+    private const int MaxManagedPayloadSize = 64 * 1024;
+
     private nint _ptyHandle;
     private SafeFileHandle? _pipeIn;   // write to child stdin
     private SafeFileHandle? _pipeOut;  // read from child stdout
@@ -32,6 +36,8 @@ public sealed class WindowsPty : IPty
     private readonly object _pendingWritesSync = new();
     private readonly Queue<PendingWrite> _priorityWrites = new();
     private readonly Queue<PendingWrite> _pendingWrites = new();
+    private readonly Guid _sessionId = Guid.NewGuid();
+    private readonly Guid _profileId = Guid.NewGuid();
 
     /// <summary>Raised when data is received from the PTY.</summary>
     public event Action<byte[], int>? DataReceived;
@@ -131,7 +137,9 @@ public sealed class WindowsPty : IPty
     public void Write(byte[] data, int offset, int count)
     {
         if (_disposed || _inputStream is null || count <= 0) return;
-        byte[] copy = data.AsSpan(offset, count).ToArray();
+        ReadOnlySpan<byte> source = data.AsSpan(offset, count);
+        bool priority = IsPriorityControlWrite(source);
+        PendingWrite[] writes = CreatePendingWrites(source);
 
         lock (_pendingWritesSync)
         {
@@ -140,10 +148,14 @@ public sealed class WindowsPty : IPty
                 return;
             }
 
-            Queue<PendingWrite> queue = IsPriorityControlWrite(copy)
+            Queue<PendingWrite> queue = priority
                 ? _priorityWrites
                 : _pendingWrites;
-            queue.Enqueue(new PendingWrite(copy));
+            for (int i = 0; i < writes.Length; i++)
+            {
+                queue.Enqueue(writes[i]);
+            }
+
             Monitor.PulseAll(_pendingWritesSync);
         }
     }
@@ -250,7 +262,7 @@ public sealed class WindowsPty : IPty
             }
 
             int remaining = pending.Buffer.Length - pending.Offset;
-            int chunkLength = Math.Min(remaining, 4096);
+            int chunkLength = Math.Min(remaining, PipeBufferSize);
 
             try
             {
@@ -268,14 +280,32 @@ public sealed class WindowsPty : IPty
         }
     }
 
-    private static bool IsPriorityControlWrite(byte[] payload)
+    private static PendingWrite[] CreatePendingWrites(ReadOnlySpan<byte> source)
+    {
+        int chunkCount = checked((source.Length + MaxManagedPayloadSize - 1) / MaxManagedPayloadSize);
+        PendingWrite[] writes = GC.AllocateUninitializedArray<PendingWrite>(chunkCount);
+        int offset = 0;
+
+        for (int i = 0; i < writes.Length; i++)
+        {
+            int chunkLength = Math.Min(source.Length - offset, MaxManagedPayloadSize);
+            byte[] copy = GC.AllocateUninitializedArray<byte>(chunkLength);
+            source.Slice(offset, chunkLength).CopyTo(copy);
+            writes[i] = new PendingWrite(copy);
+            offset += chunkLength;
+        }
+
+        return writes;
+    }
+
+    private static bool IsPriorityControlWrite(ReadOnlySpan<byte> payload)
     {
         return payload.Length == 1 && payload[0] is 0x03 or 0x1A or 0x1C;
     }
 
     private void ReadLoop()
     {
-        var buffer = new byte[4096];
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(PipeBufferSize);
         try
         {
             SafeFileHandle? pipeOut = _pipeOut;
@@ -284,28 +314,20 @@ public sealed class WindowsPty : IPty
                 using var stream = new FileStream(pipeOut, FileAccess.Read, bufferSize: 0, isAsync: false);
                 while (!_cts.IsCancellationRequested)
                 {
-                    var bytesRead = stream.Read(buffer, 0, buffer.Length);
+                    int bytesRead = stream.Read(buffer, 0, PipeBufferSize);
                     if (bytesRead <= 0) break;
 
-                    try
-                    {
-                        // ConPTY reuses the read buffer on the next iteration.
-                        // Snapshot each chunk so downstream VT parsing/batching
-                        // never observes mutated escape-sequence bytes.
-                        byte[] payload = new byte[bytesRead];
-                        Buffer.BlockCopy(buffer, 0, payload, 0, bytesRead);
-                        DataReceived?.Invoke(payload, bytesRead);
-                    }
-                    catch
-                    {
-                        // Don't let subscriber exceptions kill the read loop.
-                    }
+                    RaiseDataReceivedSnapshots(buffer, bytesRead);
                 }
             }
         }
         catch (IOException) { /* pipe closed */ }
         catch (ObjectDisposedException) { /* handle disposed */ }
         catch (ArgumentException) { /* invalid handle */ }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
 
         // Report process exit
         try
@@ -315,6 +337,35 @@ public sealed class WindowsPty : IPty
             ProcessExited?.Invoke(exitCode);
         }
         catch { ProcessExited?.Invoke(-1); }
+    }
+
+    private void RaiseDataReceivedSnapshots(byte[] buffer, int length)
+    {
+        Action<byte[], int>? handler = DataReceived;
+        if (handler is null)
+        {
+            return;
+        }
+
+        for (int offset = 0; offset < length;)
+        {
+            int chunkLength = Math.Min(length - offset, MaxManagedPayloadSize);
+            try
+            {
+                // ConPTY reuses the read buffer on the next iteration.
+                // Snapshot each chunk so downstream VT parsing/batching
+                // never observes mutated escape-sequence bytes.
+                byte[] payload = GC.AllocateUninitializedArray<byte>(chunkLength);
+                Buffer.BlockCopy(buffer, offset, payload, 0, chunkLength);
+                handler(payload, chunkLength);
+            }
+            catch
+            {
+                // Don't let subscriber exceptions kill the read loop.
+            }
+
+            offset += chunkLength;
+        }
     }
 
     private struct PendingWrite
@@ -384,37 +435,31 @@ public sealed class WindowsPty : IPty
                 throw new Win32Exception(Marshal.GetLastWin32Error());
 
             startupInfo.lpAttributeList = attrList;
-            string commandLine = BuildCommandLine(shell, arguments);
+            string expandedShell = Environment.ExpandEnvironmentVariables(shell);
+            string commandLine = Environment.ExpandEnvironmentVariables(BuildCommandLine(expandedShell, arguments));
+            string? currentDirectory = NormalizeStartingDirectoryForProcess(commandLine, workingDirectory, out commandLine);
 
-            // Build environment block
-            nint envBlock = 0;
-            if (environment is not null && environment.Count > 0)
-            {
-                var envVars = Environment.GetEnvironmentVariables();
-                foreach (var (key, value) in environment)
-                    envVars[key] = value;
-
-                envVars["TERM"] = "xterm-256color";
-
-                var sb = new StringBuilder();
-                foreach (System.Collections.DictionaryEntry entry in envVars)
-                    sb.Append($"{entry.Key}={entry.Value}\0");
-                sb.Append('\0');
-                envBlock = Marshal.StringToHGlobalUni(sb.ToString());
-            }
+            nint envBlock = WindowsPtyEnvironment.BuildEnvironmentBlock(environment, _sessionId, _profileId);
 
             try
             {
                 if (!CreateProcessW(
-                    shell, commandLine, 0, 0, false,
+                    null, commandLine, 0, 0, false,
                     EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
-                    envBlock, workingDirectory,
+                    envBlock, currentDirectory,
                     ref startupInfo, out var processInfo))
                     throw new Win32Exception(Marshal.GetLastWin32Error());
 
                 CloseHandle(processInfo.hThread);
 
-                return Process.GetProcessById(processInfo.dwProcessId);
+                try
+                {
+                    return Process.GetProcessById(processInfo.dwProcessId);
+                }
+                finally
+                {
+                    CloseHandle(processInfo.hProcess);
+                }
             }
             finally
             {
@@ -513,6 +558,109 @@ public sealed class WindowsPty : IPty
 
         escaped.Append('"');
         return escaped.ToString();
+    }
+
+    private static string? NormalizeStartingDirectoryForProcess(
+        string commandLine,
+        string workingDirectory,
+        out string normalizedCommandLine)
+    {
+        normalizedCommandLine = commandLine;
+        if (string.IsNullOrEmpty(workingDirectory))
+        {
+            return null;
+        }
+
+        if (TryMangleStartingDirectoryForWsl(commandLine, workingDirectory, out string wslCommandLine))
+        {
+            normalizedCommandLine = wslCommandLine;
+            return null;
+        }
+
+        return string.Equals(workingDirectory, "~", StringComparison.Ordinal)
+            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : workingDirectory;
+    }
+
+    private static bool TryMangleStartingDirectoryForWsl(
+        string commandLine,
+        string workingDirectory,
+        out string mangledCommandLine)
+    {
+        mangledCommandLine = commandLine;
+        if (string.IsNullOrEmpty(workingDirectory) || commandLine.Length < 3)
+        {
+            return false;
+        }
+
+        int executableStart = commandLine[0] == '"' ? 1 : 0;
+        int executableEnd = FindExecutableTerminator(commandLine, executableStart);
+        string executableToken = commandLine[executableStart..executableEnd];
+        if (string.IsNullOrEmpty(executableToken))
+        {
+            return false;
+        }
+
+        string executableFileName = Path.GetFileName(executableToken);
+        if (!string.Equals(executableFileName, "wsl", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(executableFileName, "wsl.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string? parentPath = Path.GetDirectoryName(executableToken);
+        if (!string.IsNullOrEmpty(parentPath))
+        {
+            string systemDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System);
+            if (!string.Equals(parentPath, systemDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        string arguments = executableEnd >= commandLine.Length
+            ? string.Empty
+            : commandLine[(executableEnd + 1)..];
+        if (arguments.Contains("--cd", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        int tildeIndex = arguments.IndexOf('~');
+        if (tildeIndex >= 0 &&
+            (tildeIndex + 1 == arguments.Length || arguments[tildeIndex + 1] == ' '))
+        {
+            return false;
+        }
+
+        string mangledDirectory = MangleWslStartingDirectoryPath(workingDirectory);
+        mangledCommandLine = "\"" + executableToken + "\" --cd \"" + mangledDirectory + "\" " + arguments;
+        return true;
+    }
+
+    private static int FindExecutableTerminator(string commandLine, int executableStart)
+    {
+        for (int i = executableStart; i < commandLine.Length; i++)
+        {
+            char ch = commandLine[i];
+            if (ch == '"' || ch == ' ')
+            {
+                return i;
+            }
+        }
+
+        return commandLine.Length;
+    }
+
+    private static string MangleWslStartingDirectoryPath(string workingDirectory)
+    {
+        if (workingDirectory.StartsWith("//wsl$", StringComparison.OrdinalIgnoreCase) ||
+            workingDirectory.StartsWith("//wsl.localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return workingDirectory.Replace('/', '\\');
+        }
+
+        return workingDirectory;
     }
 
     #endregion

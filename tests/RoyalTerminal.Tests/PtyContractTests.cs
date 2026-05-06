@@ -532,6 +532,78 @@ public class PtyContractTests
     }
 
     [Fact]
+    public void WindowsPty_Start_ProvidesWindowsTerminalEnvironment()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        if (!TryGetWindowsContractCmdPath(out string? cmdPath))
+        {
+            return;
+        }
+
+        using WindowsPty pty = new();
+        using ManualResetEventSlim sawMarker = new(false);
+        using ManualResetEventSlim sawExit = new(false);
+        StringBuilder output = new();
+        string marker = "__ROYALTERMINAL_WINDOWS_PTY_ENV__";
+
+        pty.DataReceived += (data, length) =>
+        {
+            string text = Encoding.UTF8.GetString(data, 0, length);
+            lock (output)
+            {
+                output.Append(text);
+                if (output.ToString().Contains(marker, StringComparison.Ordinal))
+                {
+                    sawMarker.Set();
+                }
+            }
+        };
+
+        pty.ProcessExited += _ => sawExit.Set();
+
+        pty.Start(
+            shell: cmdPath,
+            columns: 80,
+            rows: 24,
+            workingDirectory: Environment.CurrentDirectory,
+            environment: new Dictionary<string, string>
+            {
+                ["ROYALTERMINAL_CONPTY_ENV"] = "%SystemRoot%",
+            },
+            arguments:
+            [
+                "/d",
+                "/c",
+                "echo " + marker +
+                "&echo WT_SESSION=%WT_SESSION%" +
+                "&echo WT_PROFILE_ID=%WT_PROFILE_ID%" +
+                "&echo WSLENV=%WSLENV%" +
+                "&echo ROYALTERMINAL_CONPTY_ENV=%ROYALTERMINAL_CONPTY_ENV%",
+            ]);
+
+        Assert.True(sawMarker.Wait(ContractTimeout), $"Did not observe environment marker. Current output: {output}");
+        Assert.True(sawExit.Wait(ContractTimeout), "PTY child did not exit after environment probe.");
+
+        string snapshot;
+        lock (output)
+        {
+            snapshot = output.ToString();
+        }
+
+        Assert.Contains(marker, snapshot, StringComparison.Ordinal);
+        Assert.Matches(@"WT_SESSION=[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", snapshot);
+        Assert.Matches(@"WT_PROFILE_ID=\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}", snapshot);
+        Assert.Matches(@"WSLENV=.*WT_SESSION", snapshot);
+        Assert.Matches(@"WSLENV=.*WT_PROFILE_ID", snapshot);
+        Assert.Matches(@"WSLENV=.*ROYALTERMINAL_CONPTY_ENV", snapshot);
+        Assert.Contains("ROYALTERMINAL_CONPTY_ENV=" + Environment.GetEnvironmentVariable("SystemRoot"), snapshot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void WindowsPty_DataReceived_ProvidesStableBuffersAcrossReads()
     {
         if (!OperatingSystem.IsWindows())
