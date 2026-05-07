@@ -2117,6 +2117,49 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_WindowsPtyNativeResize_SuppressesStyledConptyViewportRepaint()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 80, OffsetRows: 47, VisibleRows: 33),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 133;
+        control.Rows = 33;
+        control.ReflowOnResize = true;
+        control.AutoScroll = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            control.Columns = 51;
+            control.Rows = 31;
+            control.WriteOutput(Encoding.UTF8.GetBytes(BuildConptyStyledViewportResizeRepaint(includeWindowSize: true)));
+
+            Assert.Equal(0, processor.ProcessCallCount);
+
+            control.WriteOutput("actual-output"u8.ToArray());
+
+            Assert.Equal(1, processor.ProcessCallCount);
+            Assert.Equal("actual-output", Encoding.UTF8.GetString(processor.LastProcessedData!));
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_Arrange_PixelOnlyResize_DoesNotPropagateTransportResize()
     {
         FakeTransport transport = new();
@@ -5385,6 +5428,24 @@ public class TerminalControlTests
         return output.ToString();
     }
 
+    private static string BuildConptyStyledViewportResizeRepaint(bool includeWindowSize)
+    {
+        StringBuilder output = new();
+        output.Append("\x1b[?25l");
+        if (includeWindowSize)
+        {
+            output.Append("\x1b[8;31;51t");
+        }
+
+        output.Append("\x1b[44m\x1b[1m\x1b[H");
+        output.Append("usic\x1b[m\x1b[K\r\n");
+        output.Append("dar--          15.04.2025    02:40                \x1b[K");
+        output.Append("\x1b[44m\x1b[1mOneDrive\x1b[m\x1b[K\r\n");
+        output.Append("-a---          13.10.2025    12:08          24361 .bash_history\x1b[K\r\n");
+        output.Append("PS C:\\Users\\wiesl>\x1b[K\x1b[1C\x1b[?25h");
+        return output.ToString();
+    }
+
     private static string[] GetKnownPowerShellHomeRowsPresentIn(string text)
     {
         string[] knownRows =
@@ -6097,6 +6158,10 @@ public class TerminalControlTests
 
         public TerminalScreen? ScreenSnapshot { get; set; }
 
+        public int ProcessCallCount { get; private set; }
+
+        public byte[]? LastProcessedData { get; private set; }
+
         public event EventHandler<TerminalModeState>? ModeChanged
         {
             add { }
@@ -6111,7 +6176,8 @@ public class TerminalControlTests
 
         public void Process(ReadOnlySpan<byte> data)
         {
-            _ = data;
+            ProcessCallCount++;
+            LastProcessedData = data.ToArray();
             if (ScrollToBottomOnProcess)
             {
                 ScrollViewportToBottom();

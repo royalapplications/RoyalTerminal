@@ -2256,6 +2256,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         _ = TryConsumeCsiLiteral(data, ref index, "?25l"u8);
         _ = TryConsumeCsiWindowResize(data, ref index);
+        ConsumeWindowsPtyResizeRepaintPrefixSequences(data, ref index);
 
         if (!TryConsumeCsiCursorHome(data, ref index))
         {
@@ -2265,6 +2266,50 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         ReadOnlySpan<byte> tail = data[index..];
         return ContainsCsiLiteral(tail, "K"u8) &&
                ContainsCsiLiteral(tail, "?25h"u8);
+    }
+
+    private static void ConsumeWindowsPtyResizeRepaintPrefixSequences(ReadOnlySpan<byte> data, ref int index)
+    {
+        while (TryConsumeCsiSgr(data, ref index) ||
+               TryConsumeCsiLiteral(data, ref index, "?25l"u8) ||
+               TryConsumeCsiWindowResize(data, ref index))
+        {
+        }
+    }
+
+    private static bool TryConsumeCsiSgr(ReadOnlySpan<byte> data, ref int index)
+    {
+        int start = index;
+        if (index + 3 > data.Length ||
+            data[index] != 0x1B ||
+            data[index + 1] != (byte)'[')
+        {
+            return false;
+        }
+
+        index += 2;
+        while (index < data.Length)
+        {
+            byte value = data[index];
+            if (value == (byte)'m')
+            {
+                index++;
+                return true;
+            }
+
+            if ((value >= 0x30 && value <= 0x3F) ||
+                (value >= 0x20 && value <= 0x2F))
+            {
+                index++;
+                continue;
+            }
+
+            index = start;
+            return false;
+        }
+
+        index = start;
+        return false;
     }
 
     private static bool TryConsumeCsiLiteral(
