@@ -37,6 +37,31 @@ authoritative for all new code and refactors.
   depended on by Domain or Presentation via interfaces.
 - No reference from Domain to UI or Avalonia types.
 
+## 2.1) Terminal reference implementations (required)
+
+For any terminal-related work, first check the closest relevant behavior in:
+- Windows Terminal / console host: https://github.com/microsoft/terminal
+- Ghostty: https://github.com/ghostty-org/ghostty
+- xterm.js: https://github.com/xtermjs/xterm.js
+- PowerShell, when the issue involves PowerShell or Windows shell behavior:
+  https://github.com/PowerShell/PowerShell
+
+Terminal-related work includes PTY/ConPTY handling, VT parsing, terminal modes,
+keyboard and mouse protocols, resize/reflow, rendering, text selection/copy,
+palette/style behavior, hyperlinks, and graphics protocols.
+
+For issues involving PowerShell, Windows shell startup, command invocation,
+formatting/output, prompt behavior, environment handling, or ConPTY interaction
+with PowerShell, inspect the PowerShell codebase before implementing a fix.
+Document how PowerShell produces or expects the relevant behavior and how
+RoyalTerminal should interoperate with it.
+
+Before implementing or fixing behavior, compare these reference implementations
+where relevant, decide which behavior RoyalTerminal should follow, and document
+the decision in the plan, issue, PR notes, or tests. If RoyalTerminal must
+diverge from a reference implementation, document the reason and cover the
+chosen behavior with focused tests.
+
 ## 3) Avalonia UI best practices (aligned with Avalonia codebase)
 
 Reference: https://github.com/AvaloniaUI/Avalonia

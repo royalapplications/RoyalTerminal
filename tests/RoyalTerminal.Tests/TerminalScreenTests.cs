@@ -112,6 +112,28 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_DiscardHiddenCells_DropsHiddenStorageAcrossRows()
+    {
+        TerminalScreen screen = new(12, 3);
+        screen.GetViewportRow(0)[10].Codepoint = 'K';
+        screen.GetViewportRow(1)[11].Codepoint = 'L';
+
+        screen.Resize(6, 3, reflowOnResize: false);
+
+        Assert.Equal(12, screen.GetViewportRow(0).PreservedColumns);
+
+        screen.DiscardHiddenCells();
+
+        Assert.Equal(6, screen.GetViewportRow(0).PreservedColumns);
+        Assert.Equal(6, screen.GetViewportRow(1).PreservedColumns);
+
+        screen.Resize(12, 3, reflowOnResize: false);
+
+        Assert.False(screen.GetViewportRow(0)[10].HasContent);
+        Assert.False(screen.GetViewportRow(1)[11].HasContent);
+    }
+
+    [Fact]
     public void TerminalRow_SpanAccess_ReturnsCells()
     {
         var row = new TerminalRow(10);
@@ -382,6 +404,30 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_ResizeWithReflow_TrimsTrailingStyledSpaces()
+    {
+        TerminalScreen screen = new(12, 3);
+        TerminalRow first = screen.GetViewportRow(0);
+        SetAscii(first, "DIR");
+        for (int column = 3; column < first.Columns; column++)
+        {
+            first[column].Codepoint = ' ';
+            first[column].Width = 1;
+            first[column].Background = 0xFF0000AA;
+            first[column].HasBackground = true;
+            first[column].Attributes = CellAttributes.Bold;
+        }
+
+        SetAscii(screen.GetViewportRow(1), "NEXT");
+
+        screen.Resize(4, 3, reflowOnResize: true);
+
+        Assert.False(screen.GetRow(0).WrapsToNext);
+        Assert.Equal("DIR ", ReadAscii(screen.GetRow(0), 4));
+        Assert.Equal("NEXT", ReadAscii(screen.GetRow(1), 4));
+    }
+
+    [Fact]
     public void TerminalScreen_ResizeWithReflowToOneColumn_DropsWideCharacterAsBlankCell()
     {
         TerminalScreen screen = new(2, 1);
@@ -483,7 +529,71 @@ public class TerminalScreenTests
     }
 
     [Fact]
-    public void BasicVtProcessor_ResizeWithoutReflow_CopiesHiddenTailWhenRowsShift()
+    public void BasicVtProcessor_EraseLineAfterLastColumnWrite_ClearsLastCell()
+    {
+        TerminalScreen screen = new(4, 2);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process("ABCD"u8);
+        processor.Process("\x1b[K"u8);
+
+        TerminalRow row = screen.GetViewportRow(0);
+        Assert.Equal("ABC ", ReadAscii(row, 4));
+        Assert.False(row.WrapsToNext);
+        Assert.Equal(3, processor.CursorCol);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_EraseLineToRight_ClearsWrapMetadata()
+    {
+        TerminalScreen screen = new(5, 3);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process("ABCDE1"u8);
+        Assert.True(screen.GetViewportRow(0).WrapsToNext);
+
+        processor.Process("\x1b[1;1H\x1b[K"u8);
+
+        Assert.False(screen.GetViewportRow(0).WrapsToNext);
+        Assert.Equal("     ", ReadAscii(screen.GetViewportRow(0), 5));
+        Assert.Equal("1    ", ReadAscii(screen.GetViewportRow(1), 5));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ResizeWithDelayedWrap_PreservesLogicalLineEnd()
+    {
+        TerminalScreen screen = new(4, 4, 10);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process("ABCD"u8);
+        processor.ResizeScreen(columns: 2, rows: 4, widthPx: 20, heightPx: 64, reflowOnResize: true);
+        processor.Process("E"u8);
+
+        Assert.Equal("AB", ReadAscii(screen.GetRow(0), 2));
+        Assert.Equal("CD", ReadAscii(screen.GetRow(1), 2));
+        Assert.Equal("E ", ReadAscii(screen.GetRow(2), 2));
+        Assert.True(screen.GetRow(0).WrapsToNext);
+        Assert.True(screen.GetRow(1).WrapsToNext);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ResizeWithoutDelayedWrap_ClampsCursorWithoutPendingWrap()
+    {
+        TerminalScreen screen = new(10, 3);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process("ABCDEFGHI"u8);
+        processor.ResizeScreen(columns: 5, rows: 3, widthPx: 50, heightPx: 48, reflowOnResize: false);
+        processor.Process("Z"u8);
+
+        Assert.Equal("ABCDZ", ReadAscii(screen.GetViewportRow(0), 5));
+        Assert.False(screen.GetViewportRow(0).WrapsToNext);
+        Assert.Equal(4, processor.CursorCol);
+        Assert.Equal(0, processor.CursorRow);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ResizeWithoutReflow_DropsHiddenTailWhenRowsShift()
     {
         TerminalScreen screen = new(12, 3);
         using BasicVtProcessor processor = new(screen);
@@ -494,7 +604,7 @@ public class TerminalScreenTests
         processor.ResizeScreen(columns: 12, rows: 3, widthPx: 120, heightPx: 48, reflowOnResize: false);
 
         Assert.Equal('a', screen.GetViewportRow(0)[0].Codepoint);
-        Assert.Equal('B', screen.GetViewportRow(0)[10].Codepoint);
+        Assert.False(screen.GetViewportRow(0)[10].HasContent);
     }
 
     [Fact]
@@ -528,6 +638,183 @@ public class TerminalScreenTests
         string visibleText = GetVisibleText(screen);
         Assert.Contains("MNO", visibleText, StringComparison.Ordinal);
         Assert.Contains("$ ok", visibleText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ResizeWithReflow_PreservesPowerShellTableRows()
+    {
+        TerminalScreen screen = new(133, 33, scrollbackLimit: 100);
+        using BasicVtProcessor processor = new(screen);
+
+        StringBuilder output = new();
+        output.Append("PowerShell 7.5.5\r\n\r\n");
+        output.Append("  \x1b[7;38;2;216;222;233;48;2;46;52;64m A new PowerShell stable release is available: v7.6.1 \x1b[0m\r\n");
+        output.Append("  \x1b[7;38;2;216;222;233;48;2;46;52;64m Upgrade now, or check out the release page at:       \x1b[0m\r\n");
+        output.Append("  \x1b[7;38;2;216;222;233;48;2;46;52;64m   https://aka.ms/PowerShell-Release?tag=v7.6.1       \x1b[0m\r\n\r\n");
+        output.Append("PS C:\\Users\\wiesl> ls\r\n\r\n");
+        output.Append("    Directory: C:\\Users\\wiesl\r\n\r\n");
+        output.Append("\x1b[1;38;2;163;190;140mMode                 LastWriteTime        Length Name\x1b[0m\r\n");
+        output.Append("\x1b[1;38;2;163;190;140m----                 -------------        ------ ----\x1b[0m\r\n");
+
+        string[] names =
+        [
+            ".android",
+            ".cargo",
+            ".codex",
+            ".config",
+            ".copilot",
+            ".dbus-keyrings",
+            ".dotnet",
+            ".gnupg",
+            ".ms-ad",
+            ".nuget",
+            ".rustup",
+            ".skiko",
+            ".templateengine",
+            ".vscode",
+            ".vscode-shared",
+            "Contacts",
+            "Documents",
+            "dotnet",
+            "dotTraceSnapshots",
+            "Downloads",
+            "Dropbox",
+            "Favorites",
+            "GitHub",
+            "iCloudDrive",
+            "iCloudPhotos",
+            "Links",
+            "Music",
+            "OneDrive",
+            "Pictures",
+            "Saved Games",
+            "Searches",
+            "source",
+            "Videos",
+        ];
+
+        foreach (string name in names)
+        {
+            output.Append("d----          12.10.2025    22:36                ");
+            output.Append("\x1b[1;38;2;216;222;233;48;2;129;161;193m");
+            output.Append(name);
+            output.Append("\x1b[0m\r\n");
+        }
+
+        string[] files =
+        [
+            ".bash_history",
+            ".gitconfig",
+            ".lesshst",
+            "dotnet-install.sh",
+            "java_error_in_rider_12460.log",
+            "java_error_in_rider64_26852.log",
+            "java_error_in_rider64.hprof",
+            "Nowy dokument 1.2023_08_21_12_08_40.0.svg",
+        ];
+
+        output.Append("\x1b[0;38;2;216;222;233;48;2;46;52;64m");
+        foreach (string file in files)
+        {
+            output.Append("-a---          13.10.2025    12:08          24361 ");
+            output.Append(file);
+            output.Append("\r\n");
+        }
+
+        output.Append("PS C:\\Users\\wiesl> ");
+        processor.Process(Encoding.UTF8.GetBytes(output.ToString()));
+
+        int[] resizeWidths = [120, 100, 80, 60, 51, 60, 80, 100, 120, 133];
+        for (int cycle = 0; cycle < 3; cycle++)
+        {
+            foreach (int width in resizeWidths)
+            {
+                int rows = width <= 51 ? 31 : 33;
+                processor.ResizeScreen(
+                    columns: width,
+                    rows,
+                    widthPx: width * 10,
+                    heightPx: rows * 16,
+                    reflowOnResize: true,
+                    preserveViewportTopOnRowsIncrease: true);
+            }
+        }
+
+        string allRows = GetAllText(screen);
+        foreach (string name in names)
+        {
+            Assert.Contains(name, allRows, StringComparison.Ordinal);
+            int actualCount = CountTrimmedLineEndOccurrences(allRows, name);
+            Assert.True(actualCount == 1, $"Expected {name} once, found {actualCount}.\n{allRows}");
+        }
+
+        foreach (string file in files)
+        {
+            Assert.Contains(file, allRows, StringComparison.Ordinal);
+            int actualCount = CountTrimmedLineEndOccurrences(allRows, file);
+            Assert.True(actualCount == 1, $"Expected {file} once, found {actualCount}.\n{allRows}");
+        }
+
+        Assert.DoesNotContain("\nhotos", allRows, StringComparison.Ordinal);
+        Assert.DoesNotContain("\nusic", allRows, StringComparison.Ordinal);
+        Assert.Contains("PS C:\\Users\\wiesl> ", allRows, StringComparison.Ordinal);
+
+        ITerminalSnapshotExportSource exporter = processor;
+        Assert.True(
+            exporter.TryExportSnapshot(
+                TerminalSnapshotExportFormat.PlainText,
+                new TerminalSnapshotExportOptions(Unwrap: true, TrimTrailingWhitespace: true),
+                out string snapshot));
+
+        string savedGamesLine = snapshot
+            .Split(Environment.NewLine)
+            .Single(line => line.Contains("Saved Games", StringComparison.Ordinal));
+        Assert.DoesNotContain("Searches", savedGamesLine, StringComparison.Ordinal);
+        Assert.DoesNotContain(Environment.NewLine + "hotos", snapshot, StringComparison.Ordinal);
+        Assert.DoesNotContain(Environment.NewLine + "usic", snapshot, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ResizeWithReflow_PreservesLiveBottomAfterWidthRestore()
+    {
+        TerminalScreen screen = new(8, 3, scrollbackLimit: 20);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process(Encoding.UTF8.GetBytes("12345678\r\nabcdefgh\r\nABCDEFGH\r\nPROMPT"));
+
+        processor.ResizeScreen(columns: 4, rows: 3, widthPx: 40, heightPx: 48, reflowOnResize: true);
+        processor.ResizeScreen(columns: 8, rows: 3, widthPx: 80, heightPx: 48, reflowOnResize: true);
+
+        Assert.Equal("abcdefgh", ReadAscii(screen.GetViewportRow(0), 8));
+        Assert.Equal("ABCDEFGH", ReadAscii(screen.GetViewportRow(1), 8));
+        Assert.Equal("PROMPT  ", ReadAscii(screen.GetViewportRow(2), 8));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ExplicitLineFeedClearsStaleWrapMetadataAfterReflow()
+    {
+        TerminalScreen screen = new(20, 5, scrollbackLimit: 20);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process(Encoding.UTF8.GetBytes("ABCDEFGHIJKLMNO\r\nTAIL\r\n"));
+        processor.ResizeScreen(columns: 10, rows: 5, widthPx: 100, heightPx: 80, reflowOnResize: true);
+
+        Assert.True(screen.GetRow(0).WrapsToNext);
+
+        screen.ScrollOffset = 1;
+        processor.Process(Encoding.UTF8.GetBytes("\x1b[1;1Hshort\r\nnext"));
+
+        Assert.False(screen.GetRow(0).WrapsToNext);
+
+        ITerminalSnapshotExportSource exporter = processor;
+        Assert.True(
+            exporter.TryExportSnapshot(
+                TerminalSnapshotExportFormat.PlainText,
+                new TerminalSnapshotExportOptions(Unwrap: true, TrimTrailingWhitespace: true),
+                out string snapshot));
+
+        Assert.Contains($"shortFGHIJ{Environment.NewLine}nextO", snapshot, StringComparison.Ordinal);
+        Assert.DoesNotContain("shortFGHIJnextO", snapshot, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -565,6 +852,63 @@ public class TerminalScreenTests
         }
 
         return builder.ToString();
+    }
+
+    private static string GetAllText(TerminalScreen screen)
+    {
+        StringBuilder builder = new();
+        for (int rowIndex = 0; rowIndex < screen.TotalRows; rowIndex++)
+        {
+            TerminalRow row = screen.GetRow(rowIndex);
+            for (int column = 0; column < row.Columns; column++)
+            {
+                TerminalCell cell = row[column];
+                if (cell.Width == 0)
+                {
+                    continue;
+                }
+
+                builder.Append(cell.Codepoint == 0 ? ' ' : (char)cell.Codepoint);
+            }
+
+            builder.AppendLine();
+        }
+
+        return builder.ToString();
+    }
+
+    private static int CountTrimmedLineEndOccurrences(string value, string expectedLineEnd)
+    {
+        int count = 0;
+        string[] lines = value.Split(Environment.NewLine);
+        foreach (string line in lines)
+        {
+            if (line.TrimEnd().EndsWith(" " + expectedLineEnd, StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountSubstringOccurrences(string value, string expected)
+    {
+        int count = 0;
+        int startIndex = 0;
+        while (startIndex < value.Length)
+        {
+            int index = value.IndexOf(expected, startIndex, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                return count;
+            }
+
+            count++;
+            startIndex = index + expected.Length;
+        }
+
+        return count;
     }
 
     private static void ClearAllDirtyRows(TerminalScreen screen)
@@ -775,6 +1119,255 @@ public class TerminalScreenTests
         Assert.Equal('J', screen.GetViewportRow(2)[0].Codepoint);
         Assert.False(screen.GetViewportRow(3)[0].HasContent);
         Assert.False(screen.GetViewportRow(4)[0].HasContent);
+    }
+
+    [Fact]
+    public void TerminalScreen_ResizeRowsIncrease_CanAppendRowsInsteadOfPullingScrollback()
+    {
+        var screen = new TerminalScreen(1, 3, scrollbackLimit: 100);
+
+        screen.GetViewportRow(0)[0].Codepoint = '0';
+        screen.GetViewportRow(1)[0].Codepoint = '1';
+        screen.GetViewportRow(2)[0].Codepoint = '2';
+
+        for (int i = 0; i < 10; i++)
+        {
+            TerminalRow row = screen.AddRow();
+            row[0].Codepoint = 'A' + i;
+        }
+
+        Assert.Equal('H', screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal('J', screen.GetViewportRow(2)[0].Codepoint);
+
+        screen.Resize(
+            columns: 1,
+            viewportRows: 5,
+            reflowOnResize: false,
+            trackedViewportPosition: null,
+            trackedAbsolutePositions: Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Equal('H', screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal('J', screen.GetViewportRow(2)[0].Codepoint);
+        Assert.False(screen.GetViewportRow(3)[0].HasContent);
+        Assert.False(screen.GetViewportRow(4)[0].HasContent);
+    }
+
+    [Fact]
+    public void TerminalScreen_ResizeRowsIncrease_DropsBlankTransientPaddingBeforeNextWindowsPtyResize()
+    {
+        var screen = new TerminalScreen(12, 3, scrollbackLimit: 100);
+
+        SetAscii(screen.GetViewportRow(0), "old0");
+        SetAscii(screen.GetViewportRow(1), "old1");
+        SetAscii(screen.GetViewportRow(2), "old2");
+        SetAscii(screen.AddRow(), "Music");
+        SetAscii(screen.AddRow(), "Prompt");
+
+        screen.Resize(
+            columns: 12,
+            viewportRows: 5,
+            reflowOnResize: false,
+            trackedViewportPosition: null,
+            trackedAbsolutePositions: Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease: true);
+
+        TerminalRow firstPadding = screen.GetViewportRow(3);
+        TerminalRow secondPadding = screen.GetViewportRow(4);
+        Assert.True(firstPadding.IsTransientResizeRow);
+        Assert.True(secondPadding.IsTransientResizeRow);
+
+        screen.Resize(
+            columns: 12,
+            viewportRows: 3,
+            reflowOnResize: false,
+            trackedViewportPosition: null,
+            trackedAbsolutePositions: Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease: true);
+
+        string allRows = GetAllText(screen);
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Music"));
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Prompt"));
+    }
+
+    [Fact]
+    public void TerminalScreen_ResizeRowsDecrease_AfterTransientPadding_PreservesLiveViewportTop()
+    {
+        var screen = new TerminalScreen(12, 3, scrollbackLimit: 100);
+
+        SetAscii(screen.GetViewportRow(0), "old0");
+        SetAscii(screen.GetViewportRow(1), "old1");
+        SetAscii(screen.GetViewportRow(2), "old2");
+        SetAscii(screen.AddRow(), "Music");
+        SetAscii(screen.AddRow(), "Prompt");
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+
+        screen.Resize(
+            columns: 12,
+            viewportRows: 5,
+            reflowOnResize: false,
+            trackedViewportPosition: null,
+            trackedAbsolutePositions: Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+        Assert.True(screen.GetViewportRow(3).IsTransientResizeRow);
+        Assert.True(screen.GetViewportRow(4).IsTransientResizeRow);
+
+        screen.Resize(
+            columns: 12,
+            viewportRows: 4,
+            reflowOnResize: false,
+            trackedViewportPosition: null,
+            trackedAbsolutePositions: Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+        Assert.True(screen.GetViewportRow(3).IsTransientResizeRow);
+
+        screen.Resize(
+            columns: 12,
+            viewportRows: 3,
+            reflowOnResize: false,
+            trackedViewportPosition: null,
+            trackedAbsolutePositions: Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+
+        string allRows = GetAllText(screen);
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Music"));
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Prompt"));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_VerticalWindowsPtyResize_AfterTransientPadding_PreservesRows()
+    {
+        TerminalScreen screen = new(12, 3, scrollbackLimit: 100);
+        using BasicVtProcessor processor = new(screen);
+
+        processor.Process(Encoding.UTF8.GetBytes("old0\r\nold1\r\nold2\r\nMusic\r\nPrompt"));
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+
+        processor.ResizeScreen(
+            columns: 12,
+            rows: 5,
+            widthPx: 120,
+            heightPx: 80,
+            reflowOnResize: false,
+            preserveViewportTopOnRowsIncrease: true);
+
+        processor.ResizeScreen(
+            columns: 12,
+            rows: 4,
+            widthPx: 120,
+            heightPx: 64,
+            reflowOnResize: false,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+
+        processor.ResizeScreen(
+            columns: 12,
+            rows: 3,
+            widthPx: 120,
+            heightPx: 48,
+            reflowOnResize: false,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal("old2        ", ReadAscii(screen.GetViewportRow(0), 12));
+        Assert.Equal("Music       ", ReadAscii(screen.GetViewportRow(1), 12));
+        Assert.Equal("Prompt      ", ReadAscii(screen.GetViewportRow(2), 12));
+
+        string allRows = GetAllText(screen);
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Music"));
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Prompt"));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ProcessAfterWindowsPtyResize_ActivatesRowsTouchedByRepaint()
+    {
+        var screen = new TerminalScreen(12, 3, scrollbackLimit: 100);
+        using BasicVtProcessor processor = new(screen);
+
+        SetAscii(screen.GetViewportRow(0), "old0");
+        SetAscii(screen.GetViewportRow(1), "old1");
+        SetAscii(screen.GetViewportRow(2), "old2");
+        SetAscii(screen.AddRow(), "Links");
+        SetAscii(screen.AddRow(), "Music");
+        SetAscii(screen.AddRow(), "Prompt");
+
+        processor.ResizeScreen(
+            columns: 12,
+            rows: 5,
+            widthPx: 120,
+            heightPx: 80,
+            reflowOnResize: false,
+            preserveViewportTopOnRowsIncrease: true);
+
+        TerminalRow firstPadding = screen.GetViewportRow(3);
+        TerminalRow secondPadding = screen.GetViewportRow(4);
+        Assert.True(firstPadding.IsTransientResizeRow);
+        Assert.True(secondPadding.IsTransientResizeRow);
+
+        processor.Process(Encoding.UTF8.GetBytes("\x1b[4;1HReplay"));
+
+        Assert.False(firstPadding.IsTransientResizeRow);
+        Assert.True(secondPadding.IsTransientResizeRow);
+
+        screen.DiscardTransientResizeRows();
+
+        string allRows = GetAllText(screen);
+        Assert.Contains("Replay", allRows, StringComparison.Ordinal);
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Music"));
+        Assert.Equal(1, CountSubstringOccurrences(allRows, "Prompt"));
+    }
+
+    [Fact]
+    public void TerminalScreen_ResizeWidthDeflow_CanPreserveLiveViewportTop()
+    {
+        var screen = new TerminalScreen(4, 3, scrollbackLimit: 100);
+
+        SetAscii(screen.GetRow(0), "oldA");
+        SetAscii(screen.GetRow(1), "oldB");
+        SetAscii(screen.GetRow(2), "keep");
+        TerminalRow wrapped = screen.AddRow();
+        SetAscii(wrapped, "wrap");
+        wrapped.WrapsToNext = true;
+        SetAscii(screen.AddRow(), "line");
+        SetAscii(screen.AddRow(), "prmt");
+
+        Assert.Equal("wrap", ReadAscii(screen.GetViewportRow(0), 4));
+        Assert.Equal("line", ReadAscii(screen.GetViewportRow(1), 4));
+        Assert.Equal("prmt", ReadAscii(screen.GetViewportRow(2), 4));
+
+        screen.Resize(
+            columns: 8,
+            viewportRows: 3,
+            reflowOnResize: true,
+            trackedViewportPosition: null,
+            trackedAbsolutePositions: Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease: true);
+
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Equal("wrapline", ReadAscii(screen.GetViewportRow(0), 8));
+        Assert.Equal("prmt    ", ReadAscii(screen.GetViewportRow(1), 8));
+        Assert.True(string.IsNullOrWhiteSpace(ReadAscii(screen.GetViewportRow(2), 8)));
     }
 
     [Fact]

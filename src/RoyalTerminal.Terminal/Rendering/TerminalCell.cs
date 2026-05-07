@@ -166,6 +166,11 @@ public sealed class TerminalRow
     /// </summary>
     public bool WrapsToNext { get; set; }
 
+    /// <summary>
+    /// True when this row was appended only to preserve a Windows PTY live viewport during resize.
+    /// </summary>
+    internal bool IsTransientResizeRow { get; set; }
+
     /// <summary>Number of columns in this row.</summary>
     public int Columns => _columns;
 
@@ -219,6 +224,27 @@ public sealed class TerminalRow
         }
 
         WrapsToNext = source.WrapsToNext;
+        IsTransientResizeRow = source.IsTransientResizeRow;
+        IsDirty = true;
+    }
+
+    /// <summary>Copies only the active cells from another row while discarding retained hidden columns.</summary>
+    public void CopyActiveFrom(TerminalRow source, uint defaultFg = 0xFFD4D4D4, uint defaultBg = 0xFF1E1E1E)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        ResizePreservedStorage(_columns, defaultFg, defaultBg);
+
+        ReadOnlySpan<TerminalCell> sourceCells = source.ReadOnlyCells;
+        int copiedColumns = Math.Min(_columns, sourceCells.Length);
+        sourceCells[..copiedColumns].CopyTo(_cells);
+        for (int i = copiedColumns; i < _columns; i++)
+        {
+            _cells[i] = TerminalCell.Empty(defaultFg, defaultBg);
+        }
+
+        WrapsToNext = source.WrapsToNext;
+        IsTransientResizeRow = source.IsTransientResizeRow;
         IsDirty = true;
     }
 
@@ -294,7 +320,14 @@ public sealed class TerminalRow
         for (var i = 0; i < _columns; i++)
             _cells[i] = TerminalCell.Empty(fg, bg);
         WrapsToNext = false;
+        IsTransientResizeRow = false;
         IsDirty = true;
+    }
+
+    /// <summary>Marks this row as real terminal content after an external cell mutation.</summary>
+    internal void MarkContentMutation()
+    {
+        IsTransientResizeRow = false;
     }
 
     private void EnsureCapacity(int columns, uint defaultFg, uint defaultBg)
@@ -1163,7 +1196,7 @@ public sealed class TerminalScreen
     }
 
     /// <summary>
-    /// Appends blank rows until the bottom-anchored viewport starts at or after the requested absolute row.
+    /// Appends transient blank rows until the bottom-anchored viewport starts at or after the requested absolute row.
     /// </summary>
     public void PadBottomViewportToPreserveTop(int minimumViewportTopAbsoluteRow)
     {
@@ -1178,10 +1211,74 @@ public sealed class TerminalScreen
         int missingRows = targetTop - Math.Max(0, TotalRows - ViewportRows);
         for (int i = 0; i < missingRows; i++)
         {
-            AddRow();
+            AddTransientResizeRow();
         }
 
         ScrollOffset = 0;
+    }
+
+    /// <summary>
+    /// Removes trailing rows that were appended only to preserve a Windows PTY viewport during resize.
+    /// </summary>
+    /// <returns>The number of transient resize rows removed.</returns>
+    public int DiscardTransientResizeRows()
+    {
+        if (_alternateBufferActive || _rows.Count == 0)
+        {
+            return 0;
+        }
+
+        int removableRows = 0;
+        for (int rowIndex = _rows.Count - 1; rowIndex >= 0; rowIndex--)
+        {
+            TerminalRow row = _rows[rowIndex];
+            if (!row.IsTransientResizeRow || RowHasContent(row))
+            {
+                break;
+            }
+
+            removableRows++;
+        }
+
+        if (removableRows == 0)
+        {
+            return 0;
+        }
+
+        _rows.RemoveRange(_rows.Count - removableRows, removableRows);
+        ScrollOffset = 0;
+        InvalidateAll();
+        return removableRows;
+    }
+
+    private static bool RowHasContent(TerminalRow row)
+    {
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        for (int column = 0; column < cells.Length; column++)
+        {
+            TerminalCell cell = cells[column];
+            if (cell.Width != 0 && cell.HasContent)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Drops cells retained outside each active row width after an external backend resize.
+    /// </summary>
+    public void DiscardHiddenCells()
+    {
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            TerminalRow row = _rows[i];
+            if (row.PreservedColumns > row.Columns)
+            {
+                row.ClearPreservedCellsFrom(row.Columns, DefaultForeground, DefaultBackground);
+            }
+        }
     }
 
     private void EnsureAlternateRows()
@@ -1202,6 +1299,13 @@ public sealed class TerminalScreen
         {
             _rows[rowIndex].Clear(DefaultForeground, DefaultBackground);
         }
+    }
+
+    private TerminalRow AddTransientResizeRow()
+    {
+        TerminalRow row = AddRow();
+        row.IsTransientResizeRow = true;
+        return row;
     }
 
     private void ResizeActiveRows(int columns)
@@ -1447,14 +1551,16 @@ public sealed class TerminalScreen
         int columns,
         int viewportRows,
         bool reflowOnResize = true,
-        TerminalGridPosition? trackedViewportPosition = null)
+        TerminalGridPosition? trackedViewportPosition = null,
+        bool preserveViewportTopOnRowsIncrease = false)
     {
         return Resize(
             columns,
             viewportRows,
             reflowOnResize,
             trackedViewportPosition,
-            Span<TerminalGridPosition>.Empty);
+            Span<TerminalGridPosition>.Empty,
+            preserveViewportTopOnRowsIncrease);
     }
 
     /// <summary>
@@ -1468,36 +1574,81 @@ public sealed class TerminalScreen
     /// Absolute row positions to map in place. The <see cref="TerminalGridPosition.Row"/> value is treated as an
     /// absolute row before resizing and is replaced with the mapped absolute row after resizing.
     /// </param>
+    /// <param name="preserveViewportTopOnRowsIncrease">
+    /// Whether Windows PTY-style resizes should keep the old live viewport top in scrollback by appending blank
+    /// rows when reflow or row growth would otherwise pull older scrollback rows into the active viewport.
+    /// Windows ConPTY needs this because the host repaints the active viewport after resize.
+    /// </param>
     public TerminalGridPosition Resize(
         int columns,
         int viewportRows,
         bool reflowOnResize,
         TerminalGridPosition? trackedViewportPosition,
-        Span<TerminalGridPosition> trackedAbsolutePositions)
+        Span<TerminalGridPosition> trackedAbsolutePositions,
+        bool preserveViewportTopOnRowsIncrease = false)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(viewportRows, 1);
 
         int oldColumns = Columns;
+        int oldViewportRows = ViewportRows;
+        bool preserveLiveViewportTop =
+            preserveViewportTopOnRowsIncrease &&
+            !_alternateBufferActive &&
+            _viewportTop == 0 &&
+            _rows.Count >= oldViewportRows;
+        // Capture before dropping transient bottom padding. Height-only resizes
+        // after a previous grow would otherwise move the bottom-anchored live
+        // viewport and cause repaint rows to land on the wrong backing rows.
+        int oldLiveViewportTopAbsoluteRow = preserveLiveViewportTop
+            ? Math.Max(0, _rows.Count - oldViewportRows)
+            : -1;
+
+        if (preserveViewportTopOnRowsIncrease)
+        {
+            DiscardTransientResizeRows();
+        }
+
+        bool shouldAppendRowsForViewportGrowth =
+            preserveLiveViewportTop &&
+            viewportRows > oldViewportRows &&
+            _rows.Count >= oldViewportRows;
+        int rowsToAppendForViewportGrowth = shouldAppendRowsForViewportGrowth
+            ? Math.Min(viewportRows - oldViewportRows, Math.Max(0, _rows.Count - oldViewportRows))
+            : 0;
         List<TerminalRasterImagePlacement>? reflowRasterPlacements = null;
         List<ReflowAnchorPosition>? reflowAnchors = null;
         int trackedAbsolutePositionCount = trackedAbsolutePositions.Length;
+        int liveViewportTopAnchorIndex = -1;
         if (columns != oldColumns &&
             reflowOnResize &&
-            (trackedAbsolutePositionCount > 0 || _rasterPlacements.Count > 0))
+            (trackedAbsolutePositionCount > 0 || preserveLiveViewportTop || _rasterPlacements.Count > 0))
         {
             if (_rasterPlacements.Count > 0)
             {
                 reflowRasterPlacements = new List<TerminalRasterImagePlacement>(_rasterPlacements);
             }
 
-            reflowAnchors = new List<ReflowAnchorPosition>(trackedAbsolutePositionCount + _rasterPlacements.Count);
+            reflowAnchors = new List<ReflowAnchorPosition>(
+                trackedAbsolutePositionCount +
+                (preserveLiveViewportTop ? 1 : 0) +
+                _rasterPlacements.Count);
             for (int i = 0; i < trackedAbsolutePositionCount; i++)
             {
                 TerminalGridPosition trackedAbsolutePosition = trackedAbsolutePositions[i];
                 reflowAnchors.Add(new ReflowAnchorPosition(
                     trackedAbsolutePosition.Row,
                     trackedAbsolutePosition.Column,
+                    allowEndColumn: true,
+                    extendLineToColumn: false));
+            }
+
+            if (preserveLiveViewportTop)
+            {
+                liveViewportTopAnchorIndex = reflowAnchors.Count;
+                reflowAnchors.Add(new ReflowAnchorPosition(
+                    oldLiveViewportTopAbsoluteRow,
+                    oldColumn: 0,
                     allowEndColumn: true,
                     extendLineToColumn: false));
             }
@@ -1546,6 +1697,14 @@ public sealed class TerminalScreen
             _rows.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground));
         }
 
+        for (int i = 0; i < rowsToAppendForViewportGrowth; i++)
+        {
+            _rows.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground)
+            {
+                IsTransientResizeRow = true,
+            });
+        }
+
         int removedRows = 0;
         if (_alternateBufferActive)
         {
@@ -1569,13 +1728,34 @@ public sealed class TerminalScreen
             mappedAbsoluteRow -= removedRows;
         }
 
+        int mappedLiveViewportTopAbsoluteRow = -1;
+        if (preserveLiveViewportTop)
+        {
+            if (liveViewportTopAnchorIndex >= 0 &&
+                reflowAnchors is not null &&
+                liveViewportTopAnchorIndex < reflowAnchors.Count)
+            {
+                ReflowAnchorPosition mappedAnchor = reflowAnchors[liveViewportTopAnchorIndex];
+                mappedLiveViewportTopAbsoluteRow = mappedAnchor.IsMapped
+                    ? mappedAnchor.NewAbsoluteRow
+                    : mappedAnchor.OldAbsoluteRow;
+            }
+            else
+            {
+                mappedLiveViewportTopAbsoluteRow = oldLiveViewportTopAbsoluteRow;
+            }
+
+            mappedLiveViewportTopAbsoluteRow = Math.Max(0, mappedLiveViewportTopAbsoluteRow - removedRows);
+        }
+
+        int rasterAnchorOffset = trackedAbsolutePositionCount + (liveViewportTopAnchorIndex >= 0 ? 1 : 0);
         if (reflowRasterPlacements is not null && reflowAnchors is not null)
         {
             RemapTrackedAbsolutePositionsAfterReflow(trackedAbsolutePositions, reflowAnchors, removedRows);
             RemapRasterGraphicsAfterReflow(
                 reflowRasterPlacements,
                 reflowAnchors,
-                trackedAbsolutePositionCount,
+                rasterAnchorOffset,
                 removedRows);
         }
         else if (reflowAnchors is not null)
@@ -1592,6 +1772,17 @@ public sealed class TerminalScreen
             RemapTrackedAbsolutePositionsWithoutReflow(trackedAbsolutePositions, columns, removedRows);
         }
 
+        if (mappedLiveViewportTopAbsoluteRow >= 0)
+        {
+            int minimumViewportTopAbsoluteRow = CalculateWindowsPtyResizeViewportTop(
+                oldColumns,
+                columns,
+                viewportRows,
+                mappedLiveViewportTopAbsoluteRow,
+                mappedAbsoluteRow);
+            PadBottomViewportToPreserveTop(minimumViewportTopAbsoluteRow);
+        }
+
         ScrollOffset = _viewportTop;
 
         foreach (TerminalRow row in _rows)
@@ -1600,6 +1791,62 @@ public sealed class TerminalScreen
         }
 
         return GetViewportPositionForAbsoluteRow(mappedAbsoluteRow, mappedColumn);
+    }
+
+    private int CalculateWindowsPtyResizeViewportTop(
+        int oldColumns,
+        int newColumns,
+        int viewportRows,
+        int mappedLiveViewportTopAbsoluteRow,
+        int mappedCursorAbsoluteRow)
+    {
+        int lastContentRow = GetLastContentRowIndex();
+        int maxRow = mappedCursorAbsoluteRow >= 0
+            ? Math.Max(lastContentRow, mappedCursorAbsoluteRow)
+            : lastContentRow;
+        int proposedTopFromLastLine = maxRow - viewportRows + 1;
+        int proposedTopFromScrollback = mappedLiveViewportTopAbsoluteRow;
+        int proposedTop = Math.Max(proposedTopFromLastLine, proposedTopFromScrollback);
+
+        if (proposedTop == proposedTopFromScrollback)
+        {
+            int proposedBottom = proposedTopFromScrollback + viewportRows - 1;
+            if (maxRow < proposedBottom &&
+                newColumns < oldColumns &&
+                proposedTop > 0 &&
+                proposedTop - 1 < _rows.Count &&
+                _rows[proposedTop - 1].WrapsToNext)
+            {
+                proposedTop--;
+            }
+        }
+
+        int proposedScrollbackBottom = proposedTopFromScrollback + viewportRows - 1;
+        if (maxRow > proposedScrollbackBottom)
+        {
+            proposedTop = proposedTopFromLastLine;
+        }
+
+        proposedTop = Math.Max(0, proposedTop);
+        if (mappedCursorAbsoluteRow >= 0)
+        {
+            proposedTop = Math.Min(proposedTop, mappedCursorAbsoluteRow);
+        }
+
+        return proposedTop;
+    }
+
+    private int GetLastContentRowIndex()
+    {
+        for (int rowIndex = _rows.Count - 1; rowIndex >= 0; rowIndex--)
+        {
+            if (GetReflowEndExclusive(_rows[rowIndex]) > 0)
+            {
+                return rowIndex;
+            }
+        }
+
+        return 0;
     }
 
     private void RemapTrackedAbsolutePositionsAfterReflow(
@@ -1848,7 +2095,7 @@ public sealed class TerminalScreen
         ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
         for (int i = cells.Length - 1; i >= 0; i--)
         {
-            if (IsReflowMeaningfulCell(in cells[i]))
+            if (IsReflowLineEndCell(in cells[i]))
             {
                 return i + 1;
             }
@@ -1857,17 +2104,32 @@ public sealed class TerminalScreen
         return 0;
     }
 
-    private bool IsReflowMeaningfulCell(ref readonly TerminalCell cell)
+    private static bool IsReflowLineEndCell(ref readonly TerminalCell cell)
     {
-        return cell.HasContent ||
-            cell.Attributes != CellAttributes.None ||
-            cell.UnderlineStyle != TerminalUnderlineStyle.None ||
-            cell.HasUnderlineColor ||
-            cell.Decorations != CellDecorations.None ||
-            cell.HyperlinkId != 0 ||
-            cell.Foreground != DefaultForeground ||
-            cell.Background != DefaultBackground ||
-            !cell.HasBackground;
+        if (cell.Width == 0)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(cell.Grapheme))
+        {
+            return !IsAsciiSpaceGrapheme(cell.Grapheme);
+        }
+
+        return cell.Codepoint != 0 && cell.Codepoint != ' ';
+    }
+
+    private static bool IsAsciiSpaceGrapheme(string grapheme)
+    {
+        for (int i = 0; i < grapheme.Length; i++)
+        {
+            if (grapheme[i] != ' ')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private TerminalGridPosition? AppendReflowedLogicalLine(

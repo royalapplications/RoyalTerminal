@@ -24,6 +24,7 @@ using RoyalTerminal.Shaders;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
+using RoyalTerminal.Terminal.Transport.Pty;
 using RoyalTerminal.Terminal.Transport.Ssh;
 using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
 using SkiaSharp;
@@ -1149,6 +1150,1016 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_WindowsPtyManagedResize_UsesLocalReflowLikeWindowsTerminal()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 80;
+        control.Rows = 24;
+        control.ReflowOnResize = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            string line = "COLUMN-000-010-020-030-040-050-060-070-END";
+            control.WriteOutput(Encoding.UTF8.GetBytes(line));
+
+            Assert.True(ContainsScreenText(control, "070-END"));
+
+            control.Columns = 32;
+
+            Assert.Equal(32, control.Screen!.Columns);
+            Assert.True(ContainsScreenText(control, "070-END"));
+            await AssertTransportResizeAsync(transport, resize => resize.Columns == 32);
+
+            control.Columns = 80;
+
+            Assert.Equal(80, control.Screen.Columns);
+            Assert.True(ContainsScreenText(control, "070-END"));
+            await AssertTransportResizeAsync(transport, resize => resize.Columns == 80);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyManagedResize_PreservesPowerShellTableAndCursor()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 133;
+        control.Rows = 33;
+        control.ReflowOnResize = true;
+
+        string[] names =
+        [
+            ".android",
+            ".cargo",
+            ".codex",
+            ".config",
+            ".copilot",
+            ".dbus-keyrings",
+            ".dotnet",
+            ".gnupg",
+            ".ms-ad",
+            ".nuget",
+            ".rustup",
+            ".skiko",
+            ".templateengine",
+            ".vscode",
+            ".vscode-shared",
+            "Contacts",
+            "Documents",
+            "dotnet",
+            "dotTraceSnapshots",
+            "Downloads",
+            "Dropbox",
+            "Favorites",
+            "GitHub",
+            "iCloudDrive",
+            "iCloudPhotos",
+            "Links",
+            "Music",
+            "OneDrive",
+            "Pictures",
+            "Saved Games",
+            "Searches",
+            "source",
+            "Videos",
+        ];
+        string[] files =
+        [
+            ".bash_history",
+            ".gitconfig",
+            ".lesshst",
+            "dotnet-install.sh",
+            "java_error_in_rider_12460.log",
+            "java_error_in_rider64_26852.log",
+            "java_error_in_rider64.hprof",
+            "Nowy dokument 1.2023_08_21_12_08_40.0.svg",
+        ];
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            control.WriteOutput(Encoding.UTF8.GetBytes(BuildPowerShellLsStyleOutput(names, files)));
+
+            foreach (int width in new[] { 120, 100, 80, 60, 51 })
+            {
+                control.Columns = width;
+                control.Rows = 31;
+            }
+
+            foreach (int width in new[] { 60, 80, 100, 120, 133 })
+            {
+                control.Columns = width;
+                control.Rows = 33;
+            }
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            string screenText = ReadAllRows(screen);
+            foreach (string name in names)
+            {
+                Assert.Contains(name, screenText, StringComparison.Ordinal);
+            }
+
+            foreach (string file in files)
+            {
+                Assert.Contains(file, screenText, StringComparison.Ordinal);
+            }
+
+            AssertPowerShellHomeRowsNotDuplicated(names, screenText);
+            AssertPowerShellHomeRowsNotDuplicated(files, screenText);
+            Assert.DoesNotContain("iCloudhotos", screenText, StringComparison.Ordinal);
+            Assert.DoesNotContain(Environment.NewLine + "usic", screenText, StringComparison.Ordinal);
+            Assert.DoesNotContain("Saved Games                                                    Searches", screenText, StringComparison.Ordinal);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            Assert.InRange(renderer.CursorRow, 0, control.Rows - 1);
+            Assert.DoesNotContain(transport.Resizes, resize => resize.Columns == 51);
+            await AssertTransportResizeAsync(transport, resize => resize.Columns == 133);
+            Assert.DoesNotContain(transport.Resizes, resize => resize.Columns == 51);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyManagedResizeInsideScrollViewer_KeepsLiveBottomOnVerticalResize()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.ReflowOnResize = true;
+        control.AutoScroll = true;
+
+        ScrollViewer scrollViewer = new()
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = control,
+        };
+        Window window = new()
+        {
+            Content = scrollViewer,
+        };
+        window.Show();
+
+        string[] names =
+        [
+            ".android",
+            ".cargo",
+            ".codex",
+            ".config",
+            ".copilot",
+            ".dbus-keyrings",
+            ".dotnet",
+            ".gnupg",
+            ".ms-ad",
+            ".nuget",
+            ".rustup",
+            ".skiko",
+            ".templateengine",
+            ".vscode",
+            ".vscode-shared",
+            "Contacts",
+            "Documents",
+            "dotnet",
+            "dotTraceSnapshots",
+            "Downloads",
+            "Dropbox",
+            "Favorites",
+            "GitHub",
+            "iCloudDrive",
+            "iCloudPhotos",
+            "Links",
+            "Music",
+            "OneDrive",
+            "Pictures",
+            "Saved Games",
+            "Searches",
+            "source",
+            "Videos",
+        ];
+        string[] files =
+        [
+            ".bash_history",
+            ".gitconfig",
+            ".lesshst",
+            "dotnet-install.sh",
+            "java_error_in_rider_12460.log",
+            "java_error_in_rider64_26852.log",
+            "java_error_in_rider64.hprof",
+            "Nowy dokument 1.2023_08_21_12_08_40.0.svg",
+        ];
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            ArrangeScrollViewerToGrid(scrollViewer, window, renderer, columns: 133, rows: 33);
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+            control.WriteOutput(Encoding.UTF8.GetBytes(BuildPowerShellLsStyleOutput(names, files)));
+            control.ScrollToBottom();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            Assert.Equal(0, screen.ScrollOffset);
+
+            StringBuilder resizeTrace = new();
+            foreach (int rows in new[] { 31, 27, 33, 47, 41 })
+            {
+                resizeTrace.AppendLine(
+                    $"before rows={rows}: screen={screen.ScrollOffset}, data={control.ScrollData?.Offset}/{control.ScrollData?.MaxOffset}, viewer={scrollViewer.Offset}, controlRows={control.Rows}");
+                ArrangeScrollViewerToGrid(scrollViewer, window, renderer, columns: 133, rows);
+                HeadlessTerminalTestCleanup.RunDispatcherJobs();
+                resizeTrace.AppendLine(
+                    $"after rows={rows}: screen={screen.ScrollOffset}, data={control.ScrollData?.Offset}/{control.ScrollData?.MaxOffset}, viewer={scrollViewer.Offset}, controlRows={control.Rows}");
+                Assert.True(
+                    screen.ScrollOffset == 0,
+                    $"The managed screen must remain pinned to the live bottom while the containing ScrollViewer resizes vertically. Trace:{Environment.NewLine}{resizeTrace}");
+                Assert.True(
+                    control.ScrollData?.IsAtBottom == true,
+                    $"Expected logical scroll data at bottom after rows={rows}. Offset={control.ScrollData?.Offset}, Max={control.ScrollData?.MaxOffset}, ScrollViewerOffset={scrollViewer.Offset}.");
+            }
+
+            string viewport = DumpViewportRows(screen);
+            Assert.Contains("PS C:\\Users\\wiesl>", viewport, StringComparison.Ordinal);
+            Assert.Contains("java_error_in_rider64.hprof", viewport, StringComparison.Ordinal);
+            Assert.DoesNotContain(Environment.NewLine + "usic", ReadAllRows(screen), StringComparison.Ordinal);
+            AssertPowerShellHomeRowsNotDuplicated(names, ReadAllRows(screen));
+            AssertPowerShellHomeRowsNotDuplicated(files, ReadAllRows(screen));
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyResize_CoalescesTransportUpdatesAndFlushesBeforeInput()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new()
+        {
+            EchoInput = false,
+        };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 133;
+        control.Rows = 33;
+        control.ReflowOnResize = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            foreach (int width in new[] { 120, 100, 80, 60, 51, 60, 80, 100, 120, 133 })
+            {
+                control.Columns = width;
+            }
+
+            Assert.Empty(transport.Resizes);
+
+            control.SendInput("ls\r");
+
+            TerminalSessionDimensions resize = Assert.Single(transport.Resizes);
+            Assert.Equal(133, resize.Columns);
+            Assert.Equal(33, resize.Rows);
+            Assert.DoesNotContain(transport.Resizes, dimensions => dimensions.Columns == 51);
+            Assert.Single(transport.SentInputs);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public void Control_ManagedResize_PreservesLiveBottomWhenRowsShrinkAndGrow()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 40,
+            Rows = 4,
+            AutoScroll = true,
+            ReflowOnResize = true,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        control.WriteOutput(Encoding.UTF8.GetBytes(
+            "line-00\r\nline-01\r\nline-02\r\nline-03\r\nline-04\r\nline-05\r\nPROMPT"));
+        control.ScrollToBottom();
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        Assert.True(control.ScrollData!.IsAtBottom);
+        Assert.Equal(0, screen.ScrollOffset);
+
+        control.Rows = 3;
+
+        Assert.True(control.ScrollData.IsAtBottom);
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Contains("PROMPT", DumpViewportRows(screen), StringComparison.Ordinal);
+
+        control.Rows = 4;
+
+        Assert.True(control.ScrollData.IsAtBottom);
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Contains("PROMPT", DumpViewportRows(screen), StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
+    public void Control_ManagedResize_ShrinkFromNonScrollableViewportStaysAtLiveBottom()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 40,
+            Rows = 20,
+            AutoScroll = true,
+            ReflowOnResize = true,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+
+        control.WriteOutput(Encoding.UTF8.GetBytes(
+            "line-00\r\nline-01\r\nline-02\r\nline-03\r\nline-04\r\nline-05\r\nPROMPT"));
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        int oldRows = Math.Max(8, screen.TotalRows);
+        control.Rows = oldRows;
+        control.ScrollToBottom();
+        Assert.False(control.ScrollData!.CanScroll);
+        Assert.True(control.ScrollData.IsAtBottom);
+        Assert.Equal(0, screen.ScrollOffset);
+
+        control.Rows = oldRows - 4;
+
+        string shrinkViewport = DumpViewportRows(screen);
+        Assert.True(control.ScrollData.IsAtBottom);
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Contains("line-04", shrinkViewport, StringComparison.Ordinal);
+        Assert.Contains("line-05", shrinkViewport, StringComparison.Ordinal);
+        Assert.Contains("PROMPT", shrinkViewport, StringComparison.Ordinal);
+
+        control.Rows = oldRows;
+
+        string grownViewport = DumpViewportRows(screen);
+        Assert.True(control.ScrollData.IsAtBottom);
+        Assert.Equal(0, screen.ScrollOffset);
+        Assert.Contains("line-00", grownViewport, StringComparison.Ordinal);
+        Assert.Contains("PROMPT", grownViewport, StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyRowsIncrease_ExpandsFromLiveBottom()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 20;
+        control.Rows = 3;
+        control.ReflowOnResize = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            control.WriteOutput(Encoding.UTF8.GetBytes(
+                "line-00\r\nline-01\r\nline-02\r\nline-03\r\nline-04\r\nline-05\r\nPROMPT"));
+            control.ScrollToBottom();
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            Assert.Contains("line-04", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
+            Assert.Contains("line-05", ReadRowText(screen.GetViewportRow(1)), StringComparison.Ordinal);
+            Assert.Contains("PROMPT", ReadRowText(screen.GetViewportRow(2)), StringComparison.Ordinal);
+
+            control.Rows = 5;
+
+            Assert.Contains("line-02", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
+            Assert.Contains("line-03", ReadRowText(screen.GetViewportRow(1)), StringComparison.Ordinal);
+            Assert.Contains("line-04", ReadRowText(screen.GetViewportRow(2)), StringComparison.Ordinal);
+            Assert.Contains("line-05", ReadRowText(screen.GetViewportRow(3)), StringComparison.Ordinal);
+            Assert.Contains("PROMPT", ReadRowText(screen.GetViewportRow(4)), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyRowsDecrease_AfterRowsIncrease_RemainsAtLiveBottom()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 12;
+        control.Rows = 3;
+        control.ReflowOnResize = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            control.WriteOutput(Encoding.UTF8.GetBytes("old0\r\nold1\r\nold2\r\nMusic\r\nPrompt"));
+            control.ScrollToBottom();
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            Assert.Contains("old2", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
+            Assert.Contains("Music", ReadRowText(screen.GetViewportRow(1)), StringComparison.Ordinal);
+            Assert.Contains("Prompt", ReadRowText(screen.GetViewportRow(2)), StringComparison.Ordinal);
+
+            control.Rows = 5;
+            control.Rows = 4;
+
+            Assert.Contains("old1", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
+            Assert.Contains("old2", ReadRowText(screen.GetViewportRow(1)), StringComparison.Ordinal);
+            Assert.Contains("Music", ReadRowText(screen.GetViewportRow(2)), StringComparison.Ordinal);
+            Assert.Contains("Prompt", ReadRowText(screen.GetViewportRow(3)), StringComparison.Ordinal);
+
+            control.Rows = 3;
+
+            string screenText = ReadAllRows(screen);
+            Assert.Contains("old2", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
+            Assert.Contains("Music", ReadRowText(screen.GetViewportRow(1)), StringComparison.Ordinal);
+            Assert.Contains("Prompt", ReadRowText(screen.GetViewportRow(2)), StringComparison.Ordinal);
+            Assert.Equal(1, CountOccurrences(screenText, "Music"));
+            Assert.Equal(1, CountOccurrences(screenText, "Prompt"));
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyManagedVerticalResize_SuppressesConptyViewportRepaint()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 133;
+        control.Rows = 33;
+        control.ReflowOnResize = true;
+        control.AutoScroll = true;
+
+        string[] names =
+        [
+            ".android",
+            ".cargo",
+            ".codex",
+            ".config",
+            ".copilot",
+            ".dbus-keyrings",
+            ".dotnet",
+            ".gnupg",
+            ".ms-ad",
+            ".nuget",
+            ".rustup",
+            ".skiko",
+            ".templateengine",
+            ".vscode",
+            ".vscode-shared",
+            "Contacts",
+            "Documents",
+            "dotnet",
+            "dotTraceSnapshots",
+            "Downloads",
+            "Dropbox",
+            "Favorites",
+            "GitHub",
+            "iCloudDrive",
+            "iCloudPhotos",
+            "Links",
+            "Music",
+            "OneDrive",
+            "Pictures",
+            "Saved Games",
+            "Searches",
+            "source",
+            "Videos",
+        ];
+        string[] files =
+        [
+            ".bash_history",
+            ".gitconfig",
+            ".lesshst",
+            "dotnet-install.sh",
+            "java_error_in_rider_12460.log",
+            "java_error_in_rider64_26852.log",
+            "java_error_in_rider64.hprof",
+            "Nowy dokument 1.2023_08_21_12_08_40.0.svg",
+        ];
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            control.WriteOutput(Encoding.UTF8.GetBytes(BuildPowerShellLsStyleOutput(names, files)));
+            control.ScrollToBottom();
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            control.Rows = 4;
+            control.WriteOutput(Encoding.UTF8.GetBytes(BuildConptyViewportResizeRepaint(includeWindowSize: true)));
+
+            control.Rows = 40;
+            control.WriteOutput(Encoding.UTF8.GetBytes(BuildConptyViewportResizeRepaint(includeWindowSize: false)));
+
+            string allRows = ReadAllRows(screen);
+            foreach (string name in names)
+            {
+                Assert.Contains(name, allRows, StringComparison.Ordinal);
+            }
+
+            foreach (string file in files)
+            {
+                Assert.Contains(file, allRows, StringComparison.Ordinal);
+            }
+
+            string viewport = DumpViewportRows(screen);
+            Assert.Contains("PS C:\\Users\\wiesl>", viewport, StringComparison.Ordinal);
+            Assert.Contains("java_error_in_rider64.hprof", viewport, StringComparison.Ordinal);
+            Assert.DoesNotContain(Environment.NewLine + "usic", allRows, StringComparison.Ordinal);
+            Assert.DoesNotContain("iCloudhotos", allRows, StringComparison.Ordinal);
+            AssertPowerShellHomeRowsNotDuplicated(names, allRows);
+            AssertPowerShellHomeRowsNotDuplicated(files, allRows);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyManagedRealPwshResize_PreservesPowerShellTableAndCursor()
+    {
+        if (!OperatingSystem.IsWindows() || !TryResolvePwshPath(out string? pwshPath))
+        {
+            return;
+        }
+
+        CompositeTerminalTransportFactory factory = new(
+            new ITerminalTransportProvider[]
+            {
+                new PtyTerminalTransportProvider(ptyFactory: new DefaultPtyFactory()),
+            });
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            new DefaultVtProcessorFactory(),
+            new DefaultPtyFactory(),
+            new NullSshCredentialProvider(),
+            new RejectAllSshHostKeyValidator(),
+            factory)
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            ReflowOnResize = true,
+            AutoScroll = true,
+        };
+        Window window = new()
+        {
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            ArrangeControlToGrid(control, window, renderer, columns: 133, rows: 33);
+
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            (int widthPx, int heightPx) = CalculateGridPixels(renderer, columns: 133, rows: 33);
+            PtyTransportOptions options = new(
+                Command: new TerminalCommandSpec(
+                    pwshPath!,
+                    [
+                        "-NoLogo",
+                        "-NoExit",
+                    ]),
+                WorkingDirectory: home,
+                Environment: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["POWERSHELL_UPDATECHECK"] = "Off",
+                },
+                Dimensions: new TerminalSessionDimensions(133, 33, widthPx, heightPx));
+
+            const string marker = "__RT_DONE__";
+            await control.StartSessionAsync(options);
+            control.SendInput("ls; Write-Output '" + marker + "'\r");
+
+            Assert.True(
+                await WaitUntilAsync(
+                    () => ReadAllRowsLocked(control).Contains(marker, StringComparison.Ordinal),
+                    TimeSpan.FromSeconds(10)),
+                "PowerShell output marker was not observed. Current screen: " + ReadAllRowsLocked(control));
+            await WaitForStableScreenAsync(control, TimeSpan.FromSeconds(2));
+
+            string beforeResize = ReadAllRowsLocked(control);
+            if (!beforeResize.Contains("iCloudPhotos", StringComparison.Ordinal) ||
+                !beforeResize.Contains("Music", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            string[] expectedRows = GetKnownPowerShellHomeRowsPresentIn(beforeResize);
+
+            foreach (int width in new[] { 120, 100, 80, 60, 51 })
+            {
+                ArrangeControlToGrid(control, window, renderer, columns: width, rows: 31);
+                await WaitForStableScreenAsync(control, TimeSpan.FromMilliseconds(750));
+            }
+
+            foreach (int width in new[] { 60, 80, 100, 120, 133 })
+            {
+                ArrangeControlToGrid(control, window, renderer, columns: width, rows: 33);
+                await WaitForStableScreenAsync(control, TimeSpan.FromMilliseconds(750));
+            }
+
+            string afterResize = ReadAllRowsLocked(control);
+            AssertPowerShellHomeRowsPreserved(expectedRows, afterResize);
+            AssertPowerShellHomeRowsNotDuplicated(expectedRows, afterResize);
+            Assert.DoesNotContain("iCloudhotos", afterResize, StringComparison.Ordinal);
+            Assert.DoesNotContain(Environment.NewLine + "usic", afterResize, StringComparison.Ordinal);
+            Assert.DoesNotContain("Saved Games                                                    Searches", afterResize, StringComparison.Ordinal);
+
+            Assert.True(
+                control.TryExportSnapshot(
+                    TerminalSnapshotExportFormat.StyledVt,
+                    CreateStyledSnapshotOptions(),
+                    out string styledSnapshot));
+            AssertPowerShellHomeRowsPreserved(expectedRows, styledSnapshot);
+            AssertPowerShellHomeRowsNotDuplicated(expectedRows, styledSnapshot);
+            Assert.DoesNotContain("iCloudhotos", styledSnapshot, StringComparison.Ordinal);
+            Assert.DoesNotContain(Environment.NewLine + "usic", styledSnapshot, StringComparison.Ordinal);
+            Assert.InRange(renderer.CursorRow, 0, control.Rows - 1);
+
+            const string secondMarker = "__RT_DONE_SECOND__";
+            control.SendInput("ls; Write-Output '" + secondMarker + "'\r");
+            Assert.True(
+                await WaitUntilAsync(
+                    () => ReadAllRowsLocked(control).Contains(secondMarker, StringComparison.Ordinal),
+                    TimeSpan.FromSeconds(10)),
+                "Second PowerShell output marker was not observed. Current screen: " + ReadAllRowsLocked(control));
+            await WaitForStableScreenAsync(control, TimeSpan.FromSeconds(2));
+
+            Assert.True(
+                control.TryExportSnapshot(
+                    TerminalSnapshotExportFormat.PlainText,
+                    new TerminalSnapshotExportOptions(Unwrap: true, TrimTrailingWhitespace: true),
+                    out string twoRunSnapshot));
+            AssertPowerShellHomeRowsPreservedAtLeast(expectedRows, twoRunSnapshot, minimumOccurrences: 2);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyManagedRapidRealPwshResize_PreservesDeterministicPowerShellTableRows()
+    {
+        if (!OperatingSystem.IsWindows() || !TryResolvePwshPath(out string? pwshPath))
+        {
+            return;
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "RoyalTerminal.PwshResize." + Guid.NewGuid().ToString("N"));
+        string[] names =
+        [
+            ".android",
+            ".cargo",
+            ".codex",
+            ".config",
+            ".copilot",
+            ".dbus-keyrings",
+            ".dotnet",
+            ".gnupg",
+            ".ms-ad",
+            ".nuget",
+            ".rustup",
+            ".skiko",
+            ".templateengine",
+            ".vscode",
+            ".vscode-shared",
+            "Contacts",
+            "Documents",
+            "dotnet",
+            "dotTraceSnapshots",
+            "Downloads",
+            "Dropbox",
+            "Favorites",
+            "GitHub",
+            "iCloudDrive",
+            "iCloudPhotos",
+            "Links",
+            "Music",
+            "OneDrive",
+            "Pictures",
+            "Saved Games",
+            "Searches",
+            "source",
+            "Videos",
+        ];
+        string[] files =
+        [
+            ".bash_history",
+            ".gitconfig",
+            ".lesshst",
+            "dotnet-install.sh",
+            "java_error_in_rider_12460.log",
+            "java_error_in_rider64_26852.log",
+            "java_error_in_rider64.hprof",
+            "Nowy dokument 1.2023_08_21_12_08_40.0.svg",
+        ];
+
+        CreatePowerShellLsFixture(root, names, files);
+
+        CompositeTerminalTransportFactory factory = new(
+            new ITerminalTransportProvider[]
+            {
+                new PtyTerminalTransportProvider(ptyFactory: new DefaultPtyFactory()),
+            });
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            new DefaultVtProcessorFactory(),
+            new DefaultPtyFactory(),
+            new NullSshCredentialProvider(),
+            new RejectAllSshHostKeyValidator(),
+            factory)
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            ReflowOnResize = true,
+            AutoScroll = true,
+        };
+        Window window = new()
+        {
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+            ArrangeControlToGrid(control, window, renderer, columns: 133, rows: 33);
+
+            (int widthPx, int heightPx) = CalculateGridPixels(renderer, columns: 133, rows: 33);
+            PtyTransportOptions options = new(
+                Command: new TerminalCommandSpec(
+                    pwshPath!,
+                    [
+                        "-NoLogo",
+                        "-NoExit",
+                    ]),
+                WorkingDirectory: root,
+                Environment: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["POWERSHELL_UPDATECHECK"] = "Off",
+                },
+                Dimensions: new TerminalSessionDimensions(133, 33, widthPx, heightPx));
+
+            const string marker = "__RT_RAPID_DONE__";
+            await control.StartSessionAsync(options);
+            control.SendInput("$PSStyle.OutputRendering='Ansi'; Get-ChildItem; Write-Output '" + marker + "'\r");
+
+            Assert.True(
+                await WaitUntilAsync(
+                    () => ReadAllRowsLocked(control).Contains(marker, StringComparison.Ordinal),
+                    TimeSpan.FromSeconds(10)),
+                "PowerShell output marker was not observed. Current screen: " + ReadAllRowsLocked(control));
+            await WaitForStableScreenAsync(control, TimeSpan.FromSeconds(2));
+
+            string beforeResize = ReadAllRowsLocked(control);
+            AssertPowerShellHomeRowsPreserved(names, beforeResize);
+            AssertPowerShellHomeRowsPreserved(files, beforeResize);
+
+            for (int cycle = 0; cycle < 3; cycle++)
+            {
+                foreach (int width in new[] { 120, 100, 80, 60, 51, 60, 80, 100, 120, 133 })
+                {
+                    int rows = width <= 51 ? 31 : 33;
+                    ArrangeControlToGrid(control, window, renderer, columns: width, rows);
+                }
+            }
+
+            await WaitForStableScreenAsync(control, TimeSpan.FromSeconds(2));
+
+            Assert.True(
+                control.TryExportSnapshot(
+                    TerminalSnapshotExportFormat.PlainText,
+                    new TerminalSnapshotExportOptions(Unwrap: true, TrimTrailingWhitespace: true),
+                    out string snapshot));
+            AssertPowerShellHomeRowsPreserved(names, snapshot);
+            AssertPowerShellHomeRowsPreserved(files, snapshot);
+            AssertPowerShellHomeRowsNotDuplicated(names, snapshot);
+            AssertPowerShellHomeRowsNotDuplicated(files, snapshot);
+            Assert.DoesNotContain("iCloudhotos", snapshot, StringComparison.Ordinal);
+            Assert.DoesNotContain(Environment.NewLine + "usic", snapshot, StringComparison.Ordinal);
+            Assert.DoesNotContain("Saved Games                                                    Searches", snapshot, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyNativeResize_KeepsLocalProcessorReflowEnabled()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 24, OffsetRows: 0, VisibleRows: 24),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 80;
+        control.Rows = 24;
+        control.ReflowOnResize = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            control.Columns = 32;
+
+            Assert.True(processor.LocalReflowOnResize);
+            await AssertTransportResizeAsync(transport, resize => resize.Columns == 32);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyNativeResize_PreservesPreResizeMirrorHiddenTail()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 24, OffsetRows: 0, VisibleRows: 24),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 80;
+        control.Rows = 24;
+        control.ReflowOnResize = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            string line = "COLUMN-000-010-020-030-040-050-060-070-END";
+            WriteAscii(control.Screen!.GetViewportRow(0), line);
+
+            Assert.True(ContainsScreenText(control, "070-END"));
+
+            control.Columns = 32;
+
+            Assert.Equal(32, control.Screen.Columns);
+            Assert.False(ContainsScreenText(control, "070-END"));
+
+            control.Columns = 80;
+
+            Assert.Equal(80, control.Screen.Columns);
+            Assert.True(ContainsScreenText(control, "070-END"));
+            Assert.DoesNotContain(transport.Resizes, resize => resize.Columns == 32);
+            await AssertTransportResizeAsync(transport, resize => resize.Columns == 80);
+            Assert.DoesNotContain(transport.Resizes, resize => resize.Columns == 32);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_WindowsPtyNativeResize_SuppressesStyledConptyViewportRepaint()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 80, OffsetRows: 47, VisibleRows: 33),
+            []);
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 133;
+        control.Rows = 33;
+        control.ReflowOnResize = true;
+        control.AutoScroll = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+
+            control.Columns = 51;
+            control.Rows = 31;
+            control.WriteOutput(Encoding.UTF8.GetBytes(BuildConptyStyledViewportResizeRepaint(includeWindowSize: true)));
+
+            Assert.Equal(0, processor.ProcessCallCount);
+
+            control.WriteOutput("actual-output"u8.ToArray());
+
+            Assert.Equal(1, processor.ProcessCallCount);
+            Assert.Equal("actual-output", Encoding.UTF8.GetString(processor.LastProcessedData!));
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_Arrange_PixelOnlyResize_DoesNotPropagateTransportResize()
     {
         FakeTransport transport = new();
@@ -1433,6 +2444,57 @@ public class TerminalControlTests
             Assert.True(eventRaised, "Expected DataReceived to be raised for managed transport output.");
             Assert.NotEqual(uiThreadId, factory.LastProcessor!.LastProcessThreadId);
             Assert.Equal(uiThreadId, dataReceivedThreadId);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_ManagedTransportResize_DrainsQueuedOutputBeforeResize()
+    {
+        FakeTransport transport = new();
+        ResizeOrderingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            factory,
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 133;
+        control.Rows = 33;
+        control.ReflowOnResize = true;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+            Assert.NotNull(factory.LastProcessor);
+
+            byte[] payload = Encoding.UTF8.GetBytes(new string('x', 12_288));
+            Task outputTask = Task.Run(() => transport.RaiseData(payload));
+
+            Assert.True(
+                factory.LastProcessor!.FirstProcessStarted.Wait(TimeSpan.FromSeconds(5)),
+                "Expected background managed output processing to start.");
+
+            control.Columns = 51;
+            await outputTask;
+
+            Assert.True(
+                await WaitUntilAsync(
+                    () => factory.LastProcessor!.ProcessedChunkCount >= 3,
+                    TimeSpan.FromSeconds(5)),
+                "Expected all queued managed output chunks to be processed.");
+
+            IReadOnlyList<string> events = factory.LastProcessor.EventsSnapshot;
+            int resizeIndex = IndexOfEvent(events, "resize:51");
+            int thirdProcessIndex = IndexOfEvent(events, "process:3");
+
+            Assert.True(resizeIndex >= 0, "Expected resize notification for 51 columns. Events: " + string.Join(", ", events));
+            Assert.True(thirdProcessIndex >= 0, "Expected third queued output chunk to be processed. Events: " + string.Join(", ", events));
+            Assert.True(
+                thirdProcessIndex < resizeIndex,
+                "Resize must not reflow before already queued managed output has been parsed. Events: " + string.Join(", ", events));
         }
         finally
         {
@@ -4053,12 +5115,13 @@ public class TerminalControlTests
         FakeTransport transport,
         IVtProcessorFactory vtProcessorFactory,
         VtProcessorPreference preference,
-        ITerminalScrollService? scrollService = null)
+        ITerminalScrollService? scrollService = null,
+        string transportId = "fake")
     {
         CompositeTerminalTransportFactory factory = new(
             new ITerminalTransportProvider[]
             {
-                new FakeTransportProvider(transport),
+                new FakeTransportProvider(transport, transportId),
             });
 
         return new TerminalControl(
@@ -4133,6 +5196,24 @@ public class TerminalControlTests
         HeadlessTerminalTestCleanup.RunDispatcherJobs();
     }
 
+    private static void ArrangeScrollViewerToGrid(
+        ScrollViewer scrollViewer,
+        Window window,
+        SkiaTerminalRenderer renderer,
+        int columns,
+        int rows)
+    {
+        double width = (columns * renderer.CellWidth) + (renderer.CellWidth * 0.25);
+        double height = (rows * renderer.CellHeight) + (renderer.CellHeight * 0.25);
+        scrollViewer.Width = width;
+        scrollViewer.Height = height;
+        window.Width = width;
+        window.Height = height;
+        scrollViewer.Measure(new Size(width, height));
+        scrollViewer.Arrange(new Rect(0, 0, width, height));
+        HeadlessTerminalTestCleanup.RunDispatcherJobs();
+    }
+
     private static string ReadRowPrefix(TerminalRow row, int length)
     {
         StringBuilder builder = new(length);
@@ -4183,6 +5264,19 @@ public class TerminalControlTests
         }
 
         return builder.ToString();
+    }
+
+    private static int IndexOfEvent(IReadOnlyList<string> events, string value)
+    {
+        for (int i = 0; i < events.Count; i++)
+        {
+            if (string.Equals(events[i], value, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private static string DumpViewportRows(TerminalScreen screen)
@@ -4281,6 +5375,334 @@ public class TerminalControlTests
         }
 
         return builder.ToString();
+    }
+
+    private static string BuildPowerShellLsStyleOutput(IReadOnlyList<string> names, IReadOnlyList<string> files)
+    {
+        StringBuilder output = new();
+        output.Append("PowerShell 7.5.5\r\n\r\n");
+        output.Append("  \x1b[7;38;2;216;222;233;48;2;46;52;64m A new PowerShell stable release is available: v7.6.1 \x1b[0m\r\n");
+        output.Append("  \x1b[7;38;2;216;222;233;48;2;46;52;64m Upgrade now, or check out the release page at:       \x1b[0m\r\n");
+        output.Append("  \x1b[7;38;2;216;222;233;48;2;46;52;64m   https://aka.ms/PowerShell-Release?tag=v7.6.1       \x1b[0m\r\n\r\n");
+        output.Append("PS C:\\Users\\wiesl> ls\r\n\r\n");
+        output.Append("    Directory: C:\\Users\\wiesl\r\n\r\n");
+        output.Append("\x1b[1;38;2;163;190;140mMode                 LastWriteTime        Length Name\x1b[0m\r\n");
+        output.Append("\x1b[1;38;2;163;190;140m----                 -------------        ------ ----\x1b[0m\r\n");
+
+        foreach (string name in names)
+        {
+            output.Append("d----          12.10.2025    22:36                ");
+            output.Append("\x1b[1;38;2;216;222;233;48;2;129;161;193m");
+            output.Append(name);
+            output.Append("\x1b[0m\r\n");
+        }
+
+        output.Append("\x1b[0;38;2;216;222;233;48;2;46;52;64m");
+        foreach (string file in files)
+        {
+            output.Append("-a---          13.10.2025    12:08          24361 ");
+            output.Append(file);
+            output.Append("\r\n");
+        }
+
+        output.Append("PS C:\\Users\\wiesl> ");
+        return output.ToString();
+    }
+
+    private static string BuildConptyViewportResizeRepaint(bool includeWindowSize)
+    {
+        StringBuilder output = new();
+        output.Append("\x1b[?25l");
+        if (includeWindowSize)
+        {
+            output.Append("\x1b[8;4;133t");
+        }
+
+        output.Append("\x1b[H");
+        output.Append("-a---          23.10.2023    15:47      596329185 java_error_in_rider64.hprof\x1b[K\r\n");
+        output.Append("-a---          21.08.2023    12:08           1967 Nowy dokument 1.2023_08_21_12_08_40.0.svg\x1b[K\r\n");
+        output.Append("\x1b[K\r\n");
+        output.Append("PS C:\\Users\\wiesl>\x1b[K");
+        output.Append("\r\n\x1b[K\r\n\x1b[K\r\n\x1b[K\r\n\x1b[K");
+        output.Append("\x1b[4;20H\x1b[?25h");
+        return output.ToString();
+    }
+
+    private static string BuildConptyStyledViewportResizeRepaint(bool includeWindowSize)
+    {
+        StringBuilder output = new();
+        output.Append("\x1b[?25l");
+        if (includeWindowSize)
+        {
+            output.Append("\x1b[8;31;51t");
+        }
+
+        output.Append("\x1b[44m\x1b[1m\x1b[H");
+        output.Append("usic\x1b[m\x1b[K\r\n");
+        output.Append("dar--          15.04.2025    02:40                \x1b[K");
+        output.Append("\x1b[44m\x1b[1mOneDrive\x1b[m\x1b[K\r\n");
+        output.Append("-a---          13.10.2025    12:08          24361 .bash_history\x1b[K\r\n");
+        output.Append("PS C:\\Users\\wiesl>\x1b[K\x1b[1C\x1b[?25h");
+        return output.ToString();
+    }
+
+    private static string[] GetKnownPowerShellHomeRowsPresentIn(string text)
+    {
+        string[] knownRows =
+        [
+            ".android",
+            ".cargo",
+            ".codex",
+            ".config",
+            ".copilot",
+            ".dbus-keyrings",
+            ".dotnet",
+            ".gnupg",
+            ".ms-ad",
+            ".nuget",
+            ".rustup",
+            ".skiko",
+            ".templateengine",
+            ".vscode",
+            ".vscode-shared",
+            "Contacts",
+            "Documents",
+            "dotnet",
+            "dotTraceSnapshots",
+            "Downloads",
+            "Dropbox",
+            "Favorites",
+            "GitHub",
+            "iCloudDrive",
+            "iCloudPhotos",
+            "Links",
+            "Music",
+            "OneDrive",
+            "Pictures",
+            "Saved Games",
+            "Searches",
+            "source",
+            "Videos",
+            ".bash_history",
+            ".gitconfig",
+            ".lesshst",
+            "dotnet-install.sh",
+            "java_error_in_rider_12460.log",
+            "java_error_in_rider64_26852.log",
+            "java_error_in_rider64.hprof",
+        ];
+
+        List<string> present = [];
+        foreach (string row in knownRows)
+        {
+            if (text.Contains(row, StringComparison.Ordinal))
+            {
+                present.Add(row);
+            }
+        }
+
+        return present.ToArray();
+    }
+
+    private static void AssertPowerShellHomeRowsPreserved(IReadOnlyList<string> expectedRows, string actual)
+    {
+        foreach (string row in expectedRows)
+        {
+            Assert.Contains(row, actual, StringComparison.Ordinal);
+        }
+    }
+
+    private static void AssertPowerShellHomeRowsNotDuplicated(IReadOnlyList<string> expectedRows, string actual)
+    {
+        foreach (string row in expectedRows)
+        {
+            int occurrences = CountTrimmedLineEndOccurrences(actual, row);
+            Assert.True(
+                occurrences <= 1,
+                $"Expected at most one listing row ending with '{row}', observed {occurrences}. Snapshot: {actual}");
+        }
+    }
+
+    private static void AssertPowerShellHomeRowsPreservedAtLeast(
+        IReadOnlyList<string> expectedRows,
+        string actual,
+        int minimumOccurrences)
+    {
+        foreach (string row in expectedRows)
+        {
+            int occurrences = CountOccurrences(actual, row);
+            Assert.True(
+                occurrences >= minimumOccurrences,
+                $"Expected at least {minimumOccurrences} occurrences of '{row}', observed {occurrences}. Snapshot: {actual}");
+        }
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        int count = 0;
+        int startIndex = 0;
+        while (startIndex < text.Length)
+        {
+            int index = text.IndexOf(value, startIndex, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                return count;
+            }
+
+            count++;
+            startIndex = index + value.Length;
+        }
+
+        return count;
+    }
+
+    private static int CountTrimmedLineEndOccurrences(string text, string value)
+    {
+        int count = 0;
+        string[] lines = text.Split(Environment.NewLine);
+        foreach (string line in lines)
+        {
+            if (line.TrimEnd().EndsWith(" " + value, StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static string ReadAllRows(TerminalScreen screen)
+    {
+        StringBuilder builder = new();
+        for (int rowIndex = 0; rowIndex < screen.TotalRows; rowIndex++)
+        {
+            builder.AppendLine(ReadRowText(screen.GetRow(rowIndex)));
+        }
+
+        return builder.ToString();
+    }
+
+    private static string ReadAllRowsLocked(TerminalControl control)
+    {
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            return ReadAllRows(screen);
+        }
+    }
+
+    private static async Task WaitForStableScreenAsync(TerminalControl control, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow + timeout;
+        string previous = ReadAllRowsLocked(control);
+        DateTime stableSince = DateTime.UtcNow;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(25);
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            string current = ReadAllRowsLocked(control);
+            if (!string.Equals(current, previous, StringComparison.Ordinal))
+            {
+                previous = current;
+                stableSince = DateTime.UtcNow;
+                continue;
+            }
+
+            if (DateTime.UtcNow - stableSince >= TimeSpan.FromMilliseconds(150))
+            {
+                return;
+            }
+        }
+    }
+
+    private static (int WidthPx, int HeightPx) CalculateGridPixels(
+        SkiaTerminalRenderer renderer,
+        int columns,
+        int rows)
+    {
+        return (
+            Math.Max(1, (int)Math.Round(columns * renderer.CellWidth)),
+            Math.Max(1, (int)Math.Round(rows * renderer.CellHeight)));
+    }
+
+    private static TerminalSnapshotExportOptions CreateStyledSnapshotOptions()
+    {
+        return new TerminalSnapshotExportOptions(
+            Unwrap: true,
+            TrimTrailingWhitespace: true,
+            Extras: new TerminalSnapshotExportExtras(
+                IncludeCursor: true,
+                IncludeStyle: true,
+                IncludeHyperlinks: true,
+                IncludeKittyKeyboard: true,
+                IncludeCharsets: true,
+                IncludePalette: true,
+                IncludeModes: true,
+                IncludeScrollingRegion: true,
+                IncludeTabstops: true,
+                IncludeKeyboardModes: true));
+    }
+
+    private static bool TryResolvePwshPath(out string? pwshPath)
+    {
+        string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        string installedPwsh = Path.Combine(programFiles, "PowerShell", "7", "pwsh.exe");
+        if (File.Exists(installedPwsh))
+        {
+            pwshPath = installedPwsh;
+            return true;
+        }
+
+        string? path = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            string[] directories = path.Split(
+                Path.PathSeparator,
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (int i = 0; i < directories.Length; i++)
+            {
+                string candidate = Path.Combine(directories[i], "pwsh.exe");
+                if (File.Exists(candidate))
+                {
+                    pwshPath = candidate;
+                    return true;
+                }
+            }
+        }
+
+        pwshPath = null;
+        return false;
+    }
+
+    private static void CreatePowerShellLsFixture(string root, IReadOnlyList<string> directories, IReadOnlyList<string> files)
+    {
+        Directory.CreateDirectory(root);
+        for (int i = 0; i < directories.Count; i++)
+        {
+            Directory.CreateDirectory(Path.Combine(root, directories[i]));
+        }
+
+        for (int i = 0; i < files.Count; i++)
+        {
+            File.WriteAllText(Path.Combine(root, files[i]), "fixture");
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+            // Test cleanup is best effort because the child process can still be exiting.
+        }
     }
 
     private static string BuildZcompdumpStyleOutput(IReadOnlyList<string> selectedNames)
@@ -4399,6 +5821,18 @@ public class TerminalControlTests
         return await HeadlessTerminalTestCleanup.WaitUntilAsync(predicate, timeout);
     }
 
+    private static async Task AssertTransportResizeAsync(
+        FakeTransport transport,
+        Predicate<TerminalSessionDimensions> predicate)
+    {
+        Assert.True(
+            await WaitUntilAsync(
+                () => transport.Resizes.Exists(predicate),
+                TimeSpan.FromSeconds(2)),
+            "Expected transport resize was not observed. Recorded resizes: " +
+            string.Join(", ", transport.Resizes.Select(resize => $"{resize.Columns}x{resize.Rows}")));
+    }
+
     private static bool ContainsScreenText(TerminalControl control, string needle)
     {
         TerminalScreen? screen = control.Screen;
@@ -4424,6 +5858,18 @@ public class TerminalControlTests
         }
 
         return false;
+    }
+
+    private static void WriteAscii(TerminalRow row, string text)
+    {
+        int count = Math.Min(row.Columns, text.Length);
+        for (int column = 0; column < count; column++)
+        {
+            row[column].Codepoint = text[column];
+            row[column].Width = 1;
+        }
+
+        row.IsDirty = true;
     }
 
     private static string[] ReadVisibleAsciiRows(TerminalScreen screen)
@@ -4675,7 +6121,8 @@ public class TerminalControlTests
         IVtProcessor,
         ITerminalViewportScrollSource,
         ITerminalSearchSource,
-        ITerminalScreenSnapshotSource
+        ITerminalScreenSnapshotSource,
+        ITerminalResizeReflowPolicySink
     {
         private readonly List<TerminalSearchMatch> _matches = [.. matches];
 
@@ -4697,6 +6144,8 @@ public class TerminalControlTests
 
         public TerminalViewportScrollState ViewportScrollState { get; private set; } = viewportScrollState;
 
+        public bool LocalReflowOnResize { get; set; } = true;
+
         public ulong? LastSetViewportOffsetRows { get; private set; }
 
         public int ScrollViewportByRowsCallCount { get; private set; }
@@ -4708,6 +6157,10 @@ public class TerminalControlTests
         public bool ResetViewportToTopOnResize { get; set; }
 
         public TerminalScreen? ScreenSnapshot { get; set; }
+
+        public int ProcessCallCount { get; private set; }
+
+        public byte[]? LastProcessedData { get; private set; }
 
         public event EventHandler<TerminalModeState>? ModeChanged
         {
@@ -4723,7 +6176,8 @@ public class TerminalControlTests
 
         public void Process(ReadOnlySpan<byte> data)
         {
-            _ = data;
+            ProcessCallCount++;
+            LastProcessedData = data.ToArray();
             if (ScrollToBottomOnProcess)
             {
                 ScrollViewportToBottom();
@@ -4942,6 +6396,113 @@ public class TerminalControlTests
         }
     }
 
+    private sealed class ResizeOrderingVtProcessorFactory : IVtProcessorFactory
+    {
+        public ResizeOrderingVtProcessor? LastProcessor { get; private set; }
+
+        public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
+        {
+            _ = screen;
+            _ = preference;
+            ResizeOrderingVtProcessor processor = new();
+            LastProcessor = processor;
+            return processor;
+        }
+    }
+
+    private sealed class ResizeOrderingVtProcessor : IVtProcessor
+    {
+        private readonly object _eventsSync = new();
+        private int _processedChunkCount;
+
+        public int CursorCol => 0;
+        public int CursorRow => 0;
+        public bool CursorVisible => true;
+        public bool ApplicationCursorKeys => false;
+        public bool ApplicationKeypad => false;
+        public bool AlternateScreen => false;
+        public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
+        public TerminalModeState ModeState => new(
+            CursorVisible,
+            ApplicationCursorKeys,
+            ApplicationKeypad,
+            AlternateScreen,
+            BracketedPaste,
+            Win32InputMode);
+
+        public ManualResetEventSlim FirstProcessStarted { get; } = new();
+
+        public int ProcessedChunkCount => Volatile.Read(ref _processedChunkCount);
+
+        public IReadOnlyList<string> EventsSnapshot
+        {
+            get
+            {
+                lock (_eventsSync)
+                {
+                    return _events.ToArray();
+                }
+            }
+        }
+
+        private List<string> _events { get; } = [];
+
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Action<byte[]>? ResponseCallback { get; set; }
+        public Action? BellCallback { get; set; }
+        public Action<string>? TitleCallback { get; set; }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            _ = data;
+            int chunk = Interlocked.Increment(ref _processedChunkCount);
+            AddEvent("process:" + chunk.ToString(CultureInfo.InvariantCulture));
+            if (chunk == 1)
+            {
+                FirstProcessStarted.Set();
+            }
+
+            Thread.Sleep(75);
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            _ = rows;
+            AddEvent("resize:" + columns.ToString(CultureInfo.InvariantCulture));
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            _ = rows;
+            _ = widthPx;
+            _ = heightPx;
+            AddEvent("resize:" + columns.ToString(CultureInfo.InvariantCulture));
+        }
+
+        public void Reset()
+        {
+        }
+
+        public void Dispose()
+        {
+            FirstProcessStarted.Dispose();
+        }
+
+        private void AddEvent(string value)
+        {
+            lock (_eventsSync)
+            {
+                _events.Add(value);
+            }
+        }
+    }
+
     private sealed class ResizeTrackingVtProcessorFactory : IVtProcessorFactory
     {
         public ResizeTrackingVtProcessor? LastProcessor { get; private set; }
@@ -5139,13 +6700,15 @@ public class TerminalControlTests
     private sealed class FakeTransportProvider : ITerminalTransportProvider
     {
         private readonly ITerminalTransport _transport;
+        private readonly string _transportId;
 
-        public FakeTransportProvider(ITerminalTransport transport)
+        public FakeTransportProvider(ITerminalTransport transport, string transportId = "fake")
         {
             _transport = transport;
+            _transportId = transportId;
         }
 
-        public string TransportId => "fake";
+        public string TransportId => _transportId;
 
         public bool CanHandle(ITerminalTransportOptions options)
         {

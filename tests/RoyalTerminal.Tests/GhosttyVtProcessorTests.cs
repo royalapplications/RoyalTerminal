@@ -152,6 +152,87 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_Resize_CanSuppressLocalReflow_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen)
+        {
+            LocalReflowOnResize = false,
+        };
+        processor.NotifyResize(columns: 8, rows: 4, widthPx: 80, heightPx: 64);
+
+        processor.Process("ABCDEFGHIJKLMN"u8);
+        processor.NotifyResize(columns: 6, rows: 4, widthPx: 60, heightPx: 64);
+
+        Assert.Equal("ABCDEF", ReadAsciiPrefix(screen, 0, 6));
+        Assert.NotEqual("GHIJKL", ReadAsciiPrefix(screen, 1, 6));
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_Resize_TrimsTrailingStyledSpaces_WhenAvailable()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 12, viewportRows: 3, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 12, rows: 3, widthPx: 120, heightPx: 48);
+
+        processor.Process(Encoding.UTF8.GetBytes("\x1b[44;1mDIR         \x1b[0m\r\nNEXT"));
+        processor.NotifyResize(columns: 4, rows: 3, widthPx: 40, heightPx: 48);
+
+        Assert.False(screen.GetViewportRow(0).WrapsToNext);
+        Assert.Equal("DIR ", ReadAsciiPrefix(screen, 0, 4));
+        Assert.Equal("NEXT", ReadAsciiPrefix(screen, 1, 4));
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_Resize_ForceSyncsPreResizedMirror_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 10, viewportRows: 3, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 10, rows: 3, widthPx: 100, heightPx: 48);
+
+        processor.Process("ABCDE12345\r\nNEXT"u8);
+
+        screen.Resize(columns: 5, viewportRows: 3, reflowOnResize: false);
+        SetAscii(screen.GetViewportRow(0), "XXXXX");
+        SetAscii(screen.GetViewportRow(1), "YYYYY");
+
+        processor.NotifyResize(columns: 5, rows: 3, widthPx: 50, heightPx: 48);
+
+        Assert.Equal("ABCDE", ReadAsciiPrefix(screen, 0, 5));
+        Assert.Equal("12345", ReadAsciiPrefix(screen, 1, 5));
+        Assert.Equal("NEXT ", ReadAsciiPrefix(screen, 2, 5));
+
+        screen.Resize(columns: 10, viewportRows: 3, reflowOnResize: false);
+        SetAscii(screen.GetViewportRow(0), "ZZZZZZZZZZ");
+        SetAscii(screen.GetViewportRow(1), "QQQQQQQQQQ");
+
+        processor.NotifyResize(columns: 10, rows: 3, widthPx: 100, heightPx: 48);
+
+        Assert.Equal("ABCDE12345", ReadAsciiPrefix(screen, 0, 10));
+        Assert.Equal("NEXT      ", ReadAsciiPrefix(screen, 1, 10));
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_KittyGraphicsAndHyperlinks_PopulateManagedScreen_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
@@ -438,5 +519,15 @@ public class GhosttyVtProcessorTests
         }
 
         return new string(chars);
+    }
+
+    private static void SetAscii(TerminalRow row, string text)
+    {
+        int columns = Math.Min(row.Columns, text.Length);
+        for (int col = 0; col < columns; col++)
+        {
+            row[col].Codepoint = text[col];
+            row[col].Width = 1;
+        }
     }
 }

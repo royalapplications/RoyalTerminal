@@ -1429,7 +1429,7 @@ public class TerminalQueryTests
 
         TerminalRow row0 = screen.GetViewportRow(0);
         TerminalRow row1 = screen.GetViewportRow(1);
-        Assert.Equal(2, processor.CursorCol);
+        Assert.Equal(1, processor.CursorCol);
         Assert.Equal(0, processor.CursorRow);
         Assert.Equal("B\u0301", row0[1].Grapheme);
         Assert.False(row1[0].HasContent);
