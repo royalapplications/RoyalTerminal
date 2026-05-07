@@ -428,6 +428,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private TerminalScrollData? _scrollData;
     private VirtualizedTerminalScrollViewer? _scrollViewer;
     private IVtProcessor? _vtProcessor;
+    private bool _autoScrollPinnedToBottom = true;
     private bool _isMouseSelecting;
     private DispatcherTimer? _selectionAutoScrollTimer;
     private int _selectionAnchorColumn;
@@ -645,6 +646,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private bool _canHScroll;
     private bool _canVScroll = true;
     private EventHandler? _scrollInvalidated;
+    private bool _syncingAncestorScrollViewerOffset;
+    private bool _ancestorScrollViewerOffsetSyncPending;
+    private bool _preserveAutoScrollBottomDuringAncestorOffsetSync;
+    private ScrollViewer? _containingScrollViewer;
+    private bool _suppressNextWindowsPtyResizeRepaint;
 
     /// <inheritdoc />
     bool ILogicalScrollable.IsLogicalScrollEnabled => true;
@@ -681,8 +687,27 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         get => new(0, _scrollData?.Offset ?? 0);
         set
         {
+            if (_syncingAncestorScrollViewerOffset)
+            {
+                return;
+            }
+
             if (_scrollData is not null)
             {
+                if (_preserveAutoScrollBottomDuringAncestorOffsetSync &&
+                    _autoScrollPinnedToBottom &&
+                    AutoScroll &&
+                    value.Y < _scrollData.MaxOffset - 1)
+                {
+                    _scrollData.ScrollToBottom();
+                    SyncScreenScrollOffsetFromScrollData();
+                    UpdateRendererCursorForViewport();
+                    UpdateRendererParityStateFromScreen();
+                    _presenter?.Invalidate();
+                    RaiseScrollInvalidated();
+                    return;
+                }
+
                 CaptureRendererSelectionForCurrentViewport();
                 _scrollData.Offset = value.Y;
                 SyncScreenScrollOffsetFromScrollData();
@@ -712,10 +737,99 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     /// <inheritdoc />
     void ILogicalScrollable.RaiseScrollInvalidated(EventArgs e) =>
-        _scrollInvalidated?.Invoke(this, e);
+        RaiseScrollInvalidated(e);
 
     private void RaiseScrollInvalidated() =>
-        _scrollInvalidated?.Invoke(this, EventArgs.Empty);
+        RaiseScrollInvalidated(EventArgs.Empty);
+
+    private void RaiseScrollInvalidated(EventArgs e)
+    {
+        _scrollInvalidated?.Invoke(this, e);
+        RequestAncestorScrollViewerOffsetSync();
+    }
+
+    private void RequestAncestorScrollViewerOffsetSync()
+    {
+        if (_scrollData is null)
+        {
+            return;
+        }
+
+        if (FindContainingScrollViewer() is null)
+        {
+            _preserveAutoScrollBottomDuringAncestorOffsetSync = false;
+            return;
+        }
+
+        SynchronizeAncestorScrollViewerOffset();
+        if (_ancestorScrollViewerOffsetSyncPending)
+        {
+            return;
+        }
+
+        _ancestorScrollViewerOffsetSyncPending = true;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                _ancestorScrollViewerOffsetSyncPending = false;
+                SynchronizeAncestorScrollViewerOffset();
+                _preserveAutoScrollBottomDuringAncestorOffsetSync = false;
+            },
+            DispatcherPriority.Loaded);
+    }
+
+    private void SynchronizeAncestorScrollViewerOffset()
+    {
+        if (_scrollData is null || _syncingAncestorScrollViewerOffset)
+        {
+            return;
+        }
+
+        ScrollViewer? containingScrollViewer = FindContainingScrollViewer();
+        if (containingScrollViewer is null)
+        {
+            return;
+        }
+
+        Vector currentOffset = containingScrollViewer.Offset;
+        double targetOffsetY = _scrollData.Offset;
+        if (AreClose(currentOffset.Y, targetOffsetY))
+        {
+            return;
+        }
+
+        _syncingAncestorScrollViewerOffset = true;
+        try
+        {
+            containingScrollViewer.Offset = new Vector(currentOffset.X, targetOffsetY);
+        }
+        finally
+        {
+            _syncingAncestorScrollViewerOffset = false;
+        }
+    }
+
+    private ScrollViewer? FindContainingScrollViewer()
+    {
+        if (_containingScrollViewer is { Content: var cachedContent } cachedScrollViewer &&
+            ReferenceEquals(cachedContent, this))
+        {
+            return cachedScrollViewer;
+        }
+
+        foreach (Visual ancestor in this.GetVisualAncestors())
+        {
+            if (ancestor is ScrollViewer { Content: var content } scrollViewer &&
+                ReferenceEquals(content, this))
+            {
+                _containingScrollViewer = scrollViewer;
+                return scrollViewer;
+            }
+        }
+
+        _containingScrollViewer = null;
+        return null;
+    }
 
     #endregion
 
@@ -1269,9 +1383,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             FlushPendingTransportOutputBeforeResize();
         }
 
-        bool wasAtBottom = _scrollData is { CanScroll: true, IsAtBottom: true };
+        bool hasActiveSelection = _hasAnchoredSelection || HasRendererSelection();
+        bool hasNativeViewportScrollSource = TryGetViewportScrollSource(out _);
+        bool suppressManagedBottomPreservationForSelection = hasActiveSelection && !hasNativeViewportScrollSource;
+        int previousViewportRows = _screen?.ViewportRows ?? _lastAppliedRows;
+        bool rowsDecreased = previousViewportRows > 0 && safeRows < previousViewportRows;
+        bool screenAtLiveBottom = _screen is null || _screen.ScrollOffset == 0;
+        bool wasAtBottom = !suppressManagedBottomPreservationForSelection &&
+            (_autoScrollPinnedToBottom ||
+             screenAtLiveBottom ||
+             IsScrollDataAtLiveBottom(treatNonScrollableAsBottom: rowsDecreased));
         bool preserveNativeViewportBottom = AutoScroll && (wasAtBottom || _preserveNativeViewportBottomOnNextResize);
-        bool preserveWindowsPtyViewportTop = ShouldPreserveWindowsPtyViewportTopOnResize();
+        bool windowsPtyNormalBufferResize = ShouldPreserveWindowsPtyViewportTopOnResize();
+        bool columnsChangedForWindowsPty = _lastAppliedColumns > 0 && safeColumns != _lastAppliedColumns;
+        bool preserveWindowsPtyViewportTop = windowsPtyNormalBufferResize && columnsChangedForWindowsPty;
+        if ((force || gridChanged) && windowsPtyNormalBufferResize)
+        {
+            _suppressNextWindowsPtyResizeRepaint = true;
+        }
         NativeSelectionResizeContext? nativeSelectionResizeContext = null;
         if (_screen is not null && (force || gridChanged || pixelSizeChanged))
         {
@@ -1370,7 +1499,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             {
                 if (!TryGetViewportScrollSource(out _))
                 {
-                    _scrollData.UpdateExtent(GetScrollableRowCount(), AutoScroll || alternateScreenActive);
+                    _scrollData.UpdateExtent(GetScrollableRowCount(), preserveNativeViewportBottom || alternateScreenActive);
                 }
             }
 
@@ -1399,6 +1528,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 if (preserveNativeViewportBottom || alternateScreenActive)
                 {
                     _scrollData.ScrollToBottom();
+                    if (preserveNativeViewportBottom)
+                    {
+                        _preserveAutoScrollBottomDuringAncestorOffsetSync = true;
+                    }
                 }
 
                 SyncScreenScrollOffsetFromScrollData();
@@ -1407,6 +1540,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
             UpdateRendererCursorForViewport();
             UpdateRendererParityStateFromScreen();
+            UpdateAutoScrollPinnedToBottom();
         }
 
         if (force || gridChanged)
@@ -1576,6 +1710,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnAttachedToVisualTree(e);
 
+        _containingScrollViewer = null;
+
         // TemplatedControl without a template never fires OnApplyTemplate.
         // Create the presenter here as a fallback so rendering always works.
         EnsurePresenter();
@@ -1584,6 +1720,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        _containingScrollViewer = null;
         CancelPendingTransportResize();
         StopMouseSelectionDrag();
         EnsureCursorBlinkTimerRunning(false);
@@ -1954,6 +2091,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             ApplyAnchoredSelectionToRendererLocked();
         }
 
+        UpdateAutoScrollPinnedToBottom();
         NotifyOutputUiUpdatedOnUiThread();
     }
 
@@ -1996,6 +2134,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
             try
             {
+                if (TrySuppressWindowsPtyResizeRepaint(data))
+                {
+                    return resetMouseSelection;
+                }
+
                 _vtProcessor?.Process(data);
             }
             finally
@@ -2056,6 +2199,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                         resetMouseSelection = true;
                     }
 
+                    if (TrySuppressWindowsPtyResizeRepaint(chunk))
+                    {
+                        continue;
+                    }
+
                     _vtProcessor?.Process(chunk);
                 }
             }
@@ -2077,6 +2225,163 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         return resetMouseSelection;
+    }
+
+    private bool TrySuppressWindowsPtyResizeRepaint(ReadOnlySpan<byte> data)
+    {
+        if (!_suppressNextWindowsPtyResizeRepaint)
+        {
+            return false;
+        }
+
+        _suppressNextWindowsPtyResizeRepaint = false;
+
+        if (_vtProcessor?.AlternateScreen == true ||
+            !LooksLikeWindowsPtyResizeRepaint(data))
+        {
+            return false;
+        }
+
+        // ConPTY repaints the current viewport after a resize. During a
+        // height-only resize that repaint contains only the temporarily visible
+        // rows, so accepting it as VT output drops older rows from our local
+        // managed buffer.
+        _screen?.InvalidateViewport();
+        return true;
+    }
+
+    private static bool LooksLikeWindowsPtyResizeRepaint(ReadOnlySpan<byte> data)
+    {
+        int index = 0;
+
+        _ = TryConsumeCsiLiteral(data, ref index, "?25l"u8);
+        _ = TryConsumeCsiWindowResize(data, ref index);
+
+        if (!TryConsumeCsiCursorHome(data, ref index))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<byte> tail = data[index..];
+        return ContainsCsiLiteral(tail, "K"u8) &&
+               ContainsCsiLiteral(tail, "?25h"u8);
+    }
+
+    private static bool TryConsumeCsiLiteral(
+        ReadOnlySpan<byte> data,
+        ref int index,
+        ReadOnlySpan<byte> literal)
+    {
+        if (index + 2 + literal.Length > data.Length ||
+            data[index] != 0x1B ||
+            data[index + 1] != (byte)'[' ||
+            !data.Slice(index + 2, literal.Length).SequenceEqual(literal))
+        {
+            return false;
+        }
+
+        index += 2 + literal.Length;
+        return true;
+    }
+
+    private static bool TryConsumeCsiWindowResize(ReadOnlySpan<byte> data, ref int index)
+    {
+        int start = index;
+        if (index + 4 > data.Length ||
+            data[index] != 0x1B ||
+            data[index + 1] != (byte)'[' ||
+            data[index + 2] != (byte)'8' ||
+            data[index + 3] != (byte)';')
+        {
+            return false;
+        }
+
+        index += 4;
+        if (!TryConsumeDigits(data, ref index) ||
+            index >= data.Length ||
+            data[index] != (byte)';')
+        {
+            index = start;
+            return false;
+        }
+
+        index++;
+        if (!TryConsumeDigits(data, ref index) ||
+            index >= data.Length ||
+            data[index] != (byte)'t')
+        {
+            index = start;
+            return false;
+        }
+
+        index++;
+        return true;
+    }
+
+    private static bool TryConsumeCsiCursorHome(ReadOnlySpan<byte> data, ref int index)
+    {
+        int start = index;
+        if (index + 3 > data.Length ||
+            data[index] != 0x1B ||
+            data[index + 1] != (byte)'[')
+        {
+            return false;
+        }
+
+        index += 2;
+        while (index < data.Length)
+        {
+            byte value = data[index];
+            if (value == (byte)'H' || value == (byte)'f')
+            {
+                index++;
+                return true;
+            }
+
+            if (value != (byte)'1' && value != (byte)';')
+            {
+                index = start;
+                return false;
+            }
+
+            index++;
+        }
+
+        index = start;
+        return false;
+    }
+
+    private static bool TryConsumeDigits(ReadOnlySpan<byte> data, ref int index)
+    {
+        int start = index;
+        while (index < data.Length)
+        {
+            byte value = data[index];
+            if (value < (byte)'0' || value > (byte)'9')
+            {
+                break;
+            }
+
+            index++;
+        }
+
+        return index > start;
+    }
+
+    private static bool ContainsCsiLiteral(ReadOnlySpan<byte> data, ReadOnlySpan<byte> literal)
+    {
+        int lastStart = data.Length - literal.Length - 2;
+        for (int index = 0; index <= lastStart; index++)
+        {
+            if (data[index] == 0x1B &&
+                data[index + 1] == (byte)'[' &&
+                data.Slice(index + 2, literal.Length).SequenceEqual(literal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void ApplyMouseModeSelectionResetOnUiThread()
@@ -3623,6 +3928,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             RaiseScrollInvalidated);
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
+        UpdateAutoScrollPinnedToBottom();
         e.Handled = true;
     }
 
@@ -3925,6 +4231,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
+        UpdateAutoScrollPinnedToBottom();
         RaiseScrollInvalidated();
     }
 
@@ -3953,6 +4260,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             TerminalScrollService.ScrollToBottom(_scrollData, _screen, _presenter);
         }
 
+        _autoScrollPinnedToBottom = true;
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
         RaiseScrollInvalidated();
@@ -5968,6 +6276,28 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return _vtProcessor?.AlternateScreen == true
             ? _screen.ViewportRows
             : _screen.TotalRows;
+    }
+
+    private bool IsScrollDataAtLiveBottom(bool treatNonScrollableAsBottom)
+    {
+        if (_scrollData is null)
+        {
+            return true;
+        }
+
+        return (_scrollData.CanScroll && _scrollData.IsAtBottom) ||
+               (treatNonScrollableAsBottom && !_scrollData.CanScroll);
+    }
+
+    private void UpdateAutoScrollPinnedToBottom()
+    {
+        if (_scrollData is null || _screen is null)
+        {
+            _autoScrollPinnedToBottom = true;
+            return;
+        }
+
+        _autoScrollPinnedToBottom = _scrollData.IsAtBottom && _screen.ScrollOffset == 0;
     }
 
     private static double GetLogicalViewportHeight(int rows, double cellHeight)
