@@ -2,11 +2,12 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia - Avalonia composition draw handler.
 
+using System.Diagnostics;
+using Avalonia;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Rendering.Composition;
 using Avalonia.Skia;
-using System.Diagnostics;
 using RoyalTerminal.Shaders;
 using SkiaSharp;
 
@@ -111,9 +112,9 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                 return;
             }
 
-            SKRect clip = canvas.LocalClipBounds;
-            int width = Math.Max(1, (int)Math.Ceiling(clip.Width));
-            int height = Math.Max(1, (int)Math.Ceiling(clip.Height));
+            (int width, int height) = GetRenderTargetPixelSize(
+                GetRenderBounds(),
+                canvas.LocalClipBounds);
             SKImage? terminalFrame = null;
             SKColor background = default;
 
@@ -242,6 +243,35 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         _forceFullRedrawRequested = true;
         _invalidateViewportRequested = true;
         return _terminalSurface is not null;
+    }
+
+    internal static (int Width, int Height) GetRenderTargetPixelSize(
+        Rect renderBounds,
+        SKRect localClipBounds)
+    {
+        // LocalClipBounds can be Avalonia's current damage clip. The retained
+        // terminal framebuffer must follow the full visual bounds or a partial
+        // render pass can cache a clipped terminal image.
+        double width = GetPositiveFiniteOrFallback(renderBounds.Width, localClipBounds.Width);
+        double height = GetPositiveFiniteOrFallback(renderBounds.Height, localClipBounds.Height);
+        return (
+            Math.Max(1, (int)Math.Ceiling(width)),
+            Math.Max(1, (int)Math.Ceiling(height)));
+    }
+
+    private static double GetPositiveFiniteOrFallback(double value, double fallback)
+    {
+        if (double.IsFinite(value) && value > 0)
+        {
+            return value;
+        }
+
+        if (double.IsFinite(fallback) && fallback > 0)
+        {
+            return fallback;
+        }
+
+        return 1d;
     }
 
     private bool MarkCursorRowsDirtyIfNeeded(SkiaTerminalRenderer renderer, TerminalScreen screen)
