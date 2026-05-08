@@ -5172,19 +5172,74 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         FlushPendingTransportResize();
 
         if (_vtProcessor is ITerminalPointerSequenceEncoderSource nativeEncoder &&
-            _renderer is not null &&
-            nativeEncoder.TryEncodePointer(
-                pointerEvent,
-                new TerminalPointerEncodingContext(
-                    ScreenWidthPx: Math.Max(1, (int)Math.Round(Bounds.Width)),
-                    ScreenHeightPx: Math.Max(1, (int)Math.Round(Bounds.Height)),
-                    CellWidthPx: Math.Max(1, (int)Math.Ceiling(_renderer.CellWidth)),
-                    CellHeightPx: Math.Max(1, (int)Math.Ceiling(_renderer.CellHeight))),
-                out byte[] nativeEncoded))
+            TryEncodePointerWithNativeEncoder(nativeEncoder, pointerEvent, out byte[] nativeEncoded))
         {
             TerminalSessionService.SendInput(nativeEncoded);
             return true;
         }
+
+        if (!TryEncodePointerFromTrackedMouseMode(pointerEvent, out byte[] encoded))
+        {
+            return false;
+        }
+
+        TerminalSessionService.SendInput(encoded);
+        return true;
+    }
+
+    private bool TryEncodePointerWithNativeEncoder(
+        ITerminalPointerSequenceEncoderSource nativeEncoder,
+        TerminalPointerEvent pointerEvent,
+        out byte[] encoded)
+    {
+        encoded = [];
+
+        if (_renderer is null)
+        {
+            return false;
+        }
+
+        float cellWidth = _renderer.CellWidth;
+        float cellHeight = _renderer.CellHeight;
+
+        if (cellWidth <= 0 || cellHeight <= 0)
+        {
+            return false;
+        }
+
+        int cellWidthPx = Math.Max(1, (int)Math.Ceiling(cellWidth));
+        int cellHeightPx = Math.Max(1, (int)Math.Ceiling(cellHeight));
+        int screenWidthPx = Math.Max(1, (int)Math.Round(Bounds.Width));
+        int screenHeightPx = Math.Max(1, (int)Math.Round(Bounds.Height));
+        TerminalPointerEvent nativePointerEvent = pointerEvent;
+
+        if (ShouldScalePointerForNativeMouseEncoding())
+        {
+            double widthScale = cellWidthPx / cellWidth;
+            double heightScale = cellHeightPx / cellHeight;
+
+            nativePointerEvent = pointerEvent with
+            {
+                X = pointerEvent.X * widthScale,
+                Y = pointerEvent.Y * heightScale
+            };
+
+            screenWidthPx = Math.Max(1, (int)Math.Round(Bounds.Width * widthScale));
+            screenHeightPx = Math.Max(1, (int)Math.Round(Bounds.Height * heightScale));
+        }
+
+        TerminalPointerEncodingContext context = new(
+            ScreenWidthPx: screenWidthPx,
+            ScreenHeightPx: screenHeightPx,
+            CellWidthPx: cellWidthPx,
+            CellHeightPx: cellHeightPx);
+
+        return nativeEncoder.TryEncodePointer(nativePointerEvent, context, out encoded);
+    }
+
+    private bool TryEncodePointerFromTrackedMouseMode(TerminalPointerEvent pointerEvent, out byte[] encoded)
+    {
+        encoded = [];
 
         if (!_mouseModeTracker.ModeState.IsMouseReportingEnabled ||
             !TryResolvePointerCell(pointerEvent.X, pointerEvent.Y, out int column, out int row))
@@ -5199,13 +5254,37 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 row,
                 Math.Max(1, (int)Math.Floor(pointerEvent.X) + 1),
                 Math.Max(1, (int)Math.Floor(pointerEvent.Y) + 1),
-                out byte[] encoded))
+                out encoded))
         {
             return false;
         }
 
-        TerminalSessionService.SendInput(encoded);
         return true;
+    }
+
+    private bool HasFractionalRendererCellMetrics()
+    {
+        if (_renderer is null)
+        {
+            return false;
+        }
+
+        // Reference terminals derive mouse cells from the same grid metrics used
+        // for rendering. Avalonia cell metrics can be fractional DIPs; rounding
+        // them before encoding accumulates row drift near the bottom edge.
+        return !IsWholePixelMetric(_renderer.CellWidth) ||
+               !IsWholePixelMetric(_renderer.CellHeight);
+    }
+
+    private bool ShouldScalePointerForNativeMouseEncoding()
+    {
+        return HasFractionalRendererCellMetrics() &&
+               _mouseModeTracker.ModeState.Encoding != TerminalMouseEncoding.SgrPixels;
+    }
+
+    private static bool IsWholePixelMetric(float value)
+    {
+        return Math.Abs(value - MathF.Round(value)) < 0.001f;
     }
 
     private bool IsMouseReportingActiveForInput()
