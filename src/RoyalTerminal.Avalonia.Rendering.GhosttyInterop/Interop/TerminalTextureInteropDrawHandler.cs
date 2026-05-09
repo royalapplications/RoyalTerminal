@@ -108,7 +108,9 @@ public sealed class TerminalTextureInteropDrawHandler : CompositionCustomVisualH
             PixelSize targetPixelSize = _pixelSize;
             if (targetPixelSize.Width <= 0 || targetPixelSize.Height <= 0)
             {
-                targetPixelSize = GetCanvasPixelSize(canvas);
+                targetPixelSize = GetRenderTargetPixelSize(
+                    GetRenderBounds(),
+                    canvas.LocalClipBounds);
             }
 
             SkiaInteropRenderRequest request = renderTargetProvider.CreateRenderRequest(lease, targetPixelSize);
@@ -139,11 +141,29 @@ public sealed class TerminalTextureInteropDrawHandler : CompositionCustomVisualH
         }
     }
 
-    private static PixelSize GetCanvasPixelSize(SKCanvas canvas)
+    internal static PixelSize GetRenderTargetPixelSize(
+        Rect renderBounds,
+        SKRect localClipBounds)
     {
-        SKRect clip = canvas.LocalClipBounds;
-        int width = Math.Max(1, (int)Math.Ceiling(clip.Width));
-        int height = Math.Max(1, (int)Math.Ceiling(clip.Height));
-        return new PixelSize(width, height);
+        double width = GetPositiveFiniteOrFallback(renderBounds.Width, localClipBounds.Width);
+        double height = GetPositiveFiniteOrFallback(renderBounds.Height, localClipBounds.Height);
+        return new PixelSize(
+            Math.Max(1, (int)Math.Ceiling(width)),
+            Math.Max(1, (int)Math.Ceiling(height)));
+    }
+
+    private static double GetPositiveFiniteOrFallback(double value, double fallback)
+    {
+        if (double.IsFinite(value) && value > 0)
+        {
+            return value;
+        }
+
+        if (double.IsFinite(fallback) && fallback > 0)
+        {
+            return fallback;
+        }
+
+        return 1d;
     }
 }

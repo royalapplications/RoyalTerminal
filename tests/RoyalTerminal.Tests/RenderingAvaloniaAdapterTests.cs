@@ -17,6 +17,30 @@ namespace RoyalTerminal.Tests;
 public sealed class RenderingAvaloniaAdapterTests
 {
     [Fact]
+    public void TextureDrawHandler_RenderTargetPixelSize_UsesRenderBounds_WhenClipIsPartial()
+    {
+        Rect renderBounds = new(0, 0, 960, 600);
+        SKRect partialClip = new(0, 0, 960, 280);
+
+        PixelSize size = TerminalTextureInteropDrawHandler.GetRenderTargetPixelSize(renderBounds, partialClip);
+
+        Assert.Equal(960, size.Width);
+        Assert.Equal(600, size.Height);
+    }
+
+    [Fact]
+    public void TextureDrawHandler_RenderTargetPixelSize_FallsBackToClip_WhenRenderBoundsAreUnavailable()
+    {
+        Rect renderBounds = default;
+        SKRect clip = new(0, 0, 640, 360);
+
+        PixelSize size = TerminalTextureInteropDrawHandler.GetRenderTargetPixelSize(renderBounds, clip);
+
+        Assert.Equal(640, size.Width);
+        Assert.Equal(360, size.Height);
+    }
+
+    [Fact]
     public void RenderTargetProvider_WithoutPlatformLease_UsesSoftwareFallbackDescriptor()
     {
         AvaloniaSkiaRenderTargetProvider provider = new();
