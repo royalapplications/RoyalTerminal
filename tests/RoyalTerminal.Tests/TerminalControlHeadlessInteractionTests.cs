@@ -1034,6 +1034,135 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
+    public async Task Headless_MouseInput_EncodesBottomRowFromRenderedCellMetrics_WhenCellHeightIsFractional()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            preference: VtProcessorPreference.Managed);
+        control.Width = 640;
+        control.Height = 400;
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            Assert.NotNull(control.Renderer);
+
+            const float fractionalCellHeight = 15.5f;
+            control.Renderer!.SetCellSize(control.Renderer.CellWidth, fractionalCellHeight);
+            control.WriteOutput("\x1b[?1000h\x1b[?1006h"u8);
+            Dispatcher.UIThread.RunJobs();
+
+            transport.Inputs.Clear();
+
+            int targetColumn = 9;
+            int targetRow = control.Rows - 1;
+            Point point = await GetCellInteractionPointAsync(control, window, targetColumn, targetRow);
+            RaiseMousePressReleaseSequence(control, window, point);
+            Dispatcher.UIThread.RunJobs();
+
+            bool pressSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(static input =>
+                    TryParseSgrMouseInput(input, out SgrMouseReport report) && !report.IsRelease),
+                TimeSpan.FromSeconds(2));
+            Assert.True(pressSent);
+
+            SgrMouseReport pressReport = default;
+            bool foundPressReport = false;
+            foreach (byte[] input in transport.Inputs)
+            {
+                if (TryParseSgrMouseInput(input, out SgrMouseReport report) &&
+                    report.Code == 0 &&
+                    !report.IsRelease)
+                {
+                    pressReport = report;
+                    foundPressReport = true;
+                    break;
+                }
+            }
+
+            Assert.True(foundPressReport);
+
+            // xterm.js uses fractional CSS cell metrics for mouse cells; Ghostty
+            // and Windows Terminal use the same pixel grid as rendering. The
+            // visual bottom row must therefore encode as the terminal bottom row.
+            Assert.Equal(targetColumn + 1, pressReport.Column);
+            Assert.Equal(control.Rows, pressReport.Row);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.StopPty);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_MouseInput_UsesNativeEncoder_WhenCellHeightIsFractional()
+    {
+        RecordingTransport transport = new();
+        NativePointerRecordingVtProcessorFactory vtFactory = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            vtFactory,
+            VtProcessorPreference.Managed);
+        control.Width = 640;
+        control.Height = 400;
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            Assert.NotNull(control.Renderer);
+            Assert.NotNull(vtFactory.LastProcessor);
+
+            const float fractionalCellHeight = 15.5f;
+            control.Renderer!.SetCellSize(control.Renderer.CellWidth, fractionalCellHeight);
+            control.WriteOutput("\x1b[?1000h\x1b[?1006h"u8);
+            Dispatcher.UIThread.RunJobs();
+
+            transport.Inputs.Clear();
+
+            Point point = await GetCellInteractionPointAsync(control, window, column: 3, row: control.Rows - 1);
+            RaiseMousePressReleaseSequence(control, window, point);
+            Dispatcher.UIThread.RunJobs();
+
+            NativePointerRecordingVtProcessor processor = vtFactory.LastProcessor!;
+            bool nativePointerSent = await WaitUntilAsync(
+                () => processor.PointerEvents.Count > 0 &&
+                      transport.Inputs.Any(static input =>
+                          input.Length == 1 && input[0] == NativePointerRecordingVtProcessor.EncodedPointerByte),
+                TimeSpan.FromSeconds(2));
+            Assert.True(nativePointerSent);
+
+            TerminalPointerEvent nativePointerEvent = processor.PointerEvents[0];
+            TerminalPointerEncodingContext context = processor.Contexts[0];
+            double expectedScale = Math.Ceiling(fractionalCellHeight) / fractionalCellHeight;
+
+            Assert.True(nativePointerEvent.Y > point.Y);
+            Assert.InRange(Math.Abs(nativePointerEvent.Y - (point.Y * expectedScale)), 0, 0.5);
+            Assert.Equal((int)Math.Ceiling(fractionalCellHeight), context.CellHeightPx);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.StopPty);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Headless_MouseInput_EncodesSgrReleaseToTransport_WhenMode1006Enabled()
     {
         RecordingTransport transport = new();
@@ -1573,6 +1702,35 @@ public sealed class TerminalControlHeadlessInteractionTests
                text.StartsWith("\x1b[M", StringComparison.Ordinal);
     }
 
+    private static bool TryParseSgrMouseInput(byte[] input, out SgrMouseReport report)
+    {
+        report = default;
+        string text = Encoding.ASCII.GetString(input);
+        if (!text.StartsWith("\x1b[<", StringComparison.Ordinal) ||
+            text.Length < 6)
+        {
+            return false;
+        }
+
+        char suffix = text[^1];
+        if (suffix is not ('M' or 'm'))
+        {
+            return false;
+        }
+
+        string[] parts = text[3..^1].Split(';');
+        if (parts.Length != 3 ||
+            !int.TryParse(parts[0], out int code) ||
+            !int.TryParse(parts[1], out int column) ||
+            !int.TryParse(parts[2], out int row))
+        {
+            return false;
+        }
+
+        report = new SgrMouseReport(code, column, row, suffix == 'm');
+        return true;
+    }
+
     private static bool IsSgrReleaseMouseProtocolInput(byte[] input)
     {
         if (!IsMouseProtocolInput(input))
@@ -1584,6 +1742,8 @@ public sealed class TerminalControlHeadlessInteractionTests
         return text.StartsWith("\x1b[<0;", StringComparison.Ordinal) &&
                text.EndsWith("m", StringComparison.Ordinal);
     }
+
+    private readonly record struct SgrMouseReport(int Code, int Column, int Row, bool IsRelease);
 
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
     {
@@ -2687,6 +2847,91 @@ public sealed class TerminalControlHeadlessInteractionTests
             _ = data;
             Interlocked.Increment(ref _processCallCount);
             ResponseCallback?.Invoke("\x1b[0n"u8.ToArray());
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            _ = columns;
+            _ = rows;
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            _ = columns;
+            _ = rows;
+            _ = widthPx;
+            _ = heightPx;
+        }
+
+        public void Reset()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class NativePointerRecordingVtProcessorFactory : IVtProcessorFactory
+    {
+        public NativePointerRecordingVtProcessor? LastProcessor { get; private set; }
+
+        public IVtProcessor Create(global::RoyalTerminal.Avalonia.Rendering.TerminalScreen screen, VtProcessorPreference preference)
+        {
+            _ = screen;
+            _ = preference;
+            NativePointerRecordingVtProcessor processor = new();
+            LastProcessor = processor;
+            return processor;
+        }
+    }
+
+    private sealed class NativePointerRecordingVtProcessor : IVtProcessor, ITerminalPointerSequenceEncoderSource
+    {
+        public const byte EncodedPointerByte = 0x4E;
+
+        public List<TerminalPointerEvent> PointerEvents { get; } = [];
+        public List<TerminalPointerEncodingContext> Contexts { get; } = [];
+        public int CursorCol => 0;
+        public int CursorRow => 0;
+        public bool CursorVisible => true;
+        public bool ApplicationCursorKeys => false;
+        public bool ApplicationKeypad => false;
+        public bool AlternateScreen => false;
+        public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
+        public TerminalModeState ModeState => new(
+            CursorVisible,
+            ApplicationCursorKeys,
+            ApplicationKeypad,
+            AlternateScreen,
+            BracketedPaste,
+            Win32InputMode);
+
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Action<byte[]>? ResponseCallback { get; set; }
+        public Action? BellCallback { get; set; }
+        public Action<string>? TitleCallback { get; set; }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            _ = data;
+        }
+
+        public bool TryEncodePointer(
+            in TerminalPointerEvent pointerEvent,
+            in TerminalPointerEncodingContext context,
+            out byte[] sequence)
+        {
+            PointerEvents.Add(pointerEvent);
+            Contexts.Add(context);
+            sequence = [EncodedPointerByte];
+            return true;
         }
 
         public void NotifyResize(int columns, int rows)
