@@ -45,6 +45,7 @@ features:
 - [API Reference](/api/)
 - [Embedding In Avalonia](/articles/avalonia-control)
 - [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings)
+- [Capture Formats](/articles/capture-formats)
 - [Regex Text Highlighting](/articles/text-highlighting)
 - [Transports And Remote Access](/articles/transports)
 - [Terminal Engine And Screen State](/articles/vt-modes)
