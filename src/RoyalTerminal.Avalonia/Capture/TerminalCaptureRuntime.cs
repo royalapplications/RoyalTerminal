@@ -45,6 +45,7 @@ public sealed class TerminalCaptureRuntime : IDisposable
         _control = control ?? throw new ArgumentNullException(nameof(control));
         _control.DataReceived += OnDataReceived;
         _control.TerminalResized += OnTerminalResized;
+        _control.ProcessExited += OnProcessExited;
         _control.TerminalSessionService.InputSent += OnInputSent;
 
         _replayTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -265,6 +266,7 @@ public sealed class TerminalCaptureRuntime : IDisposable
 
         _control.DataReceived -= OnDataReceived;
         _control.TerminalResized -= OnTerminalResized;
+        _control.ProcessExited -= OnProcessExited;
         _control.TerminalSessionService.InputSent -= OnInputSent;
 
         StateChanged = null;
@@ -353,6 +355,10 @@ public sealed class TerminalCaptureRuntime : IDisposable
                 {
                     _control.Rows = replayEvent.Rows;
                 }
+                break;
+
+            case TerminalCaptureEventKind.Marker:
+            case TerminalCaptureEventKind.Exit:
                 break;
         }
     }
@@ -444,6 +450,17 @@ public sealed class TerminalCaptureRuntime : IDisposable
         }
 
         _recorder.CaptureResize(e.Columns, e.Rows);
+    }
+
+    private void OnProcessExited(object? sender, int exitCode)
+    {
+        _ = sender;
+        if (!IsCaptureActive)
+        {
+            return;
+        }
+
+        _recorder.CaptureExit(exitCode);
     }
 
     private static long GetElapsedMilliseconds(long startTimestamp)
