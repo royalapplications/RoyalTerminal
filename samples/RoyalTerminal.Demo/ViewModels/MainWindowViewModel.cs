@@ -138,6 +138,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     private double _replayDurationSeconds;
     private double _replayTimelineValue;
     private string _replaySourceLabel = string.Empty;
+    private readonly IReadOnlyList<TerminalCaptureFormatOption> _captureFormats;
+    private TerminalCaptureFormatOption _selectedCaptureFormat;
     private string _searchQuery = string.Empty;
     private int _searchMatchTotal;
     private int _searchMatchSelected = -1;
@@ -161,6 +163,8 @@ public sealed class MainWindowViewModel : ReactiveObject
         InitializeModeThemes();
         _shaderSamples = TerminalShaderSampleCatalog.Options;
         _selectedShaderSample = _shaderSamples[0];
+        _captureFormats = CreateCaptureFormatOptions();
+        _selectedCaptureFormat = _captureFormats[0];
 
         _settingsCategories =
         [
@@ -625,6 +629,25 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public string ReplayTimelineText
         => $"{FormatDuration(ReplayTimelineValue)} / {FormatDuration(ReplayDurationSeconds)}";
+
+    public IReadOnlyList<TerminalCaptureFormatOption> CaptureFormats => _captureFormats;
+
+    public TerminalCaptureFormatOption SelectedCaptureFormat
+    {
+        get => _selectedCaptureFormat;
+        set
+        {
+            if (value is null || string.Equals(
+                    _selectedCaptureFormat.FormatId,
+                    value.FormatId,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _selectedCaptureFormat, value);
+        }
+    }
 
     public string SearchQuery
     {
@@ -1815,6 +1838,21 @@ public sealed class MainWindowViewModel : ReactiveObject
         return duration.ToString(@"mm\:ss", CultureInfo.InvariantCulture);
     }
 
+    private static IReadOnlyList<TerminalCaptureFormatOption> CreateCaptureFormatOptions()
+    {
+        IReadOnlyList<ITerminalCaptureSessionFormat> formats = TerminalCaptureSessionFormats.BuiltIn;
+        TerminalCaptureFormatOption[] options = new TerminalCaptureFormatOption[formats.Count];
+        for (int i = 0; i < formats.Count; i++)
+        {
+            ITerminalCaptureSessionFormat format = formats[i];
+            options[i] = new TerminalCaptureFormatOption(
+                format.Descriptor.Id,
+                format.Descriptor.DisplayName);
+        }
+
+        return options;
+    }
+
     private static bool ContainsShellProfile(IReadOnlyList<ShellProfileOption> profiles, string id)
     {
         for (int i = 0; i < profiles.Count; i++)
@@ -1940,6 +1978,11 @@ public sealed class MainWindowViewModel : ReactiveObject
 public sealed record TransportModeOption(string Id, string DisplayName);
 
 public sealed record ShellProfileOption(string Id, string DisplayName, string CommandPath);
+
+/// <summary>
+/// User-selectable terminal capture file format option.
+/// </summary>
+public sealed record TerminalCaptureFormatOption(string FormatId, string DisplayName);
 
 public sealed record SettingsCategoryOption(string Id, string DisplayName)
 {

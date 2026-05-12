@@ -1594,15 +1594,16 @@ internal sealed class MainWindowController
 
         try
         {
+            ITerminalCaptureSessionFormat selectedFormat = GetSelectedCaptureFormat();
             FilePickerSaveOptions options = new()
             {
                 Title = "Save Terminal Capture",
-                SuggestedFileName = CreateCaptureFileName(),
-                DefaultExtension = "json",
+                SuggestedFileName = CreateCaptureFileName(selectedFormat.Descriptor),
+                DefaultExtension = selectedFormat.Descriptor.DefaultExtension.TrimStart('.'),
                 ShowOverwritePrompt = true,
                 FileTypeChoices =
                 [
-                    CreateCaptureFileType(),
+                    CreateCaptureFileType(selectedFormat.Descriptor),
                 ],
             };
 
@@ -1613,10 +1614,10 @@ internal sealed class MainWindowController
             }
 
             await using Stream stream = await file.OpenWriteAsync();
-            await TerminalCaptureSessionSerializer.SaveAsync(session, stream);
+            await selectedFormat.SaveAsync(session, stream);
             await stream.FlushAsync();
 
-            UpdateStatus($"Capture saved to '{file.Name}'.");
+            UpdateStatus($"Capture saved to '{file.Name}' ({selectedFormat.Descriptor.DisplayName}).");
         }
         catch (Exception ex)
         {
@@ -1644,7 +1645,9 @@ internal sealed class MainWindowController
                 AllowMultiple = false,
                 FileTypeFilter =
                 [
-                    CreateCaptureFileType(),
+                    CreateAllCaptureFileType(),
+                    CreateCaptureFileType(TerminalCaptureSessionFormats.RoyalTerminalJson.Descriptor),
+                    CreateCaptureFileType(TerminalCaptureSessionFormats.AsciicastV3.Descriptor),
                 ],
             };
 
@@ -1656,7 +1659,8 @@ internal sealed class MainWindowController
 
             IStorageFile file = files[0];
             await using Stream stream = await file.OpenReadAsync();
-            TerminalCaptureSession session = await TerminalCaptureSessionSerializer.LoadAsync(stream);
+            TerminalCaptureSession session = await TerminalCaptureSessionFormats.DefaultRegistry
+                .LoadAsync(stream, file.Name);
 
             CreateReplayTab(session, file.Name);
             SyncCaptureReplayState();
@@ -1806,13 +1810,79 @@ internal sealed class MainWindowController
         }
     }
 
-    private static FilePickerFileType CreateCaptureFileType()
+    private ITerminalCaptureSessionFormat GetSelectedCaptureFormat()
     {
-        return new FilePickerFileType("RoyalTerminal Capture")
+        return TerminalCaptureSessionFormats.DefaultRegistry.FindById(_viewModel.SelectedCaptureFormat.FormatId)
+            ?? TerminalCaptureSessionFormats.RoyalTerminalJson;
+    }
+
+    private static FilePickerFileType CreateAllCaptureFileType()
+    {
+        IReadOnlyList<ITerminalCaptureSessionFormat> formats = TerminalCaptureSessionFormats.BuiltIn;
+        List<string> patterns = [];
+        List<string> mimeTypes = [];
+        for (int i = 0; i < formats.Count; i++)
         {
-            Patterns = ["*.rtcap.json", "*.json"],
-            MimeTypes = ["application/json"],
+            AddFileTypeValues(formats[i].Descriptor, patterns, mimeTypes);
+        }
+
+        return new FilePickerFileType("Terminal Capture")
+        {
+            Patterns = patterns,
+            MimeTypes = mimeTypes,
         };
+    }
+
+    private static FilePickerFileType CreateCaptureFileType(TerminalCaptureFileFormatDescriptor descriptor)
+    {
+        List<string> patterns = [];
+        List<string> mimeTypes = [];
+        AddFileTypeValues(descriptor, patterns, mimeTypes);
+
+        return new FilePickerFileType(descriptor.DisplayName)
+        {
+            Patterns = patterns,
+            MimeTypes = mimeTypes,
+        };
+    }
+
+    private static void AddFileTypeValues(
+        TerminalCaptureFileFormatDescriptor descriptor,
+        List<string> patterns,
+        List<string> mimeTypes)
+    {
+        IReadOnlyList<string> extensions = descriptor.FileExtensions;
+        for (int i = 0; i < extensions.Count; i++)
+        {
+            string pattern = $"*{extensions[i]}";
+            if (!ContainsOrdinalIgnoreCase(patterns, pattern))
+            {
+                patterns.Add(pattern);
+            }
+        }
+
+        IReadOnlyList<string> descriptorMimeTypes = descriptor.MimeTypes;
+        for (int i = 0; i < descriptorMimeTypes.Count; i++)
+        {
+            string mimeType = descriptorMimeTypes[i];
+            if (!ContainsOrdinalIgnoreCase(mimeTypes, mimeType))
+            {
+                mimeTypes.Add(mimeType);
+            }
+        }
+    }
+
+    private static bool ContainsOrdinalIgnoreCase(IReadOnlyList<string> values, string value)
+    {
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (string.Equals(values[i], value, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static FilePickerFileType CreateFontFileType()
@@ -1824,9 +1894,9 @@ internal sealed class MainWindowController
         };
     }
 
-    private static string CreateCaptureFileName()
+    private static string CreateCaptureFileName(TerminalCaptureFileFormatDescriptor descriptor)
     {
-        return $"terminal-capture-{DateTime.UtcNow:yyyyMMdd-HHmmss}.rtcap.json";
+        return $"terminal-capture-{DateTime.UtcNow:yyyyMMdd-HHmmss}{descriptor.DefaultExtension}";
     }
 
     #endregion

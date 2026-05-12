@@ -109,6 +109,18 @@
                   FontSize="10" Padding="8,2"
                   Command="{Binding ToggleCaptureCommand}"
                   ToolTip.Tip="Start or stop capture for the active standalone terminal tab" />
+          <ComboBox Width="132"
+                    Height="24"
+                    FontSize="10"
+                    ItemsSource="{Binding CaptureFormats}"
+                    SelectedItem="{Binding SelectedCaptureFormat}"
+                    ToolTip.Tip="Recording file format used when saving captures">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:TerminalCaptureFormatOption">
+                <TextBlock Text="{Binding DisplayName}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
           <Button Content="Save Capture" Height="24"
                   FontSize="10" Padding="8,2"
                   IsEnabled="{Binding CanSaveCapture}"
