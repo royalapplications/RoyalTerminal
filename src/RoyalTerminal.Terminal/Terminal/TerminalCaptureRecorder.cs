@@ -22,6 +22,7 @@ public sealed class TerminalCaptureRecorder
     private int _lastResizeColumns = 80;
     private int _lastResizeRows = 24;
     private long _durationMilliseconds;
+    private bool _exitCaptured;
     private volatile bool _isCapturing;
 
     /// <summary>Gets whether capture recording is active.</summary>
@@ -42,6 +43,7 @@ public sealed class TerminalCaptureRecorder
             _lastResizeColumns = _initialColumns;
             _lastResizeRows = _initialRows;
             _durationMilliseconds = 0;
+            _exitCaptured = false;
             _stopwatch.Restart();
             _isCapturing = true;
         }
@@ -74,6 +76,7 @@ public sealed class TerminalCaptureRecorder
             _events.Clear();
             _stopwatch.Reset();
             _durationMilliseconds = 0;
+            _exitCaptured = false;
             _isCapturing = false;
             _transportId = null;
             _createdUtc = DateTimeOffset.UtcNow;
@@ -141,6 +144,38 @@ public sealed class TerminalCaptureRecorder
             });
             _lastResizeColumns = safeColumns;
             _lastResizeRows = safeRows;
+            if (offsetMilliseconds > _durationMilliseconds)
+            {
+                _durationMilliseconds = offsetMilliseconds;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Captures the active process exit code.
+    /// </summary>
+    public void CaptureExit(int exitCode)
+    {
+        if (!_isCapturing)
+        {
+            return;
+        }
+
+        lock (_sync)
+        {
+            if (!_isCapturing || _exitCaptured)
+            {
+                return;
+            }
+
+            long offsetMilliseconds = _stopwatch.ElapsedMilliseconds;
+            _events.Add(new TerminalCaptureEvent
+            {
+                OffsetMilliseconds = offsetMilliseconds,
+                Kind = TerminalCaptureEventKind.Exit,
+                ExitCode = exitCode,
+            });
+            _exitCaptured = true;
             if (offsetMilliseconds > _durationMilliseconds)
             {
                 _durationMilliseconds = offsetMilliseconds;

@@ -128,12 +128,18 @@ RoyalTerminal also treats captures as durable documents. That makes them useful 
 
 | Type | Purpose |
 | --- | --- |
-| `TerminalCaptureEventKind` | Output, input, or resize capture event kind. |
+| `TerminalCaptureEventKind` | Output, input, resize, marker, and exit capture event kind. |
 | `TerminalCaptureEvent` | One captured event with a relative timestamp. |
 | `TerminalCaptureSession` | Serializable capture session document. |
 | `TerminalCaptureRecorder` | Runtime recorder for capture events. |
-| `TerminalCaptureSessionSerializer` | Capture session serializer. |
+| `TerminalCaptureSessionSerializer` | Native JSON capture serializer plus explicit-format overloads. |
+| `ITerminalCaptureSessionFormat` | Pluggable capture file format contract. |
+| `TerminalCaptureFileFormatDescriptor` | Format id, display name, extensions, and MIME types for hosts and file pickers. |
+| `TerminalCaptureSessionFormatRegistry` | Format lookup, save by id, and load probing by file name/content. |
+| `TerminalCaptureSessionFormats` | Built-in RoyalTerminal JSON and asciicast v3 formats. |
 | `TerminalCaptureRuntime` | Avalonia-facing capture and replay runtime bound to a control. |
+
+Use RoyalTerminal JSON (`.rtcap.json`) when capture fidelity matters most. Use asciicast v3 (`.cast`) when interoperability with asciinema-compatible tooling matters. See [Capture Formats](/articles/capture-formats) for the event mapping, extension model, and demo app behavior.
 
 ## Shell profiles and defaults
 

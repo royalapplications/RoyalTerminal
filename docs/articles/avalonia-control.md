@@ -141,9 +141,9 @@ RoyalTerminal keeps common clipboard-style shortcuts configurable instead of har
 
 ## Capture and replay in the UI layer
 
-Capture and replay are designed like Ghostty's higher-level feature docs: the public surface is small, but it sits on top of a more detailed runtime. In Avalonia, the entry point is `TerminalCaptureRuntime`. It subscribes to `TerminalControl` events and the session service, records output, input, and resizes, and can play the session back into the same control on a timeline.
+Capture and replay are designed like Ghostty's higher-level feature docs: the public surface is small, but it sits on top of a more detailed runtime. In Avalonia, the entry point is `TerminalCaptureRuntime`. It subscribes to `TerminalControl` events and the session service, records output, input, resizes, and process exits, and can play the session back into the same control on a timeline.
 
-If you are building a debugging, support, or teaching workflow, this is the feature to start with. The persistence format and recorder types are covered in [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings).
+If you are building a debugging, support, or teaching workflow, this is the feature to start with. The recorder types are covered in [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings), and the RoyalTerminal JSON/asciicast v3 persistence layer is covered in [Capture Formats](/articles/capture-formats).
 
 ## Adding a settings surface
 

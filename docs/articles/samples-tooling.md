@@ -16,7 +16,7 @@ The main Avalonia demo is the most complete integration example. It includes:
 - a tabbed settings flyout
 - profile CRUD and default-profile handling
 - session logging and event logging
-- capture and replay
+- capture and replay with selectable RoyalTerminal JSON or asciicast v3 files
 - search
 - theme presets and generated themes
 - framebuffer shader samples
@@ -44,7 +44,7 @@ The demo toolbar includes a shader button that cycles through built-in post-proc
 - `Windows Terminal CRT`
 - `Ghostty Shadertoy`
 
-The sample catalog is documented in [Applying Shaders](/articles/shaders-applying#demo-app-samples). The compatibility details are covered in [Shader Support](/articles/shaders).
+The capture persistence behavior is covered in [Capture Formats](/articles/capture-formats). The sample catalog is documented in [Applying Shaders](/articles/shaders-applying#demo-app-samples). The compatibility details are covered in [Shader Support](/articles/shaders).
 
 ## `RoyalTerminal.ControlCatalog`
 

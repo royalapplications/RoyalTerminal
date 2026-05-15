@@ -19,6 +19,12 @@ public enum TerminalCaptureEventKind
 
     /// <summary>Terminal grid resize event.</summary>
     Resize = 2,
+
+    /// <summary>Timeline marker used by recording formats that support navigation anchors.</summary>
+    Marker = 3,
+
+    /// <summary>Recorded process exit status.</summary>
+    Exit = 4,
 }
 
 /// <summary>
@@ -43,6 +49,12 @@ public sealed record TerminalCaptureEvent
 
     /// <summary>Captured row count for resize events.</summary>
     public int Rows { get; init; }
+
+    /// <summary>Optional marker label for <see cref="TerminalCaptureEventKind.Marker"/> events.</summary>
+    public string? Label { get; init; }
+
+    /// <summary>Captured process exit code for <see cref="TerminalCaptureEventKind.Exit"/> events.</summary>
+    public int ExitCode { get; init; }
 }
 
 /// <summary>

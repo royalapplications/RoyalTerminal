@@ -156,9 +156,13 @@ Capture/replay is available for `TerminalControl` and is designed to be reusable
   - terminal output bytes
   - terminal input bytes sent through session routing
   - terminal resize events
+  - process exit status events
+  - marker events when loaded from formats that support them
 - **Persistence**:
-  - JSON file format via `TerminalCaptureSessionSerializer`
-  - recommended extension: `.rtcap.json`
+  - native RoyalTerminal JSON via `TerminalCaptureSessionSerializer`
+  - asciicast v3 via `TerminalCaptureSessionFormats.AsciicastV3`
+  - pluggable formats via `ITerminalCaptureSessionFormat` and `TerminalCaptureSessionFormatRegistry`
+  - recommended extensions: `.rtcap.json` and `.cast`
 - **Replay controls**:
   - play, pause, stop, and seek by timeline position
   - replay surface reset to captured initial dimensions
@@ -168,8 +172,9 @@ Capture/replay is available for `TerminalControl` and is designed to be reusable
 The demo toolbar includes:
 
 - `Start Capture` / `Stop Capture`
-- `Save Capture` (writes capture session to file)
-- `Load Replay` (opens a capture file in a replay tab)
+- capture format selector (`RoyalTerminal JSON` or `Asciicast v3`)
+- `Save Capture` (writes the capture session using the selected format)
+- `Load Replay` (opens RoyalTerminal JSON or asciicast v3 capture files in a replay tab)
 - `Settings` (opens tabbed session/profile editor with explicit `Apply` and `Save`)
 
 When replay is active, the replay timeline bar is shown with play/pause, stop, slider seek, elapsed/total display, and source label.
@@ -183,7 +188,13 @@ When replay is active, the replay timeline bar is shown with play/pause, stop, s
 - `RoyalTerminal.Terminal.TerminalCaptureSession`
   - serializable capture payload (metadata + ordered events)
 - `RoyalTerminal.Terminal.TerminalCaptureSessionSerializer`
-  - stream/file load + save helpers
+  - stream/file load + save helpers for native JSON plus explicit-format overloads
+- `RoyalTerminal.Terminal.ITerminalCaptureSessionFormat`
+  - pluggable recording format contract
+- `RoyalTerminal.Terminal.TerminalCaptureSessionFormatRegistry`
+  - format lookup, save by id, and load probing
+- `RoyalTerminal.Terminal.TerminalCaptureSessionFormats`
+  - built-in RoyalTerminal JSON and asciicast v3 format instances
 
 ```csharp
 using RoyalTerminal.Avalonia.Capture;
@@ -199,9 +210,17 @@ terminal.WriteOutput("file1\nfile2\n"u8);
 
 TerminalCaptureSession captured = captureRuntime.StopCapture();
 await TerminalCaptureSessionSerializer.SaveToFileAsync(captured, "session.rtcap.json");
+await TerminalCaptureSessionSerializer.SaveToFileAsync(
+    captured,
+    "session.cast",
+    TerminalCaptureSessionFormats.AsciicastV3);
 
 TerminalCaptureSession loaded =
     await TerminalCaptureSessionSerializer.LoadFromFileAsync("session.rtcap.json");
+
+await using FileStream asciicast = File.OpenRead("session.cast");
+TerminalCaptureSession loadedAsciicast =
+    await TerminalCaptureSessionFormats.DefaultRegistry.LoadAsync(asciicast, "session.cast");
 
 captureRuntime.LoadReplay(loaded, "session.rtcap.json");
 captureRuntime.PlayReplay();
