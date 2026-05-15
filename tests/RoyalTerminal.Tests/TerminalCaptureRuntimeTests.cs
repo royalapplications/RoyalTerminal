@@ -6,6 +6,7 @@ using System.Text;
 using Avalonia.Headless.XUnit;
 using RoyalTerminal.Avalonia.Capture;
 using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
 using Xunit;
 
@@ -87,6 +88,72 @@ public sealed class TerminalCaptureRuntimeTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task TerminalCaptureRuntime_PausedReplayResize_RebuildsCurrentFrameAtControlSize()
+    {
+        TerminalControl control = new()
+        {
+            Columns = 20,
+            Rows = 6,
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        TerminalCaptureRuntime runtime = new(control);
+        TerminalCaptureSession replay = new()
+        {
+            InitialColumns = 20,
+            InitialRows = 6,
+            Events =
+            [
+                new TerminalCaptureEvent
+                {
+                    OffsetMilliseconds = 0,
+                    Kind = TerminalCaptureEventKind.Output,
+                    Data = Encoding.UTF8.GetBytes(
+                        "\x1b[?1049h\x1b[2J\x1b[H0123456789ABCDEFGHIJ0123456789END"),
+                },
+                new TerminalCaptureEvent
+                {
+                    OffsetMilliseconds = 50,
+                    Kind = TerminalCaptureEventKind.Resize,
+                    Columns = 20,
+                    Rows = 6,
+                },
+                new TerminalCaptureEvent
+                {
+                    OffsetMilliseconds = 100,
+                    Kind = TerminalCaptureEventKind.Output,
+                    Data = Encoding.UTF8.GetBytes("\x1b[6;1HNEXT"),
+                },
+            ],
+        };
+
+        try
+        {
+            runtime.LoadReplay(replay, "static.cast");
+            runtime.SeekReplay(0.05);
+
+            Assert.True(ContainsScreenText(control, "END"));
+            Assert.Equal(0.05, runtime.ReplayPositionSeconds, 2);
+
+            control.Columns = 10;
+
+            Assert.Equal(10, control.Columns);
+            Assert.Equal(10, control.Screen!.Columns);
+            Assert.Equal(0.05, runtime.ReplayPositionSeconds, 2);
+            Assert.True(ContainsScreenText(control, "END"));
+
+            runtime.SeekReplay(0.10);
+
+            Assert.Equal(0.10, runtime.ReplayPositionSeconds, 2);
+            Assert.True(ContainsScreenText(control, "NEXT"));
+        }
+        finally
+        {
+            runtime.Dispose();
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
     private sealed class FakeTerminalEndpoint : ITerminalEndpoint
     {
         public void SendText(ReadOnlySpan<byte> utf8)
@@ -104,5 +171,32 @@ public sealed class TerminalCaptureRuntimeTests
             _ = widthPx;
             _ = heightPx;
         }
+    }
+
+    private static bool ContainsScreenText(TerminalControl control, string needle)
+    {
+        TerminalScreen? screen = control.Screen;
+        if (screen is null)
+        {
+            return false;
+        }
+
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            TerminalRow terminalRow = screen.GetViewportRow(row);
+            char[] chars = new char[terminalRow.Columns];
+            for (int column = 0; column < terminalRow.Columns; column++)
+            {
+                int codepoint = terminalRow[column].Codepoint;
+                chars[column] = codepoint <= 0 ? ' ' : codepoint <= 0x7F ? (char)codepoint : '?';
+            }
+
+            if (new string(chars).Contains(needle, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

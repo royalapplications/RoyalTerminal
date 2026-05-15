@@ -34,6 +34,8 @@ public sealed class TerminalCaptureRuntime : IDisposable
     private long _replayStartOffsetMilliseconds;
     private long _replayStartTimestamp;
     private bool _isReplayPlaying;
+    private bool _isApplyingReplayTimeline;
+    private bool _isRebuildingReplayForResize;
     private bool _disposed;
 
     /// <summary>
@@ -286,15 +288,24 @@ public sealed class TerminalCaptureRuntime : IDisposable
         long clampedTarget = Math.Clamp(targetMilliseconds, 0, duration);
         bool requiresReset = forceReset || clampedTarget < _replayPositionMilliseconds;
 
-        if (requiresReset)
+        bool wasApplyingReplayTimeline = _isApplyingReplayTimeline;
+        _isApplyingReplayTimeline = true;
+        try
         {
-            ResetReplaySurface();
-            _replayNextEventIndex = 0;
-            _replayPositionMilliseconds = 0;
-        }
+            if (requiresReset)
+            {
+                ResetReplaySurface(restoreCapturedInitialSize: true);
+                _replayNextEventIndex = 0;
+                _replayPositionMilliseconds = 0;
+            }
 
-        ApplyEventsUntil(clampedTarget);
-        _replayPositionMilliseconds = clampedTarget;
+            ApplyEventsUntil(clampedTarget);
+            _replayPositionMilliseconds = clampedTarget;
+        }
+        finally
+        {
+            _isApplyingReplayTimeline = wasApplyingReplayTimeline;
+        }
 
         if (wasPlaying)
         {
@@ -308,28 +319,37 @@ public sealed class TerminalCaptureRuntime : IDisposable
         }
     }
 
-    private void ApplyEventsUntil(long targetMilliseconds)
+    private void ApplyEventsUntil(long targetMilliseconds, bool applyRecordedResizeEvents = true)
     {
         if (_replaySession is null)
         {
             return;
         }
 
-        IReadOnlyList<TerminalCaptureEvent> events = _replaySession.Events;
-        while (_replayNextEventIndex < events.Count)
+        bool wasApplyingReplayTimeline = _isApplyingReplayTimeline;
+        _isApplyingReplayTimeline = true;
+        try
         {
-            TerminalCaptureEvent replayEvent = events[_replayNextEventIndex];
-            if (replayEvent.OffsetMilliseconds > targetMilliseconds)
+            IReadOnlyList<TerminalCaptureEvent> events = _replaySession.Events;
+            while (_replayNextEventIndex < events.Count)
             {
-                break;
-            }
+                TerminalCaptureEvent replayEvent = events[_replayNextEventIndex];
+                if (replayEvent.OffsetMilliseconds > targetMilliseconds)
+                {
+                    break;
+                }
 
-            ApplyReplayEvent(replayEvent);
-            _replayNextEventIndex++;
+                ApplyReplayEvent(replayEvent, applyRecordedResizeEvents);
+                _replayNextEventIndex++;
+            }
+        }
+        finally
+        {
+            _isApplyingReplayTimeline = wasApplyingReplayTimeline;
         }
     }
 
-    private void ApplyReplayEvent(TerminalCaptureEvent replayEvent)
+    private void ApplyReplayEvent(TerminalCaptureEvent replayEvent, bool applyRecordedResizeEvents)
     {
         switch (replayEvent.Kind)
         {
@@ -346,6 +366,11 @@ public sealed class TerminalCaptureRuntime : IDisposable
                 break;
 
             case TerminalCaptureEventKind.Resize:
+                if (!applyRecordedResizeEvents)
+                {
+                    break;
+                }
+
                 if (replayEvent.Columns > 0)
                 {
                     _control.Columns = replayEvent.Columns;
@@ -363,20 +388,57 @@ public sealed class TerminalCaptureRuntime : IDisposable
         }
     }
 
-    private void ResetReplaySurface()
+    private void ResetReplaySurface(bool restoreCapturedInitialSize)
     {
         if (_control.HasActiveSession || _control.HasPty)
         {
             _control.StopPty();
         }
 
-        if (_replaySession is not null)
+        if (restoreCapturedInitialSize && _replaySession is not null)
         {
             _control.Columns = Math.Max(1, _replaySession.InitialColumns);
             _control.Rows = Math.Max(1, _replaySession.InitialRows);
         }
 
         _control.WriteOutput(ResetTerminalSequence);
+    }
+
+    private void RebuildReplaySurfaceForControlResize()
+    {
+        if (_replaySession is null ||
+            _isApplyingReplayTimeline ||
+            _isRebuildingReplayForResize)
+        {
+            return;
+        }
+
+        long targetMilliseconds = GetCurrentReplayPositionMilliseconds();
+        _isRebuildingReplayForResize = true;
+        bool wasApplyingReplayTimeline = _isApplyingReplayTimeline;
+        _isApplyingReplayTimeline = true;
+        try
+        {
+            // A replay has no live PTY/application to repaint after a host resize.
+            // Rebuild the current timeline frame at the control's new grid instead
+            // of waiting for the next captured output event.
+            ResetReplaySurface(restoreCapturedInitialSize: false);
+            _replayNextEventIndex = 0;
+            _replayPositionMilliseconds = 0;
+            ApplyEventsUntil(targetMilliseconds, applyRecordedResizeEvents: false);
+            _replayPositionMilliseconds = targetMilliseconds;
+
+            if (_isReplayPlaying)
+            {
+                _replayStartOffsetMilliseconds = targetMilliseconds;
+                _replayStartTimestamp = Stopwatch.GetTimestamp();
+            }
+        }
+        finally
+        {
+            _isApplyingReplayTimeline = wasApplyingReplayTimeline;
+            _isRebuildingReplayForResize = false;
+        }
     }
 
     private void PauseReplayInternal(bool raiseStateChanged)
@@ -444,12 +506,13 @@ public sealed class TerminalCaptureRuntime : IDisposable
     private void OnTerminalResized(object? sender, TerminalSizeEventArgs e)
     {
         _ = sender;
-        if (!IsCaptureActive)
+        if (IsCaptureActive)
         {
+            _recorder.CaptureResize(e.Columns, e.Rows);
             return;
         }
 
-        _recorder.CaptureResize(e.Columns, e.Rows);
+        RebuildReplaySurfaceForControlResize();
     }
 
     private void OnProcessExited(object? sender, int exitCode)
@@ -467,6 +530,24 @@ public sealed class TerminalCaptureRuntime : IDisposable
     {
         long elapsedTicks = Stopwatch.GetTimestamp() - startTimestamp;
         return (elapsedTicks * 1000) / Stopwatch.Frequency;
+    }
+
+    private long GetCurrentReplayPositionMilliseconds()
+    {
+        if (_replaySession is null)
+        {
+            return 0;
+        }
+
+        long duration = _replaySession.DurationMilliseconds;
+        if (!_isReplayPlaying)
+        {
+            return Math.Clamp(_replayPositionMilliseconds, 0, duration);
+        }
+
+        long elapsedMilliseconds = _replayStartOffsetMilliseconds
+            + GetElapsedMilliseconds(_replayStartTimestamp);
+        return Math.Min(elapsedMilliseconds, duration);
     }
 
     private void RaiseStateChanged()
