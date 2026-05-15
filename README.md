@@ -165,7 +165,8 @@ Capture/replay is available for `TerminalControl` and is designed to be reusable
   - recommended extensions: `.rtcap.json` and `.cast`
 - **Replay controls**:
   - play, pause, stop, and seek by timeline position
-  - replay surface reset to captured initial dimensions
+  - replay surface reset to captured initial dimensions on load, stop, and reset seeks
+  - paused or static replay frames rebuild at the current control size after host resize
 
 ### Demo Integration (`samples/RoyalTerminal.Demo`)
 
