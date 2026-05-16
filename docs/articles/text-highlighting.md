@@ -96,6 +96,8 @@ When using the renderer directly, the caller owns frame invalidation. `TerminalC
 
 `Static` is the default because terminal rows are usually redrawn far more often than their text changes. The cache is keyed by row object, row text hash, rule revision, column count, and light/dark theme state. Changing the rule set, changing the mode, or invalidating terminal rows causes the renderer to recalculate as needed.
 
+`TerminalControl` suspends regex text highlighting while an alternate-screen application is active. Full-screen TUIs own that buffer and often render dense pseudo-random text; host-side regex overlays can otherwise look like rendering artifacts. The configured `TextHighlightingMode` is restored when the processor leaves alternate screen.
+
 ## Color semantics
 
 Foreground and background are independent:
