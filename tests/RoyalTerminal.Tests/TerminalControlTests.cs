@@ -3230,6 +3230,47 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_AlternateScreenProcessorState_SuspendsTextHighlightingWithoutScreenFlag()
+    {
+        // Reference terminals treat alternate-screen content as the active app-owned buffer.
+        // xterm.js exposes normal/alternate buffers separately, Windows Terminal fixes the
+        // viewport to the alt buffer, and Ghostty formats only the active screen.
+        AlternateScreenOnlyVtProcessor processor = new();
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Managed);
+        control.TextHighlightingMode = TerminalTextHighlightingMode.Realtime;
+        control.TextHighlightRules =
+        [
+            new TerminalTextHighlightRule
+            {
+                Name = "Uppercase",
+                Pattern = "[A-Z]{2,}",
+                Background = 0xFFFFFFCC,
+            },
+        ];
+
+        Assert.NotNull(control.Renderer);
+        Assert.NotNull(control.Screen);
+        Assert.False(control.Screen!.AlternateBufferActive);
+        Assert.Equal(TerminalTextHighlightingMode.Realtime, control.Renderer!.TextHighlightingMode);
+
+        control.WriteOutput("alt-on"u8);
+
+        Assert.True(processor.AlternateScreen);
+        Assert.False(control.Screen.AlternateBufferActive);
+        Assert.Equal(TerminalTextHighlightingMode.Realtime, control.TextHighlightingMode);
+        Assert.Equal(TerminalTextHighlightingMode.Disabled, control.Renderer.TextHighlightingMode);
+
+        control.WriteOutput("alt-off"u8);
+
+        Assert.False(processor.AlternateScreen);
+        Assert.Equal(TerminalTextHighlightingMode.Realtime, control.TextHighlightingMode);
+        Assert.Equal(TerminalTextHighlightingMode.Realtime, control.Renderer.TextHighlightingMode);
+    }
+
+    [AvaloniaFact]
     public void Control_OffsetScroll_MarksViewportRowsDirty()
     {
         TerminalControl control = new()
@@ -6108,6 +6149,70 @@ public class TerminalControlTests
         {
             _ = selection;
             return SelectionExportText;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class AlternateScreenOnlyVtProcessor : IVtProcessor
+    {
+        public int CursorCol => 0;
+        public int CursorRow => 0;
+        public bool CursorVisible => true;
+        public bool ApplicationCursorKeys => false;
+        public bool ApplicationKeypad => false;
+        public bool AlternateScreen { get; private set; }
+        public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
+        public TerminalModeState ModeState => new(
+            CursorVisible,
+            ApplicationCursorKeys,
+            ApplicationKeypad,
+            AlternateScreen,
+            BracketedPaste,
+            Win32InputMode);
+
+        public event EventHandler<TerminalModeState>? ModeChanged;
+
+        public Action<byte[]>? ResponseCallback { get; set; }
+        public Action? BellCallback { get; set; }
+        public Action<string>? TitleCallback { get; set; }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            bool? nextAlternateScreen = data.SequenceEqual("alt-on"u8)
+                ? true
+                : data.SequenceEqual("alt-off"u8)
+                    ? false
+                    : null;
+            if (nextAlternateScreen is null || AlternateScreen == nextAlternateScreen.Value)
+            {
+                return;
+            }
+
+            AlternateScreen = nextAlternateScreen.Value;
+            ModeChanged?.Invoke(this, ModeState);
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            _ = columns;
+            _ = rows;
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            _ = columns;
+            _ = rows;
+            _ = widthPx;
+            _ = heightPx;
+        }
+
+        public void Reset()
+        {
+            AlternateScreen = false;
         }
 
         public void Dispose()
