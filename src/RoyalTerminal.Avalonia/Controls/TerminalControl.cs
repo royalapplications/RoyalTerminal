@@ -1093,7 +1093,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         renderer.BackgroundOpacityEnabled = _backgroundOpacityEnabled;
         renderer.BackgroundOpacityCells = RendererBackgroundOpacityCells;
         renderer.BackgroundOpacity = RendererBackgroundOpacity;
-        renderer.TextHighlightingMode = _textHighlightingMode;
+        renderer.TextHighlightingMode = GetEffectiveTextHighlightingMode();
         renderer.SetTextHighlightRules(_textHighlightRules);
         renderer.TextRenderPipeline = TextRenderPipeline;
 
@@ -1856,7 +1856,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         if (_renderer is not null)
         {
-            _renderer.TextHighlightingMode = _textHighlightingMode;
+            _renderer.TextHighlightingMode = GetEffectiveTextHighlightingMode();
         }
 
         if (_screen is not null)
@@ -5666,7 +5666,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _renderer.BackgroundOpacityEnabled = _backgroundOpacityEnabled;
         _renderer.BackgroundOpacityCells = RendererBackgroundOpacityCells;
         _renderer.BackgroundOpacity = RendererBackgroundOpacity;
+        _renderer.TextHighlightingMode = GetEffectiveTextHighlightingMode();
         _renderer.SetHighlightSpans(BuildHighlightSpansLocked());
+    }
+
+    private TerminalTextHighlightingMode GetEffectiveTextHighlightingMode()
+    {
+        return _vtProcessor?.AlternateScreen == true
+            ? TerminalTextHighlightingMode.Disabled
+            : _textHighlightingMode;
     }
 
     private TerminalHighlightSpan[] BuildHighlightSpansLocked()
