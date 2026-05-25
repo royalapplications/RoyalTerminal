@@ -602,6 +602,28 @@ public sealed class TerminalScreen
     /// <summary>Number of columns per row.</summary>
     public int Columns { get; private set; }
 
+    /// <summary>Maximum number of primary-buffer scrollback rows.</summary>
+    public int ScrollbackLimit
+    {
+        get => _scrollbackLimit;
+        set
+        {
+            int normalizedValue = NormalizeScrollbackLimit(value);
+            if (_scrollbackLimit == normalizedValue)
+            {
+                return;
+            }
+
+            _scrollbackLimit = normalizedValue;
+            if (!_alternateBufferActive)
+            {
+                TrimScrollbackRows();
+            }
+
+            ScrollOffset = _viewportTop;
+        }
+    }
+
     /// <summary>Total rows including scrollback.</summary>
     public int TotalRows => _rows.Count;
 
@@ -649,7 +671,7 @@ public sealed class TerminalScreen
     {
         Columns = columns;
         ViewportRows = viewportRows;
-        _scrollbackLimit = scrollbackLimit;
+        _scrollbackLimit = NormalizeScrollbackLimit(scrollbackLimit);
         _rows = new TerminalRowBuffer(viewportRows);
         _theme = _theme
             .WithDefaultForeground(DefaultForeground)
@@ -659,6 +681,11 @@ public sealed class TerminalScreen
         // Initialize visible rows
         for (var i = 0; i < viewportRows; i++)
             _rows.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground));
+    }
+
+    private static int NormalizeScrollbackLimit(int scrollbackLimit)
+    {
+        return Math.Max(0, scrollbackLimit);
     }
 
     /// <summary>

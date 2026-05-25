@@ -93,7 +93,24 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public TerminalViewportScrollState ViewportScrollState =>
-        new(_scrollbar.Total, _scrollbar.Offset, _scrollbar.Length);
+        GetViewportScrollMapping().ToScrollState();
+
+    private readonly record struct ViewportScrollMapping(
+        ulong VisibleRows,
+        ulong EffectiveBaseOffsetRows,
+        ulong EffectiveMaxOffsetRows,
+        ulong EffectiveOffsetRows)
+    {
+        public ulong EffectiveTotalRows => VisibleRows + EffectiveMaxOffsetRows;
+
+        public TerminalViewportScrollState ToScrollState()
+        {
+            return new TerminalViewportScrollState(
+                EffectiveTotalRows,
+                EffectiveOffsetRows,
+                VisibleRows);
+        }
+    }
 
     /// <inheritdoc />
     public bool LocalReflowOnResize
@@ -194,7 +211,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         _screen = screen;
         _theme = screen.Theme;
-        _terminal = new GhosttyTerminal((ushort)screen.Columns, (ushort)screen.ViewportRows, 10_000);
+        _terminal = new GhosttyTerminal(
+            (ushort)screen.Columns,
+            (ushort)screen.ViewportRows,
+            (nuint)screen.ScrollbackLimit);
         _renderState = new GhosttyRenderState();
         _keyEncoder = new GhosttyKeyEncoder();
         _keyEvent = new GhosttyKeyEvent();
@@ -418,27 +438,28 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             return;
         }
 
-        _terminal.ScrollViewport(GhosttyVtNative.GhosttyTerminalScrollViewport.DeltaRows(deltaRows));
-        RefreshStateAndScreenFromNative();
-        SyncSixelOverlayRasterGraphics();
+        ViewportScrollMapping mapping = GetViewportScrollMapping();
+        ulong deltaMagnitude = GetMagnitude(deltaRows);
+        ulong targetOffsetRows = deltaRows < 0
+            ? mapping.EffectiveOffsetRows - Math.Min(mapping.EffectiveOffsetRows, deltaMagnitude)
+            : mapping.EffectiveOffsetRows + Math.Min(
+                mapping.EffectiveMaxOffsetRows - mapping.EffectiveOffsetRows,
+                deltaMagnitude);
+        SetViewportOffsetRows(targetOffsetRows);
     }
 
     /// <inheritdoc />
     public void ScrollViewportToTop()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        _terminal.ScrollViewport(GhosttyVtNative.GhosttyTerminalScrollViewport.Top());
-        RefreshStateAndScreenFromNative();
-        SyncSixelOverlayRasterGraphics();
+        SetViewportOffsetRows(0);
     }
 
     /// <inheritdoc />
     public void ScrollViewportToBottom()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        _terminal.ScrollViewport(GhosttyVtNative.GhosttyTerminalScrollViewport.Bottom());
-        RefreshStateAndScreenFromNative();
-        SyncSixelOverlayRasterGraphics();
+        SetViewportOffsetRows(GetViewportScrollMapping().EffectiveMaxOffsetRows);
     }
 
     /// <inheritdoc />
@@ -446,21 +467,89 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        ulong clampedOffsetRows = Math.Min(offsetRows, ViewportScrollState.MaxOffsetRows);
-        long delta = checked((long)clampedOffsetRows) - checked((long)_scrollbar.Offset);
+        ViewportScrollMapping mapping = GetViewportScrollMapping();
+        ulong clampedOffsetRows = Math.Min(offsetRows, mapping.EffectiveMaxOffsetRows);
+        ulong targetNativeOffsetRows = mapping.EffectiveBaseOffsetRows + clampedOffsetRows;
+        int delta = CalculateViewportDelta(targetNativeOffsetRows, _scrollbar.Offset);
         if (delta == 0)
         {
             return;
         }
 
-        int clampedDelta = delta > int.MaxValue
-            ? int.MaxValue
-            : delta < int.MinValue
-                ? int.MinValue
-                : (int)delta;
-        _terminal.ScrollViewport(GhosttyVtNative.GhosttyTerminalScrollViewport.DeltaRows(clampedDelta));
+        _terminal.ScrollViewport(GhosttyVtNative.GhosttyTerminalScrollViewport.DeltaRows(delta));
         RefreshStateAndScreenFromNative();
         SyncSixelOverlayRasterGraphics();
+    }
+
+    private ViewportScrollMapping GetViewportScrollMapping()
+    {
+        ulong visibleRows = _scrollbar.Length;
+        ulong nativeTotalRows = Math.Max(_scrollbar.Total, visibleRows);
+        ulong nativeMaxOffsetRows = nativeTotalRows > visibleRows
+            ? nativeTotalRows - visibleRows
+            : 0;
+        ulong configuredMaxOffsetRows = (ulong)Math.Max(0, _screen.ScrollbackLimit);
+        ulong effectiveMaxOffsetRows = Math.Min(nativeMaxOffsetRows, configuredMaxOffsetRows);
+        ulong effectiveBaseOffsetRows = nativeMaxOffsetRows - effectiveMaxOffsetRows;
+        ulong clampedNativeOffsetRows = Clamp(
+            _scrollbar.Offset,
+            effectiveBaseOffsetRows,
+            nativeMaxOffsetRows);
+        ulong effectiveOffsetRows = clampedNativeOffsetRows - effectiveBaseOffsetRows;
+
+        return new ViewportScrollMapping(
+            visibleRows,
+            effectiveBaseOffsetRows,
+            effectiveMaxOffsetRows,
+            effectiveOffsetRows);
+    }
+
+    private static ulong Clamp(ulong value, ulong minimum, ulong maximum)
+    {
+        if (value < minimum)
+        {
+            return minimum;
+        }
+
+        return value > maximum ? maximum : value;
+    }
+
+    private static ulong GetMagnitude(int value)
+    {
+        return value < 0 ? (ulong)-(long)value : (ulong)value;
+    }
+
+    private static int CalculateViewportDelta(ulong targetOffsetRows, ulong currentOffsetRows)
+    {
+        if (targetOffsetRows >= currentOffsetRows)
+        {
+            ulong delta = targetOffsetRows - currentOffsetRows;
+            return delta > int.MaxValue ? int.MaxValue : (int)delta;
+        }
+
+        ulong negativeDelta = currentOffsetRows - targetOffsetRows;
+        return negativeDelta > int.MaxValue ? int.MinValue : -(int)negativeDelta;
+    }
+
+    private static bool TryMapNativeAbsoluteRowToEffective(
+        ViewportScrollMapping mapping,
+        ulong nativeAbsoluteRow,
+        out int effectiveAbsoluteRow)
+    {
+        effectiveAbsoluteRow = 0;
+        if (nativeAbsoluteRow < mapping.EffectiveBaseOffsetRows)
+        {
+            return false;
+        }
+
+        ulong row = nativeAbsoluteRow - mapping.EffectiveBaseOffsetRows;
+        if (row >= mapping.EffectiveTotalRows || row > int.MaxValue)
+        {
+            return false;
+        }
+
+        effectiveAbsoluteRow = (int)row;
+        return true;
     }
 
     /// <inheritdoc />
@@ -481,9 +570,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             unwrap: false,
             trim: false);
         string fullBuffer = formatter.FormatToString();
+        ViewportScrollMapping mapping = GetViewportScrollMapping();
 
         int rowStart = 0;
-        int absoluteRow = 0;
+        ulong nativeAbsoluteRow = 0;
         while (rowStart <= fullBuffer.Length)
         {
             int lineBreak = fullBuffer.IndexOf('\n', rowStart);
@@ -495,14 +585,17 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 rowSpan = rowSpan[..^1];
             }
 
-            PopulateSearchMatchesFromFormattedRow(rowSpan, absoluteRow, needle, destination);
+            if (TryMapNativeAbsoluteRowToEffective(mapping, nativeAbsoluteRow, out int effectiveAbsoluteRow))
+            {
+                PopulateSearchMatchesFromFormattedRow(rowSpan, effectiveAbsoluteRow, needle, destination);
+            }
 
             if (lineBreak < 0)
             {
                 break;
             }
 
-            absoluteRow++;
+            nativeAbsoluteRow++;
             rowStart = lineBreak + 1;
         }
     }
@@ -541,10 +634,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             return false;
         }
 
-        TerminalViewportScrollState viewportState = ViewportScrollState;
-        int totalRows = viewportState.TotalRows > int.MaxValue
+        ViewportScrollMapping mapping = GetViewportScrollMapping();
+        int totalRows = mapping.EffectiveTotalRows > int.MaxValue
             ? int.MaxValue
-            : (int)viewportState.TotalRows;
+            : (int)mapping.EffectiveTotalRows;
         if (totalRows <= 0)
         {
             return false;
@@ -566,7 +659,13 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         for (int row = 0; row < snapshotRows; row++)
         {
-            PopulateSnapshotRow(result.GetRow(row), checked(firstRow + row));
+            ulong nativeAbsoluteRow = mapping.EffectiveBaseOffsetRows + checked((ulong)(firstRow + row));
+            if (nativeAbsoluteRow > int.MaxValue)
+            {
+                break;
+            }
+
+            PopulateSnapshotRow(result.GetRow(row), (int)nativeAbsoluteRow);
         }
 
         snapshot = result;
@@ -956,7 +1055,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         int endColumn = Math.Clamp(normalized.EndColumn, 0, Math.Max(0, _screen.Columns - 1));
         int startRow = Math.Clamp(normalized.StartRow, 0, Math.Max(0, _screen.ViewportRows - 1));
         int endRow = Math.Clamp(normalized.EndRow, 0, Math.Max(0, _screen.ViewportRows - 1));
-        ulong viewportOffset = ViewportScrollState.OffsetRows;
+        ViewportScrollMapping mapping = GetViewportScrollMapping();
+        ulong viewportOffset = mapping.EffectiveBaseOffsetRows + mapping.EffectiveOffsetRows;
         uint startAbsoluteRow = checked((uint)Math.Min(uint.MaxValue, viewportOffset + (ulong)startRow));
         uint endAbsoluteRow = checked((uint)Math.Min(uint.MaxValue, viewportOffset + (ulong)endRow));
 
