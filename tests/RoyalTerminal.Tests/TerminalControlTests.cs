@@ -109,6 +109,31 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_ScrollbackLimit_AppliesToScreenAfterConstruction()
+    {
+        var control = new TerminalControl
+        {
+            ScrollbackLimit = 50_000,
+        };
+
+        Assert.NotNull(control.Screen);
+        Assert.Equal(50_000, control.Screen!.ScrollbackLimit);
+    }
+
+    [AvaloniaFact]
+    public void Control_ScrollbackLimit_CoercesNegativeValues()
+    {
+        var control = new TerminalControl
+        {
+            ScrollbackLimit = -1,
+        };
+
+        Assert.Equal(0, control.ScrollbackLimit);
+        Assert.NotNull(control.Screen);
+        Assert.Equal(0, control.Screen!.ScrollbackLimit);
+    }
+
+    [AvaloniaFact]
     public void Control_SixelGraphicsEnabled_RendersManagedRasterPayload_WhenEnabledAfterCreation()
     {
         var control = new TerminalControl
@@ -903,6 +928,26 @@ public class TerminalControlTests
 
         Assert.Equal(VtProcessorPreference.Managed, factory.Preferences[^1]);
         Assert.True(factory.CreateCallCount >= 2);
+    }
+
+    [AvaloniaFact]
+    public void Control_ScrollbackLimitChange_RecreatesIdleProcessorWithConfiguredLimit()
+    {
+        TrackingVtProcessorFactory factory = new();
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            factory,
+            new DefaultPtyFactory());
+
+        control.ScrollbackLimit = 12_345;
+
+        Assert.NotNull(control.Screen);
+        Assert.Equal(12_345, control.Screen!.ScrollbackLimit);
+        Assert.True(factory.CreateCallCount >= 2);
+        Assert.Equal(12_345, factory.ScrollbackLimits[^1]);
     }
 
     [AvaloniaFact]
@@ -6073,12 +6118,13 @@ public class TerminalControlTests
     {
         public int CreateCallCount { get; private set; }
         public List<VtProcessorPreference> Preferences { get; } = [];
+        public List<int> ScrollbackLimits { get; } = [];
 
         public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
         {
-            _ = screen;
             CreateCallCount++;
             Preferences.Add(preference);
+            ScrollbackLimits.Add(screen.ScrollbackLimit);
             return new TrackingVtProcessor();
         }
     }

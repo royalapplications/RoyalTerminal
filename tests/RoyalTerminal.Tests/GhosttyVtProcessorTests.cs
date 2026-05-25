@@ -21,7 +21,7 @@ public class GhosttyVtProcessorTests
             return;
         }
 
-        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 0);
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 100);
         using GhosttyVtProcessor processor = new(screen);
         processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
 
@@ -57,6 +57,70 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_ViewportScrollState_HonorsScreenScrollbackLimit_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 1);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 10; i++)
+        {
+            builder.Append("L");
+            builder.Append(i.ToString("D2"));
+            builder.Append("\r\n");
+        }
+
+        processor.Process(Encoding.UTF8.GetBytes(builder.ToString()));
+
+        TerminalViewportScrollState state = processor.ViewportScrollState;
+        Assert.Equal(4ul, state.VisibleRows);
+        Assert.True(state.TotalRows <= state.VisibleRows + 1);
+        Assert.True(state.MaxOffsetRows <= 1);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_ViewportScrollState_ClampsWhenScreenScrollbackLimitIsReduced_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 10; i++)
+        {
+            builder.Append("L");
+            builder.Append(i.ToString("D2"));
+            builder.Append("\r\n");
+        }
+
+        processor.Process(Encoding.UTF8.GetBytes(builder.ToString()));
+        processor.ScrollViewportToTop();
+        Assert.Equal("L00", ReadAsciiPrefix(screen, row: 0, columns: 3));
+
+        screen.ScrollbackLimit = 1;
+        processor.SetViewportOffsetRows(processor.ViewportScrollState.OffsetRows);
+
+        TerminalViewportScrollState state = processor.ViewportScrollState;
+        Assert.True(state.MaxOffsetRows <= 1);
+        Assert.NotEqual("L00", ReadAsciiPrefix(screen, row: 0, columns: 3));
+
+        List<TerminalSearchMatch> matches = [];
+        processor.PopulateSearchMatches("L00", matches);
+        Assert.Empty(matches);
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_ViewportScrollState_CanMoveUpFromBottom_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
@@ -64,7 +128,7 @@ public class GhosttyVtProcessorTests
             return;
         }
 
-        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 0);
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 100);
         using GhosttyVtProcessor processor = new(screen);
         processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
 
@@ -98,7 +162,7 @@ public class GhosttyVtProcessorTests
             return;
         }
 
-        TerminalScreen screen = new(columns: 130, viewportRows: 44, scrollbackLimit: 0);
+        TerminalScreen screen = new(columns: 130, viewportRows: 44, scrollbackLimit: 100);
         using GhosttyVtProcessor processor = new(screen);
         processor.NotifyResize(columns: 130, rows: 44, widthPx: 1172, heightPx: 890);
 
@@ -361,7 +425,7 @@ public class GhosttyVtProcessorTests
             return;
         }
 
-        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 0);
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 100);
         using GhosttyVtProcessor processor = new(screen);
         processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
 

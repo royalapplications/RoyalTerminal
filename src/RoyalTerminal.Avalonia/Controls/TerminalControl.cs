@@ -106,7 +106,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     /// <summary>Maximum number of scrollback rows.</summary>
     public static readonly StyledProperty<int> ScrollbackLimitProperty =
-        AvaloniaProperty.Register<TerminalControl, int>(nameof(ScrollbackLimit), 10_000);
+        AvaloniaProperty.Register<TerminalControl, int>(
+            nameof(ScrollbackLimit),
+            10_000,
+            coerce: static (_, value) => Math.Max(0, value));
 
     /// <summary>Default foreground color.</summary>
     public static readonly StyledProperty<Color> DefaultForegroundProperty =
@@ -979,6 +982,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        if (change.Property == ScrollbackLimitProperty)
+        {
+            ApplyScrollbackLimit();
+            return;
+        }
+
         if (change.Property == TextRenderPipelineProperty)
         {
             ApplyTextRenderPipeline();
@@ -1227,6 +1236,54 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         RaiseScrollInvalidated();
     }
 
+    private void ApplyScrollbackLimit()
+    {
+        if (_screen is null)
+        {
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            _screen.ScrollbackLimit = ScrollbackLimit;
+        }
+
+        // libghostty-vt accepts max_scrollback only at terminal creation,
+        // so idle processors must be recreated to pick up the new limit.
+        if (!TerminalSessionService.HasActiveTransport)
+        {
+            EnsureVtProcessorPreferenceApplied(force: true);
+        }
+
+        if (_scrollData is not null)
+        {
+            lock (_screen.SyncRoot)
+            {
+                if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+                {
+                    viewportScrollSource.SetViewportOffsetRows(viewportScrollSource.ViewportScrollState.OffsetRows);
+                    SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+                }
+                else
+                {
+                    _scrollData.UpdateExtent(_screen.TotalRows, AutoScroll);
+                    int nextOffset = _scrollData.ToScreenScrollOffsetRows(_screen.MaxScrollOffset);
+                    if (_screen.ScrollOffset != nextOffset)
+                    {
+                        _screen.ScrollOffset = nextOffset;
+                        _screen.InvalidateViewport();
+                    }
+                }
+
+                UpdateRendererCursorForViewportLocked();
+                UpdateRendererParityStateLocked();
+            }
+        }
+
+        _presenter?.Invalidate();
+        RaiseScrollInvalidated();
+    }
+
     private void ApplyTextRenderPipeline()
     {
         if (_renderer is null)
@@ -1256,14 +1313,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         EnsureVtProcessorPreferenceApplied();
     }
 
-    private void EnsureVtProcessorPreferenceApplied()
+    private void EnsureVtProcessorPreferenceApplied(bool force = false)
     {
         if (_screen is null)
         {
             return;
         }
 
-        if (_vtProcessor is not null && _appliedVtProcessorPreference == VtProcessorPreference)
+        if (!force && _vtProcessor is not null && _appliedVtProcessorPreference == VtProcessorPreference)
         {
             return;
         }

@@ -150,6 +150,7 @@ public class TerminalScreenTests
         var screen = new TerminalScreen(80, 24);
         Assert.Equal(80, screen.Columns);
         Assert.Equal(24, screen.ViewportRows);
+        Assert.Equal(10_000, screen.ScrollbackLimit);
         Assert.Equal(24, screen.TotalRows);
     }
 
@@ -312,6 +313,39 @@ public class TerminalScreenTests
 
         // Total should not exceed viewport + scrollback limit
         Assert.True(screen.TotalRows <= 24 + 10);
+    }
+
+    [Fact]
+    public void TerminalScreen_ScrollbackLimitSetter_TrimsExistingRows()
+    {
+        TerminalScreen screen = new(80, 4, scrollbackLimit: 10);
+        for (int i = 0; i < 20; i++)
+        {
+            screen.AddRow();
+        }
+
+        screen.ScrollbackLimit = 2;
+
+        Assert.Equal(2, screen.ScrollbackLimit);
+        Assert.Equal(6, screen.TotalRows);
+        Assert.Equal(2, screen.MaxScrollOffset);
+    }
+
+    [Fact]
+    public void TerminalScreen_ScrollbackLimit_ClampsNegativeValues()
+    {
+        TerminalScreen screen = new(80, 4, scrollbackLimit: -1);
+
+        Assert.Equal(0, screen.ScrollbackLimit);
+
+        for (int i = 0; i < 20; i++)
+        {
+            screen.AddRow();
+        }
+
+        Assert.Equal(4, screen.TotalRows);
+        screen.ScrollbackLimit = -10;
+        Assert.Equal(0, screen.ScrollbackLimit);
     }
 
     [Fact]
