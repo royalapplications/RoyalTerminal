@@ -25,14 +25,14 @@ public readonly record struct TerminalKeyEncodingRequest(
 /// <summary>
 /// Geometry context for encoding pointer events into terminal mouse protocol bytes.
 /// </summary>
-/// <param name="ScreenWidthPx">Full terminal surface width in pixels.</param>
-/// <param name="ScreenHeightPx">Full terminal surface height in pixels.</param>
+/// <param name="ScreenWidthPx">Encoding surface width in pixels.</param>
+/// <param name="ScreenHeightPx">Encoding surface height in pixels.</param>
 /// <param name="CellWidthPx">Single cell width in pixels.</param>
 /// <param name="CellHeightPx">Single cell height in pixels.</param>
-/// <param name="PaddingTopPx">Top padding in pixels.</param>
-/// <param name="PaddingBottomPx">Bottom padding in pixels.</param>
-/// <param name="PaddingRightPx">Right padding in pixels.</param>
-/// <param name="PaddingLeftPx">Left padding in pixels.</param>
+/// <param name="PaddingTopPx">Top host padding in pixels when coordinates are surface-relative.</param>
+/// <param name="PaddingBottomPx">Bottom host padding in pixels when coordinates are surface-relative.</param>
+/// <param name="PaddingRightPx">Right host padding in pixels when coordinates are surface-relative.</param>
+/// <param name="PaddingLeftPx">Left host padding in pixels when coordinates are surface-relative.</param>
 public readonly record struct TerminalPointerEncodingContext(
     int ScreenWidthPx,
     int ScreenHeightPx,

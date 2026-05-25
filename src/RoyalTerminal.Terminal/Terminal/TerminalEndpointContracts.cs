@@ -42,6 +42,10 @@ public interface ITerminalInputSink
 
     /// <summary>
     /// Sends pointer input.
+    /// <para>
+    /// <c>TerminalControl</c> supplies pointer coordinates in terminal content
+    /// space after any host padding is removed.
+    /// </para>
     /// </summary>
     bool SendPointer(TerminalPointerEvent pointerEvent);
 }
@@ -80,6 +84,11 @@ public interface ITerminalModeSource
 
 /// <summary>
 /// Optional endpoint capability for content scale updates.
+/// <para>
+/// Terminal font sizes are expressed in UI device-independent units by the
+/// Avalonia control. Native or external render endpoints can use this scale
+/// to convert content size and font metrics to physical pixels.
+/// </para>
 /// </summary>
 public interface ITerminalScaleSink
 {
@@ -175,8 +184,8 @@ public readonly record struct TerminalKeyEvent(
 /// Backend-neutral pointer input payload.
 /// </summary>
 /// <param name="Kind">Pointer event kind.</param>
-/// <param name="X">Pointer X coordinate in control space.</param>
-/// <param name="Y">Pointer Y coordinate in control space.</param>
+/// <param name="X">Pointer X coordinate in the producer's terminal coordinate space.</param>
+/// <param name="Y">Pointer Y coordinate in the producer's terminal coordinate space.</param>
 /// <param name="Button">Pointer button value for button events.</param>
 /// <param name="Action">Pointer button press/release action for button events.</param>
 /// <param name="Modifiers">Normalized key modifiers.</param>
