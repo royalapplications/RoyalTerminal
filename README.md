@@ -76,6 +76,7 @@ Project documentation source lives in [docs/](docs/) and is published through th
 - **Terminal session service split** (`Terminal.Services.Contracts` and `Terminal.Services`).
 - **Sample applications**:
   - Avalonia demo (`samples/RoyalTerminal.Demo`) with structured settings categories (`Session`/`Connection`/`Terminal`/`Appearance`/`SSH`/`Logging`), transport forms (`PTY`/`Pipe`/`Raw TCP`/`Telnet`/`Serial`/`SSH`), a tabbed Settings flyout with profile CRUD (`new`/`duplicate`/`delete`/`set default`) and explicit apply/save, session/event logging, shader samples, and terminal behavior toggles (copy-on-select, bell notifications, backspace mode, paste safety, text shaping/ligatures)
+  - Windows Forms host sample (`samples/RoyalTerminal.WinFormsHost`) showing `Avalonia.Win32.Interoperability`, PerMonitorV2 DPI, Win32 focus forwarding, and `TerminalControl.Padding` for embedded margins
   - macOS SwiftUI native tabbed demo (`samples/RoyalTerminal.MacNativeTabbed`) that hosts GhosttyKit directly as a separate native sample, outside the managed `RoyalTerminal.GhosttySharp` surface
   - VT/PTy control catalog CLI (`samples/RoyalTerminal.ControlCatalog`) with managed/Ghostty VT probes, ncurses/TUI parity scenarios, and rich visual rendering galleries
 
@@ -597,6 +598,89 @@ ITerminalTransportOptions options = TerminalSessionProfileMapper.ToTransportOpti
 var terminal = new TerminalControl();
 await terminal.StartSessionAsync(options);
 ```
+
+### 1h. Embed in Windows Forms
+
+Use `Avalonia.Win32.Interoperability` from a Windows Forms project and start Avalonia once with `SetupWithoutStarting()` before creating the host control. `TerminalControl.Padding` is the supported embedded-margin API; it defaults to `0` for existing layouts, and `8` works well when the control is hosted edge-to-edge in a form.
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows7.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Win32.Interoperability" />
+    <PackageReference Include="RoyalTerminal.Avalonia" />
+  </ItemGroup>
+</Project>
+```
+
+```csharp
+using Avalonia;
+using Avalonia.Themes.Fluent;
+using Avalonia.Win32.Interoperability;
+using RoyalTerminal.Avalonia.Controls;
+using WinForms = System.Windows.Forms;
+
+WinForms.Application.SetHighDpiMode(WinForms.HighDpiMode.PerMonitorV2);
+WinForms.Application.EnableVisualStyles();
+WinForms.Application.SetCompatibleTextRenderingDefault(false);
+
+AppBuilder.Configure<App>()
+    .UsePlatformDetect()
+    .SetupWithoutStarting();
+
+TerminalControl terminal = new()
+{
+    Padding = new Thickness(8),
+};
+
+WinFormsAvaloniaControlHost host = new()
+{
+    Dock = WinForms.DockStyle.Fill,
+    Content = terminal,
+};
+```
+
+For focus interop, handle `WM_SETFOCUS` on the WinForms host and post the Avalonia focus call at input priority. Avoid focus work from `WM_KILLFOCUS`; Windows is already moving focus at that point.
+
+```csharp
+private const int WmSetFocus = 0x0007;
+
+protected override void WndProc(ref WinForms.Message m)
+{
+    base.WndProc(ref m);
+
+    if (m.Msg == WmSetFocus)
+    {
+        Dispatcher.UIThread.Post(
+            () => terminal.Focus(),
+            DispatcherPriority.Input);
+    }
+}
+```
+
+For DPI, keep `TerminalFontSize` in Avalonia device-independent pixels. Avalonia top-level `RenderScaling` is forwarded automatically by `TerminalControl`; a WinForms host should also forward `DeviceDpi / 96.0` after parent DPI changes so native or external render endpoints implementing `ITerminalScaleSink` receive physical scale through `SetContentScale`.
+
+```csharp
+protected override void OnDpiChangedAfterParent(EventArgs e)
+{
+    base.OnDpiChangedAfterParent(e);
+
+    double scale = DeviceDpi > 0 ? DeviceDpi / 96d : 1d;
+    Dispatcher.UIThread.Post(
+        () => terminal.SetContentScale(scale, scale),
+        DispatcherPriority.Input);
+}
+```
+
+See `samples/RoyalTerminal.WinFormsHost` for a complete Windows-only sample targeting `net10.0-windows7.0`.
 
 ### 2. Core Control with Native VT Provider (official `libghostty-vt`)
 
