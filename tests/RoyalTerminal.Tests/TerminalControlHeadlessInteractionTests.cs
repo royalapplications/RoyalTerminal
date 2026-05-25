@@ -14,6 +14,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
@@ -69,6 +70,110 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.Equal(control.Rows, lastResize.Rows);
             Assert.True(lastResize.WidthPixels > 0);
             Assert.True(lastResize.HeightPixels > 0);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.StopPty);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_Padding_ArrangesPresenterInsideContentRect_AndUpdatesAtRuntime()
+    {
+        TerminalControl control = new()
+        {
+            Width = 640,
+            Height = 400,
+            Padding = new Thickness(8, 12, 16, 20),
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+
+            TerminalPresenter presenter = GetPresenter(control);
+            Point? presenterOrigin = presenter.TranslatePoint(new Point(0, 0), control);
+            Assert.True(presenterOrigin.HasValue);
+            Assert.InRange(presenterOrigin.Value.X, 7.99, 8.01);
+            Assert.InRange(presenterOrigin.Value.Y, 11.99, 12.01);
+            Assert.InRange(presenter.Bounds.Width, 615.99, 616.01);
+            Assert.InRange(presenter.Bounds.Height, 367.99, 368.01);
+
+            control.Padding = new Thickness(20, 10, 30, 40);
+            Dispatcher.UIThread.RunJobs();
+
+            bool paddingApplied = await WaitUntilAsync(
+                () => presenter.Bounds.Width is >= 589.99 and <= 590.01 &&
+                      presenter.Bounds.Height is >= 349.99 and <= 350.01,
+                TimeSpan.FromSeconds(2));
+            Assert.True(paddingApplied, $"Presenter bounds after padding change were {presenter.Bounds}.");
+
+            presenterOrigin = presenter.TranslatePoint(new Point(0, 0), control);
+            Assert.True(presenterOrigin.HasValue);
+            Assert.InRange(presenterOrigin.Value.X, 19.99, 20.01);
+            Assert.InRange(presenterOrigin.Value.Y, 9.99, 10.01);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.StopPty);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_Padding_ReducesTransportResizeGridToContentRect()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        control.Padding = new Thickness(20, 10, 20, 10);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            Dispatcher.UIThread.RunJobs();
+
+            int resizeCountBefore = transport.Resizes.Count;
+            window.Width = 800;
+            window.Height = 480;
+            Dispatcher.UIThread.RunJobs();
+
+            bool resized = await WaitUntilAsync(
+                () =>
+                {
+                    if (control.Renderer is null || transport.Resizes.Count <= resizeCountBefore)
+                    {
+                        return false;
+                    }
+
+                    double contentWidth = Math.Max(0d, control.Bounds.Width - control.Padding.Left - control.Padding.Right);
+                    double contentHeight = Math.Max(0d, control.Bounds.Height - control.Padding.Top - control.Padding.Bottom);
+                    int expectedColumns = Math.Max(1, (int)(contentWidth / control.Renderer.CellWidth));
+                    int expectedRows = Math.Max(1, (int)(contentHeight / control.Renderer.CellHeight));
+                    return control.Columns == expectedColumns &&
+                           control.Rows == expectedRows &&
+                           transport.Resizes[^1].Columns == expectedColumns &&
+                           transport.Resizes[^1].Rows == expectedRows;
+                },
+                TimeSpan.FromSeconds(2));
+
+            Assert.True(resized);
+            TerminalSessionDimensions lastResize = transport.Resizes[^1];
+            Assert.Equal(control.Columns, lastResize.Columns);
+            Assert.Equal(control.Rows, lastResize.Rows);
         }
         finally
         {
@@ -848,6 +953,53 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
+    public async Task Headless_RenderScaling_PropagatesToScaleSink_OnAttachChangeAndLateAttach()
+    {
+        TerminalControl control = new()
+        {
+            Width = 640,
+            Height = 400,
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            window.SetRenderScaling(1.5d);
+            Dispatcher.UIThread.RunJobs();
+
+            RecordingEndpoint endpoint = new();
+            control.AttachEndpoint(endpoint);
+            Assert.Equal(1.5d, endpoint.ScaleX);
+            Assert.Equal(1.5d, endpoint.ScaleY);
+
+            window.SetRenderScaling(2d);
+            Dispatcher.UIThread.RunJobs();
+
+            bool scaleChanged = await WaitUntilAsync(
+                () => endpoint.ScaleX == 2d && endpoint.ScaleY == 2d,
+                TimeSpan.FromSeconds(2));
+            Assert.True(scaleChanged);
+
+            control.DetachEndpoint();
+            RecordingEndpoint lateEndpoint = new();
+            control.AttachEndpoint(lateEndpoint);
+            Assert.Equal(2d, lateEndpoint.ScaleX);
+            Assert.Equal(2d, lateEndpoint.ScaleY);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.DetachEndpoint);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Headless_MouseInput_UsesAttachedEndpointSink()
     {
         RecordingEndpoint endpoint = new();
@@ -891,6 +1043,256 @@ public sealed class TerminalControlHeadlessInteractionTests
         finally
         {
             await CleanupWindowAsync(window, control.DetachEndpoint);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_Padding_MouseInput_UsesContentCoordinates()
+    {
+        RecordingEndpoint endpoint = new();
+        TerminalControl control = new()
+        {
+            Width = 640,
+            Height = 400,
+            Padding = new Thickness(20, 12, 16, 10),
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            control.AttachEndpoint(endpoint);
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.NotNull(control.Renderer);
+            double expectedX = 2.5d * control.Renderer!.CellWidth;
+            double expectedY = 3.5d * control.Renderer.CellHeight;
+            Point windowPoint = TranslateControlPointToWindow(
+                control,
+                window,
+                new Point(control.Padding.Left + expectedX, control.Padding.Top + expectedY));
+
+            RaiseMousePressReleaseSequence(control, window, windowPoint);
+            Dispatcher.UIThread.RunJobs();
+
+            bool pointerSent = await WaitUntilAsync(
+                () => endpoint.PointerEvents.Any(static evt =>
+                    evt.Kind == TerminalPointerEventKind.Button &&
+                    evt.Action == TerminalInputAction.Press),
+                TimeSpan.FromSeconds(2));
+            Assert.True(pointerSent);
+
+            TerminalPointerEvent press = endpoint.PointerEvents.First(static evt =>
+                evt.Kind == TerminalPointerEventKind.Button &&
+                evt.Action == TerminalInputAction.Press);
+            Assert.InRange(press.X, expectedX - 1d, expectedX + 1d);
+            Assert.InRange(press.Y, expectedY - 1d, expectedY + 1d);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.DetachEndpoint);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_Padding_ClickFocusesWithoutPointerInput()
+    {
+        RecordingEndpoint endpoint = new();
+        TerminalControl control = new()
+        {
+            Width = 640,
+            Height = 400,
+            Padding = new Thickness(20),
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            control.AttachEndpoint(endpoint);
+            endpoint.PointerEvents.Clear();
+
+            Point windowPoint = TranslateControlPointToWindow(control, window, new Point(4, 4));
+            RaiseMousePressReleaseSequence(control, window, windowPoint);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(control.IsFocused);
+            Assert.Empty(endpoint.PointerEvents);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.DetachEndpoint);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_Padding_DragReleaseOutsideContentClampsToContentEdge()
+    {
+        RecordingEndpoint endpoint = new();
+        TerminalControl control = new()
+        {
+            Width = 640,
+            Height = 400,
+            Padding = new Thickness(16, 12, 24, 20),
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            control.AttachEndpoint(endpoint);
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.NotNull(control.Renderer);
+            double pressX = control.Padding.Left + 2.5d * control.Renderer!.CellWidth;
+            double pressY = control.Padding.Top + 2.5d * control.Renderer.CellHeight;
+            Point pressPoint = TranslateControlPointToWindow(control, window, new Point(pressX, pressY));
+            Point releasePoint = TranslateControlPointToWindow(
+                control,
+                window,
+                new Point(control.Bounds.Width - 4d, pressY));
+
+            RaiseMouseDragReleaseSequence(control, window, pressPoint, releasePoint);
+            Dispatcher.UIThread.RunJobs();
+
+            bool releaseSent = await WaitUntilAsync(
+                () => endpoint.PointerEvents.Any(static evt =>
+                    evt.Kind == TerminalPointerEventKind.Button &&
+                    evt.Action == TerminalInputAction.Release),
+                TimeSpan.FromSeconds(2));
+            Assert.True(releaseSent);
+
+            TerminalPointerEvent release = endpoint.PointerEvents.Last(static evt =>
+                evt.Kind == TerminalPointerEventKind.Button &&
+                evt.Action == TerminalInputAction.Release);
+            double expectedContentRight = control.Bounds.Width - control.Padding.Left - control.Padding.Right;
+            Assert.InRange(release.X, expectedContentRight - 0.01d, expectedContentRight + 0.01d);
+            Assert.InRange(release.Y, 2.5d * control.Renderer.CellHeight - 1d, 2.5d * control.Renderer.CellHeight + 1d);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.DetachEndpoint);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_Padding_WheelScrollsScrollbackWithoutPointerInput()
+    {
+        RecordingEndpoint endpoint = new();
+        TerminalControl control = new()
+        {
+            Width = 640,
+            Height = 400,
+            Padding = new Thickness(16),
+            VtProcessorPreference = VtProcessorPreference.Managed,
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            control.AttachEndpoint(endpoint);
+            for (int i = 0; i < 64; i++)
+            {
+                control.WriteOutput(Encoding.UTF8.GetBytes($"LINE-{i:000}\n"));
+            }
+
+            Assert.NotNull(control.ScrollData);
+            Assert.True(control.ScrollData!.MaxOffset > 0);
+            control.ScrollToBottom();
+            double bottomOffset = control.ScrollData.Offset;
+            endpoint.PointerEvents.Clear();
+
+            Point windowPoint = TranslateControlPointToWindow(control, window, new Point(4, 4));
+            RaisePointerWheel(control, window, windowPoint, new Vector(0, 1));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Empty(endpoint.PointerEvents);
+            Assert.True(
+                control.ScrollData.Offset < bottomOffset,
+                $"Expected padding wheel to scroll normal scrollback. Offset={control.ScrollData.Offset}, Bottom={bottomOffset}.");
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.DetachEndpoint);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_Padding_SgrPixelsReleaseOutsideContentClampsToLastContentPixel()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            preference: VtProcessorPreference.Managed);
+        control.Width = 640;
+        control.Height = 400;
+        control.Padding = new Thickness(10);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("\x1b[?1000h\x1b[?1016h"u8);
+            Dispatcher.UIThread.RunJobs();
+
+            transport.Inputs.Clear();
+
+            Point pressPoint = TranslateControlPointToWindow(control, window, new Point(30, 30));
+            Point releasePoint = TranslateControlPointToWindow(control, window, new Point(control.Bounds.Width - 2d, 30));
+            RaiseMouseDragReleaseSequence(control, window, pressPoint, releasePoint);
+            Dispatcher.UIThread.RunJobs();
+
+            bool releaseSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(static input =>
+                    Encoding.ASCII.GetString(input).EndsWith('m')),
+                TimeSpan.FromSeconds(2));
+            Assert.True(releaseSent);
+
+            string release = transport.Inputs
+                .Select(static input => Encoding.ASCII.GetString(input))
+                .Last(static text => text.EndsWith('m'));
+            int expectedRightPixel = (int)Math.Round(control.Bounds.Width - control.Padding.Left - control.Padding.Right);
+
+            Assert.Contains($";{expectedRightPixel};", release, StringComparison.Ordinal);
+            Assert.DoesNotContain($";{expectedRightPixel + 1};", release, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.StopPty);
         }
     }
 
@@ -2421,6 +2823,22 @@ public sealed class TerminalControlHeadlessInteractionTests
         return translated!.Value;
     }
 
+    private static TerminalPresenter GetPresenter(TerminalControl control)
+    {
+        TerminalPresenter? presenter = control.GetVisualDescendants()
+            .OfType<TerminalPresenter>()
+            .SingleOrDefault();
+        Assert.NotNull(presenter);
+        return presenter;
+    }
+
+    private static Point TranslateControlPointToWindow(TerminalControl control, Window window, Point controlPoint)
+    {
+        Point? translated = control.TranslatePoint(controlPoint, window);
+        Assert.True(translated.HasValue, "Failed to translate control point to window coordinates.");
+        return translated.Value;
+    }
+
     private static void RaisePointerMove(TerminalControl control, Window window, Point windowPoint)
     {
         Pointer pointer = new(id: 4, PointerType.Mouse, isPrimary: true);
@@ -2436,6 +2854,23 @@ public sealed class TerminalControlHeadlessInteractionTests
             new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.Other),
             KeyModifiers.None);
         control.RaiseEvent(move);
+    }
+
+    private static void RaisePointerWheel(TerminalControl control, Window window, Point windowPoint, Vector delta)
+    {
+        Pointer pointer = new(id: 6, PointerType.Mouse, isPrimary: true);
+        ulong timestamp = (ulong)Environment.TickCount64;
+
+        PointerWheelEventArgs wheel = new(
+            control,
+            pointer,
+            window,
+            windowPoint,
+            timestamp,
+            new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.Other),
+            KeyModifiers.None,
+            delta);
+        control.RaiseEvent(wheel);
     }
 
     private static void RaiseMouseSequence(TerminalControl control, Window window, Point windowPoint)
@@ -2512,6 +2947,49 @@ public sealed class TerminalControlHeadlessInteractionTests
             pointer,
             window,
             windowPoint,
+            timestamp,
+            new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.LeftButtonReleased),
+            KeyModifiers.None,
+            MouseButton.Left);
+        control.RaiseEvent(release);
+    }
+
+    private static void RaiseMouseDragReleaseSequence(
+        TerminalControl control,
+        Window window,
+        Point pressWindowPoint,
+        Point releaseWindowPoint)
+    {
+        Pointer pointer = new(id: 7, PointerType.Mouse, isPrimary: true);
+        ulong timestamp = (ulong)Environment.TickCount64;
+
+        PointerPressedEventArgs press = new(
+            control,
+            pointer,
+            window,
+            pressWindowPoint,
+            timestamp++,
+            new PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonPressed),
+            KeyModifiers.None,
+            clickCount: 1);
+        control.RaiseEvent(press);
+
+        PointerEventArgs move = new(
+            InputElement.PointerMovedEvent,
+            control,
+            pointer,
+            window,
+            releaseWindowPoint,
+            timestamp++,
+            new PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.Other),
+            KeyModifiers.None);
+        control.RaiseEvent(move);
+
+        PointerReleasedEventArgs release = new(
+            control,
+            pointer,
+            window,
+            releaseWindowPoint,
             timestamp,
             new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.LeftButtonReleased),
             KeyModifiers.None,
@@ -2957,11 +3435,13 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    private sealed class RecordingEndpoint : ITerminalEndpoint, ITerminalInputSink
+    private sealed class RecordingEndpoint : ITerminalEndpoint, ITerminalInputSink, ITerminalScaleSink
     {
         public List<TerminalKeyEvent> KeyEvents { get; } = [];
         public List<string> TextInputs { get; } = [];
         public List<TerminalPointerEvent> PointerEvents { get; } = [];
+        public double ScaleX { get; private set; }
+        public double ScaleY { get; private set; }
 
         public void SendText(ReadOnlySpan<byte> utf8)
         {
@@ -2977,6 +3457,12 @@ public sealed class TerminalControlHeadlessInteractionTests
         {
             _ = widthPx;
             _ = heightPx;
+        }
+
+        public void SetContentScale(double scaleX, double scaleY)
+        {
+            ScaleX = scaleX;
+            ScaleY = scaleY;
         }
 
         public bool SendKey(TerminalKeyEvent keyEvent)

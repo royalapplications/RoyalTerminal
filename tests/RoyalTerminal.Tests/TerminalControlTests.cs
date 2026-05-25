@@ -61,6 +61,7 @@ public class TerminalControlTests
         Assert.Equal(80, control.Columns);
         Assert.Equal(24, control.Rows);
         Assert.Equal(10_000, control.ScrollbackLimit);
+        Assert.Equal(new Thickness(0), control.Padding);
         Assert.True(control.AutoScroll);
         Assert.True(control.ScrollToBottomOnInput);
         Assert.True(control.ReflowOnResize);
