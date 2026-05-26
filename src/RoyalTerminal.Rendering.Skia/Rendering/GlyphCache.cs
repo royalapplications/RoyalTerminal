@@ -69,6 +69,7 @@ public sealed class GlyphCache : IDisposable
     /// <param name="fontSource">Source used to resolve the primary typeface.</param>
     /// <param name="fontFilePath">Font file path used when <paramref name="fontSource"/> is <see cref="TerminalFontSource.File"/>.</param>
     /// <param name="maxEntries">Maximum number of cached glyph images before eviction.</param>
+    /// <param name="fontRenderingSettings">Optional font rasterization settings applied to created fonts.</param>
     public GlyphCache(
         string fontFamily,
         TerminalFontSource fontSource,
