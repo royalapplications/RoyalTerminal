@@ -227,6 +227,11 @@ public sealed record TerminalSessionAppearanceSettings
     public double FontSize { get; init; } = 14.0;
 
     /// <summary>
+    /// Font rendering quality settings.
+    /// </summary>
+    public TerminalFontRenderingSettings FontRendering { get; init; } = TerminalFontRenderingSettings.Default;
+
+    /// <summary>
     /// Whether the terminal auto-scrolls on incoming output.
     /// </summary>
     public bool AutoScroll { get; init; } = true;
