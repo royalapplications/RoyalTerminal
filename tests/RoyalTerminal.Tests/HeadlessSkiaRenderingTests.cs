@@ -11,6 +11,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Terminal;
 using SkiaSharp;
 using Xunit;
 
@@ -1122,6 +1123,61 @@ public class HeadlessSkiaRenderingTests
         Assert.NotNull(bold);
         Assert.NotNull(italic);
         Assert.NotNull(boldItalic);
+    }
+
+    [Fact]
+    public void GlyphCache_CreateFont_AppliesFontRenderingSettings()
+    {
+        TerminalFontRenderingSettings settings = new()
+        {
+            SubpixelPositioning = false,
+            Edging = TerminalFontEdging.Alias,
+            Hinting = TerminalFontHinting.Full,
+            BaselineSnap = false,
+            EmbeddedBitmaps = true,
+            Embolden = true,
+            ForceAutoHinting = true,
+            LinearMetrics = true,
+        };
+        using var cache = new GlyphCache(
+            "Consolas",
+            TerminalFontSource.System,
+            fontFilePath: null,
+            fontRenderingSettings: settings);
+
+        using SKFont font = cache.CreateFont(14f);
+
+        Assert.False(font.Subpixel);
+        Assert.Equal(SKFontEdging.Alias, font.Edging);
+        Assert.Equal(SKFontHinting.Full, font.Hinting);
+        Assert.False(font.BaselineSnap);
+        Assert.True(font.EmbeddedBitmaps);
+        Assert.True(font.Embolden);
+        Assert.True(font.ForceAutoHinting);
+        Assert.True(font.LinearMetrics);
+        Assert.Equal(settings.Normalize(), cache.FontRenderingSettings);
+    }
+
+    [Fact]
+    public void Renderer_FontRenderingSettings_UpdateGlyphCacheSettings()
+    {
+        using SkiaTerminalRenderer renderer = new("Consolas", 14f);
+        TerminalFontRenderingSettings settings = new()
+        {
+            SubpixelPositioning = false,
+            Edging = TerminalFontEdging.Antialias,
+            Hinting = TerminalFontHinting.None,
+            BaselineSnap = false,
+            EmbeddedBitmaps = true,
+            Embolden = true,
+            ForceAutoHinting = true,
+            LinearMetrics = true,
+        };
+
+        renderer.FontRenderingSettings = settings;
+
+        Assert.Equal(settings.Normalize(), renderer.FontRenderingSettings);
+        Assert.Equal(settings.Normalize(), renderer.GlyphCache.FontRenderingSettings);
     }
 
     [Fact]

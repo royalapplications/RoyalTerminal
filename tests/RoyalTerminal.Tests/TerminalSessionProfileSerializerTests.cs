@@ -136,6 +136,80 @@ public sealed class TerminalSessionProfileSerializerTests
     }
 
     [Fact]
+    public void Serializer_RoundTripsFontRenderingAppearance()
+    {
+        TerminalSessionProfilesDocument document = new()
+        {
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "font-rendering",
+                    DisplayName = "Font Rendering",
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        FontRendering = new TerminalFontRenderingSettings
+                        {
+                            SubpixelPositioning = false,
+                            Edging = TerminalFontEdging.Alias,
+                            Hinting = TerminalFontHinting.Full,
+                            BaselineSnap = false,
+                            EmbeddedBitmaps = true,
+                            Embolden = true,
+                            ForceAutoHinting = true,
+                            LinearMetrics = true,
+                        },
+                    },
+                },
+            ],
+        };
+
+        string json = TerminalSessionProfileSerializer.ToJson(document);
+        TerminalSessionProfilesDocument restored = TerminalSessionProfileSerializer.FromJson(json);
+
+        TerminalSessionProfile profile = Assert.Single(restored.Profiles);
+        TerminalFontRenderingSettings settings = profile.Appearance.FontRendering;
+        Assert.False(settings.SubpixelPositioning);
+        Assert.Equal(TerminalFontEdging.Alias, settings.Edging);
+        Assert.Equal(TerminalFontHinting.Full, settings.Hinting);
+        Assert.False(settings.BaselineSnap);
+        Assert.True(settings.EmbeddedBitmaps);
+        Assert.True(settings.Embolden);
+        Assert.True(settings.ForceAutoHinting);
+        Assert.True(settings.LinearMetrics);
+    }
+
+    [Fact]
+    public void Serializer_NormalizesInvalidFontRenderingAppearance()
+    {
+        TerminalSessionProfilesDocument document = new()
+        {
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "font-rendering",
+                    DisplayName = "Font Rendering",
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        FontRendering = new TerminalFontRenderingSettings
+                        {
+                            Edging = (TerminalFontEdging)999,
+                            Hinting = (TerminalFontHinting)999,
+                        },
+                    },
+                },
+            ],
+        };
+
+        TerminalSessionProfilesDocument restored = TerminalSessionProfileSerializer.FromJson(
+            TerminalSessionProfileSerializer.ToJson(document));
+
+        TerminalSessionProfile profile = Assert.Single(restored.Profiles);
+        Assert.Equal(TerminalFontRenderingSettings.Default, profile.Appearance.FontRendering);
+    }
+
+    [Fact]
     public void Serializer_RoundTripsTextHighlightRules_AndNormalizesColors()
     {
         TerminalSessionProfilesDocument document = new()

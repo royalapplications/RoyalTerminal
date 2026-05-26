@@ -206,9 +206,15 @@ public static class TerminalSessionProfileSerializer
             FontFamilyName = NormalizeOptional(appearance.FontFamilyName) ?? TerminalSessionProfileDefaults.DefaultMonoFont,
             FontFilePath = fontSource == TerminalFontSource.File ? fontFilePath : null,
             FontSize = appearance.FontSize > 0 ? appearance.FontSize : 14.0,
+            FontRendering = NormalizeFontRendering(appearance.FontRendering),
             TextHighlightingMode = NormalizeTextHighlightingMode(appearance.TextHighlightingMode),
             TextHighlightRules = NormalizeTextHighlightRules(appearance.TextHighlightRules),
         };
+    }
+
+    private static TerminalFontRenderingSettings NormalizeFontRendering(TerminalFontRenderingSettings? settings)
+    {
+        return (settings ?? TerminalFontRenderingSettings.Default).Normalize();
     }
 
     private static TerminalTextHighlightingMode NormalizeTextHighlightingMode(TerminalTextHighlightingMode mode)

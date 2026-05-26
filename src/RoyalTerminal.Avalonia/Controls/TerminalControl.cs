@@ -96,6 +96,54 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public static readonly StyledProperty<double> TerminalFontSizeProperty =
         AvaloniaProperty.Register<TerminalControl, double>(nameof(TerminalFontSize), 14.0);
 
+    /// <summary>Whether terminal text uses subpixel glyph positioning.</summary>
+    public static readonly StyledProperty<bool> FontSubpixelPositioningProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(
+            nameof(FontSubpixelPositioning),
+            TerminalFontRenderingSettings.Default.SubpixelPositioning);
+
+    /// <summary>Terminal text edge rendering mode.</summary>
+    public static readonly StyledProperty<TerminalFontEdging> FontEdgingProperty =
+        AvaloniaProperty.Register<TerminalControl, TerminalFontEdging>(
+            nameof(FontEdging),
+            TerminalFontRenderingSettings.Default.Edging);
+
+    /// <summary>Terminal text font hinting mode.</summary>
+    public static readonly StyledProperty<TerminalFontHinting> FontHintingProperty =
+        AvaloniaProperty.Register<TerminalControl, TerminalFontHinting>(
+            nameof(FontHinting),
+            TerminalFontRenderingSettings.Default.Hinting);
+
+    /// <summary>Whether terminal text glyphs snap to pixel boundaries on the baseline.</summary>
+    public static readonly StyledProperty<bool> FontBaselineSnapProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(
+            nameof(FontBaselineSnap),
+            TerminalFontRenderingSettings.Default.BaselineSnap);
+
+    /// <summary>Whether terminal text uses embedded bitmap strikes when available.</summary>
+    public static readonly StyledProperty<bool> FontEmbeddedBitmapsProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(
+            nameof(FontEmbeddedBitmaps),
+            TerminalFontRenderingSettings.Default.EmbeddedBitmaps);
+
+    /// <summary>Whether terminal text glyphs are algorithmically emboldened.</summary>
+    public static readonly StyledProperty<bool> FontEmboldenProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(
+            nameof(FontEmbolden),
+            TerminalFontRenderingSettings.Default.Embolden);
+
+    /// <summary>Whether terminal text forces auto-hinting.</summary>
+    public static readonly StyledProperty<bool> FontForceAutoHintingProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(
+            nameof(FontForceAutoHinting),
+            TerminalFontRenderingSettings.Default.ForceAutoHinting);
+
+    /// <summary>Whether terminal text metrics ignore hinting for improved precision.</summary>
+    public static readonly StyledProperty<bool> FontLinearMetricsProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(
+            nameof(FontLinearMetrics),
+            TerminalFontRenderingSettings.Default.LinearMetrics);
+
     /// <summary>Number of columns in the terminal grid.</summary>
     public static readonly StyledProperty<int> ColumnsProperty =
         AvaloniaProperty.Register<TerminalControl, int>(nameof(Columns), 80);
@@ -240,6 +288,62 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         get => GetValue(TerminalFontSizeProperty);
         set => SetValue(TerminalFontSizeProperty, value);
+    }
+
+    /// <summary>Gets or sets whether terminal text uses subpixel glyph positioning.</summary>
+    public bool FontSubpixelPositioning
+    {
+        get => GetValue(FontSubpixelPositioningProperty);
+        set => SetValue(FontSubpixelPositioningProperty, value);
+    }
+
+    /// <summary>Gets or sets terminal text edge rendering mode.</summary>
+    public TerminalFontEdging FontEdging
+    {
+        get => GetValue(FontEdgingProperty);
+        set => SetValue(FontEdgingProperty, value);
+    }
+
+    /// <summary>Gets or sets terminal text font hinting mode.</summary>
+    public TerminalFontHinting FontHinting
+    {
+        get => GetValue(FontHintingProperty);
+        set => SetValue(FontHintingProperty, value);
+    }
+
+    /// <summary>Gets or sets whether terminal text glyphs snap to pixel boundaries on the baseline.</summary>
+    public bool FontBaselineSnap
+    {
+        get => GetValue(FontBaselineSnapProperty);
+        set => SetValue(FontBaselineSnapProperty, value);
+    }
+
+    /// <summary>Gets or sets whether terminal text uses embedded bitmap strikes when available.</summary>
+    public bool FontEmbeddedBitmaps
+    {
+        get => GetValue(FontEmbeddedBitmapsProperty);
+        set => SetValue(FontEmbeddedBitmapsProperty, value);
+    }
+
+    /// <summary>Gets or sets whether terminal text glyphs are algorithmically emboldened.</summary>
+    public bool FontEmbolden
+    {
+        get => GetValue(FontEmboldenProperty);
+        set => SetValue(FontEmboldenProperty, value);
+    }
+
+    /// <summary>Gets or sets whether terminal text forces auto-hinting.</summary>
+    public bool FontForceAutoHinting
+    {
+        get => GetValue(FontForceAutoHintingProperty);
+        set => SetValue(FontForceAutoHintingProperty, value);
+    }
+
+    /// <summary>Gets or sets whether terminal text metrics ignore hinting for improved precision.</summary>
+    public bool FontLinearMetrics
+    {
+        get => GetValue(FontLinearMetricsProperty);
+        set => SetValue(FontLinearMetricsProperty, value);
     }
 
     public int Columns
@@ -968,7 +1072,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (change.Property == FontFamilyNameProperty ||
             change.Property == FontSourceProperty ||
             change.Property == FontFilePathProperty ||
-            change.Property == TerminalFontSizeProperty)
+            change.Property == TerminalFontSizeProperty ||
+            change.Property == FontSubpixelPositioningProperty ||
+            change.Property == FontEdgingProperty ||
+            change.Property == FontHintingProperty ||
+            change.Property == FontBaselineSnapProperty ||
+            change.Property == FontEmbeddedBitmapsProperty ||
+            change.Property == FontEmboldenProperty ||
+            change.Property == FontForceAutoHintingProperty ||
+            change.Property == FontLinearMetricsProperty)
         {
             ApplyFontSettings();
             return;
@@ -1116,7 +1228,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             family,
             (float)TerminalFontSize,
             FontSource,
-            fontFilePath);
+            fontFilePath,
+            CreateFontRenderingSettings());
         renderer.BackgroundOpacityEnabled = _backgroundOpacityEnabled;
         renderer.BackgroundOpacityCells = RendererBackgroundOpacityCells;
         renderer.BackgroundOpacity = RendererBackgroundOpacity;
@@ -1151,6 +1264,21 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         renderer.BackgroundOpacityCells = previous.BackgroundOpacityCells;
         renderer.BackgroundOpacity = previous.BackgroundOpacity;
         return renderer;
+    }
+
+    private TerminalFontRenderingSettings CreateFontRenderingSettings()
+    {
+        return new TerminalFontRenderingSettings
+        {
+            SubpixelPositioning = FontSubpixelPositioning,
+            Edging = FontEdging,
+            Hinting = FontHinting,
+            BaselineSnap = FontBaselineSnap,
+            EmbeddedBitmaps = FontEmbeddedBitmaps,
+            Embolden = FontEmbolden,
+            ForceAutoHinting = FontForceAutoHinting,
+            LinearMetrics = FontLinearMetrics,
+        }.Normalize();
     }
 
     private void ApplyColorDefaults()

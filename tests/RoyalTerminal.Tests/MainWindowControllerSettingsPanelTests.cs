@@ -47,6 +47,14 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.Equal(TerminalFontSource.File, viewModel.SettingsPanelState.SelectedFontSource);
             Assert.Equal(GetStoredFontPath(), viewModel.SettingsPanelState.FontFilePath);
             Assert.Equal(18, viewModel.SettingsPanelState.FontSize);
+            Assert.False(viewModel.SettingsPanelState.FontSubpixelPositioning);
+            Assert.Equal(TerminalFontEdging.Alias, viewModel.SettingsPanelState.SelectedFontEdging);
+            Assert.Equal(TerminalFontHinting.Full, viewModel.SettingsPanelState.SelectedFontHinting);
+            Assert.False(viewModel.SettingsPanelState.FontBaselineSnap);
+            Assert.True(viewModel.SettingsPanelState.FontEmbeddedBitmaps);
+            Assert.True(viewModel.SettingsPanelState.FontEmbolden);
+            Assert.True(viewModel.SettingsPanelState.FontForceAutoHinting);
+            Assert.True(viewModel.SettingsPanelState.FontLinearMetrics);
             Assert.Equal(
                 TerminalTextHighlightingMode.Realtime,
                 viewModel.SettingsPanelState.SelectedTextHighlightingMode?.Mode);
@@ -62,6 +70,14 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel.SettingsPanelState.SelectedFontSource = TerminalFontSource.System;
             viewModel.SettingsPanelState.FontFamilyName = "Monaco";
             viewModel.SettingsPanelState.FontSize = 17;
+            viewModel.SettingsPanelState.FontSubpixelPositioning = true;
+            viewModel.SettingsPanelState.SelectedFontEdging = TerminalFontEdging.Antialias;
+            viewModel.SettingsPanelState.SelectedFontHinting = TerminalFontHinting.None;
+            viewModel.SettingsPanelState.FontBaselineSnap = true;
+            viewModel.SettingsPanelState.FontEmbeddedBitmaps = false;
+            viewModel.SettingsPanelState.FontEmbolden = false;
+            viewModel.SettingsPanelState.FontForceAutoHinting = false;
+            viewModel.SettingsPanelState.FontLinearMetrics = false;
             viewModel.SettingsPanelState.ApplyCommand.Execute(null);
             Dispatcher.UIThread.RunJobs();
 
@@ -73,6 +89,14 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.Equal(TerminalFontSource.System, viewModel.FontSource);
             Assert.Equal("Monaco", viewModel.FontFamilyName);
             Assert.Equal(17, viewModel.FontSize);
+            Assert.True(viewModel.FontSubpixelPositioning);
+            Assert.Equal(TerminalFontEdging.Antialias, viewModel.FontEdging);
+            Assert.Equal(TerminalFontHinting.None, viewModel.FontHinting);
+            Assert.True(viewModel.FontBaselineSnap);
+            Assert.False(viewModel.FontEmbeddedBitmaps);
+            Assert.False(viewModel.FontEmbolden);
+            Assert.False(viewModel.FontForceAutoHinting);
+            Assert.False(viewModel.FontLinearMetrics);
 
             TerminalControl control = terminalHost.Children
                 .OfType<ScrollViewer>()
@@ -82,6 +106,14 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.Equal(TerminalFontSource.System, control.FontSource);
             Assert.Equal("Monaco", control.FontFamilyName);
             Assert.Equal(17, control.TerminalFontSize);
+            Assert.True(control.FontSubpixelPositioning);
+            Assert.Equal(TerminalFontEdging.Antialias, control.FontEdging);
+            Assert.Equal(TerminalFontHinting.None, control.FontHinting);
+            Assert.True(control.FontBaselineSnap);
+            Assert.False(control.FontEmbeddedBitmaps);
+            Assert.False(control.FontEmbolden);
+            Assert.False(control.FontForceAutoHinting);
+            Assert.False(control.FontLinearMetrics);
             Assert.True(control.ReflowOnResize);
             Assert.False(control.SixelGraphicsEnabled);
             Assert.Equal(TerminalTextHighlightingMode.Realtime, control.TextHighlightingMode);
@@ -122,6 +154,14 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel.SettingsPanelState.SelectedFontSource = TerminalFontSource.File;
             viewModel.SettingsPanelState.FontFamilyName = "Saved Font";
             viewModel.SettingsPanelState.FontFilePath = GetSavedFontPath();
+            viewModel.SettingsPanelState.FontSubpixelPositioning = true;
+            viewModel.SettingsPanelState.SelectedFontEdging = TerminalFontEdging.Antialias;
+            viewModel.SettingsPanelState.SelectedFontHinting = TerminalFontHinting.Normal;
+            viewModel.SettingsPanelState.FontBaselineSnap = true;
+            viewModel.SettingsPanelState.FontEmbeddedBitmaps = false;
+            viewModel.SettingsPanelState.FontEmbolden = false;
+            viewModel.SettingsPanelState.FontForceAutoHinting = false;
+            viewModel.SettingsPanelState.FontLinearMetrics = false;
             viewModel.SettingsPanelState.SaveCommand.Execute(null);
 
             bool saved = await WaitUntilAsync(() => store.SaveCount > 0, TimeSpan.FromSeconds(2));
@@ -135,6 +175,14 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.Equal(TerminalFontSource.File, savedProfile.Appearance.FontSource);
             Assert.Equal("Saved Font", savedProfile.Appearance.FontFamilyName);
             Assert.Equal(GetSavedFontPath(), savedProfile.Appearance.FontFilePath);
+            Assert.True(savedProfile.Appearance.FontRendering.SubpixelPositioning);
+            Assert.Equal(TerminalFontEdging.Antialias, savedProfile.Appearance.FontRendering.Edging);
+            Assert.Equal(TerminalFontHinting.Normal, savedProfile.Appearance.FontRendering.Hinting);
+            Assert.True(savedProfile.Appearance.FontRendering.BaselineSnap);
+            Assert.False(savedProfile.Appearance.FontRendering.EmbeddedBitmaps);
+            Assert.False(savedProfile.Appearance.FontRendering.Embolden);
+            Assert.False(savedProfile.Appearance.FontRendering.ForceAutoHinting);
+            Assert.False(savedProfile.Appearance.FontRendering.LinearMetrics);
         }
         finally
         {
@@ -207,6 +255,17 @@ public sealed class MainWindowControllerSettingsPanelTests
                         FontFamilyName = "Stored Font",
                         FontFilePath = GetStoredFontPath(),
                         FontSize = 18,
+                        FontRendering = new TerminalFontRenderingSettings
+                        {
+                            SubpixelPositioning = false,
+                            Edging = TerminalFontEdging.Alias,
+                            Hinting = TerminalFontHinting.Full,
+                            BaselineSnap = false,
+                            EmbeddedBitmaps = true,
+                            Embolden = true,
+                            ForceAutoHinting = true,
+                            LinearMetrics = true,
+                        },
                         TextHighlightingMode = TerminalTextHighlightingMode.Realtime,
                         TextHighlightRules =
                         [

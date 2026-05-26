@@ -47,6 +47,14 @@ public sealed class TerminalSettingsPanelStateTests
             current.SixelGraphicsEnabled = false;
             current.EventLogEnabled = false;
             current.FontSize = 16;
+            current.FontSubpixelPositioning = false;
+            current.SelectedFontEdging = TerminalFontEdging.Alias;
+            current.SelectedFontHinting = TerminalFontHinting.Full;
+            current.FontBaselineSnap = false;
+            current.FontEmbeddedBitmaps = true;
+            current.FontEmbolden = true;
+            current.FontForceAutoHinting = true;
+            current.FontLinearMetrics = true;
             current.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.BlockUnsafe;
         });
 
@@ -55,6 +63,14 @@ public sealed class TerminalSettingsPanelStateTests
         Assert.True(state.TerminalBehavior.EnableLigatures);
         Assert.False(state.Logging.EventLogEnabled);
         Assert.Equal(16, state.Appearance.FontSize);
+        Assert.False(state.Appearance.FontSubpixelPositioning);
+        Assert.Equal(TerminalFontEdging.Alias, state.Appearance.SelectedFontEdging);
+        Assert.Equal(TerminalFontHinting.Full, state.Appearance.SelectedFontHinting);
+        Assert.False(state.Appearance.FontBaselineSnap);
+        Assert.True(state.Appearance.FontEmbeddedBitmaps);
+        Assert.True(state.Appearance.FontEmbolden);
+        Assert.True(state.Appearance.FontForceAutoHinting);
+        Assert.True(state.Appearance.FontLinearMetrics);
         Assert.False(state.TerminalBehavior.ReflowOnResize);
         Assert.False(state.TerminalBehavior.SixelGraphicsEnabled);
         Assert.Equal(TerminalPasteSafetyPolicy.BlockUnsafe, state.TerminalBehavior.SelectedPasteSafetyPolicy);
@@ -64,6 +80,13 @@ public sealed class TerminalSettingsPanelStateTests
         Assert.Equal("BlockUnsafe", profile.Behavior.PasteSafetyPolicy);
         Assert.False(profile.Behavior.ReflowOnResize);
         Assert.False(profile.Behavior.SixelGraphicsEnabled);
+        Assert.Equal(TerminalFontEdging.Alias, profile.Appearance.FontRendering.Edging);
+        Assert.Equal(TerminalFontHinting.Full, profile.Appearance.FontRendering.Hinting);
+        Assert.False(profile.Appearance.FontRendering.BaselineSnap);
+        Assert.True(profile.Appearance.FontRendering.EmbeddedBitmaps);
+        Assert.True(profile.Appearance.FontRendering.Embolden);
+        Assert.True(profile.Appearance.FontRendering.ForceAutoHinting);
+        Assert.True(profile.Appearance.FontRendering.LinearMetrics);
     }
 
     [AvaloniaFact]
@@ -100,6 +123,34 @@ public sealed class TerminalSettingsPanelStateTests
         Assert.Equal(TerminalFontSource.File, profile.Appearance.FontSource);
         Assert.Equal(fontPath, profile.Appearance.FontFilePath);
         Assert.Equal("RoyalTerminal.CustomFont", profile.Appearance.FontFamilyName);
+    }
+
+    [AvaloniaFact]
+    public void FontRenderingSettings_LoadAndPersistThroughAppearanceState()
+    {
+        TerminalSettingsPanelState state = new();
+        state.MarkSaved();
+
+        state.Appearance.FontSubpixelPositioning = false;
+        state.Appearance.SelectedFontEdging = TerminalFontEdging.Antialias;
+        state.Appearance.SelectedFontHinting = TerminalFontHinting.None;
+        state.Appearance.FontBaselineSnap = false;
+        state.Appearance.FontEmbeddedBitmaps = true;
+        state.Appearance.FontEmbolden = true;
+        state.Appearance.FontForceAutoHinting = true;
+        state.Appearance.FontLinearMetrics = true;
+
+        Assert.True(state.IsDirty);
+        TerminalSessionProfilesDocument document = state.BuildDocument();
+        TerminalSessionProfile profile = Assert.Single(document.Profiles);
+        Assert.False(profile.Appearance.FontRendering.SubpixelPositioning);
+        Assert.Equal(TerminalFontEdging.Antialias, profile.Appearance.FontRendering.Edging);
+        Assert.Equal(TerminalFontHinting.None, profile.Appearance.FontRendering.Hinting);
+        Assert.False(profile.Appearance.FontRendering.BaselineSnap);
+        Assert.True(profile.Appearance.FontRendering.EmbeddedBitmaps);
+        Assert.True(profile.Appearance.FontRendering.Embolden);
+        Assert.True(profile.Appearance.FontRendering.ForceAutoHinting);
+        Assert.True(profile.Appearance.FontRendering.LinearMetrics);
     }
 
     [AvaloniaFact]

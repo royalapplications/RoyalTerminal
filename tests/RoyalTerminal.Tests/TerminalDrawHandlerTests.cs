@@ -28,6 +28,22 @@ public sealed class TerminalDrawHandlerTests
     }
 
     [Fact]
+    public void RenderTargetPixelSize_AppliesCanvasScale()
+    {
+        Rect renderBounds = new(0, 0, 960, 600);
+        SKRect partialClip = new(0, 0, 960, 280);
+
+        (int width, int height) = TerminalDrawHandler.GetRenderTargetPixelSize(
+            renderBounds,
+            partialClip,
+            scaleX: 2f,
+            scaleY: 1.5f);
+
+        Assert.Equal(1920, width);
+        Assert.Equal(900, height);
+    }
+
+    [Fact]
     public void RenderTargetPixelSize_FallsBackToClip_WhenRenderBoundsAreUnavailable()
     {
         Rect renderBounds = default;
@@ -37,5 +53,31 @@ public sealed class TerminalDrawHandlerTests
 
         Assert.Equal(640, width);
         Assert.Equal(360, height);
+    }
+
+    [Fact]
+    public void GetCanvasScale_ExtractsScaleFromMatrix()
+    {
+        SKMatrix matrix = SKMatrix.CreateScale(1.25f, 2f);
+
+        TerminalDrawHandler.RenderTargetScale scale = TerminalDrawHandler.GetCanvasScale(matrix);
+
+        Assert.Equal(1.25f, scale.X, precision: 3);
+        Assert.Equal(2f, scale.Y, precision: 3);
+    }
+
+    [Fact]
+    public void GetCanvasScale_InfersScaleFromPhysicalClip_WhenMatrixIsIdentity()
+    {
+        Rect renderBounds = new(0, 0, 960, 600);
+        SKRect physicalClip = new(0, 0, 1920, 1200);
+
+        TerminalDrawHandler.RenderTargetScale scale = TerminalDrawHandler.GetCanvasScale(
+            renderBounds,
+            physicalClip,
+            SKMatrix.Identity);
+
+        Assert.Equal(2f, scale.X, precision: 3);
+        Assert.Equal(2f, scale.Y, precision: 3);
     }
 }

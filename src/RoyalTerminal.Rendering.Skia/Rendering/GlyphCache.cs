@@ -23,6 +23,7 @@ public sealed class GlyphCache : IDisposable
     private readonly SKTypeface? _boldTypeface;
     private readonly SKTypeface? _italicTypeface;
     private readonly SKTypeface? _boldItalicTypeface;
+    private TerminalFontRenderingSettings _fontRenderingSettings;
     private bool _disposed;
 
     /// <summary>The default font used for rendering.</summary>
@@ -30,6 +31,26 @@ public sealed class GlyphCache : IDisposable
 
     /// <summary>Number of cached glyphs.</summary>
     public int Count => _cache.Count;
+
+    /// <summary>
+    /// Gets or sets the font rendering quality settings used for new <see cref="SKFont"/> instances.
+    /// Changing this value clears cached glyph images.
+    /// </summary>
+    public TerminalFontRenderingSettings FontRenderingSettings
+    {
+        get => _fontRenderingSettings;
+        set
+        {
+            TerminalFontRenderingSettings next = NormalizeFontRenderingSettings(value);
+            if (Equals(_fontRenderingSettings, next))
+            {
+                return;
+            }
+
+            _fontRenderingSettings = next;
+            Clear();
+        }
+    }
 
     /// <summary>
     /// Creates a new glyph cache with the specified font family and max entries.
@@ -48,13 +69,16 @@ public sealed class GlyphCache : IDisposable
     /// <param name="fontSource">Source used to resolve the primary typeface.</param>
     /// <param name="fontFilePath">Font file path used when <paramref name="fontSource"/> is <see cref="TerminalFontSource.File"/>.</param>
     /// <param name="maxEntries">Maximum number of cached glyph images before eviction.</param>
+    /// <param name="fontRenderingSettings">Optional font rasterization settings applied to created fonts.</param>
     public GlyphCache(
         string fontFamily,
         TerminalFontSource fontSource,
         string? fontFilePath,
-        int maxEntries = 8192)
+        int maxEntries = 8192,
+        TerminalFontRenderingSettings? fontRenderingSettings = null)
     {
         _maxEntries = maxEntries;
+        _fontRenderingSettings = NormalizeFontRenderingSettings(fontRenderingSettings);
 
         string normalizedFamily = string.IsNullOrWhiteSpace(fontFamily)
             ? "Consolas"
@@ -93,20 +117,35 @@ public sealed class GlyphCache : IDisposable
     public SKFont CreateFont(float size, bool bold = false, bool italic = false)
     {
         var typeface = GetTypeface(bold, italic);
-        return CreateFont(typeface, size);
+        return CreateFont(typeface, size, _fontRenderingSettings);
     }
 
     /// <summary>
     /// Creates a configured <see cref="SKFont"/> for a specific typeface.
     /// </summary>
     public static SKFont CreateFont(SKTypeface typeface, float size)
+        => CreateFont(typeface, size, TerminalFontRenderingSettings.Default);
+
+    /// <summary>
+    /// Creates a configured <see cref="SKFont"/> for a specific typeface and rendering settings.
+    /// </summary>
+    public static SKFont CreateFont(
+        SKTypeface typeface,
+        float size,
+        TerminalFontRenderingSettings? fontRenderingSettings)
     {
         ArgumentNullException.ThrowIfNull(typeface);
+        TerminalFontRenderingSettings settings = NormalizeFontRenderingSettings(fontRenderingSettings);
         return new SKFont(typeface, size)
         {
-            Subpixel = true,
-            Edging = SKFontEdging.SubpixelAntialias,
-            Hinting = SKFontHinting.Slight,
+            Subpixel = settings.SubpixelPositioning,
+            Edging = MapFontEdging(settings.Edging),
+            Hinting = MapFontHinting(settings.Hinting),
+            BaselineSnap = settings.BaselineSnap,
+            EmbeddedBitmaps = settings.EmbeddedBitmaps,
+            Embolden = settings.Embolden,
+            ForceAutoHinting = settings.ForceAutoHinting,
+            LinearMetrics = settings.LinearMetrics,
         };
     }
 
@@ -184,5 +223,32 @@ public sealed class GlyphCache : IDisposable
         {
             return null;
         }
+    }
+
+    private static TerminalFontRenderingSettings NormalizeFontRenderingSettings(
+        TerminalFontRenderingSettings? settings)
+    {
+        return (settings ?? TerminalFontRenderingSettings.Default).Normalize();
+    }
+
+    private static SKFontEdging MapFontEdging(TerminalFontEdging edging)
+    {
+        return edging switch
+        {
+            TerminalFontEdging.Alias => SKFontEdging.Alias,
+            TerminalFontEdging.Antialias => SKFontEdging.Antialias,
+            _ => SKFontEdging.SubpixelAntialias,
+        };
+    }
+
+    private static SKFontHinting MapFontHinting(TerminalFontHinting hinting)
+    {
+        return hinting switch
+        {
+            TerminalFontHinting.None => SKFontHinting.None,
+            TerminalFontHinting.Normal => SKFontHinting.Normal,
+            TerminalFontHinting.Full => SKFontHinting.Full,
+            _ => SKFontHinting.Slight,
+        };
     }
 }
