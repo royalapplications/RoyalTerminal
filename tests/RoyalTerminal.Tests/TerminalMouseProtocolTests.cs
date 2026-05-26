@@ -244,6 +244,36 @@ public sealed class TerminalMouseProtocolTests
     }
 
     [Fact]
+    public void BasicVtProcessor_SgrPixelsMouseMode_SubtractsContextPadding()
+    {
+        TerminalScreen screen = new(80, 24, 0);
+        BasicVtProcessor processor = new(screen);
+        processor.Process("\x1b[?1000h\x1b[?1016h"u8);
+
+        TerminalPointerEvent pointerEvent = new(
+            Kind: TerminalPointerEventKind.Button,
+            X: 50,
+            Y: 100,
+            Button: TerminalMouseButton.Left,
+            Action: TerminalInputAction.Press,
+            Modifiers: TerminalModifiers.None);
+        TerminalPointerEncodingContext context = new(
+            ScreenWidthPx: 820,
+            ScreenHeightPx: 420,
+            CellWidthPx: 10,
+            CellHeightPx: 16,
+            PaddingTopPx: 20,
+            PaddingBottomPx: 16,
+            PaddingRightPx: 10,
+            PaddingLeftPx: 10);
+
+        bool encoded = processor.TryEncodePointer(pointerEvent, context, out byte[] sequence);
+
+        Assert.True(encoded);
+        Assert.Equal("\x1b[<0;41;81M", Encoding.ASCII.GetString(sequence));
+    }
+
+    [Fact]
     public void Encoder_UrxvtPress_UsesDecimalEncoding()
     {
         TerminalMouseModeState mode = new(

@@ -384,8 +384,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
         double contentY = pointerEvent.Y - context.PaddingTopPx;
         int column = Math.Clamp((int)Math.Floor(contentX / context.CellWidthPx) + 1, 1, Math.Max(1, _screen.Columns));
         int row = Math.Clamp((int)Math.Floor(contentY / context.CellHeightPx) + 1, 1, Math.Max(1, _screen.ViewportRows));
-        int pixelX = Math.Max(1, (int)Math.Floor(pointerEvent.X) + 1);
-        int pixelY = Math.Max(1, (int)Math.Floor(pointerEvent.Y) + 1);
+        int pixelX = Math.Max(1, (int)Math.Floor(contentX) + 1);
+        int pixelY = Math.Max(1, (int)Math.Floor(contentY) + 1);
 
         return TerminalMouseProtocolEncoder.TryEncode(
             pointerEvent,

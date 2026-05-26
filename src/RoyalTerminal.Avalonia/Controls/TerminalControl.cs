@@ -448,6 +448,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private bool _leftPointerDown;
     private bool _middlePointerDown;
     private bool _rightPointerDown;
+    private bool _pointerInputStartedInContent;
     private bool _suppressGridPropertyApply;
     private bool _suppressLegacyColorThemeBridge;
     private int _lastPointerColumn = -1;
@@ -476,6 +477,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private TerminalSessionDimensions? _pendingTransportResize;
     private double _lastAppliedLayoutWidth = double.NaN;
     private double _lastAppliedLayoutHeight = double.NaN;
+    private TopLevel? _scalingTopLevel;
+    private double _contentScaleX = 1d;
+    private double _contentScaleY = 1d;
     private VtProcessorPreference _appliedVtProcessorPreference = VtProcessorPreference.Auto;
     private string? _activeTransportId;
     private readonly TerminalMouseModeTracker _mouseModeTracker = new();
@@ -664,7 +668,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     /// <inheritdoc />
     Size ILogicalScrollable.PageScrollSize =>
-        new(Bounds.Width, Bounds.Height);
+        GetTerminalContentSize(Bounds.Size);
 
     /// <inheritdoc />
     public bool CanHorizontallyScroll
@@ -682,7 +686,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     /// <inheritdoc />
     Size IScrollable.Extent =>
-        new(Bounds.Width, _scrollData?.Extent ?? Bounds.Height);
+        new(GetTerminalContentSize(Bounds.Size).Width, _scrollData?.Extent ?? GetTerminalContentSize(Bounds.Size).Height);
 
     /// <inheritdoc />
     Vector IScrollable.Offset
@@ -724,7 +728,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     /// <inheritdoc />
     Size IScrollable.Viewport =>
-        new(Bounds.Width, _scrollData?.Viewport ?? Bounds.Height);
+        new(GetTerminalContentSize(Bounds.Size).Width, _scrollData?.Viewport ?? GetTerminalContentSize(Bounds.Size).Height);
 
     event EventHandler? ILogicalScrollable.ScrollInvalidated
     {
@@ -1024,10 +1028,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        if (change.Property == PaddingProperty)
+        {
+            ApplyPaddingSettings();
+            return;
+        }
+
         if (change.Property == AutoScrollProperty)
         {
             ApplyAutoScrollSetting();
         }
+    }
+
+    private void ApplyPaddingSettings()
+    {
+        InvalidateMeasure();
+        InvalidateArrange();
+        _presenter?.Invalidate(fullRedraw: true);
+        RaiseScrollInvalidated();
     }
 
     private void ApplyFontSettings()
@@ -1379,7 +1397,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void ApplyGridFromProperties()
     {
-        ApplyTerminalSize(Columns, Rows, Bounds.Width, Bounds.Height, raiseTerminalResized: true, invalidateMeasure: true);
+        Size contentSize = GetTerminalContentSize(Bounds.Size);
+        ApplyTerminalSize(Columns, Rows, contentSize.Width, contentSize.Height, raiseTerminalResized: true, invalidateMeasure: true);
     }
 
     private void ApplyTerminalSize(
@@ -1768,6 +1787,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         base.OnAttachedToVisualTree(e);
 
         _containingScrollViewer = null;
+        AttachTopLevelScaling();
 
         // TemplatedControl without a template never fires OnApplyTemplate.
         // Create the presenter here as a fallback so rendering always works.
@@ -1782,6 +1802,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         StopMouseSelectionDrag();
         EnsureCursorBlinkTimerRunning(false);
         RestoreReservedAncestorKeyBindings();
+        DetachTopLevelScaling();
     }
 
     private void EnsurePresenter()
@@ -1948,9 +1969,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (_renderer is null)
             return base.MeasureOverride(availableSize);
 
+        Thickness padding = GetEffectivePadding();
+
         // Calculate desired size based on columns/rows
-        var desiredWidth = Columns * _renderer.CellWidth;
-        var desiredHeight = Rows * _renderer.CellHeight;
+        double desiredWidth = Columns * _renderer.CellWidth + padding.Left + padding.Right;
+        double desiredHeight = Rows * _renderer.CellHeight + padding.Top + padding.Bottom;
 
         // A terminal should fill all available space so that ArrangeOverride
         // receives the full container size and can recalculate cols/rows.
@@ -1964,36 +1987,96 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     protected override Size ArrangeOverride(Size finalSize)
     {
+        Rect contentRect = GetTerminalContentRect(finalSize);
+
         if (_presenter is not null)
         {
-            _presenter.Arrange(new Rect(finalSize));
+            _presenter.Arrange(contentRect);
         }
 
         // Recalculate grid dimensions based on actual size
         if (_renderer is not null && _renderer.CellWidth > 0 && _renderer.CellHeight > 0)
         {
-            if (finalSize.Width < _renderer.CellWidth || finalSize.Height < _renderer.CellHeight)
+            if (contentRect.Width < _renderer.CellWidth || contentRect.Height < _renderer.CellHeight)
             {
                 // Avoid collapsing terminal state to a destructive 1x1 grid when a full cell
                 // cannot be displayed during transient tiny layout bounds.
-                _presenter?.NotifyResize(finalSize);
+                _presenter?.NotifyResize(contentRect.Size);
                 return finalSize;
             }
 
-            var newCols = Math.Max(1, (int)(finalSize.Width / _renderer.CellWidth));
-            var newRows = Math.Max(1, (int)(finalSize.Height / _renderer.CellHeight));
+            int newCols = Math.Max(1, (int)(contentRect.Width / _renderer.CellWidth));
+            int newRows = Math.Max(1, (int)(contentRect.Height / _renderer.CellHeight));
 
             if (newCols != Columns || newRows != Rows)
             {
-                ApplyGridFromLayout(newCols, newRows, finalSize);
+                ApplyGridFromLayout(newCols, newRows, contentRect.Size);
             }
             else
             {
-                ApplyTerminalSize(newCols, newRows, finalSize.Width, finalSize.Height, raiseTerminalResized: false, invalidateMeasure: false);
+                ApplyTerminalSize(newCols, newRows, contentRect.Width, contentRect.Height, raiseTerminalResized: false, invalidateMeasure: false);
             }
         }
 
         return finalSize;
+    }
+
+    private Rect GetTerminalContentRect(Size availableSize)
+    {
+        Thickness padding = GetEffectivePadding();
+        double width = Math.Max(0d, availableSize.Width - padding.Left - padding.Right);
+        double height = Math.Max(0d, availableSize.Height - padding.Top - padding.Bottom);
+        return new Rect(padding.Left, padding.Top, width, height);
+    }
+
+    private Size GetTerminalContentSize(Size availableSize)
+    {
+        return GetTerminalContentRect(availableSize).Size;
+    }
+
+    private Thickness GetEffectivePadding()
+    {
+        Thickness padding = Padding;
+        return new Thickness(
+            NormalizePaddingValue(padding.Left),
+            NormalizePaddingValue(padding.Top),
+            NormalizePaddingValue(padding.Right),
+            NormalizePaddingValue(padding.Bottom));
+    }
+
+    private static double NormalizePaddingValue(double value)
+    {
+        return double.IsFinite(value) && value > 0d ? value : 0d;
+    }
+
+    private bool TryTranslatePointToTerminalContent(Point controlPoint, out Point contentPoint)
+    {
+        Rect contentRect = GetTerminalContentRect(Bounds.Size);
+        if (contentRect.Width <= 0d || contentRect.Height <= 0d ||
+            controlPoint.X < contentRect.X ||
+            controlPoint.Y < contentRect.Y ||
+            controlPoint.X >= contentRect.Right ||
+            controlPoint.Y >= contentRect.Bottom)
+        {
+            contentPoint = default;
+            return false;
+        }
+
+        contentPoint = new Point(controlPoint.X - contentRect.X, controlPoint.Y - contentRect.Y);
+        return true;
+    }
+
+    private Point ClampPointToTerminalContent(Point controlPoint)
+    {
+        Rect contentRect = GetTerminalContentRect(Bounds.Size);
+        double x = Math.Clamp(controlPoint.X - contentRect.X, 0d, GetMaxContentCoordinate(contentRect.Width));
+        double y = Math.Clamp(controlPoint.Y - contentRect.Y, 0d, GetMaxContentCoordinate(contentRect.Height));
+        return new Point(x, y);
+    }
+
+    private static double GetMaxContentCoordinate(double length)
+    {
+        return length > 0d ? Math.BitDecrement(length) : 0d;
     }
 
     public override void Render(DrawingContext context)
@@ -2019,6 +2102,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _mouseModeTracker.Reset();
         ResetPointerButtons();
         TerminalSessionService.AttachEndpoint(endpoint);
+        ApplyContentScaleToEndpoint(endpoint);
 
         if (_renderer is not null)
         {
@@ -2819,9 +2903,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         Focus();
 
-        var point = e.GetPosition(this);
+        Point controlPoint = e.GetPosition(this);
+        PointerPointProperties props = e.GetCurrentPoint(this).Properties;
+        if (!TryTranslatePointToTerminalContent(controlPoint, out Point point))
+        {
+            ResetPointerCell();
+            ResetPointerButtons();
+            _pointerInputStartedInContent = false;
+            e.Handled = true;
+            return;
+        }
+
         UpdatePointerCell(point);
-        var props = e.GetCurrentPoint(this).Properties;
         TerminalMouseButton button = ResolvePressedMouseButton(props);
         if (button == TerminalMouseButton.None &&
             IsPrimaryPointer(e.Pointer.Type))
@@ -2842,6 +2935,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         bool pointerSent = false;
         if (button != TerminalMouseButton.None)
         {
+            _pointerInputStartedInContent = true;
             SetPointerButtonState(button, isDown: true);
             pointerSent = SendPointerEvent(new TerminalPointerEvent(
                 Kind: TerminalPointerEventKind.Button,
@@ -2883,9 +2977,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private void HandlePointerMovedCore(PointerEventArgs e)
     {
 
-        var point = e.GetPosition(this);
+        Point controlPoint = e.GetPosition(this);
+        PointerPointProperties props = e.GetCurrentPoint(this).Properties;
+        bool inContent = TryTranslatePointToTerminalContent(controlPoint, out Point point);
+        if (!inContent)
+        {
+            if (!_isMouseSelecting && !_pointerInputStartedInContent)
+            {
+                ResetPointerCell();
+                SyncPointerButtonState(props, preserveWhenNoButtons: true);
+                return;
+            }
+
+            point = ClampPointToTerminalContent(controlPoint);
+        }
+
         UpdatePointerCell(point);
-        var props = e.GetCurrentPoint(this).Properties;
         // Preserve tracked button state when move events omit button flags.
         SyncPointerButtonState(props, preserveWhenNoButtons: true);
         TerminalMouseButton button = GetPrimaryPressedMouseButton(props);
@@ -2918,9 +3025,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void HandlePointerReleasedCore(PointerReleasedEventArgs e)
     {
-        var point = e.GetPosition(this);
-        UpdatePointerCell(point);
-        var props = e.GetCurrentPoint(this).Properties;
+        Point controlPoint = e.GetPosition(this);
+        bool inContent = TryTranslatePointToTerminalContent(controlPoint, out Point point);
+        bool useContentPoint = inContent || _isMouseSelecting || _pointerInputStartedInContent;
+        if (useContentPoint)
+        {
+            if (!inContent)
+            {
+                point = ClampPointToTerminalContent(controlPoint);
+            }
+
+            UpdatePointerCell(point);
+        }
+        else
+        {
+            ResetPointerCell();
+        }
+
+        PointerPointProperties props = e.GetCurrentPoint(this).Properties;
         TerminalMouseButton button = ConvertMouseButton(e.InitialPressMouseButton);
         if (button == TerminalMouseButton.None)
         {
@@ -2936,13 +3058,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             button = TerminalMouseButton.Left;
         }
 
-        SendPointerEvent(new TerminalPointerEvent(
-            Kind: TerminalPointerEventKind.Button,
-            X: point.X,
-            Y: point.Y,
-            Button: button,
-            Action: TerminalInputAction.Release,
-            Modifiers: ConvertTerminalModifiers(e.KeyModifiers)));
+        if (useContentPoint)
+        {
+            SendPointerEvent(new TerminalPointerEvent(
+                Kind: TerminalPointerEventKind.Button,
+                X: point.X,
+                Y: point.Y,
+                Button: button,
+                Action: TerminalInputAction.Release,
+                Modifiers: ConvertTerminalModifiers(e.KeyModifiers)));
+        }
 
         if (button != TerminalMouseButton.None)
         {
@@ -2965,6 +3090,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _isMouseSelecting = false;
+        _pointerInputStartedInContent = false;
         if (wasMouseSelecting)
         {
             e.Pointer.Capture(null);
@@ -3907,18 +4033,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private int GetSelectionAutoScrollRows(Point point)
     {
-        if (_renderer is null || _screen is null || Bounds.Height <= 0)
+        Size contentSize = GetTerminalContentSize(Bounds.Size);
+        if (_renderer is null || _screen is null || contentSize.Height <= 0)
         {
             return 0;
         }
 
-        double autoScrollMargin = Math.Min(SelectionAutoScrollMargin, Bounds.Height * 0.5d);
+        double autoScrollMargin = Math.Min(SelectionAutoScrollMargin, contentSize.Height * 0.5d);
         if (point.Y < autoScrollMargin)
         {
             return -1;
         }
 
-        if (point.Y > Bounds.Height - autoScrollMargin)
+        if (point.Y > contentSize.Height - autoScrollMargin)
         {
             return 1;
         }
@@ -3930,6 +4057,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         StopSelectionAutoScroll();
         _isMouseSelecting = false;
+        _pointerInputStartedInContent = false;
     }
 
     private void StopSelectionAutoScroll()
@@ -3955,16 +4083,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnPointerExited(e);
 
-        if (_lastPointerColumn >= 0 || _lastPointerRow >= 0)
-        {
-            _lastPointerColumn = -1;
-            _lastPointerRow = -1;
-            if (_hoveredLinkUrl is not null)
-            {
-                _hoveredLinkUrl = null;
-                UpdateRendererParityStateFromScreen();
-            }
-        }
+        ResetPointerCell();
     }
 
     protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
@@ -3975,26 +4094,34 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void HandlePointerWheelChangedCore(PointerWheelEventArgs e)
     {
-
+        Point controlPoint = e.GetPosition(this);
+        bool insideContent = TryTranslatePointToTerminalContent(controlPoint, out Point point);
         if (IsMouseReportingActiveForInput())
         {
-            Point point = e.GetPosition(this);
-            bool sent = SendPointerEvent(new TerminalPointerEvent(
-                Kind: TerminalPointerEventKind.Scroll,
-                X: point.X,
-                Y: point.Y,
-                Button: TerminalMouseButton.None,
-                Action: TerminalInputAction.Press,
-                Modifiers: ConvertTerminalModifiers(e.KeyModifiers),
-                DeltaX: e.Delta.X,
-                DeltaY: e.Delta.Y));
-            if (sent)
+            if (insideContent)
             {
-                e.Handled = true;
-                return;
+                bool sent = SendPointerEvent(new TerminalPointerEvent(
+                    Kind: TerminalPointerEventKind.Scroll,
+                    X: point.X,
+                    Y: point.Y,
+                    Button: TerminalMouseButton.None,
+                    Action: TerminalInputAction.Press,
+                    Modifiers: ConvertTerminalModifiers(e.KeyModifiers),
+                    DeltaX: e.Delta.X,
+                    DeltaY: e.Delta.Y));
+                if (sent)
+                {
+                    e.Handled = true;
+                    return;
+                }
             }
         }
 
+        HandlePointerWheelScroll(e, forwardToInputSink: insideContent);
+    }
+
+    private void HandlePointerWheelScroll(PointerWheelEventArgs e, bool forwardToInputSink)
+    {
         if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
         {
             int deltaRows = e.Delta.Y > 0
@@ -4022,12 +4149,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         CaptureRendererSelectionForCurrentViewport();
-        TerminalScrollService.HandlePointerWheel(
-            e,
-            _scrollViewer,
-            TerminalSessionService,
-            _presenter,
-            RaiseScrollInvalidated);
+        if (forwardToInputSink)
+        {
+            TerminalScrollService.HandlePointerWheel(
+                e,
+                _scrollViewer,
+                TerminalSessionService,
+                _presenter,
+                RaiseScrollInvalidated);
+        }
+        else
+        {
+            _scrollViewer?.HandleWheel(e.Delta.Y);
+            _presenter?.Invalidate();
+            RaiseScrollInvalidated();
+        }
+
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
         UpdateAutoScrollPinnedToBottom();
@@ -4373,10 +4510,74 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void SetContentScale(double scaleX, double scaleY)
     {
+        double safeScaleX = NormalizeContentScale(scaleX);
+        double safeScaleY = NormalizeContentScale(scaleY);
+        _contentScaleX = safeScaleX;
+        _contentScaleY = safeScaleY;
+
         if (Endpoint is ITerminalScaleSink scaleSink)
         {
-            scaleSink.SetContentScale(scaleX, scaleY);
+            scaleSink.SetContentScale(safeScaleX, safeScaleY);
         }
+    }
+
+    private void AttachTopLevelScaling()
+    {
+        TopLevel? nextTopLevel = TopLevel.GetTopLevel(this);
+        if (ReferenceEquals(_scalingTopLevel, nextTopLevel))
+        {
+            ApplyContentScaleFromTopLevel();
+            return;
+        }
+
+        DetachTopLevelScaling();
+        _scalingTopLevel = nextTopLevel;
+        if (_scalingTopLevel is not null)
+        {
+            _scalingTopLevel.ScalingChanged += OnTopLevelScalingChanged;
+        }
+
+        ApplyContentScaleFromTopLevel();
+    }
+
+    private void DetachTopLevelScaling()
+    {
+        if (_scalingTopLevel is not null)
+        {
+            _scalingTopLevel.ScalingChanged -= OnTopLevelScalingChanged;
+            _scalingTopLevel = null;
+        }
+    }
+
+    private void OnTopLevelScalingChanged(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        ApplyContentScaleFromTopLevel();
+    }
+
+    private void ApplyContentScaleFromTopLevel()
+    {
+        if (_scalingTopLevel is null)
+        {
+            return;
+        }
+
+        double scaling = NormalizeContentScale(_scalingTopLevel.RenderScaling);
+        SetContentScale(scaling, scaling);
+    }
+
+    private void ApplyContentScaleToEndpoint(ITerminalEndpoint endpoint)
+    {
+        if (endpoint is ITerminalScaleSink scaleSink)
+        {
+            scaleSink.SetContentScale(_contentScaleX, _contentScaleY);
+        }
+    }
+
+    private static double NormalizeContentScale(double scale)
+    {
+        return double.IsFinite(scale) && scale > 0d ? scale : 1d;
     }
 
     #endregion
@@ -5266,8 +5467,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         int cellWidthPx = Math.Max(1, (int)Math.Ceiling(cellWidth));
         int cellHeightPx = Math.Max(1, (int)Math.Ceiling(cellHeight));
-        int screenWidthPx = Math.Max(1, (int)Math.Round(Bounds.Width));
-        int screenHeightPx = Math.Max(1, (int)Math.Round(Bounds.Height));
+        Size contentSize = GetTerminalContentSize(Bounds.Size);
+        int screenWidthPx = Math.Max(1, (int)Math.Round(contentSize.Width));
+        int screenHeightPx = Math.Max(1, (int)Math.Round(contentSize.Height));
         TerminalPointerEvent nativePointerEvent = pointerEvent;
 
         if (ShouldScalePointerForNativeMouseEncoding())
@@ -5281,8 +5483,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 Y = pointerEvent.Y * heightScale
             };
 
-            screenWidthPx = Math.Max(1, (int)Math.Round(Bounds.Width * widthScale));
-            screenHeightPx = Math.Max(1, (int)Math.Round(Bounds.Height * heightScale));
+            screenWidthPx = Math.Max(1, (int)Math.Round(contentSize.Width * widthScale));
+            screenHeightPx = Math.Max(1, (int)Math.Round(contentSize.Height * heightScale));
         }
 
         TerminalPointerEncodingContext context = new(
@@ -5435,6 +5637,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         column = Math.Clamp(col + 1, 1, Columns);
         row = Math.Clamp(rowIndex + 1, 1, Rows);
         return true;
+    }
+
+    private void ResetPointerCell()
+    {
+        if (_lastPointerColumn < 0 && _lastPointerRow < 0 && _hoveredLinkUrl is null)
+        {
+            return;
+        }
+
+        bool hadHover = _hoveredLinkUrl is not null;
+        _lastPointerColumn = -1;
+        _lastPointerRow = -1;
+        _hoveredLinkUrl = null;
+
+        if (hadHover)
+        {
+            UpdateRendererParityStateFromScreen();
+        }
     }
 
     private void UpdatePointerCell(Point point)
@@ -6279,6 +6499,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _leftPointerDown = false;
         _middlePointerDown = false;
         _rightPointerDown = false;
+        _pointerInputStartedInContent = false;
     }
 
     private void SyncPointerButtonState(PointerPointProperties properties, bool preserveWhenNoButtons = false)
