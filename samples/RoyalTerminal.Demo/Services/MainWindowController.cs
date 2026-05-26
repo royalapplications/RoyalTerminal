@@ -2283,6 +2283,14 @@ internal sealed class MainWindowController
             ? TerminalFontSource.File
             : TerminalFontSource.System;
         standalone.TerminalFontSize = _viewModel.FontSize;
+        standalone.FontSubpixelPositioning = _viewModel.FontSubpixelPositioning;
+        standalone.FontEdging = _viewModel.FontEdging;
+        standalone.FontHinting = _viewModel.FontHinting;
+        standalone.FontBaselineSnap = _viewModel.FontBaselineSnap;
+        standalone.FontEmbeddedBitmaps = _viewModel.FontEmbeddedBitmaps;
+        standalone.FontEmbolden = _viewModel.FontEmbolden;
+        standalone.FontForceAutoHinting = _viewModel.FontForceAutoHinting;
+        standalone.FontLinearMetrics = _viewModel.FontLinearMetrics;
     }
 
     private static string NormalizeFontFamily(string? fontFamilyName)
@@ -2532,6 +2540,14 @@ internal sealed class MainWindowController
             current.FontFamilyName = _viewModel.FontFamilyName;
             current.FontFilePath = _viewModel.FontFilePath;
             current.FontSize = _viewModel.FontSize;
+            current.FontSubpixelPositioning = _viewModel.FontSubpixelPositioning;
+            current.SelectedFontEdging = _viewModel.FontEdging;
+            current.SelectedFontHinting = _viewModel.FontHinting;
+            current.FontBaselineSnap = _viewModel.FontBaselineSnap;
+            current.FontEmbeddedBitmaps = _viewModel.FontEmbeddedBitmaps;
+            current.FontEmbolden = _viewModel.FontEmbolden;
+            current.FontForceAutoHinting = _viewModel.FontForceAutoHinting;
+            current.FontLinearMetrics = _viewModel.FontLinearMetrics;
             current.AutoScroll = true;
             current.BackgroundOpacityEnabled = false;
             current.SelectedTextHighlightingMode = ResolveSettingsTextHighlightingMode(
@@ -2670,6 +2686,14 @@ internal sealed class MainWindowController
         _viewModel.FontSource = fontSource;
         _viewModel.FontFamilyName = fontFamilyName;
         _viewModel.FontFilePath = fontFilePath;
+        _viewModel.FontSubpixelPositioning = state.FontSubpixelPositioning;
+        _viewModel.FontEdging = state.SelectedFontEdging;
+        _viewModel.FontHinting = state.SelectedFontHinting;
+        _viewModel.FontBaselineSnap = state.FontBaselineSnap;
+        _viewModel.FontEmbeddedBitmaps = state.FontEmbeddedBitmaps;
+        _viewModel.FontEmbolden = state.FontEmbolden;
+        _viewModel.FontForceAutoHinting = state.FontForceAutoHinting;
+        _viewModel.FontLinearMetrics = state.FontLinearMetrics;
         _viewModel.SetFontSizeFromSettings(fontSize);
         ApplyFontSize(fontSize);
 

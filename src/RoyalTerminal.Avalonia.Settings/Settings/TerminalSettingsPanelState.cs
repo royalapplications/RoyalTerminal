@@ -28,6 +28,20 @@ public sealed record TerminalSettingsTransportModeOption(string Id, string Displ
 public sealed record TerminalSettingsFontSourceOption(TerminalFontSource Source, string DisplayName);
 
 /// <summary>
+/// Font edge rendering option displayed by the terminal settings appearance panel.
+/// </summary>
+/// <param name="Edging">Font edging value.</param>
+/// <param name="DisplayName">Human-readable display name.</param>
+public sealed record TerminalSettingsFontEdgingOption(TerminalFontEdging Edging, string DisplayName);
+
+/// <summary>
+/// Font hinting option displayed by the terminal settings appearance panel.
+/// </summary>
+/// <param name="Hinting">Font hinting value.</param>
+/// <param name="DisplayName">Human-readable display name.</param>
+public sealed record TerminalSettingsFontHintingOption(TerminalFontHinting Hinting, string DisplayName);
+
+/// <summary>
 /// Text highlighting evaluation mode displayed by the appearance panel.
 /// </summary>
 /// <param name="Mode">Mode value.</param>
@@ -532,6 +546,46 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public static readonly StyledProperty<double> FontSizeProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, double>(nameof(FontSize), 14.0);
 
+    public static readonly StyledProperty<bool> FontSubpixelPositioningProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(
+            nameof(FontSubpixelPositioning),
+            TerminalFontRenderingSettings.Default.SubpixelPositioning);
+
+    public static readonly StyledProperty<TerminalFontEdging> SelectedFontEdgingProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, TerminalFontEdging>(
+            nameof(SelectedFontEdging),
+            TerminalFontRenderingSettings.Default.Edging);
+
+    public static readonly StyledProperty<TerminalFontHinting> SelectedFontHintingProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, TerminalFontHinting>(
+            nameof(SelectedFontHinting),
+            TerminalFontRenderingSettings.Default.Hinting);
+
+    public static readonly StyledProperty<bool> FontBaselineSnapProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(
+            nameof(FontBaselineSnap),
+            TerminalFontRenderingSettings.Default.BaselineSnap);
+
+    public static readonly StyledProperty<bool> FontEmbeddedBitmapsProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(
+            nameof(FontEmbeddedBitmaps),
+            TerminalFontRenderingSettings.Default.EmbeddedBitmaps);
+
+    public static readonly StyledProperty<bool> FontEmboldenProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(
+            nameof(FontEmbolden),
+            TerminalFontRenderingSettings.Default.Embolden);
+
+    public static readonly StyledProperty<bool> FontForceAutoHintingProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(
+            nameof(FontForceAutoHinting),
+            TerminalFontRenderingSettings.Default.ForceAutoHinting);
+
+    public static readonly StyledProperty<bool> FontLinearMetricsProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(
+            nameof(FontLinearMetrics),
+            TerminalFontRenderingSettings.Default.LinearMetrics);
+
     public static readonly StyledProperty<bool> IsSystemFontSourceSelectedProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(IsSystemFontSourceSelected), true);
 
@@ -597,6 +651,19 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             new TerminalSettingsFontSourceOption(TerminalFontSource.System, "System Font"),
             new TerminalSettingsFontSourceOption(TerminalFontSource.File, "Font File"),
         ];
+        FontEdgingOptions =
+        [
+            new TerminalSettingsFontEdgingOption(TerminalFontEdging.SubpixelAntialias, "Subpixel antialias"),
+            new TerminalSettingsFontEdgingOption(TerminalFontEdging.Antialias, "Grayscale antialias"),
+            new TerminalSettingsFontEdgingOption(TerminalFontEdging.Alias, "Aliased"),
+        ];
+        FontHintingOptions =
+        [
+            new TerminalSettingsFontHintingOption(TerminalFontHinting.Slight, "Slight"),
+            new TerminalSettingsFontHintingOption(TerminalFontHinting.Normal, "Normal"),
+            new TerminalSettingsFontHintingOption(TerminalFontHinting.Full, "Full"),
+            new TerminalSettingsFontHintingOption(TerminalFontHinting.None, "None"),
+        ];
         TextHighlightingModes =
         [
             new TerminalSettingsTextHighlightingModeOption(TerminalTextHighlightingMode.Static, "Static (cached)"),
@@ -653,6 +720,10 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public IReadOnlyList<TerminalSessionLogFormat> SessionLogFormats { get; }
 
     public IReadOnlyList<TerminalSettingsFontSourceOption> FontSources { get; }
+
+    public IReadOnlyList<TerminalSettingsFontEdgingOption> FontEdgingOptions { get; }
+
+    public IReadOnlyList<TerminalSettingsFontHintingOption> FontHintingOptions { get; }
 
     public IReadOnlyList<TerminalSettingsTextHighlightingModeOption> TextHighlightingModes { get; }
 
@@ -1042,6 +1113,54 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         set => SetValue(FontSizeProperty, value);
     }
 
+    public bool FontSubpixelPositioning
+    {
+        get => GetValue(FontSubpixelPositioningProperty);
+        set => SetValue(FontSubpixelPositioningProperty, value);
+    }
+
+    public TerminalFontEdging SelectedFontEdging
+    {
+        get => GetValue(SelectedFontEdgingProperty);
+        set => SetValue(SelectedFontEdgingProperty, value);
+    }
+
+    public TerminalFontHinting SelectedFontHinting
+    {
+        get => GetValue(SelectedFontHintingProperty);
+        set => SetValue(SelectedFontHintingProperty, value);
+    }
+
+    public bool FontBaselineSnap
+    {
+        get => GetValue(FontBaselineSnapProperty);
+        set => SetValue(FontBaselineSnapProperty, value);
+    }
+
+    public bool FontEmbeddedBitmaps
+    {
+        get => GetValue(FontEmbeddedBitmapsProperty);
+        set => SetValue(FontEmbeddedBitmapsProperty, value);
+    }
+
+    public bool FontEmbolden
+    {
+        get => GetValue(FontEmboldenProperty);
+        set => SetValue(FontEmboldenProperty, value);
+    }
+
+    public bool FontForceAutoHinting
+    {
+        get => GetValue(FontForceAutoHintingProperty);
+        set => SetValue(FontForceAutoHintingProperty, value);
+    }
+
+    public bool FontLinearMetrics
+    {
+        get => GetValue(FontLinearMetricsProperty);
+        set => SetValue(FontLinearMetricsProperty, value);
+    }
+
     public bool IsSystemFontSourceSelected
     {
         get => GetValue(IsSystemFontSourceSelectedProperty);
@@ -1407,6 +1526,21 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
 
     private bool CanSaveDocument() => _profiles.Count > 0 && SelectedProfile is not null;
 
+    private TerminalFontRenderingSettings BuildFontRenderingSettings()
+    {
+        return new TerminalFontRenderingSettings
+        {
+            SubpixelPositioning = FontSubpixelPositioning,
+            Edging = SelectedFontEdging,
+            Hinting = SelectedFontHinting,
+            BaselineSnap = FontBaselineSnap,
+            EmbeddedBitmaps = FontEmbeddedBitmaps,
+            Embolden = FontEmbolden,
+            ForceAutoHinting = FontForceAutoHinting,
+            LinearMetrics = FontLinearMetrics,
+        }.Normalize();
+    }
+
     private List<TerminalSessionTextHighlightRule> BuildTextHighlightRules()
     {
         if (TextHighlightRules.Count == 0)
@@ -1479,6 +1613,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
                     ? NormalizeOptional(FontFilePath)
                     : null,
                 FontSize = FontSize > 0 ? FontSize : 14.0,
+                FontRendering = BuildFontRenderingSettings(),
                 AutoScroll = AutoScroll,
                 BackgroundOpacityEnabled = BackgroundOpacityEnabled,
                 TextHighlightingMode = SelectedTextHighlightingMode?.Mode ?? TerminalTextHighlightingMode.Static,
@@ -1658,6 +1793,15 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             FontFamilyName = profile.Appearance.FontFamilyName;
             FontFilePath = profile.Appearance.FontFilePath ?? string.Empty;
             FontSize = profile.Appearance.FontSize;
+            TerminalFontRenderingSettings fontRendering = profile.Appearance.FontRendering.Normalize();
+            FontSubpixelPositioning = fontRendering.SubpixelPositioning;
+            SelectedFontEdging = fontRendering.Edging;
+            SelectedFontHinting = fontRendering.Hinting;
+            FontBaselineSnap = fontRendering.BaselineSnap;
+            FontEmbeddedBitmaps = fontRendering.EmbeddedBitmaps;
+            FontEmbolden = fontRendering.Embolden;
+            FontForceAutoHinting = fontRendering.ForceAutoHinting;
+            FontLinearMetrics = fontRendering.LinearMetrics;
             AutoScroll = profile.Appearance.AutoScroll;
             BackgroundOpacityEnabled = profile.Appearance.BackgroundOpacityEnabled;
             SelectedTextHighlightingMode = ResolveTextHighlightingMode(profile.Appearance.TextHighlightingMode);

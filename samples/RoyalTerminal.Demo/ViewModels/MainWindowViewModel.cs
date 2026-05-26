@@ -25,6 +25,14 @@ public sealed class MainWindowViewModel : ReactiveObject
     private TerminalFontSource _fontSource = TerminalFontSource.System;
     private string _fontFamilyName = GetDefaultMonospaceFont();
     private string _fontFilePath = string.Empty;
+    private bool _fontSubpixelPositioning = TerminalFontRenderingSettings.Default.SubpixelPositioning;
+    private TerminalFontEdging _fontEdging = TerminalFontRenderingSettings.Default.Edging;
+    private TerminalFontHinting _fontHinting = TerminalFontRenderingSettings.Default.Hinting;
+    private bool _fontBaselineSnap = TerminalFontRenderingSettings.Default.BaselineSnap;
+    private bool _fontEmbeddedBitmaps = TerminalFontRenderingSettings.Default.EmbeddedBitmaps;
+    private bool _fontEmbolden = TerminalFontRenderingSettings.Default.Embolden;
+    private bool _fontForceAutoHinting = TerminalFontRenderingSettings.Default.ForceAutoHinting;
+    private bool _fontLinearMetrics = TerminalFontRenderingSettings.Default.LinearMetrics;
     private TerminalTextHighlightingMode _textHighlightingMode = TerminalTextHighlightingMode.Static;
     private IReadOnlyList<TerminalTextHighlightRule> _textHighlightRules = [];
     private bool _isDarkTheme = true;
@@ -417,6 +425,54 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _fontFilePath;
         set => this.RaiseAndSetIfChanged(ref _fontFilePath, value?.Trim() ?? string.Empty);
+    }
+
+    public bool FontSubpixelPositioning
+    {
+        get => _fontSubpixelPositioning;
+        set => this.RaiseAndSetIfChanged(ref _fontSubpixelPositioning, value);
+    }
+
+    public TerminalFontEdging FontEdging
+    {
+        get => _fontEdging;
+        set => this.RaiseAndSetIfChanged(ref _fontEdging, value);
+    }
+
+    public TerminalFontHinting FontHinting
+    {
+        get => _fontHinting;
+        set => this.RaiseAndSetIfChanged(ref _fontHinting, value);
+    }
+
+    public bool FontBaselineSnap
+    {
+        get => _fontBaselineSnap;
+        set => this.RaiseAndSetIfChanged(ref _fontBaselineSnap, value);
+    }
+
+    public bool FontEmbeddedBitmaps
+    {
+        get => _fontEmbeddedBitmaps;
+        set => this.RaiseAndSetIfChanged(ref _fontEmbeddedBitmaps, value);
+    }
+
+    public bool FontEmbolden
+    {
+        get => _fontEmbolden;
+        set => this.RaiseAndSetIfChanged(ref _fontEmbolden, value);
+    }
+
+    public bool FontForceAutoHinting
+    {
+        get => _fontForceAutoHinting;
+        set => this.RaiseAndSetIfChanged(ref _fontForceAutoHinting, value);
+    }
+
+    public bool FontLinearMetrics
+    {
+        get => _fontLinearMetrics;
+        set => this.RaiseAndSetIfChanged(ref _fontLinearMetrics, value);
     }
 
     public IReadOnlyList<TerminalTextHighlightRule> TextHighlightRules

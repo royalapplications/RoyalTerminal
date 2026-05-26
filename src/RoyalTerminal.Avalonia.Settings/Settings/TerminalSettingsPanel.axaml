@@ -699,6 +699,83 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+
+                <Grid ColumnDefinitions="160,*"
+                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                      ColumnSpacing="12"
+                      RowSpacing="8"
+                      Width="520">
+                  <TextBlock Grid.Row="0"
+                             Grid.Column="0"
+                             Grid.ColumnSpan="2"
+                             FontWeight="SemiBold"
+                             Text="Font Rendering" />
+                  <CheckBox Grid.Row="1"
+                            Grid.Column="1"
+                            Content="Subpixel positioning"
+                            IsChecked="{Binding FontSubpixelPositioning}" />
+                  <TextBlock Grid.Row="2"
+                             Grid.Column="0"
+                             Grid.ColumnSpan="2"
+                             FontWeight="SemiBold"
+                             Text="Rasterization" />
+                  <CheckBox Grid.Row="3"
+                            Grid.Column="1"
+                            Content="Baseline snap"
+                            IsChecked="{Binding FontBaselineSnap}" />
+                  <CheckBox Grid.Row="4"
+                            Grid.Column="1"
+                            Content="Embedded bitmaps"
+                            IsChecked="{Binding FontEmbeddedBitmaps}" />
+                  <CheckBox Grid.Row="5"
+                            Grid.Column="1"
+                            Content="Embolden glyphs"
+                            IsChecked="{Binding FontEmbolden}" />
+                  <CheckBox Grid.Row="6"
+                            Grid.Column="1"
+                            Content="Force auto-hinting"
+                            IsChecked="{Binding FontForceAutoHinting}" />
+                  <CheckBox Grid.Row="7"
+                            Grid.Column="1"
+                            Content="Linear metrics"
+                            IsChecked="{Binding FontLinearMetrics}" />
+                  <TextBlock Grid.Row="8"
+                             Grid.Column="0"
+                             VerticalAlignment="Center"
+                             Foreground="#B8B8B8"
+                             Text="Edges" />
+                  <ComboBox Grid.Row="8"
+                            Grid.Column="1"
+                            Width="220"
+                            HorizontalAlignment="Left"
+                            ItemsSource="{Binding FontEdgingOptions}"
+                            SelectedValue="{Binding SelectedFontEdging}"
+                            SelectedValueBinding="{Binding Edging}">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="settings:TerminalSettingsFontEdgingOption">
+                        <TextBlock Text="{Binding DisplayName}" />
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <TextBlock Grid.Row="9"
+                             Grid.Column="0"
+                             VerticalAlignment="Center"
+                             Foreground="#B8B8B8"
+                             Text="Hinting" />
+                  <ComboBox Grid.Row="9"
+                            Grid.Column="1"
+                            Width="160"
+                            HorizontalAlignment="Left"
+                            ItemsSource="{Binding FontHintingOptions}"
+                            SelectedValue="{Binding SelectedFontHinting}"
+                            SelectedValueBinding="{Binding Hinting}">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="settings:TerminalSettingsFontHintingOption">
+                        <TextBlock Text="{Binding DisplayName}" />
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                </Grid>
               </StackPanel>
             </StackPanel>
           </ControlTemplate>

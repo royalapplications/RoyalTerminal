@@ -58,6 +58,14 @@ public class TerminalControlTests
         Assert.Equal(TerminalFontSource.System, control.FontSource);
         Assert.Equal(string.Empty, control.FontFilePath);
         Assert.Equal(14.0, control.TerminalFontSize);
+        Assert.True(control.FontSubpixelPositioning);
+        Assert.Equal(TerminalFontEdging.SubpixelAntialias, control.FontEdging);
+        Assert.Equal(TerminalFontHinting.Slight, control.FontHinting);
+        Assert.True(control.FontBaselineSnap);
+        Assert.False(control.FontEmbeddedBitmaps);
+        Assert.False(control.FontEmbolden);
+        Assert.False(control.FontForceAutoHinting);
+        Assert.False(control.FontLinearMetrics);
         Assert.Equal(80, control.Columns);
         Assert.Equal(24, control.Rows);
         Assert.Equal(10_000, control.ScrollbackLimit);
@@ -86,6 +94,14 @@ public class TerminalControlTests
             FontSource = TerminalFontSource.System,
             FontFilePath = string.Empty,
             TerminalFontSize = 16.0,
+            FontSubpixelPositioning = false,
+            FontEdging = TerminalFontEdging.Antialias,
+            FontHinting = TerminalFontHinting.Full,
+            FontBaselineSnap = false,
+            FontEmbeddedBitmaps = true,
+            FontEmbolden = true,
+            FontForceAutoHinting = true,
+            FontLinearMetrics = true,
             Columns = 120,
             Rows = 40,
             ScrollbackLimit = 50_000,
@@ -99,6 +115,14 @@ public class TerminalControlTests
         Assert.Equal(TerminalFontSource.System, control.FontSource);
         Assert.Equal(string.Empty, control.FontFilePath);
         Assert.Equal(16.0, control.TerminalFontSize);
+        Assert.False(control.FontSubpixelPositioning);
+        Assert.Equal(TerminalFontEdging.Antialias, control.FontEdging);
+        Assert.Equal(TerminalFontHinting.Full, control.FontHinting);
+        Assert.False(control.FontBaselineSnap);
+        Assert.True(control.FontEmbeddedBitmaps);
+        Assert.True(control.FontEmbolden);
+        Assert.True(control.FontForceAutoHinting);
+        Assert.True(control.FontLinearMetrics);
         Assert.Equal(120, control.Columns);
         Assert.Equal(40, control.Rows);
         Assert.Equal(50_000, control.ScrollbackLimit);
@@ -106,6 +130,33 @@ public class TerminalControlTests
         Assert.False(control.ScrollToBottomOnInput);
         Assert.False(control.ReflowOnResize);
         Assert.True(control.SixelGraphicsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void Control_FontRenderingSettings_ApplyToRenderer()
+    {
+        var control = new TerminalControl
+        {
+            FontSubpixelPositioning = false,
+            FontEdging = TerminalFontEdging.Alias,
+            FontHinting = TerminalFontHinting.None,
+            FontBaselineSnap = false,
+            FontEmbeddedBitmaps = true,
+            FontEmbolden = true,
+            FontForceAutoHinting = true,
+            FontLinearMetrics = true,
+        };
+
+        SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+        TerminalFontRenderingSettings settings = renderer.FontRenderingSettings;
+        Assert.False(settings.SubpixelPositioning);
+        Assert.Equal(TerminalFontEdging.Alias, settings.Edging);
+        Assert.Equal(TerminalFontHinting.None, settings.Hinting);
+        Assert.False(settings.BaselineSnap);
+        Assert.True(settings.EmbeddedBitmaps);
+        Assert.True(settings.Embolden);
+        Assert.True(settings.ForceAutoHinting);
+        Assert.True(settings.LinearMetrics);
     }
 
     [AvaloniaFact]

@@ -17,6 +17,14 @@ public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategorySt
             nameof(TerminalSettingsPanelState.FontFamilyName),
             nameof(TerminalSettingsPanelState.FontFilePath),
             nameof(TerminalSettingsPanelState.FontSize),
+            nameof(TerminalSettingsPanelState.FontSubpixelPositioning),
+            nameof(TerminalSettingsPanelState.SelectedFontEdging),
+            nameof(TerminalSettingsPanelState.SelectedFontHinting),
+            nameof(TerminalSettingsPanelState.FontBaselineSnap),
+            nameof(TerminalSettingsPanelState.FontEmbeddedBitmaps),
+            nameof(TerminalSettingsPanelState.FontEmbolden),
+            nameof(TerminalSettingsPanelState.FontForceAutoHinting),
+            nameof(TerminalSettingsPanelState.FontLinearMetrics),
             nameof(TerminalSettingsPanelState.IsSystemFontSourceSelected),
             nameof(TerminalSettingsPanelState.IsFileFontSourceSelected),
             nameof(TerminalSettingsPanelState.AutoScroll),
@@ -26,6 +34,10 @@ public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategorySt
     }
 
     public IReadOnlyList<TerminalSettingsFontSourceOption> FontSources => Owner.FontSources;
+
+    public IReadOnlyList<TerminalSettingsFontEdgingOption> FontEdgingOptions => Owner.FontEdgingOptions;
+
+    public IReadOnlyList<TerminalSettingsFontHintingOption> FontHintingOptions => Owner.FontHintingOptions;
 
     public AvaloniaList<string> SystemFontFamilies => Owner.SystemFontFamilies;
 
@@ -55,6 +67,54 @@ public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategorySt
     {
         get => Owner.FontSize;
         set => Owner.FontSize = value;
+    }
+
+    public bool FontSubpixelPositioning
+    {
+        get => Owner.FontSubpixelPositioning;
+        set => Owner.FontSubpixelPositioning = value;
+    }
+
+    public TerminalFontEdging SelectedFontEdging
+    {
+        get => Owner.SelectedFontEdging;
+        set => Owner.SelectedFontEdging = value;
+    }
+
+    public TerminalFontHinting SelectedFontHinting
+    {
+        get => Owner.SelectedFontHinting;
+        set => Owner.SelectedFontHinting = value;
+    }
+
+    public bool FontBaselineSnap
+    {
+        get => Owner.FontBaselineSnap;
+        set => Owner.FontBaselineSnap = value;
+    }
+
+    public bool FontEmbeddedBitmaps
+    {
+        get => Owner.FontEmbeddedBitmaps;
+        set => Owner.FontEmbeddedBitmaps = value;
+    }
+
+    public bool FontEmbolden
+    {
+        get => Owner.FontEmbolden;
+        set => Owner.FontEmbolden = value;
+    }
+
+    public bool FontForceAutoHinting
+    {
+        get => Owner.FontForceAutoHinting;
+        set => Owner.FontForceAutoHinting = value;
+    }
+
+    public bool FontLinearMetrics
+    {
+        get => Owner.FontLinearMetrics;
+        set => Owner.FontLinearMetrics = value;
     }
 
     public bool IsSystemFontSourceSelected => Owner.IsSystemFontSourceSelected;
