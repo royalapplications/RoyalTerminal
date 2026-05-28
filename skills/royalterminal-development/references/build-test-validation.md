@@ -98,6 +98,16 @@ cd external/ghostty
 zig build -Doptimize=ReleaseFast -Dapp-runtime=none
 ```
 
+Windows x64 release/debugging build from the repository root:
+```powershell
+.\scripts\build-native.ps1 -Arch x64 -Release
+```
+
+Direct Ghostty build from `external/ghostty`:
+```powershell
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=x86_64-windows-msvc
+```
+
 Renderer C API:
 ```bash
 cd native/ghostty-renderer-capi

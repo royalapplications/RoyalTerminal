@@ -237,7 +237,7 @@ if (-not (Test-Path (Join-Path $GhosttyDir "build.zig"))) {
 }
 
 $RID = if ($Arch -eq "arm64") { "win-arm64" } else { "win-x64" }
-$ZigTarget = if ($Arch -eq "arm64") { "aarch64-windows" } else { "x86_64-windows" }
+$ZigTarget = if ($Arch -eq "arm64") { "aarch64-windows-msvc" } else { "x86_64-windows-msvc" }
 $LibName = "ghostty-vt.dll"
 
 Write-Info "Platform: Windows ($RID)"

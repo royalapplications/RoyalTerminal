@@ -196,9 +196,14 @@ jobs:
         working-directory: external/ghostty
         shell: bash
         run: |
-          target=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            target="-Dtarget=aarch64-windows"
+            target="-Dtarget=aarch64-windows-msvc"
+          else
+            # Keep win-x64 release artifacts on Zig's baseline x86_64 CPU model.
+            # Building without -Dtarget uses the GitHub runner CPU and can emit
+            # AVX/AVX2 instructions that fail on older CPUs and Windows ARM64
+            # x64 emulation.
+            target="-Dtarget=x86_64-windows-msvc"
           fi
           zig build -Doptimize=ReleaseFast -Dapp-runtime=none ${target}
 
@@ -206,9 +211,10 @@ jobs:
         working-directory: native/ghostty-renderer-capi
         shell: bash
         run: |
-          target=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            target="-Dtarget=aarch64-windows"
+            target="-Dtarget=aarch64-windows-msvc"
+          else
+            target="-Dtarget=x86_64-windows-msvc"
           fi
           zig build -Doptimize=ReleaseFast ${target}
 

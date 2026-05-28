@@ -1027,6 +1027,15 @@ cd external/ghostty
 zig build -Doptimize=ReleaseFast -Dapp-runtime=none
 ```
 
+For distributable Windows x64 artifacts, pass an explicit baseline target so the
+DLL does not inherit AVX/AVX2 support from the build machine:
+
+```powershell
+.\scripts\build-native.ps1 -Arch x64 -Release
+# or, from external/ghostty:
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=x86_64-windows-msvc
+```
+
 ## Ghostty Submodule Status
 
 RoyalTerminal now tracks upstream Ghostty directly in `external/ghostty`; the local

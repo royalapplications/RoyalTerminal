@@ -130,6 +130,14 @@ bash build.sh release
 bash build.sh test
 ```
 
+For Windows x64 distributable artifacts, do not use the build host's native CPU
+target. Build with `x86_64-windows-msvc` so the DLL stays on the baseline x64
+instruction set and runs on older CPUs and Windows ARM64 x64 emulation.
+
+```powershell
+.\scripts\build-native.ps1 -Arch x64 -Release
+```
+
 ### Build `libghostty-vt` for integration tests
 
 ```bash
