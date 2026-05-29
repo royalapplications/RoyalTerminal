@@ -1,13 +1,13 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Tests — regression checks for Windows arm64 native packaging metadata.
+// RoyalTerminal.Tests — regression checks for Windows native packaging metadata.
 
 using System.Xml.Linq;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
 
-public sealed class WindowsArm64NativePackagingTests
+public sealed class WindowsNativePackagingTests
 {
     [Fact]
     public void WindowsNativePackageProject_PacksBothX64AndArm64RuntimeAssets()
@@ -84,6 +84,47 @@ public sealed class WindowsArm64NativePackagingTests
 
         AssertWorkflowContainsWindowsArm64Markers(File.ReadAllText(ciWorkflowPath));
         AssertWorkflowContainsWindowsArm64Markers(File.ReadAllText(releaseWorkflowPath));
+    }
+
+    [Fact]
+    public void ReleaseWorkflow_BuildsWindowsX64NativeArtifactsWithScalarBaseline()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string releaseWorkflowPath = Path.Combine(repoRoot, ".github", "workflows", "release.yml");
+        string workflowText = File.ReadAllText(releaseWorkflowPath);
+
+        Assert.Contains("-Dtarget=x86_64-windows-msvc", workflowText, StringComparison.Ordinal);
+        Assert.Contains("-Dcpu=x86_64-vzeroupper", workflowText, StringComparison.Ordinal);
+        Assert.Contains("-Dsimd=false", workflowText, StringComparison.Ordinal);
+        Assert.Contains("verify-windows-x64-no-avx.ps1", workflowText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowsNativeBuildScript_BuildsX64WithScalarBaseline()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string buildScriptPath = Path.Combine(repoRoot, "scripts", "build-native.ps1");
+        string buildScriptText = File.ReadAllText(buildScriptPath);
+
+        Assert.Contains("\"x86_64-windows-msvc\"", buildScriptText, StringComparison.Ordinal);
+        Assert.Contains("\"x86_64-vzeroupper\"", buildScriptText, StringComparison.Ordinal);
+        Assert.Contains("\"-Dsimd=false\"", buildScriptText, StringComparison.Ordinal);
+        Assert.Contains("verify-windows-x64-no-avx.ps1", buildScriptText, StringComparison.Ordinal);
+        Assert.DoesNotContain("-AllowMissingObjdump", buildScriptText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowsX64AvxVerifier_FailsClosedAndChecksDisassembly()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string verifierPath = Path.Combine(repoRoot, "scripts", "verify-windows-x64-no-avx.ps1");
+        string verifierText = File.ReadAllText(verifierPath);
+
+        Assert.Contains("llvm-objdump", verifierText, StringComparison.Ordinal);
+        Assert.Contains("--no-show-raw-insn", verifierText, StringComparison.Ordinal);
+        Assert.Contains("Windows x64 baseline native artifacts must not contain AVX/VEX instructions.", verifierText, StringComparison.Ordinal);
+        Assert.Contains("ymm", verifierText, StringComparison.Ordinal);
+        Assert.Contains("zmm", verifierText, StringComparison.Ordinal);
     }
 
     private static void AssertTargetsContainArm64RuntimeSelection(string targetsText)

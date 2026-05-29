@@ -238,10 +238,16 @@ if (-not (Test-Path (Join-Path $GhosttyDir "build.zig"))) {
 
 $RID = if ($Arch -eq "arm64") { "win-arm64" } else { "win-x64" }
 $ZigTarget = if ($Arch -eq "arm64") { "aarch64-windows-msvc" } else { "x86_64-windows-msvc" }
+$ZigCpu = if ($Arch -eq "arm64") { $null } else { "x86_64-vzeroupper" }
+$GhosttySimd = if ($Arch -eq "arm64") { $true } else { $false }
 $LibName = "ghostty-vt.dll"
 
 Write-Info "Platform: Windows ($RID)"
 Write-Info "Target: $ZigTarget"
+if ($ZigCpu) {
+    Write-Info "CPU: $ZigCpu"
+}
+Write-Info "Ghostty SIMD: $GhosttySimd"
 Write-Info "VT library: $LibName"
 
 if (-not (Test-SymlinkCreation -RootPath $GhosttyDir)) {
@@ -288,9 +294,13 @@ try {
     # Build
     $optimize = if ($Debug) { "" } else { "-Doptimize=ReleaseFast" }
     Write-Info "Building ghostty-vt shared library..."
-    Write-Info "Command: zig build $optimize -Dapp-runtime=none -Dtarget=$ZigTarget"
+    $cpuLog = if ($ZigCpu) { " -Dcpu=$ZigCpu" } else { "" }
+    $simdLog = if (-not $GhosttySimd) { " -Dsimd=false" } else { "" }
+    Write-Info "Command: zig build $optimize -Dapp-runtime=none -Dtarget=$ZigTarget$cpuLog$simdLog"
 
     $buildArgs = @("build", "-Dapp-runtime=none", "-Dtarget=$ZigTarget")
+    if ($ZigCpu) { $buildArgs += "-Dcpu=$ZigCpu" }
+    if (-not $GhosttySimd) { $buildArgs += "-Dsimd=false" }
     if (-not $Debug) { $buildArgs += "-Doptimize=ReleaseFast" }
 
     if (-not (Invoke-ZigBuildWithCacheRecovery -Args $buildArgs)) {
@@ -362,6 +372,7 @@ try {
             }
 
             $rendererBuildArgs = @("build", "-Dtarget=$ZigTarget")
+            if ($ZigCpu) { $rendererBuildArgs += "-Dcpu=$ZigCpu" }
             if (-not $Debug) { $rendererBuildArgs += "-Doptimize=ReleaseFast" }
 
             if (Invoke-ZigBuildWithCacheRecovery -Args $rendererBuildArgs) {
@@ -393,6 +404,28 @@ try {
         }
     } else {
         Write-Warn "native\ghostty-renderer-capi not found - skipping ghostty-renderer-capi build."
+    }
+
+    if ($Arch -eq "x64") {
+        $verifyScript = Join-Path $RootDir "scripts\verify-windows-x64-no-avx.ps1"
+        if (-not (Test-Path $verifyScript)) {
+            Write-Err "Missing Windows x64 AVX verification script: $verifyScript"
+            exit 1
+        }
+
+        $vtVerifyPath = Join-Path $nativeRuntimeDir "ghostty-vt.dll"
+        if (-not (Test-Path $vtVerifyPath)) {
+            Write-Err "Missing required Windows x64 VT DLL before AVX verification: $vtVerifyPath"
+            exit 1
+        }
+
+        $verifyPaths = @($vtVerifyPath)
+        $rendererVerifyPath = Join-Path $nativeRuntimeDir "ghostty-renderer-capi.dll"
+        if (Test-Path $rendererVerifyPath) {
+            $verifyPaths += $rendererVerifyPath
+        }
+
+        & $verifyScript -Path $verifyPaths
     }
 
     Write-Info ""

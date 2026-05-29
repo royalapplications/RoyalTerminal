@@ -196,27 +196,34 @@ jobs:
         working-directory: external/ghostty
         shell: bash
         run: |
+          cpu=""
+          simd=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             target="-Dtarget=aarch64-windows-msvc"
           else
-            # Keep win-x64 release artifacts on Zig's baseline x86_64 CPU model.
-            # Building without -Dtarget uses the GitHub runner CPU and can emit
-            # AVX/AVX2 instructions that fail on older CPUs and Windows ARM64
-            # x64 emulation.
+            # Keep win-x64 release artifacts on a true baseline x64 CPU model.
+            # x86_64-windows-msvc alone still allows LLVM/third-party SIMD code
+            # to leave VEX/AVX instructions in startup paths. Disable Zig's
+            # vzeroupper feature and Ghostty's SIMD bundle for the compatibility
+            # DLL; CI verifies the resulting DLL with disassembly below.
             target="-Dtarget=x86_64-windows-msvc"
+            cpu="-Dcpu=x86_64-vzeroupper"
+            simd="-Dsimd=false"
           fi
-          zig build -Doptimize=ReleaseFast -Dapp-runtime=none ${target}
+          zig build -Doptimize=ReleaseFast -Dapp-runtime=none ${target} ${cpu} ${simd}
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
         shell: bash
         run: |
+          cpu=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             target="-Dtarget=aarch64-windows-msvc"
           else
             target="-Dtarget=x86_64-windows-msvc"
+            cpu="-Dcpu=x86_64-vzeroupper"
           fi
-          zig build -Doptimize=ReleaseFast ${target}
+          zig build -Doptimize=ReleaseFast ${target} ${cpu}
 
       - name: Collect artifacts
         shell: bash
@@ -245,6 +252,13 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Verify Windows x64 native artifacts avoid AVX
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          ./scripts/verify-windows-x64-no-avx.ps1 `
+            -Path "artifacts/win-x64/ghostty-vt.dll", "artifacts/win-x64/ghostty-renderer-capi.dll"
 
       - name: Upload
         uses: actions/upload-artifact@v4

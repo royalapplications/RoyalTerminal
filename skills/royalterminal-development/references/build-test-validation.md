@@ -87,7 +87,7 @@ dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --fi
 
 Rendering/native interop subset:
 ```bash
-dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|RenderingSkiaInteropTests|RenderingAvaloniaAdapterTests|RenderingContractsTests|GhosttyComponentTests|PackageBoundaryTests|WindowsArm64NativePackagingTests"
+dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|RenderingSkiaInteropTests|RenderingAvaloniaAdapterTests|RenderingContractsTests|GhosttyComponentTests|PackageBoundaryTests|WindowsNativePackagingTests"
 ```
 
 ## Native Direct Build Commands
@@ -105,8 +105,15 @@ Windows x64 release/debugging build from the repository root:
 
 Direct Ghostty build from `external/ghostty`:
 ```powershell
-zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=x86_64-windows-msvc
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=x86_64-windows-msvc -Dcpu=x86_64-vzeroupper -Dsimd=false
 ```
+
+Verify Windows x64 native artifacts do not contain AVX/VEX instructions:
+```powershell
+.\scripts\verify-windows-x64-no-avx.ps1 -Path .\src\RoyalTerminal.GhosttySharp.Native.Win64\runtimes\win-x64\native\ghostty-vt.dll
+```
+The verifier requires `llvm-objdump` on `PATH`, in a standard LLVM install
+location, or passed explicitly with `-ObjdumpPath`.
 
 Renderer C API:
 ```bash
@@ -206,5 +213,5 @@ dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.
 bash scripts/build-native.sh --clean --release
 dotnet build RoyalTerminal.sln -c Release
 
-dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|PackageBoundaryTests|WindowsArm64NativePackagingTests"
+dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|PackageBoundaryTests|WindowsNativePackagingTests"
 ```

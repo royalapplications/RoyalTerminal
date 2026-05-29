@@ -68,7 +68,7 @@ dotnet test RoyalTerminal.sln -c Release
 
 Renderer/native focused subset:
 ```bash
-dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|RenderingSkiaInteropTests|RenderingAvaloniaAdapterTests|GhosttyComponentTests|PackageBoundaryTests|WindowsArm64NativePackagingTests"
+dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|RenderingSkiaInteropTests|RenderingAvaloniaAdapterTests|GhosttyComponentTests|PackageBoundaryTests|WindowsNativePackagingTests"
 ```
 
 Integration checks:
