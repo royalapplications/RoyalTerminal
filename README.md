@@ -1027,14 +1027,19 @@ cd external/ghostty
 zig build -Doptimize=ReleaseFast -Dapp-runtime=none
 ```
 
-For distributable Windows x64 artifacts, pass an explicit baseline target so the
-DLL does not inherit AVX/AVX2 support from the build machine:
+For distributable Windows x64 artifacts, build a scalar compatibility DLL with
+an explicit baseline CPU. This avoids AVX/VEX instructions in startup paths on
+older CPUs, constrained VMs, and Windows ARM64 x64 emulation:
 
 ```powershell
 .\scripts\build-native.ps1 -Arch x64 -Release
 # or, from external/ghostty:
-zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=x86_64-windows-msvc
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=x86_64-windows-msvc -Dcpu=x86_64-vzeroupper -Dsimd=false
 ```
+
+CI verifies the Windows x64 native artifacts with `scripts/verify-windows-x64-no-avx.ps1`.
+Install LLVM or pass the verifier an explicit `-ObjdumpPath` when running the
+check locally.
 
 ## Ghostty Submodule Status
 

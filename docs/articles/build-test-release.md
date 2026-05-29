@@ -86,7 +86,7 @@ dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --fi
 Focused renderer/native validation:
 
 ```bash
-dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|RenderingSkiaInteropTests|RenderingAvaloniaAdapterTests|RenderingContractsTests|PackageBoundaryTests|WindowsArm64NativePackagingTests"
+dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|RenderingSkiaInteropTests|RenderingAvaloniaAdapterTests|RenderingContractsTests|PackageBoundaryTests|WindowsNativePackagingTests"
 ```
 
 Integration sweep:

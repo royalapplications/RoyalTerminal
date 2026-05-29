@@ -20,6 +20,7 @@ const guideItems = [
   { text: "Ghostty/Shadertoy Shader Compatibility", link: "/articles/shaders-ghostty-shadertoy" },
   { text: "Windows Terminal HLSL Shader Compatibility", link: "/articles/shaders-windows-terminal-hlsl" },
   { text: "Ghostty Integration", link: "/articles/ghostty-integration" },
+  { text: "Windows x64 Native Compatibility", link: "/articles/windows-x64-native-compatibility" },
   { text: "Samples And Tooling", link: "/articles/samples-tooling" },
   { text: "Build, Test, And Release", link: "/articles/build-test-release" },
   { text: "Troubleshooting", link: "/articles/troubleshooting" }

@@ -131,12 +131,16 @@ bash build.sh test
 ```
 
 For Windows x64 distributable artifacts, do not use the build host's native CPU
-target. Build with `x86_64-windows-msvc` so the DLL stays on the baseline x64
-instruction set and runs on older CPUs and Windows ARM64 x64 emulation.
+target. Build with `x86_64-windows-msvc`, `x86_64-vzeroupper`, and
+`-Dsimd=false` so the DLL avoids AVX/VEX startup instructions and runs on older
+CPUs, constrained VMs, and Windows ARM64 x64 emulation.
 
 ```powershell
 .\scripts\build-native.ps1 -Arch x64 -Release
+.\scripts\verify-windows-x64-no-avx.ps1 -Path .\src\RoyalTerminal.GhosttySharp.Native.Win64\runtimes\win-x64\native\ghostty-vt.dll
 ```
+The verifier requires `llvm-objdump` on `PATH`, in a standard LLVM install
+location, or passed explicitly with `-ObjdumpPath`.
 
 ### Build `libghostty-vt` for integration tests
 
