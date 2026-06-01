@@ -187,6 +187,33 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_ClearVisibleHistory_DropsRowsAboveCursorAndKeepsPromptLine_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 16, viewportRows: 4, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 16, rows: 4, widthPx: 128, heightPx: 64);
+
+        processor.Process("OLD0\r\nOLD1\r\nOLD2\r\nprompt$ "u8);
+        Assert.Contains("OLD", ReadViewportAscii(screen), StringComparison.Ordinal);
+        Assert.Equal(3, processor.CursorRow);
+
+        processor.ClearVisibleHistory();
+
+        TerminalViewportScrollState state = processor.ViewportScrollState;
+        string viewport = ReadViewportAscii(screen);
+        Assert.Equal(0ul, state.MaxOffsetRows);
+        Assert.Equal(state.VisibleRows, state.TotalRows);
+        Assert.DoesNotContain("OLD", viewport, StringComparison.Ordinal);
+        Assert.Contains("prompt$ ", viewport, StringComparison.Ordinal);
+        Assert.Equal(3, processor.CursorRow);
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_PrepareForNewSession_PreservesViewportInNativeScrollback_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())

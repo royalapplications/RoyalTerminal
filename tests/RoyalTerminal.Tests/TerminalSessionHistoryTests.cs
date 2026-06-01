@@ -33,6 +33,26 @@ public class TerminalSessionHistoryTests
     }
 
     [Fact]
+    public void TerminalScreen_ClearVisibleHistory_DropsRowsAboveCursorAndKeepsCursorLine()
+    {
+        TerminalScreen screen = new(columns: 12, viewportRows: 4, scrollbackLimit: 10);
+        SetAscii(screen.GetViewportRow(0), "older");
+        screen.AddRow();
+        SetAscii(screen.GetViewportRow(0), "OLD0");
+        SetAscii(screen.GetViewportRow(1), "OLD1");
+        SetAscii(screen.GetViewportRow(2), "OLD2");
+        SetAscii(screen.GetViewportRow(3), "prompt$ ");
+
+        screen.ClearVisibleHistory(cursorViewportRow: 3);
+
+        Assert.Equal(screen.ViewportRows, screen.TotalRows);
+        Assert.Equal(0, screen.MaxScrollOffset);
+        Assert.DoesNotContain("OLD", ReadViewport(screen), StringComparison.Ordinal);
+        Assert.DoesNotContain("older", ReadAllRows(screen), StringComparison.Ordinal);
+        Assert.Contains("prompt$ ", ReadViewport(screen), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TerminalScreen_MoveViewportToScrollbackAndClear_PreservesFormattedViewportRows()
     {
         TerminalScreen screen = new(columns: 8, viewportRows: 3, scrollbackLimit: 10);
@@ -68,6 +88,25 @@ public class TerminalSessionHistoryTests
         Assert.Equal(screen.ViewportRows, screen.TotalRows);
         Assert.Equal(0, screen.MaxScrollOffset);
         Assert.Equal(beforeViewport, ReadViewport(screen));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ClearVisibleHistory_DropsRowsAboveCursorAndKeepsPromptLine()
+    {
+        TerminalScreen screen = new(columns: 16, viewportRows: 4, scrollbackLimit: 10);
+        using BasicVtProcessor processor = new(screen);
+        Process(processor, "OLD0\r\nOLD1\r\nOLD2\r\nprompt$ ");
+
+        Assert.Contains("OLD", ReadViewport(screen), StringComparison.Ordinal);
+        Assert.Equal(3, processor.CursorRow);
+
+        processor.ClearVisibleHistory();
+
+        Assert.Equal(screen.ViewportRows, screen.TotalRows);
+        Assert.Equal(0, screen.MaxScrollOffset);
+        Assert.DoesNotContain("OLD", ReadAllRows(screen), StringComparison.Ordinal);
+        Assert.Contains("prompt$ ", ReadViewport(screen), StringComparison.Ordinal);
+        Assert.Equal(3, processor.CursorRow);
     }
 
     [Fact]

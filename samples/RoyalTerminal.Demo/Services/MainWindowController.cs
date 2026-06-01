@@ -2109,10 +2109,10 @@ internal sealed class MainWindowController
             return;
         }
 
-        control.ClearScrollback();
+        control.ClearHistory();
         control.ScrollToBottom();
         string tabName = GetTabDisplayName(control);
-        AppendEventLog($"[{tabName}] Cleared scrollback.");
+        AppendEventLog($"[{tabName}] Cleared history.");
         UpdateStatus($"Cleared history for {tabName}.");
     }
 

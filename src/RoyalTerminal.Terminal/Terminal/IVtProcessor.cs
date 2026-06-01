@@ -111,4 +111,9 @@ public interface ITerminalSessionHistoryController
     /// Clears scrollback/history while leaving the active viewport contents intact.
     /// </summary>
     void ClearScrollback();
+
+    /// <summary>
+    /// Clears scrollback/history and visible rows above the active cursor line.
+    /// </summary>
+    void ClearVisibleHistory();
 }

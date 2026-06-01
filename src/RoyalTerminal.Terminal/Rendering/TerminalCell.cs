@@ -1279,6 +1279,44 @@ public sealed class TerminalScreen
     }
 
     /// <summary>
+    /// Clears primary-buffer scrollback and visible rows above the active cursor line.
+    /// </summary>
+    /// <param name="cursorViewportRow">The cursor row in viewport coordinates.</param>
+    public void ClearVisibleHistory(int cursorViewportRow)
+    {
+        if (_alternateBufferActive)
+        {
+            EnsureAlternateRows();
+            ScrollOffset = 0;
+            InvalidateViewport();
+            return;
+        }
+
+        ClearScrollback();
+
+        int lastRowAboveCursor = Math.Clamp(cursorViewportRow - 1, -1, Math.Max(0, ViewportRows - 1));
+        if (lastRowAboveCursor < 0)
+        {
+            ScrollOffset = 0;
+            return;
+        }
+
+        for (int rowIndex = 0; rowIndex <= lastRowAboveCursor; rowIndex++)
+        {
+            GetViewportRow(rowIndex).Clear(DefaultForeground, DefaultBackground);
+        }
+
+        ClearRasterGraphicsInViewportRectangle(
+            0,
+            lastRowAboveCursor,
+            0,
+            Math.Max(0, Columns - 1));
+        ClearKittyGraphics();
+        ScrollOffset = 0;
+        InvalidateAll();
+    }
+
+    /// <summary>
     /// Clears the active buffer and all history, returning the primary buffer to blank viewport rows.
     /// </summary>
     public void ClearAll()

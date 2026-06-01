@@ -784,6 +784,38 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_ClearHistory_DropsVisibleRowsAboveCursorLine()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.Columns = 16;
+        control.Rows = 4;
+        control.ScrollbackLimit = 20;
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+        for (int i = 0; i < 16; i++)
+        {
+            control.WriteOutput(Encoding.UTF8.GetBytes($"OLD-{i:000}\r\n"));
+        }
+
+        control.WriteOutput("prompt$ "u8.ToArray());
+        control.ClearHistory();
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            string allRows = ReadAllRows(screen);
+            Assert.Equal(screen.ViewportRows, screen.TotalRows);
+            Assert.Equal(0, screen.MaxScrollOffset);
+            Assert.DoesNotContain("OLD-", allRows, StringComparison.Ordinal);
+            Assert.Contains("prompt$ ", allRows, StringComparison.Ordinal);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_TransportExit_RaisesProcessExited()
     {
         FakeTransport transport = new();

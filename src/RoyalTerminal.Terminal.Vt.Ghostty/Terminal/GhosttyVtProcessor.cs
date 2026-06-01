@@ -444,6 +444,112 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         RaiseModeChangedIfNeeded(before);
     }
 
+    /// <inheritdoc />
+    public void ClearVisibleHistory()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_alternateScreen)
+        {
+            return;
+        }
+
+        TerminalModeState before = ModeState;
+        byte[] sequence = BuildClearVisibleHistorySequence();
+        _terminal.Write(sequence);
+        _sixelOverlayProcessor?.ClearVisibleHistory();
+        RefreshStateAndScreenFromNative();
+        SyncSixelOverlayRasterGraphics();
+        RaiseModeChangedIfNeeded(before);
+    }
+
+    private byte[] BuildClearVisibleHistorySequence()
+    {
+        int cursorRow = Math.Clamp(_cursorRow, 0, Math.Max(0, _screen.ViewportRows - 1));
+        int cursorColumn = Math.Clamp(_cursorCol, 0, Math.Max(0, _screen.Columns));
+        string cursorLinePrefix = CaptureCursorLinePrefix(cursorRow, cursorColumn);
+
+        StringBuilder builder = new();
+        builder.Append("\u001b7\u001b[3J\u001b[1J");
+        if (cursorLinePrefix.Length > 0)
+        {
+            builder
+                .Append("\u001b[")
+                .Append(cursorRow + 1)
+                .Append(";1H")
+                .Append(cursorLinePrefix);
+        }
+
+        builder.Append("\u001b8");
+        return Encoding.UTF8.GetBytes(builder.ToString());
+    }
+
+    private string CaptureCursorLinePrefix(int cursorRow, int cursorColumn)
+    {
+        if (cursorColumn <= 0 || _screen.Columns <= 0)
+        {
+            return string.Empty;
+        }
+
+        TerminalRow row = _screen.GetViewportRow(cursorRow);
+        int prefixColumns = Math.Min(cursorColumn, row.Columns);
+        StringBuilder builder = new(prefixColumns);
+        for (int column = 0; column < prefixColumns; column++)
+        {
+            TerminalCell cell = row[column];
+            if (cell.Width == 0)
+            {
+                continue;
+            }
+
+            AppendCellLiteral(builder, cell);
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendCellLiteral(StringBuilder builder, TerminalCell cell)
+    {
+        if (!string.IsNullOrEmpty(cell.Grapheme) && IsSafeTerminalLiteral(cell.Grapheme))
+        {
+            builder.Append(cell.Grapheme);
+            return;
+        }
+
+        if (IsSafeTerminalLiteralCodepoint(cell.Codepoint))
+        {
+            builder.Append(char.ConvertFromUtf32(cell.Codepoint));
+            return;
+        }
+
+        builder.Append(' ');
+    }
+
+    private static bool IsSafeTerminalLiteral(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (!IsSafeTerminalLiteralCodepoint(text[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsSafeTerminalLiteralCodepoint(int codepoint)
+    {
+        if (codepoint <= 0 || codepoint > 0x10FFFF || codepoint is >= 0xD800 and <= 0xDFFF)
+        {
+            return false;
+        }
+
+        return codepoint is not 0x1B and
+            not (< 0x20) and
+            not (>= 0x7F and <= 0x9F);
+    }
+
     /// <summary>
     /// Checks whether the official libghostty-vt API is available.
     /// </summary>

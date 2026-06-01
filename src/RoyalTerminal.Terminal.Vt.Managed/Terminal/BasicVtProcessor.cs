@@ -4481,6 +4481,18 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _screen.ClearScrollback();
     }
 
+    /// <inheritdoc />
+    public void ClearVisibleHistory()
+    {
+        if (_inAltScreen)
+        {
+            return;
+        }
+
+        _screen.ClearVisibleHistory(_cursorRow);
+        ResetDelayedWrap();
+    }
+
     private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode)
     {
         TerminalModeState before = ModeState;

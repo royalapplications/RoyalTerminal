@@ -399,6 +399,7 @@ public sealed class MainWindowControllerModeStartupTests
             {
                 activeControl.WriteOutput(Encoding.UTF8.GetBytes($"HISTORY-{i:000}\r\n"));
             }
+            activeControl.WriteOutput("prompt$ "u8.ToArray());
 
             Dispatcher.UIThread.RunJobs();
             activeControl.ScrollByRows(-3);
@@ -415,9 +416,12 @@ public sealed class MainWindowControllerModeStartupTests
 
             lock (screen.SyncRoot)
             {
-                Assert.True(screen.MaxScrollOffset == 0, ReadAllRows(screen));
+                string allRows = ReadAllRows(screen);
+                Assert.True(screen.MaxScrollOffset == 0, allRows);
                 Assert.Equal(0, screen.ScrollOffset);
                 Assert.Equal(screen.ViewportRows, screen.TotalRows);
+                Assert.DoesNotContain("HISTORY-", allRows, StringComparison.Ordinal);
+                Assert.Contains("prompt$ ", allRows, StringComparison.Ordinal);
             }
 
             Assert.Contains("Cleared history", viewModel.StatusText, StringComparison.Ordinal);

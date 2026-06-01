@@ -4721,6 +4721,54 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
+    /// Clears scrollback/history and visible rows above the active cursor line.
+    /// </summary>
+    public void ClearHistory()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.InvokeAsync(ClearHistory).GetAwaiter().GetResult();
+            return;
+        }
+
+        if (_screen is null)
+        {
+            return;
+        }
+
+        FlushPendingTransportOutputBeforeResize();
+        ClearSelection();
+        ResetCursorBlinkPhase();
+
+        lock (_screen.SyncRoot)
+        {
+            if (_vtProcessor?.AlternateScreen == true)
+            {
+                SyncHistoryMutationScrollStateLocked();
+            }
+            else if (_vtProcessor is ITerminalSessionHistoryController historyController)
+            {
+                historyController.ClearVisibleHistory();
+                _screen.ClearVisibleHistory(_vtProcessor.CursorRow);
+            }
+            else
+            {
+                int cursorRow = _vtProcessor?.CursorRow ?? Math.Max(0, _screen.ViewportRows - 1);
+                _screen.ClearVisibleHistory(cursorRow);
+            }
+
+            SyncHistoryMutationScrollStateLocked();
+        }
+
+        UpdateAutoScrollPinnedToBottom();
+        ClearPreservedRestartHistoryInputScrollGuard();
+        UpdateRendererCursorForViewport();
+        UpdateRendererParityStateFromScreen();
+        _presenter?.Invalidate(fullRedraw: true);
+        RaiseScrollInvalidated();
+    }
+
+    /// <summary>
     /// Updates the content scale for DPI changes.
     /// </summary>
     public void SetContentScale(double scaleX, double scaleY)
