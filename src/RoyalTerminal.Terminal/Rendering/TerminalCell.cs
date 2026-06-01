@@ -1264,7 +1264,15 @@ public sealed class TerminalScreen
             return;
         }
 
-        _rows.RemoveFirst(scrollbackRows);
+        TerminalRowBuffer rows = new(ViewportRows);
+        int firstViewportRow = Math.Max(0, _rows.Count - ViewportRows);
+        for (int rowIndex = firstViewportRow; rowIndex < _rows.Count; rowIndex++)
+        {
+            rows.Add(_rows[rowIndex]);
+        }
+
+        _rows = rows;
+        EnsureMinimumRows(ViewportRows);
         ShiftRasterGraphicsAfterTopRowsRemoved(scrollbackRows);
         ScrollOffset = 0;
         InvalidateAll();
@@ -1280,12 +1288,7 @@ public sealed class TerminalScreen
             SwitchToPrimaryBuffer();
         }
 
-        _rows.Clear();
-        for (int rowIndex = 0; rowIndex < ViewportRows; rowIndex++)
-        {
-            _rows.Add(new TerminalRow(Columns, DefaultForeground, DefaultBackground));
-        }
-
+        _rows = CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
         _primaryRows = null;
         _alternateRows = null;
         _primaryRasterImagesById = null;
@@ -1319,11 +1322,7 @@ public sealed class TerminalScreen
         DiscardTransientResizeRows();
         ScrollOffset = 0;
 
-        int rowsToPreserve = GetNonEmptyViewportRowCount();
-        for (int rowIndex = 0; rowIndex < rowsToPreserve; rowIndex++)
-        {
-            AddRow();
-        }
+        AppendBlankRowsAndTrimScrollback(GetNonEmptyViewportRowCount());
 
         ClearViewportRows();
         ClearRasterGraphicsInViewportRectangle(
@@ -1464,6 +1463,27 @@ public sealed class TerminalScreen
         for (int rowIndex = 0; rowIndex < ViewportRows; rowIndex++)
         {
             GetViewportRow(rowIndex).Clear(DefaultForeground, DefaultBackground);
+        }
+    }
+
+    private void AppendBlankRowsAndTrimScrollback(int rowCount)
+    {
+        if (rowCount <= 0)
+        {
+            return;
+        }
+
+        int maxRows = ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit);
+        int overflowRows = Math.Max(0, _rows.Count + rowCount - maxRows);
+        if (overflowRows > 0)
+        {
+            _rows.RemoveFirst(overflowRows);
+            ShiftRasterGraphicsAfterTopRowsRemoved(overflowRows);
+        }
+
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            _rows.Add(new TerminalRow(Columns, DefaultForeground, DefaultBackground));
         }
     }
 
