@@ -283,6 +283,18 @@ internal sealed class MainWindowController
             context.SetOutput(Unit.Default);
         }));
 
+        disposables.Add(_viewModel.RestartActiveSessionInteraction.RegisterHandler(async context =>
+        {
+            await RestartActiveSessionAsync();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.ClearActiveScrollbackInteraction.RegisterHandler(context =>
+        {
+            ClearActiveScrollback();
+            context.SetOutput(Unit.Default);
+        }));
+
         disposables.Add(_viewModel.ShowHyperlinkSampleInteraction.RegisterHandler(context =>
         {
             ShowHyperlinkSample();
@@ -336,6 +348,7 @@ internal sealed class MainWindowController
                 model => model.SelectedPasteSafetyPolicy,
                 model => model.EnableTextShaping,
                 model => model.ReflowOnResize,
+                model => model.PreserveScrollbackOnRestart,
                 model => model.SixelGraphicsEnabled,
                 model => model.EnableLigatures)
             .Subscribe(_ => ApplyTerminalBehaviorSettingsToAllStandaloneTabs()));
@@ -920,11 +933,14 @@ internal sealed class MainWindowController
             .GetResult();
     }
 
-    private async Task StartStandaloneSessionAsync(TerminalControl standaloneControl)
+    private async Task StartStandaloneSessionAsync(
+        TerminalControl standaloneControl,
+        bool preserveScrollback = false)
     {
         string workingDirectory = ResolveWorkingDirectory();
         string transportId = _viewModel.SelectedTransportMode.Id;
         string tabName = GetTabDisplayName(standaloneControl);
+        TerminalSessionDimensions dimensions = BuildSessionDimensions(standaloneControl);
 
         if (string.Equals(transportId, TerminalTransportIds.Pty, StringComparison.OrdinalIgnoreCase))
         {
@@ -934,9 +950,16 @@ internal sealed class MainWindowController
             }
 
             string? shellPath = _viewModel.SelectedShellProfile?.CommandPath;
-            standaloneControl.StartPty(
-                shell: string.IsNullOrWhiteSpace(shellPath) ? null : shellPath,
-                workingDirectory: workingDirectory);
+            TerminalCommandSpec? command = string.IsNullOrWhiteSpace(shellPath)
+                ? null
+                : new TerminalCommandSpec(shellPath, Array.Empty<string>());
+            PtyTransportOptions options = new(
+                Command: command,
+                WorkingDirectory: workingDirectory,
+                Environment: null,
+                Dimensions: dimensions);
+
+            await standaloneControl.StartSessionAsync(options, preserveScrollback);
 
             string shellDisplay = _viewModel.SelectedShellProfile?.DisplayName ?? "Default shell";
             AppendEventLog($"[{tabName}] Starting PTY session ({shellDisplay}).");
@@ -944,8 +967,6 @@ internal sealed class MainWindowController
             AppendEventLog($"[{tabName}] PTY session started.");
             return;
         }
-
-        TerminalSessionDimensions dimensions = BuildSessionDimensions(standaloneControl);
 
         if (string.Equals(transportId, TerminalTransportIds.Pipe, StringComparison.OrdinalIgnoreCase))
         {
@@ -958,7 +979,7 @@ internal sealed class MainWindowController
                 MergeStdErrIntoStdOut: _viewModel.PipeMergeStdErrIntoStdOut,
                 Dimensions: dimensions);
 
-            await standaloneControl.StartPipeAsync(options);
+            await standaloneControl.StartPipeAsync(options, preserveScrollback);
             UpdateSessionStartedStatus(standaloneControl, $"Started Pipe session ({command.FileName})");
             AppendEventLog($"[{tabName}] Pipe session started.");
             return;
@@ -968,7 +989,7 @@ internal sealed class MainWindowController
         {
             RawTcpTransportOptions options = BuildRawTcpOptions(dimensions);
             AppendEventLog($"[{tabName}] Starting Raw TCP session {options.Host}:{options.Port}.");
-            await standaloneControl.StartRawTcpAsync(options);
+            await standaloneControl.StartRawTcpAsync(options, preserveScrollback);
             UpdateSessionStartedStatus(standaloneControl, $"Started Raw TCP session {options.Host}:{options.Port}");
             AppendEventLog($"[{tabName}] Raw TCP session started.");
             return;
@@ -978,7 +999,7 @@ internal sealed class MainWindowController
         {
             TelnetTransportOptions options = BuildTelnetOptions(dimensions);
             AppendEventLog($"[{tabName}] Starting Telnet session {options.Host}:{options.Port}.");
-            await standaloneControl.StartTelnetAsync(options);
+            await standaloneControl.StartTelnetAsync(options, preserveScrollback);
             UpdateSessionStartedStatus(standaloneControl, $"Started Telnet session {options.Host}:{options.Port}");
             AppendEventLog($"[{tabName}] Telnet session started.");
             return;
@@ -988,7 +1009,7 @@ internal sealed class MainWindowController
         {
             SerialTransportOptions options = BuildSerialOptions(dimensions);
             AppendEventLog($"[{tabName}] Starting Serial session {options.PortName} ({options.BaudRate}).");
-            await standaloneControl.StartSerialAsync(options);
+            await standaloneControl.StartSerialAsync(options, preserveScrollback);
             UpdateSessionStartedStatus(standaloneControl, $"Started Serial session {options.PortName} ({options.BaudRate})");
             AppendEventLog($"[{tabName}] Serial session started.");
             return;
@@ -998,7 +1019,7 @@ internal sealed class MainWindowController
         {
             SshTransportOptions options = BuildSshOptions(dimensions);
             AppendEventLog($"[{tabName}] Starting SSH session {options.Endpoint.Username}@{options.Endpoint.Host}:{options.Endpoint.Port}.");
-            await standaloneControl.StartSshAsync(options);
+            await standaloneControl.StartSshAsync(options, preserveScrollback);
             UpdateSessionStartedStatus(
                 standaloneControl,
                 $"Started SSH session {_viewModel.SshUsername}@{_viewModel.SshHost}:{_viewModel.SshPort}");
@@ -2048,6 +2069,52 @@ internal sealed class MainWindowController
         UpdateStatus($"Search cleared in {GetTabDisplayName(control)}.");
     }
 
+    private async Task RestartActiveSessionAsync()
+    {
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
+        {
+            UpdateStatus("Restart is available for standalone terminal tabs only.");
+            return;
+        }
+
+        string tabName = GetTabDisplayName(control);
+        bool preserveScrollback = _viewModel.PreserveScrollbackOnRestart;
+        try
+        {
+            if (control.HasActiveSession || control.HasPty)
+            {
+                control.StopPty();
+            }
+
+            await StartStandaloneSessionAsync(control, preserveScrollback);
+            AppendEventLog($"[{tabName}] Restarted session ({(preserveScrollback ? "history preserved" : "clean history")}).");
+            UpdateStatus(preserveScrollback
+                ? $"Restarted {tabName} with preserved history."
+                : $"Restarted {tabName}.");
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus($"Failed to restart session: {ex.Message}");
+            AppendEventLog($"[{tabName}] Failed to restart session: {ex.Message}");
+        }
+    }
+
+    private void ClearActiveScrollback()
+    {
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
+        {
+            UpdateStatus("Scrollback clear is available for standalone terminal tabs only.");
+            return;
+        }
+
+        control.ClearScrollback();
+        string tabName = GetTabDisplayName(control);
+        AppendEventLog($"[{tabName}] Cleared scrollback.");
+        UpdateStatus($"Cleared history for {tabName}.");
+    }
+
     private void SelectNextSearchMatch()
     {
         SelectSearchMatch(directionForward: true);
@@ -2906,6 +2973,7 @@ internal sealed class MainWindowController
     {
         control.PasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
         control.ReflowOnResize = _viewModel.ReflowOnResize;
+        control.PreserveScrollbackOnSessionStart = _viewModel.PreserveScrollbackOnRestart;
         control.SixelGraphicsEnabled = _viewModel.SixelGraphicsEnabled;
         SkiaTerminalRenderer? renderer = control.Renderer;
         if (renderer is not null)
