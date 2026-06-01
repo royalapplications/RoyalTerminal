@@ -86,6 +86,59 @@ public class TerminalSessionHistoryTests
         Assert.True(string.IsNullOrWhiteSpace(ReadViewport(screen)));
     }
 
+    [Fact]
+    public void BasicVtProcessor_PrepareForNewSession_PreservesPrimaryAfterAbruptAlternateScreenApp()
+    {
+        TerminalScreen screen = new(columns: 16, viewportRows: 3, scrollbackLimit: 20);
+        using BasicVtProcessor processor = new(screen);
+
+        Process(processor, "shell$ mc\r\n");
+        Process(processor, "\u001b[?1049hMC PANEL\r\nMC STATUS");
+
+        Assert.True(processor.AlternateScreen);
+        Assert.True(screen.AlternateBufferActive);
+        Assert.Contains("MC PANEL", ReadViewport(screen), StringComparison.Ordinal);
+
+        processor.PrepareForNewSession(preserveScrollback: true);
+
+        Assert.False(processor.AlternateScreen);
+        Assert.False(screen.AlternateBufferActive);
+        Assert.True(screen.TotalRows > screen.ViewportRows);
+        Assert.Contains("shell$ mc", ReadAllRows(screen), StringComparison.Ordinal);
+        Assert.DoesNotContain("MC PANEL", ReadAllRows(screen), StringComparison.Ordinal);
+        Assert.DoesNotContain("MC STATUS", ReadAllRows(screen), StringComparison.Ordinal);
+        Assert.True(string.IsNullOrWhiteSpace(ReadViewport(screen)));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_PrepareForNewSession_ResetsProcessVisibleModes()
+    {
+        TerminalScreen screen = new(columns: 16, viewportRows: 3, scrollbackLimit: 20);
+        using BasicVtProcessor processor = new(screen);
+
+        Process(processor, "\u001b[?1;66;67;1004;1049;2004h\u001b[?25l\u001b[>3u");
+
+        Assert.True(processor.ApplicationCursorKeys);
+        Assert.True(processor.ApplicationKeypad);
+        Assert.True(processor.AlternateScreen);
+        Assert.True(processor.BracketedPaste);
+        Assert.True(processor.FocusEventsEnabled);
+        Assert.Equal(3, processor.KittyKeyboardFlags);
+        Assert.False(processor.CursorVisible);
+
+        processor.PrepareForNewSession(preserveScrollback: true);
+
+        Assert.True(processor.CursorVisible);
+        Assert.False(processor.ApplicationCursorKeys);
+        Assert.False(processor.ApplicationKeypad);
+        Assert.False(processor.AlternateScreen);
+        Assert.False(processor.BracketedPaste);
+        Assert.False(processor.FocusEventsEnabled);
+        Assert.Equal(0, processor.KittyKeyboardFlags);
+        Assert.Equal(0, processor.CursorCol);
+        Assert.Equal(0, processor.CursorRow);
+    }
+
     private static void Process(BasicVtProcessor processor, string text)
     {
         processor.Process(Encoding.UTF8.GetBytes(text));
@@ -107,6 +160,17 @@ public class TerminalSessionHistoryTests
         for (int row = 0; row < screen.ViewportRows; row++)
         {
             builder.AppendLine(ReadAscii(screen.GetViewportRow(row), screen.Columns));
+        }
+
+        return builder.ToString();
+    }
+
+    private static string ReadAllRows(TerminalScreen screen)
+    {
+        StringBuilder builder = new();
+        for (int row = 0; row < screen.TotalRows; row++)
+        {
+            builder.AppendLine(ReadAscii(screen.GetRow(row), screen.Columns));
         }
 
         return builder.ToString();

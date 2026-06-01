@@ -4898,6 +4898,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
             else if (preserveScrollback)
             {
+                if (_screen.AlternateBufferActive)
+                {
+                    _screen.SwitchToPrimaryBuffer();
+                    _screen.DiscardInactiveAlternateBuffer();
+                }
+
                 _screen.MoveViewportToScrollbackAndClear();
                 _vtProcessor.Reset();
             }

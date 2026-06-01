@@ -488,6 +488,55 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_StartSessionAsync_WithPreserveScrollback_RestoresPrimaryBufferForFallbackProcessor()
+    {
+        FakeTransport transport = new();
+        AlternateScreenOnlyVtProcessor processor = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Managed);
+        control.Columns = 16;
+        control.Rows = 3;
+        control.ScrollbackLimit = 20;
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            WriteAscii(screen.GetViewportRow(0), "shell$ btop");
+            screen.SwitchToAlternateBuffer(clear: true);
+            WriteAscii(screen.GetViewportRow(0), "BTOP UI");
+            WriteAscii(screen.GetViewportRow(1), "BTOP CPU");
+        }
+
+        processor.Process("alt-on"u8);
+        Assert.True(processor.AlternateScreen);
+        Assert.True(screen.AlternateBufferActive);
+
+        control.StopPty();
+        await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"), preserveScrollback: true);
+
+        lock (screen.SyncRoot)
+        {
+            string allRows = ReadAllRows(screen);
+            string viewport = ReadViewportTextRange(screen, 0, screen.ViewportRows - 1);
+
+            Assert.False(screen.AlternateBufferActive);
+            Assert.True(screen.TotalRows > screen.ViewportRows);
+            Assert.Contains("shell$ btop", allRows, StringComparison.Ordinal);
+            Assert.DoesNotContain("BTOP UI", allRows, StringComparison.Ordinal);
+            Assert.DoesNotContain("BTOP CPU", allRows, StringComparison.Ordinal);
+            Assert.True(string.IsNullOrWhiteSpace(viewport));
+        }
+
+        Assert.False(processor.AlternateScreen);
+    }
+
+    [AvaloniaFact]
     public async Task Control_StartSessionAsync_WithPreserveScrollback_StaysAtLiveBottom_WhenAncestorReplaysOldOffset()
     {
         FakeTransport transport = new();
