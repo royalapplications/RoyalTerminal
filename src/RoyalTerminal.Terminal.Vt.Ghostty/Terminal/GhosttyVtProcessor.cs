@@ -37,12 +37,63 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 {
     private static readonly GhosttyVtNative.GhosttyMode s_wraparoundMode =
         GhosttyVtNative.CreateMode(7, ansi: false);
+    private static readonly GhosttyVtNative.GhosttyMode[] s_preserveScrollbackResetDisabledModes =
+    [
+        GhosttyVtNative.CreateMode(2, ansi: true),
+        GhosttyVtNative.CreateMode(4, ansi: true),
+        GhosttyVtNative.CreateMode(20, ansi: true),
+        GhosttyVtNative.ModeDecckm,
+        GhosttyVtNative.CreateMode(3, ansi: false),
+        GhosttyVtNative.CreateMode(4, ansi: false),
+        GhosttyVtNative.CreateMode(5, ansi: false),
+        GhosttyVtNative.CreateMode(6, ansi: false),
+        GhosttyVtNative.CreateMode(8, ansi: false),
+        GhosttyVtNative.CreateMode(9, ansi: false),
+        GhosttyVtNative.CreateMode(12, ansi: false),
+        GhosttyVtNative.CreateMode(40, ansi: false),
+        GhosttyVtNative.CreateMode(45, ansi: false),
+        GhosttyVtNative.CreateMode(47, ansi: false),
+        GhosttyVtNative.ModeKeypadKeys,
+        GhosttyVtNative.ModeBackarrowKeyMode,
+        GhosttyVtNative.CreateMode(69, ansi: false),
+        GhosttyVtNative.CreateMode(1000, ansi: false),
+        GhosttyVtNative.CreateMode(1002, ansi: false),
+        GhosttyVtNative.CreateMode(1003, ansi: false),
+        GhosttyVtNative.ModeFocusEvent,
+        GhosttyVtNative.CreateMode(1005, ansi: false),
+        GhosttyVtNative.CreateMode(1006, ansi: false),
+        GhosttyVtNative.CreateMode(1015, ansi: false),
+        GhosttyVtNative.CreateMode(1016, ansi: false),
+        GhosttyVtNative.CreateMode(1039, ansi: false),
+        GhosttyVtNative.CreateMode(1045, ansi: false),
+        GhosttyVtNative.ModeAltScreen,
+        GhosttyVtNative.CreateMode(1048, ansi: false),
+        GhosttyVtNative.ModeAltScreenSave,
+        GhosttyVtNative.ModeBracketedPaste,
+        GhosttyVtNative.CreateMode(2026, ansi: false),
+        GhosttyVtNative.CreateMode(2027, ansi: false),
+        GhosttyVtNative.ModeColorSchemeReport,
+        GhosttyVtNative.ModeInBandResize,
+    ];
+    private static readonly GhosttyVtNative.GhosttyMode[] s_preserveScrollbackResetEnabledModes =
+    [
+        GhosttyVtNative.CreateMode(12, ansi: true),
+        s_wraparoundMode,
+        GhosttyVtNative.CreateMode(25, ansi: false),
+        GhosttyVtNative.CreateMode(1007, ansi: false),
+        GhosttyVtNative.CreateMode(1035, ansi: false),
+        GhosttyVtNative.CreateMode(1036, ansi: false),
+    ];
     private const string PreserveScrollbackResetSequenceText =
         "\u001b[?1049;1047;47l" +
         "\u001b[22J" +
         "\u001b[2;4;20l" +
         "\u001b[12h" +
-        "\u001b[?1;3;4;5;6;8;9;12;40;45;47;66;67;69;1000;1002;1003;1004;1005;1006;1015;1016;1039;1045;1047;1048;1049;2004;2026;2027;2031;2048;9001l" +
+        "\u001b[?1;3;4;5;6;8;9;12l" +
+        "\u001b[?40;45;47;66;67;69l" +
+        "\u001b[?1000;1002;1003;1004;1005;1006;1015;1016l" +
+        "\u001b[?1039;1045;1047;1048;1049l" +
+        "\u001b[?2004;2026;2027;2031;2048;9001l" +
         "\u001b[?7;25;1007;1035;1036h" +
         "\u001b[<8u" +
         "\u001b[=0u" +
@@ -421,6 +472,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         // sequence mirrors a reset of the process-visible modes without
         // calling the native full reset, which would discard preserved history.
         _terminal.Write(s_preserveScrollbackResetSequence);
+        ResetProcessVisibleNativeModes();
         ConfigureOptionalNativeFeatures();
         ApplyThemeToNative(_theme);
         SetupTerminalEffects();
@@ -429,6 +481,21 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         RefreshStateAndScreenFromNative();
         SyncSixelOverlayRasterGraphics();
         RaiseModeChangedIfNeeded(before);
+    }
+
+    private void ResetProcessVisibleNativeModes()
+    {
+        // Keep the VT sequence parser-friendly and make exposed mode state
+        // deterministic even if native CSI parameter limits change.
+        foreach (GhosttyVtNative.GhosttyMode mode in s_preserveScrollbackResetDisabledModes)
+        {
+            _terminal.SetMode(mode, false);
+        }
+
+        foreach (GhosttyVtNative.GhosttyMode mode in s_preserveScrollbackResetEnabledModes)
+        {
+            _terminal.SetMode(mode, true);
+        }
     }
 
     /// <inheritdoc />
