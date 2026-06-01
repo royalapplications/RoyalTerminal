@@ -9,6 +9,7 @@ const guideItems = [
   { text: "Package Guide", link: "/articles/packages" },
   { text: "Embedding In Avalonia", link: "/articles/avalonia-control" },
   { text: "Sessions, Profiles, And Settings", link: "/articles/sessions-profiles-and-settings" },
+  { text: "Session History And Scrollback", link: "/articles/session-history" },
   { text: "Capture Formats", link: "/articles/capture-formats" },
   { text: "Regex Text Highlighting", link: "/articles/text-highlighting" },
   { text: "Transports And Remote Access", link: "/articles/transports" },

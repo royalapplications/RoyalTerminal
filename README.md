@@ -366,6 +366,21 @@ ITerminalTransportOptions options = new PtyTransportOptions(
 await terminal.StartSessionAsync(options);
 ```
 
+### Preserve Session Scrollback
+
+New sessions start with a clean buffer by default. Reconnect flows can keep the previous session history in the same control:
+
+```csharp
+terminal.PreserveScrollbackOnSessionStart = true;
+await terminal.StartSessionAsync(options);
+
+await terminal.StartSessionAsync(nextOptions, preserveScrollback: true);
+
+terminal.ClearScrollback();
+```
+
+`ClearScrollback()` removes history while keeping the active viewport intact. See the [Session History And Scrollback](docs/articles/session-history.md) guide for managed VT, Ghostty VT, and reference-terminal behavior details.
+
 ### 1b. Start a Pipe Session (`PipeTransportOptions`)
 
 ```csharp
