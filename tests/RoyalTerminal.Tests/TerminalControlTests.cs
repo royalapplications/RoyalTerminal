@@ -544,6 +544,16 @@ public class TerminalControlTests
             Assert.True(scrollData.IsAtBottom);
             Assert.True(Math.Abs(scrollViewer.Offset.Y - scrollData.MaxOffset) < 0.5);
             Assert.True(renderer.CursorVisible);
+
+            control.ScrollByRows(-1);
+
+            lock (screen.SyncRoot)
+            {
+                Assert.Equal(1, screen.ScrollOffset);
+                Assert.True((uint)renderer.CursorRow < (uint)screen.ViewportRows);
+            }
+
+            Assert.True(renderer.CursorVisible);
         }
         finally
         {
@@ -2866,7 +2876,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public void Control_ScrollingBack_HidesCursorEvenWhenCursorRowIsInViewportRange()
+    public void Control_ScrollingBack_KeepsCursorVisible_WhenCursorRowIsInViewportRange()
     {
         TerminalControl control = new()
         {
@@ -2896,7 +2906,7 @@ public class TerminalControlTests
 
         Assert.True(screen.ScrollOffset > 0);
         Assert.True((uint)renderer.CursorRow < (uint)screen.ViewportRows);
-        Assert.False(renderer.CursorVisible);
+        Assert.True(renderer.CursorVisible);
 
         control.ScrollToBottom();
 

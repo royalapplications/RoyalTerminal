@@ -7295,15 +7295,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         int cursorColumn = _vtProcessor.CursorCol;
         int cursorRow = _vtProcessor.CursorRow;
-        bool atLiveBottom;
-        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
-        {
-            atLiveBottom = viewportScrollSource.ViewportScrollState.OffsetRows >= viewportScrollSource.ViewportScrollState.MaxOffsetRows;
-        }
-        else
+        if (!TryGetViewportScrollSource(out _))
         {
             cursorRow += _screen.ScrollOffset;
-            atLiveBottom = _screen.ScrollOffset == 0;
         }
 
         _renderer.CursorColumn = cursorColumn;
@@ -7312,7 +7306,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         bool rowVisible = (uint)cursorRow < (uint)_screen.ViewportRows;
         bool columnVisible = (uint)cursorColumn < (uint)_screen.Columns;
-        bool baseVisible = _vtProcessor.CursorVisible && atLiveBottom && rowVisible && columnVisible;
+        bool baseVisible = _vtProcessor.CursorVisible && rowVisible && columnVisible;
         bool blinkPhaseActive = blinkEnabled && IsFocused;
 
         if (baseVisible &&
