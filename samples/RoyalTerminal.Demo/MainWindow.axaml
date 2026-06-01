@@ -159,7 +159,8 @@
                   Padding="8,2"
                   Command="{Binding RestartActiveSessionCommand}"
                   ToolTip.Tip="Restart the active terminal session" />
-          <Button Content="Clear History"
+          <Button x:Name="ClearHistoryButton"
+                  Content="Clear History"
                   Height="24"
                   FontSize="10"
                   Padding="8,2"

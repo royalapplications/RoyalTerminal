@@ -9,6 +9,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using RoyalTerminal.Avalonia.Services;
+using RoyalTerminal.Demo;
 using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.Terminal;
@@ -21,6 +22,26 @@ namespace RoyalTerminal.Tests;
 [Collection("MainWindowControllerHeadlessTests")]
 public class MainWindowViewModelFlowTests
 {
+    [AvaloniaFact]
+    public void MainWindow_ClearHistoryButton_IsBoundToClearActiveScrollbackCommand()
+    {
+        MainWindow window = new();
+
+        try
+        {
+            Button clearHistoryButton = window.FindControl<Button>("ClearHistoryButton")
+                ?? throw new InvalidOperationException("ClearHistoryButton was not found.");
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+
+            Assert.Same(viewModel.ClearActiveScrollbackCommand, clearHistoryButton.Command);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     [AvaloniaFact]
     public void KeyboardShortcut_CtrlT_TriggersNewTabFlow()
     {

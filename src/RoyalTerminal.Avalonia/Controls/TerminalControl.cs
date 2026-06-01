@@ -4702,6 +4702,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             if (_vtProcessor is ITerminalSessionHistoryController historyController)
             {
                 historyController.ClearScrollback();
+                _screen.ClearScrollback();
             }
             else
             {

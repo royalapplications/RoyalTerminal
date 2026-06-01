@@ -2110,6 +2110,7 @@ internal sealed class MainWindowController
         }
 
         control.ClearScrollback();
+        control.ScrollToBottom();
         string tabName = GetTabDisplayName(control);
         AppendEventLog($"[{tabName}] Cleared scrollback.");
         UpdateStatus($"Cleared history for {tabName}.");
@@ -2235,6 +2236,15 @@ internal sealed class MainWindowController
 
     private TerminalControl? GetActiveStandaloneControl()
     {
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            TerminalTab tab = _tabs[i];
+            if (tab.Container.IsVisible && tab.Control is TerminalControl visibleControl)
+            {
+                return visibleControl;
+            }
+        }
+
         return GetActiveTab()?.Control as TerminalControl;
     }
 

@@ -365,6 +365,71 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_ClearHistoryCommand_DropsActiveStandaloneScrollback()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo clear-history-demo";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
+            if (activeControl.HasActiveSession || activeControl.HasPty)
+            {
+                activeControl.StopPty();
+                await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            }
+
+            for (int i = 0; i < 64; i++)
+            {
+                activeControl.WriteOutput(Encoding.UTF8.GetBytes($"HISTORY-{i:000}\r\n"));
+            }
+
+            Dispatcher.UIThread.RunJobs();
+            activeControl.ScrollByRows(-3);
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(activeControl.Screen);
+            lock (screen.SyncRoot)
+            {
+                Assert.True(screen.MaxScrollOffset > 0);
+                Assert.True(screen.ScrollOffset > 0);
+            }
+
+            viewModel.ClearActiveScrollbackCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            lock (screen.SyncRoot)
+            {
+                Assert.True(screen.MaxScrollOffset == 0, ReadAllRows(screen));
+                Assert.Equal(0, screen.ScrollOffset);
+                Assert.Equal(screen.ViewportRows, screen.TotalRows);
+            }
+
+            Assert.Contains("Cleared history", viewModel.StatusText, StringComparison.Ordinal);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Controller_SearchCommands_SyncActiveTerminalSearchSurface()
     {
         MainWindowViewModel viewModel = new();
@@ -712,6 +777,30 @@ public sealed class MainWindowControllerModeStartupTests
         }
 
         return false;
+    }
+
+    private static string ReadAllRows(TerminalScreen screen)
+    {
+        StringBuilder builder = new();
+        for (int rowIndex = 0; rowIndex < screen.TotalRows; rowIndex++)
+        {
+            TerminalRow row = screen.GetRow(rowIndex);
+            int last = row.Columns - 1;
+            while (last >= 0 && row[last].Codepoint == 0)
+            {
+                last--;
+            }
+
+            for (int column = 0; column <= last; column++)
+            {
+                int codepoint = row[column].Codepoint;
+                builder.Append(codepoint == 0 ? ' ' : char.ConvertFromUtf32((int)codepoint));
+            }
+
+            builder.AppendLine();
+        }
+
+        return builder.ToString();
     }
 
     private static void AssertTerminalBehaviorSettings(
