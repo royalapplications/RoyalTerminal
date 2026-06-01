@@ -554,6 +554,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private VirtualizedTerminalScrollViewer? _scrollViewer;
     private IVtProcessor? _vtProcessor;
     private bool _autoScrollPinnedToBottom = true;
+    private bool _preservedRestartHistoryInputScrollGuard;
+    private bool _preservedRestartHistoryWasUserScrolled;
     private bool _isMouseSelecting;
     private DispatcherTimer? _selectionAutoScrollTimer;
     private int _selectionAnchorColumn;
@@ -843,6 +845,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 SyncScreenScrollOffsetFromScrollData();
                 UpdateRendererCursorForViewport();
                 UpdateRendererParityStateFromScreen();
+                UpdateAutoScrollPinnedToBottom();
+                UpdatePreservedRestartHistoryInputScrollGuardForViewportChange();
                 _presenter?.Invalidate();
                 RaiseScrollInvalidated();
             }
@@ -2970,7 +2974,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        ScrollToBottom();
+        if (_preservedRestartHistoryInputScrollGuard &&
+            _preservedRestartHistoryWasUserScrolled &&
+            IsScrolledBackFromLiveBottom())
+        {
+            return;
+        }
+
+        ScrollToBottomCore(clearPreservedRestartHistoryInputScrollGuard: false);
     }
 
     private bool IsScrolledBackFromLiveBottom()
@@ -4291,6 +4302,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 RaiseScrollInvalidated();
             }
 
+            UpdateAutoScrollPinnedToBottom();
+            UpdatePreservedRestartHistoryInputScrollGuardForViewportChange();
             e.Handled = true;
             return;
         }
@@ -4315,6 +4328,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
         UpdateAutoScrollPinnedToBottom();
+        UpdatePreservedRestartHistoryInputScrollGuardForViewportChange();
         e.Handled = true;
     }
 
@@ -4618,6 +4632,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
         UpdateAutoScrollPinnedToBottom();
+        UpdatePreservedRestartHistoryInputScrollGuardForViewportChange();
         RaiseScrollInvalidated();
     }
 
@@ -4625,6 +4640,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// Scrolls to the bottom of the terminal output.
     /// </summary>
     public void ScrollToBottom()
+    {
+        ScrollToBottomCore(clearPreservedRestartHistoryInputScrollGuard: true);
+    }
+
+    private void ScrollToBottomCore(bool clearPreservedRestartHistoryInputScrollGuard)
     {
         CaptureRendererSelectionForCurrentViewport();
         if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
@@ -4647,6 +4667,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _autoScrollPinnedToBottom = true;
+        if (clearPreservedRestartHistoryInputScrollGuard)
+        {
+            ClearPreservedRestartHistoryInputScrollGuard();
+        }
+
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
         RaiseScrollInvalidated();
@@ -4687,6 +4712,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         UpdateAutoScrollPinnedToBottom();
+        ClearPreservedRestartHistoryInputScrollGuard();
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
         _presenter?.Invalidate(fullRedraw: true);
@@ -4917,6 +4943,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         UpdateAutoScrollPinnedToBottom();
+        ArmPreservedRestartHistoryInputScrollGuard(preserveScrollback);
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
         _presenter?.Invalidate(fullRedraw: true);
@@ -7055,6 +7082,43 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _autoScrollPinnedToBottom = _scrollData.IsAtBottom && _screen.ScrollOffset == 0;
+    }
+
+    private void ArmPreservedRestartHistoryInputScrollGuard(bool preserveScrollback)
+    {
+        if (!preserveScrollback || _scrollData is not { CanScroll: true })
+        {
+            ClearPreservedRestartHistoryInputScrollGuard();
+            return;
+        }
+
+        _preservedRestartHistoryInputScrollGuard = true;
+        _preservedRestartHistoryWasUserScrolled = false;
+    }
+
+    private void ClearPreservedRestartHistoryInputScrollGuard()
+    {
+        _preservedRestartHistoryInputScrollGuard = false;
+        _preservedRestartHistoryWasUserScrolled = false;
+    }
+
+    private void UpdatePreservedRestartHistoryInputScrollGuardForViewportChange()
+    {
+        if (!_preservedRestartHistoryInputScrollGuard)
+        {
+            return;
+        }
+
+        if (IsScrolledBackFromLiveBottom())
+        {
+            _preservedRestartHistoryWasUserScrolled = true;
+            return;
+        }
+
+        if (_preservedRestartHistoryWasUserScrolled)
+        {
+            ClearPreservedRestartHistoryInputScrollGuard();
+        }
     }
 
     private static double GetLogicalViewportHeight(int rows, double cellHeight)

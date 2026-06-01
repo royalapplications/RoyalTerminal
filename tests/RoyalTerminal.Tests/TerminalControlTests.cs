@@ -611,6 +611,69 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_StartSessionAsync_WithPreserveScrollback_TextInputAfterUserScroll_PreservesViewport()
+    {
+        FakeTransport transport = new()
+        {
+            EchoInput = false,
+        };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.Columns = 16;
+        control.Rows = 3;
+        control.ScrollbackLimit = 40;
+
+        Window window = new()
+        {
+            Content = control,
+            Width = 640,
+            Height = 240,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            control.Focus();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            PopulateScrollableNormalBuffer(control);
+            control.StopPty();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            await control.StartSessionAsync(new FakeTransportOptions("fake"), preserveScrollback: true);
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            control.ScrollByRows(-1);
+
+            int scrollOffset;
+            lock (screen.SyncRoot)
+            {
+                scrollOffset = screen.ScrollOffset;
+            }
+
+            Assert.True(scrollOffset > 0);
+            transport.SentInputs.Clear();
+
+            window.KeyTextInput("x");
+
+            lock (screen.SyncRoot)
+            {
+                Assert.Equal(scrollOffset, screen.ScrollOffset);
+            }
+
+            Assert.Contains(transport.SentInputs, static payload =>
+                payload.Length == 1 && payload[0] == (byte)'x');
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_StartSessionAsync_DefaultClearsPreviousHistory()
     {
         FakeTransport transport = new();
