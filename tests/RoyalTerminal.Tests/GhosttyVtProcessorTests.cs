@@ -213,6 +213,44 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_PrepareForNewSession_ResetsProcessVisibleModes_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
+
+        processor.Process(
+            "\u001b[?1;6;66;67;1004;1006;1016;1049;2004;2026;2031;2048h"u8);
+        processor.Process("\u001b[?25l\u001b[4h\u001b[20h\u001b[>3u\u001b[2;3r\u001b[3;4HOLD"u8);
+
+        Assert.True(processor.ApplicationCursorKeys);
+        Assert.True(processor.ApplicationKeypad);
+        Assert.True(processor.AlternateScreen);
+        Assert.True(processor.BracketedPaste);
+        Assert.True(processor.FocusEventsEnabled);
+        Assert.Equal(3, processor.KittyKeyboardFlags);
+        Assert.False(processor.CursorVisible);
+
+        processor.PrepareForNewSession(preserveScrollback: true);
+
+        Assert.True(processor.CursorVisible);
+        Assert.False(processor.ApplicationCursorKeys);
+        Assert.False(processor.ApplicationKeypad);
+        Assert.False(processor.AlternateScreen);
+        Assert.False(processor.BracketedPaste);
+        Assert.False(processor.FocusEventsEnabled);
+        Assert.Equal(0, processor.KittyKeyboardFlags);
+        Assert.Equal(0, processor.CursorCol);
+        Assert.Equal(0, processor.CursorRow);
+        Assert.True(string.IsNullOrWhiteSpace(ReadViewportAscii(screen)));
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_ViewportScrollState_CanSetNearBottomOffset_AfterLargeResize_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())

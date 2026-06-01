@@ -37,6 +37,22 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 {
     private static readonly GhosttyVtNative.GhosttyMode s_wraparoundMode =
         GhosttyVtNative.CreateMode(7, ansi: false);
+    private const string PreserveScrollbackResetSequenceText =
+        "\u001b[?1049;1047;47l" +
+        "\u001b[22J" +
+        "\u001b[2;4;20l" +
+        "\u001b[12h" +
+        "\u001b[?1;3;4;5;6;8;9;12;40;45;47;66;67;69;1000;1002;1003;1004;1005;1006;1015;1016;1039;1045;1047;1048;1049;2004;2026;2027;2031;2048;9001l" +
+        "\u001b[?7;25;1007;1035;1036h" +
+        "\u001b[<8u" +
+        "\u001b[=0u" +
+        "\u001b[r" +
+        "\u001b[H" +
+        "\u001b[0 q" +
+        "\u001b[0m" +
+        "\u001b(B\u001b)B\u000f";
+    private static readonly byte[] s_preserveScrollbackResetSequence =
+        Encoding.ASCII.GetBytes(PreserveScrollbackResetSequenceText);
 
     private readonly TerminalScreen _screen;
     private GhosttyTerminal _terminal;
@@ -401,9 +417,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         ResetSessionInputState();
 
         // CSI 22J is Ghostty's "scroll complete" extension: move the active
-        // viewport into scrollback and clear the active screen. Exit alternate
-        // screen first so a new shell starts from the normal buffer.
-        _terminal.Write("\u001b[?1049;1047l\u001b[22J\u001b[?1;66;1000;1002;1003;1004;1006;1016;2004;9001l\u001b[?7;25h\u001b[0m\u001b(B"u8);
+        // viewport into scrollback and clear the active screen. The remaining
+        // sequence mirrors a reset of the process-visible modes without
+        // calling the native full reset, which would discard preserved history.
+        _terminal.Write(s_preserveScrollbackResetSequence);
         ConfigureOptionalNativeFeatures();
         ApplyThemeToNative(_theme);
         SetupTerminalEffects();
