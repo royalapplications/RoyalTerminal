@@ -45,6 +45,8 @@ features:
 - [API Reference](/api/)
 - [Embedding In Avalonia](/articles/avalonia-control)
 - [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings)
+- [Session History And Scrollback](/articles/session-history)
+- [Session Restart Semantics](/articles/session-restart-semantics)
 - [Capture Formats](/articles/capture-formats)
 - [Regex Text Highlighting](/articles/text-highlighting)
 - [Transports And Remote Access](/articles/transports)

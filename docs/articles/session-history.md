@@ -57,16 +57,9 @@ The session-preparation path reapplies optional Ghostty features, theme colors, 
 
 ## Reference Decision
 
-The session history behavior follows established terminal implementations:
+RoyalTerminal follows `CSI 3 J` for explicit scrollback clear and Ghostty's `CSI 22 J` semantics for preserving the active viewport into scrollback before a new session starts.
 
-- [Ghostty `csi.zig`](https://github.com/ghostty-org/ghostty/blob/main/src/terminal/csi.zig) defines ED mode `3` as scrollback clear and mode `22` as the Kitty/Ghostty scroll-complete extension.
-- [Ghostty `Terminal.zig`](https://github.com/ghostty-org/ghostty/blob/main/src/terminal/Terminal.zig) routes scroll-complete to `scrollClear()` and scrollback erase to history erase.
-- [Ghostty `Termio.zig`](https://github.com/ghostty-org/ghostty/blob/main/src/termio/Termio.zig) uses history-aware clear-screen behavior and avoids clearing scrollback from the alternate screen path.
-- [xterm.js `InputHandler.ts`](https://github.com/xtermjs/xterm.js/blob/master/src/common/InputHandler.ts) treats ED mode `3` as erase scrollback.
-- [xterm.js `Terminal.ts`](https://github.com/xtermjs/xterm.js/blob/master/src/headless/Terminal.ts) exposes a clear operation that keeps the live prompt row and drops older buffer rows.
-- [Windows Terminal `ControlCore.cpp`](https://github.com/microsoft/terminal/blob/main/src/cascadia/TerminalControl/ControlCore.cpp) sends `ESC [ 3 J` for scrollback clear and distinguishes scrollback, screen, and all-buffer clear operations.
-
-RoyalTerminal follows `CSI 3J` for explicit scrollback clear and Ghostty's `CSI 22J` semantics for preserving the active viewport into scrollback before a new session starts. PowerShell-specific behavior was not part of this feature because the issue is about terminal buffer ownership, not shell startup, prompt formatting, or ConPTY/PowerShell interop.
+See [Session Restart Semantics](/articles/session-restart-semantics) for the detailed Ghostty, xterm.js, Windows Terminal, and RoyalTerminal comparison, including alternate-screen app restart behavior and process-visible mode reset state.
 
 ## Demo App
 

@@ -57,7 +57,7 @@ Use `ClearScrollback()` when the host wants to discard history while keeping the
 Terminal.ClearScrollback();
 ```
 
-See [Session History And Scrollback](/articles/session-history) for the managed VT, Ghostty VT, and reference-terminal behavior details.
+See [Session History And Scrollback](/articles/session-history) for the host API and [Session Restart Semantics](/articles/session-restart-semantics) for the managed VT, Ghostty VT, xterm.js, Windows Terminal, and RoyalTerminal state-reset comparison.
 
 ## What the control actually owns
 
