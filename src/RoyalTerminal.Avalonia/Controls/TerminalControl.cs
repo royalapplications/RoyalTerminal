@@ -4670,6 +4670,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         FlushPendingTransportOutputBeforeResize();
         ClearSelection();
+        ResetCursorBlinkPhase();
 
         lock (_screen.SyncRoot)
         {
@@ -4882,6 +4883,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         FlushPendingTransportOutputBeforeResize();
         ClearSelection();
+        ResetCursorBlinkPhase();
 
         int previousTotalRows = _screen.TotalRows;
         int previousMaxScrollOffset = _screen.MaxScrollOffset;
@@ -7103,14 +7105,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        bool pinnedToLiveBottom = false;
         if (_vtProcessor?.AlternateScreen == true)
         {
             SyncAlternateScreenScrollStateLocked();
+            pinnedToLiveBottom = true;
         }
         else if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
         {
             viewportScrollSource.SetViewportOffsetRows(viewportScrollSource.ViewportScrollState.MaxOffsetRows);
             SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+            pinnedToLiveBottom = true;
         }
         else
         {
@@ -7118,6 +7123,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _scrollData.UpdateExtent(_screen.TotalRows, true);
             _scrollData.ScrollToBottom();
             _screen.InvalidateViewport();
+            pinnedToLiveBottom = true;
+        }
+
+        if (pinnedToLiveBottom && AutoScroll)
+        {
+            _preserveAutoScrollBottomDuringAncestorOffsetSync = true;
         }
 
         UpdateRendererCursorForViewportLocked();
@@ -7349,7 +7360,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _cursorBlinkTimer.Stop();
         }
 
+        ResetCursorBlinkPhase();
+    }
+
+    private void ResetCursorBlinkPhase()
+    {
         _cursorBlinkVisiblePhase = true;
+        _lastBlinkCursorColumn = -1;
+        _lastBlinkCursorRow = -1;
     }
 
     private DispatcherTimer CreateCursorBlinkTimer()

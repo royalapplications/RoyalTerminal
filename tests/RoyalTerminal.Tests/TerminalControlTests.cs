@@ -488,6 +488,70 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_StartSessionAsync_WithPreserveScrollback_StaysAtLiveBottom_WhenAncestorReplaysOldOffset()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.Columns = 16;
+        control.Rows = 3;
+        control.ScrollbackLimit = 20;
+
+        ScrollViewer scrollViewer = new()
+        {
+            Content = control,
+        };
+        Window window = new()
+        {
+            Content = scrollViewer,
+            Width = 640,
+            Height = 240,
+        };
+        window.Show();
+
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            control.Focus();
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            PopulateScrollableNormalBuffer(control);
+            control.StopPty();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            await control.StartSessionAsync(new FakeTransportOptions("fake"), preserveScrollback: true);
+
+            // Avalonia can replay an older top-anchored offset after the logical extent grows.
+            // The restart path must keep the terminal pinned to the live bottom.
+            await Dispatcher.UIThread.InvokeAsync(
+                () => ((IScrollable)control).Offset = new Vector(0, 0),
+                DispatcherPriority.Input);
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+            TerminalScrollData scrollData = Assert.IsType<TerminalScrollData>(control.ScrollData);
+            SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+
+            lock (screen.SyncRoot)
+            {
+                Assert.Equal(0, screen.ScrollOffset);
+                Assert.True(screen.TotalRows > screen.ViewportRows);
+            }
+
+            Assert.True(scrollData.IsAtBottom);
+            Assert.True(Math.Abs(scrollViewer.Offset.Y - scrollData.MaxOffset) < 0.5);
+            Assert.True(renderer.CursorVisible);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_StartSessionAsync_DefaultClearsPreviousHistory()
     {
         FakeTransport transport = new();
