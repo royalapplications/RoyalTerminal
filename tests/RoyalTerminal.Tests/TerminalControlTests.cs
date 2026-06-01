@@ -69,6 +69,7 @@ public class TerminalControlTests
         Assert.Equal(80, control.Columns);
         Assert.Equal(24, control.Rows);
         Assert.Equal(10_000, control.ScrollbackLimit);
+        Assert.False(control.PreserveScrollbackOnSessionStart);
         Assert.Equal(new Thickness(0), control.Padding);
         Assert.True(control.AutoScroll);
         Assert.True(control.ScrollToBottomOnInput);
@@ -106,6 +107,7 @@ public class TerminalControlTests
             Columns = 120,
             Rows = 40,
             ScrollbackLimit = 50_000,
+            PreserveScrollbackOnSessionStart = true,
             AutoScroll = false,
             ScrollToBottomOnInput = false,
             ReflowOnResize = false,
@@ -127,6 +129,7 @@ public class TerminalControlTests
         Assert.Equal(120, control.Columns);
         Assert.Equal(40, control.Rows);
         Assert.Equal(50_000, control.ScrollbackLimit);
+        Assert.True(control.PreserveScrollbackOnSessionStart);
         Assert.False(control.AutoScroll);
         Assert.False(control.ScrollToBottomOnInput);
         Assert.False(control.ReflowOnResize);
@@ -452,6 +455,146 @@ public class TerminalControlTests
         Assert.Null(control.ActiveTransportId);
         Assert.True(transport.StopCalled);
         await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+    }
+
+    [AvaloniaFact]
+    public async Task Control_StartSessionAsync_WithPreserveScrollback_KeepsPreviousHistory()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.Columns = 16;
+        control.Rows = 3;
+        control.ScrollbackLimit = 20;
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+        control.WriteOutput("\x1b[31mFIRST\x1b[0m\r\nSECOND"u8);
+        control.StopPty();
+        await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"), preserveScrollback: true);
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            Assert.True(screen.TotalRows > screen.ViewportRows);
+            int rowIndex = FindAbsoluteRowContaining(screen, "FIRST");
+            Assert.True(rowIndex >= 0, ReadAllRows(screen));
+            Assert.NotEqual(screen.DefaultForeground, screen.GetRow(rowIndex)[0].Foreground);
+            Assert.DoesNotContain("FIRST", ReadViewportTextRange(screen, 0, screen.ViewportRows - 1), StringComparison.Ordinal);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_StartSessionAsync_DefaultClearsPreviousHistory()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.Columns = 16;
+        control.Rows = 3;
+        control.ScrollbackLimit = 20;
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+        control.WriteOutput("FIRST\r\nSECOND"u8);
+        control.StopPty();
+        await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            Assert.Equal(screen.ViewportRows, screen.TotalRows);
+            Assert.DoesNotContain("FIRST", ReadAllRows(screen), StringComparison.Ordinal);
+            Assert.Equal(0, screen.MaxScrollOffset);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_StartSessionAsync_WithCanceledToken_DoesNotClearExistingBuffer()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.Columns = 16;
+        control.Rows = 3;
+        control.ScrollbackLimit = 20;
+        control.WriteOutput("KEEP\r\nVISIBLE"u8);
+
+        using CancellationTokenSource cts = new();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await control.StartSessionAsync(new FakeTransportOptions("fake"), cts.Token));
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            Assert.Contains("KEEP", ReadAllRows(screen), StringComparison.Ordinal);
+            Assert.Contains("VISIBLE", ReadAllRows(screen), StringComparison.Ordinal);
+        }
+
+        Assert.False(transport.IsRunning);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_StartSessionAsync_IgnoresStaleProcessExitPostFromPreviousSession()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.Columns = 16;
+        control.Rows = 3;
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+        transport.RaiseProcessExited(0);
+        transport.Dispose();
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+        await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+        Assert.True(control.HasActiveSession);
+        Assert.Equal("fake", control.ActiveTransportId);
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            Assert.DoesNotContain("[Process exited", ReadAllRows(screen), StringComparison.Ordinal);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_ClearScrollback_PreservesViewportAndDropsHistory()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.Columns = 16;
+        control.Rows = 4;
+        control.ScrollbackLimit = 20;
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+        PopulateScrollableNormalBuffer(control);
+
+        control.ClearScrollback();
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            Assert.Equal(screen.ViewportRows, screen.TotalRows);
+            Assert.Equal(0, screen.MaxScrollOffset);
+            Assert.Contains("LINE-063", ReadAllRows(screen), StringComparison.Ordinal);
+        }
     }
 
     [AvaloniaFact]
@@ -5384,6 +5527,19 @@ public class TerminalControlTests
         for (int row = 0; row < screen.ViewportRows; row++)
         {
             if (ReadRowText(screen.GetViewportRow(row)).Contains(text, StringComparison.Ordinal))
+            {
+                return row;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int FindAbsoluteRowContaining(TerminalScreen screen, string text)
+    {
+        for (int row = 0; row < screen.TotalRows; row++)
+        {
+            if (ReadRowText(screen.GetRow(row)).Contains(text, StringComparison.Ordinal))
             {
                 return row;
             }

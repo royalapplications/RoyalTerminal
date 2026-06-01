@@ -30,6 +30,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
     IKittyKeyboardStateSource,
     ITerminalCursorStyleSource,
     ITerminalFocusEventModeSource,
+    ITerminalSessionHistoryController,
     ITerminalSelectionExportSource,
     ITerminalPasteSequenceEncoderSource,
     ITerminalSnapshotExportSource,
@@ -183,6 +184,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
         OscEscape,
         DcsString,
         DcsEscape,
+    }
+
+    private enum SessionScreenResetMode
+    {
+        ClearViewport,
+        ClearAll,
+        PreserveScrollback,
     }
 
     /// <summary>Current cursor column.</summary>
@@ -2094,7 +2102,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 break;
 
             case (byte)'c': // RIS — Full reset
-                ResetInternal(raiseModeChanged: false);
+                ResetInternal(raiseModeChanged: false, SessionScreenResetMode.ClearViewport);
                 _state = ParserState.Ground;
                 break;
 
@@ -4082,10 +4090,15 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 _screen.ClearRasterGraphics();
                 break;
 
-            case 3: // Entire display + scrollback
-                for (var r = 0; r < _screen.ViewportRows; r++)
-                    _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
-                _screen.ClearRasterGraphics();
+            case 3: // Scrollback only
+                _screen.ClearScrollback();
+                break;
+
+            case 22: // Kitty extension: move viewport into scrollback and clear display
+                _screen.MoveViewportToScrollbackAndClear();
+                _cursorCol = 0;
+                _cursorRow = 0;
+                ResetDelayedWrap();
                 break;
         }
 
@@ -4449,10 +4462,26 @@ public sealed class BasicVtProcessor : IVtProcessor,
     /// </summary>
     public void Reset()
     {
-        ResetInternal(raiseModeChanged: true);
+        ResetInternal(raiseModeChanged: true, SessionScreenResetMode.ClearViewport);
     }
 
-    private void ResetInternal(bool raiseModeChanged)
+    /// <inheritdoc />
+    public void PrepareForNewSession(bool preserveScrollback)
+    {
+        ResetInternal(
+            raiseModeChanged: true,
+            preserveScrollback
+                ? SessionScreenResetMode.PreserveScrollback
+                : SessionScreenResetMode.ClearAll);
+    }
+
+    /// <inheritdoc />
+    public void ClearScrollback()
+    {
+        _screen.ClearScrollback();
+    }
+
+    private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode)
     {
         TerminalModeState before = ModeState;
 
@@ -4511,10 +4540,22 @@ public sealed class BasicVtProcessor : IVtProcessor,
         ResetAttributes();
         InitTabStops();
 
-        for (var r = 0; r < _screen.ViewportRows; r++)
-            _screen.GetViewportRow(r).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+        switch (screenResetMode)
+        {
+            case SessionScreenResetMode.ClearViewport:
+                for (var r = 0; r < _screen.ViewportRows; r++)
+                    _screen.GetViewportRow(r).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+                _screen.ClearRasterGraphics();
+                break;
 
-        _screen.ClearRasterGraphics();
+            case SessionScreenResetMode.ClearAll:
+                _screen.ClearAll();
+                break;
+
+            case SessionScreenResetMode.PreserveScrollback:
+                _screen.MoveViewportToScrollbackAndClear();
+                break;
+        }
 
         if (raiseModeChanged)
         {

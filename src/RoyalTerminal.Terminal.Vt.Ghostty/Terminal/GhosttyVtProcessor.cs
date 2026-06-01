@@ -26,6 +26,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     ITerminalPasteSequenceEncoderSource,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseReportingStateSource,
+    ITerminalSessionHistoryController,
     ITerminalViewportScrollSource,
     ITerminalSelectionExportSource,
     ITerminalScreenSnapshotSource,
@@ -373,13 +374,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         TerminalModeState before = ModeState;
-        _win32InputModeTracker.Reset();
-        _unsupportedWindowsSequenceSanitizer.Reset();
-        _trimTrailingWhitespaceAfterResize = false;
-        _forceFullScreenSyncAfterResize = false;
-        _win32InputMode = false;
-        _pressedMouseButtons = 0;
-
+        ResetSessionInputState();
         _terminal.Reset();
         ConfigureOptionalNativeFeatures();
         ApplyThemeToNative(_theme);
@@ -388,6 +383,47 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _sixelOverlayProcessor?.Reset();
         _screen.ClearRasterGraphics();
         RefreshStateAndScreenFromNative();
+        RaiseModeChangedIfNeeded(before);
+    }
+
+    /// <inheritdoc />
+    public void PrepareForNewSession(bool preserveScrollback)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!preserveScrollback)
+        {
+            Reset();
+            return;
+        }
+
+        TerminalModeState before = ModeState;
+        ResetSessionInputState();
+
+        // CSI 22J is Ghostty's "scroll complete" extension: move the active
+        // viewport into scrollback and clear the active screen. Exit alternate
+        // screen first so a new shell starts from the normal buffer.
+        _terminal.Write("\u001b[?1049;1047l\u001b[22J\u001b[?1;66;1000;1002;1003;1004;1006;1016;2004;9001l\u001b[?7;25h\u001b[0m\u001b(B"u8);
+        ConfigureOptionalNativeFeatures();
+        ApplyThemeToNative(_theme);
+        SetupTerminalEffects();
+        _mouseEncoder.Reset();
+        _sixelOverlayProcessor?.PrepareForNewSession(preserveScrollback: true);
+        RefreshStateAndScreenFromNative();
+        SyncSixelOverlayRasterGraphics();
+        RaiseModeChangedIfNeeded(before);
+    }
+
+    /// <inheritdoc />
+    public void ClearScrollback()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        TerminalModeState before = ModeState;
+        _terminal.Write("\u001b[3J"u8);
+        _sixelOverlayProcessor?.ClearScrollback();
+        RefreshStateAndScreenFromNative();
+        SyncSixelOverlayRasterGraphics();
         RaiseModeChangedIfNeeded(before);
     }
 
@@ -958,6 +994,16 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _kittyKeyboardFlags = 0;
         _pressedMouseButtons = 0;
         _scrollbar = default;
+    }
+
+    private void ResetSessionInputState()
+    {
+        _win32InputModeTracker.Reset();
+        _unsupportedWindowsSequenceSanitizer.Reset();
+        _trimTrailingWhitespaceAfterResize = false;
+        _forceFullScreenSyncAfterResize = false;
+        _win32InputMode = false;
+        _pressedMouseButtons = 0;
     }
 
     private unsafe void SyncScreenFromNative()
