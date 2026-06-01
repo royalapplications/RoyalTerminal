@@ -784,7 +784,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public async Task Control_ClearHistory_DropsVisibleRowsAboveCursorLine()
+    public async Task Control_ClearHistory_MakesPromptLineFirstViewportRow()
     {
         FakeTransport transport = new();
         TerminalControl control = CreateControlWithTransport(
@@ -811,7 +811,7 @@ public class TerminalControlTests
             Assert.Equal(screen.ViewportRows, screen.TotalRows);
             Assert.Equal(0, screen.MaxScrollOffset);
             Assert.DoesNotContain("OLD-", allRows, StringComparison.Ordinal);
-            Assert.Contains("prompt$ ", allRows, StringComparison.Ordinal);
+            Assert.StartsWith("prompt$ ", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
         }
     }
 

@@ -422,6 +422,7 @@ public sealed class MainWindowControllerModeStartupTests
                 Assert.Equal(screen.ViewportRows, screen.TotalRows);
                 Assert.DoesNotContain("HISTORY-", allRows, StringComparison.Ordinal);
                 Assert.Contains("prompt$ ", allRows, StringComparison.Ordinal);
+                Assert.StartsWith("prompt$ ", ReadRow(screen.GetViewportRow(0)), StringComparison.Ordinal);
             }
 
             Assert.Contains("Cleared history", viewModel.StatusText, StringComparison.Ordinal);
@@ -788,20 +789,25 @@ public sealed class MainWindowControllerModeStartupTests
         StringBuilder builder = new();
         for (int rowIndex = 0; rowIndex < screen.TotalRows; rowIndex++)
         {
-            TerminalRow row = screen.GetRow(rowIndex);
-            int last = row.Columns - 1;
-            while (last >= 0 && row[last].Codepoint == 0)
-            {
-                last--;
-            }
+            builder.AppendLine(ReadRow(screen.GetRow(rowIndex)));
+        }
 
-            for (int column = 0; column <= last; column++)
-            {
-                int codepoint = row[column].Codepoint;
-                builder.Append(codepoint == 0 ? ' ' : char.ConvertFromUtf32((int)codepoint));
-            }
+        return builder.ToString();
+    }
 
-            builder.AppendLine();
+    private static string ReadRow(TerminalRow row)
+    {
+        StringBuilder builder = new();
+        int last = row.Columns - 1;
+        while (last >= 0 && row[last].Codepoint == 0)
+        {
+            last--;
+        }
+
+        for (int column = 0; column <= last; column++)
+        {
+            int codepoint = row[column].Codepoint;
+            builder.Append(codepoint == 0 ? ' ' : char.ConvertFromUtf32((int)codepoint));
         }
 
         return builder.ToString();

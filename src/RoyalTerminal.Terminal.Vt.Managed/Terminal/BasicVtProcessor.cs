@@ -4490,6 +4490,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
 
         _screen.ClearVisibleHistory(_cursorRow);
+        _cursorRow = 0;
         ResetDelayedWrap();
     }
 

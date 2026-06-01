@@ -113,7 +113,7 @@ public interface ITerminalSessionHistoryController
     void ClearScrollback();
 
     /// <summary>
-    /// Clears scrollback/history and visible rows above the active cursor line.
+    /// Clears scrollback/history and makes the active cursor line the first viewport row.
     /// </summary>
     void ClearVisibleHistory();
 }

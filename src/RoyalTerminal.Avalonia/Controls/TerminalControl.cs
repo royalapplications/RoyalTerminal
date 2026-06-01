@@ -4694,6 +4694,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         FlushPendingTransportOutputBeforeResize();
+        ScrollToBottomCore(clearPreservedRestartHistoryInputScrollGuard: false);
         ClearSelection();
         ResetCursorBlinkPhase();
 
@@ -4721,7 +4722,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
-    /// Clears scrollback/history and visible rows above the active cursor line.
+    /// Clears scrollback/history and makes the active cursor line the first viewport row.
     /// </summary>
     public void ClearHistory()
     {

@@ -33,7 +33,7 @@ public class TerminalSessionHistoryTests
     }
 
     [Fact]
-    public void TerminalScreen_ClearVisibleHistory_DropsRowsAboveCursorAndKeepsCursorLine()
+    public void TerminalScreen_ClearVisibleHistory_MakesCursorLineFirstViewportRow()
     {
         TerminalScreen screen = new(columns: 12, viewportRows: 4, scrollbackLimit: 10);
         SetAscii(screen.GetViewportRow(0), "older");
@@ -49,7 +49,7 @@ public class TerminalSessionHistoryTests
         Assert.Equal(0, screen.MaxScrollOffset);
         Assert.DoesNotContain("OLD", ReadViewport(screen), StringComparison.Ordinal);
         Assert.DoesNotContain("older", ReadAllRows(screen), StringComparison.Ordinal);
-        Assert.Contains("prompt$ ", ReadViewport(screen), StringComparison.Ordinal);
+        Assert.StartsWith("prompt$ ", ReadAscii(screen.GetViewportRow(0), screen.Columns), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class TerminalSessionHistoryTests
     }
 
     [Fact]
-    public void BasicVtProcessor_ClearVisibleHistory_DropsRowsAboveCursorAndKeepsPromptLine()
+    public void BasicVtProcessor_ClearVisibleHistory_MakesPromptLineFirstViewportRow()
     {
         TerminalScreen screen = new(columns: 16, viewportRows: 4, scrollbackLimit: 10);
         using BasicVtProcessor processor = new(screen);
@@ -105,8 +105,8 @@ public class TerminalSessionHistoryTests
         Assert.Equal(screen.ViewportRows, screen.TotalRows);
         Assert.Equal(0, screen.MaxScrollOffset);
         Assert.DoesNotContain("OLD", ReadAllRows(screen), StringComparison.Ordinal);
-        Assert.Contains("prompt$ ", ReadViewport(screen), StringComparison.Ordinal);
-        Assert.Equal(3, processor.CursorRow);
+        Assert.StartsWith("prompt$ ", ReadAscii(screen.GetViewportRow(0), screen.Columns), StringComparison.Ordinal);
+        Assert.Equal(0, processor.CursorRow);
     }
 
     [Fact]

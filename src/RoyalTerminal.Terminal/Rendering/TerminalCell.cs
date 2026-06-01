@@ -1279,7 +1279,7 @@ public sealed class TerminalScreen
     }
 
     /// <summary>
-    /// Clears primary-buffer scrollback and visible rows above the active cursor line.
+    /// Clears primary-buffer scrollback and makes the active cursor line the first viewport row.
     /// </summary>
     /// <param name="cursorViewportRow">The cursor row in viewport coordinates.</param>
     public void ClearVisibleHistory(int cursorViewportRow)
@@ -1294,23 +1294,21 @@ public sealed class TerminalScreen
 
         ClearScrollback();
 
-        int lastRowAboveCursor = Math.Clamp(cursorViewportRow - 1, -1, Math.Max(0, ViewportRows - 1));
-        if (lastRowAboveCursor < 0)
+        int cursorRow = Math.Clamp(cursorViewportRow, 0, Math.Max(0, ViewportRows - 1));
+        TerminalRow sourceRow = GetViewportRow(cursorRow);
+        TerminalRow promptRow = new(Columns, DefaultForeground, DefaultBackground);
+        promptRow.CopyActiveFrom(sourceRow, DefaultForeground, DefaultBackground);
+        promptRow.WrapsToNext = false;
+
+        TerminalRowBuffer rows = new(ViewportRows);
+        rows.Add(promptRow);
+        for (int rowIndex = 1; rowIndex < ViewportRows; rowIndex++)
         {
-            ScrollOffset = 0;
-            return;
+            rows.Add(new TerminalRow(Columns, DefaultForeground, DefaultBackground));
         }
 
-        for (int rowIndex = 0; rowIndex <= lastRowAboveCursor; rowIndex++)
-        {
-            GetViewportRow(rowIndex).Clear(DefaultForeground, DefaultBackground);
-        }
-
-        ClearRasterGraphicsInViewportRectangle(
-            0,
-            lastRowAboveCursor,
-            0,
-            Math.Max(0, Columns - 1));
+        _rows = rows;
+        ClearRasterGraphics();
         ClearKittyGraphics();
         ScrollOffset = 0;
         InvalidateAll();

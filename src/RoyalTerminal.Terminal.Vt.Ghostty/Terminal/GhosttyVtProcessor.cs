@@ -467,34 +467,38 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         int cursorRow = Math.Clamp(_cursorRow, 0, Math.Max(0, _screen.ViewportRows - 1));
         int cursorColumn = Math.Clamp(_cursorCol, 0, Math.Max(0, _screen.Columns));
-        string cursorLinePrefix = CaptureCursorLinePrefix(cursorRow, cursorColumn);
+        string cursorLineText = CaptureCursorLineText(cursorRow, cursorColumn);
 
         StringBuilder builder = new();
-        builder.Append("\u001b7\u001b[3J\u001b[1J");
-        if (cursorLinePrefix.Length > 0)
+        builder.Append("\u001b[3J\u001b[2J\u001b[H");
+        if (cursorLineText.Length > 0)
         {
-            builder
-                .Append("\u001b[")
-                .Append(cursorRow + 1)
-                .Append(";1H")
-                .Append(cursorLinePrefix);
+            builder.Append(cursorLineText);
         }
 
-        builder.Append("\u001b8");
+        builder
+            .Append("\u001b[1;")
+            .Append(cursorColumn + 1)
+            .Append('H');
         return Encoding.UTF8.GetBytes(builder.ToString());
     }
 
-    private string CaptureCursorLinePrefix(int cursorRow, int cursorColumn)
+    private string CaptureCursorLineText(int cursorRow, int cursorColumn)
     {
-        if (cursorColumn <= 0 || _screen.Columns <= 0)
+        if (_screen.Columns <= 0)
         {
             return string.Empty;
         }
 
         TerminalRow row = _screen.GetViewportRow(cursorRow);
-        int prefixColumns = Math.Min(cursorColumn, row.Columns);
-        StringBuilder builder = new(prefixColumns);
-        for (int column = 0; column < prefixColumns; column++)
+        int lastColumn = Math.Min(row.Columns, Math.Max(cursorColumn, FindLastContentColumn(row) + 1));
+        if (lastColumn <= 0)
+        {
+            return string.Empty;
+        }
+
+        StringBuilder builder = new(lastColumn);
+        for (int column = 0; column < lastColumn; column++)
         {
             TerminalCell cell = row[column];
             if (cell.Width == 0)
@@ -506,6 +510,19 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         }
 
         return builder.ToString();
+    }
+
+    private static int FindLastContentColumn(TerminalRow row)
+    {
+        for (int column = row.Columns - 1; column >= 0; column--)
+        {
+            if (row[column].HasContent)
+            {
+                return column;
+            }
+        }
+
+        return -1;
     }
 
     private static void AppendCellLiteral(StringBuilder builder, TerminalCell cell)

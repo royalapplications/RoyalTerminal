@@ -187,7 +187,7 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
-    public void GhosttyVtProcessor_ClearVisibleHistory_DropsRowsAboveCursorAndKeepsPromptLine_WhenAvailable()
+    public void GhosttyVtProcessor_ClearVisibleHistory_MakesPromptLineFirstViewportRow_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
         {
@@ -209,8 +209,8 @@ public class GhosttyVtProcessorTests
         Assert.Equal(0ul, state.MaxOffsetRows);
         Assert.Equal(state.VisibleRows, state.TotalRows);
         Assert.DoesNotContain("OLD", viewport, StringComparison.Ordinal);
-        Assert.Contains("prompt$ ", viewport, StringComparison.Ordinal);
-        Assert.Equal(3, processor.CursorRow);
+        Assert.StartsWith("prompt$ ", ReadAsciiPrefix(screen, row: 0, columns: 8), StringComparison.Ordinal);
+        Assert.Equal(0, processor.CursorRow);
     }
 
     [Fact]
