@@ -165,7 +165,7 @@
                   FontSize="10"
                   Padding="8,2"
                   Command="{Binding ClearActiveScrollbackCommand}"
-                  ToolTip.Tip="Clear scrollback history on the active terminal tab" />
+                  ToolTip.Tip="Clear visible history on the active terminal tab" />
           <Button Content="Hyperlink Sample"
                   Height="24"
                   FontSize="10"

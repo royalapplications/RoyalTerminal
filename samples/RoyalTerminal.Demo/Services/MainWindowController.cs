@@ -2109,9 +2109,15 @@ internal sealed class MainWindowController
             return;
         }
 
+        bool canRequestPromptRedraw = control.HasActiveSession || control.HasPty;
+
         control.ClearHistory();
         control.ScrollToBottom();
-        control.RequestPromptRedraw();
+        if (canRequestPromptRedraw)
+        {
+            control.RequestPromptRedraw();
+        }
+
         string tabName = GetTabDisplayName(control);
         AppendEventLog($"[{tabName}] Cleared history.");
         UpdateStatus($"Cleared history for {tabName}.");

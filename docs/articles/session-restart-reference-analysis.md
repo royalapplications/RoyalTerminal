@@ -103,7 +103,7 @@ RoyalTerminal alignment:
 | --- | --- | --- | --- | --- |
 | Clear scrollback | `eraseHistory(null)` for `CSI 3J` | trims historical rows and resets scroll offsets | sends `CSI 3J`, viewport height remains visible height | `ClearScrollback` drops history and preserves viewport; native processors own native sync |
 | Clear visible history | `scrollClear`/physical row edits in related clear paths | moves cursor line to first row and blanks viewport | preserves cursor row by erasing below and deleting rows above | managed copies the cursor `TerminalRow`; Ghostty native now shifts the existing row |
-| Prompt redraw after host clear | sends form feed when at a semantic prompt | host API is emulator-only | ConPTY clear stays coherent with the backing console | demo calls `RequestPromptRedraw()` after host-side clear-history |
+| Prompt redraw after host clear | sends form feed when at a semantic prompt | host API is emulator-only | ConPTY clear stays coherent with the backing console | demo calls `RequestPromptRedraw()` after host-side clear-history when a live session exists |
 | Preserved restart from primary | VT state can be reset while scrollback is retained by native operations; `CSI 22J` scroll-completes active primary screen | reset/clear APIs affect buffer, not process resurrection | terminal buffer can be cleared/preserved, ConPTY process state is separate | primary viewport is moved into scrollback, active screen is cleared, process-visible modes are reset |
 | Preserved restart from alternate | `1049l` returns to primary and restores saved cursor | `1049l` activates normal buffer and restores cursor | main buffer is reactivated and alternate buffer object is deleted | restart returns to primary, restores primary cursor, discards inactive alternate UI state, and keeps the restored primary prompt area visible |
 | Mode defaults after restart | explicit defaults in `modes.zig` | soft reset restores process-visible modes | reset/clear and ConPTY interactions keep terminal and console coherent | managed and Ghostty processors reset cursor, keyboard, mouse, paste, origin, wrap, margins, charsets, and style state |
@@ -161,7 +161,7 @@ Why this was wrong:
 Fix:
 
 - Added `TerminalControl.RequestPromptRedraw()` to send form feed (`Ctrl+L`) through the normal input path.
-- The demo `Clear History` command now calls `ClearHistory()`, scrolls to the live bottom, then calls `RequestPromptRedraw()`.
+- The demo `Clear History` command now calls `ClearHistory()`, scrolls to the live bottom, then calls `RequestPromptRedraw()` when a live session input path exists.
 - Added a control test proving that prompt redraw sends the expected form-feed byte to the active transport.
 
 ### 4. Interrupted alternate-screen restart hid the restored primary prompt

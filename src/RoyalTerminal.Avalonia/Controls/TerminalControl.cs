@@ -2764,7 +2764,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void RequestPromptRedraw()
     {
-        SendInput("\f");
+        Span<byte> formFeed = stackalloc byte[] { 0x0C };
+        SendInput(formFeed);
     }
 
     #endregion

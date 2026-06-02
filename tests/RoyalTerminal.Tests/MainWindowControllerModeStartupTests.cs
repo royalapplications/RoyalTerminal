@@ -411,6 +411,9 @@ public sealed class MainWindowControllerModeStartupTests
                 Assert.True(screen.ScrollOffset > 0);
             }
 
+            List<byte[]> sentInputs = [];
+            activeControl.TerminalSessionService.InputSent += (_, args) => sentInputs.Add(args.Data.ToArray());
+
             viewModel.ClearActiveScrollbackCommand.Execute().Wait();
             Dispatcher.UIThread.RunJobs();
 
@@ -425,6 +428,7 @@ public sealed class MainWindowControllerModeStartupTests
                 Assert.StartsWith("prompt$ ", ReadRow(screen.GetViewportRow(0)), StringComparison.Ordinal);
             }
 
+            Assert.Empty(sentInputs);
             Assert.Contains("Cleared history", viewModel.StatusText, StringComparison.Ordinal);
         }
         finally

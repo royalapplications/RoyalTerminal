@@ -14,7 +14,6 @@ await terminal.StartSessionAsync(nextOptions, preserveScrollback: true);
 
 terminal.ClearScrollback();
 terminal.ClearHistory();
-terminal.RequestPromptRedraw();
 ```
 
 ## Public API
@@ -27,7 +26,7 @@ terminal.RequestPromptRedraw();
 
 `TerminalControl.ClearHistory()` clears scrollback and moves the active cursor row to the first viewport row. It is useful for host UI commands that should remove previous command output rather than only dropping off-screen history.
 
-`TerminalControl.RequestPromptRedraw()` sends form feed (`Ctrl+L`) to the active endpoint. Use it after host-side clear-history commands when an interactive shell or prompt integration needs to repaint its prompt and synchronize its internal cursor position.
+`TerminalControl.RequestPromptRedraw()` sends form feed (`Ctrl+L`) to the active endpoint. Use it after host-side clear-history commands when an active interactive shell or prompt integration needs to repaint its prompt and synchronize its internal cursor position.
 
 ## Behavior
 
@@ -37,7 +36,7 @@ When `preserveScrollback` is `true`, RoyalTerminal resets parser, keyboard, mous
 
 `ClearScrollback()` is scrollback-only. It does not clear the active viewport and does not stop the running transport.
 
-`ClearHistory()` is viewport-aware. It keeps the current cursor row as the new first row, drops rows above it, blanks rows below it, and resets the scroll position. The terminal process is not automatically notified. Hosts that expose this as an interactive shell command should call `RequestPromptRedraw()` after the clear so shells that maintain their own prompt/cursor state can repaint cleanly.
+`ClearHistory()` is viewport-aware. It keeps the current cursor row as the new first row, drops rows above it, blanks rows below it, and resets the scroll position. The terminal process is not automatically notified. Hosts that expose this as an interactive shell command should call `RequestPromptRedraw()` after the clear only when a live shell/session input path exists, so shells that maintain their own prompt/cursor state can repaint cleanly.
 
 ## Managed VT Implementation
 
@@ -77,7 +76,7 @@ The sample demo exposes the feature in the toolbar:
 
 - `Preserve History` toggles `TerminalControl.PreserveScrollbackOnSessionStart`.
 - `Restart Session` restarts the active standalone tab and uses the toggle value.
-- `Clear History` calls `TerminalControl.ClearHistory()`, scrolls to the live bottom, and then calls `RequestPromptRedraw()` so interactive shells repaint their prompt after the host-side clear.
+- `Clear History` calls `TerminalControl.ClearHistory()`, scrolls to the live bottom, and then calls `RequestPromptRedraw()` when the tab has an active session so interactive shells repaint their prompt after the host-side clear.
 
 The demo keeps the interaction in the ViewModel through ReactiveUI commands and routes the concrete terminal operation through `MainWindowController`.
 
