@@ -368,6 +368,10 @@ public sealed class MainWindowControllerModeStartupTests
     public async Task Controller_ClearHistoryCommand_DropsActiveStandaloneScrollback()
     {
         MainWindowViewModel viewModel = new();
+        viewModel.SetRenderMode(
+            useRenderedControl: false,
+            useNativeVtControl: false,
+            useManagedVtControl: true);
         viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
         viewModel.PipeCommandText = "echo clear-history-demo";
 
@@ -388,27 +392,59 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabsCreated);
 
+            int managedTabIndex = viewModel.NativeVtAvailable ? 1 : 0;
+            viewModel.SwitchToTabByIndexCommand.Execute(managedTabIndex).Wait();
+            Dispatcher.UIThread.RunJobs();
+
             TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
+            Assert.Equal(VtProcessorPreference.Managed, activeControl.VtProcessorPreference);
+            bool startupOutputSeen = await WaitUntilAsync(
+                () =>
+                {
+                    TerminalScreen? activeScreen = activeControl.Screen as TerminalScreen;
+                    if (activeScreen is null)
+                    {
+                        return false;
+                    }
+
+                    lock (activeScreen.SyncRoot)
+                    {
+                        return ReadAllRows(activeScreen).Contains("clear-history-demo", StringComparison.Ordinal);
+                    }
+                },
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupOutputSeen);
+
             if (activeControl.HasActiveSession || activeControl.HasPty)
             {
                 activeControl.StopPty();
                 await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
             }
 
-            for (int i = 0; i < 64; i++)
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                activeControl.WriteOutput(Encoding.UTF8.GetBytes($"HISTORY-{i:000}\r\n"));
-            }
-            activeControl.WriteOutput("prompt$ "u8.ToArray());
+                int historyRowsToWrite = Math.Max(64, activeControl.Rows + 64);
+                for (int i = 0; i < historyRowsToWrite; i++)
+                {
+                    activeControl.WriteOutput(Encoding.UTF8.GetBytes($"HISTORY-{i:000}\r\n"));
+                }
 
-            Dispatcher.UIThread.RunJobs();
-            activeControl.ScrollByRows(-3);
+                activeControl.WriteOutput("prompt$ "u8.ToArray());
+                activeControl.ScrollByRows(-3);
+            });
 
             TerminalScreen screen = Assert.IsType<TerminalScreen>(activeControl.Screen);
             lock (screen.SyncRoot)
             {
-                Assert.True(screen.MaxScrollOffset > 0);
-                Assert.True(screen.ScrollOffset > 0);
+                Assert.True(
+                    screen.MaxScrollOffset > 0,
+                    $"Expected synthetic history to create scrollback. Preference={activeControl.VtProcessorPreference}, " +
+                    $"Native={activeControl.IsUsingNativeVtProcessor}, Rows={activeControl.Rows}, " +
+                    $"ViewportRows={screen.ViewportRows}, TotalRows={screen.TotalRows}, " +
+                    $"MaxScrollOffset={screen.MaxScrollOffset}, ScrollOffset={screen.ScrollOffset}, Status='{viewModel.StatusText}'.");
+                Assert.True(
+                    screen.ScrollOffset > 0,
+                    $"Expected ScrollByRows to move into scrollback. MaxScrollOffset={screen.MaxScrollOffset}, ScrollOffset={screen.ScrollOffset}.");
             }
 
             List<byte[]> sentInputs = [];
