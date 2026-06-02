@@ -2111,6 +2111,7 @@ internal sealed class MainWindowController
 
         control.ClearHistory();
         control.ScrollToBottom();
+        control.RequestPromptRedraw();
         string tabName = GetTabDisplayName(control);
         AppendEventLog($"[{tabName}] Cleared history.");
         UpdateStatus($"Cleared history for {tabName}.");

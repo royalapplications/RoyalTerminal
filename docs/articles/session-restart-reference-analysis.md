@@ -46,6 +46,7 @@ RoyalTerminal alignment:
 - Preserved restart uses `CSI 22J` only when the primary screen is active. When alternate screen is active, it first exits alternate screen, captures the restored primary cursor, resets process-visible state, and keeps the restored primary prompt area visible.
 - Scrollback erase uses `CSI 3J`, matching Ghostty's erase-history path.
 - Clear-history now uses row-preserving VT editing commands instead of reconstructing text. This keeps the native row state intact in the same spirit as Ghostty's physical row operations.
+- Prompt-aware host commands request a shell redraw after emulator-side clear. Ghostty does this with form feed when semantic prompt detection says the cursor is at a prompt.
 
 ### xterm.js
 
@@ -102,6 +103,7 @@ RoyalTerminal alignment:
 | --- | --- | --- | --- | --- |
 | Clear scrollback | `eraseHistory(null)` for `CSI 3J` | trims historical rows and resets scroll offsets | sends `CSI 3J`, viewport height remains visible height | `ClearScrollback` drops history and preserves viewport; native processors own native sync |
 | Clear visible history | `scrollClear`/physical row edits in related clear paths | moves cursor line to first row and blanks viewport | preserves cursor row by erasing below and deleting rows above | managed copies the cursor `TerminalRow`; Ghostty native now shifts the existing row |
+| Prompt redraw after host clear | sends form feed when at a semantic prompt | host API is emulator-only | ConPTY clear stays coherent with the backing console | demo calls `RequestPromptRedraw()` after host-side clear-history |
 | Preserved restart from primary | VT state can be reset while scrollback is retained by native operations; `CSI 22J` scroll-completes active primary screen | reset/clear APIs affect buffer, not process resurrection | terminal buffer can be cleared/preserved, ConPTY process state is separate | primary viewport is moved into scrollback, active screen is cleared, process-visible modes are reset |
 | Preserved restart from alternate | `1049l` returns to primary and restores saved cursor | `1049l` activates normal buffer and restores cursor | main buffer is reactivated and alternate buffer object is deleted | restart returns to primary, restores primary cursor, discards inactive alternate UI state, and keeps the restored primary prompt area visible |
 | Mode defaults after restart | explicit defaults in `modes.zig` | soft reset restores process-visible modes | reset/clear and ConPTY interactions keep terminal and console coherent | managed and Ghostty processors reset cursor, keyboard, mouse, paste, origin, wrap, margins, charsets, and style state |
@@ -146,7 +148,23 @@ Fix:
 - Removed the per-cell plain-text reconstruction helpers.
 - Extended the Ghostty integration test to assert that the retained prompt row keeps bold/color attributes.
 
-### 3. Interrupted alternate-screen restart hid the restored primary prompt
+### 3. Prompt redraw was not process-aware in the demo command
+
+The low-level clear-history API correctly mutates emulator state only. That is important for library callers because an emulator-side history operation should not unexpectedly inject input into a running process. The demo command exposed that low-level operation directly, which could leave interactive shells and prompt integrations with stale internal cursor state. On the next keypress, the shell could repaint at the old row and make recently cleared output appear to return.
+
+Why this was wrong:
+
+- Ghostty's host clear separates terminal-buffer mutation from process notification and sends form feed when prompt redraw is appropriate.
+- xterm.js public `clear()` is also emulator-only, so hosts that need process-aware prompt repaint have to compose it explicitly.
+- Windows Terminal/ConPTY clear paths keep the backing console state coherent; RoyalTerminal's cross-platform demo has to request shell repaint when the process owns prompt state.
+
+Fix:
+
+- Added `TerminalControl.RequestPromptRedraw()` to send form feed (`Ctrl+L`) through the normal input path.
+- The demo `Clear History` command now calls `ClearHistory()`, scrolls to the live bottom, then calls `RequestPromptRedraw()`.
+- Added a control test proving that prompt redraw sends the expected form-feed byte to the active transport.
+
+### 4. Interrupted alternate-screen restart hid the restored primary prompt
 
 The preserved restart path returned from alternate screen and then applied the same scroll-complete clear used for primary-screen restarts. That discarded the `mc` or `btop` UI correctly, but it also moved the just-restored primary shell prompt out of the live viewport. The result differed from reference terminals: xterm.js and Ghostty restore the primary cursor on `1049l`, and Windows Terminal reactivates the main buffer instead of treating the alternate buffer as durable history.
 
@@ -171,6 +189,7 @@ Performance effects of the fixes:
 
 - Removing duplicate control-side mutations reduces UI-thread work for both managed and native processors.
 - The Ghostty clear-history path no longer scans cells or builds a copied text row. It now builds a small fixed VT sequence based only on cursor coordinates.
+- The demo prompt redraw adds one form-feed write after a user-triggered clear-history command. It does not run in parser, renderer, or output-drain hot paths.
 - The alternate-screen restart path adds one native state check and one refresh around an explicit restart. It avoids the heavier scroll-complete clear for interrupted alternate-screen sessions.
 - The preserved restart path still performs mode resets only on explicit restart and uses small fixed mode arrays. That cost is bounded and outside rendering/parser loops.
 - Existing scrollback operations still use row-buffer moves/copies in `TerminalScreen`, which is appropriate for user-initiated history changes.
@@ -197,6 +216,7 @@ Relevant tests:
 - `TerminalControlTests.Control_HistoryCommands_DelegateToSessionHistoryControllerWithoutFallbackMutation`
 - `TerminalControlTests.Control_ClearScrollback_PreservesViewportAndDropsHistory`
 - `TerminalControlTests.Control_ClearHistory_MakesPromptLineFirstViewportRow`
+- `TerminalControlTests.Control_RequestPromptRedraw_SendsFormFeedToActiveTransport`
 
 The focused test slice validates:
 
@@ -207,4 +227,5 @@ The focused test slice validates:
 - Ghostty preserved restart retains styled native scrollback,
 - Ghostty alternate-screen restart restores the primary prompt instead of retaining full-screen app UI,
 - Ghostty clear-history preserves the styled prompt row,
+- prompt redraw sends form feed to the active transport,
 - `TerminalControl` does not apply fallback screen mutation after delegating to a session-history controller.

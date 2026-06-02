@@ -2759,6 +2759,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         TerminalSessionService.SendInput(data);
     }
 
+    /// <summary>
+    /// Sends form feed to the active terminal endpoint so an interactive shell can redraw its prompt.
+    /// </summary>
+    public void RequestPromptRedraw()
+    {
+        SendInput("\f");
+    }
+
     #endregion
 
     #region Keyboard Input

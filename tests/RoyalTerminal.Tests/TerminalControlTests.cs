@@ -889,6 +889,47 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_ClearHistory_WithNativeGhostty_DoesNotRestoreOldRowsAfterNewOutput()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]),
+            VtProcessorPreference.Native);
+        control.Columns = 80;
+        control.Rows = 48;
+        control.ScrollbackLimit = 200;
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+        for (int i = 0; i < 120; i++)
+        {
+            control.WriteOutput(Encoding.UTF8.GetBytes($"OLD-{i:000}\r\n"));
+        }
+
+        control.WriteOutput("prompt$ "u8.ToArray());
+        control.ClearHistory();
+        control.ScrollToBottom();
+        control.WriteOutput("dir\r\nNEW0\r\n"u8.ToArray());
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            string allRows = ReadAllRows(screen);
+            Assert.DoesNotContain("OLD-", allRows, StringComparison.Ordinal);
+            Assert.Contains("prompt$ dir", allRows, StringComparison.Ordinal);
+            Assert.Contains("NEW0", allRows, StringComparison.Ordinal);
+        }
+
+        Assert.NotNull(control.ScrollData);
+        Assert.Equal(0d, control.ScrollData!.MaxOffset);
+    }
+
+    [AvaloniaFact]
     public async Task Control_HistoryCommands_DelegateToSessionHistoryControllerWithoutFallbackMutation()
     {
         FakeTransport transport = new();
@@ -924,6 +965,31 @@ public class TerminalControlTests
             Assert.Equal(1, processor.ClearVisibleHistoryCallCount);
             Assert.True(screen.TotalRows > screen.ViewportRows);
             Assert.StartsWith("KEEP", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_RequestPromptRedraw_SendsFormFeedToActiveTransport()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            transport.SentInputs.Clear();
+
+            control.RequestPromptRedraw();
+
+            byte[] payload = Assert.Single(transport.SentInputs);
+            Assert.Equal([0x0C], payload);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
         }
     }
 
