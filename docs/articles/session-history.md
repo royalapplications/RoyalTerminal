@@ -58,7 +58,7 @@ The native Ghostty path wires the same public API through Ghostty's parser inste
 | API | Native sequence |
 | --- | --- |
 | `ClearScrollback()` | `CSI 3 J` |
-| `ClearHistory()` | `CSI 3 J`, erase below the cursor row, delete rows above the cursor row, move cursor to row 1 |
+| `ClearHistory()` | reset scroll margins, `CSI 3 J`, erase below the cursor row, delete rows above the cursor row, move cursor to row 1 |
 | `PrepareForNewSession(true)` from primary screen | `CSI 22 J`, reset common modes, reset SGR, reset charset |
 | `PrepareForNewSession(true)` from alternate screen | exit alternate screen, reset common modes, reset SGR, reset charset, restore the primary cursor |
 

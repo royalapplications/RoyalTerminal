@@ -307,7 +307,7 @@ public class GhosttyVtProcessorTests
         builder.Append("prompt$ ");
 
         processor.Process(Encoding.UTF8.GetBytes(builder.ToString()));
-        processor.Process("\u001b[10;40r"u8);
+        processor.Process("\u001b[10;40r\u001b[17;9H"u8);
 
         processor.ClearVisibleHistory();
         processor.Process("dir\r\nNEW0\r\n"u8);

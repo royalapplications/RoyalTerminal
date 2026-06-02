@@ -91,6 +91,7 @@ RoyalTerminal alignment:
 
 - Managed clear-scrollback and clear-history perform the same logical buffer operations locally.
 - Ghostty-backed clear-history now follows the Windows Terminal VT sequence shape:
+  - reset left/right and top/bottom scroll margins so row edits target the full viewport,
   - `CSI 3J` to erase scrollback.
   - `CSI <cursorRow + 2>;1H CSI J` to erase below the cursor row.
   - `CSI H CSI <cursorRow>M` to delete rows above the cursor row.

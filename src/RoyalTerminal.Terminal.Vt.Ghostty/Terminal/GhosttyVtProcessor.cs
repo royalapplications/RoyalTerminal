@@ -594,7 +594,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         int cursorColumn = Math.Clamp(_cursorCol, 0, Math.Max(0, _screen.Columns));
 
         StringBuilder builder = new();
-        builder.Append("\u001b[3J");
+        builder
+            .Append("\u001b[?69l")
+            .Append("\u001b[r")
+            .Append("\u001b[3J");
 
         if (_screen.ViewportRows - cursorRow > 1)
         {
