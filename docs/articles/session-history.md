@@ -26,7 +26,7 @@ terminal.ClearHistory();
 
 `TerminalControl.ClearHistory()` clears scrollback and moves the active cursor row to the first viewport row. It is useful for host UI commands that should remove previous command output rather than only dropping off-screen history.
 
-`TerminalControl.RequestPromptRedraw()` sends form feed (`Ctrl+L`) to the active endpoint. Use it after host-side clear-history commands when an active interactive shell or prompt integration needs to repaint its prompt and synchronize its internal cursor position.
+`TerminalControl.RequestPromptRedraw()` sends form feed (`Ctrl+L`) to the active endpoint through the prompt-control input path. Use it after host-side clear-history commands when an active interactive shell or prompt integration needs to repaint its prompt and synchronize its internal cursor position.
 
 ## Behavior
 

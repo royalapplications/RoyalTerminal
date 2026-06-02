@@ -29,6 +29,7 @@ Relevant source:
 - `external/ghostty/src/terminal/PageList.zig`
 - `external/ghostty/src/terminal/modes.zig`
 - `external/ghostty/src/terminal/stream_terminal.zig`
+- `external/ghostty/src/termio/Termio.zig`
 
 Observed behavior:
 
@@ -161,9 +162,10 @@ Why this was wrong:
 
 Fix:
 
-- Added `TerminalControl.RequestPromptRedraw()` to send form feed (`Ctrl+L`) through the normal input path.
+- Added `TerminalControl.RequestPromptRedraw()` to send form feed (`Ctrl+L`) through the prompt-control input path.
 - The demo `Clear History` command now calls `ClearHistory()`, scrolls to the live bottom, then calls `RequestPromptRedraw()` when a live session input path exists.
 - Added a control test proving that prompt redraw sends the expected form-feed byte to the active transport.
+- `Ctrl+L`/form-feed is prioritized with other prompt-boundary control bytes so the shell redraw is not stuck behind queued normal input after clear-history.
 
 ### 4. Interrupted alternate-screen restart hid the restored primary prompt
 
