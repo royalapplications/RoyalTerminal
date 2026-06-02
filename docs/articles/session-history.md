@@ -27,7 +27,7 @@ terminal.ClearScrollback();
 
 When `preserveScrollback` is `false`, RoyalTerminal resets the processor and clears all terminal rows before the new transport starts.
 
-When `preserveScrollback` is `true`, RoyalTerminal resets parser, keyboard, mouse, alternate-screen, style, and mode state for the new session, moves any non-empty active viewport rows into scrollback, clears the active viewport, and starts the new transport at a blank prompt area. Existing scrollback rows remain available.
+When `preserveScrollback` is `true`, RoyalTerminal resets parser, keyboard, mouse, alternate-screen, style, and mode state for the new session. If the session was on the primary screen, any non-empty primary viewport rows are moved into scrollback and the active viewport is cleared for the new transport. If the session was interrupted while an alternate-screen application such as `mc` or `btop` was active, RoyalTerminal first returns to the primary screen, discards the transient application screen, restores the primary cursor, and keeps the restored primary prompt area visible. Existing scrollback rows remain available in both cases.
 
 `ClearScrollback()` is scrollback-only. It does not clear the active viewport and does not stop the running transport.
 
@@ -51,13 +51,14 @@ The native Ghostty path wires the same public API through Ghostty's parser inste
 | API | Native sequence |
 | --- | --- |
 | `ClearScrollback()` | `CSI 3 J` |
-| `PrepareForNewSession(true)` | exit alternate screen, `CSI 22 J`, reset common modes, reset SGR, reset charset |
+| `PrepareForNewSession(true)` from primary screen | `CSI 22 J`, reset common modes, reset SGR, reset charset |
+| `PrepareForNewSession(true)` from alternate screen | exit alternate screen, reset common modes, reset SGR, reset charset, restore the primary cursor |
 
 The session-preparation path reapplies optional Ghostty features, theme colors, callbacks, mouse encoder state, and sixel overlay state after the native sequence has been processed.
 
 ## Reference Decision
 
-RoyalTerminal follows `CSI 3 J` for explicit scrollback clear and Ghostty's `CSI 22 J` semantics for preserving the active viewport into scrollback before a new session starts.
+RoyalTerminal follows `CSI 3 J` for explicit scrollback clear. For primary-screen preserved restarts it follows Ghostty's `CSI 22 J` semantics by preserving the active primary viewport into scrollback before a new session starts. For interrupted alternate-screen restarts it follows `1049l`-style behavior by returning to primary, restoring the saved primary cursor, and leaving that primary prompt area visible.
 
 See [Session Restart Semantics](/articles/session-restart-semantics) for the detailed Ghostty, xterm.js, Windows Terminal, and RoyalTerminal comparison, including alternate-screen app restart behavior and process-visible mode reset state.
 

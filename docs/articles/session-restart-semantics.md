@@ -36,7 +36,7 @@ All compared implementations follow the same conceptual model:
 | The alternate buffer is app-owned and transient. | Full-screen applications such as `mc`, `btop`, `vim`, `less`, and terminal UIs write here. If the app is killed or the session is restarted before it sends its exit sequence, the terminal must still return to primary state. |
 | Private modes are process-visible state. | Cursor keys, keypad, bracketed paste, mouse protocols, focus events, synchronized output, and alternate-screen state must not leak into the next process. |
 | Parser state must be reset. | A restart must not resume in the middle of CSI, OSC, DCS, UTF-8, or similar parser payload state. |
-| Scrollback clear and restart are different operations. | `CSI 3 J` clears scrollback. A preserved restart keeps existing history and moves the current primary viewport into history before clearing the live viewport. |
+| Scrollback clear and restart are different operations. | `CSI 3 J` clears scrollback. A preserved primary-screen restart keeps existing history and moves the current primary viewport into history before clearing the live viewport; a preserved alternate-screen restart restores primary first and keeps that restored primary prompt area visible. |
 | Cursor visibility is viewport-relative. | Rendering must decide whether the cursor is visible by comparing the cursor's absolute row against the visible viewport, not by requiring the viewport to be at the live bottom. |
 
 The important user-facing result is that restarting a session while `mc` or `btop` is still active should not preserve the application screen as shell history. The terminal should discard the alternate-screen UI, restore the primary shell buffer, then prepare the new session from that primary state.
@@ -300,7 +300,7 @@ Then it chooses one of three paths:
 | Processor capability | `preserveScrollback` | Behavior |
 | --- | --- | --- |
 | Processor implements `ITerminalSessionHistoryController` | `true` or `false` | Delegate to `PrepareForNewSession(preserveScrollback)`. |
-| Processor does not implement the history controller | `true` | Restore primary screen if alternate buffer is active, discard inactive alternate rows, move primary viewport into scrollback, clear the live viewport, then reset processor state. |
+| Processor does not implement the history controller | `true` | If primary is active, move the primary viewport into scrollback, clear the live viewport, then reset processor state. If alternate screen is active, restore primary first, discard inactive alternate rows, skip the primary viewport clear, then reset processor state. |
 | Processor does not implement the history controller | `false` | Clear all screen state and reset processor state. |
 
 After screen mutation, `TerminalControl` synchronizes scroll state so a preserved restart remains pinned to the live bottom. This prevents a parent scroll viewer from replaying an older top-anchored offset after the terminal extent changes.
@@ -313,7 +313,7 @@ The managed restart reset covers:
 
 | State area | Reset behavior |
 | --- | --- |
-| Cursor position | Column and row set to zero. |
+| Cursor position | Column and row set to zero for primary-screen restart; restored from the saved primary cursor for alternate-screen restart. |
 | Delayed wrap | Cleared. |
 | Parser state | Returns to ground state. |
 | CSI parameters and markers | Cleared. |
@@ -345,7 +345,7 @@ The managed restart reset covers:
 | SGR attributes | Reset to defaults. |
 | Tab stops | Reinitialized. |
 
-If history is preserved, the reset then calls `TerminalScreen.MoveViewportToScrollbackAndClear`. Because the processor has already returned from alternate screen to primary, an abrupt restart from `mc` or `btop` preserves the shell's primary viewport, not the transient full-screen application buffer.
+If history is preserved and the active screen is primary, the reset then calls `TerminalScreen.MoveViewportToScrollbackAndClear`. If history is preserved and restart begins in alternate screen, the processor first exits alternate screen with `1049`-style primary cursor restoration, discards the transient application buffer, and keeps the restored primary viewport live. It deliberately does not call `MoveViewportToScrollbackAndClear` on that restored primary prompt area, because doing so would hide the prompt that alternate-screen exit just exposed.
 
 ### Managed Screen Preservation
 
@@ -363,22 +363,22 @@ If history is preserved, the reset then calls `TerminalScreen.MoveViewportToScro
 
 The preserved history keeps `TerminalRow` and `TerminalCell` instances, so text, colors, attributes, underline style, decorations, and hyperlink ids remain available for copied rows.
 
-If the screen is still in alternate-buffer mode, the low-level screen primitive only clears the alternate viewport. The processor and control restart paths therefore switch back to primary before using this primitive for preserved restart.
+If the screen is still in alternate-buffer mode, the low-level screen primitive only clears the alternate viewport. The processor and control restart paths therefore switch back to primary before using this primitive for primary-screen preserved restart, and they skip it for interrupted alternate-screen restarts.
 
 ### Native Ghostty Restart
 
-`GhosttyVtProcessor.PrepareForNewSession(true)` cannot call Ghostty's native full reset directly because a full reset clears the preserved history. Instead it writes a precomputed VT sequence that composes Ghostty's existing parser behavior:
+`GhosttyVtProcessor.PrepareForNewSession(true)` cannot call Ghostty's native full reset directly because a full reset clears the preserved history. Instead it composes Ghostty's existing parser behavior with two restart paths:
 
-| Step | Sequence category | Purpose |
+| Starting state | Sequence category | Purpose |
 | --- | --- | --- |
-| 1 | `DECRST 1049`, `1047`, `47` | Exit alternate-screen modes and return to the primary buffer. |
-| 2 | `CSI 22 J` | Move the active primary viewport into scrollback and clear the live viewport. |
-| 3 | ANSI reset modes | Reset keyboard action, insert, and linefeed/newline modes; restore send/receive mode. |
-| 4 | DEC private reset modes | Reset application cursor keys, origin, column, reverse video, mouse, focus, alternate-screen, bracketed paste, synchronized output, color report, in-band report, and Win32 input modes. |
-| 5 | DEC private default-on modes | Restore wraparound, cursor visible, alternate scroll, ignore keypad with numlock, and alt escape prefix. |
-| 6 | Kitty keyboard reset | Pop/reset Kitty keyboard state to disabled. |
-| 7 | Margins and cursor | Reset scroll region and move cursor home. |
-| 8 | Cursor style, SGR, charsets | Restore default cursor style, default attributes, G0/G1 ASCII charsets, and G0 invocation. |
+| Primary screen active | `CSI 22 J` | Move the active primary viewport into scrollback and clear the live viewport. |
+| Primary screen active | ANSI and DEC private mode reset | Reset keyboard action, insert, linefeed/newline, application cursor keys, origin, column, reverse video, mouse, focus, alternate-screen, bracketed paste, synchronized output, color report, in-band report, and Win32 input modes. |
+| Primary screen active | DEC private default-on modes | Restore wraparound, cursor visible, alternate scroll, ignore keypad with numlock, and alt escape prefix. |
+| Primary screen active | Kitty keyboard, margins, cursor, SGR, charsets | Reset Kitty keyboard state, reset scroll region, move cursor home, restore default cursor style, reset attributes, restore G0/G1 ASCII charsets, and invoke G0. |
+| Alternate screen active | `DECRST 1049`, `1047`, `47` | Return to the primary buffer and restore the cursor saved when the alternate screen was entered. |
+| Alternate screen active | Native screen refresh | Capture the restored primary cursor position from Ghostty before any mode reset sequence can move it. |
+| Alternate screen active | ANSI and DEC private mode reset | Reset the same process-visible modes as the primary path without applying `CSI 22 J` to the restored primary prompt area. |
+| Alternate screen active | Margins, cursor, SGR, charsets | Reset scroll region, restore the captured primary cursor, restore default cursor style, reset attributes, restore G0/G1 ASCII charsets, and invoke G0. |
 
 After the native parser processes the sequence, RoyalTerminal reapplies optional native features, theme colors, terminal effects, mouse encoder state, and sixel overlay state. It then refreshes screen state and raises mode-change notifications if needed.
 
@@ -399,10 +399,10 @@ This is the correct behavior for hosts that expect a clean terminal every time a
 | State | Ghostty | xterm.js | Windows Terminal | RoyalTerminal |
 | --- | --- | --- | --- | --- |
 | Parser state | Full reset clears parser-side state through stream/terminal reset. | Parser reset fires request reset; input handler reset clears attributes. | State machine reset plus dispatch reset. | Managed clears parser buffers and markers; native uses Ghostty parser reset sequence or native reset. |
-| Primary buffer | Reset clears active primary; scroll-complete can move viewport into scrollback. | Normal buffer reset or clear depending operation. | Main buffer persists across alternate screen; hard reset can erase. | Preserved restart keeps previous history and moves primary viewport into scrollback; clean restart clears all. |
+| Primary buffer | Reset clears active primary; scroll-complete can move viewport into scrollback; `1049l` restores the saved primary cursor. | Normal buffer reset or clear depending operation; `1049l` activates normal buffer and restores cursor. | Main buffer persists across alternate screen; hard reset can erase. | Preserved primary restart moves the primary viewport into scrollback; preserved alternate restart restores the primary buffer and keeps it live; clean restart clears all. |
 | Alternate buffer | Full reset switches primary and removes alternate. | Normal activation clears alternate buffer. | Main activation destroys alternate buffer. | Managed/native restart exits alternate first; fallback control restores primary first. |
-| Scrollback | `CSI 3 J` clears history; `CSI 22 J` preserves viewport into history. | ED 3 clears scrollback; clear can keep prompt row. | `CSI 3 J` clears scrollback; clear types distinguish scrollback/screen/all. | `ClearScrollback` clears history only; preserved restart retains history and clears live viewport. |
-| Cursor position | Reset homes cursor; scroll-complete homes live viewport in RoyalTerminal native sequence. | Cursor is buffer-relative; 1049 restore applies saved cursor. | Cursor saved/restored for alt screen; hard reset homes when erasing. | Restart homes new live session; renderer uses absolute row visibility. |
+| Scrollback | `CSI 3 J` clears history; `CSI 22 J` preserves viewport into history. | ED 3 clears scrollback; clear can keep prompt row. | `CSI 3 J` clears scrollback; clear types distinguish scrollback/screen/all. | `ClearScrollback` clears history only; preserved primary restart retains history and clears live viewport; preserved alternate restart retains history and keeps the restored primary viewport live. |
+| Cursor position | Reset homes cursor; scroll-complete homes live viewport in RoyalTerminal native sequence; `1049l` restores saved primary cursor. | Cursor is buffer-relative; 1049 restore applies saved cursor. | Cursor saved/restored for alt screen; hard reset homes when erasing. | Primary restart homes the blank live session; alternate restart restores the saved primary cursor. |
 | Cursor visibility and style | Mode defaults restore visible cursor and reset cursor state. | `DECTCEM` and cursor options reset through core/input state. | Cursor visibility/blink copied through alt transition and reset by hard reset. | Managed resets visible and default style; native sequence resets visible and cursor style. |
 | Keyboard modes | Mode state reset restores defaults. | Application cursor/keypad reset through core service. | `TerminalInput.ResetInputModes` restores defaults. | Managed/native reset application cursor, keypad, backarrow, Win32 input, and Kitty keyboard state. |
 | Mouse modes | Mode defaults reset tracking and encodings. | Mouse state service reset clears protocol/encoding. | Terminal input modes reset mouse protocols and encodings. | Managed/native reset mouse tracking, encodings, focus, and pressed button state. |
@@ -412,7 +412,7 @@ This is the correct behavior for hosts that expect a clean terminal every time a
 | Color and SGR attributes | Screen/cursor styles reset; colors may be restored/report updated. | Input handler restores default attributes. | Soft reset restores rendition, render settings reset. | Managed resets SGR; native writes SGR reset and reapplies host theme. |
 | Character sets | Screen reset clears charset. | Charset service reset. | Soft reset resets character set designations. | Managed resets G0/G1 and line drawing; native writes G0/G1 ASCII and shift-in. |
 | Tab stops | Reset every tab interval. | Buffer/core reset restores defaults. | Hard reset sets every eight columns. | Managed reinitializes tabs; native sequence leaves Ghostty parser defaults or native reset path handles clean restart. |
-| Graphics | Kitty graphics reset on screen reset. | Not the same native graphics model. | Sixel parser soft reset and soft font clear. | Managed clears live Kitty/raster graphics for restart; native syncs sixel overlay and clears live graphics through parser/screen refresh. |
+| Graphics | Kitty graphics reset on screen reset. | Not the same native graphics model. | Sixel parser soft reset and soft font clear. | Managed clears live Kitty/raster graphics for primary restart; alternate-screen graphics are discarded with the alternate buffer; native syncs sixel overlay and clears live graphics through parser/screen refresh. |
 | Selection | Cleared on reset or screen switch. | Selection service tracks active buffer. | Selection cleared when switching buffers. | `TerminalControl` clears selection before restart. |
 | Scroll viewport | Scrollbar reflects active buffer. | `ydisp` tracks viewport; cursor visibility is absolute row minus `ydisp`. | Scroll event notified after buffer switch. | Scroll data is resynchronized and pinned to live bottom after preserved restart. |
 
@@ -424,20 +424,20 @@ A host-level restart can interrupt the app before it sends the exit sequence. Co
 
 1. Detect or force alternate-screen exit.
 2. Discard the alternate app-owned buffer.
-3. Restore primary shell content.
-4. Preserve primary content into history if requested.
+3. Restore primary shell content and the saved primary cursor.
+4. Keep that restored primary prompt area visible instead of applying a scroll-complete clear to it.
 5. Reset modes that the app may have enabled.
-6. Start the next process with a blank live viewport.
+6. Start the next process from that primary-buffer state.
 
 RoyalTerminal covers this in both processor paths:
 
 | Path | Behavior |
 | --- | --- |
-| Managed | `BasicVtProcessor.ResetInternal` switches to primary before `MoveViewportToScrollbackAndClear`. |
-| Native Ghostty | The preserved restart sequence sends alternate-screen resets before `CSI 22 J`. |
-| Fallback control path | `TerminalControl` switches `TerminalScreen` to primary before preserving history when the processor lacks `ITerminalSessionHistoryController`. |
+| Managed | `BasicVtProcessor.ResetInternal` exits alternate screen through the same saved-primary-cursor path as `1049l`, discards the inactive alternate buffer, and skips `MoveViewportToScrollbackAndClear` for that restored primary prompt area. |
+| Native Ghostty | The preserved restart sequence exits alternate screen first, refreshes the restored native primary cursor, resets process-visible modes, and avoids `CSI 22 J` for interrupted alternate-screen restarts. |
+| Fallback control path | `TerminalControl` switches `TerminalScreen` to primary and discards inactive alternate rows, then skips the viewport preservation primitive when the restart began in alternate screen. |
 
-This means a restart from `mc`, `btop`, or a similar TUI preserves the shell transcript that launched the app, not the application's alternate-screen UI.
+This means a restart from `mc`, `btop`, or a similar TUI restores the shell transcript and primary cursor that launched the app, not the application's alternate-screen UI.
 
 ## What RoyalTerminal Preserves
 
@@ -446,10 +446,10 @@ With `preserveScrollback: true`, RoyalTerminal preserves:
 | State | Preserved? | Notes |
 | --- | --- | --- |
 | Existing primary scrollback rows | Yes | Kept up to `ScrollbackLimit`. |
-| Current primary viewport text | Yes | Moved into scrollback before the new live viewport is cleared. |
+| Current primary viewport text | Yes | Moved into scrollback before the new live viewport is cleared for primary-screen restarts; kept live when restored after interrupted alternate-screen restarts. |
 | Cell styling in preserved rows | Yes | Text, foreground, background, attributes, underline style, decorations, and hyperlink ids remain in row cells. |
 | Alternate-screen app UI | No | It is transient app-owned state. |
-| Live viewport for the new process | No | Cleared to blank rows. |
+| Live viewport for the new process | Depends | Primary-screen preserved restart starts with blank live rows; interrupted alternate-screen restart starts from the restored primary prompt area. |
 | Host theme and renderer settings | Yes | These are control configuration, not process state. |
 | Transport process | No | The old transport is stopped/replaced; restart does not resurrect the app. |
 | Parser state and modes | No | Reset so the new process starts from terminal defaults. |
@@ -465,7 +465,7 @@ The restart behavior is covered by focused tests:
 | --- | --- |
 | `TerminalSessionHistoryTests` | Screen primitives, managed `CSI 3 J`, managed `CSI 22 J`, managed preserved restart from alternate-screen apps, and managed mode reset. |
 | `TerminalControlTests` | `StartSessionAsync(..., preserveScrollback)`, scroll pinning after restart, fallback primary-buffer restore, explicit scrollback clear, and cursor visibility while scrolled. |
-| `GhosttyVtProcessorTests` | Native scrollback clear, native preserved restart, and native process-visible mode reset. |
+| `GhosttyVtProcessorTests` | Native scrollback clear, native preserved restart, native alternate-screen restart, and native process-visible mode reset. |
 | Demo ViewModel/controller tests | Restart Session, Preserve History, and Clear History command routing through ViewModels and interactions. |
 
 These tests encode the same reference decision documented above: restart must reset process-owned terminal state, restore primary-buffer ownership, and preserve only durable primary history when requested.
