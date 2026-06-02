@@ -5280,12 +5280,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
-        return key is Key.C or Key.Z or Key.OemBackslash;
+        return key is Key.C or Key.L or Key.Z or Key.OemBackslash;
     }
 
     private static bool IsUrgentTransportControlInput(ReadOnlySpan<byte> payload)
     {
-        return payload.Length == 1 && payload[0] is 0x03 or 0x1A or 0x1C;
+        return payload.Length == 1 && payload[0] is 0x03 or 0x0C or 0x1A or 0x1C;
     }
 
     private void SuppressReservedAncestorKeyBindings()
