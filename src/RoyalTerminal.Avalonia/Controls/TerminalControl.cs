@@ -607,6 +607,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private VtProcessorPreference _appliedVtProcessorPreference = VtProcessorPreference.Auto;
     private string? _activeTransportId;
     private int _transportSessionGeneration;
+    private Action<byte[], int>? _activeTransportDataHandler;
+    private Action<int>? _activeTransportExitHandler;
     private readonly TerminalMouseModeTracker _mouseModeTracker = new();
     private readonly object _pendingTransportOutputSync = new();
     private readonly object _pendingTransportOutputDrainExecutionSync = new();
@@ -4928,22 +4930,48 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         ResetPointerButtons();
         _isMouseSelecting = false;
         EnsureCursorBlinkTimerRunning(false);
+        int sessionGeneration;
         unchecked
         {
             _transportSessionGeneration++;
+            sessionGeneration = _transportSessionGeneration;
         }
 
-        await TerminalSessionService.StartSessionAsync(
+        Action<byte[], int> dataHandler = (data, length) =>
+            OnPtyDataReceived(sessionGeneration, data, length);
+        Action<int> exitHandler = exitCode =>
+            OnPtyProcessExited(sessionGeneration, exitCode);
+        _activeTransportDataHandler = dataHandler;
+        _activeTransportExitHandler = exitHandler;
+
+        try
+        {
+            await TerminalSessionService.StartSessionAsync(
                 TerminalTransportFactory,
                 options,
                 _vtProcessor,
-                OnPtyDataReceived,
-                OnPtyProcessExited,
+                dataHandler,
+                exitHandler,
                 OnVtProcessorResponse,
                 OnVtProcessorBell,
                 OnVtProcessorTitleChanged,
                 cancellationToken)
             .ConfigureAwait(false);
+        }
+        catch
+        {
+            if (ReferenceEquals(_activeTransportDataHandler, dataHandler))
+            {
+                _activeTransportDataHandler = null;
+            }
+
+            if (ReferenceEquals(_activeTransportExitHandler, exitHandler))
+            {
+                _activeTransportExitHandler = null;
+            }
+
+            throw;
+        }
 
         _activeTransportId = options.TransportId;
     }
@@ -5112,10 +5140,27 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         FlushPendingTransportResize();
         SetPendingTransportOutputAcceptance(acceptOutput: false);
-        TerminalSessionService.StopSessionAsync(_vtProcessor, OnPtyDataReceived, OnPtyProcessExited)
+        unchecked
+        {
+            _transportSessionGeneration++;
+        }
+
+        Action<byte[], int> dataHandler = _activeTransportDataHandler ?? OnPtyDataReceived;
+        Action<int> exitHandler = _activeTransportExitHandler ?? OnPtyProcessExited;
+        TerminalSessionService.StopSessionAsync(_vtProcessor, dataHandler, exitHandler)
             .AsTask()
             .GetAwaiter()
             .GetResult();
+        if (ReferenceEquals(_activeTransportDataHandler, dataHandler))
+        {
+            _activeTransportDataHandler = null;
+        }
+
+        if (ReferenceEquals(_activeTransportExitHandler, exitHandler))
+        {
+            _activeTransportExitHandler = null;
+        }
+
         if (Dispatcher.UIThread.CheckAccess())
         {
             DrainPendingTransportOutput(flushAll: true);
@@ -5338,7 +5383,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void OnPtyDataReceived(byte[] data, int length)
     {
+        OnPtyDataReceived(_transportSessionGeneration, data, length);
+    }
+
+    private void OnPtyDataReceived(int sessionGeneration, byte[] data, int length)
+    {
         if (length <= 0)
+        {
+            return;
+        }
+
+        if (sessionGeneration != Volatile.Read(ref _transportSessionGeneration))
         {
             return;
         }
@@ -5396,7 +5451,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void OnPtyProcessExited(int exitCode)
     {
-        int sessionGeneration = _transportSessionGeneration;
+        OnPtyProcessExited(_transportSessionGeneration, exitCode);
+    }
+
+    private void OnPtyProcessExited(int sessionGeneration, int exitCode)
+    {
         Dispatcher.UIThread.Post(() =>
         {
             if (sessionGeneration != _transportSessionGeneration)

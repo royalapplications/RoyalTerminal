@@ -536,6 +536,80 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_StartSessionAsync_WithPreserveScrollback_RendersNewPromptAfterAlternateScreenRestart()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.Columns = 24;
+        control.Rows = 5;
+        control.ScrollbackLimit = 50;
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+        control.WriteOutput("header\r\nshell$ mc\r\n\u001b[?1049hMC PANEL\r\nMC STATUS"u8);
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            Assert.True(screen.AlternateBufferActive);
+            Assert.Contains("MC PANEL", ReadViewportTextRange(screen, 0, screen.ViewportRows - 1), StringComparison.Ordinal);
+        }
+
+        control.StopPty();
+        await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"), preserveScrollback: true);
+        transport.RaiseData("new-shell$ "u8.ToArray());
+        await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+        lock (screen.SyncRoot)
+        {
+            string viewport = ReadViewportTextRange(screen, 0, screen.ViewportRows - 1);
+            Assert.False(screen.AlternateBufferActive);
+            Assert.Contains("shell$ mc", viewport, StringComparison.Ordinal);
+            Assert.Contains("new-shell$ ", viewport, StringComparison.Ordinal);
+            Assert.DoesNotContain("MC PANEL", ReadAllRows(screen), StringComparison.Ordinal);
+            Assert.DoesNotContain("MC STATUS", ReadAllRows(screen), StringComparison.Ordinal);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_StartSessionAsync_IgnoresStaleTransportCallbacksAfterRestart()
+    {
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed);
+        control.Columns = 24;
+        control.Rows = 5;
+        control.ScrollbackLimit = 50;
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+        control.WriteOutput("shell$ mc\r\n\u001b[?1049hMC PANEL"u8);
+        control.StopPty();
+        await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"), preserveScrollback: true);
+        transport.RaiseData("new-shell$ "u8.ToArray());
+        transport.RaiseRemovedData("\r\nSTALE-OLD-PTY\r\n"u8.ToArray());
+        transport.RaiseRemovedProcessExited(7);
+        await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            string allRows = ReadAllRows(screen);
+            Assert.True(control.HasActiveSession);
+            Assert.Contains("new-shell$ ", allRows, StringComparison.Ordinal);
+            Assert.DoesNotContain("STALE-OLD-PTY", allRows, StringComparison.Ordinal);
+            Assert.DoesNotContain("[Process exited with code 7]", allRows, StringComparison.Ordinal);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_StartSessionAsync_WithPreserveScrollback_StaysAtLiveBottom_WhenAncestorReplaysOldOffset()
     {
         FakeTransport transport = new();
@@ -7416,17 +7490,35 @@ public class TerminalControlTests
     {
         private Action<byte[], int>? _dataReceived;
         private Action<int>? _processExited;
+        private readonly List<Action<byte[], int>> _removedDataHandlers = [];
+        private readonly List<Action<int>> _removedExitHandlers = [];
 
         public event Action<byte[], int>? DataReceived
         {
             add => _dataReceived += value;
-            remove => _dataReceived -= value;
+            remove
+            {
+                if (value is not null)
+                {
+                    _removedDataHandlers.Add(value);
+                }
+
+                _dataReceived -= value;
+            }
         }
 
         public event Action<int>? ProcessExited
         {
             add => _processExited += value;
-            remove => _processExited -= value;
+            remove
+            {
+                if (value is not null)
+                {
+                    _removedExitHandlers.Add(value);
+                }
+
+                _processExited -= value;
+            }
         }
 
         public bool IsRunning { get; private set; }
@@ -7474,6 +7566,22 @@ public class TerminalControlTests
         public void RaiseData(byte[] data)
         {
             _dataReceived?.Invoke(data, data.Length);
+        }
+
+        public void RaiseRemovedData(byte[] data)
+        {
+            foreach (Action<byte[], int> handler in _removedDataHandlers)
+            {
+                handler(data, data.Length);
+            }
+        }
+
+        public void RaiseRemovedProcessExited(int exitCode)
+        {
+            foreach (Action<int> handler in _removedExitHandlers)
+            {
+                handler(exitCode);
+            }
         }
 
         public void Dispose()
