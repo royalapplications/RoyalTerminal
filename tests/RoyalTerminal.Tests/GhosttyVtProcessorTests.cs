@@ -198,7 +198,7 @@ public class GhosttyVtProcessorTests
         using GhosttyVtProcessor processor = new(screen);
         processor.NotifyResize(columns: 16, rows: 4, widthPx: 128, heightPx: 64);
 
-        processor.Process("OLD0\r\nOLD1\r\nOLD2\r\nprompt$ "u8);
+        processor.Process("OLD0\r\nOLD1\r\nOLD2\r\n\u001b[1;31mprompt$ \u001b[0m"u8);
         Assert.Contains("OLD", ReadViewportAscii(screen), StringComparison.Ordinal);
         Assert.Equal(3, processor.CursorRow);
 
@@ -210,6 +210,8 @@ public class GhosttyVtProcessorTests
         Assert.Equal(state.VisibleRows, state.TotalRows);
         Assert.DoesNotContain("OLD", viewport, StringComparison.Ordinal);
         Assert.StartsWith("prompt$ ", ReadAsciiPrefix(screen, row: 0, columns: 8), StringComparison.Ordinal);
+        Assert.True(screen.GetViewportRow(0)[0].Attributes.HasFlag(CellAttributes.Bold));
+        Assert.NotEqual(screen.DefaultForeground, screen.GetViewportRow(0)[0].Foreground);
         Assert.Equal(0, processor.CursorRow);
     }
 
@@ -237,6 +239,35 @@ public class GhosttyVtProcessorTests
 
         Assert.Equal("OLD", ReadAsciiPrefix(screen, row: 0, columns: 3));
         Assert.NotEqual(screen.DefaultForeground, screen.GetViewportRow(0)[0].Foreground);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_PrepareForNewSession_RestoresPrimaryPromptAfterAbruptAlternateScreenApp_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 16, viewportRows: 4, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 16, rows: 4, widthPx: 128, heightPx: 64);
+
+        processor.Process("shell$ btop\r\n"u8);
+        processor.Process("\u001b[?1049hBTOP UI\r\nBTOP CPU"u8);
+
+        Assert.True(processor.AlternateScreen);
+        Assert.Contains("BTOP UI", ReadViewportAscii(screen), StringComparison.Ordinal);
+
+        processor.PrepareForNewSession(preserveScrollback: true);
+
+        string viewport = ReadViewportAscii(screen);
+        Assert.False(processor.AlternateScreen);
+        Assert.Contains("shell$ btop", viewport, StringComparison.Ordinal);
+        Assert.DoesNotContain("BTOP UI", viewport, StringComparison.Ordinal);
+        Assert.DoesNotContain("BTOP CPU", viewport, StringComparison.Ordinal);
+        Assert.Equal(0, processor.CursorCol);
+        Assert.Equal(1, processor.CursorRow);
     }
 
     [Fact]

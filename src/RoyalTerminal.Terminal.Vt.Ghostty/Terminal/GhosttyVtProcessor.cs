@@ -104,6 +104,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         "\u001b(B\u001b)B\u000f";
     private static readonly byte[] s_preserveScrollbackResetSequence =
         Encoding.ASCII.GetBytes(PreserveScrollbackResetSequenceText);
+    private static readonly byte[] s_exitAlternateScreenWithSavedCursorSequence =
+        Encoding.ASCII.GetBytes("\u001b[?1049;1047;47l");
+    private static readonly byte[] s_exitAlternateScreenSequence =
+        Encoding.ASCII.GetBytes("\u001b[?1047;47l");
 
     private readonly TerminalScreen _screen;
     private GhosttyTerminal _terminal;
@@ -466,12 +470,30 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         TerminalModeState before = ModeState;
         ResetSessionInputState();
+        bool wasAlternateScreenSave = _terminal.GetMode(GhosttyVtNative.ModeAltScreenSave);
+        bool wasAlternateScreen = IsNativeAlternateScreenActive(wasAlternateScreenSave);
 
-        // CSI 22J is Ghostty's "scroll complete" extension: move the active
-        // viewport into scrollback and clear the active screen. The remaining
-        // sequence mirrors a reset of the process-visible modes without
-        // calling the native full reset, which would discard preserved history.
-        _terminal.Write(s_preserveScrollbackResetSequence);
+        if (wasAlternateScreen)
+        {
+            // Exit the app-owned alternate buffer before resetting modes. Use
+            // 1049 only when the native saved-cursor alternate mode is active,
+            // otherwise avoid restoring an unrelated saved cursor.
+            _terminal.Write(wasAlternateScreenSave
+                ? s_exitAlternateScreenWithSavedCursorSequence
+                : s_exitAlternateScreenSequence);
+            RefreshStateAndScreenFromNative();
+            _terminal.Write(BuildAlternateScreenRestartResetSequence(_cursorRow, _cursorCol));
+        }
+        else
+        {
+            // CSI 22J is Ghostty's "scroll complete" extension: move the active
+            // primary viewport into scrollback and clear the active screen. The
+            // remaining sequence mirrors a reset of the process-visible modes
+            // without calling the native full reset, which would discard
+            // preserved history.
+            _terminal.Write(s_preserveScrollbackResetSequence);
+        }
+
         ResetProcessVisibleNativeModes();
         ConfigureOptionalNativeFeatures();
         ApplyThemeToNative(_theme);
@@ -481,6 +503,42 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         RefreshStateAndScreenFromNative();
         SyncSixelOverlayRasterGraphics();
         RaiseModeChangedIfNeeded(before);
+    }
+
+    private bool IsNativeAlternateScreenActive(bool altScreenSave)
+    {
+        return _alternateScreen ||
+            _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate ||
+            _terminal.GetMode(GhosttyVtNative.ModeAltScreen) ||
+            altScreenSave;
+    }
+
+    private static byte[] BuildAlternateScreenRestartResetSequence(int cursorRow, int cursorColumn)
+    {
+        int row = Math.Max(1, cursorRow + 1);
+        int column = Math.Max(1, cursorColumn + 1);
+        StringBuilder builder = new();
+        builder
+            .Append("\u001b[2;4;20l")
+            .Append("\u001b[12h")
+            .Append("\u001b[?1;3;4;5;6;8;9;12l")
+            .Append("\u001b[?40;45;47;66;67;69l")
+            .Append("\u001b[?1000;1002;1003;1004;1005;1006;1015;1016l")
+            .Append("\u001b[?1039;1045l")
+            .Append("\u001b[?2004;2026;2027;2031;2048;9001l")
+            .Append("\u001b[?7;25;1007;1035;1036h")
+            .Append("\u001b[<8u")
+            .Append("\u001b[=0u")
+            .Append("\u001b[r")
+            .Append("\u001b[")
+            .Append(row)
+            .Append(';')
+            .Append(column)
+            .Append('H')
+            .Append("\u001b[0 q")
+            .Append("\u001b[0m")
+            .Append("\u001b(B\u001b)B\u000f");
+        return Encoding.ASCII.GetBytes(builder.ToString());
     }
 
     private void ResetProcessVisibleNativeModes()
@@ -534,13 +592,24 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         int cursorRow = Math.Clamp(_cursorRow, 0, Math.Max(0, _screen.ViewportRows - 1));
         int cursorColumn = Math.Clamp(_cursorCol, 0, Math.Max(0, _screen.Columns));
-        string cursorLineText = CaptureCursorLineText(cursorRow, cursorColumn);
 
         StringBuilder builder = new();
-        builder.Append("\u001b[3J\u001b[2J\u001b[H");
-        if (cursorLineText.Length > 0)
+        builder.Append("\u001b[3J");
+
+        if (_screen.ViewportRows - cursorRow > 1)
         {
-            builder.Append(cursorLineText);
+            builder
+                .Append("\u001b[")
+                .Append(cursorRow + 2)
+                .Append(";1H\u001b[J");
+        }
+
+        if (cursorRow > 0)
+        {
+            builder
+                .Append("\u001b[H\u001b[")
+                .Append(cursorRow)
+                .Append('M');
         }
 
         builder
@@ -548,90 +617,6 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             .Append(cursorColumn + 1)
             .Append('H');
         return Encoding.UTF8.GetBytes(builder.ToString());
-    }
-
-    private string CaptureCursorLineText(int cursorRow, int cursorColumn)
-    {
-        if (_screen.Columns <= 0)
-        {
-            return string.Empty;
-        }
-
-        TerminalRow row = _screen.GetViewportRow(cursorRow);
-        int lastColumn = Math.Min(row.Columns, Math.Max(cursorColumn, FindLastContentColumn(row) + 1));
-        if (lastColumn <= 0)
-        {
-            return string.Empty;
-        }
-
-        StringBuilder builder = new(lastColumn);
-        for (int column = 0; column < lastColumn; column++)
-        {
-            TerminalCell cell = row[column];
-            if (cell.Width == 0)
-            {
-                continue;
-            }
-
-            AppendCellLiteral(builder, cell);
-        }
-
-        return builder.ToString();
-    }
-
-    private static int FindLastContentColumn(TerminalRow row)
-    {
-        for (int column = row.Columns - 1; column >= 0; column--)
-        {
-            if (row[column].HasContent)
-            {
-                return column;
-            }
-        }
-
-        return -1;
-    }
-
-    private static void AppendCellLiteral(StringBuilder builder, TerminalCell cell)
-    {
-        if (!string.IsNullOrEmpty(cell.Grapheme) && IsSafeTerminalLiteral(cell.Grapheme))
-        {
-            builder.Append(cell.Grapheme);
-            return;
-        }
-
-        if (IsSafeTerminalLiteralCodepoint(cell.Codepoint))
-        {
-            builder.Append(char.ConvertFromUtf32(cell.Codepoint));
-            return;
-        }
-
-        builder.Append(' ');
-    }
-
-    private static bool IsSafeTerminalLiteral(string text)
-    {
-        for (int i = 0; i < text.Length; i++)
-        {
-            if (!IsSafeTerminalLiteralCodepoint(text[i]))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool IsSafeTerminalLiteralCodepoint(int codepoint)
-    {
-        if (codepoint <= 0 || codepoint > 0x10FFFF || codepoint is >= 0xD800 and <= 0xDFFF)
-        {
-            return false;
-        }
-
-        return codepoint is not 0x1B and
-            not (< 0x20) and
-            not (>= 0x7F and <= 0x9F);
     }
 
     /// <summary>

@@ -4703,7 +4703,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             if (_vtProcessor is ITerminalSessionHistoryController historyController)
             {
                 historyController.ClearScrollback();
-                _screen.ClearScrollback();
             }
             else
             {
@@ -4750,7 +4749,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             else if (_vtProcessor is ITerminalSessionHistoryController historyController)
             {
                 historyController.ClearVisibleHistory();
-                _screen.ClearVisibleHistory(_vtProcessor.CursorRow);
             }
             else
             {
@@ -4974,13 +4972,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
             else if (preserveScrollback)
             {
+                bool alternateBufferActive = _screen.AlternateBufferActive;
                 if (_screen.AlternateBufferActive)
                 {
                     _screen.SwitchToPrimaryBuffer();
                     _screen.DiscardInactiveAlternateBuffer();
                 }
 
-                _screen.MoveViewportToScrollbackAndClear();
+                if (!alternateBufferActive)
+                {
+                    _screen.MoveViewportToScrollbackAndClear();
+                }
+
                 _vtProcessor.Reset();
             }
             else

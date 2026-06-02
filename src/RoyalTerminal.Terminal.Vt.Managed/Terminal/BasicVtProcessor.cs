@@ -4497,6 +4497,38 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode)
     {
         TerminalModeState before = ModeState;
+        bool restorePrimaryAfterAlternateRestart =
+            screenResetMode == SessionScreenResetMode.PreserveScrollback &&
+            (_inAltScreen || _screen.AlternateBufferActive);
+        int restoredPrimaryCursorCol = 0;
+        int restoredPrimaryCursorRow = 0;
+
+        if (restorePrimaryAfterAlternateRestart)
+        {
+            if (_inAltScreen)
+            {
+                SwitchToMainScreen();
+                restoredPrimaryCursorCol = _cursorCol;
+                restoredPrimaryCursorRow = _cursorRow;
+            }
+            else if (_screen.AlternateBufferActive)
+            {
+                _screen.SwitchToPrimaryBuffer();
+                restoredPrimaryCursorCol = Math.Clamp(_cursorCol, 0, Math.Max(0, _screen.Columns - 1));
+                restoredPrimaryCursorRow = Math.Clamp(_cursorRow, 0, Math.Max(0, _screen.ViewportRows - 1));
+            }
+
+            _screen.DiscardInactiveAlternateBuffer();
+        }
+        else
+        {
+            if (_inAltScreen || _screen.AlternateBufferActive)
+            {
+                _screen.SwitchToPrimaryBuffer();
+            }
+
+            _screen.DiscardInactiveAlternateBuffer();
+        }
 
         _cursorCol = 0;
         _cursorRow = 0;
@@ -4511,13 +4543,6 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _isDiscardingDcsPayload = false;
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
-        if (_inAltScreen || _screen.AlternateBufferActive)
-        {
-            _screen.SwitchToPrimaryBuffer();
-        }
-
-        _screen.DiscardInactiveAlternateBuffer();
-
         _inAltScreen = false;
         _autoWrap = true;
         _cursorVisible = true;
@@ -4566,7 +4591,18 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 break;
 
             case SessionScreenResetMode.PreserveScrollback:
-                _screen.MoveViewportToScrollbackAndClear();
+                if (restorePrimaryAfterAlternateRestart)
+                {
+                    _cursorCol = restoredPrimaryCursorCol;
+                    _cursorRow = restoredPrimaryCursorRow;
+                    ResetDelayedWrap();
+                    _screen.ScrollOffset = 0;
+                    _screen.InvalidateAll();
+                }
+                else
+                {
+                    _screen.MoveViewportToScrollbackAndClear();
+                }
                 break;
         }
 

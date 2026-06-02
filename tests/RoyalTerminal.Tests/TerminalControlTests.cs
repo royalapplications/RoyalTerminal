@@ -526,11 +526,10 @@ public class TerminalControlTests
             string viewport = ReadViewportTextRange(screen, 0, screen.ViewportRows - 1);
 
             Assert.False(screen.AlternateBufferActive);
-            Assert.True(screen.TotalRows > screen.ViewportRows);
             Assert.Contains("shell$ btop", allRows, StringComparison.Ordinal);
             Assert.DoesNotContain("BTOP UI", allRows, StringComparison.Ordinal);
             Assert.DoesNotContain("BTOP CPU", allRows, StringComparison.Ordinal);
-            Assert.True(string.IsNullOrWhiteSpace(viewport));
+            Assert.Contains("shell$ btop", viewport, StringComparison.Ordinal);
         }
 
         Assert.False(processor.AlternateScreen);
@@ -812,6 +811,45 @@ public class TerminalControlTests
             Assert.Equal(0, screen.MaxScrollOffset);
             Assert.DoesNotContain("OLD-", allRows, StringComparison.Ordinal);
             Assert.StartsWith("prompt$ ", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_HistoryCommands_DelegateToSessionHistoryControllerWithoutFallbackMutation()
+    {
+        FakeTransport transport = new();
+        NoopHistoryControllerVtProcessor processor = new()
+        {
+            CursorRow = 1,
+        };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Managed);
+        control.Columns = 16;
+        control.Rows = 4;
+        control.ScrollbackLimit = 20;
+
+        await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        lock (screen.SyncRoot)
+        {
+            SetRowText(screen.AddRow(), "HISTORY");
+            SetRowText(screen.GetViewportRow(0), "KEEP");
+            SetRowText(screen.GetViewportRow(1), "CURSOR");
+            Assert.True(screen.TotalRows > screen.ViewportRows);
+        }
+
+        control.ClearScrollback();
+        control.ClearHistory();
+
+        lock (screen.SyncRoot)
+        {
+            Assert.Equal(1, processor.ClearScrollbackCallCount);
+            Assert.Equal(1, processor.ClearVisibleHistoryCallCount);
+            Assert.True(screen.TotalRows > screen.ViewportRows);
+            Assert.StartsWith("KEEP", ReadRowText(screen.GetViewportRow(0)), StringComparison.Ordinal);
         }
     }
 
@@ -6562,6 +6600,82 @@ public class TerminalControlTests
             _ = screen;
             _ = preference;
             return processor;
+        }
+    }
+
+    private sealed class NoopHistoryControllerVtProcessor : IVtProcessor, ITerminalSessionHistoryController
+    {
+        public int CursorCol { get; init; }
+        public int CursorRow { get; init; }
+        public bool CursorVisible => true;
+        public bool ApplicationCursorKeys => false;
+        public bool ApplicationKeypad => false;
+        public bool AlternateScreen => false;
+        public bool BracketedPaste => false;
+        public bool Win32InputMode => false;
+        public TerminalModeState ModeState => new(
+            CursorVisible,
+            ApplicationCursorKeys,
+            ApplicationKeypad,
+            AlternateScreen,
+            BracketedPaste,
+            Win32InputMode);
+
+        public int PrepareForNewSessionCallCount { get; private set; }
+        public int ClearScrollbackCallCount { get; private set; }
+        public int ClearVisibleHistoryCallCount { get; private set; }
+
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Action<byte[]>? ResponseCallback { get; set; }
+        public Action? BellCallback { get; set; }
+        public Action<string>? TitleCallback { get; set; }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            _ = data;
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            _ = columns;
+            _ = rows;
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            _ = columns;
+            _ = rows;
+            _ = widthPx;
+            _ = heightPx;
+        }
+
+        public void Reset()
+        {
+        }
+
+        public void PrepareForNewSession(bool preserveScrollback)
+        {
+            _ = preserveScrollback;
+            PrepareForNewSessionCallCount++;
+        }
+
+        public void ClearScrollback()
+        {
+            ClearScrollbackCallCount++;
+        }
+
+        public void ClearVisibleHistory()
+        {
+            ClearVisibleHistoryCallCount++;
+        }
+
+        public void Dispose()
+        {
         }
     }
 

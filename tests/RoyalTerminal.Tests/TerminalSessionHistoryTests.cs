@@ -142,11 +142,12 @@ public class TerminalSessionHistoryTests
 
         Assert.False(processor.AlternateScreen);
         Assert.False(screen.AlternateBufferActive);
-        Assert.True(screen.TotalRows > screen.ViewportRows);
         Assert.Contains("shell$ mc", ReadAllRows(screen), StringComparison.Ordinal);
         Assert.DoesNotContain("MC PANEL", ReadAllRows(screen), StringComparison.Ordinal);
         Assert.DoesNotContain("MC STATUS", ReadAllRows(screen), StringComparison.Ordinal);
-        Assert.True(string.IsNullOrWhiteSpace(ReadViewport(screen)));
+        Assert.Contains("shell$ mc", ReadViewport(screen), StringComparison.Ordinal);
+        Assert.Equal(0, processor.CursorCol);
+        Assert.Equal(1, processor.CursorRow);
     }
 
     [Fact]
