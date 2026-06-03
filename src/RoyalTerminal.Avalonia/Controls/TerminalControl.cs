@@ -62,6 +62,21 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private const int ResumePendingOutputQueueBytes = MaxPendingOutputQueueBytes / 2;
     private const int MaxPendingOutputQueueChunks = 256;
     private const int ResumePendingOutputQueueChunks = MaxPendingOutputQueueChunks / 2;
+    private static readonly SearchValues<byte> EraseDisplayDetectorGroundBytes =
+        SearchValues.Create(
+        [
+            0x1B,
+            0x90,
+            0x98,
+            0x9B,
+            0x9D,
+            0x9E,
+            0x9F,
+        ]);
+    private static readonly SearchValues<byte> EraseDisplayDetectorStringBytes =
+        SearchValues.Create([0x1B, 0x9C]);
+    private static readonly SearchValues<byte> EraseDisplayDetectorOscStringBytes =
+        SearchValues.Create([0x07, 0x1B, 0x9C]);
     private const double SelectionAutoScrollMargin = 60d;
     private const int SelectionAutoScrollSpeed = 50;
     private const ulong ComparableRowFnvOffsetBasis = 14695981039346656037UL;
@@ -614,6 +629,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private readonly object _pendingTransportOutputDrainExecutionSync = new();
     private readonly Queue<byte[]> _pendingTransportOutput = new();
     private readonly Queue<PendingTransportUiBatch> _pendingTransportUiBatches = new();
+    private EraseDisplaySequenceDetector _eraseDisplaySequenceDetector;
     private int _pendingTransportOutputBytes;
     private int _pendingTransportUiBatchBytes;
     private int _pendingTransportUiBatchChunks;
@@ -1067,6 +1083,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         _vtProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
         ApplySixelGraphicsSettingToProcessor(_vtProcessor);
+        ApplyEraseDisplayOptionsToProcessor(_vtProcessor, transportId: null);
         if (_vtProcessor is ITerminalThemeSink themeSink)
         {
             lock (_screen.SyncRoot)
@@ -1498,6 +1515,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         IVtProcessor nextProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
         ApplySixelGraphicsSettingToProcessor(nextProcessor);
+        ApplyEraseDisplayOptionsToProcessor(nextProcessor, _activeTransportId);
         IVtProcessor? previousProcessor = _vtProcessor;
         _vtProcessor = nextProcessor;
         if (_theme is not null && _vtProcessor is ITerminalThemeSink themeSink)
@@ -1522,6 +1540,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (processor is ITerminalSixelOptionsSink sixelOptions)
         {
             sixelOptions.SixelGraphicsEnabled = SixelGraphicsEnabled;
+        }
+    }
+
+    private static void ApplyEraseDisplayOptionsToProcessor(IVtProcessor? processor, string? transportId)
+    {
+        if (processor is ITerminalEraseDisplayOptionsSink eraseDisplayOptions)
+        {
+            eraseDisplayOptions.ScrollOnEraseInDisplay =
+                string.Equals(transportId, TerminalTransportIds.Pty, StringComparison.Ordinal);
         }
     }
 
@@ -2320,11 +2347,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        bool resetMouseSelection = ProcessOutputCore(data);
-        if (resetMouseSelection)
-        {
-            ApplyMouseModeSelectionResetOnUiThread();
-        }
+        TerminalOutputProcessResult result = ProcessOutputCore(data);
+        ApplyOutputProcessResultOnUiThread(result);
 
         // Span input may come from transient memory, so copy to a managed payload for event consumers.
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data.ToArray()));
@@ -2334,11 +2358,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void WriteOutputOnUiThread(ReadOnlyMemory<byte> data, bool finalizeOutputBatch = true)
     {
-        bool resetMouseSelection = ProcessOutputCore(data.Span);
-        if (resetMouseSelection)
-        {
-            ApplyMouseModeSelectionResetOnUiThread();
-        }
+        TerminalOutputProcessResult result = ProcessOutputCore(data.Span);
+        ApplyOutputProcessResultOnUiThread(result);
 
         // Raise event without copying when input is already managed memory.
         DataReceived?.Invoke(this, new TerminalDataEventArgs(data));
@@ -2389,14 +2410,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         NotifyOutputUiUpdatedOnUiThread();
     }
 
-    private bool ProcessOutputCore(ReadOnlySpan<byte> data)
+    private TerminalOutputProcessResult ProcessOutputCore(ReadOnlySpan<byte> data)
     {
         if (_screen is null)
         {
-            return false;
+            return default;
         }
 
         bool resetMouseSelection = false;
+        bool eraseDisplayClearsLiveViewport = false;
         // Lock screen during VT processing — composition thread reads cells concurrently
         lock (_screen.SyncRoot)
         {
@@ -2430,19 +2452,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             {
                 if (TrySuppressWindowsPtyResizeRepaint(data))
                 {
-                    return resetMouseSelection;
+                    return new TerminalOutputProcessResult(resetMouseSelection, false);
                 }
 
+                eraseDisplayClearsLiveViewport = _eraseDisplaySequenceDetector.Process(data);
                 _vtProcessor?.Process(data);
             }
             finally
             {
-                if (restoreScrollOffset >= 0)
+                if (restoreScrollOffset >= 0 && !eraseDisplayClearsLiveViewport)
                 {
                     _screen.ScrollOffset = restoreScrollOffset;
                 }
 
-                if (restoreViewportOffsetRows is { } offsetRows && viewportScrollSource is not null)
+                if (restoreViewportOffsetRows is { } offsetRows &&
+                    viewportScrollSource is not null &&
+                    !eraseDisplayClearsLiveViewport)
                 {
                     viewportScrollSource.SetViewportOffsetRows(offsetRows);
                 }
@@ -2452,17 +2477,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             UpdateRendererParityStateLocked();
         }
 
-        return resetMouseSelection;
+        return new TerminalOutputProcessResult(resetMouseSelection, eraseDisplayClearsLiveViewport);
     }
 
-    private bool ProcessOutputBatchCore(IReadOnlyList<byte[]> chunks)
+    private TerminalOutputProcessResult ProcessOutputBatchCore(IReadOnlyList<byte[]> chunks)
     {
         if (_screen is null)
         {
-            return false;
+            return default;
         }
 
         bool resetMouseSelection = false;
+        bool eraseDisplayClearsLiveViewport = false;
         lock (_screen.SyncRoot)
         {
             int restoreScrollOffset = -1;
@@ -2498,17 +2524,20 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                         continue;
                     }
 
+                    eraseDisplayClearsLiveViewport |= _eraseDisplaySequenceDetector.Process(chunk);
                     _vtProcessor?.Process(chunk);
                 }
             }
             finally
             {
-                if (restoreScrollOffset >= 0)
+                if (restoreScrollOffset >= 0 && !eraseDisplayClearsLiveViewport)
                 {
                     _screen.ScrollOffset = restoreScrollOffset;
                 }
 
-                if (restoreViewportOffsetRows is { } offsetRows && viewportScrollSource is not null)
+                if (restoreViewportOffsetRows is { } offsetRows &&
+                    viewportScrollSource is not null &&
+                    !eraseDisplayClearsLiveViewport)
                 {
                     viewportScrollSource.SetViewportOffsetRows(offsetRows);
                 }
@@ -2518,7 +2547,25 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             UpdateRendererParityStateLocked();
         }
 
-        return resetMouseSelection;
+        return new TerminalOutputProcessResult(resetMouseSelection, eraseDisplayClearsLiveViewport);
+    }
+
+    private void ApplyOutputProcessResultOnUiThread(TerminalOutputProcessResult result)
+    {
+        if (result.ResetMouseSelection)
+        {
+            ApplyMouseModeSelectionResetOnUiThread();
+        }
+
+        if (!result.LiveViewportCleared || _screen is null)
+        {
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            SyncHistoryMutationScrollStateLocked();
+        }
     }
 
     private bool TrySuppressWindowsPtyResizeRepaint(ReadOnlySpan<byte> data)
@@ -4927,6 +4974,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         cancellationToken.ThrowIfCancellationRequested();
 
         EnsureVtProcessorPreferenceApplied();
+        ApplyEraseDisplayOptionsToProcessor(_vtProcessor, options.TransportId);
         if (TerminalSessionService.HasActiveTransport)
         {
             throw new InvalidOperationException("A terminal transport session is already active.");
@@ -5675,10 +5723,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private PendingTransportUiBatch ProcessPendingTransportOutputBatch(List<byte[]> chunks, int totalBytes)
     {
-        bool resetMouseSelection = chunks.Count == 1
+        TerminalOutputProcessResult result = chunks.Count == 1
             ? ProcessOutputCore(chunks[0])
             : ProcessOutputBatchCore(chunks);
-        return new PendingTransportUiBatch(chunks, totalBytes, resetMouseSelection);
+        return new PendingTransportUiBatch(
+            chunks,
+            totalBytes,
+            result.ResetMouseSelection,
+            result.LiveViewportCleared);
     }
 
     private void EnqueuePendingTransportUiBatch(PendingTransportUiBatch batch)
@@ -5754,6 +5806,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 mouseSelectionResetApplied = true;
             }
 
+            if (nextBatch.LiveViewportCleared)
+            {
+                ApplyOutputProcessResultOnUiThread(new TerminalOutputProcessResult(false, true));
+            }
+
             for (int i = 0; i < nextBatch.Chunks.Count; i++)
             {
                 DataReceived?.Invoke(this, new TerminalDataEventArgs(nextBatch.Chunks[i]));
@@ -5782,11 +5839,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        bool resetMouseSelection = ProcessOutputBatchCore(chunks);
-        if (resetMouseSelection)
-        {
-            ApplyMouseModeSelectionResetOnUiThread();
-        }
+        TerminalOutputProcessResult result = ProcessOutputBatchCore(chunks);
+        ApplyOutputProcessResultOnUiThread(result);
 
         for (int i = 0; i < chunks.Count; i++)
         {
@@ -5806,6 +5860,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _pendingTransportOutputDrainScheduled = false;
             _pendingTransportUiDrainScheduled = false;
             Monitor.PulseAll(_pendingTransportOutputSync);
+        }
+
+        ResetEraseDisplaySequenceDetector();
+    }
+
+    private void ResetEraseDisplaySequenceDetector()
+    {
+        if (_screen is null)
+        {
+            _eraseDisplaySequenceDetector.Reset();
+            return;
+        }
+
+        lock (_screen.SyncRoot)
+        {
+            _eraseDisplaySequenceDetector.Reset();
         }
     }
 
@@ -5889,11 +5959,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private sealed class PendingTransportUiBatch
     {
-        public PendingTransportUiBatch(List<byte[]> chunks, int totalBytes, bool resetMouseSelection)
+        public PendingTransportUiBatch(
+            List<byte[]> chunks,
+            int totalBytes,
+            bool resetMouseSelection,
+            bool liveViewportCleared)
         {
             Chunks = chunks;
             TotalBytes = totalBytes;
             ResetMouseSelection = resetMouseSelection;
+            LiveViewportCleared = liveViewportCleared;
         }
 
         public List<byte[]> Chunks { get; }
@@ -5902,8 +5977,243 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         public bool ResetMouseSelection { get; }
 
+        public bool LiveViewportCleared { get; }
+
         public int ChunkCount => Chunks.Count;
     }
+
+    private struct EraseDisplaySequenceDetector
+    {
+        private SequenceState _state;
+        private bool _hasPrivateMarker;
+        private bool _hasDigits;
+        private bool _belTerminatesString;
+        private int _value;
+
+        public bool Process(ReadOnlySpan<byte> data)
+        {
+            bool foundLiveViewportClear = false;
+            int index = 0;
+            while (index < data.Length)
+            {
+                if (_state == SequenceState.Ground)
+                {
+                    int nextControlOffset = data[index..].IndexOfAny(EraseDisplayDetectorGroundBytes);
+                    if (nextControlOffset < 0)
+                    {
+                        break;
+                    }
+
+                    index += nextControlOffset;
+                }
+                else if (_state == SequenceState.String)
+                {
+                    SearchValues<byte> terminators = _belTerminatesString
+                        ? EraseDisplayDetectorOscStringBytes
+                        : EraseDisplayDetectorStringBytes;
+                    int nextTerminatorOffset = data[index..].IndexOfAny(terminators);
+                    if (nextTerminatorOffset < 0)
+                    {
+                        break;
+                    }
+
+                    index += nextTerminatorOffset;
+                }
+
+                foundLiveViewportClear |= Process(data[index]);
+                index++;
+            }
+
+            return foundLiveViewportClear;
+        }
+
+        public void Reset()
+        {
+            _state = SequenceState.Ground;
+            _hasPrivateMarker = false;
+            _hasDigits = false;
+            _belTerminatesString = false;
+            _value = 0;
+        }
+
+        private bool Process(byte current)
+        {
+            switch (_state)
+            {
+                case SequenceState.Ground:
+                    if (current == 0x1B)
+                    {
+                        _state = SequenceState.Escape;
+                    }
+                    else if (current == 0x9B)
+                    {
+                        BeginCsi();
+                    }
+                    else
+                    {
+                        TryBeginC1String(current);
+                    }
+                    break;
+
+                case SequenceState.Escape:
+                    if (current == (byte)'[')
+                    {
+                        BeginCsi();
+                    }
+                    else if (current == (byte)']')
+                    {
+                        BeginString(belTerminatesString: true);
+                    }
+                    else if (current is (byte)'P' or (byte)'^' or (byte)'_' or (byte)'X')
+                    {
+                        BeginString(belTerminatesString: false);
+                    }
+                    else if (current == 0x1B)
+                    {
+                        _state = SequenceState.Escape;
+                    }
+                    else if (current == 0x9B)
+                    {
+                        BeginCsi();
+                    }
+                    else if (!TryBeginC1String(current))
+                    {
+                        Reset();
+                    }
+                    break;
+
+                case SequenceState.Csi:
+                    return ProcessCsi(current);
+
+                case SequenceState.String:
+                    ProcessString(current);
+                    break;
+
+                case SequenceState.StringEscape:
+                    ProcessStringEscape(current);
+                    break;
+            }
+
+            return false;
+        }
+
+        private bool ProcessCsi(byte current)
+        {
+            if (current == 0x1B)
+            {
+                Reset();
+                _state = SequenceState.Escape;
+                return false;
+            }
+
+            if (current == 0x9B)
+            {
+                BeginCsi();
+                return false;
+            }
+
+            if ((uint)(current - (byte)'0') <= 9u)
+            {
+                _hasDigits = true;
+                _value = Math.Min(1000, (_value * 10) + current - (byte)'0');
+                return false;
+            }
+
+            if (current == (byte)'?' && !_hasPrivateMarker && !_hasDigits)
+            {
+                _hasPrivateMarker = true;
+                return false;
+            }
+
+            if (current == (byte)'J')
+            {
+                int mode = _hasDigits ? _value : 0;
+                Reset();
+                return mode is 2 or 3 or 22;
+            }
+
+            Reset();
+            return false;
+        }
+
+        private void BeginCsi()
+        {
+            _state = SequenceState.Csi;
+            _hasPrivateMarker = false;
+            _hasDigits = false;
+            _belTerminatesString = false;
+            _value = 0;
+        }
+
+        private bool TryBeginC1String(byte current)
+        {
+            switch (current)
+            {
+                case 0x90: // DCS
+                case 0x98: // SOS
+                case 0x9E: // PM
+                case 0x9F: // APC
+                    BeginString(belTerminatesString: false);
+                    return true;
+
+                case 0x9D: // OSC
+                    BeginString(belTerminatesString: true);
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        private void BeginString(bool belTerminatesString)
+        {
+            _state = SequenceState.String;
+            _hasPrivateMarker = false;
+            _hasDigits = false;
+            _belTerminatesString = belTerminatesString;
+            _value = 0;
+        }
+
+        private void ProcessString(byte current)
+        {
+            if (current == 0x1B)
+            {
+                _state = SequenceState.StringEscape;
+                return;
+            }
+
+            if (current == 0x9C || (_belTerminatesString && current == 0x07))
+            {
+                Reset();
+            }
+        }
+
+        private void ProcessStringEscape(byte current)
+        {
+            if (current == (byte)'\\' || current == 0x9C || (_belTerminatesString && current == 0x07))
+            {
+                Reset();
+                return;
+            }
+
+            _state = current == 0x1B
+                ? SequenceState.StringEscape
+                : SequenceState.String;
+        }
+
+        private enum SequenceState
+        {
+            Ground,
+            Escape,
+            Csi,
+            String,
+            StringEscape,
+        }
+    }
+
+    private readonly record struct TerminalOutputProcessResult(
+        bool ResetMouseSelection,
+        bool LiveViewportCleared);
 
     #endregion
 
