@@ -93,6 +93,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _backspaceSendsControlH;
     private bool _enableTextShaping = true;
     private bool _reflowOnResize = true;
+    private bool _preserveScrollbackOnRestart = true;
     private bool _sixelGraphicsEnabled = true;
     private bool _enableLigatures;
     private readonly IReadOnlyList<TerminalPasteSafetyPolicy> _pasteSafetyPolicies = Enum.GetValues<TerminalPasteSafetyPolicy>();
@@ -229,6 +230,8 @@ public sealed class MainWindowViewModel : ReactiveObject
         NextSearchInteraction = new Interaction<Unit, Unit>();
         PreviousSearchInteraction = new Interaction<Unit, Unit>();
         ClearSearchInteraction = new Interaction<Unit, Unit>();
+        RestartActiveSessionInteraction = new Interaction<Unit, Unit>();
+        ClearActiveScrollbackInteraction = new Interaction<Unit, Unit>();
         ShowHyperlinkSampleInteraction = new Interaction<Unit, Unit>();
         ShowKittyGraphicsSampleInteraction = new Interaction<Unit, Unit>();
         ToggleGhosttyDiagnosticsInteraction = new Interaction<bool, Unit>();
@@ -265,6 +268,8 @@ public sealed class MainWindowViewModel : ReactiveObject
         NextSearchCommand = ReactiveCommand.CreateFromObservable(NextSearch);
         PreviousSearchCommand = ReactiveCommand.CreateFromObservable(PreviousSearch);
         ClearSearchCommand = ReactiveCommand.CreateFromObservable(ClearSearch);
+        RestartActiveSessionCommand = ReactiveCommand.CreateFromObservable(RestartActiveSession);
+        ClearActiveScrollbackCommand = ReactiveCommand.CreateFromObservable(ClearActiveScrollback);
         ShowHyperlinkSampleCommand = ReactiveCommand.CreateFromObservable(ShowHyperlinkSample);
         ShowKittyGraphicsSampleCommand = ReactiveCommand.CreateFromObservable(ShowKittyGraphicsSample);
         ToggleGhosttyDiagnosticsCommand = ReactiveCommand.CreateFromObservable(ToggleGhosttyDiagnostics);
@@ -298,6 +303,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<Unit, Unit> NextSearchInteraction { get; }
     public Interaction<Unit, Unit> PreviousSearchInteraction { get; }
     public Interaction<Unit, Unit> ClearSearchInteraction { get; }
+    public Interaction<Unit, Unit> RestartActiveSessionInteraction { get; }
+    public Interaction<Unit, Unit> ClearActiveScrollbackInteraction { get; }
     public Interaction<Unit, Unit> ShowHyperlinkSampleInteraction { get; }
     public Interaction<Unit, Unit> ShowKittyGraphicsSampleInteraction { get; }
     public Interaction<bool, Unit> ToggleGhosttyDiagnosticsInteraction { get; }
@@ -334,6 +341,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> NextSearchCommand { get; }
     public ReactiveCommand<Unit, Unit> PreviousSearchCommand { get; }
     public ReactiveCommand<Unit, Unit> ClearSearchCommand { get; }
+    public ReactiveCommand<Unit, Unit> RestartActiveSessionCommand { get; }
+    public ReactiveCommand<Unit, Unit> ClearActiveScrollbackCommand { get; }
     public ReactiveCommand<Unit, Unit> ShowHyperlinkSampleCommand { get; }
     public ReactiveCommand<Unit, Unit> ShowKittyGraphicsSampleCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleGhosttyDiagnosticsCommand { get; }
@@ -949,6 +958,12 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _reflowOnResize;
         set => this.RaiseAndSetIfChanged(ref _reflowOnResize, value);
+    }
+
+    public bool PreserveScrollbackOnRestart
+    {
+        get => _preserveScrollbackOnRestart;
+        set => this.RaiseAndSetIfChanged(ref _preserveScrollbackOnRestart, value);
     }
 
     public bool SixelGraphicsEnabled
@@ -1651,6 +1666,16 @@ public sealed class MainWindowViewModel : ReactiveObject
     private IObservable<Unit> ClearSearch()
     {
         return ClearSearchInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> RestartActiveSession()
+    {
+        return RestartActiveSessionInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> ClearActiveScrollback()
+    {
+        return ClearActiveScrollbackInteraction.Handle(Unit.Default);
     }
 
     private IObservable<Unit> ShowHyperlinkSample()

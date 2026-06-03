@@ -9,6 +9,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using RoyalTerminal.Avalonia.Services;
+using RoyalTerminal.Demo;
 using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.Terminal;
@@ -21,6 +22,26 @@ namespace RoyalTerminal.Tests;
 [Collection("MainWindowControllerHeadlessTests")]
 public class MainWindowViewModelFlowTests
 {
+    [AvaloniaFact]
+    public void MainWindow_ClearHistoryButton_IsBoundToClearActiveScrollbackCommand()
+    {
+        MainWindow window = new();
+
+        try
+        {
+            Button clearHistoryButton = window.FindControl<Button>("ClearHistoryButton")
+                ?? throw new InvalidOperationException("ClearHistoryButton was not found.");
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+
+            Assert.Same(viewModel.ClearActiveScrollbackCommand, clearHistoryButton.Command);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     [AvaloniaFact]
     public void KeyboardShortcut_CtrlT_TriggersNewTabFlow()
     {
@@ -496,8 +517,11 @@ public class MainWindowViewModelFlowTests
         Assert.False(viewModel.BackspaceSendsControlH);
         Assert.True(viewModel.EnableTextShaping);
         Assert.True(viewModel.ReflowOnResize);
+        Assert.True(viewModel.PreserveScrollbackOnRestart);
         Assert.True(viewModel.SixelGraphicsEnabled);
         Assert.Equal("Sixel: On", viewModel.SixelButtonText);
+        viewModel.PreserveScrollbackOnRestart = false;
+        Assert.False(viewModel.PreserveScrollbackOnRestart);
         viewModel.SixelGraphicsEnabled = false;
         Assert.Equal("Sixel: Off", viewModel.SixelButtonText);
         Assert.False(viewModel.EnableLigatures);
@@ -709,6 +733,16 @@ public class MainWindowViewModelFlowTests
             calls.Add("clear");
             context.SetOutput(Unit.Default);
         });
+        using IDisposable restartSession = viewModel.RestartActiveSessionInteraction.RegisterHandler(context =>
+        {
+            calls.Add("restart");
+            context.SetOutput(Unit.Default);
+        });
+        using IDisposable clearHistory = viewModel.ClearActiveScrollbackInteraction.RegisterHandler(context =>
+        {
+            calls.Add("clear-history");
+            context.SetOutput(Unit.Default);
+        });
         using IDisposable hyperlinkSample = viewModel.ShowHyperlinkSampleInteraction.RegisterHandler(context =>
         {
             calls.Add("hyperlink");
@@ -737,6 +771,8 @@ public class MainWindowViewModelFlowTests
         viewModel.NextSearchCommand.Execute().Wait();
         viewModel.PreviousSearchCommand.Execute().Wait();
         viewModel.ClearSearchCommand.Execute().Wait();
+        viewModel.RestartActiveSessionCommand.Execute().Wait();
+        viewModel.ClearActiveScrollbackCommand.Execute().Wait();
         viewModel.ShowHyperlinkSampleCommand.Execute().Wait();
         viewModel.ShowKittyGraphicsSampleCommand.Execute().Wait();
         viewModel.CopyPlainSnapshotCommand.Execute().Wait();
@@ -751,6 +787,8 @@ public class MainWindowViewModelFlowTests
                 "next",
                 "previous",
                 "clear",
+                "restart",
+                "clear-history",
                 "hyperlink",
                 "kitty",
                 $"snapshot:{TerminalSnapshotExportFormat.PlainText}",
@@ -766,6 +804,29 @@ public class MainWindowViewModelFlowTests
                 TerminalSnapshotExportFormat.Html,
             ],
             snapshotFormats);
+    }
+
+    [Fact]
+    public void SessionHistoryCommands_LeaveStatusToInteractionHandlers()
+    {
+        MainWindowViewModel viewModel = new();
+
+        using IDisposable restartSession = viewModel.RestartActiveSessionInteraction.RegisterHandler(context =>
+        {
+            viewModel.SetStatus("restart handler status");
+            context.SetOutput(Unit.Default);
+        });
+        using IDisposable clearHistory = viewModel.ClearActiveScrollbackInteraction.RegisterHandler(context =>
+        {
+            viewModel.SetStatus("clear handler status");
+            context.SetOutput(Unit.Default);
+        });
+
+        viewModel.RestartActiveSessionCommand.Execute().Wait();
+        Assert.Equal("restart handler status", viewModel.StatusText);
+
+        viewModel.ClearActiveScrollbackCommand.Execute().Wait();
+        Assert.Equal("clear handler status", viewModel.StatusText);
     }
 
     private static TransportModeOption FindTransportMode(MainWindowViewModel viewModel, string transportId)
