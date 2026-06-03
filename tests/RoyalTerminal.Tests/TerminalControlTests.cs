@@ -889,6 +889,72 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_ClearHistory_DropsTransportOutputQueuedDuringHistoryMutation()
+    {
+        FakeTransport transport = new() { EchoInput = false };
+        ClearRaceVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            factory,
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 24;
+        control.Rows = 4;
+        control.ScrollbackLimit = 20;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+            Assert.NotNull(factory.LastProcessor);
+
+            for (int i = 0; i < 16; i++)
+            {
+                control.WriteOutput(Encoding.UTF8.GetBytes($"OLD-{i:000}\r\n"));
+            }
+
+            control.WriteOutput("prompt$ "u8.ToArray());
+            factory.LastProcessor!.OutputDuringClear = () =>
+                Task.Run(() => transport.RaiseData("STALE-OLD\r\n"u8.ToArray())).GetAwaiter().GetResult();
+
+            control.ClearHistory();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            await Task.Run(() => transport.RaiseData("FRESH-NEW\r\n"u8.ToArray()));
+            bool freshOutputSeen = await WaitUntilAsync(
+                () =>
+                {
+                    TerminalScreen? screen = control.Screen;
+                    if (screen is null)
+                    {
+                        return false;
+                    }
+
+                    lock (screen.SyncRoot)
+                    {
+                        return ReadAllRows(screen).Contains("FRESH-NEW", StringComparison.Ordinal);
+                    }
+                },
+                TimeSpan.FromSeconds(5));
+
+            Assert.True(freshOutputSeen, "Expected post-clear transport output to be accepted after the mutation finished.");
+
+            TerminalScreen terminalScreen = Assert.IsType<TerminalScreen>(control.Screen);
+            lock (terminalScreen.SyncRoot)
+            {
+                string allRows = ReadAllRows(terminalScreen);
+                Assert.DoesNotContain("OLD-", allRows, StringComparison.Ordinal);
+                Assert.DoesNotContain("STALE-OLD", allRows, StringComparison.Ordinal);
+                Assert.Contains("FRESH-NEW", allRows, StringComparison.Ordinal);
+                Assert.Equal(0, terminalScreen.ScrollOffset);
+            }
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Control_ClearHistory_WithNativeGhostty_DoesNotRestoreOldRowsAfterNewOutput()
     {
         if (!GhosttyVtProcessor.IsAvailable())
@@ -7331,6 +7397,106 @@ public class TerminalControlTests
             {
                 _events.Add(value);
             }
+        }
+    }
+
+    private sealed class ClearRaceVtProcessorFactory : IVtProcessorFactory
+    {
+        public ClearRaceVtProcessor? LastProcessor { get; private set; }
+
+        public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
+        {
+            _ = preference;
+            ClearRaceVtProcessor processor = new(screen);
+            LastProcessor = processor;
+            return processor;
+        }
+    }
+
+    private sealed class ClearRaceVtProcessor : IVtProcessor, ITerminalSessionHistoryController
+    {
+        private readonly BasicVtProcessor _inner;
+
+        public ClearRaceVtProcessor(TerminalScreen screen)
+        {
+            _inner = new BasicVtProcessor(screen);
+        }
+
+        public Action? OutputDuringClear { get; set; }
+
+        public int CursorCol => _inner.CursorCol;
+        public int CursorRow => _inner.CursorRow;
+        public bool CursorVisible => _inner.CursorVisible;
+        public bool ApplicationCursorKeys => _inner.ApplicationCursorKeys;
+        public bool ApplicationKeypad => _inner.ApplicationKeypad;
+        public bool AlternateScreen => _inner.AlternateScreen;
+        public bool BracketedPaste => _inner.BracketedPaste;
+        public bool Win32InputMode => _inner.Win32InputMode;
+        public TerminalModeState ModeState => _inner.ModeState;
+
+        public event EventHandler<TerminalModeState>? ModeChanged
+        {
+            add => _inner.ModeChanged += value;
+            remove => _inner.ModeChanged -= value;
+        }
+
+        public Action<byte[]>? ResponseCallback
+        {
+            get => _inner.ResponseCallback;
+            set => _inner.ResponseCallback = value;
+        }
+
+        public Action? BellCallback
+        {
+            get => _inner.BellCallback;
+            set => _inner.BellCallback = value;
+        }
+
+        public Action<string>? TitleCallback
+        {
+            get => _inner.TitleCallback;
+            set => _inner.TitleCallback = value;
+        }
+
+        public void Process(ReadOnlySpan<byte> data)
+        {
+            _inner.Process(data);
+        }
+
+        public void NotifyResize(int columns, int rows)
+        {
+            _inner.NotifyResize(columns, rows);
+        }
+
+        public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
+        {
+            _inner.NotifyResize(columns, rows, widthPx, heightPx);
+        }
+
+        public void Reset()
+        {
+            _inner.Reset();
+        }
+
+        public void PrepareForNewSession(bool preserveScrollback)
+        {
+            _inner.PrepareForNewSession(preserveScrollback);
+        }
+
+        public void ClearScrollback()
+        {
+            _inner.ClearScrollback();
+        }
+
+        public void ClearVisibleHistory()
+        {
+            OutputDuringClear?.Invoke();
+            _inner.ClearVisibleHistory();
+        }
+
+        public void Dispose()
+        {
+            _inner.Dispose();
         }
     }
 
