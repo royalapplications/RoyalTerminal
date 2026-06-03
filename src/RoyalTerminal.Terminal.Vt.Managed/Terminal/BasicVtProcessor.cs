@@ -36,7 +36,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
     ITerminalSnapshotExportSource,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseReportingStateSource,
-    ITerminalSixelOptionsSink
+    ITerminalSixelOptionsSink,
+    ITerminalEraseDisplayOptionsSink
 {
     private const int MaxOscBufferBytes = 4096;
     private const int MaxDcsBufferBytes = 4096;
@@ -288,6 +289,9 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
     }
 
+    /// <inheritdoc />
+    public bool ScrollOnEraseInDisplay { get; set; }
+
     public BasicVtProcessor(TerminalScreen screen)
         : this(screen, null)
     {
@@ -302,6 +306,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _options = options ?? BasicVtProcessorOptions.Default;
         _sixelDecoder = new SixelDecoder(_options.SixelDecoderOptions);
         _sixelGraphicsEnabled = _options.SixelGraphicsEnabled;
+        ScrollOnEraseInDisplay = _options.ScrollOnEraseInDisplay;
         _theme = screen.Theme;
         _currentFg = screen.DefaultForeground;
         _currentBg = screen.DefaultBackground;
@@ -4085,9 +4090,18 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 2: // Entire display
-                for (var r = 0; r < _screen.ViewportRows; r++)
-                    _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
-                _screen.ClearRasterGraphics();
+                if (ScrollOnEraseInDisplay && !_inAltScreen)
+                {
+                    _screen.MoveViewportToScrollbackAndClear();
+                    for (var r = 0; r < _screen.ViewportRows; r++)
+                        _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                }
+                else
+                {
+                    for (var r = 0; r < _screen.ViewportRows; r++)
+                        _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                    _screen.ClearRasterGraphics();
+                }
                 break;
 
             case 3: // Scrollback only

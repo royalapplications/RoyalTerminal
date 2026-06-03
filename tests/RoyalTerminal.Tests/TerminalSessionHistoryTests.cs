@@ -126,6 +126,50 @@ public class TerminalSessionHistoryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_Csi2J_DefaultClearsViewportWithoutCreatingScrollback()
+    {
+        TerminalScreen screen = new(columns: 16, viewportRows: 4, scrollbackLimit: 10);
+        using BasicVtProcessor processor = new(screen);
+        Process(processor, "OLD0\r\nOLD1\r\nprompt$ ");
+
+        Process(processor, "\u001b[H\u001b[2J");
+
+        Assert.Equal(screen.ViewportRows, screen.TotalRows);
+        Assert.Equal(0, screen.MaxScrollOffset);
+        Assert.DoesNotContain("OLD", ReadAllRows(screen), StringComparison.Ordinal);
+        Assert.True(string.IsNullOrWhiteSpace(ReadViewport(screen)));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Csi2J_WithScrollOnEraseInDisplay_MovesViewportIntoScrollback()
+    {
+        TerminalScreen screen = new(columns: 16, viewportRows: 4, scrollbackLimit: 10);
+        using BasicVtProcessor processor = new(
+            screen,
+            new BasicVtProcessorOptions
+            {
+                ScrollOnEraseInDisplay = true,
+            });
+        Process(processor, "\u001b[31mOLD0\u001b[0m\r\nOLD1\r\nprompt$ ");
+
+        Process(processor, "\u001b[H\u001b[2J");
+
+        Assert.True(screen.TotalRows > screen.ViewportRows);
+        Assert.True(screen.MaxScrollOffset > 0);
+        Assert.Contains("OLD0", ReadAllRows(screen), StringComparison.Ordinal);
+        Assert.NotEqual(screen.DefaultForeground, screen.GetRow(0)[0].Foreground);
+        Assert.True(string.IsNullOrWhiteSpace(ReadViewport(screen)));
+
+        Process(processor, "\u001b[3Jdir\r\nNEW0\r\n");
+
+        Assert.Equal(screen.ViewportRows, screen.TotalRows);
+        Assert.Equal(0, screen.MaxScrollOffset);
+        Assert.DoesNotContain("OLD", ReadAllRows(screen), StringComparison.Ordinal);
+        Assert.Contains("dir", ReadViewport(screen), StringComparison.Ordinal);
+        Assert.Contains("NEW0", ReadViewport(screen), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BasicVtProcessor_PrepareForNewSession_PreservesPrimaryAfterAbruptAlternateScreenApp()
     {
         TerminalScreen screen = new(columns: 16, viewportRows: 3, scrollbackLimit: 20);

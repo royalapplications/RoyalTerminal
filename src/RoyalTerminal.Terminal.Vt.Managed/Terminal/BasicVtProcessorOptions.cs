@@ -17,6 +17,12 @@ public sealed record BasicVtProcessorOptions
     /// <summary>Gets whether managed sixel image decoding is enabled.</summary>
     public bool SixelGraphicsEnabled { get; init; }
 
+    /// <summary>
+    /// Gets whether ED 2 (<c>CSI 2 J</c>) scrolls the active viewport into
+    /// history before clearing it.
+    /// </summary>
+    public bool ScrollOnEraseInDisplay { get; init; }
+
     /// <summary>Gets resource limits and compatibility settings for sixel decoding.</summary>
     public SixelDecoderOptions SixelDecoderOptions { get; init; } = SixelDecoderOptions.Default;
 }

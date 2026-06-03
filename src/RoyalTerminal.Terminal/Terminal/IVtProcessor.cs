@@ -117,3 +117,15 @@ public interface ITerminalSessionHistoryController
     /// </summary>
     void ClearVisibleHistory();
 }
+
+/// <summary>
+/// Optional VT processor capability for erase-in-display compatibility behavior.
+/// </summary>
+public interface ITerminalEraseDisplayOptionsSink
+{
+    /// <summary>
+    /// Gets or sets whether ED 2 (<c>CSI 2 J</c>) scrolls the active viewport
+    /// into history before clearing it.
+    /// </summary>
+    bool ScrollOnEraseInDisplay { get; set; }
+}
