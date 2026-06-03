@@ -2448,6 +2448,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 _screen.ScrollOffset = 0;
             }
 
+            bool shouldDetectLiveViewportClear =
+                restoreScrollOffset >= 0 || restoreViewportOffsetRows.HasValue;
+            if (!shouldDetectLiveViewportClear)
+            {
+                ResetEraseDisplaySequenceDetectorIfActive();
+            }
+
             try
             {
                 if (TrySuppressWindowsPtyResizeRepaint(data))
@@ -2455,7 +2462,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                     return new TerminalOutputProcessResult(resetMouseSelection, false);
                 }
 
-                eraseDisplayClearsLiveViewport = _eraseDisplaySequenceDetector.Process(data);
+                eraseDisplayClearsLiveViewport =
+                    shouldDetectLiveViewportClear && _eraseDisplaySequenceDetector.Process(data);
                 _vtProcessor?.Process(data);
             }
             finally
@@ -2508,6 +2516,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 _screen.ScrollOffset = 0;
             }
 
+            bool shouldDetectLiveViewportClear =
+                restoreScrollOffset >= 0 || restoreViewportOffsetRows.HasValue;
+            if (!shouldDetectLiveViewportClear)
+            {
+                ResetEraseDisplaySequenceDetectorIfActive();
+            }
+
             try
             {
                 for (int i = 0; i < chunks.Count; i++)
@@ -2524,7 +2539,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                         continue;
                     }
 
-                    eraseDisplayClearsLiveViewport |= _eraseDisplaySequenceDetector.Process(chunk);
+                    if (shouldDetectLiveViewportClear)
+                    {
+                        eraseDisplayClearsLiveViewport |= _eraseDisplaySequenceDetector.Process(chunk);
+                    }
+
                     _vtProcessor?.Process(chunk);
                 }
             }
@@ -5879,6 +5898,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
     }
 
+    private void ResetEraseDisplaySequenceDetectorIfActive()
+    {
+        if (!_eraseDisplaySequenceDetector.IsActive)
+        {
+            return;
+        }
+
+        _eraseDisplaySequenceDetector.Reset();
+    }
+
     private bool SetPendingTransportOutputAcceptance(bool acceptOutput)
     {
         lock (_pendingTransportOutputSync)
@@ -5989,6 +6018,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         private bool _hasDigits;
         private bool _belTerminatesString;
         private int _value;
+
+        public readonly bool IsActive => _state != SequenceState.Ground;
 
         public bool Process(ReadOnlySpan<byte> data)
         {
