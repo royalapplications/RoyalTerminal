@@ -50,7 +50,12 @@ public sealed class TerminalShaderPostProcessorTests
         using SKImage inputImage = input.Snapshot();
 
         TerminalShaderFrameContext frameContext = CreateFrameContext();
-        bool applied = processor.TryApply(output.Canvas, inputImage, new SKRect(0, 0, 4, 4), frameContext);
+        bool applied = processor.TryApply(
+            grContext: null,
+            output.Canvas,
+            inputImage,
+            new SKRect(0, 0, 4, 4),
+            frameContext);
 
         Assert.True(applied, processor.CompileLog);
         using SKImage outputImage = output.Snapshot();
@@ -58,6 +63,23 @@ public sealed class TerminalShaderPostProcessorTests
         SKColor pixel = bitmap.GetPixel(0, 0);
         Assert.True(pixel.Green > 200);
         Assert.True(pixel.Red < 20);
+    }
+
+    [Fact]
+    public void RenderSurfaceFactory_FallsBackToRaster_WhenGpuContextUnavailable()
+    {
+        // Reference decision: keep shader passes GPU-backed when the renderer exposes a live context,
+        // with deterministic raster fallback for headless or unsupported platforms.
+        SKImageInfo imageInfo = new(4, 4, SKColorType.Rgba8888, SKAlphaType.Premul);
+
+        using SKSurface? surface = TerminalShaderPostProcessor.CreateRenderSurface(
+            imageInfo,
+            grContext: null,
+            out bool isGpuBacked);
+
+        Assert.NotNull(surface);
+        Assert.False(isGpuBacked);
+        surface.Canvas.Clear(SKColors.Black);
     }
 
     [Fact]
