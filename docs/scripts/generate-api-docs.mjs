@@ -32,6 +32,12 @@ function runStatus(command, args, cwd = repoRoot) {
   return result.status ?? 1;
 }
 
+function warnSourceIndexFallback(pkg, reason) {
+  console.warn(
+    `[docs:api] Falling back to source-index API docs for ${pkg.packageId} because ${reason}.`
+  );
+}
+
 function getTagValue(xml, tagName) {
   const match = xml.match(new RegExp(`<${tagName}>([\\s\\S]*?)</${tagName}>`, "i"));
   return match?.[1].trim();
@@ -347,6 +353,7 @@ async function writeApiIndex(projects) {
 async function main() {
   const targetFramework = await getTargetFramework();
   const projects = [];
+  const generatedProjects = new Set();
 
   for (const pkg of apiPackages) {
     projects.push(await readProjectMetadata(pkg));
@@ -356,10 +363,20 @@ async function main() {
   await writeApiIndex(projects);
 
   run("dotnet", ["tool", "restore"]);
-  run("dotnet", ["restore", "RoyalTerminal.sln"]);
 
   for (const pkg of projects) {
-    run("dotnet", [
+    if (pkg.referenceMode === "source-index") {
+      continue;
+    }
+
+    const restoreStatus = runStatus("dotnet", ["restore", pkg.project, "--nologo"]);
+
+    if (restoreStatus !== 0) {
+      warnSourceIndexFallback(pkg, "dotnet restore failed");
+      continue;
+    }
+
+    const buildStatus = runStatus("dotnet", [
       "build",
       pkg.project,
       "-c",
@@ -370,6 +387,13 @@ async function main() {
       "-p:CopyLocalLockFileAssemblies=true",
       "-p:NoWarn=1591%3B1574"
     ]);
+
+    if (buildStatus !== 0) {
+      warnSourceIndexFallback(pkg, "dotnet build failed");
+      continue;
+    }
+
+    generatedProjects.add(pkg.slug);
   }
 
   for (const pkg of projects) {
@@ -386,13 +410,16 @@ async function main() {
 
     await fs.mkdir(outputDirectory, { recursive: true });
 
-    if (pkg.referenceMode === "source-index") {
+    if (pkg.referenceMode === "source-index" || !generatedProjects.has(pkg.slug)) {
       await writeSourceIndexPackage(pkg, outputDirectory, {
-        notes: [
-          "- This package exposes public native callback and function-pointer signatures.",
-          "- The Markdown reflection generator used for the rest of the API site cannot currently expand those signatures.",
-          "- This page indexes the public source types directly so the package is still discoverable from the docs site."
-        ]
+        notes:
+          pkg.referenceMode === "source-index"
+            ? [
+                "- This package exposes public native callback and function-pointer signatures.",
+                "- The Markdown reflection generator used for the rest of the API site cannot currently expand those signatures.",
+                "- This page indexes the public source types directly so the package is still discoverable from the docs site."
+              ]
+            : undefined
       });
       continue;
     }
@@ -414,9 +441,7 @@ async function main() {
     ]);
 
     if (generationStatus !== 0) {
-      console.warn(
-        `[docs:api] Falling back to source-index API docs for ${pkg.packageId} because xmldocmd could not load the built assembly in this environment.`
-      );
+      warnSourceIndexFallback(pkg, "xmldocmd could not load the built assembly in this environment");
       await fs.rm(outputDirectory, { recursive: true, force: true });
       await fs.mkdir(outputDirectory, { recursive: true });
       await writeSourceIndexPackage(pkg, outputDirectory);
