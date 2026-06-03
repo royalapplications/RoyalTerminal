@@ -82,6 +82,23 @@ public sealed class TerminalShaderPostProcessor : IDisposable
         SKImage inputFrame,
         SKRect destinationRect,
         in TerminalShaderFrameContext frameContext)
+        => TryApply(
+            grContext: null,
+            destinationCanvas,
+            inputFrame,
+            destinationRect,
+            frameContext);
+
+    /// <summary>
+    /// Applies the shader chain to <paramref name="inputFrame"/> and draws the result.
+    /// Uses GPU-backed intermediate surfaces when <paramref name="grContext"/> is available.
+    /// </summary>
+    public bool TryApply(
+        GRContext? grContext,
+        SKCanvas destinationCanvas,
+        SKImage inputFrame,
+        SKRect destinationRect,
+        in TerminalShaderFrameContext frameContext)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(destinationCanvas);
@@ -112,7 +129,7 @@ public sealed class TerminalShaderPostProcessor : IDisposable
                     frameContext.Height,
                     SKColorType.Rgba8888,
                     SKAlphaType.Premul);
-                using SKSurface? intermediate = SKSurface.Create(info);
+                using SKSurface? intermediate = CreateRenderSurface(info, grContext);
                 if (intermediate is null)
                 {
                     return false;
@@ -150,6 +167,40 @@ public sealed class TerminalShaderPostProcessor : IDisposable
             }
         }
     }
+
+    internal static SKSurface? CreateRenderSurface(SKImageInfo imageInfo, GRContext? grContext)
+        => CreateRenderSurface(imageInfo, grContext, out _);
+
+    internal static SKSurface? CreateRenderSurface(
+        SKImageInfo imageInfo,
+        GRContext? grContext,
+        out bool isGpuBacked)
+    {
+        isGpuBacked = false;
+        if (CanUseGpuRenderSurface(grContext))
+        {
+            try
+            {
+                SKSurface? surface = SKSurface.Create(grContext, true, imageInfo);
+                if (surface is not null)
+                {
+                    isGpuBacked = true;
+                    return surface;
+                }
+            }
+            catch (ArgumentException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        return SKSurface.Create(imageInfo);
+    }
+
+    internal static bool CanUseGpuRenderSurface(GRContext? grContext)
+        => grContext is not null && !grContext.IsAbandoned;
 
     /// <inheritdoc />
     public void Dispose()

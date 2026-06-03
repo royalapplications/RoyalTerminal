@@ -26,6 +26,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     private TerminalShaderPostProcessor? _shaderPostProcessor;
     private SKSurface? _terminalSurface;
     private SKImageInfo _terminalSurfaceInfo;
+    private GRContext? _terminalSurfaceGrContext;
+    private bool _terminalSurfaceGpuBacked;
     private float _terminalSurfaceScaleX = 1f;
     private float _terminalSurfaceScaleY = 1f;
     private bool _cachedFrameValid;
@@ -131,11 +133,12 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             SKRect logicalClipRect = new(0, 0, logicalWidth, logicalHeight);
             SKImage? terminalFrame = null;
             SKColor background = default;
+            GRContext? grContext = lease.GrContext;
 
             lock (screen.SyncRoot)
             {
                 background = new SKColor(screen.DefaultBackground);
-                if (!EnsureTerminalSurface(width, height, renderScale))
+                if (!EnsureTerminalSurface(width, height, renderScale, grContext))
                 {
                     canvas.Clear(background);
                     renderer.RenderFull(canvas, screen);
@@ -207,7 +210,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                         width,
                         height,
                         logicalDestinationRect,
-                        renderScale);
+                        renderScale,
+                        grContext);
                 }
                 else
                 {
@@ -254,6 +258,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         _terminalSurface?.Dispose();
         _terminalSurface = null;
         _terminalSurfaceInfo = default;
+        _terminalSurfaceGrContext = null;
+        _terminalSurfaceGpuBacked = false;
         _terminalSurfaceScaleX = 1f;
         _terminalSurfaceScaleY = 1f;
         _cachedFrameValid = false;
@@ -262,11 +268,19 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         _invalidateViewportRequested = true;
     }
 
-    private bool EnsureTerminalSurface(int width, int height, RenderTargetScale scale)
+    private bool EnsureTerminalSurface(
+        int width,
+        int height,
+        RenderTargetScale scale,
+        GRContext? grContext)
     {
+        GRContext? activeGrContext = TerminalShaderPostProcessor.CanUseGpuRenderSurface(grContext)
+            ? grContext
+            : null;
         if (_terminalSurface is not null &&
             _terminalSurfaceInfo.Width == width &&
             _terminalSurfaceInfo.Height == height &&
+            ReferenceEquals(_terminalSurfaceGrContext, activeGrContext) &&
             Math.Abs(_terminalSurfaceScaleX - scale.X) < 0.001f &&
             Math.Abs(_terminalSurfaceScaleY - scale.Y) < 0.001f)
         {
@@ -275,7 +289,12 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
         _terminalSurface?.Dispose();
         _terminalSurfaceInfo = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
-        _terminalSurface = SKSurface.Create(_terminalSurfaceInfo);
+        _terminalSurface = TerminalShaderPostProcessor.CreateRenderSurface(
+            _terminalSurfaceInfo,
+            activeGrContext,
+            out bool isGpuBacked);
+        _terminalSurfaceGrContext = activeGrContext;
+        _terminalSurfaceGpuBacked = isGpuBacked;
         _terminalSurfaceScaleX = scale.X;
         _terminalSurfaceScaleY = scale.Y;
         _cachedFrameValid = false;
@@ -475,7 +494,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         int width,
         int height,
         SKRect logicalDestinationRect,
-        RenderTargetScale renderScale)
+        RenderTargetScale renderScale,
+        GRContext? grContext)
     {
         TerminalShaderFrameContext frameContext = CreateFrameContext(
             renderer,
@@ -484,7 +504,13 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             height,
             renderScale);
         SKImageInfo shaderSurfaceInfo = new(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
-        using SKSurface? shaderSurface = SKSurface.Create(shaderSurfaceInfo);
+        GRContext? activeGrContext = _terminalSurfaceGpuBacked &&
+                                     TerminalShaderPostProcessor.CanUseGpuRenderSurface(grContext)
+            ? grContext
+            : null;
+        using SKSurface? shaderSurface = TerminalShaderPostProcessor.CreateRenderSurface(
+            shaderSurfaceInfo,
+            activeGrContext);
         if (shaderSurface is null)
         {
             destinationCanvas.Clear(new SKColor(screen.DefaultBackground));
@@ -493,7 +519,12 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         }
 
         SKRect pixelDestinationRect = new(0, 0, width, height);
-        if (!shaderPostProcessor.TryApply(shaderSurface.Canvas, terminalFrame, pixelDestinationRect, frameContext))
+        if (!shaderPostProcessor.TryApply(
+                activeGrContext,
+                shaderSurface.Canvas,
+                terminalFrame,
+                pixelDestinationRect,
+                frameContext))
         {
             destinationCanvas.Clear(new SKColor(screen.DefaultBackground));
             destinationCanvas.DrawImage(terminalFrame, logicalDestinationRect);
