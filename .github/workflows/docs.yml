@@ -32,6 +32,9 @@ permissions:
   pages: write
   id-token: write
 
+env:
+  DOTNET_NUGET_SIGNATURE_VERIFICATION: false
+
 concurrency:
   group: docs-pages
   cancel-in-progress: false

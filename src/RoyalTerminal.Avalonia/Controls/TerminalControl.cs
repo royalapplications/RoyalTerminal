@@ -159,6 +159,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             10_000,
             coerce: static (_, value) => Math.Max(0, value));
 
+    /// <summary>
+    /// Whether starting a new session preserves the previous session's scrollback history.
+    /// </summary>
+    public static readonly StyledProperty<bool> PreserveScrollbackOnSessionStartProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(
+            nameof(PreserveScrollbackOnSessionStart),
+            false);
+
     /// <summary>Default foreground color.</summary>
     public static readonly StyledProperty<Color> DefaultForegroundProperty =
         AvaloniaProperty.Register<TerminalControl, Color>(nameof(DefaultForeground),
@@ -364,6 +372,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         set => SetValue(ScrollbackLimitProperty, value);
     }
 
+    /// <summary>
+    /// Gets or sets whether <see cref="StartSessionAsync(ITerminalTransportOptions, CancellationToken)"/>
+    /// preserves scrollback from the previous completed session.
+    /// </summary>
+    public bool PreserveScrollbackOnSessionStart
+    {
+        get => GetValue(PreserveScrollbackOnSessionStartProperty);
+        set => SetValue(PreserveScrollbackOnSessionStartProperty, value);
+    }
+
     public Color DefaultForeground
     {
         get => GetValue(DefaultForegroundProperty);
@@ -536,6 +554,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private VirtualizedTerminalScrollViewer? _scrollViewer;
     private IVtProcessor? _vtProcessor;
     private bool _autoScrollPinnedToBottom = true;
+    private bool _preservedRestartHistoryInputScrollGuard;
+    private bool _preservedRestartHistoryWasUserScrolled;
     private bool _isMouseSelecting;
     private DispatcherTimer? _selectionAutoScrollTimer;
     private int _selectionAnchorColumn;
@@ -586,6 +606,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private double _contentScaleY = 1d;
     private VtProcessorPreference _appliedVtProcessorPreference = VtProcessorPreference.Auto;
     private string? _activeTransportId;
+    private int _transportSessionGeneration;
+    private Action<byte[], int>? _activeTransportDataHandler;
+    private Action<int>? _activeTransportExitHandler;
     private readonly TerminalMouseModeTracker _mouseModeTracker = new();
     private readonly object _pendingTransportOutputSync = new();
     private readonly object _pendingTransportOutputDrainExecutionSync = new();
@@ -824,6 +847,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 SyncScreenScrollOffsetFromScrollData();
                 UpdateRendererCursorForViewport();
                 UpdateRendererParityStateFromScreen();
+                UpdateAutoScrollPinnedToBottom();
+                UpdatePreservedRestartHistoryInputScrollGuardForViewportChange();
                 _presenter?.Invalidate();
                 RaiseScrollInvalidated();
             }
@@ -2734,6 +2759,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         TerminalSessionService.SendInput(data);
     }
 
+    /// <summary>
+    /// Sends form feed to the active terminal endpoint so an interactive shell can redraw its prompt.
+    /// </summary>
+    public void RequestPromptRedraw()
+    {
+        Span<byte> formFeed = stackalloc byte[] { 0x0C };
+        SendInput(formFeed);
+    }
+
     #endregion
 
     #region Keyboard Input
@@ -2951,7 +2985,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        ScrollToBottom();
+        if (_preservedRestartHistoryInputScrollGuard &&
+            _preservedRestartHistoryWasUserScrolled &&
+            IsScrolledBackFromLiveBottom())
+        {
+            return;
+        }
+
+        ScrollToBottomCore(clearPreservedRestartHistoryInputScrollGuard: false);
     }
 
     private bool IsScrolledBackFromLiveBottom()
@@ -4272,6 +4313,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 RaiseScrollInvalidated();
             }
 
+            UpdateAutoScrollPinnedToBottom();
+            UpdatePreservedRestartHistoryInputScrollGuardForViewportChange();
             e.Handled = true;
             return;
         }
@@ -4296,6 +4339,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
         UpdateAutoScrollPinnedToBottom();
+        UpdatePreservedRestartHistoryInputScrollGuardForViewportChange();
         e.Handled = true;
     }
 
@@ -4599,6 +4643,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
         UpdateAutoScrollPinnedToBottom();
+        UpdatePreservedRestartHistoryInputScrollGuardForViewportChange();
         RaiseScrollInvalidated();
     }
 
@@ -4606,6 +4651,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// Scrolls to the bottom of the terminal output.
     /// </summary>
     public void ScrollToBottom()
+    {
+        ScrollToBottomCore(clearPreservedRestartHistoryInputScrollGuard: true);
+    }
+
+    private void ScrollToBottomCore(bool clearPreservedRestartHistoryInputScrollGuard)
     {
         CaptureRendererSelectionForCurrentViewport();
         if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
@@ -4628,9 +4678,122 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _autoScrollPinnedToBottom = true;
+        if (clearPreservedRestartHistoryInputScrollGuard)
+        {
+            ClearPreservedRestartHistoryInputScrollGuard();
+        }
+
         UpdateRendererCursorForViewport();
         UpdateRendererParityStateFromScreen();
         RaiseScrollInvalidated();
+    }
+
+    /// <summary>
+    /// Clears scrollback/history while preserving the active terminal viewport.
+    /// </summary>
+    public void ClearScrollback()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.InvokeAsync(ClearScrollback).GetAwaiter().GetResult();
+            return;
+        }
+
+        if (_screen is null)
+        {
+            return;
+        }
+
+        bool restorePendingTransportOutputAcceptance = SetPendingTransportOutputAcceptance(acceptOutput: false);
+        try
+        {
+            FlushPendingTransportOutputBeforeResize();
+            ScrollToBottomCore(clearPreservedRestartHistoryInputScrollGuard: false);
+            ClearSelection();
+            ResetCursorBlinkPhase();
+
+            lock (_screen.SyncRoot)
+            {
+                if (_vtProcessor is ITerminalSessionHistoryController historyController)
+                {
+                    historyController.ClearScrollback();
+                }
+                else
+                {
+                    _screen.ClearScrollback();
+                }
+
+                SyncHistoryMutationScrollStateLocked();
+            }
+
+            UpdateAutoScrollPinnedToBottom();
+            ClearPreservedRestartHistoryInputScrollGuard();
+            UpdateRendererCursorForViewport();
+            UpdateRendererParityStateFromScreen();
+            _presenter?.Invalidate(fullRedraw: true);
+            RaiseScrollInvalidated();
+        }
+        finally
+        {
+            ResetPendingTransportOutputQueue();
+            SetPendingTransportOutputAcceptance(restorePendingTransportOutputAcceptance);
+        }
+    }
+
+    /// <summary>
+    /// Clears scrollback/history and makes the active cursor line the first viewport row.
+    /// </summary>
+    public void ClearHistory()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.InvokeAsync(ClearHistory).GetAwaiter().GetResult();
+            return;
+        }
+
+        if (_screen is null)
+        {
+            return;
+        }
+
+        bool restorePendingTransportOutputAcceptance = SetPendingTransportOutputAcceptance(acceptOutput: false);
+        try
+        {
+            FlushPendingTransportOutputBeforeResize();
+            ClearSelection();
+            ResetCursorBlinkPhase();
+
+            lock (_screen.SyncRoot)
+            {
+                if (_vtProcessor?.AlternateScreen == true)
+                {
+                    SyncHistoryMutationScrollStateLocked();
+                }
+                else if (_vtProcessor is ITerminalSessionHistoryController historyController)
+                {
+                    historyController.ClearVisibleHistory();
+                }
+                else
+                {
+                    int cursorRow = _vtProcessor?.CursorRow ?? Math.Max(0, _screen.ViewportRows - 1);
+                    _screen.ClearVisibleHistory(cursorRow);
+                }
+
+                SyncHistoryMutationScrollStateLocked();
+            }
+
+            UpdateAutoScrollPinnedToBottom();
+            ClearPreservedRestartHistoryInputScrollGuard();
+            UpdateRendererCursorForViewport();
+            UpdateRendererParityStateFromScreen();
+            _presenter?.Invalidate(fullRedraw: true);
+            RaiseScrollInvalidated();
+        }
+        finally
+        {
+            ResetPendingTransportOutputQueue();
+            SetPendingTransportOutputAcceptance(restorePendingTransportOutputAcceptance);
+        }
     }
 
     /// <summary>
@@ -4744,32 +4907,162 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// <summary>
     /// Starts a terminal session using a transport-specific options payload.
     /// </summary>
-    public async ValueTask StartSessionAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
+    public ValueTask StartSessionAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
+    {
+        return StartSessionAsync(options, PreserveScrollbackOnSessionStart, cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts a terminal session using a transport-specific options payload.
+    /// </summary>
+    /// <param name="options">Transport-specific session options.</param>
+    /// <param name="preserveScrollback">Whether the previous completed session's scrollback should be preserved.</param>
+    /// <param name="cancellationToken">Cancellation token used while starting the transport.</param>
+    public async ValueTask StartSessionAsync(
+        ITerminalTransportOptions options,
+        bool preserveScrollback,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+        cancellationToken.ThrowIfCancellationRequested();
 
         EnsureVtProcessorPreferenceApplied();
+        if (TerminalSessionService.HasActiveTransport)
+        {
+            throw new InvalidOperationException("A terminal transport session is already active.");
+        }
+
         CancelPendingTransportResize();
+        SetPendingTransportOutputAcceptance(acceptOutput: false);
+        try
+        {
+            ResetPendingTransportOutputQueue();
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                PrepareTerminalForSessionStart(preserveScrollback);
+            }
+            else
+            {
+                await Dispatcher.UIThread.InvokeAsync(() => PrepareTerminalForSessionStart(preserveScrollback));
+            }
+        }
+        catch
+        {
+            SetPendingTransportOutputAcceptance(acceptOutput: true);
+            throw;
+        }
+
         SetPendingTransportOutputAcceptance(acceptOutput: true);
-        ResetPendingTransportOutputQueue();
         _mouseModeTracker.Reset();
         ResetPointerButtons();
         _isMouseSelecting = false;
         EnsureCursorBlinkTimerRunning(false);
+        int sessionGeneration;
+        unchecked
+        {
+            _transportSessionGeneration++;
+            sessionGeneration = _transportSessionGeneration;
+        }
 
-        await TerminalSessionService.StartSessionAsync(
+        Action<byte[], int> dataHandler = (data, length) =>
+            OnPtyDataReceived(sessionGeneration, data, length);
+        Action<int> exitHandler = exitCode =>
+            OnPtyProcessExited(sessionGeneration, exitCode);
+        _activeTransportDataHandler = dataHandler;
+        _activeTransportExitHandler = exitHandler;
+
+        try
+        {
+            await TerminalSessionService.StartSessionAsync(
                 TerminalTransportFactory,
                 options,
                 _vtProcessor,
-                OnPtyDataReceived,
-                OnPtyProcessExited,
+                dataHandler,
+                exitHandler,
                 OnVtProcessorResponse,
                 OnVtProcessorBell,
                 OnVtProcessorTitleChanged,
                 cancellationToken)
             .ConfigureAwait(false);
+        }
+        catch
+        {
+            if (ReferenceEquals(_activeTransportDataHandler, dataHandler))
+            {
+                _activeTransportDataHandler = null;
+            }
+
+            if (ReferenceEquals(_activeTransportExitHandler, exitHandler))
+            {
+                _activeTransportExitHandler = null;
+            }
+
+            throw;
+        }
 
         _activeTransportId = options.TransportId;
+    }
+
+    private void PrepareTerminalForSessionStart(bool preserveScrollback)
+    {
+        if (_screen is null || _vtProcessor is null)
+        {
+            return;
+        }
+
+        FlushPendingTransportOutputBeforeResize();
+        ClearSelection();
+        ResetCursorBlinkPhase();
+
+        int previousTotalRows = _screen.TotalRows;
+        int previousMaxScrollOffset = _screen.MaxScrollOffset;
+        double previousScrollExtent = _scrollData?.Extent ?? 0d;
+        double previousScrollOffset = _scrollData?.Offset ?? 0d;
+
+        lock (_screen.SyncRoot)
+        {
+            if (_vtProcessor is ITerminalSessionHistoryController historyController)
+            {
+                historyController.PrepareForNewSession(preserveScrollback);
+            }
+            else if (preserveScrollback)
+            {
+                bool alternateBufferActive = _screen.AlternateBufferActive;
+                if (_screen.AlternateBufferActive)
+                {
+                    _screen.SwitchToPrimaryBuffer();
+                    _screen.DiscardInactiveAlternateBuffer();
+                }
+
+                if (!alternateBufferActive)
+                {
+                    _screen.MoveViewportToScrollbackAndClear();
+                }
+
+                _vtProcessor.Reset();
+            }
+            else
+            {
+                _screen.ClearAll();
+                _vtProcessor.Reset();
+            }
+
+            SyncHistoryMutationScrollStateLocked();
+        }
+
+        UpdateAutoScrollPinnedToBottom();
+        ArmPreservedRestartHistoryInputScrollGuard(preserveScrollback);
+        UpdateRendererCursorForViewport();
+        UpdateRendererParityStateFromScreen();
+        _presenter?.Invalidate(fullRedraw: true);
+        if (_screen.TotalRows != previousTotalRows ||
+            _screen.MaxScrollOffset != previousMaxScrollOffset ||
+            _scrollData is not null &&
+            (Math.Abs(_scrollData.Extent - previousScrollExtent) > double.Epsilon ||
+             Math.Abs(_scrollData.Offset - previousScrollOffset) > double.Epsilon))
+        {
+            RaiseScrollInvalidated();
+        }
     }
 
     /// <summary>
@@ -4781,11 +5074,33 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
+    /// Starts a pipe transport-backed terminal session.
+    /// </summary>
+    public ValueTask StartPipeAsync(
+        PipeTransportOptions options,
+        bool preserveScrollback,
+        CancellationToken cancellationToken = default)
+    {
+        return StartSessionAsync(options, preserveScrollback, cancellationToken);
+    }
+
+    /// <summary>
     /// Starts an SSH transport-backed terminal session.
     /// </summary>
     public ValueTask StartSshAsync(SshTransportOptions options, CancellationToken cancellationToken = default)
     {
         return StartSessionAsync(options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts an SSH transport-backed terminal session.
+    /// </summary>
+    public ValueTask StartSshAsync(
+        SshTransportOptions options,
+        bool preserveScrollback,
+        CancellationToken cancellationToken = default)
+    {
+        return StartSessionAsync(options, preserveScrollback, cancellationToken);
     }
 
     /// <summary>
@@ -4797,11 +5112,33 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
+    /// Starts a raw TCP transport-backed terminal session.
+    /// </summary>
+    public ValueTask StartRawTcpAsync(
+        RawTcpTransportOptions options,
+        bool preserveScrollback,
+        CancellationToken cancellationToken = default)
+    {
+        return StartSessionAsync(options, preserveScrollback, cancellationToken);
+    }
+
+    /// <summary>
     /// Starts a Telnet transport-backed terminal session.
     /// </summary>
     public ValueTask StartTelnetAsync(TelnetTransportOptions options, CancellationToken cancellationToken = default)
     {
         return StartSessionAsync(options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts a Telnet transport-backed terminal session.
+    /// </summary>
+    public ValueTask StartTelnetAsync(
+        TelnetTransportOptions options,
+        bool preserveScrollback,
+        CancellationToken cancellationToken = default)
+    {
+        return StartSessionAsync(options, preserveScrollback, cancellationToken);
     }
 
     /// <summary>
@@ -4813,16 +5150,44 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
+    /// Starts a serial transport-backed terminal session.
+    /// </summary>
+    public ValueTask StartSerialAsync(
+        SerialTransportOptions options,
+        bool preserveScrollback,
+        CancellationToken cancellationToken = default)
+    {
+        return StartSessionAsync(options, preserveScrollback, cancellationToken);
+    }
+
+    /// <summary>
     /// Stops the PTY and kills the child shell process.
     /// </summary>
     public void StopPty()
     {
         FlushPendingTransportResize();
         SetPendingTransportOutputAcceptance(acceptOutput: false);
-        TerminalSessionService.StopSessionAsync(_vtProcessor, OnPtyDataReceived, OnPtyProcessExited)
+        unchecked
+        {
+            _transportSessionGeneration++;
+        }
+
+        Action<byte[], int> dataHandler = _activeTransportDataHandler ?? OnPtyDataReceived;
+        Action<int> exitHandler = _activeTransportExitHandler ?? OnPtyProcessExited;
+        TerminalSessionService.StopSessionAsync(_vtProcessor, dataHandler, exitHandler)
             .AsTask()
             .GetAwaiter()
             .GetResult();
+        if (ReferenceEquals(_activeTransportDataHandler, dataHandler))
+        {
+            _activeTransportDataHandler = null;
+        }
+
+        if (ReferenceEquals(_activeTransportExitHandler, exitHandler))
+        {
+            _activeTransportExitHandler = null;
+        }
+
         if (Dispatcher.UIThread.CheckAccess())
         {
             DrainPendingTransportOutput(flushAll: true);
@@ -4933,12 +5298,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
-        return key is Key.C or Key.Z or Key.OemBackslash;
+        return key is Key.C or Key.L or Key.Z or Key.OemBackslash;
     }
 
     private static bool IsUrgentTransportControlInput(ReadOnlySpan<byte> payload)
     {
-        return payload.Length == 1 && payload[0] is 0x03 or 0x1A or 0x1C;
+        return payload.Length == 1 && payload[0] is 0x03 or 0x0C or 0x1A or 0x1C;
     }
 
     private void SuppressReservedAncestorKeyBindings()
@@ -5045,7 +5410,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void OnPtyDataReceived(byte[] data, int length)
     {
+        OnPtyDataReceived(_transportSessionGeneration, data, length);
+    }
+
+    private void OnPtyDataReceived(int sessionGeneration, byte[] data, int length)
+    {
         if (length <= 0)
+        {
+            return;
+        }
+
+        if (sessionGeneration != Volatile.Read(ref _transportSessionGeneration))
         {
             return;
         }
@@ -5103,8 +5478,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void OnPtyProcessExited(int exitCode)
     {
+        OnPtyProcessExited(_transportSessionGeneration, exitCode);
+    }
+
+    private void OnPtyProcessExited(int sessionGeneration, int exitCode)
+    {
         Dispatcher.UIThread.Post(() =>
         {
+            if (sessionGeneration != _transportSessionGeneration)
+            {
+                return;
+            }
+
             DrainPendingTransportOutput(flushAll: true);
             DrainPendingTransportOutputUiBatches(flushAll: true);
             _activeTransportId = null;
@@ -5424,12 +5809,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
     }
 
-    private void SetPendingTransportOutputAcceptance(bool acceptOutput)
+    private bool SetPendingTransportOutputAcceptance(bool acceptOutput)
     {
         lock (_pendingTransportOutputSync)
         {
+            bool previous = _acceptPendingTransportOutput;
             _acceptPendingTransportOutput = acceptOutput;
             Monitor.PulseAll(_pendingTransportOutputSync);
+            return previous;
         }
     }
 
@@ -6838,6 +7225,43 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _autoScrollPinnedToBottom = _scrollData.IsAtBottom && _screen.ScrollOffset == 0;
     }
 
+    private void ArmPreservedRestartHistoryInputScrollGuard(bool preserveScrollback)
+    {
+        if (!preserveScrollback || _scrollData is not { CanScroll: true })
+        {
+            ClearPreservedRestartHistoryInputScrollGuard();
+            return;
+        }
+
+        _preservedRestartHistoryInputScrollGuard = true;
+        _preservedRestartHistoryWasUserScrolled = false;
+    }
+
+    private void ClearPreservedRestartHistoryInputScrollGuard()
+    {
+        _preservedRestartHistoryInputScrollGuard = false;
+        _preservedRestartHistoryWasUserScrolled = false;
+    }
+
+    private void UpdatePreservedRestartHistoryInputScrollGuardForViewportChange()
+    {
+        if (!_preservedRestartHistoryInputScrollGuard)
+        {
+            return;
+        }
+
+        if (IsScrolledBackFromLiveBottom())
+        {
+            _preservedRestartHistoryWasUserScrolled = true;
+            return;
+        }
+
+        if (_preservedRestartHistoryWasUserScrolled)
+        {
+            ClearPreservedRestartHistoryInputScrollGuard();
+        }
+    }
+
     private static double GetLogicalViewportHeight(int rows, double cellHeight)
     {
         double safeCellHeight = Math.Max(1d, cellHeight);
@@ -6883,6 +7307,43 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _screen.ScrollOffset = 0;
             _screen.InvalidateViewport();
         }
+    }
+
+    private void SyncHistoryMutationScrollStateLocked()
+    {
+        if (_scrollData is null || _screen is null)
+        {
+            return;
+        }
+
+        bool pinnedToLiveBottom = false;
+        if (_vtProcessor?.AlternateScreen == true)
+        {
+            SyncAlternateScreenScrollStateLocked();
+            pinnedToLiveBottom = true;
+        }
+        else if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
+        {
+            viewportScrollSource.SetViewportOffsetRows(viewportScrollSource.ViewportScrollState.MaxOffsetRows);
+            SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+            pinnedToLiveBottom = true;
+        }
+        else
+        {
+            _screen.ScrollOffset = 0;
+            _scrollData.UpdateExtent(_screen.TotalRows, true);
+            _scrollData.ScrollToBottom();
+            _screen.InvalidateViewport();
+            pinnedToLiveBottom = true;
+        }
+
+        if (pinnedToLiveBottom && AutoScroll)
+        {
+            _preserveAutoScrollBottomDuringAncestorOffsetSync = true;
+        }
+
+        UpdateRendererCursorForViewportLocked();
+        ApplyAnchoredSelectionToRendererLocked();
     }
 
     private bool TryGetViewportScrollSource([NotNullWhen(true)] out ITerminalViewportScrollSource? viewportScrollSource)
@@ -7045,15 +7506,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         int cursorColumn = _vtProcessor.CursorCol;
         int cursorRow = _vtProcessor.CursorRow;
-        bool atLiveBottom;
-        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
-        {
-            atLiveBottom = viewportScrollSource.ViewportScrollState.OffsetRows >= viewportScrollSource.ViewportScrollState.MaxOffsetRows;
-        }
-        else
+        if (!TryGetViewportScrollSource(out _))
         {
             cursorRow += _screen.ScrollOffset;
-            atLiveBottom = _screen.ScrollOffset == 0;
         }
 
         _renderer.CursorColumn = cursorColumn;
@@ -7062,7 +7517,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         bool rowVisible = (uint)cursorRow < (uint)_screen.ViewportRows;
         bool columnVisible = (uint)cursorColumn < (uint)_screen.Columns;
-        bool baseVisible = _vtProcessor.CursorVisible && atLiveBottom && rowVisible && columnVisible;
+        bool baseVisible = _vtProcessor.CursorVisible && rowVisible && columnVisible;
         bool blinkPhaseActive = blinkEnabled && IsFocused;
 
         if (baseVisible &&
@@ -7110,7 +7565,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _cursorBlinkTimer.Stop();
         }
 
+        ResetCursorBlinkPhase();
+    }
+
+    private void ResetCursorBlinkPhase()
+    {
         _cursorBlinkVisiblePhase = true;
+        _lastBlinkCursorColumn = -1;
+        _lastBlinkCursorRow = -1;
     }
 
     private DispatcherTimer CreateCursorBlinkTimer()

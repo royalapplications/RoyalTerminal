@@ -92,3 +92,28 @@ public interface IVtProcessor : IDisposable
     /// </summary>
     Action<string>? TitleCallback { get; set; }
 }
+
+/// <summary>
+/// Optional VT processor capability for explicit scrollback/history operations.
+/// </summary>
+public interface ITerminalSessionHistoryController
+{
+    /// <summary>
+    /// Prepares the processor for a new transport session.
+    /// </summary>
+    /// <param name="preserveScrollback">
+    /// True to preserve existing history by moving the current viewport into scrollback
+    /// before clearing the active screen; false to start with a clean terminal buffer.
+    /// </param>
+    void PrepareForNewSession(bool preserveScrollback);
+
+    /// <summary>
+    /// Clears scrollback/history while leaving the active viewport contents intact.
+    /// </summary>
+    void ClearScrollback();
+
+    /// <summary>
+    /// Clears scrollback/history and makes the active cursor line the first viewport row.
+    /// </summary>
+    void ClearVisibleHistory();
+}

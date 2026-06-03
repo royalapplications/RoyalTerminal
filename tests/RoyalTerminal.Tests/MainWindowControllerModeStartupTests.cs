@@ -265,6 +265,7 @@ public sealed class MainWindowControllerModeStartupTests
         viewModel.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.BlockUnsafe;
         viewModel.EnableTextShaping = false;
         viewModel.ReflowOnResize = false;
+        viewModel.PreserveScrollbackOnRestart = true;
         viewModel.SixelGraphicsEnabled = true;
         viewModel.EnableLigatures = true;
 
@@ -292,12 +293,14 @@ public sealed class MainWindowControllerModeStartupTests
                 TerminalPasteSafetyPolicy.BlockUnsafe,
                 enableTextShaping: false,
                 reflowOnResize: false,
+                preserveScrollbackOnSessionStart: true,
                 sixelGraphicsEnabled: true,
                 enableLigatures: true);
 
             viewModel.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.SanitizeControlSequences;
             viewModel.EnableTextShaping = true;
             viewModel.ReflowOnResize = true;
+            viewModel.PreserveScrollbackOnRestart = false;
             viewModel.SixelGraphicsEnabled = false;
             viewModel.EnableLigatures = false;
             Dispatcher.UIThread.RunJobs();
@@ -307,6 +310,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TerminalPasteSafetyPolicy.SanitizeControlSequences,
                 enableTextShaping: true,
                 reflowOnResize: true,
+                preserveScrollbackOnSessionStart: false,
                 sixelGraphicsEnabled: false,
                 enableLigatures: false);
         }
@@ -352,6 +356,116 @@ public sealed class MainWindowControllerModeStartupTests
             Dispatcher.UIThread.RunJobs();
 
             Assert.Equal("status-marker", viewModel.StatusText);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_ClearHistoryCommand_DropsActiveStandaloneScrollback()
+    {
+        MainWindowViewModel viewModel = new();
+        viewModel.SetRenderMode(
+            useRenderedControl: false,
+            useNativeVtControl: false,
+            useManagedVtControl: true);
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo clear-history-demo";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            int managedTabIndex = viewModel.NativeVtAvailable ? 1 : 0;
+            viewModel.SwitchToTabByIndexCommand.Execute(managedTabIndex).Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
+            Assert.Equal(VtProcessorPreference.Managed, activeControl.VtProcessorPreference);
+            bool startupOutputSeen = await WaitUntilAsync(
+                () =>
+                {
+                    TerminalScreen? activeScreen = activeControl.Screen as TerminalScreen;
+                    if (activeScreen is null)
+                    {
+                        return false;
+                    }
+
+                    lock (activeScreen.SyncRoot)
+                    {
+                        return ReadAllRows(activeScreen).Contains("clear-history-demo", StringComparison.Ordinal);
+                    }
+                },
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupOutputSeen);
+
+            if (activeControl.HasActiveSession || activeControl.HasPty)
+            {
+                activeControl.StopPty();
+                await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            }
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                int historyRowsToWrite = Math.Max(64, activeControl.Rows + 64);
+                for (int i = 0; i < historyRowsToWrite; i++)
+                {
+                    activeControl.WriteOutput(Encoding.UTF8.GetBytes($"HISTORY-{i:000}\r\n"));
+                }
+
+                activeControl.WriteOutput("prompt$ "u8.ToArray());
+                activeControl.ScrollByRows(-3);
+            });
+
+            TerminalScreen screen = Assert.IsType<TerminalScreen>(activeControl.Screen);
+            lock (screen.SyncRoot)
+            {
+                Assert.True(
+                    screen.MaxScrollOffset > 0,
+                    $"Expected synthetic history to create scrollback. Preference={activeControl.VtProcessorPreference}, " +
+                    $"Native={activeControl.IsUsingNativeVtProcessor}, Rows={activeControl.Rows}, " +
+                    $"ViewportRows={screen.ViewportRows}, TotalRows={screen.TotalRows}, " +
+                    $"MaxScrollOffset={screen.MaxScrollOffset}, ScrollOffset={screen.ScrollOffset}, Status='{viewModel.StatusText}'.");
+                Assert.True(
+                    screen.ScrollOffset > 0,
+                    $"Expected ScrollByRows to move into scrollback. MaxScrollOffset={screen.MaxScrollOffset}, ScrollOffset={screen.ScrollOffset}.");
+            }
+
+            List<byte[]> sentInputs = [];
+            activeControl.TerminalSessionService.InputSent += (_, args) => sentInputs.Add(args.Data.ToArray());
+
+            viewModel.ClearActiveScrollbackCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            lock (screen.SyncRoot)
+            {
+                string allRows = ReadAllRows(screen);
+                Assert.True(screen.MaxScrollOffset == 0, allRows);
+                Assert.Equal(0, screen.ScrollOffset);
+                Assert.Equal(screen.ViewportRows, screen.TotalRows);
+                Assert.DoesNotContain("HISTORY-", allRows, StringComparison.Ordinal);
+                Assert.Contains("prompt$ ", allRows, StringComparison.Ordinal);
+                Assert.StartsWith("prompt$ ", ReadRow(screen.GetViewportRow(0)), StringComparison.Ordinal);
+            }
+
+            Assert.Empty(sentInputs);
+            Assert.Contains("Cleared history", viewModel.StatusText, StringComparison.Ordinal);
         }
         finally
         {
@@ -710,11 +824,41 @@ public sealed class MainWindowControllerModeStartupTests
         return false;
     }
 
+    private static string ReadAllRows(TerminalScreen screen)
+    {
+        StringBuilder builder = new();
+        for (int rowIndex = 0; rowIndex < screen.TotalRows; rowIndex++)
+        {
+            builder.AppendLine(ReadRow(screen.GetRow(rowIndex)));
+        }
+
+        return builder.ToString();
+    }
+
+    private static string ReadRow(TerminalRow row)
+    {
+        StringBuilder builder = new();
+        int last = row.Columns - 1;
+        while (last >= 0 && row[last].Codepoint == 0)
+        {
+            last--;
+        }
+
+        for (int column = 0; column <= last; column++)
+        {
+            int codepoint = row[column].Codepoint;
+            builder.Append(codepoint == 0 ? ' ' : char.ConvertFromUtf32((int)codepoint));
+        }
+
+        return builder.ToString();
+    }
+
     private static void AssertTerminalBehaviorSettings(
         IReadOnlyList<TerminalControl> controls,
         TerminalPasteSafetyPolicy expectedPastePolicy,
         bool enableTextShaping,
         bool reflowOnResize,
+        bool preserveScrollbackOnSessionStart,
         bool sixelGraphicsEnabled,
         bool enableLigatures)
     {
@@ -725,6 +869,7 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.NotNull(control.Renderer);
             Assert.Equal(enableTextShaping, control.Renderer!.EnableTextShaping);
             Assert.Equal(reflowOnResize, control.ReflowOnResize);
+            Assert.Equal(preserveScrollbackOnSessionStart, control.PreserveScrollbackOnSessionStart);
             Assert.Equal(sixelGraphicsEnabled, control.SixelGraphicsEnabled);
             Assert.Equal(enableLigatures, control.Renderer.EnableLigatures);
         }

@@ -36,6 +36,29 @@ await Terminal.StartSessionAsync(options);
 
 That one control already owns the default session service, the active VT processor, the terminal renderer, selection and scrolling behavior, and the mode-aware input path.
 
+## Preserving session history
+
+Session history is clean by default: starting a new session clears the previous buffer. Hosts that keep the same control alive across reconnects can opt in to preserving scrollback:
+
+```csharp
+Terminal.PreserveScrollbackOnSessionStart = true;
+await Terminal.StartSessionAsync(options);
+```
+
+For per-session control, pass the explicit overload:
+
+```csharp
+await Terminal.StartSessionAsync(options, preserveScrollback: true);
+```
+
+Use `ClearScrollback()` when the host wants to discard history while keeping the active viewport and session alive:
+
+```csharp
+Terminal.ClearScrollback();
+```
+
+See [Session History And Scrollback](/articles/session-history) for the host API and [Session Restart Semantics](/articles/session-restart-semantics) for the managed VT, Ghostty VT, xterm.js, Windows Terminal, and RoyalTerminal state-reset comparison.
+
 ## What the control actually owns
 
 `TerminalControl` is the public host boundary. It is where Avalonia-facing configuration lives: font family, font size, grid size, scrollback size, colors, active theme, regex text highlighting, framebuffer shaders, and `VtProcessorPreference`. It also exposes the events most hosts care about, such as `DataReceived`, `TitleChanged`, `Bell`, `ProcessExited`, `CloseRequested`, and `TerminalResized`.

@@ -1245,6 +1245,133 @@ public sealed class TerminalScreen
     }
 
     /// <summary>
+    /// Clears primary-buffer scrollback while preserving the active viewport.
+    /// </summary>
+    public void ClearScrollback()
+    {
+        if (_alternateBufferActive)
+        {
+            EnsureAlternateRows();
+            ScrollOffset = 0;
+            InvalidateViewport();
+            return;
+        }
+
+        int scrollbackRows = Math.Max(0, _rows.Count - ViewportRows);
+        if (scrollbackRows <= 0)
+        {
+            ScrollOffset = 0;
+            return;
+        }
+
+        TerminalRowBuffer rows = new(ViewportRows);
+        int firstViewportRow = Math.Max(0, _rows.Count - ViewportRows);
+        for (int rowIndex = firstViewportRow; rowIndex < _rows.Count; rowIndex++)
+        {
+            rows.Add(_rows[rowIndex]);
+        }
+
+        _rows = rows;
+        EnsureMinimumRows(ViewportRows);
+        ShiftRasterGraphicsAfterTopRowsRemoved(scrollbackRows);
+        ScrollOffset = 0;
+        InvalidateAll();
+    }
+
+    /// <summary>
+    /// Clears primary-buffer scrollback and makes the active cursor line the first viewport row.
+    /// </summary>
+    /// <param name="cursorViewportRow">The cursor row in viewport coordinates.</param>
+    public void ClearVisibleHistory(int cursorViewportRow)
+    {
+        if (_alternateBufferActive)
+        {
+            EnsureAlternateRows();
+            ScrollOffset = 0;
+            InvalidateViewport();
+            return;
+        }
+
+        ClearScrollback();
+
+        int cursorRow = Math.Clamp(cursorViewportRow, 0, Math.Max(0, ViewportRows - 1));
+        TerminalRow sourceRow = GetViewportRow(cursorRow);
+        TerminalRow promptRow = new(Columns, DefaultForeground, DefaultBackground);
+        promptRow.CopyActiveFrom(sourceRow, DefaultForeground, DefaultBackground);
+        promptRow.WrapsToNext = false;
+
+        TerminalRowBuffer rows = new(ViewportRows);
+        rows.Add(promptRow);
+        for (int rowIndex = 1; rowIndex < ViewportRows; rowIndex++)
+        {
+            rows.Add(new TerminalRow(Columns, DefaultForeground, DefaultBackground));
+        }
+
+        _rows = rows;
+        ClearRasterGraphics();
+        ClearKittyGraphics();
+        ScrollOffset = 0;
+        InvalidateAll();
+    }
+
+    /// <summary>
+    /// Clears the active buffer and all history, returning the primary buffer to blank viewport rows.
+    /// </summary>
+    public void ClearAll()
+    {
+        if (_alternateBufferActive)
+        {
+            SwitchToPrimaryBuffer();
+        }
+
+        _rows = CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
+        _primaryRows = null;
+        _alternateRows = null;
+        _primaryRasterImagesById = null;
+        _primaryRasterPlacements = null;
+        _alternateRasterImagesById = null;
+        _alternateRasterPlacements = null;
+        _primaryScrollOffset = 0;
+        _viewportTop = 0;
+        ClearHyperlinks();
+        ClearRasterGraphics();
+        ClearKittyGraphics();
+        InvalidateAll();
+    }
+
+    /// <summary>
+    /// Moves the non-empty active viewport into scrollback and clears the active viewport.
+    /// </summary>
+    public void MoveViewportToScrollbackAndClear()
+    {
+        if (_alternateBufferActive)
+        {
+            EnsureAlternateRows();
+            ClearActiveRows();
+            ClearRasterGraphics();
+            ClearKittyGraphics();
+            ScrollOffset = 0;
+            InvalidateAll();
+            return;
+        }
+
+        DiscardTransientResizeRows();
+        ScrollOffset = 0;
+
+        AppendBlankRowsAndTrimScrollback(GetNonEmptyViewportRowCount());
+
+        ClearViewportRows();
+        ClearRasterGraphicsInViewportRectangle(
+            0,
+            Math.Max(0, ViewportRows - 1),
+            0,
+            Math.Max(0, Columns - 1));
+        ClearKittyGraphics();
+        ScrollOffset = 0;
+        InvalidateAll();
+    }
+
+    /// <summary>
     /// Removes trailing rows that were appended only to preserve a Windows PTY viewport during resize.
     /// </summary>
     /// <returns>The number of transient resize rows removed.</returns>
@@ -1293,6 +1420,45 @@ public sealed class TerminalScreen
         return false;
     }
 
+    private int GetNonEmptyViewportRowCount()
+    {
+        for (int viewportRow = ViewportRows - 1; viewportRow >= 0; viewportRow--)
+        {
+            if (RowHasContent(GetViewportRow(viewportRow)) || RowHasRasterContent(viewportRow))
+            {
+                return viewportRow + 1;
+            }
+        }
+
+        return 0;
+    }
+
+    private bool RowHasRasterContent(int viewportRow)
+    {
+        if (_rasterPlacements.Count == 0)
+        {
+            return false;
+        }
+
+        int absoluteRow = GetAbsoluteRowForViewportRow(viewportRow);
+        for (int i = 0; i < _rasterPlacements.Count; i++)
+        {
+            if (RasterPlacementIntersectsRows(_rasterPlacements[i], absoluteRow, absoluteRow))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void ClearHyperlinks()
+    {
+        _hyperlinksById.Clear();
+        _hyperlinkIdsByUrl.Clear();
+        _nextHyperlinkId = 1;
+    }
+
     /// <summary>
     /// Drops cells retained outside each active row width after an external backend resize.
     /// </summary>
@@ -1325,6 +1491,35 @@ public sealed class TerminalScreen
         for (int rowIndex = 0; rowIndex < _rows.Count; rowIndex++)
         {
             _rows[rowIndex].Clear(DefaultForeground, DefaultBackground);
+        }
+    }
+
+    private void ClearViewportRows()
+    {
+        for (int rowIndex = 0; rowIndex < ViewportRows; rowIndex++)
+        {
+            GetViewportRow(rowIndex).Clear(DefaultForeground, DefaultBackground);
+        }
+    }
+
+    private void AppendBlankRowsAndTrimScrollback(int rowCount)
+    {
+        if (rowCount <= 0)
+        {
+            return;
+        }
+
+        int maxRows = ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit);
+        int overflowRows = Math.Max(0, _rows.Count + rowCount - maxRows);
+        if (overflowRows > 0)
+        {
+            _rows.RemoveFirst(overflowRows);
+            ShiftRasterGraphicsAfterTopRowsRemoved(overflowRows);
+        }
+
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            _rows.Add(new TerminalRow(Columns, DefaultForeground, DefaultBackground));
         }
     }
 

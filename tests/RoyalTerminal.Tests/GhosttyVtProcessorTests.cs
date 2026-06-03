@@ -155,6 +155,264 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_ClearScrollback_UsesNativeHistoryClear_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 10; i++)
+        {
+            builder.Append("L");
+            builder.Append(i.ToString("D2"));
+            builder.Append("\r\n");
+        }
+
+        processor.Process(Encoding.UTF8.GetBytes(builder.ToString()));
+        Assert.True(processor.ViewportScrollState.MaxOffsetRows > 0);
+        string beforeViewport = ReadViewportAscii(screen);
+
+        processor.ClearScrollback();
+
+        TerminalViewportScrollState state = processor.ViewportScrollState;
+        Assert.Equal(0ul, state.MaxOffsetRows);
+        Assert.Equal(state.VisibleRows, state.TotalRows);
+        Assert.Equal(beforeViewport, ReadViewportAscii(screen));
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_ClearVisibleHistory_MakesPromptLineFirstViewportRow_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 16, viewportRows: 4, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 16, rows: 4, widthPx: 128, heightPx: 64);
+
+        processor.Process("OLD0\r\nOLD1\r\nOLD2\r\n\u001b[1;31mprompt$ \u001b[0m"u8);
+        Assert.Contains("OLD", ReadViewportAscii(screen), StringComparison.Ordinal);
+        Assert.Equal(3, processor.CursorRow);
+
+        processor.ClearVisibleHistory();
+
+        TerminalViewportScrollState state = processor.ViewportScrollState;
+        string viewport = ReadViewportAscii(screen);
+        Assert.Equal(0ul, state.MaxOffsetRows);
+        Assert.Equal(state.VisibleRows, state.TotalRows);
+        Assert.DoesNotContain("OLD", viewport, StringComparison.Ordinal);
+        Assert.StartsWith("prompt$ ", ReadAsciiPrefix(screen, row: 0, columns: 8), StringComparison.Ordinal);
+        Assert.True(screen.GetViewportRow(0)[0].Attributes.HasFlag(CellAttributes.Bold));
+        Assert.NotEqual(screen.DefaultForeground, screen.GetViewportRow(0)[0].Foreground);
+        Assert.Equal(0, processor.CursorRow);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_ClearVisibleHistory_DoesNotRestoreOldRowsAfterNewOutput_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 48, scrollbackLimit: 200);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 48, widthPx: 640, heightPx: 768);
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 120; i++)
+        {
+            builder.Append("OLD-");
+            builder.Append(i.ToString("D3"));
+            builder.Append("\r\n");
+        }
+
+        builder.Append("prompt$ ");
+
+        processor.Process(Encoding.UTF8.GetBytes(builder.ToString()));
+        processor.ClearVisibleHistory();
+        processor.Process("dir\r\nNEW0\r\n"u8);
+
+        string allRows = ReadViewportAscii(screen);
+        Assert.Equal(0ul, processor.ViewportScrollState.MaxOffsetRows);
+        Assert.DoesNotContain("OLD", allRows, StringComparison.Ordinal);
+        Assert.Contains("prompt$ dir", allRows, StringComparison.Ordinal);
+        Assert.Contains("NEW0", allRows, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_ClearVisibleHistory_MovesMidViewportPromptBeforeNewOutput_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 48, scrollbackLimit: 200);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 48, widthPx: 640, heightPx: 768);
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 16; i++)
+        {
+            builder.Append("OLD-");
+            builder.Append(i.ToString("D3"));
+            builder.Append("\r\n");
+        }
+
+        builder.Append("prompt$ ");
+
+        processor.Process(Encoding.UTF8.GetBytes(builder.ToString()));
+        Assert.Equal(16, processor.CursorRow);
+
+        processor.ClearVisibleHistory();
+        processor.Process("dir\r\nNEW0\r\n"u8);
+
+        string allRows = ReadViewportAscii(screen);
+        Assert.Equal(0ul, processor.ViewportScrollState.MaxOffsetRows);
+        Assert.Equal(2, processor.CursorRow);
+        Assert.DoesNotContain("OLD-", allRows, StringComparison.Ordinal);
+        Assert.StartsWith("prompt$ dir", ReadAsciiPrefix(screen, row: 0, columns: 11), StringComparison.Ordinal);
+        Assert.StartsWith("NEW0", ReadAsciiPrefix(screen, row: 1, columns: 4), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_ClearVisibleHistory_IgnoresStaleScrollMargins_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 48, scrollbackLimit: 200);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 48, widthPx: 640, heightPx: 768);
+
+        StringBuilder builder = new();
+        for (int i = 0; i < 16; i++)
+        {
+            builder.Append("OLD-");
+            builder.Append(i.ToString("D3"));
+            builder.Append("\r\n");
+        }
+
+        builder.Append("prompt$ ");
+
+        processor.Process(Encoding.UTF8.GetBytes(builder.ToString()));
+        processor.Process("\u001b[10;40r\u001b[17;9H"u8);
+
+        processor.ClearVisibleHistory();
+        processor.Process("dir\r\nNEW0\r\n"u8);
+
+        string allRows = ReadViewportAscii(screen);
+        Assert.Equal(0ul, processor.ViewportScrollState.MaxOffsetRows);
+        Assert.DoesNotContain("OLD-", allRows, StringComparison.Ordinal);
+        Assert.StartsWith("prompt$ dir", ReadAsciiPrefix(screen, row: 0, columns: 11), StringComparison.Ordinal);
+        Assert.StartsWith("NEW0", ReadAsciiPrefix(screen, row: 1, columns: 4), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_PrepareForNewSession_PreservesViewportInNativeScrollback_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
+        processor.Process("\u001b[31mOLD\u001b[0m\r\nNEXT"u8);
+
+        processor.PrepareForNewSession(preserveScrollback: true);
+
+        TerminalViewportScrollState bottom = processor.ViewportScrollState;
+        Assert.True(bottom.MaxOffsetRows > 0);
+        Assert.Equal(bottom.MaxOffsetRows, bottom.OffsetRows);
+        Assert.True(string.IsNullOrWhiteSpace(ReadViewportAscii(screen)));
+
+        processor.ScrollViewportToTop();
+
+        Assert.Equal("OLD", ReadAsciiPrefix(screen, row: 0, columns: 3));
+        Assert.NotEqual(screen.DefaultForeground, screen.GetViewportRow(0)[0].Foreground);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_PrepareForNewSession_RestoresPrimaryPromptAfterAbruptAlternateScreenApp_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 16, viewportRows: 4, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 16, rows: 4, widthPx: 128, heightPx: 64);
+
+        processor.Process("shell$ btop\r\n"u8);
+        processor.Process("\u001b[?1049hBTOP UI\r\nBTOP CPU"u8);
+
+        Assert.True(processor.AlternateScreen);
+        Assert.Contains("BTOP UI", ReadViewportAscii(screen), StringComparison.Ordinal);
+
+        processor.PrepareForNewSession(preserveScrollback: true);
+
+        string viewport = ReadViewportAscii(screen);
+        Assert.False(processor.AlternateScreen);
+        Assert.Contains("shell$ btop", viewport, StringComparison.Ordinal);
+        Assert.DoesNotContain("BTOP UI", viewport, StringComparison.Ordinal);
+        Assert.DoesNotContain("BTOP CPU", viewport, StringComparison.Ordinal);
+        Assert.Equal(0, processor.CursorCol);
+        Assert.Equal(1, processor.CursorRow);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_PrepareForNewSession_ResetsProcessVisibleModes_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 8, viewportRows: 4, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
+
+        processor.Process(
+            "\u001b[?1;6;66;67;1004;1006;1016;1049;2004;2026;2031;2048h"u8);
+        processor.Process("\u001b[?25l\u001b[4h\u001b[20h\u001b[>3u\u001b[2;3r\u001b[3;4HOLD"u8);
+
+        Assert.True(processor.ApplicationCursorKeys);
+        Assert.True(processor.ApplicationKeypad);
+        Assert.True(processor.AlternateScreen);
+        Assert.True(processor.BracketedPaste);
+        Assert.True(processor.FocusEventsEnabled);
+        Assert.Equal(3, processor.KittyKeyboardFlags);
+        Assert.False(processor.CursorVisible);
+
+        processor.PrepareForNewSession(preserveScrollback: true);
+
+        Assert.True(processor.CursorVisible);
+        Assert.False(processor.ApplicationCursorKeys);
+        Assert.False(processor.ApplicationKeypad);
+        Assert.False(processor.AlternateScreen);
+        Assert.False(processor.BracketedPaste);
+        Assert.False(processor.FocusEventsEnabled);
+        Assert.Equal(0, processor.KittyKeyboardFlags);
+        Assert.Equal(0, processor.CursorCol);
+        Assert.Equal(0, processor.CursorRow);
+        Assert.True(string.IsNullOrWhiteSpace(ReadViewportAscii(screen)));
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_ViewportScrollState_CanSetNearBottomOffset_AfterLargeResize_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
@@ -583,6 +841,17 @@ public class GhosttyVtProcessorTests
         }
 
         return new string(chars);
+    }
+
+    private static string ReadViewportAscii(TerminalScreen screen)
+    {
+        StringBuilder builder = new();
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            builder.AppendLine(ReadAsciiPrefix(screen, row, screen.Columns));
+        }
+
+        return builder.ToString();
     }
 
     private static void SetAscii(TerminalRow row, string text)

@@ -300,7 +300,7 @@ public sealed class WindowsPty : IPty
 
     private static bool IsPriorityControlWrite(ReadOnlySpan<byte> payload)
     {
-        return payload.Length == 1 && payload[0] is 0x03 or 0x1A or 0x1C;
+        return payload.Length == 1 && payload[0] is 0x03 or 0x0C or 0x1A or 0x1C;
     }
 
     private void ReadLoop()

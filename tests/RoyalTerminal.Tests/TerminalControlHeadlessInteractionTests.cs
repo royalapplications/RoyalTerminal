@@ -455,6 +455,15 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
+    public async Task Headless_PromptRedraw_UnderOutputFlood_SendsFormFeedImmediately()
+    {
+        await VerifyControlCharacterDispatchUnderOutputFloodAsync(
+            physicalKey: PhysicalKey.L,
+            expectedByte: 0x0C,
+            controlCharacterLabel: "Ctrl+L");
+    }
+
+    [AvaloniaFact]
     public async Task Headless_ManagedPty_CtrlC_InterruptsFloodedShellWithinLatencyBudget()
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
@@ -784,6 +793,51 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.False(
                 transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;1;6;22c"),
                 "Did not expect a late DA response to be injected into the PTY after Ctrl+C.");
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.StopPty);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_ManagedPty_PromptRedraw_SuppressesLateDaResponseAtPromptBoundary()
+    {
+        RecordingPtyTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport, preference: VtProcessorPreference.Managed);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            transport.ClearInputs();
+            control.RequestPromptRedraw();
+
+            bool formFeedObserved = await WaitUntilAsync(
+                () => transport.HasInput(static input => input.Length == 1 && input[0] == 0x0C),
+                TimeSpan.FromSeconds(2));
+            Assert.True(formFeedObserved, "Expected Ctrl+L/form-feed to reach the PTY before testing late DA suppression.");
+
+            int inputCountAfterFormFeed = transport.GetInputCount();
+            transport.RaiseData("\x1b[c"u8.ToArray());
+
+            await Task.Delay(150);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(
+                inputCountAfterFormFeed,
+                transport.GetInputCount());
+            Assert.False(
+                transport.HasInput(static input => Encoding.ASCII.GetString(input) == "\x1b[?62;1;6;22c"),
+                "Did not expect a late DA response to be injected into the PTY after Ctrl+L/form-feed.");
         }
         finally
         {
@@ -2534,8 +2588,9 @@ public sealed class TerminalControlHeadlessInteractionTests
         return physicalKey switch
         {
             PhysicalKey.C => Key.C,
+            PhysicalKey.L => Key.L,
             PhysicalKey.Z => Key.Z,
-            _ => throw new ArgumentOutOfRangeException(nameof(physicalKey), physicalKey, "Only C and Z are supported in flood interrupt tests."),
+            _ => throw new ArgumentOutOfRangeException(nameof(physicalKey), physicalKey, "Only C, L, and Z are supported in flood interrupt tests."),
         };
     }
 
