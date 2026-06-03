@@ -4704,31 +4704,40 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        FlushPendingTransportOutputBeforeResize();
-        ScrollToBottomCore(clearPreservedRestartHistoryInputScrollGuard: false);
-        ClearSelection();
-        ResetCursorBlinkPhase();
-
-        lock (_screen.SyncRoot)
+        bool restorePendingTransportOutputAcceptance = SetPendingTransportOutputAcceptance(acceptOutput: false);
+        try
         {
-            if (_vtProcessor is ITerminalSessionHistoryController historyController)
+            FlushPendingTransportOutputBeforeResize();
+            ScrollToBottomCore(clearPreservedRestartHistoryInputScrollGuard: false);
+            ClearSelection();
+            ResetCursorBlinkPhase();
+
+            lock (_screen.SyncRoot)
             {
-                historyController.ClearScrollback();
-            }
-            else
-            {
-                _screen.ClearScrollback();
+                if (_vtProcessor is ITerminalSessionHistoryController historyController)
+                {
+                    historyController.ClearScrollback();
+                }
+                else
+                {
+                    _screen.ClearScrollback();
+                }
+
+                SyncHistoryMutationScrollStateLocked();
             }
 
-            SyncHistoryMutationScrollStateLocked();
+            UpdateAutoScrollPinnedToBottom();
+            ClearPreservedRestartHistoryInputScrollGuard();
+            UpdateRendererCursorForViewport();
+            UpdateRendererParityStateFromScreen();
+            _presenter?.Invalidate(fullRedraw: true);
+            RaiseScrollInvalidated();
         }
-
-        UpdateAutoScrollPinnedToBottom();
-        ClearPreservedRestartHistoryInputScrollGuard();
-        UpdateRendererCursorForViewport();
-        UpdateRendererParityStateFromScreen();
-        _presenter?.Invalidate(fullRedraw: true);
-        RaiseScrollInvalidated();
+        finally
+        {
+            ResetPendingTransportOutputQueue();
+            SetPendingTransportOutputAcceptance(restorePendingTransportOutputAcceptance);
+        }
     }
 
     /// <summary>
@@ -4747,35 +4756,44 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        FlushPendingTransportOutputBeforeResize();
-        ClearSelection();
-        ResetCursorBlinkPhase();
-
-        lock (_screen.SyncRoot)
+        bool restorePendingTransportOutputAcceptance = SetPendingTransportOutputAcceptance(acceptOutput: false);
+        try
         {
-            if (_vtProcessor?.AlternateScreen == true)
+            FlushPendingTransportOutputBeforeResize();
+            ClearSelection();
+            ResetCursorBlinkPhase();
+
+            lock (_screen.SyncRoot)
             {
+                if (_vtProcessor?.AlternateScreen == true)
+                {
+                    SyncHistoryMutationScrollStateLocked();
+                }
+                else if (_vtProcessor is ITerminalSessionHistoryController historyController)
+                {
+                    historyController.ClearVisibleHistory();
+                }
+                else
+                {
+                    int cursorRow = _vtProcessor?.CursorRow ?? Math.Max(0, _screen.ViewportRows - 1);
+                    _screen.ClearVisibleHistory(cursorRow);
+                }
+
                 SyncHistoryMutationScrollStateLocked();
             }
-            else if (_vtProcessor is ITerminalSessionHistoryController historyController)
-            {
-                historyController.ClearVisibleHistory();
-            }
-            else
-            {
-                int cursorRow = _vtProcessor?.CursorRow ?? Math.Max(0, _screen.ViewportRows - 1);
-                _screen.ClearVisibleHistory(cursorRow);
-            }
 
-            SyncHistoryMutationScrollStateLocked();
+            UpdateAutoScrollPinnedToBottom();
+            ClearPreservedRestartHistoryInputScrollGuard();
+            UpdateRendererCursorForViewport();
+            UpdateRendererParityStateFromScreen();
+            _presenter?.Invalidate(fullRedraw: true);
+            RaiseScrollInvalidated();
         }
-
-        UpdateAutoScrollPinnedToBottom();
-        ClearPreservedRestartHistoryInputScrollGuard();
-        UpdateRendererCursorForViewport();
-        UpdateRendererParityStateFromScreen();
-        _presenter?.Invalidate(fullRedraw: true);
-        RaiseScrollInvalidated();
+        finally
+        {
+            ResetPendingTransportOutputQueue();
+            SetPendingTransportOutputAcceptance(restorePendingTransportOutputAcceptance);
+        }
     }
 
     /// <summary>
@@ -5791,12 +5809,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
     }
 
-    private void SetPendingTransportOutputAcceptance(bool acceptOutput)
+    private bool SetPendingTransportOutputAcceptance(bool acceptOutput)
     {
         lock (_pendingTransportOutputSync)
         {
+            bool previous = _acceptPendingTransportOutput;
             _acceptPendingTransportOutput = acceptOutput;
             Monitor.PulseAll(_pendingTransportOutputSync);
+            return previous;
         }
     }
 
