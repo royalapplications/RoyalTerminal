@@ -8,7 +8,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading;
 using RoyalTerminal.Terminal;
 using SkiaSharp;
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
@@ -197,6 +196,25 @@ public sealed class SkiaTerminalRenderer : IDisposable
     /// Gets the configured text highlight rule snapshots.
     /// </summary>
     public IReadOnlyList<TerminalTextHighlightRule> TextHighlightRules => _textHighlightRules;
+
+    /// <summary>
+    /// Prepares regex-based text highlight rules for a later UI-thread apply.
+    /// </summary>
+    /// <param name="rules">The highlight rules to validate and compile.</param>
+    /// <returns>A prepared immutable rule snapshot, or <see langword="null"/> when no rules are supplied.</returns>
+    public static PreparedTerminalTextHighlightRules? PrepareTextHighlightRules(
+        IReadOnlyList<TerminalTextHighlightRule>? rules)
+    {
+        TerminalTextHighlightRule[] preparedRules = CopyTextHighlightRules(rules);
+        if (preparedRules.Length == 0)
+        {
+            return null;
+        }
+
+        return new PreparedTerminalTextHighlightRules(
+            preparedRules,
+            CompileTextHighlightRules(preparedRules));
+    }
 
     /// <summary>
     /// Gets or sets regex-based text highlighting evaluation mode.
@@ -491,29 +509,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
     /// </summary>
     public void SetTextHighlightRules(IReadOnlyList<TerminalTextHighlightRule>? rules)
     {
-        if (rules is null || rules.Count == 0)
+        TerminalTextHighlightRule[] nextRules = CopyTextHighlightRules(rules);
+        if (nextRules.Length == 0)
         {
             ClearTextHighlightRules();
             return;
         }
 
-        List<TerminalTextHighlightRule> copy = new(rules.Count);
-        for (int i = 0; i < rules.Count; i++)
-        {
-            TerminalTextHighlightRule? rule = rules[i];
-            if (rule is not null)
-            {
-                copy.Add(rule);
-            }
-        }
-
-        if (copy.Count == 0)
-        {
-            ClearTextHighlightRules();
-            return;
-        }
-
-        TerminalTextHighlightRule[] nextRules = copy.ToArray();
         if (AreTextHighlightRulesEqual(_textHighlightRules, nextRules))
         {
             return;
@@ -527,6 +529,55 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         _textHighlightRowCache.Clear();
+    }
+
+    /// <summary>
+    /// Replaces regex-based text highlight rules using a prepared rule snapshot.
+    /// </summary>
+    /// <param name="preparedRules">The prepared rules to apply, or <see langword="null"/> to clear text highlighting.</param>
+    public void SetPreparedTextHighlightRules(PreparedTerminalTextHighlightRules? preparedRules)
+    {
+        if (preparedRules is null || preparedRules.Rules.Count == 0)
+        {
+            ClearTextHighlightRules();
+            return;
+        }
+
+        TerminalTextHighlightRule[] nextRules = preparedRules.GetRulesUnsafe();
+        if (AreTextHighlightRulesEqual(_textHighlightRules, nextRules))
+        {
+            return;
+        }
+
+        _textHighlightRules = nextRules;
+        _compiledTextHighlightRules = (CompiledTextHighlightRule[])preparedRules.GetCompiledRulesUnsafe();
+        unchecked
+        {
+            _textHighlightRuleRevision++;
+        }
+
+        _textHighlightRowCache.Clear();
+    }
+
+    private static TerminalTextHighlightRule[] CopyTextHighlightRules(
+        IReadOnlyList<TerminalTextHighlightRule>? rules)
+    {
+        if (rules is null || rules.Count == 0)
+        {
+            return Array.Empty<TerminalTextHighlightRule>();
+        }
+
+        List<TerminalTextHighlightRule> copy = new(rules.Count);
+        for (int i = 0; i < rules.Count; i++)
+        {
+            TerminalTextHighlightRule? rule = rules[i];
+            if (rule is not null)
+            {
+                copy.Add(rule);
+            }
+        }
+
+        return copy.Count == 0 ? Array.Empty<TerminalTextHighlightRule>() : copy.ToArray();
     }
 
     private void ClearTextHighlightRules()
@@ -5053,6 +5104,32 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             Bitmap.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Immutable regex-based text highlight rules prepared for renderer application.
+    /// </summary>
+    public sealed class PreparedTerminalTextHighlightRules
+    {
+        private readonly TerminalTextHighlightRule[] _rules;
+        private readonly object _compiledRules;
+
+        internal PreparedTerminalTextHighlightRules(
+            TerminalTextHighlightRule[] rules,
+            object compiledRules)
+        {
+            _rules = rules;
+            _compiledRules = compiledRules;
+        }
+
+        /// <summary>
+        /// Gets the normalized rule snapshot represented by this prepared payload.
+        /// </summary>
+        public IReadOnlyList<TerminalTextHighlightRule> Rules => _rules;
+
+        internal TerminalTextHighlightRule[] GetRulesUnsafe() => _rules;
+
+        internal object GetCompiledRulesUnsafe() => _compiledRules;
     }
 
     private readonly record struct CompiledTextHighlightRule(
