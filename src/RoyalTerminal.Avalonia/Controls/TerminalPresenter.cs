@@ -6,6 +6,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Rendering.Composition;
 using Avalonia.Media;
+using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Shaders;
 
@@ -25,6 +26,7 @@ public class TerminalPresenter : Control
     private IReadOnlyList<TerminalShaderSource>? _shaderSources;
     private bool _shaderAnimationEnabled;
     private bool _compositionCommitPending;
+    private bool _compositionCommitQueued;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TerminalPresenter"/> class.
@@ -50,6 +52,7 @@ public class TerminalPresenter : Control
         base.OnDetachedFromVisualTree(e);
         _compositionVisual = null;
         _compositionCommitPending = false;
+        _compositionCommitQueued = false;
     }
 
     private void InitializeComposition()
@@ -175,13 +178,26 @@ public class TerminalPresenter : Control
     private void RequestCompositionCommit()
     {
         CompositionCustomVisual? compositionVisual = _compositionVisual;
-        if (compositionVisual is null || _compositionCommitPending)
+        if (compositionVisual is null || _compositionCommitPending || _compositionCommitQueued)
         {
             return;
         }
 
-        _compositionCommitPending = true;
-        compositionVisual.Compositor.RequestCompositionUpdate(_completeCompositionCommit);
+        _compositionCommitQueued = true;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                _compositionCommitQueued = false;
+                CompositionCustomVisual? queuedCompositionVisual = _compositionVisual;
+                if (queuedCompositionVisual is null || _compositionCommitPending)
+                {
+                    return;
+                }
+
+                _compositionCommitPending = true;
+                queuedCompositionVisual.Compositor.RequestCompositionUpdate(_completeCompositionCommit);
+            },
+            DispatcherPriority.Background);
     }
 
     private void SendShaderUpdate()

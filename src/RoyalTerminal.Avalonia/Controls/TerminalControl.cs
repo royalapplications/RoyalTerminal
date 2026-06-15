@@ -10,19 +10,17 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Avalonia.Input.TextInput;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using SkiaSharp;
 using RoyalTerminal.Avalonia.Rendering;
-using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Scrolling;
+using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Shaders;
 using RoyalTerminal.Terminal;
-using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Services;
+using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Transport.Pipe;
 using RoyalTerminal.Terminal.Transport.Pty;
 using RoyalTerminal.Terminal.Transport.Raw;
@@ -30,6 +28,7 @@ using RoyalTerminal.Terminal.Transport.Serial;
 using RoyalTerminal.Terminal.Transport.Ssh;
 using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
 using RoyalTerminal.Terminal.Transport.Telnet;
+using SkiaSharp;
 
 namespace RoyalTerminal.Avalonia.Controls;
 
@@ -487,6 +486,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
+    /// Applies regex-based text highlight rules that were prepared off the UI thread.
+    /// </summary>
+    /// <param name="preparedRules">The prepared rules to apply, or <see langword="null"/> to clear text highlighting.</param>
+    public void SetPreparedTextHighlightRules(SkiaTerminalRenderer.PreparedTerminalTextHighlightRules? preparedRules)
+    {
+        IReadOnlyList<TerminalTextHighlightRule>? next = preparedRules?.Rules;
+        if (AreTextHighlightRulesEqual(_textHighlightRules, next))
+        {
+            return;
+        }
+
+        SetAndRaise(TextHighlightRulesProperty, ref _textHighlightRules, next);
+        ApplyPreparedTextHighlightRules(preparedRules);
+    }
+
+    /// <summary>
     /// Gets or sets regex-based text highlighting evaluation mode.
     /// </summary>
     public TerminalTextHighlightingMode TextHighlightingMode
@@ -621,6 +636,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private bool _pendingTransportOutputDrainScheduled;
     private bool _pendingTransportUiDrainScheduled;
     private bool _acceptPendingTransportOutput = true;
+    private bool _outputScrollInvalidationPending;
     private DispatcherTimer? _transportResizeDebounceTimer;
     private readonly List<SuspendedAncestorKeyBinding> _suspendedAncestorKeyBindings = [];
     private bool _reservedAncestorKeyBindingsSuppressed;
@@ -2083,6 +2099,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _presenter?.Invalidate(fullRedraw: true);
     }
 
+    private void ApplyPreparedTextHighlightRules(SkiaTerminalRenderer.PreparedTerminalTextHighlightRules? preparedRules)
+    {
+        if (_renderer is not null)
+        {
+            _renderer.SetPreparedTextHighlightRules(preparedRules);
+        }
+
+        if (_screen is not null)
+        {
+            lock (_screen.SyncRoot)
+            {
+                _screen.InvalidateViewport();
+            }
+        }
+
+        _presenter?.Invalidate(dirtyRowsOnly: true);
+    }
+
     private void ApplyTextHighlightingMode()
     {
         if (_renderer is not null)
@@ -2094,11 +2128,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             lock (_screen.SyncRoot)
             {
-                _screen.InvalidateAll();
+                _screen.InvalidateViewport();
             }
         }
 
-        _presenter?.Invalidate(fullRedraw: true);
+        _presenter?.Invalidate(dirtyRowsOnly: true);
     }
 
     private void RefreshPresenterRenderState(bool fullRedraw)
@@ -2355,7 +2389,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         if (_screen is null)
         {
-            TerminalScrollService.HandleOutput(_scrollData, null, AutoScroll, _presenter, RaiseScrollInvalidated);
+            TerminalScrollService.HandleOutput(
+                _scrollData,
+                null,
+                AutoScroll,
+                _presenter,
+                static () => { });
             UpdateRendererCursorForViewport();
             NotifyOutputUiUpdatedOnUiThread();
             return;
@@ -5519,7 +5558,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void DrainPendingTransportOutput(bool flushAll)
     {
-        if (ShouldUseBackgroundManagedOutputPipeline())
+        if (ShouldUseBackgroundOutputPipeline())
         {
             DrainPendingTransportOutputInBackground(flushAll);
             return;
@@ -5822,10 +5861,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void SchedulePendingTransportOutputDrain()
     {
-        if (ShouldUseBackgroundManagedOutputPipeline())
+        if (ShouldUseBackgroundOutputPipeline())
         {
             ThreadPool.UnsafeQueueUserWorkItem(
-                static state => ((TerminalControl)state!).DrainPendingTransportOutput(),
+                static state => RunPendingTransportOutputDrainBelowNormal((TerminalControl)state!),
                 this);
             return;
         }
@@ -5853,10 +5892,25 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
     }
 
-    private bool ShouldUseBackgroundManagedOutputPipeline()
+    private bool ShouldUseBackgroundOutputPipeline()
     {
-        return _appliedVtProcessorPreference == VtProcessorPreference.Managed ||
-               _vtProcessor is BasicVtProcessor;
+        return _vtProcessor is not null;
+    }
+
+    private static void RunPendingTransportOutputDrainBelowNormal(TerminalControl control)
+    {
+        Thread thread = Thread.CurrentThread;
+        ThreadPriority originalPriority = thread.Priority;
+
+        try
+        {
+            thread.Priority = ThreadPriority.BelowNormal;
+            control.DrainPendingTransportOutput();
+        }
+        finally
+        {
+            thread.Priority = originalPriority;
+        }
     }
 
     private int GetPendingTransportBacklogBytesLocked()
@@ -5884,7 +5938,24 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private void NotifyOutputUiUpdatedOnUiThread()
     {
         _presenter?.Invalidate(dirtyRowsOnly: true);
-        RaiseScrollInvalidated();
+        QueueOutputScrollInvalidated();
+    }
+
+    private void QueueOutputScrollInvalidated()
+    {
+        if (_outputScrollInvalidationPending)
+        {
+            return;
+        }
+
+        _outputScrollInvalidationPending = true;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                _outputScrollInvalidationPending = false;
+                RaiseScrollInvalidated();
+            },
+            DispatcherPriority.Background);
     }
 
     private sealed class PendingTransportUiBatch

@@ -6,6 +6,7 @@ using RoyalTerminal.Avalonia.Rendering;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
+using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Terminal;
 using SkiaSharp;
 using Xunit;
@@ -492,6 +493,68 @@ public class RenderingTests
         renderer.RenderFull(surface.Canvas, screen);
 
         Assert.Single(renderer.TextHighlightRules);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_PreparedTextHighlightRules_ApplyConfiguredBackground()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        renderer.SetCellSize(16f, 20f);
+        SkiaTerminalRenderer.PreparedTerminalTextHighlightRules? preparedRules =
+            SkiaTerminalRenderer.PrepareTextHighlightRules(
+            [
+                new TerminalTextHighlightRule
+                {
+                    Name = "Prepared",
+                    Pattern = "OK",
+                    Background = 0xFFFF0000,
+                },
+            ]);
+
+        Assert.NotNull(preparedRules);
+        renderer.SetPreparedTextHighlightRules(preparedRules);
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 2, rows: 1, text: "OK");
+        using SKSurface surface = CreateRenderSurface(renderer, columns: 2, rows: 1);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int redPixels = CountRedDominantPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth * 2,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        Assert.True(redPixels > 100);
+    }
+
+    [Fact]
+    public void TerminalControl_SetPreparedTextHighlightRules_UpdatesAndClearsRuleSnapshot()
+    {
+        TerminalControl control = new();
+        SkiaTerminalRenderer.PreparedTerminalTextHighlightRules? preparedRules =
+            SkiaTerminalRenderer.PrepareTextHighlightRules(
+            [
+                new TerminalTextHighlightRule
+                {
+                    Name = "Prepared",
+                    Pattern = "OK",
+                    Background = 0xFFFF0000,
+                },
+            ]);
+
+        Assert.NotNull(preparedRules);
+        control.SetPreparedTextHighlightRules(preparedRules);
+
+        TerminalTextHighlightRule rule = Assert.Single(control.TextHighlightRules!);
+        Assert.Equal("Prepared", rule.Name);
+
+        control.SetPreparedTextHighlightRules(null);
+
+        Assert.Null(control.TextHighlightRules);
     }
 
     [Fact]
