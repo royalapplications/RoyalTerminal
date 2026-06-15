@@ -2472,7 +2472,16 @@ public sealed class TerminalControlHeadlessInteractionTests
                     $"Mode={SnapshotModeState(control.TerminalSessionService.ModeSource)}, Kitty={SnapshotKittyKeyboardFlags(control.TerminalSessionService.ModeSource)}, " +
                     $"Inputs={SnapshotInputs(inputSync, inputs)}");
 
-                await WaitForRepeatedFloodControlEchoAsync(expectedInputByte, outputSync, output);
+                bool controlEchoObserved = await WaitForRepeatedFloodControlEchoAsync(
+                    expectedInputByte,
+                    outputSync,
+                    output,
+                    GetRepeatedFloodRecoveryTimeout(scenario));
+                Assert.True(
+                    controlEchoObserved,
+                    $"Cycle {cycle}: Did not observe {controlCharacterLabel} echo before sending prompt recovery marker. " +
+                    $"Mode={SnapshotModeState(control.TerminalSessionService.ModeSource)}, Kitty={SnapshotKittyKeyboardFlags(control.TerminalSessionService.ModeSource)}, " +
+                    $"Output={SnapshotOutput(outputSync, output)}");
 
                 string cycleMarker = $"__ROYALTERMINAL_REPEAT_{physicalKey}_{cycle}__";
                 control.SendInput($"echo {cycleMarker}\n");
@@ -2637,7 +2646,11 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    private static async Task WaitForRepeatedFloodControlEchoAsync(byte expectedInputByte, object sync, StringBuilder output)
+    private static async Task<bool> WaitForRepeatedFloodControlEchoAsync(
+        byte expectedInputByte,
+        object sync,
+        StringBuilder output,
+        TimeSpan timeout)
     {
         string? controlEcho = expectedInputByte switch
         {
@@ -2648,14 +2661,14 @@ public sealed class TerminalControlHeadlessInteractionTests
 
         if (controlEcho is null)
         {
-            return;
+            return true;
         }
 
         // The tty line discipline may flush bytes written immediately after
         // INTR/SUSP. Use the echoed control character as the recovery boundary.
-        _ = await WaitUntilAsync(
+        return await WaitUntilAsync(
             () => ContainsOutput(sync, output, controlEcho),
-            TimeSpan.FromSeconds(2));
+            timeout);
     }
 
     private static bool ContainsInputByteAfterIndex(object sync, List<byte[]> inputs, byte expectedByte, int startIndex)

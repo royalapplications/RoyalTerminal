@@ -996,6 +996,309 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public async Task Control_ManagedPtyEraseDisplay_PinsLiveViewportWhenUserIsScrolledBack()
+    {
+        FakeTransport transport = new()
+        {
+            EchoInput = false,
+        };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 24;
+        control.Rows = 4;
+        control.ScrollbackLimit = 40;
+
+        await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+        await Task.Run(() =>
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                transport.RaiseData(Encoding.UTF8.GetBytes($"OLD-{i:000}\r\n"));
+            }
+        });
+
+        bool oldOutputSeen = await WaitUntilAsync(
+            () => ReadAllRowsLocked(control).Contains("OLD-019", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(5));
+        Assert.True(oldOutputSeen, "Expected initial PTY output to drain before clear-screen verification.");
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        bool historyScrollable = await WaitUntilAsync(
+            () =>
+            {
+                lock (screen.SyncRoot)
+                {
+                    return screen.MaxScrollOffset > 0 &&
+                           screen.ScrollOffset == 0 &&
+                           control.ScrollData is { MaxOffset: > 0d, IsAtBottom: true };
+                }
+            },
+            TimeSpan.FromSeconds(5));
+        Assert.True(historyScrollable, "Expected initial PTY output to create scrollback before scrolling up.");
+
+        control.ScrollByRows(-2);
+        bool userScrolledBack = await WaitUntilAsync(
+            () =>
+            {
+                lock (screen.SyncRoot)
+                {
+                    return screen.ScrollOffset > 0 &&
+                           control.ScrollData is { IsAtBottom: false };
+                }
+            },
+            TimeSpan.FromSeconds(5));
+        Assert.True(userScrolledBack, "Expected test setup to place the viewport in scrollback before ED 2.");
+
+        await Task.Run(() => transport.RaiseData("\u001b[H\u001b[2J"u8.ToArray()));
+        bool liveViewportCleared = await WaitUntilAsync(
+            () =>
+            {
+                TerminalScreen currentScreen = Assert.IsType<TerminalScreen>(control.Screen);
+                lock (currentScreen.SyncRoot)
+                {
+                    string viewport = ReadViewportTextRange(currentScreen, 0, currentScreen.ViewportRows - 1);
+                    return currentScreen.ScrollOffset == 0 &&
+                           string.IsNullOrWhiteSpace(viewport) &&
+                           currentScreen.MaxScrollOffset > 0 &&
+                           control.ScrollData is { IsAtBottom: true };
+                }
+            },
+            TimeSpan.FromSeconds(5));
+        Assert.True(liveViewportCleared, "Expected ED 2 from PTY output to clear the live viewport on the first attempt.");
+
+        lock (screen.SyncRoot)
+        {
+            Assert.Contains("OLD-", ReadAllRows(screen), StringComparison.Ordinal);
+        }
+
+        await Task.Run(() => transport.RaiseData("\u001b[3Jdir\r\nNEW0\r\n"u8.ToArray()));
+        bool freshOutputSeen = await WaitUntilAsync(
+            () => ReadAllRowsLocked(control).Contains("NEW0", StringComparison.Ordinal) &&
+                  control.ScrollData is { MaxOffset: 0d },
+            TimeSpan.FromSeconds(5));
+        Assert.True(freshOutputSeen, "Expected fresh post-clear PTY output to drain.");
+
+        lock (screen.SyncRoot)
+        {
+            string allRows = ReadAllRows(screen);
+            Assert.Equal(0, screen.ScrollOffset);
+            Assert.Equal(0, screen.MaxScrollOffset);
+            Assert.DoesNotContain("OLD-", allRows, StringComparison.Ordinal);
+            Assert.Contains("dir", allRows, StringComparison.Ordinal);
+            Assert.Contains("NEW0", allRows, StringComparison.Ordinal);
+        }
+
+        Assert.NotNull(control.ScrollData);
+        Assert.Equal(0d, control.ScrollData!.MaxOffset);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_ManagedPtyEraseDisplay_DetectsSplitClearSequenceWhenUserIsScrolledBack()
+    {
+        FakeTransport transport = new()
+        {
+            EchoInput = false,
+        };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 24;
+        control.Rows = 4;
+        control.ScrollbackLimit = 40;
+
+        await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+        await Task.Run(() =>
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                transport.RaiseData(Encoding.UTF8.GetBytes($"OLD-{i:000}\r\n"));
+            }
+        });
+
+        bool oldOutputSeen = await WaitUntilAsync(
+            () => ReadAllRowsLocked(control).Contains("OLD-019", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(5));
+        Assert.True(oldOutputSeen, "Expected initial PTY output to drain before split clear-screen verification.");
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        bool historyScrollable = await WaitUntilAsync(
+            () =>
+            {
+                lock (screen.SyncRoot)
+                {
+                    return screen.MaxScrollOffset > 0 &&
+                           screen.ScrollOffset == 0 &&
+                           control.ScrollData is { MaxOffset: > 0d, IsAtBottom: true };
+                }
+            },
+            TimeSpan.FromSeconds(5));
+        Assert.True(historyScrollable, "Expected initial PTY output to create scrollback before scrolling up.");
+
+        control.ScrollByRows(-2);
+        bool userScrolledBack = await WaitUntilAsync(
+            () =>
+            {
+                lock (screen.SyncRoot)
+                {
+                    return screen.ScrollOffset > 0 &&
+                           control.ScrollData is { IsAtBottom: false };
+                }
+            },
+            TimeSpan.FromSeconds(5));
+        Assert.True(userScrolledBack, "Expected test setup to place the viewport in scrollback before split ED 2.");
+
+        await Task.Run(() =>
+        {
+            transport.RaiseData("\u001b[H\u001b["u8.ToArray());
+            transport.RaiseData("2J"u8.ToArray());
+        });
+
+        bool liveViewportCleared = await WaitUntilAsync(
+            () =>
+            {
+                TerminalScreen currentScreen = Assert.IsType<TerminalScreen>(control.Screen);
+                lock (currentScreen.SyncRoot)
+                {
+                    string viewport = ReadViewportTextRange(currentScreen, 0, currentScreen.ViewportRows - 1);
+                    return currentScreen.ScrollOffset == 0 &&
+                           string.IsNullOrWhiteSpace(viewport) &&
+                           currentScreen.MaxScrollOffset > 0 &&
+                           control.ScrollData is { IsAtBottom: true };
+                }
+            },
+            TimeSpan.FromSeconds(5));
+        Assert.True(liveViewportCleared, "Expected split ED 2 from PTY output to clear the live viewport on the first attempt.");
+
+        lock (screen.SyncRoot)
+        {
+            Assert.Contains("OLD-", ReadAllRows(screen), StringComparison.Ordinal);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_ManagedPtyEraseDisplay_IgnoresOscPayloadWhenUserIsScrolledBack()
+    {
+        FakeTransport transport = new()
+        {
+            EchoInput = false,
+        };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(),
+            VtProcessorPreference.Managed,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 24;
+        control.Rows = 4;
+        control.ScrollbackLimit = 40;
+
+        int oscPayloadObserved = 0;
+        control.DataReceived += (_, args) =>
+        {
+            string payload = Encoding.UTF8.GetString(args.Data.Span);
+            if (payload.Contains("not-clear", StringComparison.Ordinal))
+            {
+                Interlocked.Exchange(ref oscPayloadObserved, 1);
+            }
+        };
+
+        await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+        await Task.Run(() =>
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                transport.RaiseData(Encoding.UTF8.GetBytes($"OLD-{i:000}\r\n"));
+            }
+        });
+
+        bool oldOutputSeen = await WaitUntilAsync(
+            () => ReadAllRowsLocked(control).Contains("OLD-019", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(5));
+        Assert.True(oldOutputSeen, "Expected initial PTY output to drain before OSC payload verification.");
+
+        TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
+        bool historyScrollable = await WaitUntilAsync(
+            () =>
+            {
+                lock (screen.SyncRoot)
+                {
+                    return screen.MaxScrollOffset > 0 &&
+                           screen.ScrollOffset == 0 &&
+                           control.ScrollData is { MaxOffset: > 0d, IsAtBottom: true };
+                }
+            },
+            TimeSpan.FromSeconds(5));
+        Assert.True(historyScrollable, "Expected initial PTY output to create scrollback before scrolling up.");
+
+        control.ScrollByRows(-2);
+        bool userScrolledBack = await WaitUntilAsync(
+            () =>
+            {
+                lock (screen.SyncRoot)
+                {
+                    return screen.ScrollOffset > 0 &&
+                           control.ScrollData is { IsAtBottom: false };
+                }
+            },
+            TimeSpan.FromSeconds(5));
+        Assert.True(userScrolledBack, "Expected test setup to place the viewport in scrollback before OSC payload.");
+
+        await Task.Run(() => transport.RaiseData("\u001b]0;not-clear \u001b[2J title\u0007"u8.ToArray()));
+
+        bool oscPayloadProcessed = await WaitUntilAsync(
+            () => Interlocked.CompareExchange(ref oscPayloadObserved, 0, 0) == 1,
+            TimeSpan.FromSeconds(5));
+        Assert.True(oscPayloadProcessed, "Expected OSC payload to drain through DataReceived.");
+
+        lock (screen.SyncRoot)
+        {
+            Assert.True(screen.ScrollOffset > 0);
+            Assert.Contains("OLD-", ReadAllRows(screen), StringComparison.Ordinal);
+        }
+
+        Assert.NotNull(control.ScrollData);
+        Assert.False(control.ScrollData!.IsAtBottom);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_NativeViewportEraseDisplay_DoesNotRestoreScrolledBackOffset()
+    {
+        FakeTransport transport = new();
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 80, VisibleRows: 4),
+            [])
+        {
+            ScrollToBottomOnProcess = true,
+        };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native,
+            transportId: TerminalTransportIds.Pty);
+        control.Columns = 24;
+        control.Rows = 4;
+
+        await control.StartSessionAsync(new FakeTransportOptions(TerminalTransportIds.Pty));
+        processor.SetViewportState(new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 80, VisibleRows: 4));
+        processor.ClearLastSetViewportOffsetRows();
+
+        await Task.Run(() => transport.RaiseData("\u001b[2J"u8.ToArray()));
+
+        bool liveViewportPinned = await WaitUntilAsync(
+            () => processor.ProcessCallCount > 0 &&
+                  processor.ViewportScrollState.OffsetRows == processor.ViewportScrollState.MaxOffsetRows &&
+                  control.ScrollData is { IsAtBottom: true },
+            TimeSpan.FromSeconds(5));
+        Assert.True(liveViewportPinned, "Expected native-style viewport source to stay at the live bottom after ED 2.");
+        Assert.Equal(processor.ViewportScrollState.MaxOffsetRows, processor.LastSetViewportOffsetRows);
+        Assert.NotEqual(80UL, processor.LastSetViewportOffsetRows);
+    }
+
+    [AvaloniaFact]
     public async Task Control_HistoryCommands_DelegateToSessionHistoryControllerWithoutFallbackMutation()
     {
         FakeTransport transport = new();
