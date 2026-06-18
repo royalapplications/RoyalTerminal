@@ -2887,7 +2887,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private void OnKeyDownTunnel(object? sender, KeyEventArgs e)
     {
         _ = sender;
-        if (!e.Handled)
+        if (!e.Handled && !IsTerminalTabInputChord(e.Key, e.KeyModifiers))
         {
             return;
         }
@@ -5407,6 +5407,23 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return key is Key.C or Key.L or Key.Z or Key.OemBackslash;
     }
 
+    private static bool IsTerminalTabInputChord(Key key, KeyModifiers modifiers)
+    {
+        if (key != Key.Tab)
+        {
+            return false;
+        }
+
+        if (modifiers.HasFlag(KeyModifiers.Control) ||
+            modifiers.HasFlag(KeyModifiers.Alt) ||
+            modifiers.HasFlag(KeyModifiers.Meta))
+        {
+            return false;
+        }
+
+        return modifiers == KeyModifiers.None || modifiers == KeyModifiers.Shift;
+    }
+
     private static bool IsUrgentTransportControlInput(ReadOnlySpan<byte> payload)
     {
         return payload.Length == 1 && payload[0] is 0x03 or 0x0C or 0x1A or 0x1C;
@@ -5477,6 +5494,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         return IsUrgentTransportControlChord(gesture.Key, gesture.KeyModifiers) ||
+               IsTerminalTabInputChord(gesture.Key, gesture.KeyModifiers) ||
                IsConfiguredTerminalShortcutGesture(ShortcutConfiguration.CopyGestures, gesture) ||
                IsConfiguredTerminalShortcutGesture(ShortcutConfiguration.PasteGestures, gesture) ||
                IsConfiguredTerminalShortcutGesture(ShortcutConfiguration.CutGestures, gesture) ||

@@ -224,6 +224,143 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
+    public async Task Headless_PlainTab_SendsHorizontalTabAndDoesNotMoveFocus()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        Button focusableSibling = new()
+        {
+            Content = "Sibling",
+        };
+        StackPanel root = new()
+        {
+            Children =
+            {
+                control,
+                focusableSibling,
+            },
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = root,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            transport.ClearInputs();
+            window.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None);
+
+            bool tabSent = await WaitUntilAsync(
+                () => transport.HasInput(static input => input.Length == 1 && input[0] == 0x09),
+                TimeSpan.FromSeconds(2));
+            Assert.True(tabSent);
+            Assert.True(control.IsFocused, "Plain Tab should remain terminal input instead of moving focus to a sibling control.");
+            Assert.False(focusableSibling.IsFocused);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.StopPty);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_ShiftTab_SendsBacktabAndDoesNotMoveFocus()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        Button focusableSibling = new()
+        {
+            Content = "Sibling",
+        };
+        StackPanel root = new()
+        {
+            Children =
+            {
+                focusableSibling,
+                control,
+            },
+        };
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = root,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            transport.ClearInputs();
+            window.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.Shift);
+
+            bool backtabSent = await WaitUntilAsync(
+                () => transport.HasInput(static input => Encoding.UTF8.GetString(input) == "\x1B[Z"),
+                TimeSpan.FromSeconds(2));
+            Assert.True(backtabSent);
+            Assert.True(control.IsFocused, "Shift+Tab should remain terminal input instead of moving focus to a sibling control.");
+            Assert.False(focusableSibling.IsFocused);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.StopPty);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_PlainTab_WithWindowScopedKeyBinding_StillReachesTransportFallback()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        bool keyBindingExecuted = false;
+        window.KeyBindings.Add(new KeyBinding
+        {
+            Gesture = new KeyGesture(Key.Tab, KeyModifiers.None),
+            Command = new RecordingCommand(() => keyBindingExecuted = true),
+        });
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            transport.ClearInputs();
+            window.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None);
+
+            bool tabSent = await WaitUntilAsync(
+                () => transport.HasInput(static input => input.Length == 1 && input[0] == 0x09),
+                TimeSpan.FromSeconds(2));
+            Assert.True(tabSent);
+            Assert.False(keyBindingExecuted, "Terminal input should preempt window-scoped key bindings for plain Tab when focused.");
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.StopPty);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Headless_KeyboardInterrupt_FromHandledTunnelRouting_StillReachesTransportFallback()
     {
         RecordingTransport transport = new();
@@ -948,6 +1085,13 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(keySent);
             Assert.Contains(endpoint.KeyEvents, static key => key.KeyCode == (uint)Key.Return);
 
+            endpoint.KeyEvents.Clear();
+            window.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None);
+            bool tabKeySent = await WaitUntilAsync(
+                () => endpoint.KeyEvents.Any(static key => key.KeyCode == (uint)Key.Tab),
+                TimeSpan.FromSeconds(2));
+            Assert.True(tabKeySent);
+
             window.KeyTextInput("z");
             bool textSent = await WaitUntilAsync(
                 () => endpoint.TextInputs.Count > 0,
@@ -991,6 +1135,14 @@ public sealed class TerminalControlHeadlessInteractionTests
                 () => endpoint.Inputs.Any(static input => input.Length == 1 && input[0] == (byte)'\r'),
                 TimeSpan.FromSeconds(2));
             Assert.True(enterSent);
+
+            endpoint.Inputs.Clear();
+            window.KeyPressQwerty(PhysicalKey.Tab, RawInputModifiers.None);
+
+            bool tabSent = await WaitUntilAsync(
+                () => endpoint.Inputs.Any(static input => input.Length == 1 && input[0] == 0x09),
+                TimeSpan.FromSeconds(2));
+            Assert.True(tabSent);
 
             endpoint.Inputs.Clear();
             window.KeyTextInput("x");
