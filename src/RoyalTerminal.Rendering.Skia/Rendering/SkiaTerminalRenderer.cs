@@ -44,6 +44,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const int MaxCodepointTextCacheEntries = 4096;
     private const int MaxStackallocTextRunChars = 256;
     private const int MaxStackallocGlyphPoints = 256;
+    private const float LightBoxLineThickness = 1f;
+    private const float HeavyBoxLineThickness = 3f;
     private static readonly TimeSpan s_textHighlightNonBacktrackingRegexTimeout = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan s_textHighlightBacktrackingRegexTimeout = TimeSpan.FromMilliseconds(10);
     private static readonly CultureInfo s_renderCulture = CultureInfo.InvariantCulture;
@@ -1099,6 +1101,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     }
                     break;
 
+                case SpriteCategory.Powerline:
+                    DrawPowerlineSymbol(canvas, codepoint, x, y, spriteWidth, spriteHeight, color);
+                    break;
+
                 case SpriteCategory.Symbol:
                     DrawGeometricSymbol(canvas, codepoint, x, y, spriteWidth, spriteHeight, color);
                     break;
@@ -1108,6 +1114,274 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             canvas.Restore();
         }
+    }
+
+    private void DrawPowerlineSymbol(
+        SKCanvas canvas,
+        int codepoint,
+        float x,
+        float y,
+        float width,
+        float height,
+        SKColor color)
+    {
+        SKPaintStyle previousStyle = _spritePaint.Style;
+        float previousStrokeWidth = _spritePaint.StrokeWidth;
+        SKStrokeCap previousStrokeCap = _spritePaint.StrokeCap;
+        bool previousIsAntialias = _spritePaint.IsAntialias;
+        SKColor previousColor = _spritePaint.Color;
+        try
+        {
+            _spritePaint.Color = color;
+            _spritePaint.IsAntialias = true;
+            _spritePaint.StrokeCap = SKStrokeCap.Butt;
+            _spritePath.Rewind();
+
+            switch (codepoint)
+            {
+                case 0xE0B0:
+                    DrawFilledPowerlineTriangle(canvas, x, y, x + width, y + (height * 0.5f), x, y + height);
+                    break;
+                case 0xE0B2:
+                    DrawFilledPowerlineTriangle(canvas, x + width, y, x, y + (height * 0.5f), x + width, y + height);
+                    break;
+                case 0xE0B8:
+                    DrawFilledPowerlineTriangle(canvas, x, y, x + width, y + height, x, y + height);
+                    break;
+                case 0xE0BA:
+                    DrawFilledPowerlineTriangle(canvas, x + width, y, x + width, y + height, x, y + height);
+                    break;
+                case 0xE0BC:
+                    DrawFilledPowerlineTriangle(canvas, x, y, x + width, y, x, y + height);
+                    break;
+                case 0xE0BE:
+                    DrawFilledPowerlineTriangle(canvas, x, y, x + width, y, x + width, y + height);
+                    break;
+                case 0xE0B1:
+                    DrawPowerlineChevronStroke(canvas, x, y, width, height, pointsRight: true);
+                    break;
+                case 0xE0B3:
+                    DrawPowerlineChevronStroke(canvas, x, y, width, height, pointsRight: false);
+                    break;
+                case 0xE0B4:
+                    DrawPowerlineRoundedSegment(canvas, x, y, width, height, filled: true, opensRight: true);
+                    break;
+                case 0xE0B5:
+                    DrawPowerlineRoundedSegment(canvas, x, y, width, height, filled: false, opensRight: true);
+                    break;
+                case 0xE0B6:
+                    DrawPowerlineRoundedSegment(canvas, x, y, width, height, filled: true, opensRight: false);
+                    break;
+                case 0xE0B7:
+                    DrawPowerlineRoundedSegment(canvas, x, y, width, height, filled: false, opensRight: false);
+                    break;
+                case 0xE0B9:
+                case 0xE0BF:
+                    DrawStrokeLine(
+                        canvas,
+                        new SKPoint(x, y),
+                        new SKPoint(x + width, y + height),
+                        GetPowerlineStrokeThickness(width, height),
+                        color);
+                    break;
+                case 0xE0BB:
+                case 0xE0BD:
+                    DrawStrokeLine(
+                        canvas,
+                        new SKPoint(x + width, y),
+                        new SKPoint(x, y + height),
+                        GetPowerlineStrokeThickness(width, height),
+                        color);
+                    break;
+                case 0xE0D2:
+                    DrawPowerlineSplitFlame(canvas, x, y, width, height, pointsRight: true);
+                    break;
+                case 0xE0D4:
+                    DrawPowerlineSplitFlame(canvas, x, y, width, height, pointsRight: false);
+                    break;
+            }
+        }
+        finally
+        {
+            _spritePaint.Style = previousStyle;
+            _spritePaint.StrokeWidth = previousStrokeWidth;
+            _spritePaint.StrokeCap = previousStrokeCap;
+            _spritePaint.IsAntialias = previousIsAntialias;
+            _spritePaint.Color = previousColor;
+            _spritePath.Rewind();
+        }
+    }
+
+    private void DrawFilledPowerlineTriangle(
+        SKCanvas canvas,
+        float x0,
+        float y0,
+        float x1,
+        float y1,
+        float x2,
+        float y2)
+    {
+        _spritePaint.Style = SKPaintStyle.Fill;
+        _spritePath.Rewind();
+        _spritePath.MoveTo(x0, y0);
+        _spritePath.LineTo(x1, y1);
+        _spritePath.LineTo(x2, y2);
+        _spritePath.Close();
+        canvas.DrawPath(_spritePath, _spritePaint);
+    }
+
+    private void DrawPowerlineChevronStroke(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        bool pointsRight)
+    {
+        _spritePaint.Style = SKPaintStyle.Stroke;
+        _spritePaint.StrokeWidth = GetPowerlineStrokeThickness(width, height);
+        _spritePath.Rewind();
+        if (pointsRight)
+        {
+            _spritePath.MoveTo(x, y);
+            _spritePath.LineTo(x + width, y + (height * 0.5f));
+            _spritePath.LineTo(x, y + height);
+        }
+        else
+        {
+            _spritePath.MoveTo(x + width, y);
+            _spritePath.LineTo(x, y + (height * 0.5f));
+            _spritePath.LineTo(x + width, y + height);
+        }
+
+        canvas.DrawPath(_spritePath, _spritePaint);
+    }
+
+    private void DrawPowerlineRoundedSegment(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        bool filled,
+        bool opensRight)
+    {
+        float radius = MathF.Min(width, height * 0.5f);
+        float c = (MathF.Sqrt(2f) - 1f) * 4f / 3f;
+        float left = x;
+        float right = x + width;
+        float top = y;
+        float bottom = y + height;
+
+        _spritePath.Rewind();
+        if (opensRight)
+        {
+            _spritePath.MoveTo(left, top);
+            _spritePath.CubicTo(
+                left + (radius * c),
+                top,
+                left + radius,
+                top + radius - (radius * c),
+                left + radius,
+                top + radius);
+            _spritePath.LineTo(left + radius, bottom - radius);
+            _spritePath.CubicTo(
+                left + radius,
+                bottom - radius + (radius * c),
+                left + (radius * c),
+                bottom,
+                left,
+                bottom);
+        }
+        else
+        {
+            _spritePath.MoveTo(right, top);
+            _spritePath.CubicTo(
+                right - (radius * c),
+                top,
+                right - radius,
+                top + radius - (radius * c),
+                right - radius,
+                top + radius);
+            _spritePath.LineTo(right - radius, bottom - radius);
+            _spritePath.CubicTo(
+                right - radius,
+                bottom - radius + (radius * c),
+                right - (radius * c),
+                bottom,
+                right,
+                bottom);
+        }
+
+        _spritePaint.Style = filled ? SKPaintStyle.Fill : SKPaintStyle.Stroke;
+        _spritePaint.StrokeWidth = GetPowerlineStrokeThickness(width, height);
+        if (filled)
+        {
+            _spritePath.Close();
+        }
+
+        canvas.DrawPath(_spritePath, _spritePaint);
+    }
+
+    private void DrawPowerlineSplitFlame(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        bool pointsRight)
+    {
+        float thickness = GetPowerlineStrokeThickness(width, height);
+        float midY = y + (height * 0.5f);
+        float halfThickness = thickness * 0.5f;
+        float left = x;
+        float right = x + width;
+        float centerX = x + (width * 0.5f);
+
+        _spritePaint.Style = SKPaintStyle.Fill;
+
+        _spritePath.Rewind();
+        if (pointsRight)
+        {
+            _spritePath.MoveTo(left, y);
+            _spritePath.LineTo(right, y);
+            _spritePath.LineTo(centerX, midY - halfThickness);
+            _spritePath.LineTo(left, midY - halfThickness);
+        }
+        else
+        {
+            _spritePath.MoveTo(right, y);
+            _spritePath.LineTo(left, y);
+            _spritePath.LineTo(centerX, midY - halfThickness);
+            _spritePath.LineTo(right, midY - halfThickness);
+        }
+
+        _spritePath.Close();
+        canvas.DrawPath(_spritePath, _spritePaint);
+
+        _spritePath.Rewind();
+        if (pointsRight)
+        {
+            _spritePath.MoveTo(left, y + height);
+            _spritePath.LineTo(right, y + height);
+            _spritePath.LineTo(centerX, midY + halfThickness);
+            _spritePath.LineTo(left, midY + halfThickness);
+        }
+        else
+        {
+            _spritePath.MoveTo(right, y + height);
+            _spritePath.LineTo(left, y + height);
+            _spritePath.LineTo(centerX, midY + halfThickness);
+            _spritePath.LineTo(right, midY + halfThickness);
+        }
+
+        _spritePath.Close();
+        canvas.DrawPath(_spritePath, _spritePaint);
+    }
+
+    private static float GetPowerlineStrokeThickness(float width, float height)
+    {
+        return MathF.Max(1f, RoundToPixel(MathF.Min(width, height) * 0.12f));
     }
 
     private void DrawGeometricSymbol(
@@ -1128,7 +1402,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         switch (codepoint)
         {
             case 0x25A0: // Black square.
-                DrawCenteredSquare(canvas, centerX, centerY, MathF.Min(width, height) * 0.54f, fill: true);
+                DrawCenteredSquare(canvas, centerX, centerY, MathF.Min(width, height) * 0.78f, fill: true);
                 break;
 
             case 0x25CB: // White circle.
@@ -1193,12 +1467,168 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _symbolPaint.Style = fill ? SKPaintStyle.Fill : SKPaintStyle.Stroke;
         _symbolPaint.StrokeWidth = MathF.Max(1f, MathF.Round(size * 0.12f));
         _symbolPaint.StrokeCap = SKStrokeCap.Square;
-        canvas.DrawRect(
+        DrawPixelAlignedRect(
+            canvas,
             centerX - half,
             centerY - half,
-            half * 2f,
-            half * 2f,
+            centerX + half,
+            centerY + half,
             _symbolPaint);
+    }
+
+    private static void DrawPixelAlignedRect(
+        SKCanvas canvas,
+        float left,
+        float top,
+        float right,
+        float bottom,
+        SKPaint paint)
+    {
+        float alignedLeft = MathF.Floor(MathF.Min(left, right));
+        float alignedTop = MathF.Floor(MathF.Min(top, bottom));
+        float alignedRight = MathF.Ceiling(MathF.Max(left, right));
+        float alignedBottom = MathF.Ceiling(MathF.Max(top, bottom));
+
+        if (alignedRight <= alignedLeft)
+        {
+            alignedRight = alignedLeft + 1f;
+        }
+
+        if (alignedBottom <= alignedTop)
+        {
+            alignedBottom = alignedTop + 1f;
+        }
+
+        canvas.DrawRect(
+            alignedLeft,
+            alignedTop,
+            alignedRight - alignedLeft,
+            alignedBottom - alignedTop,
+            paint);
+    }
+
+    private static void DrawCenteredHorizontalPixelRect(
+        SKCanvas canvas,
+        float startX,
+        float endX,
+        float centerY,
+        float thickness,
+        SKPaint paint)
+    {
+        int strokePixels = ToStrokePixelSize(thickness);
+        int top = CenteredStrokeStartPixel(centerY, strokePixels);
+        DrawPixelRangeRect(canvas, startX, top, endX, top + strokePixels, paint);
+    }
+
+    private static void DrawCenteredVerticalPixelRect(
+        SKCanvas canvas,
+        float startY,
+        float endY,
+        float centerX,
+        float thickness,
+        SKPaint paint)
+    {
+        int strokePixels = ToStrokePixelSize(thickness);
+        int left = CenteredStrokeStartPixel(centerX, strokePixels);
+        DrawPixelRangeRect(canvas, left, startY, left + strokePixels, endY, paint);
+    }
+
+    private static void DrawPixelRangeRect(
+        SKCanvas canvas,
+        float left,
+        float top,
+        float right,
+        float bottom,
+        SKPaint paint)
+    {
+        int pixelLeft = RoundToPixel(MathF.Min(left, right));
+        int pixelTop = RoundToPixel(MathF.Min(top, bottom));
+        int pixelRight = RoundToPixel(MathF.Max(left, right));
+        int pixelBottom = RoundToPixel(MathF.Max(top, bottom));
+
+        if (pixelRight <= pixelLeft)
+        {
+            pixelRight = pixelLeft + 1;
+        }
+
+        if (pixelBottom <= pixelTop)
+        {
+            pixelBottom = pixelTop + 1;
+        }
+
+        DrawPixelRect(canvas, pixelLeft, pixelTop, pixelRight, pixelBottom, paint);
+    }
+
+    private static void DrawPixelRect(
+        SKCanvas canvas,
+        int left,
+        int top,
+        int right,
+        int bottom,
+        SKPaint paint)
+    {
+        if (right <= left || bottom <= top)
+        {
+            return;
+        }
+
+        canvas.DrawRect(left, top, right - left, bottom - top, paint);
+    }
+
+    private static void DrawCellPixelRect(
+        SKCanvas canvas,
+        float cellX,
+        float cellY,
+        int left,
+        int top,
+        int right,
+        int bottom,
+        SKPaint paint)
+    {
+        int originX = RoundToPixel(cellX);
+        int originY = RoundToPixel(cellY);
+        DrawPixelRect(
+            canvas,
+            originX + left,
+            originY + top,
+            originX + right,
+            originY + bottom,
+            paint);
+    }
+
+    private static int ToPixelSize(float value)
+    {
+        return Math.Max(1, RoundToPixel(value));
+    }
+
+    private static int ToStrokePixelSize(float value)
+    {
+        return Math.Max(1, RoundToPixel(value));
+    }
+
+    private static int CenteredStrokeStartPixel(float center, int strokePixels)
+    {
+        return RoundToPixel(center - (strokePixels * 0.5f));
+    }
+
+    private static int FractionMinPixel(int size, float fraction)
+    {
+        return size - RoundToPixel((1f - fraction) * size);
+    }
+
+    private static int FractionMaxPixel(int size, float fraction)
+    {
+        return RoundToPixel(fraction * size);
+    }
+
+    private static int TrailingFractionStartPixel(int size, float fraction)
+    {
+        return size - RoundToPixel(fraction * size);
+    }
+
+    private static int RoundToPixel(float value)
+    {
+        return (int)MathF.Round(value, MidpointRounding.AwayFromZero);
     }
 
     private void DrawCheckMark(SKCanvas canvas, float centerX, float centerY, float size)
@@ -1349,7 +1779,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
         int dashExtraPixels = Math.Max(0, dashPixelsRemaining - (dashBasePixels * dashCount));
 
         float centerY = y + (height * 0.5f);
-        float halfThickness = thickness * 0.5f;
 
         _spritePaint.Color = color;
         int cursorPixels = 0;
@@ -1364,7 +1793,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
             if (segmentPixels > 0)
             {
                 float segmentX = x + cursorPixels;
-                canvas.DrawRect(segmentX, centerY - halfThickness, segmentPixels, thickness, _spritePaint);
+                DrawCenteredHorizontalPixelRect(
+                    canvas,
+                    segmentX,
+                    segmentX + segmentPixels,
+                    centerY,
+                    thickness,
+                    _spritePaint);
             }
 
             cursorPixels += segmentPixels + gapPixels;
@@ -1400,7 +1835,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
         int dashExtraPixels = Math.Max(0, dashPixelsRemaining - (dashBasePixels * dashCount));
 
         float centerX = x + (width * 0.5f);
-        float halfThickness = thickness * 0.5f;
 
         _spritePaint.Color = color;
         int cursorPixels = 0;
@@ -1415,7 +1849,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
             if (segmentPixels > 0)
             {
                 float segmentY = y + cursorPixels;
-                canvas.DrawRect(centerX - halfThickness, segmentY, thickness, segmentPixels, _spritePaint);
+                DrawCenteredVerticalPixelRect(
+                    canvas,
+                    segmentY,
+                    segmentY + segmentPixels,
+                    centerX,
+                    thickness,
+                    _spritePaint);
             }
 
             cursorPixels += segmentPixels + gapPixels;
@@ -1453,38 +1893,94 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float centerY = y + (height * 0.5f);
         GetStrokeThicknesses(width, height, out float lightThickness, out _);
 
-        SKPoint start;
-        SKPoint control;
-        SKPoint end;
+        float radius = MathF.Min(width, height) * 0.5f;
+        float controlScale = 0.25f;
+        float left = x;
+        float right = x + width;
+        float top = y;
+        float bottom = y + height;
+
+        SKPaintStyle previousStyle = _spritePaint.Style;
+        float previousStrokeWidth = _spritePaint.StrokeWidth;
+        SKStrokeCap previousStrokeCap = _spritePaint.StrokeCap;
+        bool previousIsAntialias = _spritePaint.IsAntialias;
+        SKColor previousColor = _spritePaint.Color;
+
+        _spritePath.Rewind();
         switch (corner)
         {
             case ArcCorner.DownRight:
-                start = new SKPoint(centerX, y + height);
-                control = new SKPoint(x + width, y + height);
-                end = new SKPoint(x + width, centerY);
+                _spritePath.MoveTo(centerX, bottom);
+                _spritePath.LineTo(centerX, centerY + radius);
+                _spritePath.CubicTo(
+                    centerX,
+                    centerY + (controlScale * radius),
+                    centerX + (controlScale * radius),
+                    centerY,
+                    centerX + radius,
+                    centerY);
+                _spritePath.LineTo(right, centerY);
                 break;
 
             case ArcCorner.DownLeft:
-                start = new SKPoint(centerX, y + height);
-                control = new SKPoint(x, y + height);
-                end = new SKPoint(x, centerY);
+                _spritePath.MoveTo(centerX, bottom);
+                _spritePath.LineTo(centerX, centerY + radius);
+                _spritePath.CubicTo(
+                    centerX,
+                    centerY + (controlScale * radius),
+                    centerX - (controlScale * radius),
+                    centerY,
+                    centerX - radius,
+                    centerY);
+                _spritePath.LineTo(left, centerY);
                 break;
 
             case ArcCorner.UpLeft:
-                start = new SKPoint(x, centerY);
-                control = new SKPoint(x, y);
-                end = new SKPoint(centerX, y);
+                _spritePath.MoveTo(centerX, top);
+                _spritePath.LineTo(centerX, centerY - radius);
+                _spritePath.CubicTo(
+                    centerX,
+                    centerY - (controlScale * radius),
+                    centerX - (controlScale * radius),
+                    centerY,
+                    centerX - radius,
+                    centerY);
+                _spritePath.LineTo(left, centerY);
                 break;
 
             case ArcCorner.UpRight:
             default:
-                start = new SKPoint(centerX, y);
-                control = new SKPoint(x + width, y);
-                end = new SKPoint(x + width, centerY);
+                _spritePath.MoveTo(centerX, top);
+                _spritePath.LineTo(centerX, centerY - radius);
+                _spritePath.CubicTo(
+                    centerX,
+                    centerY - (controlScale * radius),
+                    centerX + (controlScale * radius),
+                    centerY,
+                    centerX + radius,
+                    centerY);
+                _spritePath.LineTo(right, centerY);
                 break;
         }
 
-        DrawStrokeQuadratic(canvas, start, control, end, lightThickness, color);
+        try
+        {
+            _spritePaint.Style = SKPaintStyle.Stroke;
+            _spritePaint.StrokeWidth = lightThickness;
+            _spritePaint.IsAntialias = true;
+            _spritePaint.Color = color;
+            _spritePaint.StrokeCap = SKStrokeCap.Butt;
+            canvas.DrawPath(_spritePath, _spritePaint);
+        }
+        finally
+        {
+            _spritePaint.Style = previousStyle;
+            _spritePaint.StrokeWidth = previousStrokeWidth;
+            _spritePaint.StrokeCap = previousStrokeCap;
+            _spritePaint.IsAntialias = previousIsAntialias;
+            _spritePaint.Color = previousColor;
+            _spritePath.Rewind();
+        }
     }
 
     private bool TryDrawDiagonalBoxLine(
@@ -1533,15 +2029,15 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float centerY = y + (height * 0.5f);
         GetStrokeThicknesses(width, height, out float lightThickness, out float heavyThickness);
 
-        float leftThickness = segments.Left == StrokeWeight.Heavy ? heavyThickness : lightThickness;
-        float rightThickness = segments.Right == StrokeWeight.Heavy ? heavyThickness : lightThickness;
-        float upThickness = segments.Up == StrokeWeight.Heavy ? heavyThickness : lightThickness;
-        float downThickness = segments.Down == StrokeWeight.Heavy ? heavyThickness : lightThickness;
+        float leftThickness = GetSegmentSpan(segments.Left, lightThickness, heavyThickness, heavyMeansDouble);
+        float rightThickness = GetSegmentSpan(segments.Right, lightThickness, heavyThickness, heavyMeansDouble);
+        float upThickness = GetSegmentSpan(segments.Up, lightThickness, heavyThickness, heavyMeansDouble);
+        float downThickness = GetSegmentSpan(segments.Down, lightThickness, heavyThickness, heavyMeansDouble);
 
         DrawHorizontalSegment(
             canvas,
             x,
-            centerX + leftThickness,
+            centerX + (leftThickness * 0.5f),
             centerY,
             segments.Left,
             color,
@@ -1550,7 +2046,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             heavyMeansDouble);
         DrawHorizontalSegment(
             canvas,
-            centerX - rightThickness,
+            centerX - (rightThickness * 0.5f),
             x + width,
             centerY,
             segments.Right,
@@ -1561,7 +2057,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         DrawVerticalSegment(
             canvas,
             y,
-            centerY + upThickness,
+            centerY + (upThickness * 0.5f),
             centerX,
             segments.Up,
             color,
@@ -1570,7 +2066,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             heavyMeansDouble);
         DrawVerticalSegment(
             canvas,
-            centerY - downThickness,
+            centerY - (downThickness * 0.5f),
             y + height,
             centerX,
             segments.Down,
@@ -1604,8 +2100,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         float thickness = weight == StrokeWeight.Heavy ? heavyThickness : lightThickness;
         _spritePaint.Color = color;
-        float halfThickness = thickness * 0.5f;
-        canvas.DrawRect(startX, centerY - halfThickness, endX - startX, thickness, _spritePaint);
+        DrawCenteredHorizontalPixelRect(
+            canvas,
+            startX,
+            endX,
+            centerY,
+            thickness,
+            _spritePaint);
     }
 
     private void DrawVerticalSegment(
@@ -1632,8 +2133,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         float thickness = weight == StrokeWeight.Heavy ? heavyThickness : lightThickness;
         _spritePaint.Color = color;
-        float halfThickness = thickness * 0.5f;
-        canvas.DrawRect(centerX - halfThickness, startY, thickness, endY - startY, _spritePaint);
+        DrawCenteredVerticalPixelRect(
+            canvas,
+            startY,
+            endY,
+            centerX,
+            thickness,
+            _spritePaint);
     }
 
     private void DrawDoubleHorizontalSegment(
@@ -1645,14 +2151,15 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float heavyThickness,
         SKColor color)
     {
-        float strokeThickness = MathF.Max(1f, MathF.Floor(lightThickness));
-        float pairSpan = MathF.Max((strokeThickness * 2f) + 1f, heavyThickness);
-        float top = centerY - (pairSpan * 0.5f);
-        float bottom = top + pairSpan - strokeThickness;
+        _ = heavyThickness;
+        float strokeThickness = MathF.Max(1f, RoundToPixel(lightThickness));
+        float gap = MathF.Max(1f, strokeThickness);
+        float top = MathF.Floor(centerY - strokeThickness - (gap * 0.5f));
+        float bottom = top + strokeThickness + gap;
 
         _spritePaint.Color = color;
-        canvas.DrawRect(startX, top, endX - startX, strokeThickness, _spritePaint);
-        canvas.DrawRect(startX, bottom, endX - startX, strokeThickness, _spritePaint);
+        DrawPixelRangeRect(canvas, startX, top, endX, top + strokeThickness, _spritePaint);
+        DrawPixelRangeRect(canvas, startX, bottom, endX, bottom + strokeThickness, _spritePaint);
     }
 
     private void DrawDoubleVerticalSegment(
@@ -1664,66 +2171,59 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float heavyThickness,
         SKColor color)
     {
-        float strokeThickness = MathF.Max(1f, MathF.Floor(lightThickness));
-        float pairSpan = MathF.Max((strokeThickness * 2f) + 1f, heavyThickness);
-        float left = centerX - (pairSpan * 0.5f);
-        float right = left + pairSpan - strokeThickness;
+        _ = heavyThickness;
+        float strokeThickness = MathF.Max(1f, RoundToPixel(lightThickness));
+        float gap = MathF.Max(1f, strokeThickness);
+        float left = MathF.Floor(centerX - strokeThickness - (gap * 0.5f));
+        float right = left + strokeThickness + gap;
 
         _spritePaint.Color = color;
-        canvas.DrawRect(left, startY, strokeThickness, endY - startY, _spritePaint);
-        canvas.DrawRect(right, startY, strokeThickness, endY - startY, _spritePaint);
+        DrawPixelRangeRect(canvas, left, startY, left + strokeThickness, endY, _spritePaint);
+        DrawPixelRangeRect(canvas, right, startY, right + strokeThickness, endY, _spritePaint);
+    }
+
+    private static float GetSegmentSpan(
+        StrokeWeight weight,
+        float lightThickness,
+        float heavyThickness,
+        bool heavyMeansDouble)
+    {
+        if (weight == StrokeWeight.None)
+        {
+            return 0f;
+        }
+
+        if (heavyMeansDouble && weight == StrokeWeight.Heavy)
+        {
+            float strokeThickness = MathF.Max(1f, RoundToPixel(lightThickness));
+            float gap = MathF.Max(1f, strokeThickness);
+            return (strokeThickness * 2f) + gap;
+        }
+
+        return weight == StrokeWeight.Heavy ? heavyThickness : lightThickness;
     }
 
     private void DrawStrokeLine(SKCanvas canvas, SKPoint start, SKPoint end, float thickness, SKColor color)
     {
         SKPaintStyle previousStyle = _spritePaint.Style;
         float previousStrokeWidth = _spritePaint.StrokeWidth;
+        SKStrokeCap previousStrokeCap = _spritePaint.StrokeCap;
         bool previousIsAntialias = _spritePaint.IsAntialias;
         SKColor previousColor = _spritePaint.Color;
         try
         {
             _spritePaint.Style = SKPaintStyle.Stroke;
             _spritePaint.StrokeWidth = thickness;
-            _spritePaint.IsAntialias = false;
+            _spritePaint.IsAntialias = true;
             _spritePaint.Color = color;
+            _spritePaint.StrokeCap = SKStrokeCap.Square;
             canvas.DrawLine(start, end, _spritePaint);
         }
         finally
         {
             _spritePaint.Style = previousStyle;
             _spritePaint.StrokeWidth = previousStrokeWidth;
-            _spritePaint.IsAntialias = previousIsAntialias;
-            _spritePaint.Color = previousColor;
-        }
-    }
-
-    private void DrawStrokeQuadratic(
-        SKCanvas canvas,
-        SKPoint start,
-        SKPoint control,
-        SKPoint end,
-        float thickness,
-        SKColor color)
-    {
-        SKPaintStyle previousStyle = _spritePaint.Style;
-        float previousStrokeWidth = _spritePaint.StrokeWidth;
-        bool previousIsAntialias = _spritePaint.IsAntialias;
-        SKColor previousColor = _spritePaint.Color;
-        try
-        {
-            _spritePaint.Style = SKPaintStyle.Stroke;
-            _spritePaint.StrokeWidth = thickness;
-            _spritePaint.IsAntialias = false;
-            _spritePaint.Color = color;
-            _spritePath.Rewind();
-            _spritePath.MoveTo(start);
-            _spritePath.QuadTo(control, end);
-            canvas.DrawPath(_spritePath, _spritePaint);
-        }
-        finally
-        {
-            _spritePaint.Style = previousStyle;
-            _spritePaint.StrokeWidth = previousStrokeWidth;
+            _spritePaint.StrokeCap = previousStrokeCap;
             _spritePaint.IsAntialias = previousIsAntialias;
             _spritePaint.Color = previousColor;
         }
@@ -1735,9 +2235,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
         out float lightThickness,
         out float heavyThickness)
     {
-        float minDimension = MathF.Max(1f, MathF.Min(width, height));
-        lightThickness = MathF.Max(1f, MathF.Round(minDimension * 0.12f));
-        heavyThickness = MathF.Max(lightThickness + 1f, MathF.Round(lightThickness * 1.75f));
+        _ = width;
+        _ = height;
+
+        lightThickness = LightBoxLineThickness;
+        heavyThickness = HeavyBoxLineThickness;
     }
 
     private void DrawBraillePattern(
@@ -1754,12 +2256,76 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return;
         }
 
-        float insetX = MathF.Max(0f, width * 0.16f);
-        float insetY = MathF.Max(0f, height * 0.1f);
-        float stepX = MathF.Max(1f, (width - (2f * insetX)) * 0.5f);
-        float stepY = MathF.Max(1f, (height - (2f * insetY)) * 0.25f);
-        float dotWidth = MathF.Max(1f, stepX * 0.45f);
-        float dotHeight = MathF.Max(1f, stepY * 0.45f);
+        int cellWidthPx = ToPixelSize(width);
+        int cellHeightPx = ToPixelSize(height);
+        int dotSize = Math.Min(cellWidthPx / 4, cellHeightPx / 8);
+        int xSpacing = cellWidthPx / 4;
+        int ySpacing = cellHeightPx / 8;
+        int xMargin = xSpacing / 2;
+        int yMargin = ySpacing / 2;
+
+        int xPixelsLeft = cellWidthPx - (2 * xMargin) - xSpacing - (2 * dotSize);
+        int yPixelsLeft = cellHeightPx - (2 * yMargin) - (3 * ySpacing) - (4 * dotSize);
+
+        if (xPixelsLeft >= 2 && yPixelsLeft >= 4 && dotSize == 0)
+        {
+            dotSize++;
+            xPixelsLeft -= 2;
+            yPixelsLeft -= 4;
+        }
+
+        if (xPixelsLeft >= 2 && xMargin == 0)
+        {
+            xMargin++;
+            xPixelsLeft -= 2;
+        }
+
+        if (yPixelsLeft >= 2 && yMargin == 0)
+        {
+            yMargin++;
+            yPixelsLeft -= 2;
+        }
+
+        if (xPixelsLeft >= 1)
+        {
+            xSpacing++;
+            xPixelsLeft--;
+        }
+
+        if (yPixelsLeft >= 3)
+        {
+            ySpacing++;
+            yPixelsLeft -= 3;
+        }
+
+        if (xPixelsLeft >= 2)
+        {
+            xMargin++;
+            xPixelsLeft -= 2;
+        }
+
+        if (yPixelsLeft >= 2)
+        {
+            yMargin++;
+            yPixelsLeft -= 2;
+        }
+
+        if (xPixelsLeft >= 2 && yPixelsLeft >= 4)
+        {
+            dotSize++;
+        }
+
+        if (dotSize <= 0)
+        {
+            dotSize = 1;
+        }
+
+        int leftColumnX = xMargin;
+        int rightColumnX = xMargin + dotSize + xSpacing;
+        int topRowY = yMargin;
+        int upperRowY = topRowY + dotSize + ySpacing;
+        int lowerRowY = upperRowY + dotSize + ySpacing;
+        int bottomRowY = lowerRowY + dotSize + ySpacing;
 
         _spritePaint.Color = color;
         for (int bit = 0; bit < 8; bit++)
@@ -1781,9 +2347,24 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 _ => (1, 3),
             };
 
-            float cx = x + insetX + (dotColumn * stepX) + (stepX * 0.5f);
-            float cy = y + insetY + (dotRow * stepY) + (stepY * 0.5f);
-            canvas.DrawRect(cx - (dotWidth * 0.5f), cy - (dotHeight * 0.5f), dotWidth, dotHeight, _spritePaint);
+            int dotX = dotColumn == 0 ? leftColumnX : rightColumnX;
+            int dotY = dotRow switch
+            {
+                0 => topRowY,
+                1 => upperRowY,
+                2 => lowerRowY,
+                _ => bottomRowY,
+            };
+
+            DrawCellPixelRect(
+                canvas,
+                x,
+                y,
+                dotX,
+                dotY,
+                dotX + dotSize,
+                dotY + dotSize,
+                _spritePaint);
         }
     }
 
@@ -1797,31 +2378,32 @@ public sealed class SkiaTerminalRenderer : IDisposable
         SKColor color)
     {
         _spritePaint.Color = color;
+        int cellWidthPx = ToPixelSize(width);
+        int cellHeightPx = ToPixelSize(height);
 
         if (codepoint >= 0x2581 && codepoint <= 0x2588)
         {
             int eighths = codepoint - 0x2580;
-            float blockHeight = height * (eighths / 8f);
-            float top = y + (height - blockHeight);
-            canvas.DrawRect(x, top, width, blockHeight, _spritePaint);
+            int top = TrailingFractionStartPixel(cellHeightPx, eighths / 8f);
+            DrawCellPixelRect(canvas, x, y, 0, top, cellWidthPx, cellHeightPx, _spritePaint);
             return true;
         }
 
         if (codepoint >= 0x2589 && codepoint <= 0x258F)
         {
             int eighths = 0x2590 - codepoint;
-            float blockWidth = width * (eighths / 8f);
-            canvas.DrawRect(x, y, blockWidth, height, _spritePaint);
+            int right = FractionMaxPixel(cellWidthPx, eighths / 8f);
+            DrawCellPixelRect(canvas, x, y, 0, 0, right, cellHeightPx, _spritePaint);
             return true;
         }
 
         switch (codepoint)
         {
             case 0x2580:
-                canvas.DrawRect(x, y, width, height * 0.5f, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, 0, 0, cellWidthPx, FractionMaxPixel(cellHeightPx, 0.5f), _spritePaint);
                 return true;
             case 0x2590:
-                canvas.DrawRect(x + (width * 0.5f), y, width * 0.5f, height, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, TrailingFractionStartPixel(cellWidthPx, 0.5f), 0, cellWidthPx, cellHeightPx, _spritePaint);
                 return true;
             case 0x2591:
             case 0x2592:
@@ -1832,36 +2414,38 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 return true;
             }
             case 0x2594:
-                canvas.DrawRect(x, y, width, height * 0.125f, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, 0, 0, cellWidthPx, FractionMaxPixel(cellHeightPx, 0.125f), _spritePaint);
                 return true;
             case 0x2595:
-                canvas.DrawRect(x + (width * 0.875f), y, width * 0.125f, height, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, TrailingFractionStartPixel(cellWidthPx, 0.125f), 0, cellWidthPx, cellHeightPx, _spritePaint);
                 return true;
         }
 
         if (TryGetQuadrantMask(codepoint, out QuadrantMask quadrants))
         {
-            float halfWidth = width * 0.5f;
-            float halfHeight = height * 0.5f;
+            int halfWidthMin = FractionMinPixel(cellWidthPx, 0.5f);
+            int halfWidthMax = FractionMaxPixel(cellWidthPx, 0.5f);
+            int halfHeightMin = FractionMinPixel(cellHeightPx, 0.5f);
+            int halfHeightMax = FractionMaxPixel(cellHeightPx, 0.5f);
 
             if ((quadrants & QuadrantMask.UpperLeft) != 0)
             {
-                canvas.DrawRect(x, y, halfWidth, halfHeight, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, 0, 0, halfWidthMax, halfHeightMax, _spritePaint);
             }
 
             if ((quadrants & QuadrantMask.UpperRight) != 0)
             {
-                canvas.DrawRect(x + halfWidth, y, halfWidth, halfHeight, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, halfWidthMin, 0, cellWidthPx, halfHeightMax, _spritePaint);
             }
 
             if ((quadrants & QuadrantMask.LowerLeft) != 0)
             {
-                canvas.DrawRect(x, y + halfHeight, halfWidth, halfHeight, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, 0, halfHeightMin, halfWidthMax, cellHeightPx, _spritePaint);
             }
 
             if ((quadrants & QuadrantMask.LowerRight) != 0)
             {
-                canvas.DrawRect(x + halfWidth, y + halfHeight, halfWidth, halfHeight, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, halfWidthMin, halfHeightMin, cellWidthPx, cellHeightPx, _spritePaint);
             }
 
             return true;
@@ -1880,9 +2464,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
         SKColor color)
     {
         _spritePaint.Color = color;
-        float thickness = MathF.Max(1f, MathF.Round(height * 0.1f));
-        float lineY = y + (height * ratio) - (thickness * 0.5f);
-        canvas.DrawRect(x, lineY, width, thickness, _spritePaint);
+        int cellWidthPx = ToPixelSize(width);
+        int cellHeightPx = ToPixelSize(height);
+        int thickness = Math.Max(1, RoundToPixel(cellHeightPx * 0.1f));
+        int lineTop = Math.Clamp(
+            RoundToPixel((cellHeightPx * ratio) - (thickness * 0.5f)),
+            0,
+            Math.Max(0, cellHeightPx - thickness));
+        DrawCellPixelRect(canvas, x, y, 0, lineTop, cellWidthPx, lineTop + thickness, _spritePaint);
     }
 
     private void DrawShadePattern(
@@ -1907,8 +2496,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
             15, 7, 13, 5,
         ];
 
-        float cellWidth = width / 4f;
-        float cellHeight = height / 4f;
+        int cellWidthPx = ToPixelSize(width);
+        int cellHeightPx = ToPixelSize(height);
         _spritePaint.Color = color;
 
         for (int row = 0; row < 4; row++)
@@ -1921,9 +2510,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     continue;
                 }
 
-                float px = x + (col * cellWidth);
-                float py = y + (row * cellHeight);
-                canvas.DrawRect(px, py, cellWidth, cellHeight, _spritePaint);
+                int left = FractionMinPixel(cellWidthPx, col / 4f);
+                int right = FractionMaxPixel(cellWidthPx, (col + 1) / 4f);
+                int top = FractionMinPixel(cellHeightPx, row / 4f);
+                int bottom = FractionMaxPixel(cellHeightPx, (row + 1) / 4f);
+                DrawCellPixelRect(canvas, x, y, left, top, right, bottom, _spritePaint);
             }
         }
     }
@@ -1968,6 +2559,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return true;
         }
 
+        if (IsPowerlineCodepoint(codepoint))
+        {
+            category = SpriteCategory.Powerline;
+            return true;
+        }
+
         if (IsGeometricSymbolCodepoint(codepoint))
         {
             category = SpriteCategory.Symbol;
@@ -2009,6 +2606,29 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         return TryGetQuadrantMask(codepoint, out _);
+    }
+
+    private static bool IsPowerlineCodepoint(int codepoint)
+    {
+        return codepoint is
+            0xE0B0 or
+            0xE0B1 or
+            0xE0B2 or
+            0xE0B3 or
+            0xE0B4 or
+            0xE0B5 or
+            0xE0B6 or
+            0xE0B7 or
+            0xE0B8 or
+            0xE0B9 or
+            0xE0BA or
+            0xE0BB or
+            0xE0BC or
+            0xE0BD or
+            0xE0BE or
+            0xE0BF or
+            0xE0D2 or
+            0xE0D4;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -5652,7 +6272,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
         Braille = 1,
         BlockElement = 2,
         ScanLine = 3,
-        Symbol = 4,
+        Powerline = 4,
+        Symbol = 5,
     }
 
     private readonly record struct BoxSegments(

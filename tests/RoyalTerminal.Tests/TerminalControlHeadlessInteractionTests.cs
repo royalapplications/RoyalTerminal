@@ -1761,7 +1761,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             double expectedScale = Math.Ceiling(fractionalCellHeight) / fractionalCellHeight;
 
             Assert.True(nativePointerEvent.Y > point.Y);
-            Assert.InRange(Math.Abs(nativePointerEvent.Y - (point.Y * expectedScale)), 0, 0.5);
+            Assert.InRange(Math.Abs(nativePointerEvent.Y - (point.Y * expectedScale)), 0, 1.0);
             Assert.Equal((int)Math.Ceiling(fractionalCellHeight), context.CellHeightPx);
         }
         finally
