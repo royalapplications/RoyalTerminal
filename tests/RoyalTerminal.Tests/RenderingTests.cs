@@ -50,6 +50,24 @@ public class RenderingTests
     }
 
     [Fact]
+    public void GlyphCache_MeasureCellSize_UsesRoundedDigitZeroAdvance()
+    {
+        using var cache = new GlyphCache("Consolas");
+        using SKFont font = cache.CreateFont(14f);
+
+        (float width, float height) = cache.MeasureCellSize(14f);
+        float expectedWidth = MathF.Max(1f, MathF.Round(font.MeasureText("0"), MidpointRounding.AwayFromZero));
+        float expectedHeight = MathF.Max(
+            1f,
+            MathF.Round(
+                font.Metrics.Descent - font.Metrics.Ascent + font.Metrics.Leading,
+                MidpointRounding.AwayFromZero));
+
+        Assert.Equal(expectedWidth, width);
+        Assert.Equal(expectedHeight, height);
+    }
+
+    [Fact]
     public void HarfBuzzTypefaceCache_GetOrCreate_ReusesSameEntry()
     {
         using var glyphCache = new GlyphCache("Consolas");
