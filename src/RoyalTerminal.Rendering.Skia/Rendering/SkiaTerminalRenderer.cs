@@ -2554,6 +2554,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             {
                 if (useSolidGraphShades)
                 {
+                    _spritePaint.Color = GetSolidGraphShadeColor(color, codepoint);
                     DrawCellPixelRect(canvas, x, y, 0, 0, cellWidthPx, cellHeightPx, _spritePaint);
                 }
                 else
@@ -2603,6 +2604,18 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         return false;
+    }
+
+    private static SKColor GetSolidGraphShadeColor(SKColor color, int codepoint)
+    {
+        byte shadeAlpha = codepoint switch
+        {
+            0x2591 => 64,
+            0x2592 => 128,
+            _ => 192,
+        };
+        byte alpha = (byte)((color.Alpha * shadeAlpha + 127) / 255);
+        return color.WithAlpha(alpha);
     }
 
     private void DrawScanLine(
