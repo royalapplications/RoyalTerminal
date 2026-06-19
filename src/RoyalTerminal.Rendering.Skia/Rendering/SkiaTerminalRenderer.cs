@@ -2372,15 +2372,29 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return;
         }
 
-        int cellWidthPx = ToPixelSize(width);
-        int cellHeightPx = ToPixelSize(height);
-        bool previousIsAntialias = _spritePaint.IsAntialias;
+        ReadOnlySpan<byte> dotPositions =
+        [
+            1, 0,
+            1, 2,
+            1, 4,
+            5, 0,
+            5, 2,
+            5, 4,
+            1, 6,
+            5, 6,
+        ];
+        float xEighth = MathF.Max(1f, width / 8f);
+        float paddingY = height * 0.1f;
+        float usableHeight = MathF.Max(1f, height * 0.8f);
+        float yEighth = MathF.Max(1f, usableHeight / 8f);
+        float radius = MathF.Max(0.75f, MathF.Min(xEighth, yEighth));
+        bool previousAntialias = _spritePaint.IsAntialias;
         SKPaintStyle previousStyle = _spritePaint.Style;
         _spritePaint.Color = color;
 
         try
         {
-            _spritePaint.IsAntialias = false;
+            _spritePaint.IsAntialias = true;
             _spritePaint.Style = SKPaintStyle.Fill;
 
             for (int bit = 0; bit < 8; bit++)
@@ -2390,28 +2404,15 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     continue;
                 }
 
-                (int column, int row) = bit switch
-                {
-                    0 => (0, 0),
-                    1 => (0, 1),
-                    2 => (0, 2),
-                    3 => (1, 0),
-                    4 => (1, 1),
-                    5 => (1, 2),
-                    6 => (0, 3),
-                    _ => (1, 3),
-                };
-
-                int left = FractionMinPixel(cellWidthPx, column / 2f);
-                int right = FractionMaxPixel(cellWidthPx, (column + 1) / 2f);
-                int top = FractionMinPixel(cellHeightPx, row / 4f);
-                int bottom = FractionMaxPixel(cellHeightPx, (row + 1) / 4f);
-                DrawCellPixelRect(canvas, x, y, left, top, right, bottom, _spritePaint);
+                int positionIndex = bit * 2;
+                float centerX = x + ((dotPositions[positionIndex] + 1) * xEighth);
+                float centerY = y + paddingY + ((dotPositions[positionIndex + 1] + 1) * yEighth);
+                canvas.DrawCircle(centerX, centerY, radius, _spritePaint);
             }
         }
         finally
         {
-            _spritePaint.IsAntialias = previousIsAntialias;
+            _spritePaint.IsAntialias = previousAntialias;
             _spritePaint.Style = previousStyle;
         }
     }
