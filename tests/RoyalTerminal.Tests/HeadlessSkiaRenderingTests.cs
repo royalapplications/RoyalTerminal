@@ -1300,27 +1300,56 @@ public class HeadlessSkiaRenderingTests
         using var snapshot = surface.Snapshot();
         using var pixmap = snapshot.PeekPixels();
 
-        // Check for red pixels in row 0 area
-        var hasRed = false;
-        var row0Y = (int)(renderer.CellHeight / 2);
-        for (var x = 0; x < (int)(10 * renderer.CellWidth) && !hasRed; x++)
-        {
-            var px = pixmap.GetPixelColor(x, row0Y);
-            if (px.Red > 200 && px.Green < 50 && px.Blue < 50)
-                hasRed = true;
-        }
+        int sampleWidth = Math.Min(pixmap.Width, Math.Max(1, (int)Math.Ceiling(10 * renderer.CellWidth)));
+        int cellHeight = Math.Max(1, (int)Math.Ceiling(renderer.CellHeight));
+
+        // Check for red pixels in row 0 area. Scan the row cell rectangle instead of
+        // one y-coordinate so Linux fallback font metrics cannot miss the glyph ink.
+        bool hasRed = ContainsColoredPixel(
+            pixmap,
+            startX: 0,
+            endX: sampleWidth,
+            startY: 0,
+            endY: cellHeight,
+            static px => px.Red > 200 && px.Green < 50 && px.Blue < 50);
         Assert.True(hasRed, "Red text should produce red pixels");
 
         // Check for green pixels in row 1 area
-        var hasGreen = false;
-        var row1Y = (int)(renderer.CellHeight + renderer.CellHeight / 2);
-        for (var x = 0; x < (int)(10 * renderer.CellWidth) && !hasGreen; x++)
-        {
-            var px = pixmap.GetPixelColor(x, row1Y);
-            if (px.Green > 200 && px.Red < 50 && px.Blue < 50)
-                hasGreen = true;
-        }
+        bool hasGreen = ContainsColoredPixel(
+            pixmap,
+            startX: 0,
+            endX: sampleWidth,
+            startY: cellHeight,
+            endY: cellHeight * 2,
+            static px => px.Green > 200 && px.Red < 50 && px.Blue < 50);
         Assert.True(hasGreen, "Green text should produce green pixels");
+    }
+
+    private static bool ContainsColoredPixel(
+        SKPixmap pixmap,
+        int startX,
+        int endX,
+        int startY,
+        int endY,
+        Func<SKColor, bool> predicate)
+    {
+        int minX = Math.Clamp(startX, 0, pixmap.Width);
+        int maxX = Math.Clamp(endX, 0, pixmap.Width);
+        int minY = Math.Clamp(startY, 0, pixmap.Height);
+        int maxY = Math.Clamp(endY, 0, pixmap.Height);
+
+        for (int y = minY; y < maxY; y++)
+        {
+            for (int x = minX; x < maxX; x++)
+            {
+                if (predicate(pixmap.GetPixelColor(x, y)))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     #endregion
