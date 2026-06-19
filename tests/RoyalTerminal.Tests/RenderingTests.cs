@@ -1900,7 +1900,7 @@ public class RenderingTests
     }
 
     [Fact]
-    public void SkiaTerminalRenderer_FullBraillePattern_UsesSpriteFontCellDotGeometry()
+    public void SkiaTerminalRenderer_FullBraillePattern_UsesSmoothSpriteFontDotGeometry()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
         {
@@ -1916,14 +1916,24 @@ public class RenderingTests
 
         using SKImage snapshot = surface.Snapshot();
         using SKPixmap pixels = snapshot.PeekPixels();
-        int ink = CountBrightPixelsInRegion(
+        int brightInk = CountBrightPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: 0f,
+            endY: renderer.CellHeight);
+        int edgeInk = CountMidTonePixelsInRegion(
             pixels,
             startX: 0f,
             endX: renderer.CellWidth,
             startY: 0f,
             endY: renderer.CellHeight);
 
-        Assert.Equal(128, ink);
+        // Ghostty and xterm.js both keep Braille cell-owned. xterm's custom
+        // glyphs use rounded dots; this keeps btop-style net graphs smooth
+        // while preserving the terminal grid placement.
+        Assert.True(brightInk >= 64, $"Braille graph cell should keep visible dot coverage. brightInk={brightInk}");
+        Assert.True(edgeInk >= 8, $"Braille graph cell should have anti-aliased dot edges. edgeInk={edgeInk}");
     }
 
     [Fact]
@@ -2587,6 +2597,43 @@ public class RenderingTests
         }
 
         return count;
+    }
+
+    private static int CountMidTonePixelsInRegion(
+        SKPixmap pixels,
+        float startX,
+        float endX,
+        float startY,
+        float endY,
+        byte lowThreshold = 0,
+        byte highThreshold = 180)
+    {
+        int count = 0;
+        int minX = Math.Clamp((int)MathF.Floor(startX), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling(endX), 0, pixels.Width);
+        int minY = Math.Clamp((int)MathF.Floor(startY), 0, pixels.Height);
+        int maxY = Math.Clamp((int)MathF.Ceiling(endY), 0, pixels.Height);
+
+        for (int y = minY; y < maxY; y++)
+        {
+            for (int x = minX; x < maxX; x++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                if (IsMidToneChannel(pixel.Red, lowThreshold, highThreshold) ||
+                    IsMidToneChannel(pixel.Green, lowThreshold, highThreshold) ||
+                    IsMidToneChannel(pixel.Blue, lowThreshold, highThreshold))
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static bool IsMidToneChannel(byte value, byte lowThreshold, byte highThreshold)
+    {
+        return value > lowThreshold && value < highThreshold;
     }
 
     private static int CountBrightPixelsInCell(

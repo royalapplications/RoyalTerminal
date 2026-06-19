@@ -2256,115 +2256,48 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return;
         }
 
-        int cellWidthPx = ToPixelSize(width);
-        int cellHeightPx = ToPixelSize(height);
-        int dotSize = Math.Min(cellWidthPx / 4, cellHeightPx / 8);
-        int xSpacing = cellWidthPx / 4;
-        int ySpacing = cellHeightPx / 8;
-        int xMargin = xSpacing / 2;
-        int yMargin = ySpacing / 2;
-
-        int xPixelsLeft = cellWidthPx - (2 * xMargin) - xSpacing - (2 * dotSize);
-        int yPixelsLeft = cellHeightPx - (2 * yMargin) - (3 * ySpacing) - (4 * dotSize);
-
-        if (xPixelsLeft >= 2 && yPixelsLeft >= 4 && dotSize == 0)
-        {
-            dotSize++;
-            xPixelsLeft -= 2;
-            yPixelsLeft -= 4;
-        }
-
-        if (xPixelsLeft >= 2 && xMargin == 0)
-        {
-            xMargin++;
-            xPixelsLeft -= 2;
-        }
-
-        if (yPixelsLeft >= 2 && yMargin == 0)
-        {
-            yMargin++;
-            yPixelsLeft -= 2;
-        }
-
-        if (xPixelsLeft >= 1)
-        {
-            xSpacing++;
-            xPixelsLeft--;
-        }
-
-        if (yPixelsLeft >= 3)
-        {
-            ySpacing++;
-            yPixelsLeft -= 3;
-        }
-
-        if (xPixelsLeft >= 2)
-        {
-            xMargin++;
-            xPixelsLeft -= 2;
-        }
-
-        if (yPixelsLeft >= 2)
-        {
-            yMargin++;
-            yPixelsLeft -= 2;
-        }
-
-        if (xPixelsLeft >= 2 && yPixelsLeft >= 4)
-        {
-            dotSize++;
-        }
-
-        if (dotSize <= 0)
-        {
-            dotSize = 1;
-        }
-
-        int leftColumnX = xMargin;
-        int rightColumnX = xMargin + dotSize + xSpacing;
-        int topRowY = yMargin;
-        int upperRowY = topRowY + dotSize + ySpacing;
-        int lowerRowY = upperRowY + dotSize + ySpacing;
-        int bottomRowY = lowerRowY + dotSize + ySpacing;
-
+        ReadOnlySpan<byte> dotPositions =
+        [
+            1, 0,
+            1, 2,
+            1, 4,
+            5, 0,
+            5, 2,
+            5, 4,
+            1, 6,
+            5, 6,
+        ];
+        float xEighth = MathF.Max(1f, width / 8f);
+        float paddingY = height * 0.1f;
+        float usableHeight = MathF.Max(1f, height * 0.8f);
+        float yEighth = MathF.Max(1f, usableHeight / 8f);
+        float radius = MathF.Max(0.75f, MathF.Min(xEighth, yEighth));
+        bool previousAntialias = _spritePaint.IsAntialias;
+        SKPaintStyle previousStyle = _spritePaint.Style;
         _spritePaint.Color = color;
-        for (int bit = 0; bit < 8; bit++)
+
+        try
         {
-            if ((pattern & (1 << bit)) == 0)
+            _spritePaint.IsAntialias = true;
+            _spritePaint.Style = SKPaintStyle.Fill;
+
+            for (int bit = 0; bit < 8; bit++)
             {
-                continue;
+                if ((pattern & (1 << bit)) == 0)
+                {
+                    continue;
+                }
+
+                int positionIndex = bit * 2;
+                float centerX = x + ((dotPositions[positionIndex] + 1) * xEighth);
+                float centerY = y + paddingY + ((dotPositions[positionIndex + 1] + 1) * yEighth);
+                canvas.DrawCircle(centerX, centerY, radius, _spritePaint);
             }
-
-            (int dotColumn, int dotRow) = bit switch
-            {
-                0 => (0, 0),
-                1 => (0, 1),
-                2 => (0, 2),
-                3 => (1, 0),
-                4 => (1, 1),
-                5 => (1, 2),
-                6 => (0, 3),
-                _ => (1, 3),
-            };
-
-            int dotX = dotColumn == 0 ? leftColumnX : rightColumnX;
-            int dotY = dotRow switch
-            {
-                0 => topRowY,
-                1 => upperRowY,
-                2 => lowerRowY,
-                _ => bottomRowY,
-            };
-
-            DrawCellPixelRect(
-                canvas,
-                x,
-                y,
-                dotX,
-                dotY,
-                dotX + dotSize,
-                dotY + dotSize,
-                _spritePaint);
+        }
+        finally
+        {
+            _spritePaint.IsAntialias = previousAntialias;
+            _spritePaint.Style = previousStyle;
         }
     }
 
