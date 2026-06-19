@@ -1092,7 +1092,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     break;
 
                 case SpriteCategory.Braille:
-                    DrawBraillePattern(canvas, x, y, spriteWidth, spriteHeight, codepoint - 0x2800, color, useSolidGraphSprites);
+                    DrawBraillePattern(canvas, x, y, spriteWidth, spriteHeight, codepoint - 0x2800, color);
                     break;
 
                 case SpriteCategory.BlockElement:
@@ -2458,17 +2458,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float width,
         float height,
         int pattern,
-        SKColor color,
-        bool useSolidGraphSubcells)
+        SKColor color)
     {
         if ((pattern & 0xFF) == 0)
         {
-            return;
-        }
-
-        if (useSolidGraphSubcells)
-        {
-            DrawSolidBraillePattern(canvas, x, y, width, height, pattern, color);
             return;
         }
 
@@ -2513,59 +2506,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
         finally
         {
             _spritePaint.IsAntialias = previousAntialias;
-            _spritePaint.Style = previousStyle;
-        }
-    }
-
-    private void DrawSolidBraillePattern(
-        SKCanvas canvas,
-        float x,
-        float y,
-        float width,
-        float height,
-        int pattern,
-        SKColor color)
-    {
-        int cellWidthPx = ToPixelSize(width);
-        int cellHeightPx = ToPixelSize(height);
-        bool previousIsAntialias = _spritePaint.IsAntialias;
-        SKPaintStyle previousStyle = _spritePaint.Style;
-        _spritePaint.Color = color;
-
-        try
-        {
-            _spritePaint.IsAntialias = false;
-            _spritePaint.Style = SKPaintStyle.Fill;
-
-            for (int bit = 0; bit < 8; bit++)
-            {
-                if ((pattern & (1 << bit)) == 0)
-                {
-                    continue;
-                }
-
-                (int column, int row) = bit switch
-                {
-                    0 => (0, 0),
-                    1 => (0, 1),
-                    2 => (0, 2),
-                    3 => (1, 0),
-                    4 => (1, 1),
-                    5 => (1, 2),
-                    6 => (0, 3),
-                    _ => (1, 3),
-                };
-
-                int left = FractionMinPixel(cellWidthPx, column / 2f);
-                int right = FractionMaxPixel(cellWidthPx, (column + 1) / 2f);
-                int top = FractionMinPixel(cellHeightPx, row / 4f);
-                int bottom = FractionMaxPixel(cellHeightPx, (row + 1) / 4f);
-                DrawCellPixelRect(canvas, x, y, left, top, right, bottom, _spritePaint);
-            }
-        }
-        finally
-        {
-            _spritePaint.IsAntialias = previousIsAntialias;
             _spritePaint.Style = previousStyle;
         }
     }

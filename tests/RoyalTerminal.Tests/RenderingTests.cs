@@ -2360,7 +2360,7 @@ public class RenderingTests
     }
 
     [Fact]
-    public void SkiaTerminalRenderer_BtopNetPanelGraphSprites_RenderAsSolidCells()
+    public void SkiaTerminalRenderer_BtopNetPanelGraphSprites_RenderShadeSolidAndBrailleDotted()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
         {
@@ -2388,7 +2388,10 @@ public class RenderingTests
         Assert.Equal(expectedCellPixels, CountBrightPixelsInCell(pixels, renderer, column: 1, row: 1));
         Assert.Equal(expectedCellPixels, CountBrightPixelsInCell(pixels, renderer, column: 2, row: 1));
         Assert.Equal(expectedCellPixels, CountBrightPixelsInCell(pixels, renderer, column: 3, row: 1));
-        Assert.Equal(expectedCellPixels, CountBrightPixelsInCell(pixels, renderer, column: 4, row: 1));
+
+        int brailleInk = CountBrightPixelsInCell(pixels, renderer, column: 4, row: 1);
+        Assert.True(brailleInk >= 64, $"Braille graph cell should keep visible dotted coverage. brailleInk={brailleInk}");
+        Assert.True(brailleInk < expectedCellPixels, $"Braille graph cell should not be filled as a solid net graph cell. brailleInk={brailleInk}");
     }
 
     [Theory]
