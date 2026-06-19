@@ -1541,10 +1541,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float bottom,
         SKPaint paint)
     {
-        int pixelLeft = RoundToPixel(MathF.Min(left, right));
-        int pixelTop = RoundToPixel(MathF.Min(top, bottom));
-        int pixelRight = RoundToPixel(MathF.Max(left, right));
-        int pixelBottom = RoundToPixel(MathF.Max(top, bottom));
+        int pixelLeft = FloorToPixel(MathF.Min(left, right));
+        int pixelTop = FloorToPixel(MathF.Min(top, bottom));
+        int pixelRight = FloorToPixel(MathF.Max(left, right));
+        int pixelBottom = FloorToPixel(MathF.Max(top, bottom));
 
         if (pixelRight <= pixelLeft)
         {
@@ -1608,7 +1608,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private static int CenteredStrokeStartPixel(float center, int strokePixels)
     {
-        return RoundToPixel(center - (strokePixels * 0.5f));
+        return FloorToPixel(center - (strokePixels * 0.5f));
+    }
+
+    private static float CenteredStrokeCenterPixel(int size, int strokePixels)
+    {
+        return ((size - strokePixels) / 2) + (strokePixels * 0.5f);
     }
 
     private static int FractionMinPixel(int size, float fraction)
@@ -1629,6 +1634,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private static int RoundToPixel(float value)
     {
         return (int)MathF.Round(value, MidpointRounding.AwayFromZero);
+    }
+
+    private static int FloorToPixel(float value)
+    {
+        return (int)MathF.Floor(value);
     }
 
     private void DrawCheckMark(SKCanvas canvas, float centerX, float centerY, float size)
@@ -1889,16 +1899,21 @@ public sealed class SkiaTerminalRenderer : IDisposable
         ArcCorner corner,
         SKColor color)
     {
-        float centerX = x + (width * 0.5f);
-        float centerY = y + (height * 0.5f);
         GetStrokeThicknesses(width, height, out float lightThickness, out _);
+        int cellWidthPx = ToPixelSize(width);
+        int cellHeightPx = ToPixelSize(height);
+        int lightPx = ToStrokePixelSize(lightThickness);
+        int originX = RoundToPixel(x);
+        int originY = RoundToPixel(y);
 
-        float radius = MathF.Min(width, height) * 0.5f;
+        float centerX = originX + CenteredStrokeCenterPixel(cellWidthPx, lightPx);
+        float centerY = originY + CenteredStrokeCenterPixel(cellHeightPx, lightPx);
+        float radius = MathF.Min(cellWidthPx, cellHeightPx) * 0.5f;
         float controlScale = 0.25f;
-        float left = x;
-        float right = x + width;
-        float top = y;
-        float bottom = y + height;
+        float left = originX;
+        float right = originX + cellWidthPx;
+        float top = originY;
+        float bottom = originY + cellHeightPx;
 
         SKPaintStyle previousStyle = _spritePaint.Style;
         float previousStrokeWidth = _spritePaint.StrokeWidth;
@@ -1966,7 +1981,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         try
         {
             _spritePaint.Style = SKPaintStyle.Stroke;
-            _spritePaint.StrokeWidth = lightThickness;
+            _spritePaint.StrokeWidth = lightPx;
             _spritePaint.IsAntialias = true;
             _spritePaint.Color = color;
             _spritePaint.StrokeCap = SKStrokeCap.Butt;

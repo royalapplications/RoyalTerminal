@@ -1835,6 +1835,63 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_BoxDrawingSprites_SnapToSharedCellLocalGridAtEvenSizes()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(18f, 36f);
+
+        string[] rows =
+        [
+            "\u256D\u2500\u256E",
+            "\u2502 \u2502",
+            "\u2570\u2500\u256F",
+        ];
+
+        TerminalScreen screen = CreateScreenFromRows(rows);
+        using var surface = CreateRenderSurface(renderer, columns: screen.Columns, rows: screen.ViewportRows);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+
+        int expectedVerticalColumn = 8;
+        int shiftedVerticalColumn = 9;
+        int expectedHorizontalRow = 17;
+        int shiftedHorizontalRow = 18;
+
+        Assert.True(
+            CountBrightPixelsInRegion(pixels, expectedVerticalColumn, expectedVerticalColumn + 1f, 33f, 36f) > 0,
+            "Rounded top-left corner vertical stem should use the same floor-snapped column as straight vertical lines.");
+        Assert.Equal(
+            0,
+            CountBrightPixelsInRegion(pixels, shiftedVerticalColumn, shiftedVerticalColumn + 1f, 33f, 36f));
+        Assert.True(
+            CountBrightPixelsInRegion(pixels, expectedVerticalColumn, expectedVerticalColumn + 1f, 36f, 72f) > 0,
+            "Straight vertical line below the rounded corner should use the same snapped column.");
+        Assert.Equal(
+            0,
+            CountBrightPixelsInRegion(pixels, shiftedVerticalColumn, shiftedVerticalColumn + 1f, 36f, 72f));
+
+        Assert.True(
+            CountBrightPixelsInRegion(pixels, 18f, 36f, expectedHorizontalRow, expectedHorizontalRow + 1f) > 0,
+            "Straight horizontal line should use the floor-snapped center row.");
+        Assert.Equal(
+            0,
+            CountBrightPixelsInRegion(pixels, 18f, 36f, shiftedHorizontalRow, shiftedHorizontalRow + 1f));
+        Assert.True(
+            CountBrightPixelsInRegion(pixels, 15f, 18f, expectedHorizontalRow, expectedHorizontalRow + 1f) > 0,
+            "Rounded corner horizontal exit should align with the adjacent horizontal segment row.");
+        Assert.Equal(
+            0,
+            CountBrightPixelsInRegion(pixels, 15f, 18f, shiftedHorizontalRow, shiftedHorizontalRow + 1f));
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_LightBoxLines_DoNotThickenAtBtopCellScale()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
