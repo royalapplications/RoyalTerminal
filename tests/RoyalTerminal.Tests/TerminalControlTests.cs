@@ -596,7 +596,10 @@ public class TerminalControlTests
         transport.RaiseData("new-shell$ "u8.ToArray());
         transport.RaiseRemovedData("\r\nSTALE-OLD-PTY\r\n"u8.ToArray());
         transport.RaiseRemovedProcessExited(7);
-        await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+        bool newPromptSeen = await WaitUntilAsync(
+            () => ReadAllRowsLocked(control).Contains("new-shell$ ", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(2));
+        Assert.True(newPromptSeen, $"Did not observe restarted session prompt. Output: {ReadAllRowsLocked(control)}");
 
         TerminalScreen screen = Assert.IsType<TerminalScreen>(control.Screen);
         lock (screen.SyncRoot)
