@@ -2161,6 +2161,66 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_DoubleLineCorners_ClipInnerRailsWithoutCrossing()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(32f, 32f);
+
+        string[] rows =
+        [
+            "\u2554\u2557",
+            "\u255A\u255D",
+        ];
+
+        TerminalScreen screen = CreateScreenFromRows(rows);
+        using var surface = CreateRenderSurface(renderer, columns: screen.Columns, rows: screen.ViewportRows);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int totalInk = CountBrightPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: screen.Columns * renderer.CellWidth,
+            startY: 0f,
+            endY: screen.ViewportRows * renderer.CellHeight);
+
+        Assert.True(totalInk > 0, "Double-line corners should render visible ink.");
+
+        int hDoubleTop = 14;
+        int hLightTop = 15;
+        int hLightBottom = 16;
+        int vDoubleLeft = 14;
+        int vLightLeft = 15;
+        int vLightRight = 16;
+
+        AssertNoCornerInk(column: 0, row: 0, localX: vLightRight, localY: hLightTop, "top-left inner vertical rail should not cross upward");
+        AssertNoCornerInk(column: 0, row: 0, localX: vLightLeft, localY: hLightBottom, "top-left lower horizontal rail should not cross leftward");
+
+        AssertNoCornerInk(column: 1, row: 0, localX: vDoubleLeft, localY: hLightTop, "top-right inner vertical rail should not cross upward");
+        AssertNoCornerInk(column: 1, row: 0, localX: vLightLeft, localY: hLightBottom, "top-right lower horizontal rail should not cross rightward");
+
+        AssertNoCornerInk(column: 0, row: 1, localX: vLightRight, localY: hLightTop, "bottom-left inner vertical rail should not cross downward");
+        AssertNoCornerInk(column: 0, row: 1, localX: vLightLeft, localY: hDoubleTop, "bottom-left upper horizontal rail should not cross leftward");
+
+        AssertNoCornerInk(column: 1, row: 1, localX: vDoubleLeft, localY: hLightTop, "bottom-right inner vertical rail should not cross downward");
+        AssertNoCornerInk(column: 1, row: 1, localX: vLightLeft, localY: hDoubleTop, "bottom-right upper horizontal rail should not cross rightward");
+
+        void AssertNoCornerInk(int column, int row, int localX, int localY, string message)
+        {
+            float x = (column * renderer.CellWidth) + localX;
+            float y = (row * renderer.CellHeight) + localY;
+            int ink = CountBrightPixelsInRegion(pixels, x, x + 1f, y, y + 1f);
+            Assert.True(ink == 0, $"{message}. ink={ink}");
+        }
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_DoubleHorizontalSprite_DrawsTwoParallelBands()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)

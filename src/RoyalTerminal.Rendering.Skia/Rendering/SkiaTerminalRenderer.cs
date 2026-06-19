@@ -2025,9 +2025,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
         SKColor color,
         bool heavyMeansDouble = false)
     {
+        GetStrokeThicknesses(width, height, out float lightThickness, out float heavyThickness);
+
+        if (heavyMeansDouble)
+        {
+            DrawDoubleBoxSegments(canvas, x, y, width, height, segments, color, lightThickness);
+            return;
+        }
+
         float centerX = x + (width * 0.5f);
         float centerY = y + (height * 0.5f);
-        GetStrokeThicknesses(width, height, out float lightThickness, out float heavyThickness);
 
         float leftThickness = GetSegmentSpan(segments.Left, lightThickness, heavyThickness, heavyMeansDouble);
         float rightThickness = GetSegmentSpan(segments.Right, lightThickness, heavyThickness, heavyMeansDouble);
@@ -2074,6 +2081,115 @@ public sealed class SkiaTerminalRenderer : IDisposable
             lightThickness,
             heavyThickness,
             heavyMeansDouble);
+    }
+
+    private void DrawDoubleBoxSegments(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        BoxSegments segments,
+        SKColor color,
+        float lightThickness)
+    {
+        int cellWidthPx = ToPixelSize(width);
+        int cellHeightPx = ToPixelSize(height);
+        int lightPx = ToStrokePixelSize(lightThickness);
+        DoubleBoxLineStyle left = ToDoubleBoxLineStyle(segments.Left);
+        DoubleBoxLineStyle right = ToDoubleBoxLineStyle(segments.Right);
+        DoubleBoxLineStyle up = ToDoubleBoxLineStyle(segments.Up);
+        DoubleBoxLineStyle down = ToDoubleBoxLineStyle(segments.Down);
+
+        int hLightTop = Math.Max(0, (cellHeightPx - lightPx) / 2);
+        int hLightBottom = Math.Min(cellHeightPx, hLightTop + lightPx);
+        int hDoubleTop = Math.Max(0, hLightTop - lightPx);
+        int hDoubleBottom = Math.Min(cellHeightPx, hLightBottom + lightPx);
+
+        int vLightLeft = Math.Max(0, (cellWidthPx - lightPx) / 2);
+        int vLightRight = Math.Min(cellWidthPx, vLightLeft + lightPx);
+        int vDoubleLeft = Math.Max(0, vLightLeft - lightPx);
+        int vDoubleRight = Math.Min(cellWidthPx, vLightRight + lightPx);
+
+        // Match Ghostty's sprite-face box drawing behavior: at double-line
+        // joins, each rail stops at the adjacent inner rail instead of crossing
+        // through the corner cell center.
+        int upBottom = left != right || down == up
+            ? left == DoubleBoxLineStyle.Double || right == DoubleBoxLineStyle.Double ? hDoubleBottom : hLightBottom
+            : left == DoubleBoxLineStyle.None && right == DoubleBoxLineStyle.None ? hLightBottom : hLightTop;
+        int downTop = left != right || up == down
+            ? left == DoubleBoxLineStyle.Double || right == DoubleBoxLineStyle.Double ? hDoubleTop : hLightTop
+            : left == DoubleBoxLineStyle.None && right == DoubleBoxLineStyle.None ? hLightTop : hLightBottom;
+        int leftRight = up != down || left == right
+            ? up == DoubleBoxLineStyle.Double || down == DoubleBoxLineStyle.Double ? vDoubleRight : vLightRight
+            : up == DoubleBoxLineStyle.None && down == DoubleBoxLineStyle.None ? vLightRight : vLightLeft;
+        int rightLeft = up != down || right == left
+            ? up == DoubleBoxLineStyle.Double || down == DoubleBoxLineStyle.Double ? vDoubleLeft : vLightLeft
+            : up == DoubleBoxLineStyle.None && down == DoubleBoxLineStyle.None ? vLightLeft : vLightRight;
+
+        _spritePaint.Color = color;
+
+        switch (up)
+        {
+            case DoubleBoxLineStyle.Light:
+                DrawCellPixelRect(canvas, x, y, vLightLeft, 0, vLightRight, upBottom, _spritePaint);
+                break;
+            case DoubleBoxLineStyle.Double:
+                int leftBottom = left == DoubleBoxLineStyle.Double ? hLightTop : upBottom;
+                int rightBottom = right == DoubleBoxLineStyle.Double ? hLightTop : upBottom;
+                DrawCellPixelRect(canvas, x, y, vDoubleLeft, 0, vLightLeft, leftBottom, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, vLightRight, 0, vDoubleRight, rightBottom, _spritePaint);
+                break;
+        }
+
+        switch (right)
+        {
+            case DoubleBoxLineStyle.Light:
+                DrawCellPixelRect(canvas, x, y, rightLeft, hLightTop, cellWidthPx, hLightBottom, _spritePaint);
+                break;
+            case DoubleBoxLineStyle.Double:
+                int topLeft = up == DoubleBoxLineStyle.Double ? vLightRight : rightLeft;
+                int bottomLeft = down == DoubleBoxLineStyle.Double ? vLightRight : rightLeft;
+                DrawCellPixelRect(canvas, x, y, topLeft, hDoubleTop, cellWidthPx, hLightTop, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, bottomLeft, hLightBottom, cellWidthPx, hDoubleBottom, _spritePaint);
+                break;
+        }
+
+        switch (down)
+        {
+            case DoubleBoxLineStyle.Light:
+                DrawCellPixelRect(canvas, x, y, vLightLeft, downTop, vLightRight, cellHeightPx, _spritePaint);
+                break;
+            case DoubleBoxLineStyle.Double:
+                int leftTop = left == DoubleBoxLineStyle.Double ? hLightBottom : downTop;
+                int rightTop = right == DoubleBoxLineStyle.Double ? hLightBottom : downTop;
+                DrawCellPixelRect(canvas, x, y, vDoubleLeft, leftTop, vLightLeft, cellHeightPx, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, vLightRight, rightTop, vDoubleRight, cellHeightPx, _spritePaint);
+                break;
+        }
+
+        switch (left)
+        {
+            case DoubleBoxLineStyle.Light:
+                DrawCellPixelRect(canvas, x, y, 0, hLightTop, leftRight, hLightBottom, _spritePaint);
+                break;
+            case DoubleBoxLineStyle.Double:
+                int topRight = up == DoubleBoxLineStyle.Double ? vLightLeft : leftRight;
+                int bottomRight = down == DoubleBoxLineStyle.Double ? vLightLeft : leftRight;
+                DrawCellPixelRect(canvas, x, y, 0, hDoubleTop, topRight, hLightTop, _spritePaint);
+                DrawCellPixelRect(canvas, x, y, 0, hLightBottom, bottomRight, hDoubleBottom, _spritePaint);
+                break;
+        }
+    }
+
+    private static DoubleBoxLineStyle ToDoubleBoxLineStyle(StrokeWeight weight)
+    {
+        return weight switch
+        {
+            StrokeWeight.None => DoubleBoxLineStyle.None,
+            StrokeWeight.Light => DoubleBoxLineStyle.Light,
+            _ => DoubleBoxLineStyle.Double,
+        };
     }
 
     private void DrawHorizontalSegment(
@@ -6172,6 +6288,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
         None = 0,
         Light = 1,
         Heavy = 2,
+    }
+
+    private enum DoubleBoxLineStyle : byte
+    {
+        None = 0,
+        Light = 1,
+        Double = 2,
     }
 
     private enum BoxLineOrientation : byte
