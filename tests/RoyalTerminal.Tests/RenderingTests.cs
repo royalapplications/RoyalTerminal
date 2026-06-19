@@ -2291,13 +2291,14 @@ public class RenderingTests
     }
 
     [Fact]
-    public void SkiaTerminalRenderer_ShadeBlockSprites_IncreaseFilledPixelsByDensity()
+    public void SkiaTerminalRenderer_ShadeBlockSprites_FillCellsAndIncreaseIntensity()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
         {
             EnableTextRenderDiagnostics = true,
             CursorVisible = false,
         };
+        renderer.SetCellSize(16f, 32f);
 
         using var surface = CreateRenderSurface(renderer, columns: 3, rows: 1);
         TerminalScreen screen = CreateAsciiScreen(columns: 3, rows: 1, text: "\u2591\u2592\u2593");
@@ -2309,58 +2310,23 @@ public class RenderingTests
         using SKImage snapshot = surface.Snapshot();
         using SKPixmap pixels = snapshot.PeekPixels();
 
-        int firstCellEnd = pixels.Width / 3;
-        int secondCellEnd = (pixels.Width * 2) / 3;
+        int expectedCellPixels = 16 * 32;
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 0));
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 1));
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 2));
 
-        int lightPixels = CountNonBackgroundPixelsInRegion(
-            pixels,
-            startX: 0f,
-            endX: firstCellEnd,
-            startY: 0f,
-            endY: pixels.Height);
-        int mediumPixels = CountNonBackgroundPixelsInRegion(
-            pixels,
-            startX: firstCellEnd,
-            endX: secondCellEnd,
-            startY: 0f,
-            endY: pixels.Height);
-        int darkPixels = CountNonBackgroundPixelsInRegion(
-            pixels,
-            startX: secondCellEnd,
-            endX: pixels.Width,
-            startY: 0f,
-            endY: pixels.Height);
+        long lightInk = SumPixelIntensityInCell(pixels, renderer, column: 0);
+        long mediumInk = SumPixelIntensityInCell(pixels, renderer, column: 1);
+        long darkInk = SumPixelIntensityInCell(pixels, renderer, column: 2);
 
-        long lightInk = SumPixelIntensityInRegion(
-            pixels,
-            startX: 0f,
-            endX: firstCellEnd,
-            startY: 0f,
-            endY: pixels.Height);
-        long mediumInk = SumPixelIntensityInRegion(
-            pixels,
-            startX: firstCellEnd,
-            endX: secondCellEnd,
-            startY: 0f,
-            endY: pixels.Height);
-        long darkInk = SumPixelIntensityInRegion(
-            pixels,
-            startX: secondCellEnd,
-            endX: pixels.Width,
-            startY: 0f,
-            endY: pixels.Height);
-
-        Assert.True(lightPixels > 0);
-        Assert.True(mediumPixels > 0);
-        Assert.True(darkPixels > 0);
         Assert.True(diagnostics.BlockSpriteCells >= 3);
-        Assert.True(lightInk <= mediumInk, $"Expected medium shade ink >= light shade ink, got {mediumInk} < {lightInk}.");
-        Assert.True(mediumInk <= darkInk, $"Expected dark shade ink >= medium shade ink, got {darkInk} < {mediumInk}.");
+        Assert.True(lightInk < mediumInk, $"Expected medium shade ink > light shade ink, got {mediumInk} <= {lightInk}.");
+        Assert.True(mediumInk < darkInk, $"Expected dark shade ink > medium shade ink, got {darkInk} <= {mediumInk}.");
         Assert.True(lightInk < darkInk, $"Expected dark shade ink > light shade ink, got {darkInk} <= {lightInk}.");
     }
 
     [Fact]
-    public void SkiaTerminalRenderer_BtopNetPanelGraphSprites_RenderShadeSolidAndBrailleDotted()
+    public void SkiaTerminalRenderer_ShadeAndBrailleGraphGlyphs_UseIndependentSpriteGeometry()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
         {
@@ -2370,9 +2336,7 @@ public class RenderingTests
 
         string[] rows =
         [
-            "\u256D\u2500\u2510\u00B3net\u250C\u2510192.168.1.179\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510sync\u250C\u2510auto\u250C\u2510zero\u250C\u256E",
-            "\u2502\u2591\u2592\u2593\u2588\u28FF\u2502",
-            "\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256F",
+            "\u2591\u2592\u2593\u2588\u28FF",
         ];
 
         TerminalScreen screen = CreateScreenFromRows(rows);
@@ -2385,20 +2349,20 @@ public class RenderingTests
         using SKPixmap pixels = snapshot.PeekPixels();
         int expectedCellPixels = 16 * 32;
 
-        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 1, row: 1));
-        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 2, row: 1));
-        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 3, row: 1));
-        Assert.Equal(expectedCellPixels, CountBrightPixelsInCell(pixels, renderer, column: 4, row: 1));
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 0));
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 1));
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 2));
+        Assert.Equal(expectedCellPixels, CountBrightPixelsInCell(pixels, renderer, column: 3));
 
-        long lightShadeInk = SumPixelIntensityInCell(pixels, renderer, column: 1, row: 1);
-        long mediumShadeInk = SumPixelIntensityInCell(pixels, renderer, column: 2, row: 1);
-        long darkShadeInk = SumPixelIntensityInCell(pixels, renderer, column: 3, row: 1);
-        long fullBlockInk = SumPixelIntensityInCell(pixels, renderer, column: 4, row: 1);
+        long lightShadeInk = SumPixelIntensityInCell(pixels, renderer, column: 0);
+        long mediumShadeInk = SumPixelIntensityInCell(pixels, renderer, column: 1);
+        long darkShadeInk = SumPixelIntensityInCell(pixels, renderer, column: 2);
+        long fullBlockInk = SumPixelIntensityInCell(pixels, renderer, column: 3);
         Assert.True(lightShadeInk < mediumShadeInk, $"Expected medium shade ink > light shade ink, got {mediumShadeInk} <= {lightShadeInk}.");
         Assert.True(mediumShadeInk < darkShadeInk, $"Expected dark shade ink > medium shade ink, got {darkShadeInk} <= {mediumShadeInk}.");
         Assert.True(darkShadeInk < fullBlockInk, $"Expected full block ink > dark shade ink, got {fullBlockInk} <= {darkShadeInk}.");
 
-        int brailleInk = CountBrightPixelsInCell(pixels, renderer, column: 5, row: 1);
+        int brailleInk = CountBrightPixelsInCell(pixels, renderer, column: 4);
         Assert.True(brailleInk >= 64, $"Braille graph cell should keep visible dotted coverage. brailleInk={brailleInk}");
         Assert.True(brailleInk < expectedCellPixels, $"Braille graph cell should not be filled as a solid net graph cell. brailleInk={brailleInk}");
     }

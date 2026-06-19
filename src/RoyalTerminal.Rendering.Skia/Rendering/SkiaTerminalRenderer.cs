@@ -44,7 +44,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const int MaxCodepointTextCacheEntries = 4096;
     private const int MaxStackallocTextRunChars = 256;
     private const int MaxStackallocGlyphPoints = 256;
-    private const int BtopNetPanelScanRows = 96;
     private const float LightBoxLineThickness = 1f;
     private const float HeavyBoxLineThickness = 3f;
     private static readonly TimeSpan s_textHighlightNonBacktrackingRegexTimeout = TimeSpan.FromMilliseconds(100);
@@ -711,7 +710,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                         rowTextHighlights);
                 }
 
-                RenderRowText(canvas, screen, terminalRow, y, row, rowOverlays, rowTextHighlights);
+                RenderRowText(canvas, terminalRow, y, row, rowOverlays, rowTextHighlights);
                 terminalRow.IsDirty = false;
             }
         }
@@ -804,7 +803,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private void RenderRowText(
         SKCanvas canvas,
-        TerminalScreen screen,
         TerminalRow row,
         float y,
         int rowIndex,
@@ -819,7 +817,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         bool splitRunsAroundCursor = CursorVisible && rowIndex == CursorRow;
         int cursorSplitColumn = CursorColumn;
-        bool useSolidGraphSprites = IsBtopNetGraphRow(screen, rowIndex);
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
         bool usePretextPipeline = EnableTextShaping &&
             _textRenderPipeline == TerminalTextRenderPipeline.Pretext &&
@@ -900,7 +897,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     spriteRunEnd++;
                 }
 
-                DrawSpriteRun(canvas, cells, col, spriteRunEnd, y, spriteColor, useSolidGraphSprites);
+                DrawSpriteRun(canvas, cells, col, spriteRunEnd, y, spriteColor);
                 DrawRunDecorations(
                     canvas,
                     cells,
@@ -1030,8 +1027,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         int startCol,
         int endCol,
         float y,
-        SKColor color,
-        bool useSolidGraphSprites)
+        SKColor color)
     {
         for (int col = startCol; col < endCol; col++)
         {
@@ -1042,7 +1038,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             int cellWidth = cell.Width <= 0 ? 1 : cell.Width;
-            DrawSpriteCell(canvas, codepoint, category, col, cellWidth, y, color, useSolidGraphSprites);
+            DrawSpriteCell(canvas, codepoint, category, col, cellWidth, y, color);
             RecordSpriteCell(category);
         }
     }
@@ -1054,8 +1050,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         int column,
         int widthCells,
         float y,
-        SKColor color,
-        bool useSolidGraphSprites)
+        SKColor color)
     {
         float x = column * _cellWidth;
         float spriteWidth = Math.Max(_cellWidth, _cellWidth * widthCells);
@@ -1096,7 +1091,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     break;
 
                 case SpriteCategory.BlockElement:
-                    _ = TryDrawBlockElement(canvas, x, y, spriteWidth, spriteHeight, codepoint, color, useSolidGraphSprites);
+                    _ = TryDrawBlockElement(canvas, x, y, spriteWidth, spriteHeight, codepoint, color);
                     break;
 
                 case SpriteCategory.ScanLine:
@@ -1119,94 +1114,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             canvas.Restore();
         }
-    }
-
-    private static bool IsBtopNetGraphRow(TerminalScreen screen, int rowIndex)
-    {
-        if (rowIndex <= 0)
-        {
-            return false;
-        }
-
-        int minRow = Math.Max(0, rowIndex - BtopNetPanelScanRows);
-        for (int probeRow = rowIndex; probeRow >= minRow; probeRow--)
-        {
-            TerminalRow row = screen.GetViewportRow(probeRow);
-            if (IsBtopNetPanelHeaderRow(row))
-            {
-                return probeRow < rowIndex;
-            }
-
-            if (IsPanelHorizontalBorderRow(row))
-            {
-                return false;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool IsBtopNetPanelHeaderRow(TerminalRow row)
-    {
-        return RowContainsAsciiSequence(row, "net") &&
-               (RowContainsAsciiSequence(row, "sync") ||
-                RowContainsAsciiSequence(row, "auto") ||
-                RowContainsAsciiSequence(row, "zero"));
-    }
-
-    private static bool IsPanelHorizontalBorderRow(TerminalRow row)
-    {
-        int horizontalCount = 0;
-        for (int column = 0; column < row.Columns; column++)
-        {
-            ref readonly TerminalCell cell = ref row[column];
-            if (!TryGetCellCodepoint(in cell, out int codepoint))
-            {
-                continue;
-            }
-
-            if (codepoint is 0x2500 or 0x2501 or 0x2550)
-            {
-                horizontalCount++;
-            }
-        }
-
-        return horizontalCount >= Math.Max(4, row.Columns / 3);
-    }
-
-    private static bool RowContainsAsciiSequence(TerminalRow row, string sequence)
-    {
-        if (sequence.Length == 0)
-        {
-            return true;
-        }
-
-        int matched = 0;
-        for (int column = 0; column < row.Columns; column++)
-        {
-            ref readonly TerminalCell cell = ref row[column];
-            if (!TryGetCellCodepoint(in cell, out int codepoint) || codepoint > 0x7F)
-            {
-                matched = 0;
-                continue;
-            }
-
-            char value = (char)codepoint;
-            if (value == sequence[matched])
-            {
-                matched++;
-                if (matched == sequence.Length)
-                {
-                    return true;
-                }
-            }
-            else
-            {
-                matched = value == sequence[0] ? 1 : 0;
-            }
-        }
-
-        return false;
     }
 
     private void DrawPowerlineSymbol(
@@ -2517,8 +2424,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float width,
         float height,
         int codepoint,
-        SKColor color,
-        bool useSolidGraphShades)
+        SKColor color)
     {
         _spritePaint.Color = color;
         int cellWidthPx = ToPixelSize(width);
@@ -2552,17 +2458,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
             case 0x2592:
             case 0x2593:
             {
-                if (useSolidGraphShades)
-                {
-                    _spritePaint.Color = GetSolidGraphShadeColor(color, codepoint);
-                    DrawCellPixelRect(canvas, x, y, 0, 0, cellWidthPx, cellHeightPx, _spritePaint);
-                }
-                else
-                {
-                    int fillLevel = codepoint == 0x2591 ? 4 : codepoint == 0x2592 ? 8 : 12;
-                    DrawShadePattern(canvas, x, y, width, height, fillLevel, color);
-                }
-
+                _spritePaint.Color = GetShadeBlockColor(color, codepoint);
+                DrawCellPixelRect(canvas, x, y, 0, 0, cellWidthPx, cellHeightPx, _spritePaint);
                 return true;
             }
             case 0x2594:
@@ -2606,7 +2503,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return false;
     }
 
-    private static SKColor GetSolidGraphShadeColor(SKColor color, int codepoint)
+    private static SKColor GetShadeBlockColor(SKColor color, int codepoint)
     {
         byte shadeAlpha = codepoint switch
         {
@@ -2636,51 +2533,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
             0,
             Math.Max(0, cellHeightPx - thickness));
         DrawCellPixelRect(canvas, x, y, 0, lineTop, cellWidthPx, lineTop + thickness, _spritePaint);
-    }
-
-    private void DrawShadePattern(
-        SKCanvas canvas,
-        float x,
-        float y,
-        float width,
-        float height,
-        int fillLevel,
-        SKColor color)
-    {
-        if (fillLevel <= 0)
-        {
-            return;
-        }
-
-        ReadOnlySpan<int> matrix =
-        [
-            0, 8, 2, 10,
-            12, 4, 14, 6,
-            3, 11, 1, 9,
-            15, 7, 13, 5,
-        ];
-
-        int cellWidthPx = ToPixelSize(width);
-        int cellHeightPx = ToPixelSize(height);
-        _spritePaint.Color = color;
-
-        for (int row = 0; row < 4; row++)
-        {
-            for (int col = 0; col < 4; col++)
-            {
-                int threshold = matrix[(row * 4) + col];
-                if (threshold >= fillLevel)
-                {
-                    continue;
-                }
-
-                int left = FractionMinPixel(cellWidthPx, col / 4f);
-                int right = FractionMaxPixel(cellWidthPx, (col + 1) / 4f);
-                int top = FractionMinPixel(cellHeightPx, row / 4f);
-                int bottom = FractionMaxPixel(cellHeightPx, (row + 1) / 4f);
-                DrawCellPixelRect(canvas, x, y, left, top, right, bottom, _spritePaint);
-            }
-        }
     }
 
     private static bool TryGetSpriteCodepoint(ref readonly TerminalCell cell, out int codepoint)
