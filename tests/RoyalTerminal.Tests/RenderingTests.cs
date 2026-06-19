@@ -50,6 +50,24 @@ public class RenderingTests
     }
 
     [Fact]
+    public void GlyphCache_MeasureCellSize_UsesRoundedDigitZeroAdvance()
+    {
+        using var cache = new GlyphCache("Consolas");
+        using SKFont font = cache.CreateFont(14f);
+
+        (float width, float height) = cache.MeasureCellSize(14f);
+        float expectedWidth = MathF.Max(1f, MathF.Round(font.MeasureText("0"), MidpointRounding.AwayFromZero));
+        float expectedHeight = MathF.Max(
+            1f,
+            MathF.Round(
+                font.Metrics.Descent - font.Metrics.Ascent + font.Metrics.Leading,
+                MidpointRounding.AwayFromZero));
+
+        Assert.Equal(expectedWidth, width);
+        Assert.Equal(expectedHeight, height);
+    }
+
+    [Fact]
     public void HarfBuzzTypefaceCache_GetOrCreate_ReusesSameEntry()
     {
         using var glyphCache = new GlyphCache("Consolas");
@@ -1373,6 +1391,7 @@ public class RenderingTests
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
         {
+            CursorVisible = false,
             EnableTextRenderDiagnostics = true,
         };
         renderer.SetCellSize(1f, renderer.CellHeight);
@@ -1563,6 +1582,500 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_PowerlineSeparators_UseCellSpriteGeometry()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+            EnableTextRenderDiagnostics = true,
+        };
+        renderer.SetCellSize(18f, 36f);
+
+        // Ghostty routes this geometric Powerline subset through its sprite face, and
+        // xterm.js defines these as cell-scaled custom glyphs; keep them cell-owned
+        // instead of delegating to arbitrary Nerd Font outlines.
+        string text = "\uE0B0\uE0B2\uE0B1\uE0B3\uE0B4\uE0B6\uE0D2\uE0D4";
+        using var surface = CreateRenderSurface(renderer, columns: text.Length, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: text.Length, rows: 1, text: text);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+        Assert.True(diagnostics.SpriteCells >= text.Length);
+        Assert.Equal(0, diagnostics.ShapedRuns);
+        Assert.Equal(0, diagnostics.FallbackRuns);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+
+        Assert.True(
+            CountBrightPixelsInRegion(pixels, 0f, 1f, 0f, renderer.CellHeight, threshold: 64) >= 34,
+            "The right-pointing filled separator should own the full left cell edge.");
+        Assert.True(
+            CountBrightPixelsInRegion(
+                pixels,
+                renderer.CellWidth - 1f,
+                renderer.CellWidth,
+                0f,
+                renderer.CellHeight * 0.2f,
+                threshold: 64) <= 1,
+            "The right-pointing filled separator should not fill the top-right corner.");
+        Assert.True(
+            CountBrightPixelsInRegion(
+                pixels,
+                renderer.CellWidth - 1f,
+                renderer.CellWidth,
+                renderer.CellHeight * 0.45f,
+                renderer.CellHeight * 0.55f,
+                threshold: 64) > 0,
+            "The right-pointing filled separator should reach the right edge at the cell midpoint.");
+
+        float secondCellX = renderer.CellWidth;
+        Assert.True(
+            CountBrightPixelsInRegion(
+                pixels,
+                secondCellX + renderer.CellWidth - 1f,
+                secondCellX + renderer.CellWidth,
+                0f,
+                renderer.CellHeight,
+                threshold: 64) >= 34,
+            "The left-pointing filled separator should own the full right cell edge.");
+        Assert.True(
+            CountBrightPixelsInRegion(
+                pixels,
+                secondCellX,
+                secondCellX + 1f,
+                0f,
+                renderer.CellHeight * 0.2f,
+                threshold: 64) <= 1,
+            "The left-pointing filled separator should not fill the top-left corner.");
+        Assert.True(
+            CountBrightPixelsInRegion(
+                pixels,
+                secondCellX,
+                secondCellX + 1f,
+                renderer.CellHeight * 0.45f,
+                renderer.CellHeight * 0.55f,
+                threshold: 64) > 0,
+            "The left-pointing filled separator should reach the left edge at the cell midpoint.");
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_ReportedNerdFontFiles_RenderSpritesWithCellGeometry()
+    {
+        string[] fontPaths = GetReportedNerdFontFixturePaths();
+        if (fontPaths.Length == 0)
+        {
+            return;
+        }
+
+        foreach (string fontPath in fontPaths)
+        {
+            using var renderer = new SkiaTerminalRenderer(
+                System.IO.Path.GetFileNameWithoutExtension(fontPath),
+                14f,
+                TerminalFontSource.File,
+                fontPath)
+            {
+                CursorVisible = false,
+                EnableTextRenderDiagnostics = true,
+            };
+            renderer.SetCellSize(18f, 36f);
+
+            string text = "\u256D\u2500\u256E\u28FF\u2588\uE0B0\uE0B2";
+            using var surface = CreateRenderSurface(renderer, columns: text.Length, rows: 1);
+            TerminalScreen screen = CreateAsciiScreen(columns: text.Length, rows: 1, text: text);
+            surface.Canvas.Clear(SKColors.Black);
+
+            renderer.RenderFull(surface.Canvas, screen);
+
+            TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+            Assert.True(diagnostics.SpriteCells >= text.Length, fontPath);
+            Assert.True(diagnostics.BoxDrawingSpriteCells >= 3, fontPath);
+            Assert.True(diagnostics.BrailleSpriteCells >= 1, fontPath);
+            Assert.True(diagnostics.BlockSpriteCells >= 1, fontPath);
+            Assert.Equal(0, diagnostics.FallbackRuns);
+
+            using SKImage snapshot = surface.Snapshot();
+            SaveReportedNerdFontFixture(snapshot, fontPath);
+
+            using SKPixmap pixels = snapshot.PeekPixels();
+            Assert.Equal(18 * 36, CountBrightPixelsInCell(pixels, renderer, 4, threshold: 64));
+            Assert.True(CountBrightPixelsInCell(pixels, renderer, 3, threshold: 64) >= 128, fontPath);
+            Assert.True(
+                CountBrightPixelsInRegion(
+                    pixels,
+                    5f * renderer.CellWidth,
+                    (5f * renderer.CellWidth) + 1f,
+                    0f,
+                    renderer.CellHeight,
+                    threshold: 64) >= 34,
+                fontPath);
+            Assert.True(
+                CountBrightPixelsInRegion(
+                    pixels,
+                    (6f * renderer.CellWidth) + renderer.CellWidth - 1f,
+                    (6f * renderer.CellWidth) + renderer.CellWidth,
+                    0f,
+                    renderer.CellHeight,
+                    threshold: 64) >= 34,
+                fontPath);
+        }
+    }
+
+    private static void SaveReportedNerdFontFixture(SKImage snapshot, string fontPath)
+    {
+        string? outputDir = Environment.GetEnvironmentVariable("ROYALTERMINAL_RENDER_FIXTURE_OUTPUT_DIR");
+        if (string.IsNullOrWhiteSpace(outputDir))
+        {
+            return;
+        }
+
+        System.IO.Directory.CreateDirectory(outputDir);
+        string fileName = $"{System.IO.Path.GetFileNameWithoutExtension(fontPath)}-sprites.png";
+        using SKData? data = snapshot.Encode(SKEncodedImageFormat.Png, quality: 100);
+        if (data is null)
+        {
+            return;
+        }
+
+        using System.IO.FileStream stream = System.IO.File.Create(System.IO.Path.Combine(outputDir, fileName));
+        data.SaveTo(stream);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_RoundedBoxCorners_ConnectToAdjacentEdges()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(32f, 32f);
+
+        string[] rows =
+        [
+            "\u256D\u2500\u256E",
+            "\u2502 \u2502",
+            "\u2570\u2500\u256F",
+        ];
+        TerminalScreen screen = CreateScreenFromRows(rows);
+        using var surface = CreateRenderSurface(renderer, columns: 3, rows: 3);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        float center = renderer.CellWidth * 0.5f;
+        float boundary = renderer.CellWidth;
+        float lowerBoundary = renderer.CellHeight;
+
+        int topHorizontalJoin = CountNonBackgroundPixelsInRegion(
+            pixels,
+            startX: boundary - 1f,
+            endX: boundary + 2f,
+            startY: center - 2f,
+            endY: center + 3f);
+        int leftVerticalJoin = CountNonBackgroundPixelsInRegion(
+            pixels,
+            startX: center - 2f,
+            endX: center + 3f,
+            startY: lowerBoundary - 1f,
+            endY: lowerBoundary + 2f);
+
+        Assert.True(topHorizontalJoin > 0, "Rounded top-left corner should connect to the top horizontal segment.");
+        Assert.True(leftVerticalJoin > 0, "Rounded top-left corner should connect to the left vertical segment.");
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_RoundedBoxCorners_UseCompactCellArc()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(18f, 36f);
+
+        using var surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: "\u256D");
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int misplacedOuterQuadrantInk = CountBrightPixelsInRegion(
+            pixels,
+            startX: 13f,
+            endX: 18f,
+            startY: 29f,
+            endY: 36f,
+            threshold: 64);
+        int rightEdgeJoin = CountBrightPixelsInRegion(
+            pixels,
+            startX: 17f,
+            endX: 18f,
+            startY: 16f,
+            endY: 20f,
+            threshold: 64);
+        int bottomStem = CountBrightPixelsInRegion(
+            pixels,
+            startX: 8f,
+            endX: 11f,
+            startY: 32f,
+            endY: 36f,
+            threshold: 64);
+
+        // Ghostty and xterm.js keep U+256D cell-owned but draw it as a compact
+        // stem-plus-curve path; the old full-quadrant Bezier put visible ink here.
+        Assert.Equal(0, misplacedOuterQuadrantInk);
+        Assert.True(rightEdgeJoin > 0, "Rounded corner should still meet the right edge centerline.");
+        Assert.True(bottomStem > 0, "Rounded corner should still meet the bottom edge centerline.");
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_BoxDrawingSprites_SnapToSharedCellLocalGridAtEvenSizes()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(18f, 36f);
+
+        string[] rows =
+        [
+            "\u256D\u2500\u256E",
+            "\u2502 \u2502",
+            "\u2570\u2500\u256F",
+        ];
+
+        TerminalScreen screen = CreateScreenFromRows(rows);
+        using var surface = CreateRenderSurface(renderer, columns: screen.Columns, rows: screen.ViewportRows);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+
+        int expectedVerticalColumn = 8;
+        int shiftedVerticalColumn = 9;
+        int expectedHorizontalRow = 17;
+        int shiftedHorizontalRow = 18;
+
+        Assert.True(
+            CountBrightPixelsInRegion(pixels, expectedVerticalColumn, expectedVerticalColumn + 1f, 33f, 36f) > 0,
+            "Rounded top-left corner vertical stem should use the same floor-snapped column as straight vertical lines.");
+        Assert.Equal(
+            0,
+            CountBrightPixelsInRegion(pixels, shiftedVerticalColumn, shiftedVerticalColumn + 1f, 33f, 36f));
+        Assert.True(
+            CountBrightPixelsInRegion(pixels, expectedVerticalColumn, expectedVerticalColumn + 1f, 36f, 72f) > 0,
+            "Straight vertical line below the rounded corner should use the same snapped column.");
+        Assert.Equal(
+            0,
+            CountBrightPixelsInRegion(pixels, shiftedVerticalColumn, shiftedVerticalColumn + 1f, 36f, 72f));
+
+        Assert.True(
+            CountBrightPixelsInRegion(pixels, 18f, 36f, expectedHorizontalRow, expectedHorizontalRow + 1f) > 0,
+            "Straight horizontal line should use the floor-snapped center row.");
+        Assert.Equal(
+            0,
+            CountBrightPixelsInRegion(pixels, 18f, 36f, shiftedHorizontalRow, shiftedHorizontalRow + 1f));
+        Assert.True(
+            CountBrightPixelsInRegion(pixels, 15f, 18f, expectedHorizontalRow, expectedHorizontalRow + 1f) > 0,
+            "Rounded corner horizontal exit should align with the adjacent horizontal segment row.");
+        Assert.Equal(
+            0,
+            CountBrightPixelsInRegion(pixels, 15f, 18f, shiftedHorizontalRow, shiftedHorizontalRow + 1f));
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_LightBoxLines_DoNotThickenAtBtopCellScale()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(14f, 28f);
+
+        using var surface = CreateRenderSurface(renderer, columns: 2, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 2, rows: 1, text: "\u2500\u2502");
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int horizontalRows = CountBrightRowsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: 0f,
+            endY: renderer.CellHeight,
+            threshold: 64);
+        int verticalColumns = CountBrightColumnsInRegion(
+            pixels,
+            startX: renderer.CellWidth,
+            endX: renderer.CellWidth * 2f,
+            startY: 0f,
+            endY: renderer.CellHeight,
+            threshold: 64);
+
+        // xterm.js keeps light box-drawing strokes at width 1; this prevents
+        // btop borders from becoming visibly heavier as cell size increases.
+        Assert.Equal(1, horizontalRows);
+        Assert.Equal(1, verticalColumns);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_FullBraillePattern_OccupiesReadableGraphArea()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(32f, 40f);
+
+        using var surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: "\u28FF");
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int ink = CountNonBackgroundPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        Assert.True(ink >= 200, $"Braille graph cell should be visibly readable at terminal scale. ink={ink}");
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_FullBraillePattern_UsesSmoothSpriteFontDotGeometry()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(17f, 33f);
+
+        using var surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: "\u28FF");
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int brightInk = CountBrightPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: 0f,
+            endY: renderer.CellHeight);
+        int edgeInk = CountMidTonePixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        // Ghostty and xterm.js both keep Braille cell-owned. xterm's custom
+        // glyphs use rounded dots; this keeps btop-style net graphs smooth
+        // while preserving the terminal grid placement.
+        Assert.True(brightInk >= 64, $"Braille graph cell should keep visible dot coverage. brightInk={brightInk}");
+        Assert.True(brightInk < 17 * 33, $"Braille graph cell should not be filled as solid subcells. brightInk={brightInk}");
+        Assert.True(edgeInk >= 8, $"Braille graph cell should have anti-aliased dot edges. edgeInk={edgeInk}");
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_BlackSquareSymbol_UsesTerminalSizedSprite()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(32f, 32f);
+
+        using var surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: "\u25A0");
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int ink = CountBrightPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        Assert.True(ink >= 560, $"Black square graph symbol should not look zoomed out. ink={ink}");
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_FullBlockElement_FillsEntireCell()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(24f, 24f);
+
+        using var surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: "\u2588");
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int ink = CountBrightPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        Assert.True(ink >= 560, $"Full block element should fill the terminal cell. ink={ink}");
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_BlockElements_UseIntegerCellFractions()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(17f, 19f);
+
+        string text = "\u2581\u2588\u2589\u2590\u2594\u2595";
+        using var surface = CreateRenderSurface(renderer, columns: text.Length, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: text.Length, rows: 1, text: text);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+
+        Assert.Equal(34, CountBrightPixelsInCell(pixels, renderer, 0));
+        Assert.Equal(323, CountBrightPixelsInCell(pixels, renderer, 1));
+        Assert.Equal(285, CountBrightPixelsInCell(pixels, renderer, 2));
+        Assert.Equal(171, CountBrightPixelsInCell(pixels, renderer, 3));
+        Assert.Equal(34, CountBrightPixelsInCell(pixels, renderer, 4));
+        Assert.Equal(38, CountBrightPixelsInCell(pixels, renderer, 5));
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_GeometricControlSymbols_UseSpriteFallback()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
@@ -1682,9 +2195,72 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_DoubleLineCorners_ClipInnerRailsWithoutCrossing()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(32f, 32f);
+
+        string[] rows =
+        [
+            "\u2554\u2557",
+            "\u255A\u255D",
+        ];
+
+        TerminalScreen screen = CreateScreenFromRows(rows);
+        using var surface = CreateRenderSurface(renderer, columns: screen.Columns, rows: screen.ViewportRows);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int totalInk = CountBrightPixelsInRegion(
+            pixels,
+            startX: 0f,
+            endX: screen.Columns * renderer.CellWidth,
+            startY: 0f,
+            endY: screen.ViewportRows * renderer.CellHeight);
+
+        Assert.True(totalInk > 0, "Double-line corners should render visible ink.");
+
+        int hDoubleTop = 14;
+        int hLightTop = 15;
+        int hLightBottom = 16;
+        int vDoubleLeft = 14;
+        int vLightLeft = 15;
+        int vLightRight = 16;
+
+        AssertNoCornerInk(column: 0, row: 0, localX: vLightRight, localY: hLightTop, "top-left inner vertical rail should not cross upward");
+        AssertNoCornerInk(column: 0, row: 0, localX: vLightLeft, localY: hLightBottom, "top-left lower horizontal rail should not cross leftward");
+
+        AssertNoCornerInk(column: 1, row: 0, localX: vDoubleLeft, localY: hLightTop, "top-right inner vertical rail should not cross upward");
+        AssertNoCornerInk(column: 1, row: 0, localX: vLightLeft, localY: hLightBottom, "top-right lower horizontal rail should not cross rightward");
+
+        AssertNoCornerInk(column: 0, row: 1, localX: vLightRight, localY: hLightTop, "bottom-left inner vertical rail should not cross downward");
+        AssertNoCornerInk(column: 0, row: 1, localX: vLightLeft, localY: hDoubleTop, "bottom-left upper horizontal rail should not cross leftward");
+
+        AssertNoCornerInk(column: 1, row: 1, localX: vDoubleLeft, localY: hLightTop, "bottom-right inner vertical rail should not cross downward");
+        AssertNoCornerInk(column: 1, row: 1, localX: vLightLeft, localY: hDoubleTop, "bottom-right upper horizontal rail should not cross rightward");
+
+        void AssertNoCornerInk(int column, int row, int localX, int localY, string message)
+        {
+            float x = (column * renderer.CellWidth) + localX;
+            float y = (row * renderer.CellHeight) + localY;
+            int ink = CountBrightPixelsInRegion(pixels, x, x + 1f, y, y + 1f);
+            Assert.True(ink == 0, $"{message}. ink={ink}");
+        }
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_DoubleHorizontalSprite_DrawsTwoParallelBands()
     {
-        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
         using var doubleSurface = CreateRenderSurface(renderer, columns: 1, rows: 1);
         using var heavySurface = CreateRenderSurface(renderer, columns: 1, rows: 1);
 
@@ -1713,6 +2289,7 @@ public class RenderingTests
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
         {
+            CursorVisible = false,
             EnableTextRenderDiagnostics = true,
         };
         renderer.SetCellSize(64f, 64f);
@@ -1771,13 +2348,14 @@ public class RenderingTests
     }
 
     [Fact]
-    public void SkiaTerminalRenderer_ShadeBlockSprites_IncreaseFilledPixelsByDensity()
+    public void SkiaTerminalRenderer_ShadeBlockSprites_FillCellsAndIncreaseIntensity()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
         {
             EnableTextRenderDiagnostics = true,
             CursorVisible = false,
         };
+        renderer.SetCellSize(16f, 32f);
 
         using var surface = CreateRenderSurface(renderer, columns: 3, rows: 1);
         TerminalScreen screen = CreateAsciiScreen(columns: 3, rows: 1, text: "\u2591\u2592\u2593");
@@ -1789,54 +2367,61 @@ public class RenderingTests
         using SKImage snapshot = surface.Snapshot();
         using SKPixmap pixels = snapshot.PeekPixels();
 
-        int firstCellEnd = pixels.Width / 3;
-        int secondCellEnd = (pixels.Width * 2) / 3;
+        int expectedCellPixels = 16 * 32;
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 0));
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 1));
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 2));
 
-        int lightPixels = CountNonBackgroundPixelsInRegion(
-            pixels,
-            startX: 0f,
-            endX: firstCellEnd,
-            startY: 0f,
-            endY: pixels.Height);
-        int mediumPixels = CountNonBackgroundPixelsInRegion(
-            pixels,
-            startX: firstCellEnd,
-            endX: secondCellEnd,
-            startY: 0f,
-            endY: pixels.Height);
-        int darkPixels = CountNonBackgroundPixelsInRegion(
-            pixels,
-            startX: secondCellEnd,
-            endX: pixels.Width,
-            startY: 0f,
-            endY: pixels.Height);
+        long lightInk = SumPixelIntensityInCell(pixels, renderer, column: 0);
+        long mediumInk = SumPixelIntensityInCell(pixels, renderer, column: 1);
+        long darkInk = SumPixelIntensityInCell(pixels, renderer, column: 2);
 
-        long lightInk = SumPixelIntensityInRegion(
-            pixels,
-            startX: 0f,
-            endX: firstCellEnd,
-            startY: 0f,
-            endY: pixels.Height);
-        long mediumInk = SumPixelIntensityInRegion(
-            pixels,
-            startX: firstCellEnd,
-            endX: secondCellEnd,
-            startY: 0f,
-            endY: pixels.Height);
-        long darkInk = SumPixelIntensityInRegion(
-            pixels,
-            startX: secondCellEnd,
-            endX: pixels.Width,
-            startY: 0f,
-            endY: pixels.Height);
-
-        Assert.True(lightPixels > 0);
-        Assert.True(mediumPixels > 0);
-        Assert.True(darkPixels > 0);
         Assert.True(diagnostics.BlockSpriteCells >= 3);
-        Assert.True(lightInk <= mediumInk, $"Expected medium shade ink >= light shade ink, got {mediumInk} < {lightInk}.");
-        Assert.True(mediumInk <= darkInk, $"Expected dark shade ink >= medium shade ink, got {darkInk} < {mediumInk}.");
+        Assert.True(lightInk < mediumInk, $"Expected medium shade ink > light shade ink, got {mediumInk} <= {lightInk}.");
+        Assert.True(mediumInk < darkInk, $"Expected dark shade ink > medium shade ink, got {darkInk} <= {mediumInk}.");
         Assert.True(lightInk < darkInk, $"Expected dark shade ink > light shade ink, got {darkInk} <= {lightInk}.");
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_ShadeAndBrailleGraphGlyphs_UseIndependentSpriteGeometry()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(16f, 32f);
+
+        string[] rows =
+        [
+            "\u2591\u2592\u2593\u2588\u28FF",
+        ];
+
+        TerminalScreen screen = CreateScreenFromRows(rows);
+        using var surface = CreateRenderSurface(renderer, columns: screen.Columns, rows: screen.ViewportRows);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int expectedCellPixels = 16 * 32;
+
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 0));
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 1));
+        Assert.Equal(expectedCellPixels, CountNonBackgroundPixelsInCell(pixels, renderer, column: 2));
+        Assert.Equal(expectedCellPixels, CountBrightPixelsInCell(pixels, renderer, column: 3));
+
+        long lightShadeInk = SumPixelIntensityInCell(pixels, renderer, column: 0);
+        long mediumShadeInk = SumPixelIntensityInCell(pixels, renderer, column: 1);
+        long darkShadeInk = SumPixelIntensityInCell(pixels, renderer, column: 2);
+        long fullBlockInk = SumPixelIntensityInCell(pixels, renderer, column: 3);
+        Assert.True(lightShadeInk < mediumShadeInk, $"Expected medium shade ink > light shade ink, got {mediumShadeInk} <= {lightShadeInk}.");
+        Assert.True(mediumShadeInk < darkShadeInk, $"Expected dark shade ink > medium shade ink, got {darkShadeInk} <= {mediumShadeInk}.");
+        Assert.True(darkShadeInk < fullBlockInk, $"Expected full block ink > dark shade ink, got {fullBlockInk} <= {darkShadeInk}.");
+
+        int brailleInk = CountBrightPixelsInCell(pixels, renderer, column: 4);
+        Assert.True(brailleInk >= 64, $"Braille graph cell should keep visible dotted coverage. brailleInk={brailleInk}");
+        Assert.True(brailleInk < expectedCellPixels, $"Braille graph cell should not be filled as a solid net graph cell. brailleInk={brailleInk}");
     }
 
     [Theory]
@@ -2058,6 +2643,24 @@ public class RenderingTests
             ?? throw new InvalidOperationException("Unable to create monospace typeface.");
     }
 
+    private static string[] GetReportedNerdFontFixturePaths()
+    {
+        string? configuredDirectory = Environment.GetEnvironmentVariable("ROYALTERMINAL_RENDER_FONT_FIXTURE_DIR");
+        string directory = !string.IsNullOrWhiteSpace(configuredDirectory)
+            ? configuredDirectory
+            : "/private/tmp/royalterminal-render-fonts";
+
+        string[] paths =
+        [
+            System.IO.Path.Combine(directory, "IosevkaTermNerdFontMono-Regular.ttf"),
+            System.IO.Path.Combine(directory, "FiraCodeNerdFontMono-Regular.ttf"),
+        ];
+
+        return paths.All(System.IO.File.Exists)
+            ? paths
+            : [];
+    }
+
     private static SKSurface CreateRenderSurface(SkiaTerminalRenderer renderer, int columns, int rows)
     {
         int width = Math.Max(1, (int)Math.Ceiling(columns * renderer.CellWidth));
@@ -2120,6 +2723,165 @@ public class RenderingTests
         }
 
         return count;
+    }
+
+    private static int CountMidTonePixelsInRegion(
+        SKPixmap pixels,
+        float startX,
+        float endX,
+        float startY,
+        float endY,
+        byte lowThreshold = 0,
+        byte highThreshold = 180)
+    {
+        int count = 0;
+        int minX = Math.Clamp((int)MathF.Floor(startX), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling(endX), 0, pixels.Width);
+        int minY = Math.Clamp((int)MathF.Floor(startY), 0, pixels.Height);
+        int maxY = Math.Clamp((int)MathF.Ceiling(endY), 0, pixels.Height);
+
+        for (int y = minY; y < maxY; y++)
+        {
+            for (int x = minX; x < maxX; x++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                if (IsMidToneChannel(pixel.Red, lowThreshold, highThreshold) ||
+                    IsMidToneChannel(pixel.Green, lowThreshold, highThreshold) ||
+                    IsMidToneChannel(pixel.Blue, lowThreshold, highThreshold))
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static bool IsMidToneChannel(byte value, byte lowThreshold, byte highThreshold)
+    {
+        return value > lowThreshold && value < highThreshold;
+    }
+
+    private static int CountBrightPixelsInCell(
+        SKPixmap pixels,
+        SkiaTerminalRenderer renderer,
+        int column,
+        int row = 0,
+        byte threshold = 180)
+    {
+        float startX = column * renderer.CellWidth;
+        float startY = row * renderer.CellHeight;
+        return CountBrightPixelsInRegion(
+            pixels,
+            startX,
+            startX + renderer.CellWidth,
+            startY,
+            startY + renderer.CellHeight,
+            threshold);
+    }
+
+    private static int CountNonBackgroundPixelsInCell(
+        SKPixmap pixels,
+        SkiaTerminalRenderer renderer,
+        int column,
+        int row = 0)
+    {
+        float startX = column * renderer.CellWidth;
+        float startY = row * renderer.CellHeight;
+        return CountNonBackgroundPixelsInRegion(
+            pixels,
+            startX,
+            startX + renderer.CellWidth,
+            startY,
+            startY + renderer.CellHeight);
+    }
+
+    private static long SumPixelIntensityInCell(
+        SKPixmap pixels,
+        SkiaTerminalRenderer renderer,
+        int column,
+        int row = 0)
+    {
+        float startX = column * renderer.CellWidth;
+        float startY = row * renderer.CellHeight;
+        return SumPixelIntensityInRegion(
+            pixels,
+            startX,
+            startX + renderer.CellWidth,
+            startY,
+            startY + renderer.CellHeight);
+    }
+
+    private static int CountBrightRowsInRegion(
+        SKPixmap pixels,
+        float startX,
+        float endX,
+        float startY,
+        float endY,
+        byte threshold = 180)
+    {
+        int rows = 0;
+        int minX = Math.Clamp((int)MathF.Floor(startX), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling(endX), 0, pixels.Width);
+        int minY = Math.Clamp((int)MathF.Floor(startY), 0, pixels.Height);
+        int maxY = Math.Clamp((int)MathF.Ceiling(endY), 0, pixels.Height);
+
+        for (int y = minY; y < maxY; y++)
+        {
+            bool hasBrightPixel = false;
+            for (int x = minX; x < maxX; x++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                if (pixel.Red >= threshold || pixel.Green >= threshold || pixel.Blue >= threshold)
+                {
+                    hasBrightPixel = true;
+                    break;
+                }
+            }
+
+            if (hasBrightPixel)
+            {
+                rows++;
+            }
+        }
+
+        return rows;
+    }
+
+    private static int CountBrightColumnsInRegion(
+        SKPixmap pixels,
+        float startX,
+        float endX,
+        float startY,
+        float endY,
+        byte threshold = 180)
+    {
+        int columns = 0;
+        int minX = Math.Clamp((int)MathF.Floor(startX), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling(endX), 0, pixels.Width);
+        int minY = Math.Clamp((int)MathF.Floor(startY), 0, pixels.Height);
+        int maxY = Math.Clamp((int)MathF.Ceiling(endY), 0, pixels.Height);
+
+        for (int x = minX; x < maxX; x++)
+        {
+            bool hasBrightPixel = false;
+            for (int y = minY; y < maxY; y++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                if (pixel.Red >= threshold || pixel.Green >= threshold || pixel.Blue >= threshold)
+                {
+                    hasBrightPixel = true;
+                    break;
+                }
+            }
+
+            if (hasBrightPixel)
+            {
+                columns++;
+            }
+        }
+
+        return columns;
     }
 
     private static long SumPixelIntensityInRegion(

@@ -1090,6 +1090,41 @@ public sealed class TerminalInputAdapterTests
     }
 
     [Fact]
+    public async Task HandleKeyDown_WithActiveTransport_EncodesPlainTabAsHorizontalTab()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.Tab,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal(new byte[] { 0x09 }, transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
     public async Task HandleKeyDown_WithActiveTransport_EncodesShiftTabAsBacktab()
     {
         DefaultTerminalInputAdapter adapter = new();

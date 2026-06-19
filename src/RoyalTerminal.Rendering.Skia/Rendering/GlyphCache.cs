@@ -157,8 +157,16 @@ public sealed class GlyphCache : IDisposable
     {
         using var font = CreateFont(fontSize);
         var metrics = font.Metrics;
-        var height = metrics.Descent - metrics.Ascent + metrics.Leading;
-        var width = font.MeasureText("M");
+        var height = MathF.Max(
+            1f,
+            MathF.Round(metrics.Descent - metrics.Ascent + metrics.Leading, MidpointRounding.AwayFromZero));
+        var width = font.MeasureText("0");
+        if (width <= 0f)
+        {
+            width = font.MeasureText("M");
+        }
+
+        width = MathF.Max(1f, MathF.Round(width, MidpointRounding.AwayFromZero));
         return (width, height);
     }
 
