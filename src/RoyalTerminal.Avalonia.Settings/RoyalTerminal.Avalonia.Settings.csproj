@@ -6,15 +6,10 @@
     <PackageProjectUrl>https://github.com/royalapplications/RoyalTerminal</PackageProjectUrl>
     <RepositoryUrl>https://github.com/royalapplications/RoyalTerminal</RepositoryUrl>
     <PackageTags>terminal;avalonia;settings</PackageTags>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
     <IsPackable>true</IsPackable>
     <NoWarn>$(NoWarn);NU5104</NoWarn>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
-
-  <ItemGroup>
-    <None Include="../../README.md" Pack="true" PackagePath="" Condition="Exists('../../README.md')" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\RoyalTerminal.Avalonia\RoyalTerminal.Avalonia.csproj" />
