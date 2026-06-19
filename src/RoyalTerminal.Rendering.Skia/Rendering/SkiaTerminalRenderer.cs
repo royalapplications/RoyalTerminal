@@ -44,6 +44,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const int MaxCodepointTextCacheEntries = 4096;
     private const int MaxStackallocTextRunChars = 256;
     private const int MaxStackallocGlyphPoints = 256;
+    private const int BtopNetPanelScanRows = 96;
     private const float LightBoxLineThickness = 1f;
     private const float HeavyBoxLineThickness = 3f;
     private static readonly TimeSpan s_textHighlightNonBacktrackingRegexTimeout = TimeSpan.FromMilliseconds(100);
@@ -710,7 +711,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                         rowTextHighlights);
                 }
 
-                RenderRowText(canvas, terminalRow, y, row, rowOverlays, rowTextHighlights);
+                RenderRowText(canvas, screen, terminalRow, y, row, rowOverlays, rowTextHighlights);
                 terminalRow.IsDirty = false;
             }
         }
@@ -803,6 +804,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private void RenderRowText(
         SKCanvas canvas,
+        TerminalScreen screen,
         TerminalRow row,
         float y,
         int rowIndex,
@@ -817,6 +819,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         bool splitRunsAroundCursor = CursorVisible && rowIndex == CursorRow;
         int cursorSplitColumn = CursorColumn;
+        bool useSolidGraphSprites = IsBtopNetGraphRow(screen, rowIndex);
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
         bool usePretextPipeline = EnableTextShaping &&
             _textRenderPipeline == TerminalTextRenderPipeline.Pretext &&
@@ -897,7 +900,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     spriteRunEnd++;
                 }
 
-                DrawSpriteRun(canvas, cells, col, spriteRunEnd, y, spriteColor);
+                DrawSpriteRun(canvas, cells, col, spriteRunEnd, y, spriteColor, useSolidGraphSprites);
                 DrawRunDecorations(
                     canvas,
                     cells,
@@ -1027,7 +1030,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
         int startCol,
         int endCol,
         float y,
-        SKColor color)
+        SKColor color,
+        bool useSolidGraphSprites)
     {
         for (int col = startCol; col < endCol; col++)
         {
@@ -1038,7 +1042,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             int cellWidth = cell.Width <= 0 ? 1 : cell.Width;
-            DrawSpriteCell(canvas, codepoint, category, col, cellWidth, y, color);
+            DrawSpriteCell(canvas, codepoint, category, col, cellWidth, y, color, useSolidGraphSprites);
             RecordSpriteCell(category);
         }
     }
@@ -1050,7 +1054,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
         int column,
         int widthCells,
         float y,
-        SKColor color)
+        SKColor color,
+        bool useSolidGraphSprites)
     {
         float x = column * _cellWidth;
         float spriteWidth = Math.Max(_cellWidth, _cellWidth * widthCells);
@@ -1087,11 +1092,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     break;
 
                 case SpriteCategory.Braille:
-                    DrawBraillePattern(canvas, x, y, spriteWidth, spriteHeight, codepoint - 0x2800, color);
+                    DrawBraillePattern(canvas, x, y, spriteWidth, spriteHeight, codepoint - 0x2800, color, useSolidGraphSprites);
                     break;
 
                 case SpriteCategory.BlockElement:
-                    _ = TryDrawBlockElement(canvas, x, y, spriteWidth, spriteHeight, codepoint, color);
+                    _ = TryDrawBlockElement(canvas, x, y, spriteWidth, spriteHeight, codepoint, color, useSolidGraphSprites);
                     break;
 
                 case SpriteCategory.ScanLine:
@@ -1114,6 +1119,94 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             canvas.Restore();
         }
+    }
+
+    private static bool IsBtopNetGraphRow(TerminalScreen screen, int rowIndex)
+    {
+        if (rowIndex <= 0)
+        {
+            return false;
+        }
+
+        int minRow = Math.Max(0, rowIndex - BtopNetPanelScanRows);
+        for (int probeRow = rowIndex; probeRow >= minRow; probeRow--)
+        {
+            TerminalRow row = screen.GetViewportRow(probeRow);
+            if (IsBtopNetPanelHeaderRow(row))
+            {
+                return probeRow < rowIndex;
+            }
+
+            if (IsPanelHorizontalBorderRow(row))
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsBtopNetPanelHeaderRow(TerminalRow row)
+    {
+        return RowContainsAsciiSequence(row, "net") &&
+               (RowContainsAsciiSequence(row, "sync") ||
+                RowContainsAsciiSequence(row, "auto") ||
+                RowContainsAsciiSequence(row, "zero"));
+    }
+
+    private static bool IsPanelHorizontalBorderRow(TerminalRow row)
+    {
+        int horizontalCount = 0;
+        for (int column = 0; column < row.Columns; column++)
+        {
+            ref readonly TerminalCell cell = ref row[column];
+            if (!TryGetCellCodepoint(in cell, out int codepoint))
+            {
+                continue;
+            }
+
+            if (codepoint is 0x2500 or 0x2501 or 0x2550)
+            {
+                horizontalCount++;
+            }
+        }
+
+        return horizontalCount >= Math.Max(4, row.Columns / 3);
+    }
+
+    private static bool RowContainsAsciiSequence(TerminalRow row, string sequence)
+    {
+        if (sequence.Length == 0)
+        {
+            return true;
+        }
+
+        int matched = 0;
+        for (int column = 0; column < row.Columns; column++)
+        {
+            ref readonly TerminalCell cell = ref row[column];
+            if (!TryGetCellCodepoint(in cell, out int codepoint) || codepoint > 0x7F)
+            {
+                matched = 0;
+                continue;
+            }
+
+            char value = (char)codepoint;
+            if (value == sequence[matched])
+            {
+                matched++;
+                if (matched == sequence.Length)
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                matched = value == sequence[0] ? 1 : 0;
+            }
+        }
+
+        return false;
     }
 
     private void DrawPowerlineSymbol(
@@ -2365,10 +2458,17 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float width,
         float height,
         int pattern,
-        SKColor color)
+        SKColor color,
+        bool useSolidGraphSubcells)
     {
         if ((pattern & 0xFF) == 0)
         {
+            return;
+        }
+
+        if (useSolidGraphSubcells)
+        {
+            DrawSolidBraillePattern(canvas, x, y, width, height, pattern, color);
             return;
         }
 
@@ -2417,6 +2517,59 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
     }
 
+    private void DrawSolidBraillePattern(
+        SKCanvas canvas,
+        float x,
+        float y,
+        float width,
+        float height,
+        int pattern,
+        SKColor color)
+    {
+        int cellWidthPx = ToPixelSize(width);
+        int cellHeightPx = ToPixelSize(height);
+        bool previousIsAntialias = _spritePaint.IsAntialias;
+        SKPaintStyle previousStyle = _spritePaint.Style;
+        _spritePaint.Color = color;
+
+        try
+        {
+            _spritePaint.IsAntialias = false;
+            _spritePaint.Style = SKPaintStyle.Fill;
+
+            for (int bit = 0; bit < 8; bit++)
+            {
+                if ((pattern & (1 << bit)) == 0)
+                {
+                    continue;
+                }
+
+                (int column, int row) = bit switch
+                {
+                    0 => (0, 0),
+                    1 => (0, 1),
+                    2 => (0, 2),
+                    3 => (1, 0),
+                    4 => (1, 1),
+                    5 => (1, 2),
+                    6 => (0, 3),
+                    _ => (1, 3),
+                };
+
+                int left = FractionMinPixel(cellWidthPx, column / 2f);
+                int right = FractionMaxPixel(cellWidthPx, (column + 1) / 2f);
+                int top = FractionMinPixel(cellHeightPx, row / 4f);
+                int bottom = FractionMaxPixel(cellHeightPx, (row + 1) / 4f);
+                DrawCellPixelRect(canvas, x, y, left, top, right, bottom, _spritePaint);
+            }
+        }
+        finally
+        {
+            _spritePaint.IsAntialias = previousIsAntialias;
+            _spritePaint.Style = previousStyle;
+        }
+    }
+
     private bool TryDrawBlockElement(
         SKCanvas canvas,
         float x,
@@ -2424,7 +2577,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float width,
         float height,
         int codepoint,
-        SKColor color)
+        SKColor color,
+        bool useSolidGraphShades)
     {
         _spritePaint.Color = color;
         int cellWidthPx = ToPixelSize(width);
@@ -2458,8 +2612,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
             case 0x2592:
             case 0x2593:
             {
-                int fillLevel = codepoint == 0x2591 ? 4 : codepoint == 0x2592 ? 8 : 12;
-                DrawShadePattern(canvas, x, y, width, height, fillLevel, color);
+                if (useSolidGraphShades)
+                {
+                    DrawCellPixelRect(canvas, x, y, 0, 0, cellWidthPx, cellHeightPx, _spritePaint);
+                }
+                else
+                {
+                    int fillLevel = codepoint == 0x2591 ? 4 : codepoint == 0x2592 ? 8 : 12;
+                    DrawShadePattern(canvas, x, y, width, height, fillLevel, color);
+                }
+
                 return true;
             }
             case 0x2594:

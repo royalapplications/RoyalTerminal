@@ -2359,6 +2359,38 @@ public class RenderingTests
         Assert.True(lightInk < darkInk, $"Expected dark shade ink > light shade ink, got {darkInk} <= {lightInk}.");
     }
 
+    [Fact]
+    public void SkiaTerminalRenderer_BtopNetPanelGraphSprites_RenderAsSolidCells()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(16f, 32f);
+
+        string[] rows =
+        [
+            "\u256D\u2500\u2510\u00B3net\u250C\u2510192.168.1.179\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510sync\u250C\u2510auto\u250C\u2510zero\u250C\u256E",
+            "\u2502\u2591\u2592\u2593\u28FF\u2502",
+            "\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256F",
+        ];
+
+        TerminalScreen screen = CreateScreenFromRows(rows);
+        using var surface = CreateRenderSurface(renderer, columns: screen.Columns, rows: screen.ViewportRows);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int expectedCellPixels = 16 * 32;
+
+        Assert.Equal(expectedCellPixels, CountBrightPixelsInCell(pixels, renderer, column: 1, row: 1));
+        Assert.Equal(expectedCellPixels, CountBrightPixelsInCell(pixels, renderer, column: 2, row: 1));
+        Assert.Equal(expectedCellPixels, CountBrightPixelsInCell(pixels, renderer, column: 3, row: 1));
+        Assert.Equal(expectedCellPixels, CountBrightPixelsInCell(pixels, renderer, column: 4, row: 1));
+    }
+
     [Theory]
     [InlineData(TerminalUnderlineStyle.Single)]
     [InlineData(TerminalUnderlineStyle.Double)]
@@ -2701,15 +2733,17 @@ public class RenderingTests
         SKPixmap pixels,
         SkiaTerminalRenderer renderer,
         int column,
+        int row = 0,
         byte threshold = 180)
     {
         float startX = column * renderer.CellWidth;
+        float startY = row * renderer.CellHeight;
         return CountBrightPixelsInRegion(
             pixels,
             startX,
             startX + renderer.CellWidth,
-            startY: 0f,
-            endY: renderer.CellHeight,
+            startY,
+            startY + renderer.CellHeight,
             threshold);
     }
 
