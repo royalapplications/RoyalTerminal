@@ -55,6 +55,13 @@ export const apiPackageGroups = [
         project: "src/RoyalTerminal.Unicode/RoyalTerminal.Unicode.csproj",
         guideTitle: "Terminal Engine And Screen State",
         guideLink: "/articles/vt-modes"
+      },
+      {
+        packageId: "RoyalTerminal.Sixel",
+        slug: "royalterminal-sixel",
+        project: "src/RoyalTerminal.Sixel/RoyalTerminal.Sixel.csproj",
+        guideTitle: "Terminal Engine And Screen State",
+        guideLink: "/articles/vt-modes"
       }
     ]
   },

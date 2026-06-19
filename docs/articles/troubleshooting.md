@@ -86,6 +86,7 @@ If the documentation site does not publish:
 
 - ensure GitHub Pages is configured to use `GitHub Actions`
 - ensure the repo has permission to deploy Pages
+- ensure repository variable `DOCS_DEPLOY_ENABLED` is set to `true`
 - verify the `base` option stays `/RoyalTerminal/`
 - run `npm run docs:build` locally before pushing
 

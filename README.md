@@ -11,7 +11,7 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 [![Avalonia](https://img.shields.io/badge/Avalonia-11.x-8b44ac)](https://avaloniaui.net)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Project documentation source lives in [docs/](docs/) and is published through the VitePress/GitHub Pages workflow in [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
+Documentation is published at [royalapplications.github.io/RoyalTerminal](https://royalapplications.github.io/RoyalTerminal/). Source lives in [docs/](docs/) and is published through the VitePress/GitHub Pages workflow in [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
 
 ## NuGet Packages
 
@@ -29,7 +29,10 @@ Project documentation source lives in [docs/](docs/) and is published through th
 
 | Package | Responsibility |
 |---------|----------------|
+| `RoyalTerminal.Avalonia.Settings` | Reusable Avalonia settings panel controls and state for session, connection, terminal, appearance, SSH, logging, and highlighting configuration |
 | `RoyalTerminal.Terminal` | Core terminal contracts (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`), SSH bootstrap helpers, and screen model |
+| `RoyalTerminal.Unicode` | Deterministic Unicode data and terminal width helpers |
+| `RoyalTerminal.Sixel` | Reusable managed sixel decoder and image payload model |
 | `RoyalTerminal.Terminal.Vt.Managed` | Managed VT processor (`BasicVtProcessor`) |
 | `RoyalTerminal.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over official `libghostty-vt` terminal/render APIs) + `GhosttyVtProcessorProvider` |
 | `RoyalTerminal.Terminal.Vt.Default` | Preference-based VT processor factory (`VtProcessorPreference`) |
@@ -38,6 +41,9 @@ Project documentation source lives in [docs/](docs/) and is published through th
 | `RoyalTerminal.Terminal.Pty.Platform` | Platform PTY factory (`DefaultPtyFactory`) |
 | `RoyalTerminal.Terminal.Transport.Pty` | PTY transport provider and wrapper (`PtyTerminalTransportProvider`) |
 | `RoyalTerminal.Terminal.Transport.Pipe` | Process pipe transport provider (`PipeTerminalTransportProvider`) |
+| `RoyalTerminal.Terminal.Transport.Raw` | Raw TCP terminal transport provider |
+| `RoyalTerminal.Terminal.Transport.Telnet` | Telnet terminal transport provider with option negotiation |
+| `RoyalTerminal.Terminal.Transport.Serial` | Serial line terminal transport provider |
 | `RoyalTerminal.Terminal.Transport.Ssh.Abstractions` | SSH host-key validation contracts |
 | `RoyalTerminal.Terminal.Transport.Ssh.SshNet` | SSH transport provider (`SshNetTerminalTransportProvider`) |
 | `RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent` | Optional SSH agent auth contributor for SSH.NET |
@@ -941,7 +947,7 @@ dotnet add package RoyalTerminal.Rendering.Interop.Ghostty.Skia
 dotnet add package RoyalTerminal.Avalonia.Rendering.GhosttyInterop
 ```
 
-If your feed does not yet publish these composition packages, create them from source with `dotnet pack -c Release` and consume from your local/internal feed.
+For source builds or internal feeds, create the same package set with `bash scripts/pack-nuget.sh --configuration Release --output artifacts --version <version>`.
 
 ## Codex SKILL
 
@@ -1115,14 +1121,25 @@ RoyalTerminal/
 ├── src/
 │   ├── RoyalTerminal.GhosttySharp/
 │   ├── RoyalTerminal.Avalonia/
+│   ├── RoyalTerminal.Avalonia.Settings/
 │   ├── RoyalTerminal.Avalonia.Rendering.GhosttyInterop/
 │   ├── RoyalTerminal.Terminal/
+│   ├── RoyalTerminal.Unicode/
+│   ├── RoyalTerminal.Sixel/
 │   ├── RoyalTerminal.Terminal.Vt.Managed/
 │   ├── RoyalTerminal.Terminal.Vt.Ghostty/
 │   ├── RoyalTerminal.Terminal.Vt.Default/
 │   ├── RoyalTerminal.Terminal.Pty.Unix/
 │   ├── RoyalTerminal.Terminal.Pty.Windows/
 │   ├── RoyalTerminal.Terminal.Pty.Platform/
+│   ├── RoyalTerminal.Terminal.Transport.Pty/
+│   ├── RoyalTerminal.Terminal.Transport.Pipe/
+│   ├── RoyalTerminal.Terminal.Transport.Raw/
+│   ├── RoyalTerminal.Terminal.Transport.Telnet/
+│   ├── RoyalTerminal.Terminal.Transport.Serial/
+│   ├── RoyalTerminal.Terminal.Transport.Ssh.Abstractions/
+│   ├── RoyalTerminal.Terminal.Transport.Ssh.SshNet/
+│   ├── RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent/
 │   ├── RoyalTerminal.Terminal.Services.Contracts/
 │   ├── RoyalTerminal.Terminal.Services/
 │   ├── RoyalTerminal.Rendering.Text/
@@ -1135,6 +1152,7 @@ RoyalTerminal/
 │   ├── RoyalTerminal.GhosttySharp.Native.Linux64/
 │   └── RoyalTerminal.GhosttySharp.Native.Win64/
 ├── samples/RoyalTerminal.Demo/
+├── samples/RoyalTerminal.WinFormsHost/
 ├── samples/RoyalTerminal.MacNativeTabbed/
 ├── samples/RoyalTerminal.ControlCatalog/
 ├── tests/

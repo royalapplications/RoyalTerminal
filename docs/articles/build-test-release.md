@@ -128,11 +128,43 @@ That structure exists because native asset availability is part of the product c
 
 The release workflow is tag-driven and builds native artifacts per platform/architecture before packing or publishing managed outputs.
 
+Release tags must use one of these forms:
+
+```text
+vMAJOR.MINOR.PATCH
+vMAJOR.MINOR.PATCH-prerelease
+```
+
+Examples:
+
+```text
+v0.1.21
+v0.1.21-alpha.1
+```
+
 This is the core release invariant:
 
 - native runtime artifacts are produced first
+- required native files are verified for every RID before packing
 - managed packages consume the staged artifacts
-- packaging verification happens as part of the repository’s automated validation surface
+- every package in `artifacts/*.nupkg` is pushed to NuGet.org explicitly
+- the GitHub release is created only after package publishing succeeds
+
+The workflow requires the `NUGET_API_KEY` repository secret. It publishes with `--skip-duplicate` so a re-run can continue past packages that already reached NuGet.org.
+
+The package version comes from the tag without the leading `v`; the repository `VersionPrefix` remains the local/default development version.
+
+## Documentation release
+
+The docs workflow builds on pull requests and pushes. Deployment is guarded by the repository variable `DOCS_DEPLOY_ENABLED`.
+
+To publish docs:
+
+1. Configure GitHub Pages to use GitHub Actions.
+2. Set `DOCS_DEPLOY_ENABLED` to `true`.
+3. Push to `main` or run the Docs workflow manually with `workflow_dispatch`.
+
+Pull request runs never deploy.
 
 ## Benchmarks
 

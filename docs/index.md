@@ -59,6 +59,7 @@ features:
 - [Ghostty/Shadertoy Shader Compatibility](/articles/shaders-ghostty-shadertoy)
 - [Windows Terminal HLSL Shader Compatibility](/articles/shaders-windows-terminal-hlsl)
 - [Ghostty Integration](/articles/ghostty-integration)
+- [Windows x64 Native Compatibility](/articles/windows-x64-native-compatibility)
 - [Samples And Tooling](/articles/samples-tooling)
 - [Build, Test, And Release](/articles/build-test-release)
 - [Troubleshooting](/articles/troubleshooting)
