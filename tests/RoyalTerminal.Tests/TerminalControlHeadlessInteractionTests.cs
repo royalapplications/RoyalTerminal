@@ -2624,22 +2624,12 @@ public sealed class TerminalControlHeadlessInteractionTests
                     $"Mode={SnapshotModeState(control.TerminalSessionService.ModeSource)}, Kitty={SnapshotKittyKeyboardFlags(control.TerminalSessionService.ModeSource)}, " +
                     $"Inputs={SnapshotInputs(inputSync, inputs)}");
 
-                bool controlEchoObserved = await WaitForRepeatedFloodControlEchoAsync(
-                    expectedInputByte,
+                string cycleMarker = $"__ROYALTERMINAL_REPEAT_{physicalKey}_{cycle}__";
+                bool promptRecovered = await SendRepeatedFloodRecoveryMarkerUntilObservedAsync(
+                    control,
+                    cycleMarker,
                     outputSync,
                     output,
-                    GetRepeatedFloodRecoveryTimeout(scenario));
-                Assert.True(
-                    controlEchoObserved,
-                    $"Cycle {cycle}: Did not observe {controlCharacterLabel} echo before sending prompt recovery marker. " +
-                    $"Mode={SnapshotModeState(control.TerminalSessionService.ModeSource)}, Kitty={SnapshotKittyKeyboardFlags(control.TerminalSessionService.ModeSource)}, " +
-                    $"Output={SnapshotOutput(outputSync, output)}");
-
-                string cycleMarker = $"__ROYALTERMINAL_REPEAT_{physicalKey}_{cycle}__";
-                control.SendInput($"echo {cycleMarker}\n");
-
-                bool promptRecovered = await WaitUntilAsync(
-                    () => ContainsOutput(outputSync, output, cycleMarker),
                     GetRepeatedFloodRecoveryTimeout(scenario));
                 Assert.True(
                     promptRecovered,
@@ -2798,29 +2788,36 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    private static async Task<bool> WaitForRepeatedFloodControlEchoAsync(
-        byte expectedInputByte,
+    private static async Task<bool> SendRepeatedFloodRecoveryMarkerUntilObservedAsync(
+        TerminalControl control,
+        string marker,
         object sync,
         StringBuilder output,
         TimeSpan timeout)
     {
-        string? controlEcho = expectedInputByte switch
-        {
-            0x03 => "^C",
-            0x1A => "^Z",
-            _ => null,
-        };
-
-        if (controlEcho is null)
-        {
-            return true;
-        }
+        Stopwatch elapsed = Stopwatch.StartNew();
+        TimeSpan retryInterval = TimeSpan.FromMilliseconds(250);
 
         // The tty line discipline may flush bytes written immediately after
-        // INTR/SUSP. Use the echoed control character as the recovery boundary.
-        return await WaitUntilAsync(
-            () => ContainsOutput(sync, output, controlEcho),
-            timeout);
+        // INTR/SUSP. Retry the recovery marker until the prompt accepts it
+        // instead of relying on the echoed control character appearing in a
+        // flood-heavy output backlog.
+        while (elapsed.Elapsed < timeout)
+        {
+            control.SendInput($"echo {marker}\n");
+
+            TimeSpan remaining = timeout - elapsed.Elapsed;
+            TimeSpan wait = remaining < retryInterval ? remaining : retryInterval;
+            if (wait > TimeSpan.Zero &&
+                await WaitUntilAsync(() => ContainsOutput(sync, output, marker), wait))
+            {
+                return true;
+            }
+
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+        }
+
+        return ContainsOutput(sync, output, marker);
     }
 
     private static bool ContainsInputByteAfterIndex(object sync, List<byte[]> inputs, byte expectedByte, int startIndex)
