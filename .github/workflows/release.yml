@@ -426,39 +426,7 @@ jobs:
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
           NUGET_SOURCE: https://api.nuget.org/v3/index.json
-        run: |
-          set -euo pipefail
-          if [ -z "${NUGET_API_KEY}" ]; then
-            echo "::error::NUGET_API_KEY secret is required to publish release packages."
-            exit 1
-          fi
-
-          shopt -s nullglob
-          packages=(artifacts/*.nupkg)
-          if [ "${#packages[@]}" -eq 0 ]; then
-            echo "::error::No NuGet packages were produced in artifacts/."
-            exit 1
-          fi
-
-          for package in "${packages[@]}"; do
-            output_file="$(mktemp)"
-            if dotnet nuget push "${package}" \
-                --api-key "${NUGET_API_KEY}" \
-                --source "${NUGET_SOURCE}" \
-                --skip-duplicate 2>&1 | tee "${output_file}"; then
-              rm -f "${output_file}"
-              continue
-            fi
-
-            if grep -Eqi "already exists|conflict" "${output_file}"; then
-              echo "::warning::Package ${package} already exists on NuGet.org; continuing."
-              rm -f "${output_file}"
-              continue
-            fi
-
-            rm -f "${output_file}"
-            exit 1
-          done
+        run: bash scripts/push-nuget.sh --directory artifacts
 
       # Create GitHub Release
       - name: Create GitHub Release
