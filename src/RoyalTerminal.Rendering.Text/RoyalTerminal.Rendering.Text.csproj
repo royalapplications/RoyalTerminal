@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <PackageId>RoyalApps.RoyalTerminal.Rendering.Text</PackageId>
     <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
 

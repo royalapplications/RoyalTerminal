@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent</PackageId>
     <Description>Optional SSH.NET agent authentication adapter for terminal SSH transport.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>

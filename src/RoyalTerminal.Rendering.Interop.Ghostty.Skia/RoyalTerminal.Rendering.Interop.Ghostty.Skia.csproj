@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.Rendering.Interop.Ghostty.Skia</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty.Skia</PackageId>
     <Description>SkiaSharp bridge for Ghostty renderer interop with texture and CPU fallback paths.</Description>
     <IsPackable>true</IsPackable>
     <NoWarn>$(NoWarn);NU5104</NoWarn>

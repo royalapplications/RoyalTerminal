@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.Terminal.Services.Contracts</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.Terminal.Services.Contracts</PackageId>
     <Description>Contracts for terminal session lifecycle services.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>

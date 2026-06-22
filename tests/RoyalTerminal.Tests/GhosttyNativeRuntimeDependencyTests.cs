@@ -15,18 +15,18 @@ public sealed class GhosttyNativeRuntimeDependencyTests
 
     private static readonly (string Rid, string ExpectedNativePackage)[] RuntimePackageSelections =
     [
-        ("linux-arm64", "RoyalTerminal.GhosttySharp.Native.Linux64"),
-        ("linux-x64", "RoyalTerminal.GhosttySharp.Native.Linux64"),
-        ("osx-arm64", "RoyalTerminal.GhosttySharp.Native.OSX"),
-        ("osx-x64", "RoyalTerminal.GhosttySharp.Native.OSX"),
-        ("win-arm64", "RoyalTerminal.GhosttySharp.Native.Win64"),
-        ("win-x64", "RoyalTerminal.GhosttySharp.Native.Win64"),
+        ("linux-arm64", "RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64"),
+        ("linux-x64", "RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64"),
+        ("osx-arm64", "RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX"),
+        ("osx-x64", "RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX"),
+        ("win-arm64", "RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64"),
+        ("win-x64", "RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64"),
     ];
 
     private static readonly string[] ManagedRuntimePackages =
     [
-        "RoyalTerminal.GhosttySharp",
-        "RoyalTerminal.Rendering.Interop.Ghostty",
+        "RoyalApps.RoyalTerminal.GhosttySharp",
+        "RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty",
     ];
 
     private static readonly string[] ExternalPackageStubs =
@@ -40,18 +40,23 @@ public sealed class GhosttyNativeRuntimeDependencyTests
     ];
 
     [Theory]
-    [InlineData("RoyalTerminal.GhosttySharp", "src/RoyalTerminal.GhosttySharp")]
-    [InlineData("RoyalTerminal.Rendering.Interop.Ghostty", "src/RoyalTerminal.Rendering.Interop.Ghostty")]
+    [InlineData("RoyalApps.RoyalTerminal.GhosttySharp", "src/RoyalTerminal.GhosttySharp")]
+    [InlineData("RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty", "src/RoyalTerminal.Rendering.Interop.Ghostty")]
     public void PackageProject_OptsIntoGeneratedRuntimeJson(string packageId, string projectDirectory)
     {
         string repoRoot = FindRepositoryRoot();
-        string projectPath = Path.Combine(repoRoot, projectDirectory, packageId + ".csproj");
+        string projectName = Path.GetFileName(projectDirectory);
+        string projectPath = Path.Combine(repoRoot, projectDirectory, projectName + ".csproj");
 
         XDocument project = XDocument.Load(projectPath);
         XElement optInProperty = Assert.Single(
             project.Descendants(),
             element => element.Name.LocalName == "RoyalTerminalGenerateGhosttyNativeRuntimeJson");
+        XElement packageIdProperty = Assert.Single(
+            project.Descendants(),
+            element => element.Name.LocalName == "PackageId");
 
+        Assert.Equal(packageId, packageIdProperty.Value);
         Assert.Equal("true", optInProperty.Value);
     }
 
@@ -109,8 +114,8 @@ public sealed class GhosttyNativeRuntimeDependencyTests
     }
 
     [Theory]
-    [InlineData("RoyalTerminal.GhosttySharp")]
-    [InlineData("RoyalTerminal.Rendering.Interop.Ghostty")]
+    [InlineData("RoyalApps.RoyalTerminal.GhosttySharp")]
+    [InlineData("RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty")]
     public void RuntimeJsonTarget_GeneratesSupportedRidMappings(string packageId)
     {
         string repoRoot = FindRepositoryRoot();
@@ -136,12 +141,12 @@ public sealed class GhosttyNativeRuntimeDependencyTests
 
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement runtimes = document.RootElement.GetProperty("runtimes");
-        AssertRuntimeDependency(runtimes, "linux-arm64", packageId, "RoyalTerminal.GhosttySharp.Native.Linux64");
-        AssertRuntimeDependency(runtimes, "linux-x64", packageId, "RoyalTerminal.GhosttySharp.Native.Linux64");
-        AssertRuntimeDependency(runtimes, "osx-arm64", packageId, "RoyalTerminal.GhosttySharp.Native.OSX");
-        AssertRuntimeDependency(runtimes, "osx-x64", packageId, "RoyalTerminal.GhosttySharp.Native.OSX");
-        AssertRuntimeDependency(runtimes, "win-arm64", packageId, "RoyalTerminal.GhosttySharp.Native.Win64");
-        AssertRuntimeDependency(runtimes, "win-x64", packageId, "RoyalTerminal.GhosttySharp.Native.Win64");
+        AssertRuntimeDependency(runtimes, "linux-arm64", packageId, "RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64");
+        AssertRuntimeDependency(runtimes, "linux-x64", packageId, "RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64");
+        AssertRuntimeDependency(runtimes, "osx-arm64", packageId, "RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX");
+        AssertRuntimeDependency(runtimes, "osx-x64", packageId, "RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX");
+        AssertRuntimeDependency(runtimes, "win-arm64", packageId, "RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64");
+        AssertRuntimeDependency(runtimes, "win-x64", packageId, "RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64");
 
         Assert.Equal(6, runtimes.EnumerateObject().Count());
         Assert.Contains(

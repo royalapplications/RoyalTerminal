@@ -24,7 +24,7 @@ hero:
 
 features:
   - title: Avalonia-first terminal UI
-    details: "`RoyalTerminal.Avalonia` provides a backend-neutral `TerminalControl` with theming, virtualization, regex text highlighting, framebuffer shaders, capture/replay, snapshot export, and rich input handling."
+    details: "`RoyalApps.RoyalTerminal.Avalonia` provides a backend-neutral `TerminalControl` with theming, virtualization, regex text highlighting, framebuffer shaders, capture/replay, snapshot export, and rich input handling."
   - title: Multi-transport runtime
     details: "PTY, pipe, SSH, raw TCP, Telnet, and serial transports share a single session model and option surface."
   - title: Managed and native VT engines

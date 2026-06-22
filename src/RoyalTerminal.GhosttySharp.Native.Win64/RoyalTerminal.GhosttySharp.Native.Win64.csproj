@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.GhosttySharp.Native.Win64</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64</PackageId>
     <Description>Native Ghostty libraries for Windows (x64 and arm64). Provides ghostty-vt.dll and ghostty-renderer-capi.dll shared libraries for RoyalTerminal on Windows.</Description>
     <PackageTags>ghostty;terminal;native;windows;x64;arm64</PackageTags>
 
@@ -21,8 +21,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="build/RoyalTerminal.GhosttySharp.Native.Win64.targets" Pack="true" PackagePath="build" />
-    <None Include="buildTransitive/RoyalTerminal.GhosttySharp.Native.Win64.targets" Pack="true" PackagePath="buildTransitive" />
+    <None Include="build/RoyalTerminal.GhosttySharp.Native.Win64.targets" Pack="true" PackagePath="build/RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64.targets" />
+    <None Include="buildTransitive/RoyalTerminal.GhosttySharp.Native.Win64.targets" Pack="true" PackagePath="buildTransitive/RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64.targets" />
   </ItemGroup>
 
 </Project>

@@ -14,30 +14,30 @@ RoyalTerminal is a modular terminal stack, not a single UI control package. The 
 
 | Scenario | Required packages |
 | --- | --- |
-| Avalonia terminal with managed VT fallback | `RoyalTerminal.Avalonia` |
-| Avalonia terminal with native Ghostty VT available | `RoyalTerminal.Avalonia`, `RoyalTerminal.Terminal.Vt.Ghostty`; restore or publish with your target RID so NuGet selects the matching native asset package |
-| Avalonia settings surface | add `RoyalTerminal.Avalonia.Settings` |
-| SSH agent auth for the SSH.NET transport | add `RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent` |
+| Avalonia terminal with managed VT fallback | `RoyalApps.RoyalTerminal.Avalonia` |
+| Avalonia terminal with native Ghostty VT available | `RoyalApps.RoyalTerminal.Avalonia`, `RoyalApps.RoyalTerminal.Terminal.Vt.Ghostty`; restore or publish with your target RID so NuGet selects the matching native asset package |
+| Avalonia settings surface | add `RoyalApps.RoyalTerminal.Avalonia.Settings` |
+| SSH agent auth for the SSH.NET transport | add `RoyalApps.RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent` |
 
 Native asset packages selected by `runtime.json`:
 
-- macOS: `RoyalTerminal.GhosttySharp.Native.OSX`
-- Windows: `RoyalTerminal.GhosttySharp.Native.Win64`
-- Linux: `RoyalTerminal.GhosttySharp.Native.Linux64`
+- macOS: `RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX`
+- Windows: `RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64`
+- Linux: `RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64`
 
 ## Install the packages
 
 Managed-only Avalonia setup:
 
 ```bash
-dotnet add package RoyalTerminal.Avalonia
+dotnet add package RoyalApps.RoyalTerminal.Avalonia
 ```
 
 Avalonia plus native Ghostty VT:
 
 ```bash
-dotnet add package RoyalTerminal.Avalonia
-dotnet add package RoyalTerminal.Terminal.Vt.Ghostty
+dotnet add package RoyalApps.RoyalTerminal.Avalonia
+dotnet add package RoyalApps.RoyalTerminal.Terminal.Vt.Ghostty
 dotnet publish -r osx-arm64
 ```
 

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.Terminal.Pty.Windows</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.Terminal.Pty.Windows</PackageId>
     <Description>Windows ConPTY implementation for RoyalTerminal terminal contracts.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
