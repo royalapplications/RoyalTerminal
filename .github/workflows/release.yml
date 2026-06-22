@@ -425,6 +425,7 @@ jobs:
         shell: bash
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_SOURCE: https://api.nuget.org/v3/index.json
         run: |
           set -euo pipefail
           if [ -z "${NUGET_API_KEY}" ]; then
@@ -440,10 +441,23 @@ jobs:
           fi
 
           for package in "${packages[@]}"; do
-            dotnet nuget push "${package}" \
-              --api-key "${NUGET_API_KEY}" \
-              --source https://api.nuget.org/v3/index.json \
-              --skip-duplicate
+            output_file="$(mktemp)"
+            if dotnet nuget push "${package}" \
+                --api-key "${NUGET_API_KEY}" \
+                --source "${NUGET_SOURCE}" \
+                --skip-duplicate 2>&1 | tee "${output_file}"; then
+              rm -f "${output_file}"
+              continue
+            fi
+
+            if grep -Eqi "already exists|conflict" "${output_file}"; then
+              echo "::warning::Package ${package} already exists on NuGet.org; continuing."
+              rm -f "${output_file}"
+              continue
+            fi
+
+            rm -f "${output_file}"
+            exit 1
           done
 
       # Create GitHub Release
