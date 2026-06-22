@@ -5,6 +5,8 @@
   <img src="assets/royalterminal-logo-dark.svg#gh-dark-mode-only" alt="RoyalTerminal logo" width="128" height="128">
 </p>
 
+<img width="2690" height="1840" alt="image" src="https://github.com/user-attachments/assets/5ac2f18a-6461-495a-9344-382e25f82c2a" />
+
 High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`RoyalTerminal.Avalonia`), framebuffer shader support, official native Ghostty VT integration (`libghostty-vt`), and a separate fully managed VT implementation.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com)
