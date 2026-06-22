@@ -9,9 +9,12 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com)
 [![Avalonia](https://img.shields.io/badge/Avalonia-11.x-8b44ac)](https://avaloniaui.net)
+[![Documentation](https://img.shields.io/badge/docs-online-0f766e.svg)](https://royalapplications.github.io/RoyalTerminal/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Documentation is published at [royalapplications.github.io/RoyalTerminal](https://royalapplications.github.io/RoyalTerminal/). Source lives in [docs/](docs/) and is published through the VitePress/GitHub Pages workflow in [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
+## Documentation
+
+Read the published documentation at [royalapplications.github.io/RoyalTerminal](https://royalapplications.github.io/RoyalTerminal/). Source lives in [docs/](docs/) and is published through the VitePress/GitHub Pages workflow in [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
 
 ## NuGet Packages
 
