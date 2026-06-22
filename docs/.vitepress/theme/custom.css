@@ -54,13 +54,45 @@
 }
 
 @media (max-width: 960px) {
+  .VPHomeHero {
+    margin-top: 0;
+    padding-top: 40px;
+    padding-bottom: 56px;
+  }
+
+  .VPHomeHero .container {
+    min-height: 0;
+  }
+
   .VPHomeHero .image {
-    min-height: 280px;
-    padding: 20px;
+    width: min(100%, 560px);
+    min-height: clamp(188px, 36vw, 240px);
+    margin: 0 auto 28px;
+    padding: 18px;
   }
 
   .VPHomeHero .image-container {
-    width: min(62vw, 280px);
+    width: min(46vw, 220px);
+  }
+
+  .VPHomeHero .main {
+    padding-top: 0;
+  }
+}
+
+@media (max-width: 520px) {
+  .VPHomeHero {
+    padding-top: 28px;
+  }
+
+  .VPHomeHero .image {
+    min-height: 176px;
+    margin-bottom: 24px;
+    padding: 16px;
+  }
+
+  .VPHomeHero .image-container {
+    width: min(52vw, 176px);
   }
 }
 
