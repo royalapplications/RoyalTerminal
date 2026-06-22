@@ -39,27 +39,64 @@ features:
 
 ## Documentation
 
-- [Getting Started](/articles/getting-started)
-- [Architecture](/articles/architecture)
-- [Package Guide](/articles/packages)
-- [API Reference](/api/)
-- [Embedding In Avalonia](/articles/avalonia-control)
-- [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings)
-- [Session History And Scrollback](/articles/session-history)
-- [Session Restart Semantics](/articles/session-restart-semantics)
-- [Session Restart Reference Analysis](/articles/session-restart-reference-analysis)
-- [Capture Formats](/articles/capture-formats)
-- [Regex Text Highlighting](/articles/text-highlighting)
-- [Transports And Remote Access](/articles/transports)
-- [Terminal Engine And Screen State](/articles/vt-modes)
-- [Rendering, Text, And Graphics](/articles/rendering-native)
-- [Shader Support](/articles/shaders)
-- [Applying Shaders](/articles/shaders-applying)
-- [Skia Runtime Effect Shaders](/articles/shaders-skia-runtime-effect)
-- [Ghostty/Shadertoy Shader Compatibility](/articles/shaders-ghostty-shadertoy)
-- [Windows Terminal HLSL Shader Compatibility](/articles/shaders-windows-terminal-hlsl)
-- [Ghostty Integration](/articles/ghostty-integration)
-- [Windows x64 Native Compatibility](/articles/windows-x64-native-compatibility)
-- [Samples And Tooling](/articles/samples-tooling)
-- [Build, Test, And Release](/articles/build-test-release)
-- [Troubleshooting](/articles/troubleshooting)
+<div class="home-docs-grid">
+  <section class="home-docs-group home-docs-group-primary">
+    <p class="home-docs-eyebrow">Start here</p>
+    <h3>Plan your integration</h3>
+    <p>Choose the right package set, understand the architecture, and jump into the generated API surface.</p>
+    <ul>
+      <li><a href="articles/getting-started">Getting Started</a></li>
+      <li><a href="articles/architecture">Architecture</a></li>
+      <li><a href="articles/packages">Package Guide</a></li>
+      <li><a href="api/">API Reference</a></li>
+    </ul>
+  </section>
+  <section class="home-docs-group">
+    <p class="home-docs-eyebrow">Embedding</p>
+    <h3>Avalonia host workflows</h3>
+    <p>Wire the control, configure sessions, preserve history, and export terminal state.</p>
+    <ul>
+      <li><a href="articles/avalonia-control">Embedding in Avalonia</a></li>
+      <li><a href="articles/sessions-profiles-and-settings">Sessions, Profiles, and Settings</a></li>
+      <li><a href="articles/session-history">Session History and Scrollback</a></li>
+      <li><a href="articles/session-restart-semantics">Session Restart Semantics</a></li>
+      <li><a href="articles/session-restart-reference-analysis">Session Restart Reference Analysis</a></li>
+      <li><a href="articles/capture-formats">Capture Formats</a></li>
+    </ul>
+  </section>
+  <section class="home-docs-group">
+    <p class="home-docs-eyebrow">Runtime</p>
+    <h3>Terminal behavior</h3>
+    <p>Review transports, screen state, highlighting, Ghostty interop, and native compatibility notes.</p>
+    <ul>
+      <li><a href="articles/transports">Transports and Remote Access</a></li>
+      <li><a href="articles/vt-modes">Terminal Engine and Screen State</a></li>
+      <li><a href="articles/text-highlighting">Regex Text Highlighting</a></li>
+      <li><a href="articles/ghostty-integration">Ghostty Integration</a></li>
+      <li><a href="articles/windows-x64-native-compatibility">Windows x64 Native Compatibility</a></li>
+    </ul>
+  </section>
+  <section class="home-docs-group">
+    <p class="home-docs-eyebrow">Rendering</p>
+    <h3>Text, graphics, and shaders</h3>
+    <p>Understand the rendering stack and shader compatibility across Skia, Ghostty, and Windows Terminal models.</p>
+    <ul>
+      <li><a href="articles/rendering-native">Rendering, Text, and Graphics</a></li>
+      <li><a href="articles/shaders">Shader Support</a></li>
+      <li><a href="articles/shaders-applying">Applying Shaders</a></li>
+      <li><a href="articles/shaders-skia-runtime-effect">Skia Runtime Effect Shaders</a></li>
+      <li><a href="articles/shaders-ghostty-shadertoy">Ghostty/Shadertoy Shader Compatibility</a></li>
+      <li><a href="articles/shaders-windows-terminal-hlsl">Windows Terminal HLSL Shader Compatibility</a></li>
+    </ul>
+  </section>
+  <section class="home-docs-group">
+    <p class="home-docs-eyebrow">Operations</p>
+    <h3>Ship and troubleshoot</h3>
+    <p>Use sample tooling, validate release workflows, and diagnose common integration issues.</p>
+    <ul>
+      <li><a href="articles/samples-tooling">Samples and Tooling</a></li>
+      <li><a href="articles/build-test-release">Build, Test, and Release</a></li>
+      <li><a href="articles/troubleshooting">Troubleshooting</a></li>
+    </ul>
+  </section>
+</div>

@@ -2,31 +2,61 @@ import { defineConfig } from "vitepress";
 
 import { apiPackageGroups } from "./api-packages.mjs";
 
-const guideItems = [
-  { text: "Overview", link: "/" },
-  { text: "Getting Started", link: "/articles/getting-started" },
-  { text: "Architecture", link: "/articles/architecture" },
-  { text: "Package Guide", link: "/articles/packages" },
-  { text: "Embedding In Avalonia", link: "/articles/avalonia-control" },
-  { text: "Sessions, Profiles, And Settings", link: "/articles/sessions-profiles-and-settings" },
-  { text: "Session History And Scrollback", link: "/articles/session-history" },
-  { text: "Session Restart Semantics", link: "/articles/session-restart-semantics" },
-  { text: "Session Restart Reference Analysis", link: "/articles/session-restart-reference-analysis" },
-  { text: "Capture Formats", link: "/articles/capture-formats" },
-  { text: "Regex Text Highlighting", link: "/articles/text-highlighting" },
-  { text: "Transports And Remote Access", link: "/articles/transports" },
-  { text: "Terminal Engine And Screen State", link: "/articles/vt-modes" },
-  { text: "Rendering, Text, And Graphics", link: "/articles/rendering-native" },
-  { text: "Shader Support", link: "/articles/shaders" },
-  { text: "Applying Shaders", link: "/articles/shaders-applying" },
-  { text: "Skia Runtime Effect Shaders", link: "/articles/shaders-skia-runtime-effect" },
-  { text: "Ghostty/Shadertoy Shader Compatibility", link: "/articles/shaders-ghostty-shadertoy" },
-  { text: "Windows Terminal HLSL Shader Compatibility", link: "/articles/shaders-windows-terminal-hlsl" },
-  { text: "Ghostty Integration", link: "/articles/ghostty-integration" },
-  { text: "Windows x64 Native Compatibility", link: "/articles/windows-x64-native-compatibility" },
-  { text: "Samples And Tooling", link: "/articles/samples-tooling" },
-  { text: "Build, Test, And Release", link: "/articles/build-test-release" },
-  { text: "Troubleshooting", link: "/articles/troubleshooting" }
+const guideSidebarItems = [
+  {
+    text: "Start Here",
+    collapsed: false,
+    items: [
+      { text: "Overview", link: "/" },
+      { text: "Getting Started", link: "/articles/getting-started" },
+      { text: "Architecture", link: "/articles/architecture" },
+      { text: "Package Guide", link: "/articles/packages" }
+    ]
+  },
+  {
+    text: "Embedding and Sessions",
+    collapsed: false,
+    items: [
+      { text: "Embedding in Avalonia", link: "/articles/avalonia-control" },
+      { text: "Sessions, Profiles, and Settings", link: "/articles/sessions-profiles-and-settings" },
+      { text: "Session History and Scrollback", link: "/articles/session-history" },
+      { text: "Session Restart Semantics", link: "/articles/session-restart-semantics" },
+      { text: "Session Restart Reference Analysis", link: "/articles/session-restart-reference-analysis" },
+      { text: "Capture Formats", link: "/articles/capture-formats" }
+    ]
+  },
+  {
+    text: "Terminal Runtime",
+    collapsed: false,
+    items: [
+      { text: "Transports and Remote Access", link: "/articles/transports" },
+      { text: "Terminal Engine and Screen State", link: "/articles/vt-modes" },
+      { text: "Regex Text Highlighting", link: "/articles/text-highlighting" },
+      { text: "Ghostty Integration", link: "/articles/ghostty-integration" },
+      { text: "Windows x64 Native Compatibility", link: "/articles/windows-x64-native-compatibility" }
+    ]
+  },
+  {
+    text: "Rendering and Shaders",
+    collapsed: false,
+    items: [
+      { text: "Rendering, Text, and Graphics", link: "/articles/rendering-native" },
+      { text: "Shader Support", link: "/articles/shaders" },
+      { text: "Applying Shaders", link: "/articles/shaders-applying" },
+      { text: "Skia Runtime Effect Shaders", link: "/articles/shaders-skia-runtime-effect" },
+      { text: "Ghostty/Shadertoy Shader Compatibility", link: "/articles/shaders-ghostty-shadertoy" },
+      { text: "Windows Terminal HLSL Shader Compatibility", link: "/articles/shaders-windows-terminal-hlsl" }
+    ]
+  },
+  {
+    text: "Operations",
+    collapsed: false,
+    items: [
+      { text: "Samples and Tooling", link: "/articles/samples-tooling" },
+      { text: "Build, Test, and Release", link: "/articles/build-test-release" },
+      { text: "Troubleshooting", link: "/articles/troubleshooting" }
+    ]
+  }
 ];
 
 const apiSidebarItems = [
@@ -70,12 +100,7 @@ export default defineConfig({
       { text: "GitHub", link: "https://github.com/royalapplications/RoyalTerminal" }
     ],
     sidebar: {
-      "/articles/": [
-        {
-          text: "Guide",
-          items: guideItems
-        }
-      ],
+      "/articles/": guideSidebarItems,
       "/api/": [
         {
           text: "API Reference",
@@ -90,10 +115,7 @@ export default defineConfig({
         }))
       ],
       "/": [
-        {
-          text: "Guide",
-          items: guideItems
-        },
+        ...guideSidebarItems,
         {
           text: "API Reference",
           items: apiSidebarItems
