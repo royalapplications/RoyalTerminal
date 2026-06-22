@@ -8,7 +8,7 @@ RoyalTerminal is easiest to understand from the top down: drop `TerminalControl`
 
 ## The default host story
 
-Most applications only need `RoyalTerminal.Avalonia`, a `TerminalControl`, and a session start call:
+Most applications only need `RoyalApps.RoyalTerminal.Avalonia`, a `TerminalControl`, and a session start call:
 
 ```xml
 <Window
@@ -170,7 +170,7 @@ If you are building a debugging, support, or teaching workflow, this is the feat
 
 ## Adding a settings surface
 
-The `RoyalTerminal.Avalonia.Settings` package is not just a demo convenience. It is the reusable configuration UI for editing the same session document model used by the runtime.
+The `RoyalApps.RoyalTerminal.Avalonia.Settings` package is not just a demo convenience. It is the reusable configuration UI for editing the same session document model used by the runtime.
 
 ### Settings controls
 
@@ -238,5 +238,5 @@ If you are embedding RoyalTerminal into an Avalonia application, the normal prog
 
 1. Start with `TerminalControl`.
 2. Add `TerminalCaptureRuntime` if you need capture or replay.
-3. Add `RoyalTerminal.Avalonia.Settings` if your application edits saved session documents.
-4. Add `RoyalTerminal.Avalonia.Rendering.GhosttyInterop` only when your host architecture specifically needs Ghostty renderer interop.
+3. Add `RoyalApps.RoyalTerminal.Avalonia.Settings` if your application edits saved session documents.
+4. Add `RoyalApps.RoyalTerminal.Avalonia.Rendering.GhosttyInterop` only when your host architecture specifically needs Ghostty renderer interop.

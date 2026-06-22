@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.Sixel</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.Sixel</PackageId>
     <Description>Reusable managed sixel decoder for RoyalTerminal.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>

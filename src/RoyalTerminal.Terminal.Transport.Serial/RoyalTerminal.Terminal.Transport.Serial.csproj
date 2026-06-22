@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.Terminal.Transport.Serial</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.Terminal.Transport.Serial</PackageId>
     <Description>Serial line terminal transport provider.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>

@@ -202,7 +202,7 @@ The serializer skips rules with empty patterns and normalizes unknown `TextHighl
 
 ## Settings UI
 
-`RoyalTerminal.Avalonia.Settings` exposes the feature through the Appearance category.
+`RoyalApps.RoyalTerminal.Avalonia.Settings` exposes the feature through the Appearance category.
 
 The settings state surface includes:
 

@@ -10,11 +10,11 @@ RoyalTerminal is organized as layered packages that keep UI concerns, terminal c
 
 | Layer | Responsibility | Representative packages |
 | --- | --- | --- |
-| UI | Avalonia control surface, input adaptation, scrolling, selection, capture/replay | `RoyalTerminal.Avalonia`, `RoyalTerminal.Avalonia.Settings` |
+| UI | Avalonia control surface, input adaptation, scrolling, selection, capture/replay | `RoyalApps.RoyalTerminal.Avalonia`, `RoyalApps.RoyalTerminal.Avalonia.Settings` |
 | Presentation and orchestration | Sample app view model/controller coordination | `samples/RoyalTerminal.Demo` |
-| Domain contracts | Terminal model, transport abstractions, profiles, themes, snapshot/capture contracts | `RoyalTerminal.Terminal`, `RoyalTerminal.Terminal.Services.Contracts` |
-| Runtime implementations | Session service, PTY, transports, VT engines, rendering, SSH adapters | `RoyalTerminal.Terminal.Services`, `RoyalTerminal.Terminal.Transport.*`, `RoyalTerminal.Terminal.Vt.*`, `RoyalTerminal.Rendering.*` |
-| Native interop and assets | Ghostty VT bindings, renderer interop, OS-specific runtime binaries | `RoyalTerminal.GhosttySharp`, `RoyalTerminal.Rendering.Interop.Ghostty*`, `RoyalTerminal.GhosttySharp.Native.*` |
+| Domain contracts | Terminal model, transport abstractions, profiles, themes, snapshot/capture contracts | `RoyalApps.RoyalTerminal.Terminal`, `RoyalApps.RoyalTerminal.Terminal.Services.Contracts` |
+| Runtime implementations | Session service, PTY, transports, VT engines, rendering, SSH adapters | `RoyalApps.RoyalTerminal.Terminal.Services`, `RoyalApps.RoyalTerminal.Terminal.Transport.*`, `RoyalApps.RoyalTerminal.Terminal.Vt.*`, `RoyalApps.RoyalTerminal.Rendering.*` |
+| Native interop and assets | Ghostty VT bindings, renderer interop, OS-specific runtime binaries | `RoyalApps.RoyalTerminal.GhosttySharp`, `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty*`, `RoyalApps.RoyalTerminal.GhosttySharp.Native.*` |
 
 ## Core runtime flow
 
@@ -86,10 +86,10 @@ The default native provider in this repository is `GhosttyVtProcessorProvider`, 
 
 The rendering stack is intentionally split:
 
-- `RoyalTerminal.Rendering.Text` handles shaping and font fallback
-- `RoyalTerminal.Rendering.Skia` handles the CPU terminal renderer
-- `RoyalTerminal.Rendering.Interop.Ghostty` and `RoyalTerminal.Rendering.Interop.Ghostty.Skia` provide optional Ghostty renderer integration
-- `RoyalTerminal.Avalonia.Rendering.GhosttyInterop` acquires Avalonia render targets and GPU texture handles
+- `RoyalApps.RoyalTerminal.Rendering.Text` handles shaping and font fallback
+- `RoyalApps.RoyalTerminal.Rendering.Skia` handles the CPU terminal renderer
+- `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty` and `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty.Skia` provide optional Ghostty renderer integration
+- `RoyalApps.RoyalTerminal.Avalonia.Rendering.GhosttyInterop` acquires Avalonia render targets and GPU texture handles
 
 This lets consumers adopt only the pieces they need instead of taking a single monolithic renderer package.
 

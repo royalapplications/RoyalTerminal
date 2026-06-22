@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.Avalonia.Settings</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.Avalonia.Settings</PackageId>
     <Description>Settings panel controls and state for RoyalTerminal Avalonia integration.</Description>
     <PackageProjectUrl>https://github.com/royalapplications/RoyalTerminal</PackageProjectUrl>
     <RepositoryUrl>https://github.com/royalapplications/RoyalTerminal</RepositoryUrl>

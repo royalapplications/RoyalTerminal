@@ -1,13 +1,13 @@
 <Project>
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
     <NativeLibrary Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/ghostty-vt.dll"
-                   Condition="'$(RuntimeIdentifier)' == 'win-x64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64')" />
+                   Condition="Exists('$(MSBuildThisFileDirectory)../runtimes/win-x64/native/ghostty-vt.dll') And ('$(RuntimeIdentifier)' == 'win-x64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64'))" />
     <NativeLibrary Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/ghostty-renderer-capi.dll"
-                   Condition="'$(RuntimeIdentifier)' == 'win-x64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64')" />
+                   Condition="Exists('$(MSBuildThisFileDirectory)../runtimes/win-x64/native/ghostty-renderer-capi.dll') And ('$(RuntimeIdentifier)' == 'win-x64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64'))" />
     <NativeLibrary Include="$(MSBuildThisFileDirectory)../runtimes/win-arm64/native/ghostty-vt.dll"
-                   Condition="'$(RuntimeIdentifier)' == 'win-arm64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64')" />
+                   Condition="Exists('$(MSBuildThisFileDirectory)../runtimes/win-arm64/native/ghostty-vt.dll') And ('$(RuntimeIdentifier)' == 'win-arm64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64'))" />
     <NativeLibrary Include="$(MSBuildThisFileDirectory)../runtimes/win-arm64/native/ghostty-renderer-capi.dll"
-                   Condition="'$(RuntimeIdentifier)' == 'win-arm64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64')" />
+                   Condition="Exists('$(MSBuildThisFileDirectory)../runtimes/win-arm64/native/ghostty-renderer-capi.dll') And ('$(RuntimeIdentifier)' == 'win-arm64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64'))" />
     <None Include="@(NativeLibrary)"
           CopyToOutputDirectory="PreserveNewest"
           Link="%(Filename)%(Extension)"

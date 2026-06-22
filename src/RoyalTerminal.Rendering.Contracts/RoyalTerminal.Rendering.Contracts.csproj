@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.Rendering.Contracts</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.Rendering.Contracts</PackageId>
     <Description>Backend-agnostic contracts for GPU terminal rendering integration.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>

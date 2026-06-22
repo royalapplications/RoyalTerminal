@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.Terminal.Transport.Ssh.Abstractions</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.Terminal.Transport.Ssh.Abstractions</PackageId>
     <Description>SSH transport abstractions for terminal backends.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>

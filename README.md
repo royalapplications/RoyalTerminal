@@ -24,49 +24,49 @@ Read the published documentation at [royalapplications.github.io/RoyalTerminal](
 
 | Package | NuGet | Description |
 |---------|-------|-------------|
-| **RoyalTerminal.Avalonia** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.Avalonia.svg)](https://www.nuget.org/packages/RoyalTerminal.Avalonia) | Backend-neutral Avalonia terminal control (`TerminalControl`) and presentation services (no Ghostty dependency) |
-| **RoyalTerminal.GhosttySharp** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp) | Core Ghostty VT bindings (`libghostty-vt`) with RID-aware native package selection |
-| **RoyalTerminal.GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.OSX) | Native runtime assets selected for macOS by `runtime.json` (`libghostty-vt`, `libghostty-renderer-capi`) |
-| **RoyalTerminal.GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Win64) | Native runtime assets selected for Windows x64/arm64 by `runtime.json` (`ghostty-vt.dll`, `ghostty-renderer-capi.dll`) |
-| **RoyalTerminal.GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/RoyalTerminal.GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/RoyalTerminal.GhosttySharp.Native.Linux64) | Native runtime assets selected for Linux by `runtime.json` (`libghostty-vt.so`, `libghostty-renderer-capi.so`) |
+| **RoyalApps.RoyalTerminal.Avalonia** | [![NuGet](https://img.shields.io/nuget/v/RoyalApps.RoyalTerminal.Avalonia.svg)](https://www.nuget.org/packages/RoyalApps.RoyalTerminal.Avalonia) | Backend-neutral Avalonia terminal control (`TerminalControl`) and presentation services (no Ghostty dependency) |
+| **RoyalApps.RoyalTerminal.GhosttySharp** | [![NuGet](https://img.shields.io/nuget/v/RoyalApps.RoyalTerminal.GhosttySharp.svg)](https://www.nuget.org/packages/RoyalApps.RoyalTerminal.GhosttySharp) | Core Ghostty VT bindings (`libghostty-vt`) with RID-aware native package selection |
+| **RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX) | Native runtime assets selected for macOS by `runtime.json` (`libghostty-vt`, `libghostty-renderer-capi`) |
+| **RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64) | Native runtime assets selected for Windows x64/arm64 by `runtime.json` (`ghostty-vt.dll`, `ghostty-renderer-capi.dll`) |
+| **RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64) | Native runtime assets selected for Linux by `runtime.json` (`libghostty-vt.so`, `libghostty-renderer-capi.so`) |
 
 ### Modular Managed Packages (Packable Composition Units)
 
 | Package | Responsibility |
 |---------|----------------|
-| `RoyalTerminal.Avalonia.Settings` | Reusable Avalonia settings panel controls and state for session, connection, terminal, appearance, SSH, logging, and highlighting configuration |
-| `RoyalTerminal.Terminal` | Core terminal contracts (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`), SSH bootstrap helpers, and screen model |
-| `RoyalTerminal.Unicode` | Deterministic Unicode data and terminal width helpers |
-| `RoyalTerminal.Sixel` | Reusable managed sixel decoder and image payload model |
-| `RoyalTerminal.Terminal.Vt.Managed` | Managed VT processor (`BasicVtProcessor`) |
-| `RoyalTerminal.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over official `libghostty-vt` terminal/render APIs) + `GhosttyVtProcessorProvider` |
-| `RoyalTerminal.Terminal.Vt.Default` | Preference-based VT processor factory (`VtProcessorPreference`) |
-| `RoyalTerminal.Terminal.Pty.Unix` | Unix PTY implementation (`forkpty`) |
-| `RoyalTerminal.Terminal.Pty.Windows` | Windows PTY implementation (ConPTY) |
-| `RoyalTerminal.Terminal.Pty.Platform` | Platform PTY factory (`DefaultPtyFactory`) |
-| `RoyalTerminal.Terminal.Transport.Pty` | PTY transport provider and wrapper (`PtyTerminalTransportProvider`) |
-| `RoyalTerminal.Terminal.Transport.Pipe` | Process pipe transport provider (`PipeTerminalTransportProvider`) |
-| `RoyalTerminal.Terminal.Transport.Raw` | Raw TCP terminal transport provider |
-| `RoyalTerminal.Terminal.Transport.Telnet` | Telnet terminal transport provider with option negotiation |
-| `RoyalTerminal.Terminal.Transport.Serial` | Serial line terminal transport provider |
-| `RoyalTerminal.Terminal.Transport.Ssh.Abstractions` | SSH host-key validation contracts |
-| `RoyalTerminal.Terminal.Transport.Ssh.SshNet` | SSH transport provider (`SshNetTerminalTransportProvider`) |
-| `RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent` | Optional SSH agent auth contributor for SSH.NET |
-| `RoyalTerminal.Terminal.Services.Contracts` | Terminal session service contracts |
-| `RoyalTerminal.Terminal.Services` | Terminal session service implementations |
-| `RoyalTerminal.Rendering.Text` | Reusable text shaping/fallback subsystem (`HarfBuzzTextShaper`, `TerminalFontResolver`) |
-| `RoyalTerminal.Shaders` | Dependency-free shader source models and compatibility translation for Skia Runtime Effect terminal shaders |
-| `RoyalTerminal.Rendering.Skia` | CPU cell renderer core (`SkiaTerminalRenderer`, `GlyphCache`) with HarfBuzz shaping, fallback font resolution, and framebuffer shader post-processing |
-| `RoyalTerminal.Rendering.Contracts` | Backend-agnostic render contracts (`RenderTargetDescriptor`, capabilities) |
-| `RoyalTerminal.Rendering.Interop.Ghostty` | Managed wrapper for `ghostty-renderer-capi` |
-| `RoyalTerminal.Rendering.Interop.Ghostty.Skia` | Skia bridge (`SkiaInteropRenderer`) with CPU fallback |
-| `RoyalTerminal.Avalonia.Rendering.GhosttyInterop` | Avalonia render-target acquisition and texture interop draw handler |
+| `RoyalApps.RoyalTerminal.Avalonia.Settings` | Reusable Avalonia settings panel controls and state for session, connection, terminal, appearance, SSH, logging, and highlighting configuration |
+| `RoyalApps.RoyalTerminal.Terminal` | Core terminal contracts (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`), SSH bootstrap helpers, and screen model |
+| `RoyalApps.RoyalTerminal.Unicode` | Deterministic Unicode data and terminal width helpers |
+| `RoyalApps.RoyalTerminal.Sixel` | Reusable managed sixel decoder and image payload model |
+| `RoyalApps.RoyalTerminal.Terminal.Vt.Managed` | Managed VT processor (`BasicVtProcessor`) |
+| `RoyalApps.RoyalTerminal.Terminal.Vt.Ghostty` | Native VT processor (`GhosttyVtProcessor` over official `libghostty-vt` terminal/render APIs) + `GhosttyVtProcessorProvider` |
+| `RoyalApps.RoyalTerminal.Terminal.Vt.Default` | Preference-based VT processor factory (`VtProcessorPreference`) |
+| `RoyalApps.RoyalTerminal.Terminal.Pty.Unix` | Unix PTY implementation (`forkpty`) |
+| `RoyalApps.RoyalTerminal.Terminal.Pty.Windows` | Windows PTY implementation (ConPTY) |
+| `RoyalApps.RoyalTerminal.Terminal.Pty.Platform` | Platform PTY factory (`DefaultPtyFactory`) |
+| `RoyalApps.RoyalTerminal.Terminal.Transport.Pty` | PTY transport provider and wrapper (`PtyTerminalTransportProvider`) |
+| `RoyalApps.RoyalTerminal.Terminal.Transport.Pipe` | Process pipe transport provider (`PipeTerminalTransportProvider`) |
+| `RoyalApps.RoyalTerminal.Terminal.Transport.Raw` | Raw TCP terminal transport provider |
+| `RoyalApps.RoyalTerminal.Terminal.Transport.Telnet` | Telnet terminal transport provider with option negotiation |
+| `RoyalApps.RoyalTerminal.Terminal.Transport.Serial` | Serial line terminal transport provider |
+| `RoyalApps.RoyalTerminal.Terminal.Transport.Ssh.Abstractions` | SSH host-key validation contracts |
+| `RoyalApps.RoyalTerminal.Terminal.Transport.Ssh.SshNet` | SSH transport provider (`SshNetTerminalTransportProvider`) |
+| `RoyalApps.RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent` | Optional SSH agent auth contributor for SSH.NET |
+| `RoyalApps.RoyalTerminal.Terminal.Services.Contracts` | Terminal session service contracts |
+| `RoyalApps.RoyalTerminal.Terminal.Services` | Terminal session service implementations |
+| `RoyalApps.RoyalTerminal.Rendering.Text` | Reusable text shaping/fallback subsystem (`HarfBuzzTextShaper`, `TerminalFontResolver`) |
+| `RoyalApps.RoyalTerminal.Shaders` | Dependency-free shader source models and compatibility translation for Skia Runtime Effect terminal shaders |
+| `RoyalApps.RoyalTerminal.Rendering.Skia` | CPU cell renderer core (`SkiaTerminalRenderer`, `GlyphCache`) with HarfBuzz shaping, fallback font resolution, and framebuffer shader post-processing |
+| `RoyalApps.RoyalTerminal.Rendering.Contracts` | Backend-agnostic render contracts (`RenderTargetDescriptor`, capabilities) |
+| `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty` | Managed wrapper for `ghostty-renderer-capi` |
+| `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty.Skia` | Skia bridge (`SkiaInteropRenderer`) with CPU fallback |
+| `RoyalApps.RoyalTerminal.Avalonia.Rendering.GhosttyInterop` | Avalonia render-target acquisition and texture interop draw handler |
 
 ## Features
 
 - **Core/native VT split**:
-  - `RoyalTerminal.Avalonia`: backend-neutral control and services.
-  - `RoyalTerminal.Terminal.Vt.Ghostty`: official native VT integration over upstream `libghostty-vt`.
+  - `RoyalApps.RoyalTerminal.Avalonia`: backend-neutral control and services.
+  - `RoyalApps.RoyalTerminal.Terminal.Vt.Ghostty`: official native VT integration over upstream `libghostty-vt`.
 - **Backend-neutral endpoint contracts** (`ITerminalEndpoint`, `ITerminalInputSink`, `ITerminalSelectionSource`, `ITerminalModeSource`) for control reuse across backends.
 - **Pluggable transport runtime** (`ITerminalTransportFactory`) supporting PTY, process pipe, SSH, raw TCP, Telnet, and serial sessions.
 - **Shared SSH bootstrap helper** (`SshShellBootstrapCommandBuilder`) for consistent POSIX `export` command composition across SSH backends.
@@ -79,7 +79,7 @@ Read the published documentation at [royalapplications.github.io/RoyalTerminal](
 - **Split rendering architecture**:
   - CPU cell rendering path (`RoyalTerminal.Rendering.Skia`)
   - Managed framebuffer shader pipeline with direct Skia Runtime Effect source plus Ghostty/Shadertoy and Windows Terminal HLSL compatibility adapters
-  - GPU interop path (`RoyalTerminal.Rendering.*` + `ghostty-renderer-capi`)
+  - GPU interop path (`RoyalApps.RoyalTerminal.Rendering.*` + `ghostty-renderer-capi`)
 - **Official native VT engine** via `libghostty-vt` terminal/render-state APIs on all supported platforms.
 - **Modular PTY and VT packages** (`Terminal.Pty.*`, `Terminal.Vt.*`).
 - **HarfBuzz-backed text shaping** with grid-safe fallback behavior and optional diagnostics counters.
@@ -246,9 +246,9 @@ captureRuntime.StopReplay();
 
 | Mode | Control | Package Set | VT Engine | Renderer | PTY | Platform | Best For |
 |------|---------|-------------|-----------|----------|-----|----------|----------|
-| **Native VT** | `TerminalControl` | `RoyalTerminal.Avalonia` + `RoyalTerminal.Terminal.Vt.Ghostty` + native assets | official `libghostty-vt` terminal/render-state APIs | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Cross-platform native VT parser on the upstream Ghostty C API |
-| **Managed VT** | `TerminalControl` | `RoyalTerminal.Avalonia` | `BasicVtProcessor` (C#) | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Explicit managed VT path |
-| **Rendered (Auto VT)** | `TerminalControl` | `RoyalTerminal.Avalonia` (+ optional native VT provider packages) | Auto (`libghostty-vt` when available, otherwise `BasicVtProcessor`) | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Default backend-neutral mode |
+| **Native VT** | `TerminalControl` | `RoyalApps.RoyalTerminal.Avalonia` + `RoyalApps.RoyalTerminal.Terminal.Vt.Ghostty` + native assets | official `libghostty-vt` terminal/render-state APIs | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Cross-platform native VT parser on the upstream Ghostty C API |
+| **Managed VT** | `TerminalControl` | `RoyalApps.RoyalTerminal.Avalonia` | `BasicVtProcessor` (C#) | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Explicit managed VT path |
+| **Rendered (Auto VT)** | `TerminalControl` | `RoyalApps.RoyalTerminal.Avalonia` (+ optional native VT provider packages) | Auto (`libghostty-vt` when available, otherwise `BasicVtProcessor`) | Skia cell renderer | Unix PTY / ConPTY | macOS/Linux/Windows | Default backend-neutral mode |
 
 ### Mode Availability and Fallback Policy (Demo)
 
@@ -642,7 +642,7 @@ Use `Avalonia.Win32.Interoperability` from a Windows Forms project and start Ava
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Avalonia.Win32.Interoperability" />
-    <PackageReference Include="RoyalTerminal.Avalonia" />
+    <PackageReference Include="RoyalApps.RoyalTerminal.Avalonia" />
   </ItemGroup>
 </Project>
 ```
@@ -902,7 +902,7 @@ surface.EndFrame(frameToken);
 ```bash
 # Core Avalonia control + PTY + managed VT defaults
 
-dotnet add package RoyalTerminal.Avalonia
+dotnet add package RoyalApps.RoyalTerminal.Avalonia
 ```
 
 ### Optional Native VT for Core Control
@@ -910,33 +910,33 @@ dotnet add package RoyalTerminal.Avalonia
 ```bash
 # Native VT provider over official libghostty-vt bindings
 
-dotnet add package RoyalTerminal.Terminal.Vt.Ghostty
+dotnet add package RoyalApps.RoyalTerminal.Terminal.Vt.Ghostty
 
 # Restore/publish for the RID you target so NuGet selects the matching native package.
 dotnet publish -r osx-arm64
 ```
 
-`RoyalTerminal.GhosttySharp` and `RoyalTerminal.Rendering.Interop.Ghostty` ship
+`RoyalApps.RoyalTerminal.GhosttySharp` and `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty` ship
 `runtime.json` metadata that maps supported RIDs to the matching
-`RoyalTerminal.GhosttySharp.Native.*` package. Direct native package references
+`RoyalApps.RoyalTerminal.GhosttySharp.Native.*` package. Direct native package references
 are only needed when you intentionally want to force a specific native asset
 package.
 
 ### Optional SSH Transport Packages
 
 ```bash
-dotnet add package RoyalTerminal.Terminal.Transport.Ssh.Abstractions
-dotnet add package RoyalTerminal.Terminal.Transport.Ssh.SshNet
+dotnet add package RoyalApps.RoyalTerminal.Terminal.Transport.Ssh.Abstractions
+dotnet add package RoyalApps.RoyalTerminal.Terminal.Transport.Ssh.SshNet
 
 # Optional SSH agent auth adapter
-dotnet add package RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent
+dotnet add package RoyalApps.RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent
 ```
 
 If you integrate a custom SSH SDK (for example Rebex) via `AttachEndpoint(...)`, you can skip SSH.NET packages and use:
 
 ```bash
-dotnet add package RoyalTerminal.Avalonia
-dotnet add package RoyalTerminal.Terminal
+dotnet add package RoyalApps.RoyalTerminal.Avalonia
+dotnet add package RoyalApps.RoyalTerminal.Terminal
 ```
 
 ### Modular Rendering Interop Setup
@@ -944,12 +944,12 @@ dotnet add package RoyalTerminal.Terminal
 Use this when embedding the renderer interop pipeline directly (for `TextureInterop` or custom integrations):
 
 ```bash
-dotnet add package RoyalTerminal.Rendering.Contracts
-dotnet add package RoyalTerminal.Rendering.Interop.Ghostty
-dotnet add package RoyalTerminal.Shaders
-dotnet add package RoyalTerminal.Rendering.Skia
-dotnet add package RoyalTerminal.Rendering.Interop.Ghostty.Skia
-dotnet add package RoyalTerminal.Avalonia.Rendering.GhosttyInterop
+dotnet add package RoyalApps.RoyalTerminal.Rendering.Contracts
+dotnet add package RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty
+dotnet add package RoyalApps.RoyalTerminal.Shaders
+dotnet add package RoyalApps.RoyalTerminal.Rendering.Skia
+dotnet add package RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty.Skia
+dotnet add package RoyalApps.RoyalTerminal.Avalonia.Rendering.GhosttyInterop
 ```
 
 For source builds or internal feeds, create the same package set with `bash scripts/pack-nuget.sh --configuration Release --output artifacts --version <version>`.
@@ -997,7 +997,7 @@ test -f "${CODEX_HOME:-$HOME/.codex}/skills/royalterminal-development/SKILL.md" 
 
 | Capability | Native VT (`TerminalControl`) | Managed VT (`TerminalControl`) | Rendered (`TerminalControl`, Auto VT) |
 |------------|--------------------------------|--------------------------------|---------------------------------------|
-| Package entry point | `RoyalTerminal.Avalonia` + `Terminal.Vt.Ghostty` | `RoyalTerminal.Avalonia` | `RoyalTerminal.Avalonia` |
+| Package entry point | `RoyalApps.RoyalTerminal.Avalonia` + `Terminal.Vt.Ghostty` | `RoyalApps.RoyalTerminal.Avalonia` | `RoyalApps.RoyalTerminal.Avalonia` |
 | Platform availability | macOS/Linux/Windows | macOS/Linux/Windows | macOS/Linux/Windows |
 | VT engine | official `libghostty-vt` | `BasicVtProcessor` | auto-selects native VT when available, otherwise managed VT |
 | Renderer path | Skia cell renderer | Skia cell renderer | Skia cell renderer |
@@ -1078,9 +1078,9 @@ managed/native integration now targets upstream `libghostty-vt` directly, with
 
 | Package | Implementation |
 |---------|----------------|
-| `RoyalTerminal.Terminal.Pty.Unix` | `UnixPty` (`forkpty`, `TIOCSWINSZ`) |
-| `RoyalTerminal.Terminal.Pty.Windows` | `WindowsPty` (ConPTY) |
-| `RoyalTerminal.Terminal.Pty.Platform` | `DefaultPtyFactory` selector |
+| `RoyalApps.RoyalTerminal.Terminal.Pty.Unix` | `UnixPty` (`forkpty`, `TIOCSWINSZ`) |
+| `RoyalApps.RoyalTerminal.Terminal.Pty.Windows` | `WindowsPty` (ConPTY) |
+| `RoyalApps.RoyalTerminal.Terminal.Pty.Platform` | `DefaultPtyFactory` selector |
 
 ## Native Library Resolution
 
@@ -1112,7 +1112,7 @@ Primary runtime package locations:
 
 Package consumers normally do not reference those native packages directly.
 RID-aware restore/publish resolves them from the `runtime.json` files in
-`RoyalTerminal.GhosttySharp` and `RoyalTerminal.Rendering.Interop.Ghostty`.
+`RoyalApps.RoyalTerminal.GhosttySharp` and `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty`.
 
 ## Project Structure
 

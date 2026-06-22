@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.Terminal.Transport.Raw</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.Terminal.Transport.Raw</PackageId>
     <Description>Raw TCP terminal transport provider.</Description>
     <IsPackable>true</IsPackable>
   </PropertyGroup>

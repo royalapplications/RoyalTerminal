@@ -26,12 +26,12 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <PackageIcon>assets/royalterminal-logo.png</PackageIcon>
+    <PackageIcon>assets/RoyalApps_1024.png</PackageIcon>
     <PackageReadmeFile Condition="'$(PackageReadmeFile)' == ''">README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)assets/royalterminal-logo.png" Pack="true" PackagePath="assets" Visible="false" Link="assets/royalterminal-logo.png" />
+    <None Include="$(MSBuildThisFileDirectory)assets/RoyalApps_1024.png" Pack="true" PackagePath="assets" Visible="false" Link="assets/RoyalApps_1024.png" />
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="" Visible="false" Link="README.md" Condition="Exists('$(MSBuildThisFileDirectory)README.md')" />
   </ItemGroup>
 </Project>

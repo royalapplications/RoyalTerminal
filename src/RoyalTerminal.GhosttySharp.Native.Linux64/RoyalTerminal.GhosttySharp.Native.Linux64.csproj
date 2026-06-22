@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.GhosttySharp.Native.Linux64</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64</PackageId>
     <Description>Native Ghostty libraries for Linux (x64 and arm64). Provides libghostty-vt.so and libghostty-renderer-capi.so shared libraries for RoyalTerminal on Linux.</Description>
     <PackageTags>ghostty;terminal;native;linux;x64;arm64</PackageTags>
 
@@ -19,8 +19,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="build/RoyalTerminal.GhosttySharp.Native.Linux64.targets" Pack="true" PackagePath="build" />
-    <None Include="buildTransitive/RoyalTerminal.GhosttySharp.Native.Linux64.targets" Pack="true" PackagePath="buildTransitive" />
+    <None Include="build/RoyalTerminal.GhosttySharp.Native.Linux64.targets" Pack="true" PackagePath="build/RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64.targets" />
+    <None Include="buildTransitive/RoyalTerminal.GhosttySharp.Native.Linux64.targets" Pack="true" PackagePath="buildTransitive/RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64.targets" />
   </ItemGroup>
 
 </Project>

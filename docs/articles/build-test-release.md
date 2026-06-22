@@ -138,8 +138,8 @@ vMAJOR.MINOR.PATCH-prerelease
 Examples:
 
 ```text
-v0.1.21
-v0.1.21-alpha.1
+v0.1.22
+v0.1.22-alpha.1
 ```
 
 This is the core release invariant:

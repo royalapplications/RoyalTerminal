@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>RoyalTerminal.GhosttySharp</PackageId>
+    <PackageId>RoyalApps.RoyalTerminal.GhosttySharp</PackageId>
     <Description>High-performance .NET 10 bindings for the official Ghostty VT C API. Provides zero-alloc P/Invoke via LibraryImport, span-friendly terminal access, and managed wrappers over libghostty-vt.</Description>
     <IsPackable>true</IsPackable>
     <RoyalTerminalGenerateGhosttyNativeRuntimeJson>true</RoyalTerminalGenerateGhosttyNativeRuntimeJson>

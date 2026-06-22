@@ -33,7 +33,7 @@ Regex text highlighting uses compiled row-local regexes, span-based matching, re
 
 The managed shader path runs after the terminal has been rendered into a Skia surface. It treats the completed terminal frame as a texture and applies one or more `TerminalShaderSource` entries through `TerminalShaderPostProcessor`.
 
-The reusable shader model and compatibility translation live in `RoyalTerminal.Shaders`, which has no Avalonia, SkiaSharp, terminal, or native interop dependency. `RoyalTerminal.Rendering.Skia` owns the Skia-specific `TerminalShaderPostProcessor` and `TerminalShaderFrameContext` adapter types.
+The reusable shader model and compatibility translation live in `RoyalApps.RoyalTerminal.Shaders`, which has no Avalonia, SkiaSharp, terminal, or native interop dependency. `RoyalApps.RoyalTerminal.Rendering.Skia` owns the Skia-specific `TerminalShaderPostProcessor` and `TerminalShaderFrameContext` adapter types.
 
 The main host-facing properties live on `TerminalControl`:
 
@@ -76,7 +76,7 @@ The shaping layer is deliberately terminal-focused. It exists to preserve the ce
 
 ## Backend-neutral render contracts
 
-When you need to render outside the default Avalonia control, the public contract surface lives in `RoyalTerminal.Rendering.Contracts`.
+When you need to render outside the default Avalonia control, the public contract surface lives in `RoyalApps.RoyalTerminal.Rendering.Contracts`.
 
 | Type | Purpose |
 | --- | --- |
