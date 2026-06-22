@@ -10,7 +10,7 @@
 High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`RoyalTerminal.Avalonia`), framebuffer shader support, official native Ghostty VT integration (`libghostty-vt`), and a separate fully managed VT implementation.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com)
-[![Avalonia](https://img.shields.io/badge/Avalonia-11.x-8b44ac)](https://avaloniaui.net)
+[![Avalonia](https://img.shields.io/badge/Avalonia-12.x-8b44ac)](https://avaloniaui.net)
 [![Documentation](https://img.shields.io/badge/docs-online-0f766e.svg)](https://royalapplications.github.io/RoyalTerminal/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
