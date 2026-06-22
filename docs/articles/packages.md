@@ -53,6 +53,7 @@ The API section is generated from the packable managed libraries under `src/` an
 | `RoyalTerminal.Terminal.Services.Contracts` | Contracts for terminal session lifecycle services. |
 | `RoyalTerminal.Terminal.Services` | The default `TerminalSessionService` implementation. |
 | `RoyalTerminal.Unicode` | Deterministic Unicode width helpers used by the terminal stack. |
+| `RoyalTerminal.Sixel` | Reusable managed sixel decoder and image payload model used by managed VT graphics support. |
 
 ## VT packages
 
@@ -108,6 +109,7 @@ to let NuGet resolve only the native package for that target.
 | Project | Purpose |
 | --- | --- |
 | `samples/RoyalTerminal.Demo` | End-user style Avalonia sample with tabs, settings, profiles, logging, selectable-format capture/replay, search, and diagnostics. |
+| `samples/RoyalTerminal.WinFormsHost` | Windows Forms interop sample using `Avalonia.Win32.Interoperability` and `TerminalControl.Padding`. |
 | `samples/RoyalTerminal.ControlCatalog` | Terminal validation, rendering gallery, TUI parity, and interactive scenario catalog. |
 | `samples/RoyalTerminal.MacNativeTabbed` | Native macOS SwiftUI/GhosttyKit sample outside the managed RoyalTerminal surface. |
 | `tests/RoyalTerminal.Tests` | Unit, headless UI, renderer, packaging, and integration boundary tests. |

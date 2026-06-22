@@ -3,15 +3,10 @@
   <PropertyGroup>
     <PackageId>RoyalTerminal.GhosttySharp</PackageId>
     <Description>High-performance .NET 10 bindings for the official Ghostty VT C API. Provides zero-alloc P/Invoke via LibraryImport, span-friendly terminal access, and managed wrappers over libghostty-vt.</Description>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
     <IsPackable>true</IsPackable>
     <RoyalTerminalGenerateGhosttyNativeRuntimeJson>true</RoyalTerminalGenerateGhosttyNativeRuntimeJson>
     <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
-
-  <ItemGroup>
-    <None Include="../../README.md" Pack="true" PackagePath="" Condition="Exists('../../README.md')" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />

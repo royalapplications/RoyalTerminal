@@ -11,6 +11,7 @@ const guideItems = [
   { text: "Sessions, Profiles, And Settings", link: "/articles/sessions-profiles-and-settings" },
   { text: "Session History And Scrollback", link: "/articles/session-history" },
   { text: "Session Restart Semantics", link: "/articles/session-restart-semantics" },
+  { text: "Session Restart Reference Analysis", link: "/articles/session-restart-reference-analysis" },
   { text: "Capture Formats", link: "/articles/capture-formats" },
   { text: "Regex Text Highlighting", link: "/articles/text-highlighting" },
   { text: "Transports And Remote Access", link: "/articles/transports" },
@@ -54,6 +55,11 @@ export default defineConfig({
   ],
   markdown: {
     lineNumbers: true
+  },
+  vite: {
+    build: {
+      chunkSizeWarningLimit: 4096
+    }
   },
   themeConfig: {
     logo: "/assets/royalterminal-mark.svg",
