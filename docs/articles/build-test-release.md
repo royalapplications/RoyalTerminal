@@ -150,7 +150,7 @@ This is the core release invariant:
 - every package in `artifacts/*.nupkg` is pushed to NuGet.org explicitly
 - the GitHub release is created only after package publishing succeeds
 
-The workflow requires the `NUGET_API_KEY` repository secret. It publishes with `--skip-duplicate` so a re-run can continue past packages that already reached NuGet.org.
+The workflow requires the `NUGET_API_KEY` repository secret. Re-runs continue past an existing package only after verifying that the exact package ID and version are already visible in the NuGet.org feed.
 
 The package version comes from the tag without the leading `v`; the repository `VersionPrefix` remains the local/default development version.
 
