@@ -2974,14 +2974,14 @@ public sealed class TerminalControlHeadlessInteractionTests
 
     private static string BuildBase64FloodCommand(bool launchAsChildJob)
     {
-        const string loopCommand =
-            "while :; do " +
-            "head -c 10000 /dev/urandom | base64 | head -n 40; " +
-            "done";
+        // Keep the base64 flood as one foreground process. A shell loop of
+        // short pipelines can restart between INTR delivery and marker retry,
+        // which makes the recovery assertion depend on shell timing.
+        const string producerCommand = "base64 /dev/zero";
 
         return launchAsChildJob
-            ? $"/bin/sh -c '{EscapeSingleQuoted(loopCommand)}'\n"
-            : $"{loopCommand}\n";
+            ? $"/bin/sh -c 'exec {EscapeSingleQuoted(producerCommand)}'\n"
+            : $"{producerCommand}\n";
     }
 
     private static string EscapeSingleQuoted(string value)
