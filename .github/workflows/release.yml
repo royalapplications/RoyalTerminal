@@ -23,7 +23,8 @@ jobs:
 
   native-macos:
     name: Native (macOS ${{ matrix.arch }})
-    runs-on: macos-latest
+    # Zig 0.15.2 fails to link the build runner on macos-26-arm64.
+    runs-on: macos-15
     strategy:
       matrix:
         arch: [arm64, x64]
