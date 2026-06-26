@@ -870,7 +870,7 @@ public sealed class TerminalScreen
     /// <summary>Attempts to resolve a Kitty image payload by image id.</summary>
     public bool TryGetKittyImageSource(int imageId, out TerminalKittyImageSource? source)
     {
-        if (imageId <= 0)
+        if (imageId == 0)
         {
             source = null;
             return false;

@@ -33,7 +33,7 @@ public sealed class TerminalKittyImageSource
         int heightPx,
         byte[] rgbaPixels)
     {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(imageId);
+        ArgumentOutOfRangeException.ThrowIfEqual(imageId, 0);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(widthPx);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(heightPx);
         ArgumentNullException.ThrowIfNull(rgbaPixels);
@@ -83,7 +83,7 @@ public sealed class TerminalKittyImagePlacement
         int sourceWidth,
         int sourceHeight)
     {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(imageId);
+        ArgumentOutOfRangeException.ThrowIfEqual(imageId, 0);
         ImageId = imageId;
         Layer = layer;
         ViewportColumn = viewportColumn;
