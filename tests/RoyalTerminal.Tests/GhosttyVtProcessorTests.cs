@@ -3,6 +3,7 @@
 // RoyalTerminal.Tests — Native Ghostty VT processor integration coverage.
 
 using System.Text;
+using System.Globalization;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
@@ -602,6 +603,66 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_RepeatedKittyGraphics_PopulatesManagedScreen_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 24, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 24, widthPx: 640, heightPx: 384);
+
+        processor.Process("\u001b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=2,c=10,r=1;////////\u001b\\"u8);
+        processor.Process("between\r\n"u8);
+        processor.Process("\u001b_Ga=T,t=d,f=24,i=2,p=1,s=1,v=2,c=10,r=1;////////\u001b\\"u8);
+
+        Assert.True(screen.HasKittyGraphics);
+        Assert.True(screen.TryGetKittyImageSource(2, out TerminalKittyImageSource? image));
+        Assert.NotNull(image);
+        Assert.Equal(1, image!.WidthPx);
+        Assert.Equal(2, image.HeightPx);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_RepeatedChunkedKittyGraphics_PopulatesManagedScreen_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 24, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 24, widthPx: 640, heightPx: 384);
+
+        byte[] sequence = BuildViuChunkedKittyImageSequence(width: 40, height: 25, columns: 40, rows: 13);
+
+        processor.Process(sequence);
+        processor.Process("between\r\n"u8);
+        processor.Process(sequence);
+
+        Assert.True(screen.HasKittyGraphics);
+        TerminalKittyImagePlacement[] placements = screen.GetKittyPlacements().ToArray();
+        Assert.NotEmpty(placements);
+        Assert.All(placements, placement =>
+            Assert.True(screen.TryGetKittyImageSource(placement.ImageId, out TerminalKittyImageSource? _)));
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_SixelDisabled_DoesNotPopulateRasterOverlay_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
@@ -852,6 +913,33 @@ public class GhosttyVtProcessorTests
         }
 
         return builder.ToString();
+    }
+
+    private static byte[] BuildViuChunkedKittyImageSequence(int width, int height, int columns, int rows)
+    {
+        byte[] rgba = new byte[checked(width * height * 4)];
+        for (int i = 0; i < rgba.Length; i += 4)
+        {
+            rgba[i + 3] = 0xFF;
+        }
+
+        string encoded = Convert.ToBase64String(rgba);
+        StringBuilder builder = new();
+        int offset = 0;
+        int firstChunkLength = Math.Min(4096, encoded.Length);
+        string firstChunk = encoded.Substring(offset, firstChunkLength);
+        offset += firstChunkLength;
+        builder.Append(CultureInfo.InvariantCulture, $"\u001b_Gf=32,a=T,t=d,s={width},v={height},c={columns},r={rows},m=1;{firstChunk}\u001b\\");
+        while (offset < encoded.Length)
+        {
+            int chunkLength = Math.Min(4096, encoded.Length - offset);
+            string chunk = encoded.Substring(offset, chunkLength);
+            offset += chunkLength;
+            int more = offset < encoded.Length ? 1 : 0;
+            builder.Append(CultureInfo.InvariantCulture, $"\u001b_Gm={more};{chunk}\u001b\\");
+        }
+
+        return Encoding.UTF8.GetBytes(builder.ToString());
     }
 
     private static void SetAscii(TerminalRow row, string text)

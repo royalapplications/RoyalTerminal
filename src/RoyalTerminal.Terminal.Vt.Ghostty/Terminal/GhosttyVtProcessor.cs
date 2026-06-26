@@ -1547,8 +1547,14 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         while (_kittyPlacementIterator.MoveNext())
         {
-            int imageId = checked((int)_kittyPlacementIterator.GetImageId());
-            if (!graphics.TryGetImage((uint)imageId, out GhosttyKittyGraphicsImage image) || !image.IsValid)
+            uint nativeImageId = _kittyPlacementIterator.GetImageId();
+            if (nativeImageId == 0)
+            {
+                continue;
+            }
+
+            int imageId = ToManagedKittyImageId(nativeImageId);
+            if (!graphics.TryGetImage(nativeImageId, out GhosttyKittyGraphicsImage image) || !image.IsValid)
             {
                 continue;
             }
@@ -1595,6 +1601,11 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         }
 
         _screen.ReplaceKittyGraphics(images.Values.ToArray(), placements);
+    }
+
+    private static int ToManagedKittyImageId(uint imageId)
+    {
+        return unchecked((int)imageId);
     }
 
     private static TerminalKittyImageLayer ClassifyKittyLayer(int zIndex)
