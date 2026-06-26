@@ -14,9 +14,30 @@ namespace RoyalTerminal.Avalonia.Services;
 /// </summary>
 public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
 {
+    private readonly ITerminalKeyboardInputNormalizer _keyboardInputNormalizer;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DefaultTerminalInputAdapter"/> class.
+    /// </summary>
+    public DefaultTerminalInputAdapter()
+        : this(TerminalKeyboardInputNormalizerFactory.Create())
+    {
+    }
+
+    internal DefaultTerminalInputAdapter(ITerminalKeyboardInputNormalizer keyboardInputNormalizer)
+    {
+        _keyboardInputNormalizer = keyboardInputNormalizer ?? throw new ArgumentNullException(nameof(keyboardInputNormalizer));
+    }
+
     /// <inheritdoc />
     public bool HandleKeyDown(KeyEventArgs e, ITerminalSessionService sessionService, IVtProcessor? vtProcessor)
     {
+        TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor);
+        if (_keyboardInputNormalizer.HandleKeyDown(e, modeState) == TerminalKeyboardInputAction.SuppressForTextInput)
+        {
+            return false;
+        }
+
         ITerminalInputSink? inputSink = sessionService.InputSink;
         if (inputSink is not null)
         {
@@ -31,7 +52,6 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
 
         if (HasFallbackByteInputPath(sessionService))
         {
-            TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor);
             if (ShouldUseWin32InputMode(modeState) &&
                 TerminalWin32InputSequenceEncoder.TryEncode(
                     e.Key,
@@ -72,12 +92,17 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
     /// <inheritdoc />
     public bool HandleKeyUp(KeyEventArgs e, ITerminalSessionService sessionService)
     {
+        TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor: null);
+        if (_keyboardInputNormalizer.HandleKeyUp(e, modeState) == TerminalKeyboardInputAction.SuppressForTextInput)
+        {
+            return false;
+        }
+
         ITerminalInputSink? inputSink = sessionService.InputSink;
         if (inputSink is null)
         {
             if (HasFallbackByteInputPath(sessionService))
             {
-                TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor: null);
                 if (ShouldUseWin32InputMode(modeState) &&
                     TerminalWin32InputSequenceEncoder.TryEncode(
                         e.Key,

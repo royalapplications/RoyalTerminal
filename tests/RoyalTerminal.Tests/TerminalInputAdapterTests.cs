@@ -646,6 +646,294 @@ public sealed class TerminalInputAdapterTests
     }
 
     [Fact]
+    public async Task HandleKeyDown_WithWindowsAltGrPrintableKey_DefersToTextInput()
+    {
+        DefaultTerminalInputAdapter adapter = new(new WindowsTerminalKeyboardInputNormalizer());
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetKittyKeyboardFlags(1);
+
+        adapter.HandleKeyDown(
+            new KeyEventArgs
+            {
+                Key = Key.RightAlt,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            },
+            sessionService,
+            vtProcessor: null);
+
+        bool keyHandled = adapter.HandleKeyDown(
+            new KeyEventArgs
+            {
+                Key = Key.D3,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            },
+            sessionService,
+            vtProcessor);
+
+        Assert.False(keyHandled);
+        Assert.Null(transport.LastInput);
+
+        bool textHandled = adapter.HandleTextInput(new TextInputEventArgs { Text = "#" }, sessionService);
+
+        Assert.True(textHandled);
+        Assert.Equal("#", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithWindowsAltGrDigitWhenRightAltWasSwallowed_DefersToTextInput()
+    {
+        DefaultTerminalInputAdapter adapter = new(new WindowsTerminalKeyboardInputNormalizer());
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetKittyKeyboardFlags(1);
+
+        bool keyHandled = adapter.HandleKeyDown(
+            new KeyEventArgs
+            {
+                Key = Key.D4,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            },
+            sessionService,
+            vtProcessor);
+
+        Assert.False(keyHandled);
+        Assert.Null(transport.LastInput);
+
+        bool textHandled = adapter.HandleTextInput(new TextInputEventArgs { Text = "{" }, sessionService);
+
+        Assert.True(textHandled);
+        Assert.Equal("{", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithWindowsAltGrEuroWhenRightAltWasSwallowed_DefersToTextInput()
+    {
+        DefaultTerminalInputAdapter adapter = new(new WindowsTerminalKeyboardInputNormalizer());
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetKittyKeyboardFlags(1);
+
+        bool keyHandled = adapter.HandleKeyDown(
+            new KeyEventArgs
+            {
+                Key = Key.E,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            },
+            sessionService,
+            vtProcessor);
+
+        Assert.False(keyHandled);
+        Assert.Null(transport.LastInput);
+
+        bool textHandled = adapter.HandleTextInput(new TextInputEventArgs { Text = "€" }, sessionService);
+
+        Assert.True(textHandled);
+        Assert.Equal("€", Encoding.UTF8.GetString(transport.LastInput!));
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyUp_WithWindowsAltGrPrintableKey_DoesNotSendRelease()
+    {
+        DefaultTerminalInputAdapter adapter = new(new WindowsTerminalKeyboardInputNormalizer());
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new()
+        {
+            EncodedKeySequence = "native"u8.ToArray(),
+        };
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        adapter.HandleKeyDown(
+            new KeyEventArgs
+            {
+                Key = Key.RightAlt,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            },
+            sessionService,
+            vtProcessor: null);
+
+        adapter.HandleKeyDown(
+            new KeyEventArgs
+            {
+                Key = Key.E,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            },
+            sessionService,
+            vtProcessor: null);
+
+        int encodedRequestCount = vtProcessor.EncodedKeyRequests.Count;
+        bool keyUpHandled = adapter.HandleKeyUp(
+            new KeyEventArgs
+            {
+                Key = Key.E,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            },
+            sessionService);
+
+        Assert.False(keyUpHandled);
+        Assert.Equal(encodedRequestCount, vtProcessor.EncodedKeyRequests.Count);
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithWindowsNormalizer_RealControlAltChordStillEncodes()
+    {
+        DefaultTerminalInputAdapter adapter = new(new WindowsTerminalKeyboardInputNormalizer());
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor: null,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.C,
+            KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            KeySymbol = "c",
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        Assert.Equal(new byte[] { 0x1B, 0x03 }, transport.LastInput);
+
+        await sessionService.StopSessionAsync(vtProcessor: null, onData, onExit);
+    }
+
+    [Fact]
+    public void WindowsNormalizer_Win32InputMode_DoesNotSuppressAltGrPrintableKey()
+    {
+        WindowsTerminalKeyboardInputNormalizer normalizer = new(new FixedWindowsKeyboardLayoutTextInputProbe(mayProduceText: true));
+        TerminalModeState modeState = new FakeVtProcessor().ModeState with { Win32InputMode = true };
+
+        TerminalKeyboardInputAction rightAltAction = normalizer.HandleKeyDown(
+            new KeyEventArgs
+            {
+                Key = Key.RightAlt,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            },
+            modeState);
+        TerminalKeyboardInputAction textKeyAction = normalizer.HandleKeyDown(
+            new KeyEventArgs
+            {
+                Key = Key.D3,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            },
+            modeState);
+
+        Assert.Equal(TerminalKeyboardInputAction.Forward, rightAltAction);
+        Assert.Equal(TerminalKeyboardInputAction.Forward, textKeyAction);
+    }
+
+    [Fact]
+    public void WindowsNormalizer_LayoutProbeTextKey_SuppressesCtrlAltKey()
+    {
+        WindowsTerminalKeyboardInputNormalizer normalizer = new(new FixedWindowsKeyboardLayoutTextInputProbe(mayProduceText: true));
+
+        TerminalKeyboardInputAction action = normalizer.HandleKeyDown(
+            new KeyEventArgs
+            {
+                Key = Key.Q,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            },
+            new FakeVtProcessor().ModeState);
+
+        Assert.Equal(TerminalKeyboardInputAction.SuppressForTextInput, action);
+    }
+
+    [Fact]
+    public void WindowsNormalizer_LayoutProbeNonTextLetter_ForwardsCtrlAltKey()
+    {
+        WindowsTerminalKeyboardInputNormalizer normalizer = new(new FixedWindowsKeyboardLayoutTextInputProbe(mayProduceText: false));
+
+        TerminalKeyboardInputAction action = normalizer.HandleKeyDown(
+            new KeyEventArgs
+            {
+                Key = Key.Q,
+                KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt,
+            },
+            new FakeVtProcessor().ModeState);
+
+        Assert.Equal(TerminalKeyboardInputAction.Forward, action);
+    }
+
+    [Fact]
     public async Task HandleKeyDown_ApplicationCursorMode_WithModifiers_UsesCsiEncoding()
     {
         DefaultTerminalInputAdapter adapter = new();
@@ -1331,6 +1619,22 @@ public sealed class TerminalInputAdapterTests
         {
             _ = widthPx;
             _ = heightPx;
+        }
+    }
+
+    private sealed class FixedWindowsKeyboardLayoutTextInputProbe : IWindowsKeyboardLayoutTextInputProbe
+    {
+        private readonly bool _mayProduceText;
+
+        public FixedWindowsKeyboardLayoutTextInputProbe(bool mayProduceText)
+        {
+            _mayProduceText = mayProduceText;
+        }
+
+        public bool MayProduceText(KeyEventArgs e)
+        {
+            _ = e;
+            return _mayProduceText;
         }
     }
 
