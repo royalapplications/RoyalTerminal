@@ -5477,13 +5477,15 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 }
 
                 RecordImagePlacementVisited();
-                float destLeft = (placement.ViewportColumn * _cellWidth) + placement.XOffsetPx;
-                float destTop = (placement.ViewportRow * _cellHeight) + placement.YOffsetPx;
+                float xScale = GetRasterPlacementScale(placement.CellWidthPx, _cellWidth);
+                float yScale = GetRasterPlacementScale(placement.CellHeightPx, _cellHeight);
+                float destLeft = (placement.ViewportColumn * _cellWidth) + (placement.XOffsetPx * xScale);
+                float destTop = (placement.ViewportRow * _cellHeight) + (placement.YOffsetPx * yScale);
                 SKRect destRect = new(
                     destLeft,
                     destTop,
-                    destLeft + placement.WidthPx,
-                    destTop + placement.HeightPx);
+                    destLeft + (placement.WidthPx * xScale),
+                    destTop + (placement.HeightPx * yScale));
                 if (!IntersectsViewport(destRect, viewportWidth, viewportHeight))
                 {
                     continue;

@@ -81,7 +81,9 @@ public sealed class TerminalKittyImagePlacement
         int sourceX,
         int sourceY,
         int sourceWidth,
-        int sourceHeight)
+        int sourceHeight,
+        int cellWidthPx = 0,
+        int cellHeightPx = 0)
     {
         ArgumentOutOfRangeException.ThrowIfEqual(imageId, 0);
         ImageId = imageId;
@@ -96,6 +98,8 @@ public sealed class TerminalKittyImagePlacement
         SourceY = sourceY;
         SourceWidth = sourceWidth;
         SourceHeight = sourceHeight;
+        CellWidthPx = Math.Max(0, cellWidthPx);
+        CellHeightPx = Math.Max(0, cellHeightPx);
     }
 
     /// <summary>Referenced image id.</summary>
@@ -133,4 +137,10 @@ public sealed class TerminalKittyImagePlacement
 
     /// <summary>Source height in pixels.</summary>
     public int SourceHeight { get; }
+
+    /// <summary>Cell width in pixels at placement calculation time, or zero when unspecified.</summary>
+    public int CellWidthPx { get; }
+
+    /// <summary>Cell height in pixels at placement calculation time, or zero when unspecified.</summary>
+    public int CellHeightPx { get; }
 }

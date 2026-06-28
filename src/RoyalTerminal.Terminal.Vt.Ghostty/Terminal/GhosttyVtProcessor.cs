@@ -383,8 +383,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        _cellWidthPx = columns > 0 ? Math.Max(0, widthPx / columns) : 0;
-        _cellHeightPx = rows > 0 ? Math.Max(0, heightPx / rows) : 0;
+        _cellWidthPx = CalculateNativeCellSizePx(widthPx, columns);
+        _cellHeightPx = CalculateNativeCellSizePx(heightPx, rows);
 
         PrepareResizeSync();
         ResizeNativeTerminal(
@@ -1591,7 +1591,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 checked((int)renderInfo.SourceX),
                 checked((int)renderInfo.SourceY),
                 checked((int)renderInfo.SourceWidth),
-                checked((int)renderInfo.SourceHeight)));
+                checked((int)renderInfo.SourceHeight),
+                Math.Max(0, _cellWidthPx),
+                Math.Max(0, _cellHeightPx)));
         }
 
         if (placements.Count == 0)
@@ -1606,6 +1608,16 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private static int ToManagedKittyImageId(uint imageId)
     {
         return unchecked((int)imageId);
+    }
+
+    private static int CalculateNativeCellSizePx(int totalPixels, int cells)
+    {
+        if (totalPixels <= 0 || cells <= 0)
+        {
+            return 0;
+        }
+
+        return Math.Max(1, (int)Math.Ceiling(totalPixels / (double)cells));
     }
 
     private static TerminalKittyImageLayer ClassifyKittyLayer(int zIndex)
