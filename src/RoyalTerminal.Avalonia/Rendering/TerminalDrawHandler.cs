@@ -603,7 +603,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         int Row,
         bool Visible,
         CursorStyle Style,
-        SKColor Color)
+        SKColor Color,
+        SKColor TextColor)
     {
         public static TerminalCursorRenderSnapshot From(SkiaTerminalRenderer renderer)
             => new(
@@ -611,6 +612,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                 renderer.CursorRow,
                 renderer.CursorVisible,
                 renderer.CursorStyle,
-                renderer.CursorColor);
+                renderer.CursorColor,
+                renderer.CursorTextColor);
     }
 }

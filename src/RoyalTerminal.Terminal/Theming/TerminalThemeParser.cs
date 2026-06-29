@@ -22,6 +22,7 @@ public static class TerminalThemeParser
         uint defaultFg = seed.DefaultForeground;
         uint defaultBg = seed.DefaultBackground;
         uint cursor = seed.CursorColor;
+        uint? cursorText = null;
         uint? selectionFg = seed.SelectionForeground;
         uint? selectionBg = seed.SelectionBackground;
         uint? boldColor = seed.BoldColor;
@@ -89,6 +90,11 @@ public static class TerminalThemeParser
                 case "cursor":
                 case "cursor-color":
                     if (TryParseColor(value, out uint cursorColor)) cursor = cursorColor;
+                    break;
+
+                case "cursor-text":
+                case "cursor-text-color":
+                    if (TryParseColor(value, out uint cursorTextColor)) cursorText = cursorTextColor;
                     break;
 
                 case "selection-foreground":
@@ -161,7 +167,8 @@ public static class TerminalThemeParser
             reportFormat,
             selectionFg,
             selectionBg,
-            boldColor);
+            boldColor,
+            cursorText);
     }
 
     private static bool TryParsePaletteGenerationMode(string value, out TerminalPaletteGenerationMode mode)

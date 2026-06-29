@@ -1305,7 +1305,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         renderer.CursorVisible = previous.CursorVisible;
         renderer.CursorStyle = previous.CursorStyle;
         renderer.CursorColor = previous.CursorColor;
+        renderer.CursorTextColor = previous.CursorTextColor;
         renderer.SelectionColor = previous.SelectionColor;
+        renderer.SelectionForegroundColor = previous.SelectionForegroundColor;
         renderer.SelectionStart = previous.SelectionStart;
         renderer.SelectionEnd = previous.SelectionEnd;
         renderer.SelectionIsRectangle = previous.SelectionIsRectangle;
@@ -1421,11 +1423,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private static void ApplyThemeToRenderer(TerminalTheme theme, SkiaTerminalRenderer renderer)
     {
         renderer.CursorColor = ArgbToSkColor(theme.CursorColor);
+        renderer.CursorTextColor = ArgbToSkColor(theme.CursorTextColor);
+        renderer.SelectionForegroundColor = theme.SelectionForeground is uint selectionFg
+            ? ArgbToSkColor(selectionFg)
+            : SKColors.Empty;
         if (theme.SelectionBackground is uint selectionBg)
         {
             // Use a translucent selection fill to keep glyphs legible.
             uint translucent = (selectionBg & 0x00FFFFFFu) | 0x80000000u;
             renderer.SelectionColor = ArgbToSkColor(translucent);
+        }
+        else
+        {
+            renderer.SelectionColor = SkiaTerminalRenderer.DefaultSelectionColor;
         }
     }
 

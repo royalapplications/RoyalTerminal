@@ -1132,6 +1132,43 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_BlockCursor_RepaintsSupplementaryPlaneCellText()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 28f)
+        {
+            CursorVisible = true,
+            CursorStyle = CursorStyle.Block,
+            CursorColumn = 0,
+            CursorRow = 0,
+            CursorColor = SKColors.Red,
+            CursorTextColor = SKColors.Lime,
+        };
+
+        renderer.SetCellSize(48f, 48f);
+        using var surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: string.Empty);
+        TerminalRow row = screen.GetViewportRow(0);
+        SetTestCell(row, 0, 0x1F600);
+        row.IsDirty = true;
+
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+
+        int textPixels = CountPixelsDifferentFromColorInRegion(
+            pixels,
+            expectedColor: SKColors.Red,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        Assert.True(textPixels > 0);
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_Selection_InitiallyNull()
     {
         var renderer = new SkiaTerminalRenderer("Consolas", 14f);
@@ -1188,6 +1225,46 @@ public class RenderingTests
 
         Assert.True(selectedCell.Blue > selectedCell.Red);
         Assert.True(searchCell.Green > searchCell.Red);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_SelectionForegroundColor_OverridesSelectedCellText()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 18f)
+        {
+            CursorVisible = false,
+            SelectionColor = SKColors.Black,
+            SelectionForegroundColor = SKColors.Lime,
+            SelectionStart = (0, 0),
+            SelectionEnd = (1, 0),
+        };
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: "A");
+        ref TerminalCell cell = ref screen.GetViewportRow(0)[0];
+        cell.Foreground = 0xFFFF0000u;
+        cell.Background = 0xFF000000u;
+        cell.HasBackground = true;
+
+        using var surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+
+        int greenInk = CountPixelsInCell(
+            pixels,
+            renderer,
+            column: 0,
+            pixel => pixel.Green > pixel.Red && pixel.Green > pixel.Blue && pixel.Green > 24);
+        int redInk = CountPixelsInCell(
+            pixels,
+            renderer,
+            column: 0,
+            pixel => pixel.Red > pixel.Green && pixel.Red > pixel.Blue && pixel.Red > 24);
+
+        Assert.True(greenInk > 0);
+        Assert.Equal(0, redInk);
     }
 
     [Fact]
@@ -2834,6 +2911,38 @@ public class RenderingTests
         return count;
     }
 
+    private static int CountPixelsDifferentFromColorInRegion(
+        SKPixmap pixels,
+        SKColor expectedColor,
+        float startX,
+        float endX,
+        float startY,
+        float endY,
+        byte tolerance = 4)
+    {
+        int count = 0;
+        int minX = Math.Clamp((int)MathF.Floor(startX), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling(endX), 0, pixels.Width);
+        int minY = Math.Clamp((int)MathF.Floor(startY), 0, pixels.Height);
+        int maxY = Math.Clamp((int)MathF.Ceiling(endY), 0, pixels.Height);
+
+        for (int y = minY; y < maxY; y++)
+        {
+            for (int x = minX; x < maxX; x++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                if (Math.Abs(pixel.Red - expectedColor.Red) > tolerance ||
+                    Math.Abs(pixel.Green - expectedColor.Green) > tolerance ||
+                    Math.Abs(pixel.Blue - expectedColor.Blue) > tolerance)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
     private static int CountMidTonePixelsInRegion(
         SKPixmap pixels,
         float startX,
@@ -2903,6 +3012,33 @@ public class RenderingTests
             startX + renderer.CellWidth,
             startY,
             startY + renderer.CellHeight);
+    }
+
+    private static int CountPixelsInCell(
+        SKPixmap pixels,
+        SkiaTerminalRenderer renderer,
+        int column,
+        Func<SKColor, bool> predicate,
+        int row = 0)
+    {
+        int count = 0;
+        int minX = Math.Clamp((int)MathF.Floor(column * renderer.CellWidth), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling((column + 1) * renderer.CellWidth), 0, pixels.Width);
+        int minY = Math.Clamp((int)MathF.Floor(row * renderer.CellHeight), 0, pixels.Height);
+        int maxY = Math.Clamp((int)MathF.Ceiling((row + 1) * renderer.CellHeight), 0, pixels.Height);
+
+        for (int y = minY; y < maxY; y++)
+        {
+            for (int x = minX; x < maxX; x++)
+            {
+                if (predicate(pixels.GetPixelColor(x, y)))
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
     }
 
     private static long SumPixelIntensityInCell(

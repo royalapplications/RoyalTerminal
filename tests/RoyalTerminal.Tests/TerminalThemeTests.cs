@@ -18,6 +18,9 @@ public sealed class TerminalThemeTests
             "foreground = #112233\n" +
             "background = #223344\n" +
             "cursor-color = #334455\n" +
+            "cursor-text-color = #DDEEFF\n" +
+            "selection-foreground = #ABCDEF\n" +
+            "selection-background = #123456\n" +
             "palette-generation-mode = derived-from-base16-lab\n" +
             "osc-color-report-format = 8-bit\n" +
             "ansi1 = #AA0000\n" +
@@ -29,6 +32,9 @@ public sealed class TerminalThemeTests
         Assert.Equal(0xFF112233u, parsed.DefaultForeground);
         Assert.Equal(0xFF223344u, parsed.DefaultBackground);
         Assert.Equal(0xFF334455u, parsed.CursorColor);
+        Assert.Equal(0xFFDDEEFFu, parsed.CursorTextColor);
+        Assert.Equal(0xFFABCDEFu, parsed.SelectionForeground);
+        Assert.Equal(0xFF123456u, parsed.SelectionBackground);
         Assert.Equal(TerminalPaletteGenerationMode.DerivedFromBase16Lab, parsed.PaletteGenerationMode);
         Assert.Equal(TerminalOscColorReportFormat.Bit8, parsed.OscColorReportFormat);
         Assert.Equal(0xFFAA0000u, parsed.Palette[1]);
@@ -44,6 +50,8 @@ public sealed class TerminalThemeTests
             .WithDefaultForeground(0xFF102030u)
             .WithDefaultBackground(0xFF405060u)
             .WithCursorColor(0xFF708090u)
+            .WithCursorTextColor(0xFFA0B0C0u)
+            .WithSelectionColors(0xFF13579Bu, 0xFF2468ACu)
             .WithOscColorReportFormat(TerminalOscColorReportFormat.Bit8)
             .WithPaletteColor(7, 0xFFAABBCCu, explicitOverride: true)
             .WithPaletteColor(142, 0xFF665544u, explicitOverride: true);
@@ -54,9 +62,35 @@ public sealed class TerminalThemeTests
         Assert.Equal(0xFF102030u, parsed.DefaultForeground);
         Assert.Equal(0xFF405060u, parsed.DefaultBackground);
         Assert.Equal(0xFF708090u, parsed.CursorColor);
+        Assert.Equal(0xFFA0B0C0u, parsed.CursorTextColor);
+        Assert.Equal(0xFF13579Bu, parsed.SelectionForeground);
+        Assert.Equal(0xFF2468ACu, parsed.SelectionBackground);
         Assert.Equal(TerminalOscColorReportFormat.Bit8, parsed.OscColorReportFormat);
         Assert.Equal(0xFFAABBCCu, parsed.Palette[7]);
         Assert.Equal(0xFF665544u, parsed.Palette[142]);
+    }
+
+    [Fact]
+    public void TerminalTheme_CursorTextColor_DefaultsToBackground()
+    {
+        TerminalTheme theme = new(
+            defaultForeground: 0xFFE0E0E0u,
+            defaultBackground: 0xFF0A0B0Cu,
+            cursorColor: 0xFFE0E0E0u,
+            palette: TerminalPalette.CreateDefaultCanonical());
+
+        Assert.Equal(0xFF0A0B0Cu, theme.CursorTextColor);
+    }
+
+    [Fact]
+    public void TerminalThemeParser_Parse_OmittedCursorTextDefaultsToParsedBackground()
+    {
+        TerminalTheme parsed = TerminalThemeParser.Parse(
+            "background = #FFFFFF\n",
+            TerminalTheme.Dark);
+
+        Assert.Equal(0xFFFFFFFFu, parsed.DefaultBackground);
+        Assert.Equal(0xFFFFFFFFu, parsed.CursorTextColor);
     }
 
     [Fact]

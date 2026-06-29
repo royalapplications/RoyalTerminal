@@ -1986,6 +1986,39 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_ApplyTheme_AppliesRendererCursorAndSelectionColors()
+    {
+        var control = new TerminalControl();
+        TerminalTheme theme = TerminalTheme.Dark
+            .WithCursorColor(0xFF102030u)
+            .WithCursorTextColor(0xFF405060u)
+            .WithSelectionColors(0xFF708090u, 0xFFA0B0C0u);
+
+        control.ApplyTheme(theme);
+
+        SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+        Assert.Equal(new SKColor(0x10, 0x20, 0x30, 0xFF), renderer.CursorColor);
+        Assert.Equal(new SKColor(0x40, 0x50, 0x60, 0xFF), renderer.CursorTextColor);
+        Assert.Equal(new SKColor(0x70, 0x80, 0x90, 0xFF), renderer.SelectionForegroundColor);
+        Assert.Equal(new SKColor(0xA0, 0xB0, 0xC0, 0x80), renderer.SelectionColor);
+    }
+
+    [AvaloniaFact]
+    public void Control_ApplyTheme_ClearingSelectionColorsRestoresRendererFallbacks()
+    {
+        var control = new TerminalControl();
+        TerminalTheme themedSelection = TerminalTheme.Dark
+            .WithSelectionColors(0xFF708090u, 0xFFA0B0C0u);
+
+        control.ApplyTheme(themedSelection);
+        control.ApplyTheme(TerminalTheme.Dark.WithSelectionColors(null, null));
+
+        SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+        Assert.Equal(SKColors.Empty, renderer.SelectionForegroundColor);
+        Assert.Equal(SkiaTerminalRenderer.DefaultSelectionColor, renderer.SelectionColor);
+    }
+
+    [AvaloniaFact]
     public void Control_ApplyTheme_MarksRowsDirtyWithoutResizing()
     {
         TerminalControl control = new()
