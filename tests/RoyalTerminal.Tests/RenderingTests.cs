@@ -709,10 +709,67 @@ public class RenderingTests
     [Fact]
     public void SkiaTerminalRenderer_KittyGraphicsPlacement_ScalesFromPlacementCellMetrics()
     {
-        using var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
         renderer.SetCellSize(20f, 20f);
 
-        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: string.Empty);
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: " ");
+        screen.ReplaceKittyGraphics(
+            images:
+            [
+                new TerminalKittyImageSource(
+                    imageId: 1,
+                    widthPx: 1,
+                    heightPx: 1,
+                    rgbaPixels: [0xFF, 0x00, 0x00, 0xFF]),
+            ],
+            placements:
+            [
+                new TerminalKittyImagePlacement(
+                    imageId: 1,
+                    layer: TerminalKittyImageLayer.AboveText,
+                    viewportColumn: 0,
+                    viewportRow: 0,
+                    xOffsetPx: 0,
+                    yOffsetPx: 0,
+                    widthPx: 10,
+                    heightPx: 10,
+                    sourceX: 0,
+                    sourceY: 0,
+                    sourceWidth: 1,
+                    sourceHeight: 1,
+                    cellWidthPx: 10,
+                    cellHeightPx: 10,
+                    scaleMode: TerminalKittyImagePlacementScaleMode.ColumnsAndRows),
+            ]);
+
+        using SKSurface surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        int scaledInk = CountNonBackgroundPixelsInRegion(
+            pixels,
+            startX: renderer.CellWidth * 0.6f,
+            endX: renderer.CellWidth * 0.9f,
+            startY: renderer.CellHeight * 0.6f,
+            endY: renderer.CellHeight * 0.9f);
+        Assert.True(scaledInk > 0);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_KittyGraphicsPlacement_DoesNotScaleNaturalPixelPlacement()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            CursorVisible = false,
+        };
+        renderer.SetCellSize(20f, 20f);
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: " ");
         screen.ReplaceKittyGraphics(
             images:
             [
@@ -741,19 +798,21 @@ public class RenderingTests
                     cellHeightPx: 10),
             ]);
 
+        Assert.Equal(TerminalKittyImagePlacementScaleMode.None, screen.GetKittyPlacements()[0].ScaleMode);
+
         using SKSurface surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
         surface.Canvas.Clear(SKColors.Black);
         renderer.RenderFull(surface.Canvas, screen);
 
         using SKImage snapshot = surface.Snapshot();
         using SKPixmap pixels = snapshot.PeekPixels();
-        int scaledInk = CountNonBackgroundPixelsInRegion(
+        int unscaledOutsideInk = CountNonBackgroundPixelsInRegion(
             pixels,
             startX: renderer.CellWidth * 0.6f,
             endX: renderer.CellWidth * 0.9f,
             startY: renderer.CellHeight * 0.6f,
             endY: renderer.CellHeight * 0.9f);
-        Assert.True(scaledInk > 0);
+        Assert.Equal(0, unscaledOutsideInk);
     }
 
     [Fact]

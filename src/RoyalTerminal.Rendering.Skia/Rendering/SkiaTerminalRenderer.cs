@@ -5477,8 +5477,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 }
 
                 RecordImagePlacementVisited();
-                float xScale = GetRasterPlacementScale(placement.CellWidthPx, _cellWidth);
-                float yScale = GetRasterPlacementScale(placement.CellHeightPx, _cellHeight);
+                (float xScale, float yScale) = GetKittyPlacementScale(placement);
                 float destLeft = (placement.ViewportColumn * _cellWidth) + (placement.XOffsetPx * xScale);
                 float destTop = (placement.ViewportRow * _cellHeight) + (placement.YOffsetPx * yScale);
                 SKRect destRect = new(
@@ -5517,6 +5516,29 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             canvas.Restore();
         }
+    }
+
+    private (float X, float Y) GetKittyPlacementScale(TerminalKittyImagePlacement placement)
+    {
+        return placement.ScaleMode switch
+        {
+            TerminalKittyImagePlacementScaleMode.Columns => GetUniformKittyPlacementScale(
+                placement.CellWidthPx,
+                _cellWidth),
+            TerminalKittyImagePlacementScaleMode.Rows => GetUniformKittyPlacementScale(
+                placement.CellHeightPx,
+                _cellHeight),
+            TerminalKittyImagePlacementScaleMode.ColumnsAndRows => (
+                GetRasterPlacementScale(placement.CellWidthPx, _cellWidth),
+                GetRasterPlacementScale(placement.CellHeightPx, _cellHeight)),
+            _ => (1f, 1f),
+        };
+    }
+
+    private static (float X, float Y) GetUniformKittyPlacementScale(int placementCellSizePx, float rendererCellSize)
+    {
+        float scale = GetRasterPlacementScale(placementCellSizePx, rendererCellSize);
+        return (scale, scale);
     }
 
     private static bool IntersectsViewport(SKRect rect, float viewportWidth, float viewportHeight)

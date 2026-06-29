@@ -41,9 +41,11 @@ graphics:
 - Ghostty owns Kitty protocol parsing and cursor movement.
 - The managed screen imports Ghostty's viewport-relative direct placements.
 - Managed Kitty placements carry the native cell size used when Ghostty computed
-  placement pixel dimensions.
-- Managed Kitty placements use `0` for unknown placement-time cell metrics; the
-  Skia renderer treats unknown metrics as unscaled literal pixels.
+  placement pixel dimensions only when the Kitty placement requested `c`, `r`,
+  or both.
+- Managed Kitty placements use `0` and `ScaleMode.None` for natural pixel-size
+  placements where `c` and `r` were omitted; the Skia renderer treats those as
+  unscaled literal pixels.
 - The Skia renderer scales Kitty placement offsets and extents when Avalonia's
   current render cell size differs from that placement-time native cell size.
 - Pixel resize notifications use ceiling cell metrics to avoid fractional-cell
@@ -53,6 +55,8 @@ graphics:
 
 - Verify Chafa is installed and emits direct Kitty graphics locally.
 - Cover placement-time cell metrics in Ghostty VT tests.
+- Cover natural pixel-size Kitty placements in Ghostty VT and Skia renderer
+  tests so omitted `c`/`r` placements are not scaled.
 - Cover direct Kitty prompt placement by asserting that `CRLF` after a two-row
   image writes the prompt below the image rows.
 - Cover Skia Kitty placement scaling in renderer tests.

@@ -626,6 +626,34 @@ public class GhosttyVtProcessorTests
         Assert.Single(placements);
         Assert.Equal(9, placements[0].CellWidthPx);
         Assert.Equal(17, placements[0].CellHeightPx);
+        Assert.Equal(TerminalKittyImagePlacementScaleMode.ColumnsAndRows, placements[0].ScaleMode);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_KittyGraphicsPlacement_LeavesNaturalPixelPlacementUnscaled_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 24, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 24, widthPx: 641, heightPx: 385);
+
+        processor.Process("\u001b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=2;////////\u001b\\"u8);
+
+        TerminalKittyImagePlacement[] placements = screen.GetKittyPlacements().ToArray();
+        Assert.Single(placements);
+        Assert.Equal(0, placements[0].CellWidthPx);
+        Assert.Equal(0, placements[0].CellHeightPx);
+        Assert.Equal(TerminalKittyImagePlacementScaleMode.None, placements[0].ScaleMode);
     }
 
     [Fact]

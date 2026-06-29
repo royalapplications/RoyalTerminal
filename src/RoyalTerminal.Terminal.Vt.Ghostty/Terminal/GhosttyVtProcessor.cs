@@ -1579,6 +1579,16 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             }
 
             TerminalKittyImageLayer layer = ClassifyKittyLayer(_kittyPlacementIterator.GetZIndex());
+            uint requestedColumns = _kittyPlacementIterator.GetColumns();
+            uint requestedRows = _kittyPlacementIterator.GetRows();
+            TerminalKittyImagePlacementScaleMode scaleMode = GetKittyScaleMode(requestedColumns, requestedRows);
+            int cellWidthPx = scaleMode is TerminalKittyImagePlacementScaleMode.Columns or TerminalKittyImagePlacementScaleMode.ColumnsAndRows
+                ? Math.Max(0, _cellWidthPx)
+                : 0;
+            int cellHeightPx = scaleMode is TerminalKittyImagePlacementScaleMode.Rows or TerminalKittyImagePlacementScaleMode.ColumnsAndRows
+                ? Math.Max(0, _cellHeightPx)
+                : 0;
+
             placements.Add(new TerminalKittyImagePlacement(
                 imageId,
                 layer,
@@ -1592,8 +1602,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 checked((int)renderInfo.SourceY),
                 checked((int)renderInfo.SourceWidth),
                 checked((int)renderInfo.SourceHeight),
-                Math.Max(0, _cellWidthPx),
-                Math.Max(0, _cellHeightPx)));
+                cellWidthPx,
+                cellHeightPx,
+                scaleMode));
         }
 
         if (placements.Count == 0)
@@ -1608,6 +1619,17 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private static int ToManagedKittyImageId(uint imageId)
     {
         return unchecked((int)imageId);
+    }
+
+    private static TerminalKittyImagePlacementScaleMode GetKittyScaleMode(uint requestedColumns, uint requestedRows)
+    {
+        return (requestedColumns > 0, requestedRows > 0) switch
+        {
+            (true, true) => TerminalKittyImagePlacementScaleMode.ColumnsAndRows,
+            (true, false) => TerminalKittyImagePlacementScaleMode.Columns,
+            (false, true) => TerminalKittyImagePlacementScaleMode.Rows,
+            _ => TerminalKittyImagePlacementScaleMode.None,
+        };
     }
 
     private static int CalculateNativeCellSizePx(int totalPixels, int cells)
