@@ -5252,10 +5252,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return;
         }
 
-        if (cell.Codepoint > 0 && cell.Codepoint <= char.MaxValue)
+        if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
         {
             using SKFont font = _glyphCache.CreateFont(_fontSize);
-            canvas.DrawText(new string((char)cell.Codepoint, 1), x, baselineY, font, _fgPaint);
+            canvas.DrawText(GetCodepointText(cell.Codepoint), x, baselineY, font, _fgPaint);
         }
     }
 

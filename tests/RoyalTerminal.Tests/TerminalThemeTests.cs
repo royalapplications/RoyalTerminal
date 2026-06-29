@@ -83,6 +83,17 @@ public sealed class TerminalThemeTests
     }
 
     [Fact]
+    public void TerminalThemeParser_Parse_OmittedCursorTextDefaultsToParsedBackground()
+    {
+        TerminalTheme parsed = TerminalThemeParser.Parse(
+            "background = #FFFFFF\n",
+            TerminalTheme.Dark);
+
+        Assert.Equal(0xFFFFFFFFu, parsed.DefaultBackground);
+        Assert.Equal(0xFFFFFFFFu, parsed.CursorTextColor);
+    }
+
+    [Fact]
     public void TerminalPalette_GenerationModes_ProduceDifferentExtendedPalette()
     {
         uint[] base16 =

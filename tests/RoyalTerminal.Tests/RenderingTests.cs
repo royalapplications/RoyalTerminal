@@ -1132,6 +1132,43 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_BlockCursor_RepaintsSupplementaryPlaneCellText()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 28f)
+        {
+            CursorVisible = true,
+            CursorStyle = CursorStyle.Block,
+            CursorColumn = 0,
+            CursorRow = 0,
+            CursorColor = SKColors.Red,
+            CursorTextColor = SKColors.Lime,
+        };
+
+        renderer.SetCellSize(48f, 48f);
+        using var surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: string.Empty);
+        TerminalRow row = screen.GetViewportRow(0);
+        SetTestCell(row, 0, 0x1F600);
+        row.IsDirty = true;
+
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+
+        int textPixels = CountPixelsDifferentFromColorInRegion(
+            pixels,
+            expectedColor: SKColors.Red,
+            startX: 0f,
+            endX: renderer.CellWidth,
+            startY: 0f,
+            endY: renderer.CellHeight);
+
+        Assert.True(textPixels > 0);
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_Selection_InitiallyNull()
     {
         var renderer = new SkiaTerminalRenderer("Consolas", 14f);
@@ -2865,6 +2902,38 @@ public class RenderingTests
             {
                 SKColor pixel = pixels.GetPixelColor(x, y);
                 if (pixel.Red >= threshold || pixel.Green >= threshold || pixel.Blue >= threshold)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountPixelsDifferentFromColorInRegion(
+        SKPixmap pixels,
+        SKColor expectedColor,
+        float startX,
+        float endX,
+        float startY,
+        float endY,
+        byte tolerance = 4)
+    {
+        int count = 0;
+        int minX = Math.Clamp((int)MathF.Floor(startX), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling(endX), 0, pixels.Width);
+        int minY = Math.Clamp((int)MathF.Floor(startY), 0, pixels.Height);
+        int maxY = Math.Clamp((int)MathF.Ceiling(endY), 0, pixels.Height);
+
+        for (int y = minY; y < maxY; y++)
+        {
+            for (int x = minX; x < maxX; x++)
+            {
+                SKColor pixel = pixels.GetPixelColor(x, y);
+                if (Math.Abs(pixel.Red - expectedColor.Red) > tolerance ||
+                    Math.Abs(pixel.Green - expectedColor.Green) > tolerance ||
+                    Math.Abs(pixel.Blue - expectedColor.Blue) > tolerance)
                 {
                     count++;
                 }

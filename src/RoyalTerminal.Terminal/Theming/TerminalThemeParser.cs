@@ -22,7 +22,7 @@ public static class TerminalThemeParser
         uint defaultFg = seed.DefaultForeground;
         uint defaultBg = seed.DefaultBackground;
         uint cursor = seed.CursorColor;
-        uint cursorText = seed.CursorTextColor;
+        uint? cursorText = null;
         uint? selectionFg = seed.SelectionForeground;
         uint? selectionBg = seed.SelectionBackground;
         uint? boldColor = seed.BoldColor;
