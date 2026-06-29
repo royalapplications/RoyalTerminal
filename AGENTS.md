@@ -156,3 +156,11 @@ References:
 - Avoid static state (except truly immutable constants).
 - Prefer explicit types where clarity is improved; avoid `var` in public APIs.
 - All public APIs must be documented and unit-tested.
+
+## Review guidelines
+
+- Prioritize correctness, regressions, missing tests, build errors, and architecture violations.
+- Enforce MVVM strictly: no UI logic or event handlers in code-behind.
+- Require compiled Avalonia bindings with explicit `x:DataType`.
+- For terminal-related changes, verify behavior against Windows Terminal, Ghostty, xterm.js, and PowerShell where relevant.
+- Treat missing focused tests for production code changes as a review finding.
