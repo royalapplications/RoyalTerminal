@@ -48,8 +48,11 @@ graphics:
   unscaled literal pixels.
 - The Skia renderer scales Kitty placement offsets and extents when Avalonia's
   current render cell size differs from that placement-time native cell size.
-- Pixel resize notifications use ceiling cell metrics to avoid fractional-cell
-  truncation and stay consistent with native pointer encoding.
+- Ghostty native resize and Kitty placement scaling use ceiling cell metrics to
+  avoid fractional-cell truncation in native placement math.
+- XTWINOPS size replies (`CSI 14t`/`CSI 16t`) use a separate, non-overreporting
+  size-report metric so fractional grids do not report a larger pixel surface
+  than the PTY/renderer was given.
 
 ## Validation Plan
 
@@ -57,6 +60,8 @@ graphics:
 - Cover placement-time cell metrics in Ghostty VT tests.
 - Cover natural pixel-size Kitty placements in Ghostty VT and Skia renderer
   tests so omitted `c`/`r` placements are not scaled.
+- Cover fractional-cell Ghostty size replies so `CSI 14t`/`CSI 16t` do not round
+  the report metric up.
 - Cover direct Kitty prompt placement by asserting that `CRLF` after a two-row
   image writes the prompt below the image rows.
 - Cover Skia Kitty placement scaling in renderer tests.

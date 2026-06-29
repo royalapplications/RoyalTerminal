@@ -630,6 +630,29 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_SizeReports_DoNotRoundFractionalCellsUp_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 24, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 24, widthPx: 641, heightPx: 385);
+
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+
+        processor.Process("\u001b[14t"u8);
+        processor.Process("\u001b[16t"u8);
+
+        Assert.Contains("\u001b[4;384;640t", responses);
+        Assert.Contains("\u001b[6;16;8t", responses);
+        Assert.DoesNotContain("\u001b[4;408;720t", responses);
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_KittyGraphicsPlacement_LeavesNaturalPixelPlacementUnscaled_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
