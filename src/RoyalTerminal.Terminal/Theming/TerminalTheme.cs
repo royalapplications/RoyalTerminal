@@ -34,6 +34,11 @@ public sealed class TerminalTheme
     public uint CursorColor { get; }
 
     /// <summary>
+    /// Cursor text color (ARGB).
+    /// </summary>
+    public uint CursorTextColor { get; }
+
+    /// <summary>
     /// Optional selection foreground color (ARGB).
     /// </summary>
     public uint? SelectionForeground { get; }
@@ -75,12 +80,14 @@ public sealed class TerminalTheme
         TerminalOscColorReportFormat oscColorReportFormat = TerminalOscColorReportFormat.Bit16,
         uint? selectionForeground = null,
         uint? selectionBackground = null,
-        uint? boldColor = null)
+        uint? boldColor = null,
+        uint? cursorTextColor = null)
     {
         Palette = palette ?? throw new ArgumentNullException(nameof(palette));
         DefaultForeground = EnsureOpaque(defaultForeground);
         DefaultBackground = EnsureOpaque(defaultBackground);
         CursorColor = EnsureOpaque(cursorColor);
+        CursorTextColor = EnsureOpaque(cursorTextColor ?? defaultBackground);
         SelectionForeground = selectionForeground is null ? null : EnsureOpaque(selectionForeground.Value);
         SelectionBackground = selectionBackground is null ? null : EnsureOpaque(selectionBackground.Value);
         BoldColor = boldColor is null ? null : EnsureOpaque(boldColor.Value);
@@ -100,7 +107,8 @@ public sealed class TerminalTheme
         TerminalOscColorReportFormat oscReportFormat = TerminalOscColorReportFormat.Bit16,
         uint? selectionForeground = null,
         uint? selectionBackground = null,
-        uint? boldColor = null)
+        uint? boldColor = null,
+        uint? cursorTextColor = null)
     {
         TerminalPalette palette = TerminalPalette.FromBase16(base16, mode);
         return new TerminalTheme(
@@ -112,7 +120,8 @@ public sealed class TerminalTheme
             oscReportFormat,
             selectionForeground,
             selectionBackground,
-            boldColor);
+            boldColor,
+            cursorTextColor);
     }
 
     /// <summary>
@@ -129,7 +138,8 @@ public sealed class TerminalTheme
             OscColorReportFormat,
             SelectionForeground,
             SelectionBackground,
-            BoldColor);
+            BoldColor,
+            CursorTextColor);
     }
 
     /// <summary>
@@ -146,7 +156,8 @@ public sealed class TerminalTheme
             OscColorReportFormat,
             SelectionForeground,
             SelectionBackground,
-            BoldColor);
+            BoldColor,
+            CursorTextColor);
     }
 
     /// <summary>
@@ -163,7 +174,26 @@ public sealed class TerminalTheme
             OscColorReportFormat,
             SelectionForeground,
             SelectionBackground,
-            BoldColor);
+            BoldColor,
+            CursorTextColor);
+    }
+
+    /// <summary>
+    /// Returns a copy with a different cursor text color.
+    /// </summary>
+    public TerminalTheme WithCursorTextColor(uint value)
+    {
+        return new TerminalTheme(
+            DefaultForeground,
+            DefaultBackground,
+            CursorColor,
+            Palette,
+            PaletteGenerationMode,
+            OscColorReportFormat,
+            SelectionForeground,
+            SelectionBackground,
+            BoldColor,
+            value);
     }
 
     /// <summary>
@@ -180,7 +210,8 @@ public sealed class TerminalTheme
             OscColorReportFormat,
             foreground,
             background,
-            BoldColor);
+            BoldColor,
+            CursorTextColor);
     }
 
     /// <summary>
@@ -197,7 +228,8 @@ public sealed class TerminalTheme
             OscColorReportFormat,
             SelectionForeground,
             SelectionBackground,
-            boldColor);
+            boldColor,
+            CursorTextColor);
     }
 
     /// <summary>
@@ -214,7 +246,8 @@ public sealed class TerminalTheme
             reportFormat,
             SelectionForeground,
             SelectionBackground,
-            BoldColor);
+            BoldColor,
+            CursorTextColor);
     }
 
     /// <summary>
@@ -231,7 +264,8 @@ public sealed class TerminalTheme
             OscColorReportFormat,
             SelectionForeground,
             SelectionBackground,
-            BoldColor);
+            BoldColor,
+            CursorTextColor);
     }
 
     /// <summary>
@@ -260,7 +294,8 @@ public sealed class TerminalTheme
             OscColorReportFormat,
             SelectionForeground,
             SelectionBackground,
-            BoldColor);
+            BoldColor,
+            CursorTextColor);
     }
 
     private static TerminalTheme CreateDark()

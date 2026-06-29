@@ -21,6 +21,7 @@ public static class TerminalThemeSerializer
         builder.AppendLine($"foreground = {ToHex(theme.DefaultForeground)}");
         builder.AppendLine($"background = {ToHex(theme.DefaultBackground)}");
         builder.AppendLine($"cursor-color = {ToHex(theme.CursorColor)}");
+        builder.AppendLine($"cursor-text-color = {ToHex(theme.CursorTextColor)}");
         builder.AppendLine($"palette-generation-mode = {FormatPaletteMode(theme.PaletteGenerationMode)}");
         builder.AppendLine($"osc-color-report-format = {FormatOscMode(theme.OscColorReportFormat)}");
 

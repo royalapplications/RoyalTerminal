@@ -1191,6 +1191,46 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_SelectionForegroundColor_OverridesSelectedCellText()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 18f)
+        {
+            CursorVisible = false,
+            SelectionColor = SKColors.Black,
+            SelectionForegroundColor = SKColors.Lime,
+            SelectionStart = (0, 0),
+            SelectionEnd = (1, 0),
+        };
+
+        TerminalScreen screen = CreateAsciiScreen(columns: 1, rows: 1, text: "A");
+        ref TerminalCell cell = ref screen.GetViewportRow(0)[0];
+        cell.Foreground = 0xFFFF0000u;
+        cell.Background = 0xFF000000u;
+        cell.HasBackground = true;
+
+        using var surface = CreateRenderSurface(renderer, columns: 1, rows: 1);
+        surface.Canvas.Clear(SKColors.Black);
+        renderer.RenderFull(surface.Canvas, screen);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+
+        int greenInk = CountPixelsInCell(
+            pixels,
+            renderer,
+            column: 0,
+            pixel => pixel.Green > pixel.Red && pixel.Green > pixel.Blue && pixel.Green > 24);
+        int redInk = CountPixelsInCell(
+            pixels,
+            renderer,
+            column: 0,
+            pixel => pixel.Red > pixel.Green && pixel.Red > pixel.Blue && pixel.Red > 24);
+
+        Assert.True(greenInk > 0);
+        Assert.Equal(0, redInk);
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_RectangularSelection_RestrictsMiddleRowsToColumnBand()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
@@ -2903,6 +2943,33 @@ public class RenderingTests
             startX + renderer.CellWidth,
             startY,
             startY + renderer.CellHeight);
+    }
+
+    private static int CountPixelsInCell(
+        SKPixmap pixels,
+        SkiaTerminalRenderer renderer,
+        int column,
+        Func<SKColor, bool> predicate,
+        int row = 0)
+    {
+        int count = 0;
+        int minX = Math.Clamp((int)MathF.Floor(column * renderer.CellWidth), 0, pixels.Width);
+        int maxX = Math.Clamp((int)MathF.Ceiling((column + 1) * renderer.CellWidth), 0, pixels.Width);
+        int minY = Math.Clamp((int)MathF.Floor(row * renderer.CellHeight), 0, pixels.Height);
+        int maxY = Math.Clamp((int)MathF.Ceiling((row + 1) * renderer.CellHeight), 0, pixels.Height);
+
+        for (int y = minY; y < maxY; y++)
+        {
+            for (int x = minX; x < maxX; x++)
+            {
+                if (predicate(pixels.GetPixelColor(x, y)))
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
     }
 
     private static long SumPixelIntensityInCell(

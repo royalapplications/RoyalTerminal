@@ -28,6 +28,9 @@ namespace RoyalTerminal.Avalonia.Rendering;
 /// </summary>
 public sealed class SkiaTerminalRenderer : IDisposable
 {
+    /// <summary>Default selection highlight color.</summary>
+    public static SKColor DefaultSelectionColor { get; } = new(0x40, 0x60, 0xA0, 0x80);
+
     private const float DimFactor = 0.55f;
     private const ulong FnvOffsetBasis = 14695981039346656037UL;
     private const ulong FnvPrime = 1099511628211UL;
@@ -144,6 +147,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
     /// <summary>Cursor color.</summary>
     public SKColor CursorColor { get; set; } = new(0xFF, 0xFF, 0xFF);
 
+    /// <summary>Cursor text color.</summary>
+    public SKColor CursorTextColor { get; set; } = new(0x00, 0x00, 0x00);
+
     /// <summary>Selection start (column, row) in viewport coordinates.</summary>
     public (int Column, int Row)? SelectionStart { get; set; }
 
@@ -154,7 +160,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
     public bool SelectionIsRectangle { get; set; }
 
     /// <summary>Selection highlight color.</summary>
-    public SKColor SelectionColor { get; set; } = new(0x40, 0x60, 0xA0, 0x80);
+    public SKColor SelectionColor { get; set; } = DefaultSelectionColor;
+
+    /// <summary>Optional selection foreground color.</summary>
+    public SKColor SelectionForegroundColor { get; set; } = SKColors.Empty;
 
     /// <summary>Search-match highlight color.</summary>
     public SKColor SearchHighlightColor { get; set; } = new(0xA0, 0x90, 0x20, 0x90);
@@ -866,6 +875,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             {
                 SKColor spriteColor = ResolveForegroundColorForCell(
                     in firstCell,
+                    rowOverlays[col],
                     GetTextHighlightOverride(rowTextHighlights, col));
                 int spriteRunEnd = col + 1;
                 while (spriteRunEnd < cells.Length)
@@ -888,6 +898,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
                     SKColor nextColor = ResolveForegroundColorForCell(
                         in spriteCandidate,
+                        rowOverlays[spriteRunEnd],
                         GetTextHighlightOverride(rowTextHighlights, spriteRunEnd));
                     if (nextColor != spriteColor)
                     {
@@ -915,6 +926,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
             SKColor runColor = ResolveForegroundColorForCell(
                 in firstCell,
+                rowOverlays[col],
                 GetTextHighlightOverride(rowTextHighlights, col));
             SKTypeface runTypeface = ResolveTypefaceForCell(primaryTypeface, in firstCell);
             bool firstIsSymbolGlyph = IsSymbolGlyphClipCandidate(in firstCell);
@@ -957,6 +969,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
                 SKColor nextColor = ResolveForegroundColorForCell(
                     in nextCell,
+                    rowOverlays[runEnd],
                     GetTextHighlightOverride(rowTextHighlights, runEnd));
                 if (nextColor != runColor)
                 {
@@ -4344,10 +4357,17 @@ public sealed class SkiaTerminalRenderer : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static SKColor ResolveForegroundColorForCell(
+    private SKColor ResolveForegroundColorForCell(
         ref readonly TerminalCell cell,
+        CellOverlayFlags overlays,
         CellTextHighlightOverride textHighlight)
     {
+        if ((overlays & CellOverlayFlags.Selection) != 0 &&
+            SelectionForegroundColor != SKColors.Empty)
+        {
+            return SelectionForegroundColor;
+        }
+
         return textHighlight.HasForeground
             ? new SKColor(textHighlight.Foreground)
             : GetEffectiveForeground(in cell);
@@ -5176,9 +5196,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             case CursorStyle.Block:
                 _cursorPaint.Style = SKPaintStyle.Fill;
-                _cursorPaint.BlendMode = SKBlendMode.Difference;
-                canvas.DrawRect(x, y, cursorWidth, _cellHeight, _cursorPaint);
                 _cursorPaint.BlendMode = SKBlendMode.SrcOver;
+                canvas.DrawRect(x, y, cursorWidth, _cellHeight, _cursorPaint);
+                RenderCursorText(canvas, screen, renderColumn, CursorRow, y);
                 break;
 
             case CursorStyle.BlockHollow:
@@ -5198,6 +5218,44 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 float barWidth = Math.Max(1f, MathF.Round(_cellWidth * 0.16f));
                 canvas.DrawRect(x, y, barWidth, _cellHeight, _cursorPaint);
                 break;
+        }
+    }
+
+    private void RenderCursorText(SKCanvas canvas, TerminalScreen screen, int column, int rowIndex, float y)
+    {
+        if ((uint)rowIndex >= (uint)screen.ViewportRows || (uint)column >= (uint)screen.Columns)
+        {
+            return;
+        }
+
+        TerminalRow row = screen.GetViewportRow(rowIndex);
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        if ((uint)column >= (uint)cells.Length)
+        {
+            return;
+        }
+
+        ref readonly TerminalCell cell = ref cells[column];
+        if (!IsRenderableGlyphCell(in cell))
+        {
+            return;
+        }
+
+        _fgPaint.Color = CursorTextColor;
+        float x = column * _cellWidth;
+        float baselineY = GetTextBaselineY(y);
+
+        if (!string.IsNullOrEmpty(cell.Grapheme))
+        {
+            using SKFont font = _glyphCache.CreateFont(_fontSize);
+            canvas.DrawText(cell.Grapheme, x, baselineY, font, _fgPaint);
+            return;
+        }
+
+        if (cell.Codepoint > 0 && cell.Codepoint <= char.MaxValue)
+        {
+            using SKFont font = _glyphCache.CreateFont(_fontSize);
+            canvas.DrawText(new string((char)cell.Codepoint, 1), x, baselineY, font, _fgPaint);
         }
     }
 
