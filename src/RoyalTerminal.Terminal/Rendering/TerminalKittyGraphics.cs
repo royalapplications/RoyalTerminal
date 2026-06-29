@@ -20,6 +20,24 @@ public enum TerminalKittyImageLayer : byte
 }
 
 /// <summary>
+/// Describes how a Kitty Graphics placement destination scales when renderer cell metrics differ.
+/// </summary>
+public enum TerminalKittyImagePlacementScaleMode : byte
+{
+    /// <summary>Do not scale destination pixels.</summary>
+    None = 0,
+
+    /// <summary>Scale both axes from the column cell metric.</summary>
+    Columns = 1,
+
+    /// <summary>Scale both axes from the row cell metric.</summary>
+    Rows = 2,
+
+    /// <summary>Scale width from column cells and height from row cells.</summary>
+    ColumnsAndRows = 3,
+}
+
+/// <summary>
 /// Snapshot of a decoded Kitty image payload.
 /// </summary>
 public sealed class TerminalKittyImageSource
@@ -81,7 +99,10 @@ public sealed class TerminalKittyImagePlacement
         int sourceX,
         int sourceY,
         int sourceWidth,
-        int sourceHeight)
+        int sourceHeight,
+        int cellWidthPx = 0,
+        int cellHeightPx = 0,
+        TerminalKittyImagePlacementScaleMode scaleMode = TerminalKittyImagePlacementScaleMode.None)
     {
         ArgumentOutOfRangeException.ThrowIfEqual(imageId, 0);
         ImageId = imageId;
@@ -96,6 +117,9 @@ public sealed class TerminalKittyImagePlacement
         SourceY = sourceY;
         SourceWidth = sourceWidth;
         SourceHeight = sourceHeight;
+        CellWidthPx = Math.Max(0, cellWidthPx);
+        CellHeightPx = Math.Max(0, cellHeightPx);
+        ScaleMode = scaleMode;
     }
 
     /// <summary>Referenced image id.</summary>
@@ -133,4 +157,13 @@ public sealed class TerminalKittyImagePlacement
 
     /// <summary>Source height in pixels.</summary>
     public int SourceHeight { get; }
+
+    /// <summary>Cell width in pixels at placement calculation time, or zero when unspecified.</summary>
+    public int CellWidthPx { get; }
+
+    /// <summary>Cell height in pixels at placement calculation time, or zero when unspecified.</summary>
+    public int CellHeightPx { get; }
+
+    /// <summary>Destination scaling behavior for placement-time cell metrics.</summary>
+    public TerminalKittyImagePlacementScaleMode ScaleMode { get; }
 }

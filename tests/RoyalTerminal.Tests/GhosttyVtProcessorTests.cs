@@ -603,6 +603,114 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_KittyGraphicsPlacement_CapturesNativeCellMetrics_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 24, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 24, widthPx: 641, heightPx: 385);
+
+        processor.Process("\u001b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=2,c=10,r=1;////////\u001b\\"u8);
+
+        TerminalKittyImagePlacement[] placements = screen.GetKittyPlacements().ToArray();
+        Assert.Single(placements);
+        Assert.Equal(9, placements[0].CellWidthPx);
+        Assert.Equal(17, placements[0].CellHeightPx);
+        Assert.Equal(TerminalKittyImagePlacementScaleMode.ColumnsAndRows, placements[0].ScaleMode);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_SizeReports_DoNotRoundFractionalCellsUp_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 24, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 24, widthPx: 641, heightPx: 385);
+
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+
+        processor.Process("\u001b[14t"u8);
+        processor.Process("\u001b[16t"u8);
+
+        Assert.Contains("\u001b[4;384;640t", responses);
+        Assert.Contains("\u001b[6;16;8t", responses);
+        Assert.DoesNotContain("\u001b[4;408;720t", responses);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_KittyGraphicsPlacement_LeavesNaturalPixelPlacementUnscaled_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 24, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 24, widthPx: 641, heightPx: 385);
+
+        processor.Process("\u001b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=2;////////\u001b\\"u8);
+
+        TerminalKittyImagePlacement[] placements = screen.GetKittyPlacements().ToArray();
+        Assert.Single(placements);
+        Assert.Equal(0, placements[0].CellWidthPx);
+        Assert.Equal(0, placements[0].CellHeightPx);
+        Assert.Equal(TerminalKittyImagePlacementScaleMode.None, placements[0].ScaleMode);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_KittyGraphicsPlacement_MovesPromptBelowImage_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 24, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 24, widthPx: 640, heightPx: 384);
+
+        processor.Process("\u001b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=2,c=10,r=2;////////\u001b\\"u8);
+
+        Assert.Equal(10, processor.CursorCol);
+        Assert.Equal(1, processor.CursorRow);
+
+        processor.Process("\r\nprompt$ "u8);
+
+        Assert.DoesNotContain("prompt", ReadAsciiPrefix(screen, row: 1, columns: 80), StringComparison.Ordinal);
+        Assert.StartsWith("prompt$ ", ReadAsciiPrefix(screen, row: 2, columns: 8), StringComparison.Ordinal);
+        Assert.Equal(8, processor.CursorCol);
+        Assert.Equal(2, processor.CursorRow);
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_RepeatedKittyGraphics_PopulatesManagedScreen_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())

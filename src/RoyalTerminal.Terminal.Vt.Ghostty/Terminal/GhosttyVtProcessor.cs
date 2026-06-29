@@ -134,8 +134,12 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private bool _win32InputMode;
     private bool _focusEventMode;
     private int _kittyKeyboardFlags;
-    private int _cellWidthPx;
-    private int _cellHeightPx;
+    private int _nativeCellWidthPx;
+    private int _nativeCellHeightPx;
+    private int _sizeReportCellWidthPx;
+    private int _sizeReportCellHeightPx;
+    private int _terminalWidthPx;
+    private int _terminalHeightPx;
     private byte _pressedMouseButtons;
     private GhosttyVtNative.GhosttyTerminalScrollbar _scrollbar;
     private readonly bool _kittyGraphicsSupported;
@@ -369,8 +373,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         ResizeNativeTerminal(
             checked((ushort)columns),
             checked((ushort)rows),
-            checked((uint)Math.Max(_cellWidthPx, 0)),
-            checked((uint)Math.Max(_cellHeightPx, 0)));
+            checked((uint)Math.Max(_nativeCellWidthPx, 0)),
+            checked((uint)Math.Max(_nativeCellHeightPx, 0)));
+        _terminalWidthPx = CalculateTotalPixels(_sizeReportCellWidthPx, columns);
+        _terminalHeightPx = CalculateTotalPixels(_sizeReportCellHeightPx, rows);
 
         ResizeSixelOverlay(columns, rows);
         _mouseEncoder.Reset();
@@ -383,15 +389,19 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        _cellWidthPx = columns > 0 ? Math.Max(0, widthPx / columns) : 0;
-        _cellHeightPx = rows > 0 ? Math.Max(0, heightPx / rows) : 0;
+        _terminalWidthPx = Math.Max(0, widthPx);
+        _terminalHeightPx = Math.Max(0, heightPx);
+        _nativeCellWidthPx = CalculateCeilingCellSizePx(widthPx, columns);
+        _nativeCellHeightPx = CalculateCeilingCellSizePx(heightPx, rows);
+        _sizeReportCellWidthPx = CalculateSizeReportCellSizePx(widthPx, columns);
+        _sizeReportCellHeightPx = CalculateSizeReportCellSizePx(heightPx, rows);
 
         PrepareResizeSync();
         ResizeNativeTerminal(
             checked((ushort)columns),
             checked((ushort)rows),
-            checked((uint)_cellWidthPx),
-            checked((uint)_cellHeightPx));
+            checked((uint)_nativeCellWidthPx),
+            checked((uint)_nativeCellHeightPx));
 
         ResizeSixelOverlay(columns, rows);
         _mouseEncoder.Reset();
@@ -1086,8 +1096,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             {
                 SixelGraphicsEnabled = true,
             });
-        int widthPx = _cellWidthPx > 0 ? checked(_cellWidthPx * Math.Max(1, _screen.Columns)) : 0;
-        int heightPx = _cellHeightPx > 0 ? checked(_cellHeightPx * Math.Max(1, _screen.ViewportRows)) : 0;
+        int widthPx = GetResizeWidthPx(_screen.Columns);
+        int heightPx = GetResizeHeightPx(_screen.ViewportRows);
         overlayProcessor.ResizeScreen(
             Math.Max(1, _screen.Columns),
             Math.Max(1, _screen.ViewportRows),
@@ -1109,8 +1119,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         int safeColumns = Math.Max(1, columns);
         int safeRows = Math.Max(1, rows);
-        int widthPx = _cellWidthPx > 0 ? checked(_cellWidthPx * safeColumns) : 0;
-        int heightPx = _cellHeightPx > 0 ? checked(_cellHeightPx * safeRows) : 0;
+        int widthPx = GetResizeWidthPx(safeColumns);
+        int heightPx = GetResizeHeightPx(safeRows);
         _sixelOverlayProcessor.ResizeScreen(
             safeColumns,
             safeRows,
@@ -1187,6 +1197,12 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _win32InputMode = false;
         _focusEventMode = false;
         _kittyKeyboardFlags = 0;
+        _nativeCellWidthPx = 0;
+        _nativeCellHeightPx = 0;
+        _sizeReportCellWidthPx = 0;
+        _sizeReportCellHeightPx = 0;
+        _terminalWidthPx = 0;
+        _terminalHeightPx = 0;
         _pressedMouseButtons = 0;
         _scrollbar = default;
     }
@@ -1579,6 +1595,16 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             }
 
             TerminalKittyImageLayer layer = ClassifyKittyLayer(_kittyPlacementIterator.GetZIndex());
+            uint requestedColumns = _kittyPlacementIterator.GetColumns();
+            uint requestedRows = _kittyPlacementIterator.GetRows();
+            TerminalKittyImagePlacementScaleMode scaleMode = GetKittyScaleMode(requestedColumns, requestedRows);
+            int cellWidthPx = scaleMode is TerminalKittyImagePlacementScaleMode.Columns or TerminalKittyImagePlacementScaleMode.ColumnsAndRows
+                ? Math.Max(0, _nativeCellWidthPx)
+                : 0;
+            int cellHeightPx = scaleMode is TerminalKittyImagePlacementScaleMode.Rows or TerminalKittyImagePlacementScaleMode.ColumnsAndRows
+                ? Math.Max(0, _nativeCellHeightPx)
+                : 0;
+
             placements.Add(new TerminalKittyImagePlacement(
                 imageId,
                 layer,
@@ -1591,7 +1617,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 checked((int)renderInfo.SourceX),
                 checked((int)renderInfo.SourceY),
                 checked((int)renderInfo.SourceWidth),
-                checked((int)renderInfo.SourceHeight)));
+                checked((int)renderInfo.SourceHeight),
+                cellWidthPx,
+                cellHeightPx,
+                scaleMode));
         }
 
         if (placements.Count == 0)
@@ -1606,6 +1635,61 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private static int ToManagedKittyImageId(uint imageId)
     {
         return unchecked((int)imageId);
+    }
+
+    private static TerminalKittyImagePlacementScaleMode GetKittyScaleMode(uint requestedColumns, uint requestedRows)
+    {
+        return (requestedColumns > 0, requestedRows > 0) switch
+        {
+            (true, true) => TerminalKittyImagePlacementScaleMode.ColumnsAndRows,
+            (true, false) => TerminalKittyImagePlacementScaleMode.Columns,
+            (false, true) => TerminalKittyImagePlacementScaleMode.Rows,
+            _ => TerminalKittyImagePlacementScaleMode.None,
+        };
+    }
+
+    private static int CalculateCeilingCellSizePx(int totalPixels, int cells)
+    {
+        if (totalPixels <= 0 || cells <= 0)
+        {
+            return 0;
+        }
+
+        return Math.Max(1, (int)Math.Ceiling(totalPixels / (double)cells));
+    }
+
+    private static int CalculateSizeReportCellSizePx(int totalPixels, int cells)
+    {
+        if (totalPixels <= 0 || cells <= 0)
+        {
+            return 0;
+        }
+
+        return Math.Max(1, totalPixels / cells);
+    }
+
+    private static int CalculateTotalPixels(int cellSizePx, int cells)
+    {
+        if (cellSizePx <= 0 || cells <= 0)
+        {
+            return 0;
+        }
+
+        return checked(cellSizePx * cells);
+    }
+
+    private int GetResizeWidthPx(int columns)
+    {
+        return _terminalWidthPx > 0
+            ? _terminalWidthPx
+            : CalculateTotalPixels(_sizeReportCellWidthPx, columns);
+    }
+
+    private int GetResizeHeightPx(int rows)
+    {
+        return _terminalHeightPx > 0
+            ? _terminalHeightPx
+            : CalculateTotalPixels(_sizeReportCellHeightPx, rows);
     }
 
     private static TerminalKittyImageLayer ClassifyKittyLayer(int zIndex)
@@ -1980,8 +2064,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         {
             Rows = checked((ushort)_screen.ViewportRows),
             Columns = checked((ushort)_screen.Columns),
-            CellWidth = checked((uint)Math.Max(_cellWidthPx, 0)),
-            CellHeight = checked((uint)Math.Max(_cellHeightPx, 0)),
+            CellWidth = checked((uint)Math.Max(_sizeReportCellWidthPx, 0)),
+            CellHeight = checked((uint)Math.Max(_sizeReportCellHeightPx, 0)),
         };
 
         return 1;

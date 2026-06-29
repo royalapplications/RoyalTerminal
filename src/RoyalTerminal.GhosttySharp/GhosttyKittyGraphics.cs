@@ -207,6 +207,12 @@ public sealed class GhosttyKittyGraphicsPlacementIterator : IDisposable
     /// <summary>Gets the current placement z index.</summary>
     public int GetZIndex() => GetPlacementValue<int>(GhosttyVtNative.GhosttyKittyGraphicsPlacementData.Z);
 
+    /// <summary>Gets the requested placement columns, or zero when unspecified.</summary>
+    public uint GetColumns() => GetPlacementValue<uint>(GhosttyVtNative.GhosttyKittyGraphicsPlacementData.Columns);
+
+    /// <summary>Gets the requested placement rows, or zero when unspecified.</summary>
+    public uint GetRows() => GetPlacementValue<uint>(GhosttyVtNative.GhosttyKittyGraphicsPlacementData.Rows);
+
     /// <summary>Resolves the current placement's source rectangle.</summary>
     public unsafe bool TryGetSourceRect(
         GhosttyKittyGraphicsImage image,
