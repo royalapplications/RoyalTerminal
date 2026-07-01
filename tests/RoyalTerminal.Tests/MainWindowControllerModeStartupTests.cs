@@ -1223,6 +1223,124 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_ProfileLaunch_KeepsBehaviorScopedToLaunchedControl()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        TerminalSessionProfilesDocument document = new()
+        {
+            DefaultProfileId = "profile-a",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "profile-a",
+                    DisplayName = "Profile A",
+                    Transport = CreatePipeTransportProfile("echo profile-a"),
+                    Behavior = new TerminalSessionBehaviorSettings
+                    {
+                        EnableTextShaping = false,
+                        ReflowOnResize = false,
+                        SixelGraphicsEnabled = false,
+                        EnableLigatures = false,
+                        PasteSafetyPolicy = "SanitizeControlSequences",
+                    },
+                },
+                new TerminalSessionProfile
+                {
+                    Id = "profile-b",
+                    DisplayName = "Profile B",
+                    Transport = CreatePipeTransportProfile("echo profile-b"),
+                    Behavior = new TerminalSessionBehaviorSettings
+                    {
+                        EnableTextShaping = true,
+                        ReflowOnResize = true,
+                        SixelGraphicsEnabled = true,
+                        EnableLigatures = true,
+                        PasteSafetyPolicy = "BlockUnsafe",
+                    },
+                },
+            ],
+        };
+        InMemoryProfileStore profileStore = new(document);
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo startup";
+        viewModel.SelectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.None;
+        viewModel.EnableTextShaping = true;
+        viewModel.ReflowOnResize = true;
+        viewModel.PreserveScrollbackOnRestart = false;
+        viewModel.SixelGraphicsEnabled = true;
+        viewModel.EnableLigatures = true;
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: profileStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-a").Wait();
+            bool profileATabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(profileATabCreated);
+
+            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-b").Wait();
+            bool profileBTabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 3,
+                TimeSpan.FromSeconds(2));
+            Assert.True(profileBTabCreated);
+
+            List<TerminalControl> controls = GetStandaloneControls(terminalHost);
+            AssertTerminalBehaviorSettings(
+                [controls[0]],
+                TerminalPasteSafetyPolicy.None,
+                enableTextShaping: true,
+                reflowOnResize: true,
+                preserveScrollbackOnSessionStart: false,
+                sixelGraphicsEnabled: true,
+                enableLigatures: true);
+            AssertTerminalBehaviorSettings(
+                [controls[1]],
+                TerminalPasteSafetyPolicy.SanitizeControlSequences,
+                enableTextShaping: false,
+                reflowOnResize: false,
+                preserveScrollbackOnSessionStart: false,
+                sixelGraphicsEnabled: false,
+                enableLigatures: false);
+            AssertTerminalBehaviorSettings(
+                [controls[2]],
+                TerminalPasteSafetyPolicy.BlockUnsafe,
+                enableTextShaping: true,
+                reflowOnResize: true,
+                preserveScrollbackOnSessionStart: false,
+                sixelGraphicsEnabled: true,
+                enableLigatures: true);
+            Assert.Equal(TerminalPasteSafetyPolicy.None, viewModel.SelectedPasteSafetyPolicy);
+            Assert.True(viewModel.SixelGraphicsEnabled);
+            Assert.True(viewModel.EnableLigatures);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Controller_ProfileLaunch_QuotesPipeProfileShellMetacharacters()
     {
         using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);

@@ -934,7 +934,6 @@ internal sealed class MainWindowController
         _viewModel.SessionName = profile.DisplayName;
         _viewModel.SelectedTransportMode = ResolveViewModelTransportMode(profile.Transport.TransportId);
         ApplyProfileAppearance(profile.Appearance);
-        ApplyProfileBehavior(profile.Behavior);
         ApplyProfileLogging(profile.Logging);
         ApplyProfileTransport(profile);
         _viewModel.SetStatus($"Launch profile: {profile.DisplayName}");
@@ -1026,18 +1025,6 @@ internal sealed class MainWindowController
 
     private static string? FormatArgbColor(uint? color)
         => color.HasValue ? "#" + color.Value.ToString("X8", CultureInfo.InvariantCulture) : null;
-
-    private void ApplyProfileBehavior(TerminalSessionBehaviorSettings behavior)
-    {
-        _viewModel.CopyOnSelectEnabled = behavior.CopyOnSelectEnabled;
-        _viewModel.EnableBellNotifications = behavior.EnableBellNotifications;
-        _viewModel.BackspaceSendsControlH = behavior.BackspaceSendsControlH;
-        _viewModel.EnableTextShaping = behavior.EnableTextShaping;
-        _viewModel.ReflowOnResize = behavior.ReflowOnResize;
-        _viewModel.SixelGraphicsEnabled = behavior.SixelGraphicsEnabled;
-        _viewModel.EnableLigatures = behavior.EnableLigatures;
-        _viewModel.SelectedPasteSafetyPolicy = ParsePasteSafetyPolicy(behavior.PasteSafetyPolicy);
-    }
 
     private void ApplyProfileLogging(TerminalSessionLoggingSettings logging)
     {
@@ -1703,6 +1690,7 @@ internal sealed class MainWindowController
         _launchConfigurations[terminal] = new TerminalLaunchConfiguration(
             launchProfile);
         ApplyLaunchAppearanceSettings(terminal, launchProfile.Appearance);
+        ApplyLaunchBehaviorSettings(terminal, launchProfile.Behavior);
         UpdateSessionLoggingSubscription(terminal);
         leafControls.Add(terminal);
         resolvedModes.Add(finalizedModeSelection.ResolvedMode);
@@ -2079,6 +2067,7 @@ internal sealed class MainWindowController
         TerminalLaunchConfiguration launchConfiguration = new(launchProfile);
         _launchConfigurations[terminal] = launchConfiguration;
         ApplyLaunchAppearanceSettings(terminal, launchProfile.Appearance);
+        ApplyLaunchBehaviorSettings(terminal, launchProfile.Behavior);
         UpdateSessionLoggingSubscription(terminal);
 
         ScrollViewer container = CreatePaneScrollViewer(terminal);
@@ -2285,7 +2274,7 @@ internal sealed class MainWindowController
         };
         standaloneControl.Bell += (_, _) =>
         {
-            if (!_viewModel.EnableBellNotifications)
+            if (!GetTerminalBehaviorSettings(standaloneControl).EnableBellNotifications)
             {
                 return;
             }
@@ -2312,7 +2301,7 @@ internal sealed class MainWindowController
         };
         standaloneControl.PointerReleased += async (_, e) =>
         {
-            if (!_viewModel.CopyOnSelectEnabled ||
+            if (!GetTerminalBehaviorSettings(standaloneControl).CopyOnSelectEnabled ||
                 e.InitialPressMouseButton != MouseButton.Left ||
                 !standaloneControl.HasSelection)
             {
@@ -3310,6 +3299,7 @@ internal sealed class MainWindowController
         TerminalLaunchConfiguration newLaunchConfiguration = new(splitLaunchProfile);
         _launchConfigurations[newControl] = newLaunchConfiguration;
         ApplyLaunchAppearanceSettings(newControl, newLaunchConfiguration.Profile.Appearance);
+        ApplyLaunchBehaviorSettings(newControl, newLaunchConfiguration.Profile.Behavior);
         UpdateSessionLoggingSubscription(newControl);
 
         ScrollViewer newContainer = CreatePaneScrollViewer(newControl);
@@ -5244,9 +5234,11 @@ internal sealed class MainWindowController
 
     private void ApplyTerminalBehaviorSettingsToAllStandaloneTabs()
     {
+        TerminalSessionBehaviorSettings behavior = BuildLaunchBehaviorFromViewModel();
         foreach (TerminalControl standaloneControl in EnumerateTerminalControls())
         {
-            ApplyTerminalBehaviorSettings(standaloneControl);
+            ApplyTerminalBehaviorSettings(standaloneControl, behavior);
+            UpdateLaunchConfigurationBehavior(standaloneControl, behavior);
         }
     }
 
@@ -5597,24 +5589,60 @@ internal sealed class MainWindowController
             : FindProfile(_sessionLauncherDocument, profileId);
     }
 
+    private void ApplyLaunchBehaviorSettings(
+        TerminalControl control,
+        TerminalSessionBehaviorSettings behavior)
+    {
+        ApplyTerminalBehaviorSettings(control, behavior);
+    }
+
+    private TerminalSessionBehaviorSettings GetTerminalBehaviorSettings(TerminalControl control)
+    {
+        return _launchConfigurations.TryGetValue(control, out TerminalLaunchConfiguration launchConfiguration)
+            ? launchConfiguration.Profile.Behavior
+            : BuildLaunchBehaviorFromViewModel();
+    }
+
+    private void UpdateLaunchConfigurationBehavior(
+        TerminalControl control,
+        TerminalSessionBehaviorSettings behavior)
+    {
+        if (!_launchConfigurations.TryGetValue(control, out TerminalLaunchConfiguration launchConfiguration))
+        {
+            return;
+        }
+
+        _launchConfigurations[control] = new TerminalLaunchConfiguration(launchConfiguration.Profile with
+        {
+            Behavior = behavior,
+        });
+    }
+
     private void ApplyTerminalBehaviorSettings(TerminalControl control)
     {
-        control.PasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
-        control.ReflowOnResize = _viewModel.ReflowOnResize;
+        ApplyTerminalBehaviorSettings(control, BuildLaunchBehaviorFromViewModel());
+    }
+
+    private void ApplyTerminalBehaviorSettings(
+        TerminalControl control,
+        TerminalSessionBehaviorSettings behavior)
+    {
+        control.PasteSafetyPolicy = ParsePasteSafetyPolicy(behavior.PasteSafetyPolicy);
+        control.ReflowOnResize = behavior.ReflowOnResize;
         control.PreserveScrollbackOnSessionStart = _viewModel.PreserveScrollbackOnRestart;
-        control.SixelGraphicsEnabled = _viewModel.SixelGraphicsEnabled;
+        control.SixelGraphicsEnabled = behavior.SixelGraphicsEnabled;
         SkiaTerminalRenderer? renderer = control.Renderer;
         if (renderer is not null)
         {
-            renderer.EnableTextShaping = _viewModel.EnableTextShaping;
-            renderer.EnableLigatures = _viewModel.EnableLigatures;
+            renderer.EnableTextShaping = behavior.EnableTextShaping;
+            renderer.EnableLigatures = behavior.EnableLigatures;
         }
     }
 
     private void HandleStandaloneKeyDown(TerminalControl control, KeyEventArgs e)
     {
         if (e.Handled ||
-            !_viewModel.BackspaceSendsControlH ||
+            !GetTerminalBehaviorSettings(control).BackspaceSendsControlH ||
             e.Key != Key.Back)
         {
             return;
