@@ -73,6 +73,21 @@ public sealed class TerminalShellIntegrationContractTests
     }
 
     [Fact]
+    public void Parser_Osc133_MalformedCmdlineUrl_IgnoresCommandLine()
+    {
+        TerminalShellIntegrationParser parser = new();
+        TerminalShellIntegrationEvent? captured = null;
+        parser.EventReceived += (_, e) => captured = e.Value;
+
+        bool handled = parser.TryHandleOsc(133, "C;cmdline_url=bad%ZZvalue");
+
+        Assert.True(handled);
+        Assert.NotNull(captured);
+        Assert.Equal(TerminalShellIntegrationEventKind.OutputStarted, captured!.Kind);
+        Assert.Null(captured.CommandLine);
+    }
+
+    [Fact]
     public void Parser_Osc133_IgnoresUnknownOptions_AndDecodesCmdlineEscapes()
     {
         TerminalShellIntegrationParser parser = new();

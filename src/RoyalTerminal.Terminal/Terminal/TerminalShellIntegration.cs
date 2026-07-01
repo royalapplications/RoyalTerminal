@@ -162,7 +162,9 @@ public sealed class TerminalShellIntegrationParser
 
     private static string GetWorkingDirectoryPath(Uri uri)
     {
-        string workingDirectory = Uri.UnescapeDataString(uri.AbsolutePath);
+        string workingDirectory = TryUnescapeDataString(uri.AbsolutePath, out string decodedPath)
+            ? decodedPath
+            : uri.AbsolutePath;
         if (workingDirectory.Length >= 3 &&
             workingDirectory[0] == '/' &&
             IsAsciiLetter(workingDirectory[1]) &&
@@ -317,12 +319,59 @@ public sealed class TerminalShellIntegrationParser
     {
         if (options.TryGetValue("cmdline_url", out string? encodedUrlCommandLine))
         {
-            return Uri.UnescapeDataString(encodedUrlCommandLine);
+            return TryUnescapeDataString(encodedUrlCommandLine, out string decodedCommandLine)
+                ? decodedCommandLine
+                : null;
         }
 
         return options.TryGetValue("cmdline", out string? encodedCommandLine)
             ? DecodeShellQuotedCommandLine(encodedCommandLine)
             : null;
+    }
+
+    private static bool TryUnescapeDataString(string value, out string decoded)
+    {
+        if (ContainsMalformedPercentEscape(value.AsSpan()))
+        {
+            decoded = string.Empty;
+            return false;
+        }
+
+        try
+        {
+            decoded = Uri.UnescapeDataString(value);
+            return true;
+        }
+        catch (UriFormatException)
+        {
+            decoded = string.Empty;
+            return false;
+        }
+    }
+
+    private static bool ContainsMalformedPercentEscape(ReadOnlySpan<char> value)
+    {
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (value[i] != '%')
+            {
+                continue;
+            }
+
+            if (i + 2 >= value.Length ||
+                !IsAsciiHexDigit(value[i + 1]) ||
+                !IsAsciiHexDigit(value[i + 2]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsAsciiHexDigit(char value)
+    {
+        return value is >= '0' and <= '9' or >= 'A' and <= 'F' or >= 'a' and <= 'f';
     }
 
     private static string DecodeShellQuotedCommandLine(string value)

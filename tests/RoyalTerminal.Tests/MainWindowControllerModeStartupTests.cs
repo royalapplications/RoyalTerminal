@@ -146,6 +146,9 @@ public sealed class MainWindowControllerModeStartupTests
                 {
                     Id = "main",
                     SelectedTabId = "tab-two",
+                    WidthPixels = 1366,
+                    HeightPixels = 777,
+                    IsMaximized = true,
                     Tabs =
                     [
                         new TerminalWorkspaceTab
@@ -188,6 +191,9 @@ public sealed class MainWindowControllerModeStartupTests
                 () => terminalHost.Children.Count == 2,
                 TimeSpan.FromSeconds(2));
             Assert.True(restoredTabs);
+            Assert.Equal(1366, window.Width);
+            Assert.Equal(777, window.Height);
+            Assert.Equal(WindowState.Maximized, window.WindowState);
 
             Assert.Single(GetStandaloneControls(terminalHost));
 
@@ -213,6 +219,7 @@ public sealed class MainWindowControllerModeStartupTests
         Assert.Equal(2, savedWindow.Tabs.Count);
         Assert.Equal("main", workspaceStore.Document.SelectedWindowId);
         Assert.False(string.IsNullOrWhiteSpace(savedWindow.SelectedTabId));
+        Assert.True(savedWindow.IsMaximized);
     }
 
     [AvaloniaFact]

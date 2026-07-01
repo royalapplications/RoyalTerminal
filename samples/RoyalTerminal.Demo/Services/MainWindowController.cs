@@ -1146,6 +1146,8 @@ internal sealed class MainWindowController
             return false;
         }
 
+        ApplyWorkspaceWindowState(window);
+
         int selectedIndex = 0;
         for (int i = 0; i < window.Tabs.Count; i++)
         {
@@ -1165,6 +1167,23 @@ internal sealed class MainWindowController
 
         AppendEventLog($"Restored {window.Tabs.Count} workspace tab(s).");
         return true;
+    }
+
+    private void ApplyWorkspaceWindowState(TerminalWorkspaceWindow window)
+    {
+        if (window.WidthPixels > 0)
+        {
+            _window.Width = window.WidthPixels;
+        }
+
+        if (window.HeightPixels > 0)
+        {
+            _window.Height = window.HeightPixels;
+        }
+
+        _window.WindowState = window.IsMaximized
+            ? WindowState.Maximized
+            : WindowState.Normal;
     }
 
     private void RestoreWorkspaceTab(TerminalWorkspaceTab workspaceTab)
@@ -4796,6 +4815,7 @@ internal sealed class MainWindowController
             CreateCommandHistoryCaptureContext(control));
         EventHandler<TerminalShellIntegrationEventArgs> handler = (_, args) =>
         {
+            UpdateRuntimeWorkingDirectory(control, args.Value);
             TerminalCommandHistoryEntry? entry = capture.Process(args.Value);
             if (entry is null)
             {
@@ -4819,6 +4839,28 @@ internal sealed class MainWindowController
         }
 
         _commandHistoryCaptures.Remove(control);
+    }
+
+    private void UpdateRuntimeWorkingDirectory(
+        TerminalControl control,
+        TerminalShellIntegrationEvent value)
+    {
+        if (value.Kind != TerminalShellIntegrationEventKind.WorkingDirectoryChanged)
+        {
+            return;
+        }
+
+        string? workingDirectory = NormalizeOptional(value.WorkingDirectory);
+        if (_paneRuntimeNodes.TryGetValue(control, out TerminalPaneRuntimeNode? node))
+        {
+            node.SetWorkingDirectory(workingDirectory);
+        }
+
+        TerminalTab? tab = FindTabForControl(control);
+        if (tab is not null && (tab.LeafControls.Count <= 1 || ReferenceEquals(tab.Control, control)))
+        {
+            tab.SetWorkingDirectory(workingDirectory);
+        }
     }
 
     private TerminalCommandHistoryCaptureContext CreateCommandHistoryCaptureContext(TerminalControl control)
@@ -5129,6 +5171,20 @@ internal sealed class MainWindowController
         return "Terminal";
     }
 
+    private TerminalTab? FindTabForControl(TerminalControl control)
+    {
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            TerminalTab tab = _tabs[i];
+            if (ReferenceEquals(tab.Control, control) || ContainsControl(tab.LeafControls, control))
+            {
+                return tab;
+            }
+        }
+
+        return null;
+    }
+
     private void UpdateStatus(string text)
     {
         _viewModel.SetStatus(text);
@@ -5254,6 +5310,7 @@ internal sealed class MainWindowController
             SelectedTabId = selectedTabId,
             WidthPixels = Math.Max(1, (int)Math.Round(_window.Bounds.Width)),
             HeightPixels = Math.Max(1, (int)Math.Round(_window.Bounds.Height)),
+            IsMaximized = _window.WindowState == WindowState.Maximized,
             Tabs = tabs,
         };
 
@@ -5676,7 +5733,7 @@ internal sealed class MainWindowController
         public TerminalRenderMode ResolvedMode { get; }
         public string ProfileId { get; }
         public string TransportId { get; }
-        public string? WorkingDirectory { get; }
+        public string? WorkingDirectory { get; private set; }
         public string? WorkspaceId { get; }
         public TerminalWorkspacePane? RootPane { get; }
         public TerminalPaneRuntimeNode? RootPaneNode { get; private set; }
@@ -5693,6 +5750,11 @@ internal sealed class MainWindowController
         public void SetModeName(string modeName)
         {
             ModeName = modeName;
+        }
+
+        public void SetWorkingDirectory(string? workingDirectory)
+        {
+            WorkingDirectory = workingDirectory;
         }
 
         public void SetPaneRoot(
@@ -5734,7 +5796,7 @@ internal sealed class MainWindowController
         public string Id { get; }
         public string? Title { get; }
         public string? ProfileId { get; }
-        public string? WorkingDirectory { get; }
+        public string? WorkingDirectory { get; private set; }
         public string? TransportId { get; }
         public string? TransportProfileId { get; }
         public TerminalPaneRuntimeNode? Parent { get; set; }
@@ -5756,6 +5818,11 @@ internal sealed class MainWindowController
             Orientation = null;
             SplitGrid = null;
             Visual = container;
+        }
+
+        public void SetWorkingDirectory(string? workingDirectory)
+        {
+            WorkingDirectory = workingDirectory;
         }
 
         public void SetSplit(
