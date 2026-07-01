@@ -990,6 +990,41 @@ internal sealed class MainWindowController
         return rules.Count == 0 ? [] : rules;
     }
 
+    private static List<TerminalSessionTextHighlightRule> BuildSessionTextHighlightRules(
+        IReadOnlyList<TerminalTextHighlightRule>? rules)
+    {
+        if (rules is null || rules.Count == 0)
+        {
+            return [];
+        }
+
+        List<TerminalSessionTextHighlightRule> result = new(rules.Count);
+        for (int i = 0; i < rules.Count; i++)
+        {
+            TerminalTextHighlightRule rule = rules[i];
+            if (string.IsNullOrWhiteSpace(rule.Pattern))
+            {
+                continue;
+            }
+
+            result.Add(new TerminalSessionTextHighlightRule
+            {
+                Name = string.IsNullOrWhiteSpace(rule.Name) ? "Highlight Rule" : rule.Name.Trim(),
+                Pattern = rule.Pattern.Trim(),
+                IsEnabled = rule.IsEnabled,
+                ForegroundColor = FormatArgbColor(rule.Foreground),
+                BackgroundColor = FormatArgbColor(rule.Background),
+                DarkForegroundColor = FormatArgbColor(rule.DarkForeground),
+                DarkBackgroundColor = FormatArgbColor(rule.DarkBackground),
+            });
+        }
+
+        return result;
+    }
+
+    private static string? FormatArgbColor(uint? color)
+        => color.HasValue ? "#" + color.Value.ToString("X8", CultureInfo.InvariantCulture) : null;
+
     private void ApplyProfileBehavior(TerminalSessionBehaviorSettings behavior)
     {
         _viewModel.CopyOnSelectEnabled = behavior.CopyOnSelectEnabled;
@@ -1251,7 +1286,60 @@ internal sealed class MainWindowController
         {
             Id = profileId,
             DisplayName = displayName,
+            Appearance = BuildLaunchAppearanceFromViewModel(),
+            Behavior = BuildLaunchBehaviorFromViewModel(),
+            Logging = _viewModel.GetSessionLoggingSettings(),
             Transport = transport,
+        };
+    }
+
+    private TerminalSessionAppearanceSettings BuildLaunchAppearanceFromViewModel(
+        bool autoScroll = true,
+        bool backgroundOpacityEnabled = false)
+    {
+        string fontFamily = NormalizeFontFamily(_viewModel.FontFamilyName);
+        string fontFilePath = NormalizeFontFilePath(_viewModel.FontSource, _viewModel.FontFilePath);
+        TerminalFontSource fontSource = _viewModel.FontSource == TerminalFontSource.File &&
+            !string.IsNullOrWhiteSpace(fontFilePath)
+                ? TerminalFontSource.File
+                : TerminalFontSource.System;
+
+        return new TerminalSessionAppearanceSettings
+        {
+            FontSource = fontSource,
+            FontFamilyName = fontFamily,
+            FontFilePath = fontSource == TerminalFontSource.File ? fontFilePath : null,
+            FontSize = _viewModel.FontSize > 0 ? _viewModel.FontSize : 14.0,
+            FontRendering = new TerminalFontRenderingSettings
+            {
+                SubpixelPositioning = _viewModel.FontSubpixelPositioning,
+                Edging = _viewModel.FontEdging,
+                Hinting = _viewModel.FontHinting,
+                BaselineSnap = _viewModel.FontBaselineSnap,
+                EmbeddedBitmaps = _viewModel.FontEmbeddedBitmaps,
+                Embolden = _viewModel.FontEmbolden,
+                ForceAutoHinting = _viewModel.FontForceAutoHinting,
+                LinearMetrics = _viewModel.FontLinearMetrics,
+            },
+            AutoScroll = autoScroll,
+            BackgroundOpacityEnabled = backgroundOpacityEnabled,
+            TextHighlightingMode = _viewModel.TextHighlightingMode,
+            TextHighlightRules = BuildSessionTextHighlightRules(_viewModel.TextHighlightRules),
+        };
+    }
+
+    private TerminalSessionBehaviorSettings BuildLaunchBehaviorFromViewModel()
+    {
+        return new TerminalSessionBehaviorSettings
+        {
+            CopyOnSelectEnabled = _viewModel.CopyOnSelectEnabled,
+            EnableBellNotifications = _viewModel.EnableBellNotifications,
+            BackspaceSendsControlH = _viewModel.BackspaceSendsControlH,
+            EnableTextShaping = _viewModel.EnableTextShaping,
+            ReflowOnResize = _viewModel.ReflowOnResize,
+            SixelGraphicsEnabled = _viewModel.SixelGraphicsEnabled,
+            EnableLigatures = _viewModel.EnableLigatures,
+            PasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy.ToString(),
         };
     }
 
@@ -1571,7 +1659,8 @@ internal sealed class MainWindowController
             savedProfile);
         _launchConfigurations[terminal] = new TerminalLaunchConfiguration(
             launchProfile);
-        ApplyLaunchAppearanceSettings(terminal, launchProfile);
+        ApplyLaunchAppearanceSettings(terminal, launchProfile.Appearance);
+        UpdateSessionLoggingSubscription(terminal);
         leafControls.Add(terminal);
         resolvedModes.Add(finalizedModeSelection.ResolvedMode);
 
@@ -1946,7 +2035,8 @@ internal sealed class MainWindowController
         string? workingDirectory = GetProfileWorkingDirectory(launchProfile);
         TerminalLaunchConfiguration launchConfiguration = new(launchProfile);
         _launchConfigurations[terminal] = launchConfiguration;
-        ApplyLaunchAppearanceSettings(terminal, launchProfile);
+        ApplyLaunchAppearanceSettings(terminal, launchProfile.Appearance);
+        UpdateSessionLoggingSubscription(terminal);
 
         ScrollViewer container = CreatePaneScrollViewer(terminal);
         TerminalPaneRuntimeNode rootPaneNode = new(
@@ -3167,13 +3257,17 @@ internal sealed class MainWindowController
         TerminalLaunchConfiguration activeLaunchConfiguration = GetLaunchConfiguration(activeControl);
         string? splitWorkingDirectory = NormalizeOptional(activeNode.WorkingDirectory) ??
                                         NormalizeOptional(tab.WorkingDirectory);
-        TerminalLaunchConfiguration newLaunchConfiguration = splitWorkingDirectory is null
-            ? activeLaunchConfiguration
-            : new TerminalLaunchConfiguration(ApplyLaunchWorkingDirectory(
-                activeLaunchConfiguration.Profile,
-                splitWorkingDirectory));
+        TerminalSessionProfile splitLaunchProfile = splitWorkingDirectory is null
+            ? activeLaunchConfiguration.Profile
+            : ApplyLaunchWorkingDirectory(activeLaunchConfiguration.Profile, splitWorkingDirectory);
+        splitLaunchProfile = splitLaunchProfile with
+        {
+            Appearance = BuildAppearanceSettingsFromControl(activeControl),
+        };
+        TerminalLaunchConfiguration newLaunchConfiguration = new(splitLaunchProfile);
         _launchConfigurations[newControl] = newLaunchConfiguration;
-        ApplyLaunchAppearanceSettings(newControl, newLaunchConfiguration.Profile);
+        ApplyLaunchAppearanceSettings(newControl, newLaunchConfiguration.Profile.Appearance);
+        UpdateSessionLoggingSubscription(newControl);
 
         ScrollViewer newContainer = CreatePaneScrollViewer(newControl);
         TerminalPaneRuntimeNode newNode = new(
@@ -4421,10 +4515,62 @@ internal sealed class MainWindowController
 
     private static void ApplyLaunchAppearanceSettings(
         TerminalControl standalone,
-        TerminalSessionProfile profile)
+        TerminalSessionAppearanceSettings appearance)
     {
-        standalone.AutoScroll = profile.Appearance.AutoScroll;
-        standalone.BackgroundOpacityEnabled = profile.Appearance.BackgroundOpacityEnabled;
+        string fontFamily = NormalizeFontFamily(appearance.FontFamilyName);
+        string fontFilePath = NormalizeFontFilePath(appearance.FontSource, appearance.FontFilePath);
+
+        standalone.FontFamilyName = fontFamily;
+        standalone.FontFilePath = fontFilePath;
+        standalone.FontSource = appearance.FontSource == TerminalFontSource.File &&
+            !string.IsNullOrWhiteSpace(fontFilePath)
+                ? TerminalFontSource.File
+                : TerminalFontSource.System;
+        standalone.TerminalFontSize = appearance.FontSize > 0 ? appearance.FontSize : 14.0;
+        standalone.FontSubpixelPositioning = appearance.FontRendering.SubpixelPositioning;
+        standalone.FontEdging = appearance.FontRendering.Edging;
+        standalone.FontHinting = appearance.FontRendering.Hinting;
+        standalone.FontBaselineSnap = appearance.FontRendering.BaselineSnap;
+        standalone.FontEmbeddedBitmaps = appearance.FontRendering.EmbeddedBitmaps;
+        standalone.FontEmbolden = appearance.FontRendering.Embolden;
+        standalone.FontForceAutoHinting = appearance.FontRendering.ForceAutoHinting;
+        standalone.FontLinearMetrics = appearance.FontRendering.LinearMetrics;
+        standalone.AutoScroll = appearance.AutoScroll;
+        standalone.BackgroundOpacityEnabled = appearance.BackgroundOpacityEnabled;
+        standalone.TextHighlightingMode = appearance.TextHighlightingMode;
+        standalone.TextHighlightRules = BuildRuntimeTextHighlightRules(null, appearance);
+    }
+
+    private static TerminalSessionAppearanceSettings BuildAppearanceSettingsFromControl(TerminalControl control)
+    {
+        string fontFilePath = NormalizeFontFilePath(control.FontSource, control.FontFilePath);
+        TerminalFontSource fontSource = control.FontSource == TerminalFontSource.File &&
+            !string.IsNullOrWhiteSpace(fontFilePath)
+                ? TerminalFontSource.File
+                : TerminalFontSource.System;
+
+        return new TerminalSessionAppearanceSettings
+        {
+            FontSource = fontSource,
+            FontFamilyName = NormalizeFontFamily(control.FontFamilyName),
+            FontFilePath = fontSource == TerminalFontSource.File ? fontFilePath : null,
+            FontSize = control.TerminalFontSize > 0 ? control.TerminalFontSize : 14.0,
+            FontRendering = new TerminalFontRenderingSettings
+            {
+                SubpixelPositioning = control.FontSubpixelPositioning,
+                Edging = control.FontEdging,
+                Hinting = control.FontHinting,
+                BaselineSnap = control.FontBaselineSnap,
+                EmbeddedBitmaps = control.FontEmbeddedBitmaps,
+                Embolden = control.FontEmbolden,
+                ForceAutoHinting = control.FontForceAutoHinting,
+                LinearMetrics = control.FontLinearMetrics,
+            },
+            AutoScroll = control.AutoScroll,
+            BackgroundOpacityEnabled = control.BackgroundOpacityEnabled,
+            TextHighlightingMode = control.TextHighlightingMode,
+            TextHighlightRules = BuildSessionTextHighlightRules(control.TextHighlightRules),
+        };
     }
 
     private static string NormalizeFontFamily(string? fontFamilyName)
@@ -4876,10 +5022,28 @@ internal sealed class MainWindowController
             standaloneControl.TextHighlightRules = _viewModel.TextHighlightRules;
         }
 
+        UpdateLaunchConfigurationsFromRuntimeControls();
+        ApplySessionLoggingSubscriptionsToAllStandaloneTabs();
         ApplyTerminalBehaviorSettingsToAllStandaloneTabs();
         _sessionLauncherDocument = state.BuildDocument();
         RefreshSessionLauncherOptions(_sessionLauncherDocument);
         state.SetStatus("Applied settings to demo runtime.");
+    }
+
+    private void UpdateLaunchConfigurationsFromRuntimeControls()
+    {
+        TerminalSessionBehaviorSettings behavior = BuildLaunchBehaviorFromViewModel();
+        TerminalSessionLoggingSettings logging = _viewModel.GetSessionLoggingSettings();
+        foreach (TerminalControl control in EnumerateTerminalControls())
+        {
+            TerminalLaunchConfiguration configuration = GetLaunchConfiguration(control);
+            _launchConfigurations[control] = new TerminalLaunchConfiguration(configuration.Profile with
+            {
+                Appearance = BuildAppearanceSettingsFromControl(control),
+                Behavior = behavior,
+                Logging = logging,
+            });
+        }
     }
 
     private static IReadOnlyList<TerminalTextHighlightRule> BuildRuntimeTextHighlightRules(
@@ -5041,7 +5205,7 @@ internal sealed class MainWindowController
 
     private void UpdateSessionLoggingSubscription(TerminalControl control)
     {
-        if (_viewModel.SessionLoggingEnabled)
+        if (GetSessionLoggingSettings(control).Enabled)
         {
             if (_sessionLogOutputHandlers.ContainsKey(control))
             {
@@ -5062,6 +5226,13 @@ internal sealed class MainWindowController
         {
             control.DataReceived -= existingHandler;
         }
+    }
+
+    private TerminalSessionLoggingSettings GetSessionLoggingSettings(TerminalControl control)
+    {
+        return _launchConfigurations.TryGetValue(control, out TerminalLaunchConfiguration launchConfiguration)
+            ? launchConfiguration.Profile.Logging
+            : _viewModel.GetSessionLoggingSettings();
     }
 
     private void RegisterCommandHistoryCapture(TerminalControl control)
@@ -5408,25 +5579,27 @@ internal sealed class MainWindowController
 
     private void WriteSessionLogOutput(TerminalControl control, ReadOnlyMemory<byte> data)
     {
-        if (data.IsEmpty || !_viewModel.SessionLoggingEnabled)
+        TerminalSessionLoggingSettings settings = GetSessionLoggingSettings(control);
+        if (data.IsEmpty || !settings.Enabled)
         {
             return;
         }
 
         EnsureSessionLogWriter(control).WriteOutput(
-            _viewModel.GetSessionLoggingSettings(),
+            settings,
             data);
     }
 
     private void WriteSessionLogInput(TerminalControl control, ReadOnlyMemory<byte> data)
     {
-        if (data.IsEmpty || !_viewModel.SessionLoggingEnabled)
+        TerminalSessionLoggingSettings settings = GetSessionLoggingSettings(control);
+        if (data.IsEmpty || !settings.Enabled)
         {
             return;
         }
 
         EnsureSessionLogWriter(control).WriteInput(
-            _viewModel.GetSessionLoggingSettings(),
+            settings,
             data);
     }
 

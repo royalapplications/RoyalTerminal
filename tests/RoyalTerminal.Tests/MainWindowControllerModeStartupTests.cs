@@ -1170,6 +1170,253 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_ProfileSessionLogging_RemainsScopedToLaunchedControl()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        string directory = Path.Combine(Path.GetTempPath(), "royalterminal-tests", Guid.NewGuid().ToString("N"));
+        string firstLogPath = Path.Combine(directory, "first.log");
+        string secondLogPath = Path.Combine(directory, "second.log");
+        TerminalSessionProfilesDocument document = new()
+        {
+            DefaultProfileId = "first",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "first",
+                    DisplayName = "First",
+                    Transport = CreatePipeTransportProfile("echo first"),
+                    Logging = new TerminalSessionLoggingSettings
+                    {
+                        Enabled = true,
+                        FilePath = firstLogPath,
+                        Format = TerminalSessionLogFormat.PlainText,
+                        FlushFrequently = true,
+                    },
+                },
+                new TerminalSessionProfile
+                {
+                    Id = "second",
+                    DisplayName = "Second",
+                    Transport = CreatePipeTransportProfile("echo second"),
+                    Logging = new TerminalSessionLoggingSettings
+                    {
+                        Enabled = true,
+                        FilePath = secondLogPath,
+                        Format = TerminalSessionLogFormat.PlainText,
+                        FlushFrequently = true,
+                    },
+                },
+            ],
+        };
+        InMemoryProfileStore profileStore = new(document);
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo startup";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: profileStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.LaunchSessionProfileCommand.Execute("profile:first").Wait();
+            bool firstProfileTabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(firstProfileTabCreated);
+
+            viewModel.LaunchSessionProfileCommand.Execute("profile:second").Wait();
+            bool secondProfileTabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 3,
+                TimeSpan.FromSeconds(2));
+            Assert.True(secondProfileTabCreated);
+
+            List<TerminalControl> controls = GetStandaloneControls(terminalHost);
+            TerminalControl firstProfileControl = controls[1];
+            TerminalControl secondProfileControl = controls[2];
+
+            firstProfileControl.WriteOutput(Encoding.UTF8.GetBytes("first-profile-output\n"));
+            secondProfileControl.WriteOutput(Encoding.UTF8.GetBytes("second-profile-output\n"));
+            Dispatcher.UIThread.RunJobs();
+
+            bool logsWritten = await WaitUntilAsync(
+                () => File.Exists(firstLogPath) &&
+                      File.Exists(secondLogPath) &&
+                      File.ReadAllText(firstLogPath).Contains("first-profile-output", StringComparison.Ordinal) &&
+                      File.ReadAllText(secondLogPath).Contains("second-profile-output", StringComparison.Ordinal),
+                TimeSpan.FromSeconds(2));
+            Assert.True(logsWritten);
+
+            string firstLog = File.ReadAllText(firstLogPath);
+            string secondLog = File.ReadAllText(secondLogPath);
+            Assert.DoesNotContain("second-profile-output", firstLog, StringComparison.Ordinal);
+            Assert.DoesNotContain("first-profile-output", secondLog, StringComparison.Ordinal);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_SplitPaneFromProfile_ClonesActiveAppearanceAfterOtherProfileLaunch()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        TerminalSessionProfilesDocument document = new()
+        {
+            DefaultProfileId = "profile-a",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "profile-a",
+                    DisplayName = "Profile A",
+                    Transport = CreatePipeTransportProfile("echo profile-a"),
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        FontFamilyName = "Profile A Mono",
+                        FontSize = 19.0,
+                        FontRendering = new TerminalFontRenderingSettings
+                        {
+                            SubpixelPositioning = false,
+                            Edging = TerminalFontEdging.Alias,
+                            Hinting = TerminalFontHinting.None,
+                            BaselineSnap = false,
+                            EmbeddedBitmaps = true,
+                            Embolden = true,
+                            ForceAutoHinting = true,
+                            LinearMetrics = true,
+                        },
+                        AutoScroll = false,
+                        BackgroundOpacityEnabled = true,
+                        TextHighlightingMode = TerminalTextHighlightingMode.Realtime,
+                        TextHighlightRules =
+                        [
+                            new TerminalSessionTextHighlightRule
+                            {
+                                Name = "Errors",
+                                Pattern = "ERROR",
+                                ForegroundColor = "#FFFF0000",
+                            },
+                        ],
+                    },
+                },
+                new TerminalSessionProfile
+                {
+                    Id = "profile-b",
+                    DisplayName = "Profile B",
+                    Transport = CreatePipeTransportProfile("echo profile-b"),
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        FontFamilyName = "Profile B Mono",
+                        FontSize = 11.0,
+                        AutoScroll = true,
+                        BackgroundOpacityEnabled = false,
+                        TextHighlightingMode = TerminalTextHighlightingMode.Disabled,
+                    },
+                },
+            ],
+        };
+        InMemoryProfileStore profileStore = new(document);
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo startup";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: profileStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-a").Wait();
+            bool profileATabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(profileATabCreated);
+            TerminalControl profileAControl = GetVisibleStandaloneControl(terminalHost);
+
+            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-b").Wait();
+            bool profileBTabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 3,
+                TimeSpan.FromSeconds(2));
+            Assert.True(profileBTabCreated);
+            Assert.Equal(11.0, GetVisibleStandaloneControl(terminalHost).TerminalFontSize);
+
+            viewModel.ActivateTabCommand.Execute(2).Wait();
+            bool profileAReactivated = await WaitUntilAsync(
+                () => ReferenceEquals(GetVisibleStandaloneControl(terminalHost), profileAControl),
+                TimeSpan.FromSeconds(2));
+            Assert.True(profileAReactivated);
+
+            viewModel.SplitPaneRightCommand.Execute().Wait();
+            bool splitCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 4,
+                TimeSpan.FromSeconds(2));
+            Assert.True(splitCreated);
+
+            TerminalControl splitControl = Assert.Single(
+                GetStandaloneControls(terminalHost),
+                control => !ReferenceEquals(control, profileAControl) && control.TerminalFontSize == 19.0);
+            Assert.Equal("Profile A Mono", splitControl.FontFamilyName);
+            Assert.Equal(TerminalFontSource.System, splitControl.FontSource);
+            Assert.False(splitControl.FontSubpixelPositioning);
+            Assert.Equal(TerminalFontEdging.Alias, splitControl.FontEdging);
+            Assert.Equal(TerminalFontHinting.None, splitControl.FontHinting);
+            Assert.False(splitControl.FontBaselineSnap);
+            Assert.True(splitControl.FontEmbeddedBitmaps);
+            Assert.True(splitControl.FontEmbolden);
+            Assert.True(splitControl.FontForceAutoHinting);
+            Assert.True(splitControl.FontLinearMetrics);
+            Assert.False(splitControl.AutoScroll);
+            Assert.True(splitControl.BackgroundOpacityEnabled);
+            Assert.Equal(TerminalTextHighlightingMode.Realtime, splitControl.TextHighlightingMode);
+            TerminalTextHighlightRule rule = Assert.Single(splitControl.TextHighlightRules ?? []);
+            Assert.Equal("Errors", rule.Name);
+            Assert.Equal("ERROR", rule.Pattern);
+            Assert.Equal(0xFFFF0000u, rule.Foreground);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Controller_StandaloneTerminalOutput_DoesNotSpamStatusBar()
     {
         MainWindowViewModel viewModel = new();
@@ -1687,6 +1934,19 @@ public sealed class MainWindowControllerModeStartupTests
         }
 
         throw new InvalidOperationException($"Transport mode '{id}' was not found.");
+    }
+
+    private static TerminalSessionTransportProfile CreatePipeTransportProfile(string command)
+    {
+        return new TerminalSessionTransportProfile
+        {
+            TransportId = TerminalTransportIds.Pipe,
+            Pipe = new TerminalSessionPipeSettings
+            {
+                FileName = "echo",
+                Arguments = [command],
+            },
+        };
     }
 
     private static void SetRequestedMode(MainWindowViewModel viewModel, TerminalRenderMode requestedMode)
