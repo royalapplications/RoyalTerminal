@@ -15,6 +15,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Chrome;
+using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Presenters;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -22,6 +25,7 @@ using Avalonia.Media;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Capture;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
@@ -54,6 +58,8 @@ internal sealed class MainWindowController
     private const string EnableRenderDiagnosticsEnvVar = "ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS";
     private const string StartAllRenderModesEnvVar = "ROYALTERMINAL_DEMO_START_ALL_RENDER_MODES";
     private const string TextRenderPipelineEnvVar = "ROYALTERMINAL_TEXT_RENDER_PIPELINE";
+    private const double TabStripScrollStep = 220d;
+    private const double TabStripWheelScrollStep = 80d;
     private const string DismissRegularIconResourceKey = "Icon.DismissRegular";
     private const string DismissRegularIconPathData =
         "M4.39705 4.55379L4.46967 4.46967C4.73594 4.2034 5.1526 4.1792 5.44621 4.39705" +
@@ -86,7 +92,16 @@ internal sealed class MainWindowController
     private readonly Window _window;
     private readonly MainWindowViewModel _viewModel;
     private readonly Grid _terminalHost;
+    private readonly ContentControl _titleBarTabStripHost;
+    private readonly ContentControl _bodyTabStripHost;
+    private readonly Border _tabStripSurface;
+    private readonly Grid _tabStripLayout;
+    private readonly ScrollViewer _tabStripScrollViewer;
+    private readonly RepeatButton _tabStripScrollLeftButton;
+    private readonly RepeatButton _tabStripScrollRightButton;
     private readonly StackPanel _tabStrip;
+    private readonly Button _tabStripNewTabButton;
+    private ScrollContentPresenter? _tabStripScrollContentPresenter;
     private readonly List<TerminalTab> _tabs = [];
     private readonly HashSet<TerminalControl> _startingStandaloneControls = [];
     private readonly Dictionary<TerminalControl, TerminalCaptureRuntime> _captureRuntimes = [];
@@ -144,14 +159,31 @@ internal sealed class MainWindowController
         _workspaceStore = workspaceStore ?? TerminalWorkspaceStoreFactory.CreateDefault();
         _terminalHost = _window.FindControl<Grid>("TerminalHost")
             ?? throw new InvalidOperationException("TerminalHost was not found in MainWindow.");
+        _titleBarTabStripHost = _window.FindControl<ContentControl>("TitleBarTabStripHost")
+            ?? throw new InvalidOperationException("TitleBarTabStripHost was not found in MainWindow.");
+        _bodyTabStripHost = _window.FindControl<ContentControl>("BodyTabStripHost")
+            ?? throw new InvalidOperationException("BodyTabStripHost was not found in MainWindow.");
+        _tabStripSurface = _window.FindControl<Border>("TabStripSurface")
+            ?? throw new InvalidOperationException("TabStripSurface was not found in MainWindow.");
+        _tabStripLayout = _window.FindControl<Grid>("TabStripLayout")
+            ?? throw new InvalidOperationException("TabStripLayout was not found in MainWindow.");
+        _tabStripScrollViewer = _window.FindControl<ScrollViewer>("TabStripScrollViewer")
+            ?? throw new InvalidOperationException("TabStripScrollViewer was not found in MainWindow.");
+        _tabStripScrollLeftButton = _window.FindControl<RepeatButton>("TabStripScrollLeftButton")
+            ?? throw new InvalidOperationException("TabStripScrollLeftButton was not found in MainWindow.");
+        _tabStripScrollRightButton = _window.FindControl<RepeatButton>("TabStripScrollRightButton")
+            ?? throw new InvalidOperationException("TabStripScrollRightButton was not found in MainWindow.");
         _tabStrip = _window.FindControl<StackPanel>("TabStrip")
             ?? throw new InvalidOperationException("TabStrip was not found in MainWindow.");
+        _tabStripNewTabButton = _window.FindControl<Button>("TabStripNewTabButton")
+            ?? throw new InvalidOperationException("TabStripNewTabButton was not found in MainWindow.");
     }
 
     public IDisposable Activate()
     {
         CompositeDisposable lifetime = new();
         RegisterInteractionHandlers(lifetime);
+        RegisterShellLayoutHandlers(lifetime);
 
         _terminalCapabilities = _modeCapabilityResolver.Resolve(GhosttyVtProcessor.IsAvailable());
         _viewModel.SetTerminalCapabilities(_terminalCapabilities);
@@ -448,6 +480,207 @@ internal sealed class MainWindowController
         disposables.Add(_viewModel
             .WhenAnyValue(model => model.SessionLoggingEnabled)
             .Subscribe(_ => ApplySessionLoggingSubscriptionsToAllStandaloneTabs()));
+    }
+
+    private void RegisterShellLayoutHandlers(CompositeDisposable disposables)
+    {
+        disposables.Add(_viewModel
+            .WhenAnyValue(static viewModel => viewModel.IsTabsInTitleBar)
+            .Subscribe(ApplyTabsInTitleBarLayout));
+
+        _tabStripScrollLeftButton.Click += OnTabStripScrollLeftClicked;
+        _tabStripScrollRightButton.Click += OnTabStripScrollRightClicked;
+        _tabStripScrollViewer.TemplateApplied += OnTabStripScrollViewerTemplateApplied;
+        _tabStripScrollViewer.ScrollChanged += OnTabStripScrollChanged;
+        _tabStripSurface.AddHandler(
+            InputElement.PointerWheelChangedEvent,
+            OnTabStripPointerWheelChanged,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        disposables.Add(Disposable.Create(() =>
+        {
+            _tabStripScrollLeftButton.Click -= OnTabStripScrollLeftClicked;
+            _tabStripScrollRightButton.Click -= OnTabStripScrollRightClicked;
+            _tabStripScrollViewer.TemplateApplied -= OnTabStripScrollViewerTemplateApplied;
+            _tabStripScrollViewer.ScrollChanged -= OnTabStripScrollChanged;
+            _tabStripSurface.RemoveHandler(InputElement.PointerWheelChangedEvent, OnTabStripPointerWheelChanged);
+        }));
+
+        QueueTabStripScrollStateUpdate();
+    }
+
+    private void ApplyTabsInTitleBarLayout(bool tabsInTitleBar)
+    {
+        ContentControl targetHost = tabsInTitleBar
+            ? _titleBarTabStripHost
+            : _bodyTabStripHost;
+
+        if (!ReferenceEquals(targetHost.Content, _tabStripSurface))
+        {
+            if (ReferenceEquals(_titleBarTabStripHost.Content, _tabStripSurface))
+            {
+                _titleBarTabStripHost.Content = null;
+            }
+
+            if (ReferenceEquals(_bodyTabStripHost.Content, _tabStripSurface))
+            {
+                _bodyTabStripHost.Content = null;
+            }
+
+            targetHost.Content = _tabStripSurface;
+        }
+
+        _tabStripSurface.Classes.Set("titleBarTabs", tabsInTitleBar);
+        _tabStripSurface.Classes.Set("bodyTabs", !tabsInTitleBar);
+        WindowDecorationProperties.SetElementRole(
+            _tabStripSurface,
+            tabsInTitleBar
+                ? WindowDecorationsElementRole.TitleBar
+                : WindowDecorationsElementRole.None);
+        WindowDecorationProperties.SetElementRole(
+            _tabStripLayout,
+            tabsInTitleBar
+                ? WindowDecorationsElementRole.TitleBar
+                : WindowDecorationsElementRole.None);
+        WindowDecorationProperties.SetElementRole(
+            _tabStripScrollViewer,
+            tabsInTitleBar
+                ? WindowDecorationsElementRole.TitleBar
+                : WindowDecorationsElementRole.None);
+        WindowDecorationProperties.SetElementRole(
+            _tabStrip,
+            tabsInTitleBar
+                ? WindowDecorationsElementRole.TitleBar
+                : WindowDecorationsElementRole.None);
+        ApplyTabStripScrollContentPresenterRole(tabsInTitleBar);
+        WindowDecorationProperties.SetElementRole(
+            _tabStripNewTabButton,
+            WindowDecorationsElementRole.User);
+        WindowDecorationProperties.SetElementRole(
+            _tabStripScrollLeftButton,
+            WindowDecorationsElementRole.User);
+        WindowDecorationProperties.SetElementRole(
+            _tabStripScrollRightButton,
+            WindowDecorationsElementRole.User);
+        QueueTabStripScrollStateUpdate();
+    }
+
+    private void OnTabStripScrollViewerTemplateApplied(object? sender, TemplateAppliedEventArgs e)
+    {
+        _tabStripScrollContentPresenter = e.NameScope.Find<ScrollContentPresenter>("PART_ContentPresenter");
+        ApplyTabStripScrollContentPresenterRole(_viewModel.IsTabsInTitleBar);
+    }
+
+    private void ApplyTabStripScrollContentPresenterRole(bool tabsInTitleBar)
+    {
+        ScrollContentPresenter? presenter = _tabStripScrollContentPresenter ?? FindTabStripScrollContentPresenter();
+        if (presenter is null)
+        {
+            return;
+        }
+
+        _tabStripScrollContentPresenter = presenter;
+        WindowDecorationProperties.SetElementRole(
+            presenter,
+            tabsInTitleBar
+                ? WindowDecorationsElementRole.TitleBar
+                : WindowDecorationsElementRole.None);
+    }
+
+    private ScrollContentPresenter? FindTabStripScrollContentPresenter()
+    {
+        foreach (object descendant in _tabStripScrollViewer.GetVisualDescendants())
+        {
+            if (descendant is ScrollContentPresenter presenter)
+            {
+                return presenter;
+            }
+        }
+
+        return null;
+    }
+
+    private void OnTabStripScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        UpdateTabStripScrollButtons();
+    }
+
+    private void OnTabStripPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        if (GetTabStripMaxHorizontalOffset() <= 0.5)
+        {
+            return;
+        }
+
+        double delta = Math.Abs(e.Delta.X) > Math.Abs(e.Delta.Y)
+            ? -e.Delta.X
+            : -e.Delta.Y;
+        if (Math.Abs(delta) <= double.Epsilon)
+        {
+            return;
+        }
+
+        ScrollTabStripBy(delta * TabStripWheelScrollStep);
+        e.Handled = true;
+    }
+
+    private void OnTabStripScrollLeftClicked(object? sender, RoutedEventArgs e)
+    {
+        ScrollTabStripBy(-TabStripScrollStep);
+        e.Handled = true;
+    }
+
+    private void OnTabStripScrollRightClicked(object? sender, RoutedEventArgs e)
+    {
+        ScrollTabStripBy(TabStripScrollStep);
+        e.Handled = true;
+    }
+
+    private void ScrollTabStripBy(double delta)
+    {
+        double maxOffset = GetTabStripMaxHorizontalOffset();
+        Vector offset = _tabStripScrollViewer.Offset;
+        double nextOffset = Math.Clamp(offset.X + delta, 0d, maxOffset);
+        _tabStripScrollViewer.Offset = new Vector(nextOffset, offset.Y);
+        UpdateTabStripScrollButtons();
+    }
+
+    private void QueueTabStripScrollStateUpdate()
+    {
+        Dispatcher.UIThread.Post(UpdateTabStripScrollButtons, DispatcherPriority.Background);
+    }
+
+    private void UpdateTabStripScrollButtons()
+    {
+        double maxOffset = GetTabStripMaxHorizontalOffset();
+        Vector offset = _tabStripScrollViewer.Offset;
+        double clampedOffset = Math.Clamp(offset.X, 0d, maxOffset);
+        if (Math.Abs(clampedOffset - offset.X) > 0.5)
+        {
+            _tabStripScrollViewer.Offset = new Vector(clampedOffset, offset.Y);
+            offset = _tabStripScrollViewer.Offset;
+        }
+
+        bool canScroll = maxOffset > 0.5;
+        _tabStripScrollLeftButton.IsVisible = canScroll;
+        _tabStripScrollRightButton.IsVisible = canScroll;
+        _tabStripScrollLeftButton.IsEnabled = canScroll && offset.X > 0.5;
+        _tabStripScrollRightButton.IsEnabled = canScroll && offset.X < maxOffset - 0.5;
+    }
+
+    private double GetTabStripMaxHorizontalOffset()
+    {
+        Size extent = _tabStripScrollViewer.Extent;
+        Size viewport = _tabStripScrollViewer.Viewport;
+        if (double.IsNaN(extent.Width) ||
+            double.IsNaN(viewport.Width) ||
+            double.IsInfinity(extent.Width) ||
+            double.IsInfinity(viewport.Width))
+        {
+            return 0d;
+        }
+
+        return Math.Max(0d, extent.Width - viewport.Width);
     }
 
     private void InitializeShellProfiles()
@@ -1184,6 +1417,7 @@ internal sealed class MainWindowController
         _window.WindowState = window.IsMaximized
             ? WindowState.Maximized
             : WindowState.Normal;
+        _viewModel.IsTabsInTitleBar = window.TabsInTitleBar;
     }
 
     private void RestoreWorkspaceTab(TerminalWorkspaceTab workspaceTab)
@@ -1230,6 +1464,7 @@ internal sealed class MainWindowController
         deferredContainer.IsVisible = false;
         _terminalHost.Children.Add(deferredContainer);
         _tabStrip.Children.Add(headerButton);
+        QueueTabStripScrollStateUpdate();
         AppendEventLog($"[{tabName}] Workspace tab restored lazily.");
     }
 
@@ -1749,6 +1984,7 @@ internal sealed class MainWindowController
         container.IsVisible = false;
         _terminalHost.Children.Add(container);
         _tabStrip.Children.Add(headerButton);
+        QueueTabStripScrollStateUpdate();
 
         SwitchToTab(_tabs.Count - 1);
         UpdateStatus(BuildTabOpenedStatus(tabName, finalizedModeSelection));
@@ -1807,6 +2043,7 @@ internal sealed class MainWindowController
         container.IsVisible = false;
         _terminalHost.Children.Add(container);
         _tabStrip.Children.Add(headerButton);
+        QueueTabStripScrollStateUpdate();
 
         SwitchToTab(_tabs.Count - 1);
         UpdateStatus($"Loaded replay '{sourceLabel}'.");
@@ -2743,6 +2980,7 @@ internal sealed class MainWindowController
             VerticalAlignment = VerticalAlignment.Center,
         };
         closeButton.Classes.Add("tabCloseButton");
+        WindowDecorationProperties.SetElementRole(closeButton, WindowDecorationsElementRole.User);
         ToolTip.SetTip(closeButton, "Close tab");
 
         StackPanel headerContent = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
@@ -2757,6 +2995,7 @@ internal sealed class MainWindowController
             BorderThickness = new Thickness(0),
         };
         headerButton.Classes.Add("tabHeader");
+        WindowDecorationProperties.SetElementRole(headerButton, WindowDecorationsElementRole.User);
         ToolTip.SetTip(headerButton, mode.Name);
 
         headerButton.Tag = closeButton;
@@ -2804,6 +3043,7 @@ internal sealed class MainWindowController
 
         _terminalHost.Children.Remove(tab.Container);
         _tabStrip.Children.Remove(tab.HeaderButton);
+        QueueTabStripScrollStateUpdate();
 
         DisposeTabTerminals(tab);
 
@@ -2854,6 +3094,7 @@ internal sealed class MainWindowController
 
         target.Container.IsVisible = true;
         target.HeaderButton.Classes.Add("active");
+        target.HeaderButton.BringIntoView();
         _activeTab = target;
         if (_activePaneControl is null || !ContainsControl(target.LeafControls, _activePaneControl))
         {
@@ -2885,6 +3126,7 @@ internal sealed class MainWindowController
 
         SyncCaptureReplayState();
         SyncActiveTerminalSurface();
+        QueueTabStripScrollStateUpdate();
     }
 
     private void CycleTab(bool forward)
@@ -5343,6 +5585,7 @@ internal sealed class MainWindowController
             WidthPixels = Math.Max(1, (int)Math.Round(_window.Bounds.Width)),
             HeightPixels = Math.Max(1, (int)Math.Round(_window.Bounds.Height)),
             IsMaximized = _window.WindowState == WindowState.Maximized,
+            TabsInTitleBar = _viewModel.IsTabsInTitleBar,
             Tabs = tabs,
         };
 

@@ -18,6 +18,18 @@
         ExtendClientAreaTitleBarHeightHint="-1"
         Background="{DynamicResource WindowBackgroundBrush}">
 
+  <Window.Resources>
+    <ControlTemplate x:Key="TabStripScrollViewerTemplate" TargetType="ScrollViewer">
+      <ScrollContentPresenter Name="PART_ContentPresenter"
+                              Background="{TemplateBinding Background}"
+                              HorizontalSnapPointsType="{TemplateBinding HorizontalSnapPointsType}"
+                              VerticalSnapPointsType="{TemplateBinding VerticalSnapPointsType}"
+                              HorizontalSnapPointsAlignment="{TemplateBinding HorizontalSnapPointsAlignment}"
+                              VerticalSnapPointsAlignment="{TemplateBinding VerticalSnapPointsAlignment}"
+                              Padding="{TemplateBinding Padding}" />
+    </ControlTemplate>
+  </Window.Resources>
+
   <Window.KeyBindings>
     <KeyBinding Gesture="Ctrl+T" Command="{Binding NewTabCommand}" />
     <KeyBinding Gesture="Ctrl+W" Command="{Binding CloseCurrentTabCommand}" />
@@ -138,6 +150,10 @@
                             ToggleType="CheckBox"
                             IsChecked="{Binding IsStatusBarVisible}"
                             Command="{Binding ToggleStatusBarCommand}" />
+            <NativeMenuItem Header="Move _Tabs to Title Bar"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding IsTabsInTitleBar}"
+                            Command="{Binding ToggleTabsInTitleBarCommand}" />
             <NativeMenuItemSeparator />
             <NativeMenuItem Header="_Increase Font Size"
                             Command="{Binding IncreaseFontSizeCommand}"
@@ -336,7 +352,7 @@
           <Grid Grid.Column="1"
                 x:Name="TopCommandBar"
                 Margin="{DynamicResource Shell.CommandPadding}"
-                ColumnDefinitions="Auto,*"
+                ColumnDefinitions="Auto,*,Auto"
                 ColumnSpacing="12"
                 ClipToBounds="True">
             <Border x:Name="TitleBarBrandDragZone"
@@ -349,7 +365,8 @@
                           IsHitTestVisible="False"
                           VerticalAlignment="Center">
                 <Border x:Name="TitleBarBrandIcon"
-                        Classes="titleBrandIcon">
+                        Classes="titleBrandIcon"
+                        IsVisible="{Binding IsTitleBarLogoVisible}">
                   <PathIcon x:Name="TitleBarBrandPathIcon"
                             Classes="titleBrandIconGlyph"
                             Data="{StaticResource Icon.RoyalTerminalLogo}" />
@@ -357,10 +374,19 @@
               </StackPanel>
             </Border>
 
-            <Grid Grid.Column="1"
+            <ContentControl x:Name="TitleBarTabStripHost"
+                            Grid.Column="1"
+                            IsVisible="{Binding IsTabsInTitleBar}"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            ClipToBounds="True"
+                            chrome:WindowDecorationProperties.ElementRole="TitleBar" />
+
+            <Grid Grid.Column="2"
                   x:Name="TopSearchPanel"
                   ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
                   ColumnSpacing="4"
+                  MinWidth="600"
                   MaxWidth="960"
                   HorizontalAlignment="Right"
                   VerticalAlignment="Center"
@@ -635,34 +661,65 @@
       </Border>
 
       <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto">
-        <Border Grid.Row="0" Classes="tabStripSurface">
-          <Grid x:Name="TabStripLayout"
-                ColumnDefinitions="*,Auto"
-                ColumnSpacing="6"
-                ClipToBounds="True">
-            <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                          VerticalScrollBarVisibility="Disabled">
-              <StackPanel Name="TabStrip"
-                          Orientation="Horizontal"
-                          Spacing="4" />
-            </ScrollViewer>
-            <Button x:Name="TabStripNewTabButton"
-                    Grid.Column="1"
-                    Classes="tabStripNewTab"
-                    Width="30"
-                    Height="30"
-                    MinWidth="30"
-                    MinHeight="30"
-                    MaxWidth="30"
-                    MaxHeight="30"
-                    Command="{Binding NewTabCommand}"
-                    ToolTip.Tip="New tab">
-              <PathIcon x:Name="TabStripNewTabIcon"
-                        Classes="tabStripNewTabIcon"
-                        Data="{StaticResource Icon.AddRegular}" />
-            </Button>
-          </Grid>
-        </Border>
+        <ContentControl x:Name="BodyTabStripHost"
+                        Grid.Row="0"
+                        IsVisible="{Binding IsBodyTabStripVisible}"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        ClipToBounds="True">
+          <Border x:Name="TabStripSurface"
+                  Classes="tabStripSurface bodyTabs">
+            <Grid x:Name="TabStripLayout"
+                  ColumnDefinitions="Auto,*,Auto,Auto"
+                  ColumnSpacing="4"
+                  ClipToBounds="True">
+              <RepeatButton x:Name="TabStripScrollLeftButton"
+                            Grid.Column="0"
+                            Classes="tabStripScrollButton"
+                            IsVisible="False"
+                            ToolTip.Tip="Scroll tabs left"
+                            chrome:WindowDecorationProperties.ElementRole="User">
+                <PathIcon Classes="tabStripScrollIcon"
+                          Data="{StaticResource Icon.ChevronLeftRegular}" />
+              </RepeatButton>
+              <ScrollViewer x:Name="TabStripScrollViewer"
+                            Grid.Column="1"
+                            Classes="tabStripScrollViewer"
+                            Template="{StaticResource TabStripScrollViewerTemplate}"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Disabled">
+                <StackPanel Name="TabStrip"
+                            Orientation="Horizontal"
+                            Spacing="4" />
+              </ScrollViewer>
+              <RepeatButton x:Name="TabStripScrollRightButton"
+                            Grid.Column="2"
+                            Classes="tabStripScrollButton"
+                            IsVisible="False"
+                            ToolTip.Tip="Scroll tabs right"
+                            chrome:WindowDecorationProperties.ElementRole="User">
+                <PathIcon Classes="tabStripScrollIcon"
+                          Data="{StaticResource Icon.ChevronRightRegular}" />
+              </RepeatButton>
+              <Button x:Name="TabStripNewTabButton"
+                      Grid.Column="3"
+                      Classes="tabStripNewTab"
+                      Width="30"
+                      Height="30"
+                      MinWidth="30"
+                      MinHeight="30"
+                      MaxWidth="30"
+                      MaxHeight="30"
+                      Command="{Binding NewTabCommand}"
+                      ToolTip.Tip="New tab"
+                      chrome:WindowDecorationProperties.ElementRole="User">
+                <PathIcon x:Name="TabStripNewTabIcon"
+                          Classes="tabStripNewTabIcon"
+                          Data="{StaticResource Icon.AddRegular}" />
+              </Button>
+            </Grid>
+          </Border>
+        </ContentControl>
 
         <Grid Grid.Row="1">
           <Border Classes="terminalSurface">
