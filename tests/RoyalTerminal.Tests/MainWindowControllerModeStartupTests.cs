@@ -114,8 +114,8 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.Equal(VerticalAlignment.Center, closeButton.VerticalContentAlignment);
             Assert.Equal(HorizontalAlignment.Center, closeIcon.HorizontalAlignment);
             Assert.Equal(VerticalAlignment.Center, closeIcon.VerticalAlignment);
-            Assert.Equal(14d, closeIcon.Width);
-            Assert.Equal(14d, closeIcon.Height);
+            Assert.Equal(12d, closeIcon.Width);
+            Assert.Equal(12d, closeIcon.Height);
             Assert.NotNull(closeIcon.Data);
 
             Point iconCenter = closeIcon.TranslatePoint(

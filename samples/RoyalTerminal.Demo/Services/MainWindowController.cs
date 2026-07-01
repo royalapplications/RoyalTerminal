@@ -2577,8 +2577,8 @@ internal sealed class MainWindowController
         PathIcon closeIcon = new()
         {
             Data = ResolveDismissRegularIconGeometry(),
-            Width = 14,
-            Height = 14,
+            Width = 12,
+            Height = 12,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
