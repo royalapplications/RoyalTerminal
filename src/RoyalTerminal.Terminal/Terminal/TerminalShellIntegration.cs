@@ -173,6 +173,14 @@ public sealed class TerminalShellIntegrationParser
             return workingDirectory[1..];
         }
 
+        if (workingDirectory.Length >= 3 &&
+            workingDirectory[0] == '/' &&
+            workingDirectory[1] == '\\' &&
+            workingDirectory[2] == '\\')
+        {
+            return workingDirectory[1..];
+        }
+
         return workingDirectory;
     }
 

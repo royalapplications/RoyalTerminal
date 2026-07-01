@@ -47,6 +47,23 @@ public sealed class TerminalShellIntegrationContractTests
     }
 
     [Fact]
+    public void Parser_Osc7_WindowsFileUri_RemovesLeadingSlashFromUncPath()
+    {
+        TerminalShellIntegrationParser parser = new();
+        TerminalShellIntegrationEvent? value = null;
+        parser.EventReceived += (_, e) => value = e.Value;
+
+        bool handled = parser.TryHandleOsc(
+            7,
+            "file://DESKTOP/%5C%5Cserver%5Cshare%5CProject");
+
+        Assert.True(handled);
+        Assert.NotNull(value);
+        Assert.Equal(@"\\server\share\Project", value!.WorkingDirectory);
+        Assert.Equal("desktop", value.Host);
+    }
+
+    [Fact]
     public void Parser_Osc133_OutputStartAndFinish_RaisesStructuredCommandEvents()
     {
         TerminalShellIntegrationParser parser = new();
