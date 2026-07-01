@@ -1,6 +1,7 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
@@ -18,9 +19,12 @@ namespace RoyalTerminal.Tests;
 [Collection("MainWindowControllerHeadlessTests")]
 public sealed class MainWindowControllerSettingsPanelTests
 {
+    private const string DisableSessionAutostartEnvVar = "ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART";
+
     [AvaloniaFact]
-    public void Controller_PrepareSettingsPanel_LoadsStoredProfile_AndApplyUpdatesViewModel()
+    public async Task Controller_PrepareSettingsPanel_LoadsStoredProfile_AndApplyUpdatesViewModel()
     {
+        using IDisposable autostart = SetProcessEnvironmentVariable(DisableSessionAutostartEnvVar, "1");
         InMemoryProfileStore store = new(CreateStoredDocument());
         MainWindowViewModel viewModel = new();
         Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
@@ -37,7 +41,7 @@ public sealed class MainWindowControllerSettingsPanelTests
         {
             lifetime = controller.Activate();
 
-            viewModel.PrepareSettingsPanelCommand.Execute().Wait();
+            await viewModel.PrepareSettingsPanelCommand.Execute();
             Dispatcher.UIThread.RunJobs();
 
             Assert.NotNull(viewModel.SettingsPanelState.SelectedProfile);
@@ -130,6 +134,7 @@ public sealed class MainWindowControllerSettingsPanelTests
     [AvaloniaFact]
     public async Task Controller_SaveSettingsPanel_PersistsEditedDocument()
     {
+        using IDisposable autostart = SetProcessEnvironmentVariable(DisableSessionAutostartEnvVar, "1");
         InMemoryProfileStore store = new(CreateStoredDocument());
         MainWindowViewModel viewModel = new();
         Window window = CreateControllerHostWindow(viewModel, out _);
@@ -146,7 +151,7 @@ public sealed class MainWindowControllerSettingsPanelTests
         {
             lifetime = controller.Activate();
 
-            viewModel.PrepareSettingsPanelCommand.Execute().Wait();
+            await viewModel.PrepareSettingsPanelCommand.Execute();
             Dispatcher.UIThread.RunJobs();
 
             viewModel.SettingsPanelState.SessionName = "Renamed Stored Profile";
@@ -308,6 +313,13 @@ public sealed class MainWindowControllerSettingsPanelTests
     private static string GetSavedFontPath()
     {
         return Path.Combine(Path.GetTempPath(), "royalterminal-saved-font.otf");
+    }
+
+    private static IDisposable SetProcessEnvironmentVariable(string variable, string? value)
+    {
+        string? previous = Environment.GetEnvironmentVariable(variable);
+        Environment.SetEnvironmentVariable(variable, value);
+        return Disposable.Create(() => Environment.SetEnvironmentVariable(variable, previous));
     }
 
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
