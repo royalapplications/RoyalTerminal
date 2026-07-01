@@ -618,12 +618,13 @@
 
   <Style Selector="TextBox.searchField">
     <Setter Property="MinHeight" Value="32" />
-    <Setter Property="Padding" Value="10,5" />
+    <Setter Property="Padding" Value="10,3" />
     <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
 
   <Style Selector="TextBox.searchField:focus">

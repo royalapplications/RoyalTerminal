@@ -355,7 +355,9 @@
                        MinWidth="80"
                        HorizontalAlignment="Stretch"
                        Classes="compactField searchField"
+                       Padding="10,3"
                        PlaceholderText="Search"
+                       VerticalContentAlignment="Center"
                        chrome:WindowDecorationProperties.ElementRole="User"
                        Text="{Binding SearchQuery}" />
               <Button x:Name="TopSearchApplyButton"

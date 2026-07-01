@@ -13,6 +13,7 @@ using Avalonia.Controls.Chrome;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -553,6 +554,8 @@ public class MainWindowViewModelFlowTests
             Assert.Empty(topCommandBar.Children.OfType<ScrollViewer>());
             Assert.Same(topSearchPanel, topSearchBox.Parent);
             Assert.Contains("searchField", topSearchBox.Classes);
+            Assert.Equal(VerticalAlignment.Center, topSearchBox.VerticalContentAlignment);
+            Assert.Equal(new Thickness(10, 3), topSearchBox.Padding);
             Assert.Contains("iconButton", topSearchApplyButton.Classes);
             Assert.Contains("iconButton", topSearchPreviousButton.Classes);
             Assert.Contains("searchStatusChip", topSearchStatusIdleChip.Classes);
