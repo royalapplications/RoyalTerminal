@@ -54,6 +54,16 @@ internal sealed class MainWindowController
     private const string EnableRenderDiagnosticsEnvVar = "ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS";
     private const string StartAllRenderModesEnvVar = "ROYALTERMINAL_DEMO_START_ALL_RENDER_MODES";
     private const string TextRenderPipelineEnvVar = "ROYALTERMINAL_TEXT_RENDER_PIPELINE";
+    private const string DismissRegularIconResourceKey = "Icon.DismissRegular";
+    private const string DismissRegularIconPathData =
+        "M4.39705 4.55379L4.46967 4.46967C4.73594 4.2034 5.1526 4.1792 5.44621 4.39705" +
+        "L5.53033 4.46967L12 10.939L18.4697 4.46967C18.7626 4.17678 19.2374 4.17678 19.5303 4.46967" +
+        "C19.8232 4.76256 19.8232 5.23744 19.5303 5.53033L13.061 12L19.5303 18.4697" +
+        "C19.7966 18.7359 19.8208 19.1526 19.6029 19.4462L19.5303 19.5303" +
+        "C19.2641 19.7966 18.8474 19.8208 18.5538 19.6029L18.4697 19.5303L12 13.061" +
+        "L5.53033 19.5303C5.23744 19.8232 4.76256 19.8232 4.46967 19.5303" +
+        "C4.17678 19.2374 4.17678 18.7626 4.46967 18.4697L10.939 12L4.46967 5.53033" +
+        "C4.2034 5.26406 4.1792 4.8474 4.39705 4.55379L4.46967 4.46967L4.39705 4.55379Z";
     private static readonly byte[] s_hyperlinkShowcaseBytes = Encoding.UTF8.GetBytes(
         "\r\n\u001b[1mRoyalTerminal OSC8 hyperlink showcase\u001b[0m\r\n" +
         "\u001b]8;;https://ghostty.org\u001b\\Ghostty docs\u001b]8;;\u001b\\  |  " +
@@ -71,6 +81,7 @@ internal sealed class MainWindowController
     private static readonly bool s_disableTextShaping = ReadEnvironmentToggle(DisableTextShapingEnvVar);
     private static readonly bool s_enableRenderDiagnostics = ReadEnvironmentToggle(EnableRenderDiagnosticsEnvVar);
     private static readonly TerminalTextRenderPipeline s_textRenderPipeline = ReadTextRenderPipeline(TextRenderPipelineEnvVar);
+    private static readonly Geometry s_dismissRegularIconFallback = StreamGeometry.Parse(DismissRegularIconPathData);
 
     private readonly Window _window;
     private readonly MainWindowViewModel _viewModel;
@@ -2563,17 +2574,34 @@ internal sealed class MainWindowController
             FontSize = 12,
         };
 
-        Button closeButton = new()
+        PathIcon closeIcon = new()
         {
-            Content = "\u00d7",
-            FontSize = 14,
-            Padding = new Thickness(2, 0),
-            MinWidth = 20,
-            MinHeight = 20,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
+            Data = ResolveDismissRegularIconGeometry(),
+            Width = 14,
+            Height = 14,
+            HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        closeIcon.Classes.Add("tabCloseIcon");
+
+        Button closeButton = new()
+        {
+            Content = closeIcon,
+            Width = 24,
+            Height = 24,
+            MinWidth = 24,
+            MinHeight = 24,
+            MaxWidth = 24,
+            MaxHeight = 24,
+            Padding = new Thickness(0),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        closeButton.Classes.Add("tabCloseButton");
+        ToolTip.SetTip(closeButton, "Close tab");
 
         StackPanel headerContent = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
         headerContent.Children.Add(modeIndicator);
@@ -2591,6 +2619,17 @@ internal sealed class MainWindowController
 
         headerButton.Tag = closeButton;
         return headerButton;
+    }
+
+    private static Geometry ResolveDismissRegularIconGeometry()
+    {
+        if (Application.Current?.Resources.TryGetResource(DismissRegularIconResourceKey, null, out object? resource) == true &&
+            resource is Geometry geometry)
+        {
+            return geometry;
+        }
+
+        return s_dismissRegularIconFallback;
     }
 
     private void ActivateTabById(int tabId)

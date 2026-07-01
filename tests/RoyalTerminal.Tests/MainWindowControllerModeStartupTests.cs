@@ -4,11 +4,14 @@
 
 using System.Reactive.Linq;
 using System.Text;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input.Platform;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
@@ -58,6 +61,70 @@ public sealed class MainWindowControllerModeStartupTests
                 terminalHost.Children[0],
                 startupHeader);
             Assert.Equal(TerminalRenderMode.RenderedAuto, startupMode);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_TabHeader_CloseButton_UsesCenteredIcon()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo tab-close-alignment";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool createdSingleTab = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(createdSingleTab);
+
+            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
+            Button startupHeader = Assert.IsType<Button>(tabStrip.Children[0]);
+            Button closeButton = Assert.IsType<Button>(startupHeader.Tag);
+            PathIcon closeIcon = Assert.IsType<PathIcon>(closeButton.Content);
+
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            Assert.Contains("tabCloseButton", closeButton.Classes);
+            Assert.Contains("tabCloseIcon", closeIcon.Classes);
+            Assert.Equal(new Thickness(0), closeButton.Padding);
+            Assert.Equal(24d, closeButton.Width);
+            Assert.Equal(24d, closeButton.Height);
+            Assert.Equal(HorizontalAlignment.Center, closeButton.HorizontalContentAlignment);
+            Assert.Equal(VerticalAlignment.Center, closeButton.VerticalContentAlignment);
+            Assert.Equal(HorizontalAlignment.Center, closeIcon.HorizontalAlignment);
+            Assert.Equal(VerticalAlignment.Center, closeIcon.VerticalAlignment);
+            Assert.Equal(14d, closeIcon.Width);
+            Assert.Equal(14d, closeIcon.Height);
+            Assert.NotNull(closeIcon.Data);
+
+            Point iconCenter = closeIcon.TranslatePoint(
+                    new Point(closeIcon.Bounds.Width / 2d, closeIcon.Bounds.Height / 2d),
+                    closeButton)
+                ?? throw new InvalidOperationException("Close icon was not attached to the close button visual tree.");
+
+            Assert.InRange(Math.Abs(iconCenter.X - closeButton.Bounds.Width / 2d), 0d, 0.75d);
+            Assert.InRange(Math.Abs(iconCenter.Y - closeButton.Bounds.Height / 2d), 0d, 0.75d);
         }
         finally
         {
