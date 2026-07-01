@@ -175,10 +175,20 @@
     <Setter Property="Padding" Value="8,6" />
   </Style>
 
-  <Style Selector="TextBlock.productTitle">
-    <Setter Property="FontSize" Value="13" />
-    <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+  <Style Selector="Border.titleBrandIcon">
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="Padding" Value="5" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceRaisedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <Style Selector="PathIcon.titleBrandIconGlyph">
+    <Setter Property="Width" Value="18" />
+    <Setter Property="Height" Value="18" />
+    <Setter Property="Foreground" Value="{DynamicResource ShellAccentBrush}" />
   </Style>
 
   <Style Selector="TextBlock.sectionTitle">

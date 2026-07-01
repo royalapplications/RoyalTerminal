@@ -330,12 +330,17 @@
                     Background="Transparent"
                     VerticalAlignment="Center"
                     chrome:WindowDecorationProperties.ElementRole="TitleBar">
-              <StackPanel Orientation="Horizontal"
+              <StackPanel x:Name="TitleBarBrandContent"
+                          Orientation="Horizontal"
                           Spacing="8"
+                          IsHitTestVisible="False"
                           VerticalAlignment="Center">
-                <TextBlock Text="RoyalTerminal"
-                           Classes="productTitle"
-                           VerticalAlignment="Center" />
+                <Border x:Name="TitleBarBrandIcon"
+                        Classes="titleBrandIcon">
+                  <PathIcon x:Name="TitleBarBrandPathIcon"
+                            Classes="titleBrandIconGlyph"
+                            Data="{StaticResource Icon.WindowRegular}" />
+                </Border>
                 <Border Classes="badge"
                         MaxWidth="78">
                   <TextBlock Text="{Binding ActiveSessionDisplay}"

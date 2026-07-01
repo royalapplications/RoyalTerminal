@@ -561,6 +561,12 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("TitleBarDragSurface was not found.");
             Border titleBarBrandDragZone = window.FindControl<Border>("TitleBarBrandDragZone")
                 ?? throw new InvalidOperationException("TitleBarBrandDragZone was not found.");
+            StackPanel titleBarBrandContent = window.FindControl<StackPanel>("TitleBarBrandContent")
+                ?? throw new InvalidOperationException("TitleBarBrandContent was not found.");
+            Border titleBarBrandIcon = window.FindControl<Border>("TitleBarBrandIcon")
+                ?? throw new InvalidOperationException("TitleBarBrandIcon was not found.");
+            PathIcon titleBarBrandPathIcon = window.FindControl<PathIcon>("TitleBarBrandPathIcon")
+                ?? throw new InvalidOperationException("TitleBarBrandPathIcon was not found.");
             Border macTrafficLightReserve = window.FindControl<Border>("MacTrafficLightReserve")
                 ?? throw new InvalidOperationException("MacTrafficLightReserve was not found.");
             TextBox topSearchBox = window.FindControl<TextBox>("TopSearchBox")
@@ -599,9 +605,16 @@ public class MainWindowViewModelFlowTests
                 $"Expected titlebar drag surface to cover the titlebar height. Drag={titleBarDragSurface.Bounds}, Layout={titleBarLayout.Bounds}.");
             Assert.True(
                 titleBarBrandDragZone.Bounds.Width > 0,
-                $"Expected product title area to be a drag zone. BrandDrag={titleBarBrandDragZone.Bounds}.");
+                $"Expected brand icon area to be a drag zone. BrandDrag={titleBarBrandDragZone.Bounds}.");
             Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(titleBarDragSurface));
             Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(titleBarBrandDragZone));
+            Assert.True(titleBarBrandDragZone.IsHitTestVisible);
+            Assert.False(titleBarBrandContent.IsHitTestVisible);
+            Assert.Contains("titleBrandIcon", titleBarBrandIcon.Classes);
+            Assert.Contains("titleBrandIconGlyph", titleBarBrandPathIcon.Classes);
+            Assert.DoesNotContain(
+                titleBarBrandDragZone.GetVisualDescendants().OfType<TextBlock>(),
+                textBlock => string.Equals(textBlock.Text, "RoyalTerminal", StringComparison.Ordinal));
             Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(topSearchBox));
             Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(topNewTabButton));
             Assert.True(
