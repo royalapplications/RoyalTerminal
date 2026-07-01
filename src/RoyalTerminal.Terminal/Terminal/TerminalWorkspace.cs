@@ -108,6 +108,11 @@ public sealed record TerminalWorkspaceWindow
     public bool IsMaximized { get; init; }
 
     /// <summary>
+    /// Whether the tab strip is hosted in the client title bar.
+    /// </summary>
+    public bool TabsInTitleBar { get; init; }
+
+    /// <summary>
     /// Persisted tabs for the window.
     /// </summary>
     public List<TerminalWorkspaceTab> Tabs { get; init; } = [];

@@ -92,6 +92,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _isLeftPanelVisible = true;
     private bool _isSearchPanelVisible = true;
     private bool _isStatusBarVisible = true;
+    private bool _isTabsInTitleBar;
 
     private IReadOnlyList<ShellProfileOption> _shellProfiles =
     [
@@ -317,6 +318,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         ToggleLeftPanelCommand = ReactiveCommand.Create(ToggleLeftPanel);
         ToggleSearchPanelCommand = ReactiveCommand.Create(ToggleSearchPanel);
         ToggleStatusBarCommand = ReactiveCommand.Create(ToggleStatusBar);
+        ToggleTabsInTitleBarCommand = ReactiveCommand.Create(ToggleTabsInTitleBar);
         IObservable<bool> canSaveCapture = ObserveCanSaveCapture();
         IObservable<bool> canReplayControl = ObserveCanReplayControl();
         IObservable<bool> canApplySearch = ObserveCanExecuteProperty(nameof(CanApplySearch), () => CanApplySearch);
@@ -458,6 +460,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> ToggleLeftPanelCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleSearchPanelCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleStatusBarCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleTabsInTitleBarCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleCaptureCommand { get; }
     public ReactiveCommand<object?, Unit> SelectCaptureFormatCommand { get; }
     public ReactiveCommand<Unit, Unit> SaveCaptureCommand { get; }
@@ -527,6 +530,26 @@ public sealed class MainWindowViewModel : ReactiveObject
         get => _isStatusBarVisible;
         set => this.RaiseAndSetIfChanged(ref _isStatusBarVisible, value);
     }
+
+    public bool IsTabsInTitleBar
+    {
+        get => _isTabsInTitleBar;
+        set
+        {
+            if (_isTabsInTitleBar == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _isTabsInTitleBar, value);
+            this.RaisePropertyChanged(nameof(IsBodyTabStripVisible));
+            this.RaisePropertyChanged(nameof(IsTitleBarLogoVisible));
+        }
+    }
+
+    public bool IsBodyTabStripVisible => !IsTabsInTitleBar;
+
+    public bool IsTitleBarLogoVisible => !IsTabsInTitleBar;
 
     public bool IsSshHostKeyPromptVisible
     {
@@ -2105,6 +2128,11 @@ public sealed class MainWindowViewModel : ReactiveObject
     private void ToggleStatusBar()
     {
         IsStatusBarVisible = !IsStatusBarVisible;
+    }
+
+    private void ToggleTabsInTitleBar()
+    {
+        IsTabsInTitleBar = !IsTabsInTitleBar;
     }
 
     private IObservable<Unit> ToggleCapture()

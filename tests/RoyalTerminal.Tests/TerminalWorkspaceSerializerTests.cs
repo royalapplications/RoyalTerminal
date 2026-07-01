@@ -23,6 +23,7 @@ public sealed class TerminalWorkspaceSerializerTests
                     Title = " Main Window ",
                     WidthPixels = 0,
                     HeightPixels = -10,
+                    TabsInTitleBar = true,
                     Tabs =
                     [
                         new TerminalWorkspaceTab
@@ -60,6 +61,7 @@ public sealed class TerminalWorkspaceSerializerTests
         Assert.Equal("shell", window.SelectedTabId);
         Assert.Equal(1, window.WidthPixels);
         Assert.Equal(1, window.HeightPixels);
+        Assert.True(window.TabsInTitleBar);
 
         TerminalWorkspaceTab tab = Assert.Single(window.Tabs);
         Assert.Equal("shell", tab.Id);
