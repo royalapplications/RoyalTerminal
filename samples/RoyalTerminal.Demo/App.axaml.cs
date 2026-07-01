@@ -3,9 +3,11 @@
 // RoyalTerminal.Demo — Avalonia Application setup.
 
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Diagnostics;
 using Avalonia.Markup.Xaml;
+using RoyalTerminal.Demo.Services;
 
 namespace RoyalTerminal.Demo;
 
@@ -20,7 +22,15 @@ public class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow();
+            MainWindow mainWindow = new();
+            desktop.MainWindow = mainWindow;
+
+            if (mainWindow.ViewModel is not null)
+            {
+                NativeMenu applicationMenu = NativeMenu.GetMenu(this) ?? ApplicationNativeMenuFactory.CreateShell();
+                ApplicationNativeMenuFactory.Bind(applicationMenu, mainWindow.ViewModel);
+                NativeMenu.SetMenu(this, applicationMenu);
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

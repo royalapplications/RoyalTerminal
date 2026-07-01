@@ -1,14 +1,21 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:RoyalTerminal.Demo.ViewModels"
+        xmlns:chrome="using:Avalonia.Controls.Chrome"
+        xmlns:terminal="using:RoyalTerminal.Terminal"
         xmlns:settings="using:RoyalTerminal.Avalonia.Settings"
         x:Class="RoyalTerminal.Demo.MainWindow"
         x:Name="RootWindow"
         x:DataType="vm:MainWindowViewModel"
-        Title="RoyalTerminal Terminal"
-        Width="1024" Height="768"
-        MinWidth="400" MinHeight="300"
+        Title="RoyalTerminal"
+        Width="1180"
+        Height="760"
+        MinWidth="720"
+        MinHeight="460"
         WindowStartupLocation="CenterScreen"
+        ExtendClientAreaToDecorationsHint="True"
+        WindowDecorations="Full"
+        ExtendClientAreaTitleBarHeightHint="44"
         Background="{DynamicResource WindowBackgroundBrush}">
 
   <Window.KeyBindings>
@@ -24,6 +31,18 @@
     <KeyBinding Gesture="Ctrl+Shift+C" Command="{Binding CopySelectionCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+V" Command="{Binding PasteClipboardCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+A" Command="{Binding SelectAllCommand}" />
+    <KeyBinding Gesture="Ctrl+Space" Command="{Binding OpenCommandHistoryOverlayCommand}" />
+    <KeyBinding Gesture="Ctrl+Enter" Command="{Binding AcceptCommandSuggestionCommand}" />
+    <KeyBinding Gesture="Alt+Shift+OemPlus" Command="{Binding SplitPaneRightCommand}" />
+    <KeyBinding Gesture="Alt+Shift+OemMinus" Command="{Binding SplitPaneDownCommand}" />
+    <KeyBinding Gesture="Alt+Left" Command="{Binding FocusPaneLeftCommand}" />
+    <KeyBinding Gesture="Alt+Right" Command="{Binding FocusPaneRightCommand}" />
+    <KeyBinding Gesture="Alt+Up" Command="{Binding FocusPaneUpCommand}" />
+    <KeyBinding Gesture="Alt+Down" Command="{Binding FocusPaneDownCommand}" />
+    <KeyBinding Gesture="Alt+Shift+Left" Command="{Binding ResizePaneLeftCommand}" />
+    <KeyBinding Gesture="Alt+Shift+Right" Command="{Binding ResizePaneRightCommand}" />
+    <KeyBinding Gesture="Alt+Shift+Up" Command="{Binding ResizePaneUpCommand}" />
+    <KeyBinding Gesture="Alt+Shift+Down" Command="{Binding ResizePaneDownCommand}" />
     <KeyBinding Gesture="Ctrl+D1" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="0" />
     <KeyBinding Gesture="Ctrl+D2" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="1" />
     <KeyBinding Gesture="Ctrl+D3" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="2" />
@@ -35,793 +54,879 @@
     <KeyBinding Gesture="Ctrl+D9" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="8" />
   </Window.KeyBindings>
 
-  <Grid>
-  <DockPanel>
-    <Border DockPanel.Dock="Top"
-            Background="{DynamicResource ToolbarBackgroundBrush}"
-            Padding="4,2"
-            ClipToBounds="True">
-      <Grid ColumnDefinitions="Auto,*"
-            ColumnSpacing="8"
-            ClipToBounds="True">
-        <StackPanel Grid.Column="0"
-                    Orientation="Horizontal"
-                    Spacing="4"
-                    VerticalAlignment="Center">
-          <Button Content="+ New Tab" Height="24"
-                  FontSize="11" Padding="8,2"
-                  Command="{Binding NewTabCommand}"
-                  ToolTip.Tip="New terminal tab (Ctrl+T)" />
-        </StackPanel>
+  <NativeMenu.Menu>
+    <NativeMenu>
+      <NativeMenuItem Header="_Shell">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="_New Tab"
+                            Command="{Binding NewTabCommand}"
+                            Gesture="Ctrl+T" />
+            <NativeMenuItem Header="_Close Tab"
+                            Command="{Binding CloseCurrentTabCommand}"
+                            Gesture="Ctrl+W" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Command History"
+                            Command="{Binding OpenCommandHistoryOverlayCommand}"
+                            Gesture="Ctrl+Space" />
+            <NativeMenuItem Header="_Refresh Command Suggestions"
+                            Command="{Binding RefreshCommandSuggestionsCommand}" />
+            <NativeMenuItem Header="_Insert Selected Suggestion"
+                            Command="{Binding AcceptCommandSuggestionCommand}"
+                            Gesture="Ctrl+Enter"
+                            IsEnabled="{Binding CanAcceptCommandSuggestion}" />
+            <NativeMenuItem Header="Close Command _History"
+                            Command="{Binding CloseCommandHistoryOverlayCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Split Pane _Right"
+                            Command="{Binding SplitPaneRightCommand}"
+                            Gesture="Alt+Shift+OemPlus" />
+            <NativeMenuItem Header="Split Pane _Down"
+                            Command="{Binding SplitPaneDownCommand}"
+                            Gesture="Alt+Shift+OemMinus" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Refresh Profiles"
+                            Command="{Binding RefreshSessionLauncherCommand}" />
+            <NativeMenuItem Header="_Launch Selected Profile"
+                            Command="{Binding LaunchSelectedSessionProfileCommand}"
+                            IsEnabled="{Binding CanLaunchSelectedSessionProfile}" />
+            <NativeMenuItem Header="_Restart Session"
+                            Command="{Binding RestartActiveSessionCommand}" />
+            <NativeMenuItem Header="_Clear Scrollback"
+                            Command="{Binding ClearActiveScrollbackCommand}" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
 
-        <StackPanel Grid.Column="1"
-                    Orientation="Horizontal"
-                    Spacing="4"
-                    HorizontalAlignment="Right"
+      <NativeMenuItem Header="_Edit">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="_Copy"
+                            Command="{Binding CopySelectionCommand}"
+                            Gesture="Ctrl+Shift+C" />
+            <NativeMenuItem Header="_Paste"
+                            Command="{Binding PasteClipboardCommand}"
+                            Gesture="Ctrl+Shift+V" />
+            <NativeMenuItem Header="Select _All"
+                            Command="{Binding SelectAllCommand}"
+                            Gesture="Ctrl+Shift+A" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Find"
+                            Command="{Binding ApplySearchCommand}" />
+            <NativeMenuItem Header="Find _Next"
+                            Command="{Binding NextSearchCommand}" />
+            <NativeMenuItem Header="Find _Previous"
+                            Command="{Binding PreviousSearchCommand}" />
+            <NativeMenuItem Header="_Clear Search"
+                            Command="{Binding ClearSearchCommand}" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
+
+      <NativeMenuItem Header="_View">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="_Increase Font Size"
+                            Command="{Binding IncreaseFontSizeCommand}"
+                            Gesture="Ctrl+Add" />
+            <NativeMenuItem Header="_Decrease Font Size"
+                            Command="{Binding DecreaseFontSizeCommand}"
+                            Gesture="Ctrl+Subtract" />
+            <NativeMenuItem Header="_Reset Font Size"
+                            Command="{Binding ResetFontSizeCommand}"
+                            Gesture="Ctrl+D0" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="{Binding ModeButtonText}"
+                            Command="{Binding CycleRenderModeCommand}" />
+            <NativeMenuItem Header="{Binding ThemePresetButtonText}"
+                            Command="{Binding CycleThemePresetCommand}" />
+            <NativeMenuItem Header="_Toggle Light Theme"
+                            Command="{Binding ToggleThemeCommand}" />
+            <NativeMenuItem Header="_Generate Theme"
+                            Command="{Binding GenerateThemeCommand}" />
+            <NativeMenuItem Header="{Binding ShaderSampleButtonText}"
+                            Command="{Binding CycleShaderSampleCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Preferences..."
+                            Command="{Binding PrepareSettingsPanelCommand}" />
+            <NativeMenuItem Header="Close Preferences"
+                            Command="{Binding CloseSettingsPanelCommand}" />
+            <NativeMenuItem Header="Preferences _Actions"
+                            IsEnabled="{Binding IsSettingsPanelOpen}">
+              <NativeMenuItem.Menu>
+                <NativeMenu>
+                  <NativeMenuItem Header="_New Profile"
+                                  Command="{Binding SettingsPanelState.NewProfileCommand}" />
+                  <NativeMenuItem Header="_Duplicate Profile"
+                                  Command="{Binding SettingsPanelState.DuplicateProfileCommand}" />
+                  <NativeMenuItem Header="_Delete Profile"
+                                  Command="{Binding SettingsPanelState.DeleteProfileCommand}" />
+                  <NativeMenuItem Header="Set _Default Profile"
+                                  Command="{Binding SettingsPanelState.SetDefaultProfileCommand}" />
+                  <NativeMenuItemSeparator />
+                  <NativeMenuItem Header="_Apply Settings"
+                                  Command="{Binding SettingsPanelState.ApplyCommand}" />
+                  <NativeMenuItem Header="_Save Settings"
+                                  Command="{Binding SettingsPanelState.SaveCommand}" />
+                  <NativeMenuItemSeparator />
+                  <NativeMenuItem Header="_Browse Font File"
+                                  Command="{Binding SettingsPanelState.BrowseFontFileCommand}" />
+                  <NativeMenuItem Header="Add Text Highlight _Rule"
+                                  Command="{Binding SettingsPanelState.AddTextHighlightRuleCommand}" />
+                </NativeMenu>
+              </NativeMenuItem.Menu>
+            </NativeMenuItem>
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Diagnostics"
+                            Command="{Binding ToggleGhosttyDiagnosticsCommand}" />
+            <NativeMenuItem Header="_Clear Event Log"
+                            Command="{Binding ClearEventLogCommand}"
+                            IsEnabled="{Binding HasEventLogEntries}" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
+
+      <NativeMenuItem Header="_Session">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="_Preserve Scrollback on Restart"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding PreserveScrollbackOnRestart}"
+                            Command="{Binding TogglePreserveScrollbackOnRestartCommand}" />
+            <NativeMenuItem Header="_Sixel Graphics"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding SixelGraphicsEnabled}"
+                            Command="{Binding ToggleSixelGraphicsCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="{Binding CaptureToggleButtonText}"
+                            Command="{Binding ToggleCaptureCommand}" />
+            <NativeMenuItem Header="Capture _Format">
+              <NativeMenuItem.Menu>
+                <NativeMenu>
+                  <NativeMenuItem Header="RoyalTerminal JSON"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding IsRoyalTerminalJsonCaptureFormatSelected}"
+                                  Command="{Binding SelectCaptureFormatCommand}"
+                                  CommandParameter="royalterminal-json" />
+                  <NativeMenuItem Header="Asciicast v3"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding IsAsciicastV3CaptureFormatSelected}"
+                                  Command="{Binding SelectCaptureFormatCommand}"
+                                  CommandParameter="asciicast-v3" />
+                </NativeMenu>
+              </NativeMenuItem.Menu>
+            </NativeMenuItem>
+            <NativeMenuItem Header="_Save Capture"
+                            Command="{Binding SaveCaptureCommand}" />
+            <NativeMenuItem Header="_Load Replay"
+                            Command="{Binding LoadReplayCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Replay _Play/Pause"
+                            Command="{Binding ToggleReplayPlaybackCommand}" />
+            <NativeMenuItem Header="_Stop Replay"
+                            Command="{Binding StopReplayCommand}" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
+
+      <NativeMenuItem Header="_Window">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="_Next Tab"
+                            Command="{Binding CycleTabForwardCommand}"
+                            Gesture="Ctrl+Tab" />
+            <NativeMenuItem Header="_Previous Tab"
+                            Command="{Binding CycleTabBackwardCommand}"
+                            Gesture="Ctrl+Shift+Tab" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Focus Pane _Left"
+                            Command="{Binding FocusPaneLeftCommand}"
+                            Gesture="Alt+Left" />
+            <NativeMenuItem Header="Focus Pane _Right"
+                            Command="{Binding FocusPaneRightCommand}"
+                            Gesture="Alt+Right" />
+            <NativeMenuItem Header="Focus Pane _Up"
+                            Command="{Binding FocusPaneUpCommand}"
+                            Gesture="Alt+Up" />
+            <NativeMenuItem Header="Focus Pane _Down"
+                            Command="{Binding FocusPaneDownCommand}"
+                            Gesture="Alt+Down" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Resize Pane Left"
+                            Command="{Binding ResizePaneLeftCommand}"
+                            Gesture="Alt+Shift+Left" />
+            <NativeMenuItem Header="Resize Pane Right"
+                            Command="{Binding ResizePaneRightCommand}"
+                            Gesture="Alt+Shift+Right" />
+            <NativeMenuItem Header="Resize Pane Up"
+                            Command="{Binding ResizePaneUpCommand}"
+                            Gesture="Alt+Shift+Up" />
+            <NativeMenuItem Header="Resize Pane Down"
+                            Command="{Binding ResizePaneDownCommand}"
+                            Gesture="Alt+Shift+Down" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Tab _1" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="0" Gesture="Ctrl+D1" />
+            <NativeMenuItem Header="Tab _2" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="1" Gesture="Ctrl+D2" />
+            <NativeMenuItem Header="Tab _3" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="2" Gesture="Ctrl+D3" />
+            <NativeMenuItem Header="Tab _4" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="3" Gesture="Ctrl+D4" />
+            <NativeMenuItem Header="Tab _5" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="4" Gesture="Ctrl+D5" />
+            <NativeMenuItem Header="Tab _6" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="5" Gesture="Ctrl+D6" />
+            <NativeMenuItem Header="Tab _7" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="6" Gesture="Ctrl+D7" />
+            <NativeMenuItem Header="Tab _8" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="7" Gesture="Ctrl+D8" />
+            <NativeMenuItem Header="Tab _9" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="8" Gesture="Ctrl+D9" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
+
+      <NativeMenuItem Header="_Help">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="_Hyperlink Sample"
+                            Command="{Binding ShowHyperlinkSampleCommand}" />
+            <NativeMenuItem Header="_Kitty Graphics Sample"
+                            Command="{Binding ShowKittyGraphicsSampleCommand}" />
+            <NativeMenuItem Header="_Copy Plain Snapshot"
+                            Command="{Binding CopyPlainSnapshotCommand}" />
+            <NativeMenuItem Header="Copy _VT Snapshot"
+                            Command="{Binding CopyStyledVtSnapshotCommand}" />
+            <NativeMenuItem Header="Copy _HTML Snapshot"
+                            Command="{Binding CopyHtmlSnapshotCommand}" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
+    </NativeMenu>
+  </NativeMenu.Menu>
+
+  <Grid RowDefinitions="Auto,*">
+    <NativeMenuBar x:Name="MainMenuBar"
+                   Grid.Row="0" />
+
+    <Grid Grid.Row="1" RowDefinitions="Auto,*">
+      <Border Grid.Row="0"
+              Classes="topBar titleBarArea"
+              Padding="0"
+              ClipToBounds="True"
+              chrome:WindowDecorationProperties.ElementRole="TitleBar">
+        <Grid x:Name="TitleBarLayout"
+              Height="{DynamicResource Shell.CommandHeight}"
+              ColumnDefinitions="88,*,Auto"
+              ClipToBounds="True">
+          <Border x:Name="MacTrafficLightReserve"
+                  Grid.Column="0"
+                  IsHitTestVisible="False" />
+
+          <Border x:Name="TitleBarDragSurface"
+                  Grid.Column="1"
+                  Background="Transparent"
+                  chrome:WindowDecorationProperties.ElementRole="TitleBar" />
+
+          <Grid Grid.Column="1"
+                x:Name="TopCommandBar"
+                Margin="{DynamicResource Shell.CommandPadding}"
+                ColumnDefinitions="Auto,*,Auto"
+                ColumnSpacing="12"
+                ClipToBounds="True">
+            <Border x:Name="TitleBarBrandDragZone"
+                    Background="Transparent"
                     VerticalAlignment="Center"
-                    ClipToBounds="True">
-          <Button Content="A-" Width="28" Height="24"
-                  FontSize="10" Padding="2"
-                  Command="{Binding DecreaseFontSizeCommand}"
-                  ToolTip.Tip="Decrease font size (Ctrl+-)" />
-          <TextBlock Text="{Binding FontSizeDisplay}" VerticalAlignment="Center"
-                     Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" Width="24"
-                     TextAlignment="Center" />
-          <Button Content="A+" Width="28" Height="24"
-                  FontSize="10" Padding="2"
-                  Command="{Binding IncreaseFontSizeCommand}"
-                  ToolTip.Tip="Increase font size (Ctrl++)" />
-          <Border Width="1" Background="{StaticResource ToolbarDividerBrush}" Margin="4,2" />
-          <Button Content="{Binding ThemePresetButtonText}" Height="24"
-                  FontSize="10" Padding="8,2"
-                  Command="{Binding CycleThemePresetCommand}"
-                  ToolTip.Tip="Cycle predefined terminal themes for the active mode" />
-          <Button Content="Generate Theme" Height="24"
-                  FontSize="10" Padding="8,2"
-                  Command="{Binding GenerateThemeCommand}"
-                  ToolTip.Tip="Generate a new mode-specific terminal theme for the active mode" />
-          <Button Content="Settings" Height="24"
-                  FontSize="10" Padding="8,2"
-                  Command="{Binding PrepareSettingsPanelCommand}"
-                  ToolTip.Tip="Open tabbed terminal settings flyout">
-            <Button.Flyout>
-              <Flyout Placement="BottomEdgeAlignedRight"
-                      FlyoutPresenterClasses="settings-popup">
-                <settings:TerminalSettingsPanel DataContext="{Binding SettingsPanelState}" />
-              </Flyout>
-            </Button.Flyout>
-          </Button>
-          <Border Width="1" Background="{StaticResource ToolbarDividerBrush}" Margin="4,2" />
-          <Button Content="{Binding ModeButtonText}" Height="24"
-                  FontSize="10" Padding="8,2"
-                  Command="{Binding CycleRenderModeCommand}"
-                  ToolTip.Tip="Switch rendering mode (Native VT / Managed VT / Rendered)" />
-          <ToggleButton Content="{Binding SixelButtonText}" Height="24"
-                        FontSize="10" Padding="8,2"
-                        IsChecked="{Binding SixelGraphicsEnabled}"
-                        ToolTip.Tip="Enable or disable sixel graphics for terminal tabs" />
-          <Button Content="{Binding ShaderSampleButtonText}" Height="24"
-                  FontSize="10" Padding="8,2"
-                  Command="{Binding CycleShaderSampleCommand}"
-                  ToolTip.Tip="Cycle terminal framebuffer shader samples" />
-          <Border Width="1" Background="{StaticResource ToolbarDividerBrush}" Margin="4,2" />
-          <Button Content="{Binding CaptureToggleButtonText}" Height="24"
-                  FontSize="10" Padding="8,2"
-                  Command="{Binding ToggleCaptureCommand}"
-                  ToolTip.Tip="Start or stop capture for the active standalone terminal tab" />
-          <ComboBox Width="132"
-                    Height="24"
-                    FontSize="10"
-                    ItemsSource="{Binding CaptureFormats}"
-                    SelectedItem="{Binding SelectedCaptureFormat}"
-                    ToolTip.Tip="Recording file format used when saving captures">
-            <ComboBox.ItemTemplate>
-              <DataTemplate x:DataType="vm:TerminalCaptureFormatOption">
-                <TextBlock Text="{Binding DisplayName}" />
-              </DataTemplate>
-            </ComboBox.ItemTemplate>
-          </ComboBox>
-          <Button Content="Save Capture" Height="24"
-                  FontSize="10" Padding="8,2"
-                  IsEnabled="{Binding CanSaveCapture}"
-                  Command="{Binding SaveCaptureCommand}"
-                  ToolTip.Tip="Save the active tab capture to a file" />
-          <Button Content="Load Replay" Height="24"
-                  FontSize="10" Padding="8,2"
-                  Command="{Binding LoadReplayCommand}"
-                  ToolTip.Tip="Load a capture file and open a replay tab" />
-        </StackPanel>
-      </Grid>
-    </Border>
+                    chrome:WindowDecorationProperties.ElementRole="TitleBar">
+              <StackPanel Orientation="Horizontal"
+                          Spacing="8"
+                          VerticalAlignment="Center">
+                <TextBlock Text="RoyalTerminal"
+                           Classes="productTitle"
+                           VerticalAlignment="Center" />
+                <Border Classes="badge"
+                        MaxWidth="78">
+                  <TextBlock Text="{Binding ActiveSessionDisplay}"
+                             Classes="caption"
+                             TextTrimming="CharacterEllipsis"
+                             VerticalAlignment="Center" />
+                </Border>
+              </StackPanel>
+            </Border>
 
-    <Border DockPanel.Dock="Top"
-            Background="{DynamicResource ToolbarBackgroundBrush}"
-            BorderBrush="{StaticResource ToolbarDividerBrush}"
-            BorderThickness="0,0,0,1"
-            Padding="6,4"
-            ClipToBounds="True">
-      <Grid ColumnDefinitions="*,Auto"
-            ColumnSpacing="8"
-            ClipToBounds="True">
-        <StackPanel Grid.Column="1"
-                    Orientation="Horizontal"
-                    Spacing="4"
-                    VerticalAlignment="Center">
-          <CheckBox Content="Preserve History"
-                    Height="24"
-                    FontSize="10"
-                    IsChecked="{Binding PreserveScrollbackOnRestart}"
-                    VerticalAlignment="Center"
-                    ToolTip.Tip="Preserve terminal history when restarting the active session" />
-          <Button Content="Restart Session"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  Command="{Binding RestartActiveSessionCommand}"
-                  ToolTip.Tip="Restart the active terminal session" />
-          <Button x:Name="ClearHistoryButton"
-                  Content="Clear History"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  Command="{Binding ClearActiveScrollbackCommand}"
-                  ToolTip.Tip="Clear visible history on the active terminal tab" />
-          <Button Content="Hyperlink Sample"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  Command="{Binding ShowHyperlinkSampleCommand}"
-                  ToolTip.Tip="Inject OSC8 hyperlink sample output into the active terminal tab" />
-          <Button Content="Kitty Graphics"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  Command="{Binding ShowKittyGraphicsSampleCommand}"
-                  ToolTip.Tip="Inject a Ghostty Kitty Graphics sample into the active native VT tab" />
-          <Button Content="Copy Plain Snapshot"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  Command="{Binding CopyPlainSnapshotCommand}"
-                  ToolTip.Tip="Copy a plain-text snapshot of the active terminal buffer" />
-          <Button Content="Copy VT Snapshot"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  Command="{Binding CopyStyledVtSnapshotCommand}"
-                  ToolTip.Tip="Copy a styled VT snapshot of the active terminal buffer" />
-          <Button Content="Copy HTML Snapshot"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  Command="{Binding CopyHtmlSnapshotCommand}"
-                  ToolTip.Tip="Copy an HTML snapshot of the active terminal buffer" />
-          <Button Content="{Binding GhosttyDiagnosticsButtonText}"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  Command="{Binding ToggleGhosttyDiagnosticsCommand}"
-                  ToolTip.Tip="Show or hide Ghostty VT capability and active-tab diagnostics" />
-        </StackPanel>
+            <Grid Grid.Column="1"
+                  x:Name="TopSearchPanel"
+                  ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
+                  ColumnSpacing="4"
+                  VerticalAlignment="Center"
+                  ClipToBounds="True">
+              <TextBox x:Name="TopSearchBox"
+                       Grid.Column="0"
+                       MinWidth="80"
+                       HorizontalAlignment="Stretch"
+                       Classes="compactField searchField"
+                       PlaceholderText="Search"
+                       chrome:WindowDecorationProperties.ElementRole="User"
+                       Text="{Binding SearchQuery}" />
+              <Button x:Name="TopSearchApplyButton"
+                      Grid.Column="1"
+                      Classes="iconButton"
+                      MinWidth="32"
+                      MinHeight="32"
+                      Width="32"
+                      Height="32"
+                      MaxWidth="32"
+                      MaxHeight="32"
+                      IsEnabled="{Binding CanApplySearch}"
+                      Command="{Binding ApplySearchCommand}"
+                      chrome:WindowDecorationProperties.ElementRole="User"
+                      ToolTip.Tip="Find">
+                <PathIcon Classes="commandIcon"
+                          Data="{StaticResource Icon.SearchRegular}" />
+              </Button>
+              <Button x:Name="TopSearchPreviousButton"
+                      Grid.Column="2"
+                      Classes="iconButton"
+                      MinWidth="32"
+                      MinHeight="32"
+                      Width="32"
+                      Height="32"
+                      MaxWidth="32"
+                      MaxHeight="32"
+                      IsEnabled="{Binding CanAdvanceSearch}"
+                      Command="{Binding PreviousSearchCommand}"
+                      chrome:WindowDecorationProperties.ElementRole="User"
+                      ToolTip.Tip="Previous match">
+                <PathIcon Classes="commandIcon"
+                          Data="{StaticResource Icon.ChevronLeftRegular}" />
+              </Button>
+              <Button x:Name="TopSearchNextButton"
+                      Grid.Column="3"
+                      Classes="iconButton"
+                      MinWidth="32"
+                      MinHeight="32"
+                      Width="32"
+                      Height="32"
+                      MaxWidth="32"
+                      MaxHeight="32"
+                      IsEnabled="{Binding CanAdvanceSearch}"
+                      Command="{Binding NextSearchCommand}"
+                      chrome:WindowDecorationProperties.ElementRole="User"
+                      ToolTip.Tip="Next match">
+                <PathIcon Classes="commandIcon"
+                          Data="{StaticResource Icon.ChevronRightRegular}" />
+              </Button>
+              <Button x:Name="TopSearchClearButton"
+                      Grid.Column="4"
+                      Classes="iconButton"
+                      MinWidth="32"
+                      MinHeight="32"
+                      Width="32"
+                      Height="32"
+                      MaxWidth="32"
+                      MaxHeight="32"
+                      IsEnabled="{Binding CanClearSearch}"
+                      Command="{Binding ClearSearchCommand}"
+                      chrome:WindowDecorationProperties.ElementRole="User"
+                      ToolTip.Tip="Clear search">
+                <PathIcon Classes="commandIcon"
+                          Data="{StaticResource Icon.DismissRegular}" />
+              </Button>
+              <TextBlock Grid.Column="5"
+                         Text="{Binding SearchResultText}"
+                         Classes="caption"
+                         MaxWidth="84"
+                         TextTrimming="CharacterEllipsis"
+                         VerticalAlignment="Center" />
+            </Grid>
 
-        <StackPanel Grid.Column="0"
-                    Orientation="Horizontal"
-                    Spacing="4"
-                    VerticalAlignment="Center"
-                    ClipToBounds="True">
-          <TextBlock Text="Search"
-                     Margin="0,4,0,0"
-                     Foreground="{DynamicResource ToolbarForegroundBrush}"
-                     FontSize="11" />
-          <TextBox Width="220"
-                   PlaceholderText="Find in active terminal"
-                   Text="{Binding SearchQuery}" />
-          <Button Content="Find"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  IsEnabled="{Binding CanApplySearch}"
-                  Command="{Binding ApplySearchCommand}"
-                  ToolTip.Tip="Start search on the active terminal tab" />
-          <Button Content="Prev"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  IsEnabled="{Binding CanAdvanceSearch}"
-                  Command="{Binding PreviousSearchCommand}"
-                  ToolTip.Tip="Select the previous search result" />
-          <Button Content="Next"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  IsEnabled="{Binding CanAdvanceSearch}"
-                  Command="{Binding NextSearchCommand}"
-                  ToolTip.Tip="Select the next search result" />
-          <Button Content="Clear"
-                  Height="24"
-                  FontSize="10"
-                  Padding="8,2"
-                  IsEnabled="{Binding CanClearSearch}"
-                  Command="{Binding ClearSearchCommand}"
-                  ToolTip.Tip="Clear search highlights on the active terminal tab" />
-          <TextBlock Text="{Binding SearchResultText}"
-                     Margin="8,4,0,0"
-                     Foreground="{DynamicResource ToolbarForegroundBrush}"
-                     FontSize="11" />
-        </StackPanel>
-      </Grid>
-    </Border>
+            <Button Grid.Column="2"
+                    x:Name="TopNewTabButton"
+                    Classes="primaryCommand"
+                    Command="{Binding NewTabCommand}"
+                    chrome:WindowDecorationProperties.ElementRole="User">
+              <StackPanel Classes="iconLabel">
+                <PathIcon Classes="primaryCommandIcon"
+                          Data="{StaticResource Icon.AddSquareMultipleRegular}" />
+                <TextBlock Text="New Tab"
+                           VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+          </Grid>
 
-    <Border DockPanel.Dock="Top"
-            Background="{DynamicResource ToolbarBackgroundBrush}"
-            BorderBrush="{StaticResource ToolbarDividerBrush}"
-            BorderThickness="0,0,0,1"
-            Padding="6,4"
-            IsVisible="{Binding ShowGhosttyDiagnostics}">
-      <StackPanel Spacing="4">
-        <TextBlock Text="Ghostty VT Diagnostics"
-                   Foreground="{DynamicResource ToolbarForegroundBrush}"
-                   FontSize="11" />
-        <TextBox Height="132"
-                 IsReadOnly="True"
-                 AcceptsReturn="True"
-                 TextWrapping="Wrap"
-                 Text="{Binding GhosttyDiagnosticsText}" />
-      </StackPanel>
-    </Border>
+          <Border x:Name="TitleBarRightDecorationReserve"
+                  Grid.Column="2"
+                  Width="{Binding #RootWindow.WindowDecorationMargin.Right}"
+                  IsHitTestVisible="False" />
+        </Grid>
+      </Border>
 
-    <Border DockPanel.Dock="Top"
-            Background="{DynamicResource ToolbarBackgroundBrush}"
-            BorderBrush="{StaticResource ToolbarDividerBrush}"
-            BorderThickness="0,0,0,1"
-            Padding="6,4"
-            IsVisible="{Binding ShowSessionTransportPicker}">
-      <StackPanel Spacing="6">
-        <WrapPanel Orientation="Horizontal">
-          <TextBlock Text="Category" Margin="0,4,6,0"
-                     Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-          <ComboBox Width="150" Margin="0,0,8,0"
-                    ItemsSource="{Binding SettingsCategories}"
-                    SelectedItem="{Binding SelectedSettingsCategory}">
-            <ComboBox.ItemTemplate>
-              <DataTemplate x:DataType="vm:SettingsCategoryOption">
-                <TextBlock Text="{Binding DisplayName}" />
-              </DataTemplate>
-            </ComboBox.ItemTemplate>
-          </ComboBox>
+      <Grid Grid.Row="1" ColumnDefinitions="56,*">
+        <Border Grid.Column="0" Classes="shellRail">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Classes="brandMark">
+            <TextBlock Text="RT"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       FontSize="13"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource ShellAccentBrush}" />
+          </Border>
 
-          <TextBlock Text="Session" Margin="0,4,6,0"
-                     Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-          <TextBox Width="150" Margin="0,0,8,0"
-                   Text="{Binding SessionName}" />
-
-          <TextBlock Text="Transport" Margin="0,4,6,0"
-                     Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-          <ComboBox Width="130" Margin="0,0,8,0"
-                    ItemsSource="{Binding TransportModes}"
-                    SelectedItem="{Binding SelectedTransportMode}">
-            <ComboBox.ItemTemplate>
-              <DataTemplate x:DataType="vm:TransportModeOption">
-                <TextBlock Text="{Binding DisplayName}" />
-              </DataTemplate>
-            </ComboBox.ItemTemplate>
-          </ComboBox>
-        </WrapPanel>
-
-        <TextBlock Text="Transport settings are used for all demo tabs."
-                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                   IsVisible="{Binding ShowSessionTransportHint}" />
-
-        <StackPanel Spacing="4" IsVisible="{Binding ShowSessionSettingsCategory}">
-          <TextBlock Text="Session defaults for new tabs."
-                     Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-          <WrapPanel Orientation="Horizontal">
-            <TextBlock Text="Name" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="180" Margin="0,0,8,0"
-                     Text="{Binding SessionName}" />
-            <TextBlock Text="Active Transport" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBlock Margin="0,4,0,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                       Text="{Binding SelectedTransportMode.DisplayName}" />
-          </WrapPanel>
-        </StackPanel>
-
-        <StackPanel Spacing="4" IsVisible="{Binding ShowConnectionSettingsCategory}">
-          <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsPtyTransportSelected}">
-            <TextBlock Text="Shell" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <ComboBox Width="240" Margin="0,0,8,0"
-                      ItemsSource="{Binding ShellProfiles}"
-                      SelectedItem="{Binding SelectedShellProfile}">
-              <ComboBox.ItemTemplate>
-                <DataTemplate x:DataType="vm:ShellProfileOption">
-                  <TextBlock Text="{Binding DisplayName}" />
-                </DataTemplate>
-              </ComboBox.ItemTemplate>
-            </ComboBox>
-            <TextBlock Text="Working Dir" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="280" Margin="0,0,8,0"
-                     Text="{Binding WorkingDirectory}" />
-          </WrapPanel>
-
-          <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsPipeTransportSelected}">
-            <TextBlock Text="Working Dir" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="240" Margin="0,0,8,0"
-                     Text="{Binding WorkingDirectory}" />
-            <TextBlock Text="Pipe Cmd" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="280" Margin="0,0,8,0"
-                     Text="{Binding PipeCommandText}" />
-            <CheckBox Content="Merge stderr"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding PipeMergeStdErrIntoStdOut}" />
-          </WrapPanel>
-
-          <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsRawTcpTransportSelected}">
-            <TextBlock Text="Host" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="180" Margin="0,0,8,0"
-                     Text="{Binding RawTcpHost}" />
-            <TextBlock Text="Port" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="80" Margin="0,0,8,0"
-                     Text="{Binding RawTcpPort}" />
-          </WrapPanel>
-
-          <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsTelnetTransportSelected}">
-            <TextBlock Text="Host" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="180" Margin="0,0,8,0"
-                     Text="{Binding TelnetHost}" />
-            <TextBlock Text="Port" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="80" Margin="0,0,8,0"
-                     Text="{Binding TelnetPort}" />
-          </WrapPanel>
-
-          <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsSerialTransportSelected}">
-            <TextBlock Text="Port" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="120" Margin="0,0,8,0"
-                     Text="{Binding SerialPortName}" />
-            <TextBlock Text="Baud" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="90" Margin="0,0,8,0"
-                     Text="{Binding SerialBaudRate}" />
-            <TextBlock Text="Data Bits" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="70" Margin="0,0,8,0"
-                     Text="{Binding SerialDataBits}" />
-            <TextBlock Text="Parity" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <ComboBox Width="120" Margin="0,0,8,0"
-                      ItemsSource="{Binding SerialParityOptions}"
-                      SelectedItem="{Binding SelectedSerialParity}" />
-            <TextBlock Text="Stop Bits" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <ComboBox Width="120" Margin="0,0,8,0"
-                      ItemsSource="{Binding SerialStopBitsOptions}"
-                      SelectedItem="{Binding SelectedSerialStopBits}" />
-            <TextBlock Text="Handshake" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <ComboBox Width="170" Margin="0,0,8,0"
-                      ItemsSource="{Binding SerialHandshakeOptions}"
-                      SelectedItem="{Binding SelectedSerialHandshake}" />
-            <TextBlock Text="NewLine" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="80" Margin="0,0,8,0"
-                     Text="{Binding SerialNewLine}" />
-          </WrapPanel>
-
-          <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsSshTransportSelected}">
-            <TextBlock Text="Host" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="180" Margin="0,0,8,0" Text="{Binding SshHost}" />
-            <TextBlock Text="Port" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="80" Margin="0,0,8,0" Text="{Binding SshPort}" />
-            <TextBlock Text="User" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="140" Margin="0,0,8,0" Text="{Binding SshUsername}" />
-          </WrapPanel>
-        </StackPanel>
-
-        <StackPanel Spacing="4" IsVisible="{Binding ShowTerminalSettingsCategory}">
-          <WrapPanel Orientation="Horizontal">
-            <CheckBox Content="Copy on Select"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding CopyOnSelectEnabled}" />
-            <CheckBox Content="Bell Notifications"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding EnableBellNotifications}" />
-            <CheckBox Content="Backspace sends Ctrl-H"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding BackspaceSendsControlH}" />
-          </WrapPanel>
-          <WrapPanel Orientation="Horizontal">
-            <CheckBox Content="Enable Text Shaping"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding EnableTextShaping}" />
-            <CheckBox Content="Reflow on Resize"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding ReflowOnResize}" />
-            <CheckBox Content="Sixel Graphics"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding SixelGraphicsEnabled}" />
-            <CheckBox Content="Enable Ligatures"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding EnableLigatures}" />
-            <TextBlock Text="Paste Safety" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <ComboBox Width="220" Margin="0,0,8,0"
-                      ItemsSource="{Binding PasteSafetyPolicies}"
-                      SelectedItem="{Binding SelectedPasteSafetyPolicy}" />
-          </WrapPanel>
-          <WrapPanel Orientation="Horizontal" IsVisible="{Binding ShowTerminalSshFields}">
-            <CheckBox Content="Request PTY"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding SshRequestPty}" />
-            <TextBlock Text="Terminal" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="140" Margin="0,0,8,0" Text="{Binding SshTerminalType}" />
-            <TextBlock Text="Initial Cmd" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="260" Margin="0,0,8,0" Text="{Binding SshInitialCommand}" />
-          </WrapPanel>
-
-          <WrapPanel Orientation="Horizontal" IsVisible="{Binding ShowTerminalTelnetFields}">
-            <TextBlock Text="Terminal" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="140" Margin="0,0,8,0" Text="{Binding TelnetTerminalType}" />
-            <TextBlock Text="Initial Cmd" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="260" Margin="0,0,8,0" Text="{Binding TelnetInitialCommand}" />
-          </WrapPanel>
-
-          <TextBlock Text="No protocol-specific terminal options are available for the selected transport."
-                     Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                     IsVisible="{Binding ShowTerminalSettingsHint}" />
-        </StackPanel>
-
-        <StackPanel Spacing="4" IsVisible="{Binding ShowAppearanceSettingsCategory}">
-          <WrapPanel Orientation="Horizontal">
-            <TextBlock Text="Font Size" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <Button Content="A-" Width="28" Height="24"
-                    FontSize="10" Padding="2"
-                    Command="{Binding DecreaseFontSizeCommand}" />
-            <TextBlock Text="{Binding FontSizeDisplay}" Margin="6,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <Button Content="A+" Width="28" Height="24"
-                    FontSize="10" Padding="2"
-                    Command="{Binding IncreaseFontSizeCommand}" />
-            <Button Content="Reset" Height="24"
-                    FontSize="10" Padding="8,2" Margin="8,0,0,0"
-                    Command="{Binding ResetFontSizeCommand}" />
-          </WrapPanel>
-          <WrapPanel Orientation="Horizontal">
-            <Button Content="{Binding ThemePresetButtonText}" Height="24"
-                    FontSize="10" Padding="8,2"
-                    Command="{Binding CycleThemePresetCommand}" />
-            <Button Content="Generate Theme" Height="24"
-                    FontSize="10" Padding="8,2" Margin="8,0,0,0"
-                    Command="{Binding GenerateThemeCommand}" />
-          </WrapPanel>
-        </StackPanel>
-
-        <StackPanel Spacing="4" IsVisible="{Binding ShowSshSettingsCategory}">
-          <TextBlock Text="Select SSH transport in Connection to configure SSH-specific settings."
-                     Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                     IsVisible="{Binding ShowSshSettingsUnavailableHint}" />
-
-          <StackPanel Spacing="4" IsVisible="{Binding ShowSshSettingsFields}">
-            <WrapPanel Orientation="Horizontal">
-              <TextBlock Text="Auth" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-              <ComboBox Width="150" Margin="0,0,8,0"
-                        ItemsSource="{Binding SshAuthModes}"
-                        SelectedItem="{Binding SelectedSshAuthMode}">
-                <ComboBox.ItemTemplate>
-                  <DataTemplate x:DataType="vm:SshAuthModeOption">
-                    <TextBlock Text="{Binding DisplayName}" />
-                  </DataTemplate>
-                </ComboBox.ItemTemplate>
-              </ComboBox>
-
-              <TextBlock Text="Password" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshPasswordField}" />
-              <TextBox Width="140" Margin="0,0,8,0"
-                       Text="{Binding SshPassword}"
-                       PasswordChar="*"
-                       IsVisible="{Binding ShowSshPasswordField}" />
-
-              <TextBlock Text="Private Key(s)" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshPrivateKeyField}" />
-              <TextBox Width="220" Margin="0,0,8,0"
-                       Text="{Binding SshPrivateKeyPath}"
-                       PlaceholderText="Path or PEM; separate multiple with comma/semicolon/newline"
-                       IsVisible="{Binding ShowSshPrivateKeyField}" />
-
-              <TextBlock Text="Agent credentials are resolved from your SSH agent socket."
-                         Margin="0,4,8,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshAgentHint}" />
-            </WrapPanel>
-
-            <WrapPanel Orientation="Horizontal">
-              <TextBlock Text="Host Key SHA256 (optional pin)" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-              <TextBox Width="240" Margin="0,0,8,0" Text="{Binding SshExpectedHostKeyFingerprintSha256}" />
-            </WrapPanel>
-
-            <WrapPanel Orientation="Horizontal">
-              <TextBlock Text="Proxy" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-              <ComboBox Width="120" Margin="0,0,8,0"
-                        ItemsSource="{Binding SshProxyTypes}"
-                        SelectedItem="{Binding SelectedSshProxyType}" />
-              <TextBlock Text="Host" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshProxyFields}" />
-              <TextBox Width="160" Margin="0,0,8,0"
-                       Text="{Binding SshProxyHost}"
-                       IsVisible="{Binding ShowSshProxyFields}" />
-              <TextBlock Text="Port" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshProxyFields}" />
-              <TextBox Width="80" Margin="0,0,8,0"
-                       Text="{Binding SshProxyPort}"
-                       IsVisible="{Binding ShowSshProxyFields}" />
-              <TextBlock Text="User" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshProxyFields}" />
-              <TextBox Width="120" Margin="0,0,8,0"
-                       Text="{Binding SshProxyUsername}"
-                       IsVisible="{Binding ShowSshProxyFields}" />
-              <TextBlock Text="Password" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshProxyFields}" />
-              <TextBox Width="120" Margin="0,0,8,0"
-                       Text="{Binding SshProxyPassword}"
-                       PasswordChar="*"
-                       IsVisible="{Binding ShowSshProxyFields}" />
-            </WrapPanel>
-
-            <WrapPanel Orientation="Horizontal">
-              <CheckBox Content="Local Port Forward"
-                        Margin="0,2,8,0"
-                        IsChecked="{Binding SshLocalPortForwardEnabled}" />
-              <TextBlock Text="Bind" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshPortForwardFields}" />
-              <TextBox Width="120" Margin="0,0,8,0"
-                       Text="{Binding SshLocalPortForwardBindAddress}"
-                       IsVisible="{Binding ShowSshPortForwardFields}" />
-              <TextBlock Text="Source" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshPortForwardFields}" />
-              <TextBox Width="80" Margin="0,0,8,0"
-                       Text="{Binding SshLocalPortForwardSourcePort}"
-                       IsVisible="{Binding ShowSshPortForwardFields}" />
-              <TextBlock Text="Destination Host" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshPortForwardFields}" />
-              <TextBox Width="160" Margin="0,0,8,0"
-                       Text="{Binding SshLocalPortForwardDestinationHost}"
-                       IsVisible="{Binding ShowSshPortForwardFields}" />
-              <TextBlock Text="Destination Port" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshPortForwardFields}" />
-              <TextBox Width="80" Margin="0,0,8,0"
-                       Text="{Binding SshLocalPortForwardDestinationPort}"
-                       IsVisible="{Binding ShowSshPortForwardFields}" />
-            </WrapPanel>
-
-            <WrapPanel Orientation="Horizontal">
-              <CheckBox Content="Enable X11"
-                        Margin="0,2,8,0"
-                        IsChecked="{Binding SshX11Enabled}" />
-              <TextBlock Text="Display" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                         IsVisible="{Binding ShowSshX11DisplayField}" />
-              <TextBox Width="100" Margin="0,0,8,0"
-                       Text="{Binding SshX11Display}"
-                       IsVisible="{Binding ShowSshX11DisplayField}" />
-              <TextBlock Text="KeepAlive (s)" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-              <TextBox Width="90" Margin="0,0,8,0"
-                       Text="{Binding SshKeepAliveIntervalSeconds}" />
-              <TextBlock Text="Connect Timeout (s)" Margin="0,4,6,0"
-                         Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-              <TextBox Width="90" Margin="0,0,8,0"
-                       Text="{Binding SshConnectTimeoutSeconds}" />
-            </WrapPanel>
+          <StackPanel Spacing="4">
+            <Button Classes="railCommand"
+                    Command="{Binding NewTabCommand}"
+                    ToolTip.Tip="New tab">
+              <PathIcon Classes="railIcon"
+                        Data="{StaticResource Icon.AddSquareMultipleRegular}" />
+            </Button>
+            <Button x:Name="ProfileLauncherButton"
+                    Classes="railCommand"
+                    Command="{Binding RefreshSessionLauncherCommand}"
+                    ToolTip.Tip="Profiles">
+              <PathIcon Classes="railIcon"
+                        Data="{StaticResource Icon.ProfileRegular}" />
+              <Button.Flyout>
+                <Flyout Placement="RightEdgeAlignedTop"
+                        FlyoutPresenterClasses="product-flyout">
+                  <Border Classes="flyoutPanel"
+                          Width="360">
+                    <StackPanel Spacing="10">
+                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <TextBlock Text="Profiles"
+                                   Classes="sectionTitle"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding SessionLauncherStatusText}"
+                                   Classes="caption"
+                                   VerticalAlignment="Center" />
+                      </Grid>
+                      <TextBox Classes="compactField"
+                               PlaceholderText="Filter profiles"
+                               Text="{Binding SessionLauncherQuery, Mode=TwoWay}" />
+                      <ListBox Classes="launcherList"
+                               MinHeight="120"
+                               MaxHeight="280"
+                               ItemsSource="{Binding FilteredSessionLaunchOptions}"
+                               SelectedItem="{Binding SelectedSessionLaunchOption, Mode=TwoWay}">
+                        <ListBox.ItemTemplate>
+                          <DataTemplate x:DataType="vm:SessionLaunchOption">
+                            <Grid RowDefinitions="Auto,Auto"
+                                  ColumnDefinitions="*,Auto,Auto"
+                                  ColumnSpacing="8"
+                                  RowSpacing="2"
+                                  Margin="2">
+                              <TextBlock Text="{Binding DisplayName}"
+                                         Foreground="{DynamicResource ToolbarForegroundBrush}"
+                                         TextTrimming="CharacterEllipsis" />
+                              <Border Grid.Column="1"
+                                      Classes="badge">
+                                <TextBlock Text="{Binding TransportId}"
+                                           Classes="caption" />
+                              </Border>
+                              <Button Grid.Column="2"
+                                      Grid.RowSpan="2"
+                                      Classes="iconButton"
+                                      Width="28"
+                                      Height="28"
+                                      MinWidth="28"
+                                      MinHeight="28"
+                                      MaxWidth="28"
+                                      MaxHeight="28"
+                                      VerticalAlignment="Center"
+                                      Command="{Binding #RootWindow.DataContext.LaunchSessionProfileCommand}"
+                                      CommandParameter="{Binding}"
+                                      ToolTip.Tip="Launch profile">
+                                <PathIcon Classes="commandIcon"
+                                          Width="14"
+                                          Height="14"
+                                          Data="{StaticResource Icon.PlayRegular}" />
+                              </Button>
+                              <TextBlock Grid.Row="1"
+                                         Grid.ColumnSpan="2"
+                                         Text="{Binding Subtitle}"
+                                         Classes="caption"
+                                         TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                          </DataTemplate>
+                        </ListBox.ItemTemplate>
+                      </ListBox>
+                      <Button Classes="primaryCommand"
+                              HorizontalAlignment="Stretch"
+                              IsEnabled="{Binding CanLaunchSelectedSessionProfile}"
+                              Command="{Binding LaunchSelectedSessionProfileCommand}">
+                        <StackPanel Classes="iconLabel">
+                          <PathIcon Classes="primaryCommandIcon"
+                                    Data="{StaticResource Icon.PlayRegular}" />
+                          <TextBlock Text="Launch"
+                                     VerticalAlignment="Center" />
+                        </StackPanel>
+                      </Button>
+                    </StackPanel>
+                  </Border>
+                </Flyout>
+              </Button.Flyout>
+            </Button>
+            <Button x:Name="CommandHistoryButton"
+                    Classes="railCommand"
+                    Command="{Binding OpenCommandHistoryOverlayCommand}"
+                    ToolTip.Tip="Command history">
+              <PathIcon Classes="railIcon"
+                        Data="{StaticResource Icon.HistoryRegular}" />
+            </Button>
+            <Button Classes="railCommand"
+                    Command="{Binding PrepareSettingsPanelCommand}"
+                    ToolTip.Tip="Settings">
+              <PathIcon Classes="railIcon"
+                        Data="{StaticResource Icon.SettingsRegular}" />
+            </Button>
+            <Button Classes="railCommand"
+                    Command="{Binding ToggleGhosttyDiagnosticsCommand}"
+                    ToolTip.Tip="Diagnostics">
+              <PathIcon Classes="railIcon"
+                        Data="{StaticResource Icon.PulseRegular}" />
+            </Button>
           </StackPanel>
-        </StackPanel>
+        </DockPanel>
+      </Border>
 
-        <StackPanel Spacing="4" IsVisible="{Binding ShowLoggingSettingsCategory}">
-          <WrapPanel Orientation="Horizontal">
-            <CheckBox Content="Enable Session Log"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding SessionLoggingEnabled}" />
-            <TextBlock Text="Format" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <ComboBox Width="140" Margin="0,0,8,0"
-                      ItemsSource="{Binding SessionLogFormats}"
-                      SelectedItem="{Binding SelectedSessionLogFormat}" />
-            <CheckBox Content="Flush Frequently"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding SessionLogFlushFrequently}" />
-            <CheckBox Content="Enable Event Log"
-                      Margin="0,2,8,0"
-                      IsChecked="{Binding EventLogEnabled}" />
-            <Button Content="Clear Event Log"
-                    Height="24"
-                    FontSize="10"
-                    Padding="8,2"
-                    Command="{Binding ClearEventLogCommand}"
-                    IsEnabled="{Binding HasEventLogEntries}" />
-            <TextBlock Margin="8,4,0,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11"
-                       Text="{Binding EventLogEntryCountText}" />
-          </WrapPanel>
-          <WrapPanel Orientation="Horizontal">
-            <TextBlock Text="Session Log File" Margin="0,4,6,0"
-                       Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-            <TextBox Width="620" Margin="0,0,8,0"
-                     Text="{Binding SessionLogFilePath}" />
-          </WrapPanel>
-          <TextBlock Text="Event timeline for connection lifecycle and runtime notifications."
-                     Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-          <TextBox Height="140"
-                   IsReadOnly="True"
-                   AcceptsReturn="True"
-                   TextWrapping="Wrap"
-                   Text="{Binding EventLogText}" />
-        </StackPanel>
-      </StackPanel>
-    </Border>
+      <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto">
+        <Border Grid.Row="0" Classes="tabStripSurface">
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Disabled">
+            <StackPanel Name="TabStrip"
+                        Orientation="Horizontal"
+                        Spacing="4" />
+          </ScrollViewer>
+        </Border>
 
-    <Border DockPanel.Dock="Top"
-            Background="{DynamicResource ToolbarBackgroundBrush}"
-            BorderBrush="{StaticResource ToolbarDividerBrush}"
-            BorderThickness="0,0,0,1"
-            Padding="6,4"
-            IsVisible="{Binding IsReplayEnabled}">
-      <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-        <TextBlock Text="Replay" Margin="0,4,0,0"
-                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-        <Button Content="{Binding ReplayPlayPauseButtonText}" Height="24"
-                FontSize="10" Padding="8,2"
-                IsEnabled="{Binding CanReplayControl}"
-                Command="{Binding ToggleReplayPlaybackCommand}" />
-        <Button Content="Stop" Height="24"
-                FontSize="10" Padding="8,2"
-                IsEnabled="{Binding CanReplayControl}"
-                Command="{Binding StopReplayCommand}" />
-        <Slider Width="340"
-                Minimum="0"
-                Maximum="{Binding ReplayDurationSeconds}"
-                Value="{Binding ReplayTimelineValue, Mode=TwoWay}"
-                IsEnabled="{Binding CanSeekReplay}" />
-        <TextBlock Text="{Binding ReplayTimelineText}"
-                   Margin="0,4,0,0"
-                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-        <TextBlock Text="{Binding ReplaySourceLabel}"
-                   Margin="8,4,0,0"
-                   Foreground="{DynamicResource ToolbarForegroundBrush}" FontSize="11" />
-      </StackPanel>
-    </Border>
+        <Grid Grid.Row="1">
+          <Border Classes="terminalSurface">
+            <Grid Name="TerminalHost"
+                  Background="{DynamicResource WindowBackgroundBrush}" />
+          </Border>
 
-    <Border DockPanel.Dock="Top" Background="{DynamicResource TabStripBackgroundBrush}" Padding="4,2,4,0">
-      <StackPanel Name="TabStrip" Orientation="Horizontal" Spacing="2" />
-    </Border>
+          <Border Classes="diagnosticsPanel"
+                  VerticalAlignment="Top"
+                  MaxHeight="360"
+                  IsVisible="{Binding ShowGhosttyDiagnostics}">
+            <Grid RowDefinitions="Auto,Auto,*"
+                  RowSpacing="8">
+              <Grid ColumnDefinitions="*,Auto"
+                    ColumnSpacing="10">
+                <TextBlock Text="Diagnostics"
+                           Classes="sectionTitle"
+                           VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            VerticalAlignment="Center">
+                  <TextBlock Text="{Binding EventLogEntryCountText}"
+                             Classes="caption"
+                             VerticalAlignment="Center" />
+                  <Button x:Name="DiagnosticsClearEventLogButton"
+                          Classes="statusButton"
+                          IsEnabled="{Binding HasEventLogEntries}"
+                          Command="{Binding ClearEventLogCommand}">
+                    <TextBlock Text="Clear Log" />
+                  </Button>
+                </StackPanel>
+              </Grid>
+              <TextBox x:Name="GhosttyDiagnosticsTextBox"
+                       Grid.Row="1"
+                       Classes="diagnosticsTextBox"
+                       Height="88"
+                       IsReadOnly="True"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                       ScrollViewer.VerticalScrollBarVisibility="Auto"
+                       Text="{Binding GhosttyDiagnosticsText}" />
+              <TextBox x:Name="EventLogTextBox"
+                       Grid.Row="2"
+                       Classes="diagnosticsTextBox"
+                       MinHeight="96"
+                       IsReadOnly="True"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                       ScrollViewer.VerticalScrollBarVisibility="Auto"
+                       Text="{Binding EventLogText}" />
+            </Grid>
+          </Border>
 
-    <Border DockPanel.Dock="Bottom" Background="{DynamicResource StatusBarBackgroundBrush}" Padding="8,2" Height="24">
-      <DockPanel>
-        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
-          <TextBlock Text="{Binding TextRenderPipelineIndicatorText}"
-                     Foreground="{DynamicResource StatusBarForegroundBrush}" FontSize="11"
-                     VerticalAlignment="Center" />
-          <Border Width="1" Height="12" Background="{DynamicResource StatusBarForegroundBrush}" Opacity="0.35" />
-          <TextBlock Text="{Binding DimensionsText}"
-                     Foreground="{DynamicResource StatusBarForegroundBrush}" FontSize="11"
-                     VerticalAlignment="Center" />
-        </StackPanel>
-        <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource StatusBarForegroundBrush}"
-                   FontSize="11" VerticalAlignment="Center" />
-      </DockPanel>
-    </Border>
+          <Border x:Name="SettingsOverlay"
+                  Classes="flyoutPanel settingsOverlayPanel"
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Stretch"
+                  Margin="24"
+                  MaxWidth="900"
+                  MaxHeight="620"
+                  ClipToBounds="True"
+                  IsVisible="{Binding IsSettingsPanelOpen}">
+            <Grid RowDefinitions="Auto,*" RowSpacing="12" ClipToBounds="True">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBlock Text="Preferences"
+                           Classes="sectionTitle"
+                           VerticalAlignment="Center" />
+                <Button Grid.Column="1"
+                        Classes="commandButton"
+                        Command="{Binding CloseSettingsPanelCommand}">
+                  <StackPanel Classes="iconLabel">
+                    <PathIcon Classes="commandIcon"
+                              Data="{StaticResource Icon.DismissRegular}" />
+                    <TextBlock Text="Close"
+                               VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+              </Grid>
+              <settings:TerminalSettingsPanel Grid.Row="1"
+                                              MinHeight="0"
+                                              HorizontalAlignment="Stretch"
+                                              VerticalAlignment="Stretch"
+                                              DataContext="{Binding SettingsPanelState}" />
+            </Grid>
+          </Border>
 
-    <Grid Name="TerminalHost" />
-  </DockPanel>
-
-  <Border Background="#99000000"
-          IsVisible="{Binding IsSshHostKeyPromptVisible}">
-    <Border HorizontalAlignment="Stretch"
-            VerticalAlignment="Center"
-            MaxWidth="560"
-            Margin="16"
-            Background="{DynamicResource WindowBackgroundBrush}"
-            BorderBrush="{StaticResource ToolbarDividerBrush}"
-            BorderThickness="1"
-            CornerRadius="6"
-            Padding="20">
-      <StackPanel Spacing="12">
-        <TextBlock Text="{Binding SshHostKeyPromptTitle}"
-                   Foreground="{DynamicResource ToolbarForegroundBrush}"
-                   FontSize="18"
-                   FontWeight="SemiBold" />
-        <TextBlock Text="{Binding SshHostKeyPromptEndpoint}"
-                   Foreground="{DynamicResource ToolbarForegroundBrush}"
-                   FontSize="12" />
-
-        <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto">
-          <TextBlock Grid.Row="0" Grid.Column="0"
-                     Text="Algorithm"
-                     Foreground="{DynamicResource ToolbarForegroundBrush}"
-                     FontSize="12" />
-          <TextBlock Grid.Row="0" Grid.Column="1"
-                     Text="{Binding SshHostKeyPromptAlgorithm}"
-                     Foreground="{DynamicResource ToolbarForegroundBrush}"
-                     FontSize="12" />
-          <TextBlock Grid.Row="1" Grid.Column="0"
-                     Text="SHA256"
-                     Foreground="{DynamicResource ToolbarForegroundBrush}"
-                     FontSize="12" />
-          <TextBox Grid.Row="1" Grid.Column="1"
-                   Text="{Binding SshHostKeyPromptFingerprintSha256, Mode=OneWay}"
-                   IsReadOnly="True"
-                   FontFamily="Consolas"
-                   FontSize="12" />
-          <TextBlock Grid.Row="2" Grid.Column="0"
-                     Text="MD5"
-                     Foreground="{DynamicResource ToolbarForegroundBrush}"
-                     FontSize="12" />
-          <TextBox Grid.Row="2" Grid.Column="1"
-                   Text="{Binding SshHostKeyPromptFingerprintMd5, Mode=OneWay}"
-                   IsReadOnly="True"
-                   FontFamily="Consolas"
-                   FontSize="12" />
+          <Border Classes="flyoutPanel commandHistoryOverlay"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Top"
+                  Margin="0,18,0,0"
+                  Width="560"
+                  IsVisible="{Binding IsCommandHistoryOverlayOpen}">
+            <StackPanel Spacing="10">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBlock Text="Command History"
+                           Classes="sectionTitle"
+                           VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding CommandSuggestionStatusText}"
+                           Classes="caption"
+                           VerticalAlignment="Center" />
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Classes="compactField"
+                         PlaceholderText="Search command or snippet"
+                         Text="{Binding CommandSuggestionQuery, Mode=TwoWay}" />
+                <Button Grid.Column="1"
+                        Classes="commandButton"
+                        Command="{Binding RefreshCommandSuggestionsCommand}">
+                  <StackPanel Classes="iconLabel">
+                    <PathIcon Classes="commandIcon"
+                              Data="{StaticResource Icon.ArrowSyncRegular}" />
+                    <TextBlock Text="Refresh"
+                               VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+              </Grid>
+              <ListBox Classes="launcherList"
+                       MinHeight="140"
+                       MaxHeight="300"
+                       ItemsSource="{Binding CommandSuggestions}"
+                       SelectedItem="{Binding SelectedCommandSuggestion, Mode=TwoWay}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="terminal:TerminalCommandSuggestion">
+                    <Grid RowDefinitions="Auto,Auto,Auto"
+                          ColumnDefinitions="*,Auto"
+                          ColumnSpacing="8"
+                          RowSpacing="2"
+                          Margin="2">
+                      <TextBlock Text="{Binding CommandLine}"
+                                 FontFamily="Menlo,Consolas,monospace"
+                                 Foreground="{DynamicResource ToolbarForegroundBrush}"
+                                 TextTrimming="CharacterEllipsis" />
+                      <Border Grid.Column="1"
+                              Classes="badge">
+                        <TextBlock Text="{Binding Kind}"
+                                   Classes="caption" />
+                      </Border>
+                      <TextBlock Grid.Row="1"
+                                 Grid.ColumnSpan="2"
+                                 Text="{Binding Description}"
+                                 Classes="caption"
+                                 TextTrimming="CharacterEllipsis" />
+                      <TextBlock Grid.Row="2"
+                                 Grid.ColumnSpan="2"
+                                 Text="{Binding WorkingDirectory}"
+                                 Classes="caption"
+                                 TextTrimming="CharacterEllipsis" />
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <StackPanel Orientation="Horizontal"
+                          Spacing="8"
+                          HorizontalAlignment="Right">
+                <Button Classes="commandButton"
+                        Command="{Binding CloseCommandHistoryOverlayCommand}">
+                  <StackPanel Classes="iconLabel">
+                    <PathIcon Classes="commandIcon"
+                              Data="{StaticResource Icon.DismissRegular}" />
+                    <TextBlock Text="Close"
+                               VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+                <Button Classes="primaryCommand"
+                        IsEnabled="{Binding CanAcceptCommandSuggestion}"
+                        Command="{Binding AcceptCommandSuggestionCommand}">
+                  <StackPanel Classes="iconLabel">
+                    <PathIcon Classes="primaryCommandIcon"
+                              Data="{StaticResource Icon.SendRegular}" />
+                    <TextBlock Text="Insert"
+                               VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+              </StackPanel>
+            </StackPanel>
+          </Border>
         </Grid>
 
-        <TextBlock Text="{Binding SshHostKeyPromptPersistenceText}"
-                   Foreground="{DynamicResource ToolbarForegroundBrush}"
-                   FontSize="12"
-                   TextWrapping="Wrap" />
+        <Border Grid.Row="2" Classes="statusBar">
+          <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="14">
+            <TextBlock Text="{Binding TextRenderPipelineIndicatorText}"
+                       Classes="statusText"
+                       VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1"
+                       Text="{Binding StatusText}"
+                       Classes="statusText"
+                       TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Center" />
+            <Border x:Name="ReplayStatusControls"
+                    Grid.Column="2"
+                    Classes="replayTransport"
+                    Height="24"
+                    MaxHeight="24"
+                    ClipToBounds="True"
+                    IsVisible="{Binding IsReplayEnabled}"
+                    ToolTip.Tip="{Binding ReplaySourceLabel}"
+                    VerticalAlignment="Center">
+              <Grid ColumnDefinitions="Auto,Auto,Auto,150,94"
+                    Height="22"
+                    ColumnSpacing="6"
+                    VerticalAlignment="Center">
+                <TextBlock x:Name="ReplayTransportLabelTextBlock"
+                           Grid.Column="0"
+                           Text="Replay"
+                           Classes="statusText replayLabel"
+                           VerticalAlignment="Center" />
+                <Button x:Name="ReplayPlayPauseButton"
+                        Grid.Column="1"
+                        Classes="statusIconButton"
+                        Width="22"
+                        Height="22"
+                        MinWidth="22"
+                        MinHeight="22"
+                        MaxWidth="22"
+                        MaxHeight="22"
+                        IsEnabled="{Binding CanReplayControl}"
+                        Command="{Binding ToggleReplayPlaybackCommand}"
+                        ToolTip.Tip="{Binding ReplayPlayPauseButtonText}">
+                  <PathIcon Classes="statusIcon"
+                            Data="{StaticResource Icon.PlayRegular}" />
+                </Button>
+                <Button x:Name="ReplayStopButton"
+                        Grid.Column="2"
+                        Classes="statusIconButton"
+                        Width="22"
+                        Height="22"
+                        MinWidth="22"
+                        MinHeight="22"
+                        MaxWidth="22"
+                        MaxHeight="22"
+                        IsEnabled="{Binding CanReplayControl}"
+                        Command="{Binding StopReplayCommand}"
+                        ToolTip.Tip="Stop replay">
+                  <PathIcon Classes="statusIcon"
+                            Data="{StaticResource Icon.StopRegular}" />
+                </Button>
+                <Slider x:Name="ReplayTimelineSlider"
+                        Grid.Column="3"
+                        Classes="replayTimeline"
+                        Width="150"
+                        Height="16"
+                        MinWidth="150"
+                        MaxWidth="150"
+                        MaxHeight="16"
+                        Minimum="0"
+                        Maximum="{Binding ReplayDurationSeconds}"
+                        Value="{Binding ReplayTimelineValue, Mode=TwoWay}"
+                        IsEnabled="{Binding CanSeekReplay}" />
+                <TextBlock x:Name="ReplayTimelineTextBlock"
+                           Grid.Column="4"
+                           Text="{Binding ReplayTimelineText}"
+                           Classes="statusText replayTime"
+                           VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+            <TextBlock Grid.Column="3"
+                       Text="{Binding DimensionsText}"
+                       Classes="statusText"
+                       VerticalAlignment="Center" />
+          </Grid>
+        </Border>
+      </Grid>
+    </Grid>
+    </Grid>
 
+    <Border Grid.Row="1"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Width="560"
+            Classes="flyoutPanel"
+            IsVisible="{Binding IsSshHostKeyPromptVisible}">
+      <StackPanel Spacing="12">
+        <TextBlock Text="{Binding SshHostKeyPromptTitle}"
+                   Classes="sectionTitle" />
+        <TextBlock Text="{Binding SshHostKeyPromptEndpoint}"
+                   Classes="caption" />
+        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6" ColumnSpacing="10">
+          <TextBlock Text="Algorithm" Classes="muted" />
+          <TextBlock Grid.Column="1"
+                     Text="{Binding SshHostKeyPromptAlgorithm}"
+                     Foreground="{DynamicResource ToolbarForegroundBrush}" />
+          <TextBlock Grid.Row="1" Text="SHA256" Classes="muted" />
+          <TextBlock Grid.Row="1"
+                     Grid.Column="1"
+                     Text="{Binding SshHostKeyPromptFingerprintSha256}"
+                     TextWrapping="Wrap"
+                     Foreground="{DynamicResource ToolbarForegroundBrush}" />
+          <TextBlock Grid.Row="2" Text="MD5" Classes="muted" />
+          <TextBlock Grid.Row="2"
+                     Grid.Column="1"
+                     Text="{Binding SshHostKeyPromptFingerprintMd5}"
+                     TextWrapping="Wrap"
+                     Foreground="{DynamicResource ToolbarForegroundBrush}" />
+        </Grid>
+        <TextBlock Text="{Binding SshHostKeyPromptPersistenceText}"
+                   Classes="caption"
+                   TextWrapping="Wrap" />
         <StackPanel Orientation="Horizontal"
-                    HorizontalAlignment="Right"
-                    Spacing="8">
-          <Button Content="Decline"
-                  MinWidth="84"
-                  Command="{Binding DeclineSshHostKeyCommand}" />
-          <Button Content="Accept"
-                  MinWidth="84"
-                  Command="{Binding AcceptSshHostKeyCommand}" />
+                    Spacing="8"
+                    HorizontalAlignment="Right">
+          <Button Classes="commandButton"
+                  Command="{Binding DeclineSshHostKeyCommand}">
+            <StackPanel Classes="iconLabel">
+              <PathIcon Classes="commandIcon"
+                        Data="{StaticResource Icon.DismissRegular}" />
+              <TextBlock Text="Decline"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Button Classes="primaryCommand"
+                  Command="{Binding AcceptSshHostKeyCommand}">
+            <StackPanel Classes="iconLabel">
+              <PathIcon Classes="primaryCommandIcon"
+                        Data="{StaticResource Icon.CheckmarkRegular}" />
+              <TextBlock Text="Accept"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
         </StackPanel>
       </StackPanel>
     </Border>
-  </Border>
+
+    <Grid.ContextMenu>
+      <ContextMenu DataContext="{Binding #RootWindow.DataContext}">
+        <MenuItem Header="_Copy" InputGesture="Ctrl+Shift+C" Command="{Binding CopySelectionCommand}" />
+        <MenuItem Header="_Paste" InputGesture="Ctrl+Shift+V" Command="{Binding PasteClipboardCommand}" />
+        <Separator />
+        <MenuItem Header="Select _All" InputGesture="Ctrl+Shift+A" Command="{Binding SelectAllCommand}" />
+        <Separator />
+        <MenuItem Header="_New Tab" InputGesture="Ctrl+T" Command="{Binding NewTabCommand}" />
+        <MenuItem Header="C_lose Tab" InputGesture="Ctrl+W" Command="{Binding CloseCurrentTabCommand}" />
+      </ContextMenu>
+    </Grid.ContextMenu>
   </Grid>
-
-  <Window.ContextMenu>
-    <ContextMenu x:DataType="vm:MainWindowViewModel"
-                 DataContext="{Binding #RootWindow.DataContext}">
-      <MenuItem Header="_Copy" InputGesture="Ctrl+Shift+C" Command="{Binding CopySelectionCommand}" />
-      <MenuItem Header="_Paste" InputGesture="Ctrl+Shift+V" Command="{Binding PasteClipboardCommand}" />
-      <Separator />
-      <MenuItem Header="Select _All" InputGesture="Ctrl+Shift+A" Command="{Binding SelectAllCommand}" />
-      <Separator />
-      <MenuItem Header="_New Tab" InputGesture="Ctrl+T" Command="{Binding NewTabCommand}" />
-      <MenuItem Header="C_lose Tab" InputGesture="Ctrl+W" Command="{Binding CloseCurrentTabCommand}" />
-    </ContextMenu>
-  </Window.ContextMenu>
-
 </Window>

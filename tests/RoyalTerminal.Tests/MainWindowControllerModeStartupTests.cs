@@ -23,9 +23,388 @@ namespace RoyalTerminal.Tests;
 [Collection("MainWindowControllerHeadlessTests")]
 public sealed class MainWindowControllerModeStartupTests
 {
+    private const string StartAllRenderModesEnvVar = "ROYALTERMINAL_DEMO_START_ALL_RENDER_MODES";
+
     [AvaloniaFact]
-    public async Task Controller_Startup_CreatesTabsForEachSupportedMode()
+    public async Task Controller_Startup_CreatesSingleRenderedTabByDefault()
     {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo startup-default";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool createdSingleTab = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(createdSingleTab);
+
+            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
+            Button startupHeader = Assert.IsType<Button>(tabStrip.Children[0]);
+            TerminalRenderMode startupMode = ResolveModeFromContainer(
+                terminalHost.Children[0],
+                startupHeader);
+            Assert.Equal(TerminalRenderMode.RenderedAuto, startupMode);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_Startup_RestoresWorkspaceTabs_AndShutdownSavesWorkspace()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        InMemoryWorkspaceStore workspaceStore = new(new TerminalWorkspaceDocument
+        {
+            SelectedWindowId = "main",
+            Windows =
+            [
+                new TerminalWorkspaceWindow
+                {
+                    Id = "main",
+                    SelectedTabId = "tab-two",
+                    Tabs =
+                    [
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "tab-one",
+                            ProfileId = "default",
+                            Title = "One",
+                            TransportId = TerminalTransportIds.Pipe,
+                            RenderMode = TerminalWorkspaceRenderModes.Skia,
+                        },
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "tab-two",
+                            ProfileId = "default",
+                            Title = "Two",
+                            TransportId = TerminalTransportIds.Pipe,
+                            RenderMode = TerminalWorkspaceRenderModes.Text,
+                        },
+                    ],
+                },
+            ],
+        });
+        MainWindowViewModel viewModel = new();
+        viewModel.PipeCommandText = "echo workspace-restore";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool restoredTabs = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(restoredTabs);
+
+            Assert.Single(GetStandaloneControls(terminalHost));
+
+            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
+            Assert.Equal(2, tabStrip.Children.Count);
+
+            Button firstTab = Assert.IsType<Button>(tabStrip.Children[0]);
+            firstTab.Command!.Execute(firstTab.CommandParameter);
+            bool materializedInactiveTab = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(materializedInactiveTab);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        Assert.True(workspaceStore.SaveCount > 0);
+        TerminalWorkspaceWindow savedWindow = Assert.Single(workspaceStore.Document.Windows);
+        Assert.Equal(2, savedWindow.Tabs.Count);
+        Assert.Equal("main", workspaceStore.Document.SelectedWindowId);
+        Assert.False(string.IsNullOrWhiteSpace(savedWindow.SelectedTabId));
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_Startup_RestoresSplitPaneWorkspace_AndShutdownPreservesPaneTree()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        TerminalWorkspacePane rootPane = new()
+        {
+            Id = "root",
+            Split = new TerminalWorkspacePaneSplit
+            {
+                Orientation = TerminalWorkspacePaneSplitOrientations.Horizontal,
+                Ratio = 0.42,
+                FirstPane = new TerminalWorkspacePane
+                {
+                    Id = "left",
+                    ProfileId = "default",
+                    TransportId = TerminalTransportIds.Pipe,
+                    WorkingDirectory = "/tmp/left",
+                },
+                SecondPane = new TerminalWorkspacePane
+                {
+                    Id = "right",
+                    ProfileId = "default",
+                    TransportId = TerminalTransportIds.Pipe,
+                    WorkingDirectory = "/tmp/right",
+                },
+            },
+        };
+        InMemoryWorkspaceStore workspaceStore = new(new TerminalWorkspaceDocument
+        {
+            SelectedWindowId = "main",
+            Windows =
+            [
+                new TerminalWorkspaceWindow
+                {
+                    Id = "main",
+                    SelectedTabId = "tab-split",
+                    Tabs =
+                    [
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "tab-split",
+                            ProfileId = "default",
+                            Title = "Split",
+                            TransportId = TerminalTransportIds.Pipe,
+                            RenderMode = TerminalWorkspaceRenderModes.Skia,
+                            RootPane = rootPane,
+                        },
+                    ],
+                },
+            ],
+        });
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo split-restore";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            commandHistoryStore: new InMemoryCommandHistoryStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool restoredSplit = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1 && terminalHost.Children[0] is Grid { Children.Count: 3 },
+                TimeSpan.FromSeconds(2));
+            Assert.True(restoredSplit);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        TerminalWorkspaceTab savedTab = Assert.Single(workspaceStore.Document.Windows[0].Tabs);
+        Assert.NotNull(savedTab.RootPane.Split);
+        Assert.Equal(TerminalWorkspacePaneSplitOrientations.Horizontal, savedTab.RootPane.Split!.Orientation);
+        Assert.Equal("left", savedTab.RootPane.Split.FirstPane.Id);
+        Assert.Equal("right", savedTab.RootPane.Split.SecondPane.Id);
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_Shutdown_PreservesDeferredSplitPaneWorkspace()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        TerminalWorkspacePane inactiveRootPane = new()
+        {
+            Id = "inactive-root",
+            Split = new TerminalWorkspacePaneSplit
+            {
+                Orientation = TerminalWorkspacePaneSplitOrientations.Vertical,
+                Ratio = 0.35,
+                FirstPane = new TerminalWorkspacePane
+                {
+                    Id = "inactive-top",
+                    ProfileId = "default",
+                    TransportId = TerminalTransportIds.Pipe,
+                },
+                SecondPane = new TerminalWorkspacePane
+                {
+                    Id = "inactive-bottom",
+                    ProfileId = "default",
+                    TransportId = TerminalTransportIds.Pipe,
+                },
+            },
+        };
+        InMemoryWorkspaceStore workspaceStore = new(new TerminalWorkspaceDocument
+        {
+            SelectedWindowId = "main",
+            Windows =
+            [
+                new TerminalWorkspaceWindow
+                {
+                    Id = "main",
+                    SelectedTabId = "active-tab",
+                    Tabs =
+                    [
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "active-tab",
+                            ProfileId = "default",
+                            Title = "Active",
+                            TransportId = TerminalTransportIds.Pipe,
+                            RenderMode = TerminalWorkspaceRenderModes.Skia,
+                        },
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "inactive-tab",
+                            ProfileId = "default",
+                            Title = "Inactive Split",
+                            TransportId = TerminalTransportIds.Pipe,
+                            RenderMode = TerminalWorkspaceRenderModes.Skia,
+                            RootPane = inactiveRootPane,
+                        },
+                    ],
+                },
+            ],
+        });
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo deferred-split";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            commandHistoryStore: new InMemoryCommandHistoryStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool restoredTabs = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 2 && GetStandaloneControls(terminalHost).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(restoredTabs);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        TerminalWorkspaceWindow savedWindow = Assert.Single(workspaceStore.Document.Windows);
+        Assert.Equal("active-tab", savedWindow.SelectedTabId);
+        TerminalWorkspaceTab inactiveTab = Assert.Single(
+            savedWindow.Tabs,
+            static tab => string.Equals(tab.Id, "inactive-tab", StringComparison.Ordinal));
+        Assert.NotNull(inactiveTab.RootPane.Split);
+        Assert.Equal(TerminalWorkspacePaneSplitOrientations.Vertical, inactiveTab.RootPane.Split!.Orientation);
+        Assert.Equal(0.35, inactiveTab.RootPane.Split.Ratio, precision: 3);
+        Assert.Equal("inactive-top", inactiveTab.RootPane.Split.FirstPane.Id);
+        Assert.Equal("inactive-bottom", inactiveTab.RootPane.Split.SecondPane.Id);
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_SplitPaneCommands_CreatePanes_AndShutdownPreservesLiveRatio()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryWorkspaceStore workspaceStore = new();
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo split-command";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            commandHistoryStore: new InMemoryCommandHistoryStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabCreated);
+
+            viewModel.SplitPaneRightCommand.Execute().Wait();
+            bool splitCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1 &&
+                      terminalHost.Children[0] is Grid { Children.Count: 3 } &&
+                      GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(splitCreated);
+
+            Grid splitGrid = Assert.IsType<Grid>(terminalHost.Children[0]);
+            Assert.Equal(3, splitGrid.ColumnDefinitions.Count);
+
+            viewModel.FocusPaneLeftCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Contains("Focused pane", viewModel.StatusText, StringComparison.Ordinal);
+
+            viewModel.ResizePaneRightCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Contains("Pane ratio", viewModel.StatusText, StringComparison.Ordinal);
+
+            splitGrid.ColumnDefinitions[0].Width = new GridLength(0.7, GridUnitType.Star);
+            splitGrid.ColumnDefinitions[2].Width = new GridLength(0.3, GridUnitType.Star);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        TerminalWorkspaceTab savedTab = Assert.Single(workspaceStore.Document.Windows[0].Tabs);
+        Assert.NotNull(savedTab.RootPane.Split);
+        TerminalWorkspacePaneSplit savedSplit = savedTab.RootPane.Split!;
+        Assert.Equal(TerminalWorkspacePaneSplitOrientations.Horizontal, savedSplit.Orientation);
+        Assert.Equal(0.7, savedSplit.Ratio, precision: 3);
+        Assert.NotNull(savedSplit.FirstPane);
+        Assert.NotNull(savedSplit.SecondPane);
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_Startup_DiagnosticMode_CreatesTabsForEachSupportedMode()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, "1");
         MainWindowViewModel viewModel = new();
         viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
         viewModel.PipeCommandText = "echo startup-modes";
@@ -35,7 +414,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -59,8 +439,9 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
-    public async Task Controller_Startup_StandaloneModeIndicators_UseDistinctColors()
+    public async Task Controller_Startup_DiagnosticModeIndicators_UseDistinctColors()
     {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, "1");
         MainWindowViewModel viewModel = new();
         viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
         viewModel.PipeCommandText = "echo startup-mode-indicators";
@@ -70,7 +451,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -110,7 +492,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -173,7 +556,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new FixedTerminalModeCapabilityResolver(TerminalModeCapabilities.Create(nativeVtAvailable: true)),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -227,7 +611,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -274,7 +659,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -333,7 +719,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -380,7 +767,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -392,7 +780,17 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabsCreated);
 
-            int managedTabIndex = viewModel.NativeVtAvailable ? 1 : 0;
+            viewModel.SetRenderMode(
+                useRenderedControl: false,
+                useNativeVtControl: false,
+                useManagedVtControl: true);
+            int managedTabIndex = terminalHost.Children.Count;
+            viewModel.NewTabCommand.Execute().Wait();
+            bool managedTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == managedTabIndex + 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(managedTabCreated);
+
             viewModel.SwitchToTabByIndexCommand.Execute(managedTabIndex).Wait();
             Dispatcher.UIThread.RunJobs();
 
@@ -486,7 +884,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -539,7 +938,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -582,7 +982,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -638,7 +1039,8 @@ public sealed class MainWindowControllerModeStartupTests
             window,
             viewModel,
             new FixedTerminalModeCapabilityResolver(TerminalModeCapabilities.Create(nativeVtAvailable: true)),
-            TerminalModeResolver.Default);
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
         IDisposable? lifetime = null;
 
         try
@@ -777,32 +1179,63 @@ public sealed class MainWindowControllerModeStartupTests
     private static List<TerminalControl> GetStandaloneControls(Grid terminalHost)
     {
         List<TerminalControl> controls = [];
-        for (int i = 0; i < terminalHost.Children.Count; i++)
-        {
-            if (terminalHost.Children[i] is ScrollViewer { Content: TerminalControl wrapped })
-            {
-                controls.Add(wrapped);
-            }
-        }
-
+        AddStandaloneControls(terminalHost, controls);
         return controls;
     }
 
     private static TerminalControl GetVisibleStandaloneControl(Grid terminalHost)
     {
-        for (int i = 0; i < terminalHost.Children.Count; i++)
+        if (TryGetVisibleStandaloneControl(terminalHost, out TerminalControl? control))
         {
-            if (terminalHost.Children[i] is ScrollViewer
-                {
-                    IsVisible: true,
-                    Content: TerminalControl wrapped,
-                })
-            {
-                return wrapped;
-            }
+            return control!;
         }
 
         throw new InvalidOperationException("No visible standalone terminal control was found.");
+    }
+
+    private static void AddStandaloneControls(Control control, List<TerminalControl> controls)
+    {
+        if (control is ScrollViewer { Content: TerminalControl wrapped })
+        {
+            controls.Add(wrapped);
+            return;
+        }
+
+        if (control is Panel panel)
+        {
+            for (int i = 0; i < panel.Children.Count; i++)
+            {
+                AddStandaloneControls(panel.Children[i], controls);
+            }
+        }
+    }
+
+    private static bool TryGetVisibleStandaloneControl(Control control, out TerminalControl? terminal)
+    {
+        terminal = null;
+        if (!control.IsVisible)
+        {
+            return false;
+        }
+
+        if (control is ScrollViewer { Content: TerminalControl wrapped })
+        {
+            terminal = wrapped;
+            return true;
+        }
+
+        if (control is Panel panel)
+        {
+            for (int i = 0; i < panel.Children.Count; i++)
+            {
+                if (TryGetVisibleStandaloneControl(panel.Children[i], out terminal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool ViewportContainsHyperlink(TerminalControl control)
@@ -914,6 +1347,13 @@ public sealed class MainWindowControllerModeStartupTests
         return Math.Max(1, count);
     }
 
+    private static IDisposable SetProcessEnvironmentVariable(string variableName, string? value)
+    {
+        string? originalValue = Environment.GetEnvironmentVariable(variableName);
+        Environment.SetEnvironmentVariable(variableName, value, EnvironmentVariableTarget.Process);
+        return new ProcessEnvironmentVariableScope(variableName, originalValue);
+    }
+
     private static Dictionary<string, Color> GetStandaloneModeIndicatorColors(StackPanel tabStrip)
     {
         Dictionary<string, Color> colors = new(StringComparer.Ordinal);
@@ -1012,6 +1452,30 @@ public sealed class MainWindowControllerModeStartupTests
         public TerminalModeCapabilities Resolve(bool nativeVtAvailable)
         {
             return _capabilities;
+        }
+    }
+
+    private sealed class ProcessEnvironmentVariableScope : IDisposable
+    {
+        private readonly string _variableName;
+        private readonly string? _originalValue;
+        private bool _disposed;
+
+        public ProcessEnvironmentVariableScope(string variableName, string? originalValue)
+        {
+            _variableName = variableName;
+            _originalValue = originalValue;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            Environment.SetEnvironmentVariable(_variableName, _originalValue, EnvironmentVariableTarget.Process);
+            _disposed = true;
         }
     }
 }

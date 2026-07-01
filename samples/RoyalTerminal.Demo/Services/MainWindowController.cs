@@ -27,6 +27,7 @@ using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
+using RoyalTerminal.Demo.Views;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
@@ -49,7 +50,9 @@ namespace RoyalTerminal.Demo.Services;
 internal sealed class MainWindowController
 {
     private const string DisableTextShapingEnvVar = "ROYALTERMINAL_DISABLE_TEXT_SHAPING";
+    private const string DisableSessionAutostartEnvVar = "ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART";
     private const string EnableRenderDiagnosticsEnvVar = "ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS";
+    private const string StartAllRenderModesEnvVar = "ROYALTERMINAL_DEMO_START_ALL_RENDER_MODES";
     private const string TextRenderPipelineEnvVar = "ROYALTERMINAL_TEXT_RENDER_PIPELINE";
     private static readonly byte[] s_hyperlinkShowcaseBytes = Encoding.UTF8.GetBytes(
         "\r\n\u001b[1mRoyalTerminal OSC8 hyperlink showcase\u001b[0m\r\n" +
@@ -78,14 +81,26 @@ internal sealed class MainWindowController
     private readonly Dictionary<TerminalControl, TerminalCaptureRuntime> _captureRuntimes = [];
     private readonly Dictionary<TerminalControl, EventHandler<TerminalDataEventArgs>> _sessionLogOutputHandlers = [];
     private readonly Dictionary<TerminalControl, SessionLogWriter> _sessionLogWriters = [];
+    private readonly Dictionary<TerminalControl, EventHandler<TerminalShellIntegrationEventArgs>> _commandHistoryHandlers = [];
+    private readonly Dictionary<TerminalControl, TerminalCommandHistoryCaptureService> _commandHistoryCaptures = [];
+    private readonly Dictionary<TerminalControl, TerminalLaunchConfiguration> _launchConfigurations = [];
+    private readonly Dictionary<TerminalControl, TerminalPaneRuntimeNode> _paneRuntimeNodes = [];
     private readonly ITerminalModeCapabilityResolver _modeCapabilityResolver;
     private readonly ITerminalModeResolver _modeResolver;
     private readonly ITerminalSessionProfileStore _settingsProfileStore;
+    private readonly ITerminalCommandHistoryStore _commandHistoryStore;
+    private readonly ITerminalWorkspaceStore _workspaceStore;
+    private readonly TerminalCommandSuggestionService _commandSuggestionService = new();
+    private readonly SemaphoreSlim _commandHistorySync = new(1, 1);
     private bool _suppressReplayTimelineSeek;
     private bool _settingsProfilesLoaded;
+    private TerminalCommandHistoryDocument? _commandHistoryDocument;
+    private TerminalSessionProfilesDocument? _sessionLauncherDocument;
 
     private TerminalTab? _activeTab;
+    private TerminalControl? _activePaneControl;
     private int _tabCounter;
+    private int _paneCounter;
     private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(nativeVtAvailable: false);
 
     public MainWindowController(Window window, MainWindowViewModel viewModel)
@@ -102,7 +117,9 @@ internal sealed class MainWindowController
         MainWindowViewModel viewModel,
         ITerminalModeCapabilityResolver modeCapabilityResolver,
         ITerminalModeResolver modeResolver,
-        ITerminalSessionProfileStore? settingsProfileStore = null)
+        ITerminalSessionProfileStore? settingsProfileStore = null,
+        ITerminalCommandHistoryStore? commandHistoryStore = null,
+        ITerminalWorkspaceStore? workspaceStore = null)
     {
         _window = window ?? throw new ArgumentNullException(nameof(window));
         _viewModel = viewModel;
@@ -110,6 +127,8 @@ internal sealed class MainWindowController
             ?? throw new ArgumentNullException(nameof(modeCapabilityResolver));
         _modeResolver = modeResolver ?? throw new ArgumentNullException(nameof(modeResolver));
         _settingsProfileStore = settingsProfileStore ?? TerminalSessionProfileStoreFactory.CreateDefault();
+        _commandHistoryStore = commandHistoryStore ?? TerminalCommandHistoryStoreFactory.CreateDefault();
+        _workspaceStore = workspaceStore ?? TerminalWorkspaceStoreFactory.CreateDefault();
         _terminalHost = _window.FindControl<Grid>("TerminalHost")
             ?? throw new InvalidOperationException("TerminalHost was not found in MainWindow.");
         _tabStrip = _window.FindControl<StackPanel>("TabStrip")
@@ -129,8 +148,9 @@ internal sealed class MainWindowController
 
         ApplyThemeResources(CreateChromePalette(_viewModel.ActiveTheme));
         InitializeShellProfiles();
+        RefreshSessionLauncherForActivation();
 
-        CreateInitialTabsForSupportedModes();
+        CreateInitialTabs();
         SyncCaptureReplayState();
         string startupStatus = _viewModel.UseRenderedControl
             ? "Rendered terminal ready"
@@ -259,6 +279,18 @@ internal sealed class MainWindowController
             context.SetOutput(Unit.Default);
         }));
 
+        disposables.Add(_viewModel.RefreshSessionLauncherInteraction.RegisterHandler(async context =>
+        {
+            await RefreshSessionLauncherAsync();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.LaunchSessionProfileInteraction.RegisterHandler(async context =>
+        {
+            await LaunchSessionProfileAsync(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
         disposables.Add(_viewModel.ApplySearchInteraction.RegisterHandler(context =>
         {
             ApplySearch(context.Input);
@@ -280,6 +312,18 @@ internal sealed class MainWindowController
         disposables.Add(_viewModel.ClearSearchInteraction.RegisterHandler(context =>
         {
             ClearSearch();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.RefreshCommandSuggestionsInteraction.RegisterHandler(async context =>
+        {
+            await RefreshCommandSuggestionsAsync(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.AcceptCommandSuggestionInteraction.RegisterHandler(context =>
+        {
+            AcceptCommandSuggestion(context.Input);
             context.SetOutput(Unit.Default);
         }));
 
@@ -322,6 +366,36 @@ internal sealed class MainWindowController
         disposables.Add(_viewModel.ApplyShaderSampleInteraction.RegisterHandler(context =>
         {
             ApplyShaderSample(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.ShowAboutInteraction.RegisterHandler(async context =>
+        {
+            await ShowAboutAsync();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.QuitApplicationInteraction.RegisterHandler(context =>
+        {
+            _window.Close();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.SplitPaneInteraction.RegisterHandler(context =>
+        {
+            SplitActivePane(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.FocusPaneInteraction.RegisterHandler(context =>
+        {
+            FocusPane(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.ResizePaneInteraction.RegisterHandler(context =>
+        {
+            ResizePane(context.Input);
             context.SetOutput(Unit.Default);
         }));
 
@@ -388,7 +462,1054 @@ internal sealed class MainWindowController
         }
     }
 
+    private async Task ShowAboutAsync()
+    {
+        AboutRoyalTerminalWindow aboutWindow = new()
+        {
+            DataContext = AboutRoyalTerminalViewModel.CreateDefault(),
+        };
+
+        await aboutWindow.ShowDialog(_window);
+    }
+
+    private async Task RefreshSessionLauncherAsync()
+    {
+        try
+        {
+            TerminalSessionProfilesDocument document = await LoadLauncherProfileDocumentAsync();
+            _sessionLauncherDocument = document;
+            RefreshSessionLauncherOptions(document);
+        }
+        catch (Exception ex)
+        {
+            RefreshSessionLauncherOptions(new TerminalSessionProfilesDocument());
+            UpdateStatus($"Profile launcher refresh failed: {ex.Message}");
+            AppendEventLog($"Profile launcher refresh failed: {ex.Message}");
+        }
+    }
+
+    private void RefreshSessionLauncherForActivation()
+    {
+        try
+        {
+            TerminalSessionProfilesDocument document = _settingsProfileStore
+                .LoadAsync()
+                .AsTask()
+                .ConfigureAwait(false)
+                .GetAwaiter()
+                .GetResult();
+            _sessionLauncherDocument = document;
+            RefreshSessionLauncherOptions(document);
+        }
+        catch (Exception ex)
+        {
+            RefreshSessionLauncherOptions(new TerminalSessionProfilesDocument());
+            UpdateStatus($"Profile launcher refresh failed: {ex.Message}");
+            AppendEventLog($"Profile launcher refresh failed: {ex.Message}");
+        }
+    }
+
+    private async Task<TerminalSessionProfilesDocument> LoadLauncherProfileDocumentAsync()
+    {
+        if (_settingsProfilesLoaded)
+        {
+            return _viewModel.SettingsPanelState.BuildDocument();
+        }
+
+        return await _settingsProfileStore.LoadAsync();
+    }
+
+    private void RefreshSessionLauncherOptions(TerminalSessionProfilesDocument document)
+    {
+        List<SessionLaunchOption> options = new(document.Profiles.Count + _viewModel.ShellProfiles.Count);
+        for (int i = 0; i < document.Profiles.Count; i++)
+        {
+            TerminalSessionProfile profile = document.Profiles[i];
+            string? workingDirectory = GetProfileWorkingDirectory(profile);
+            options.Add(new SessionLaunchOption(
+                $"profile:{profile.Id}",
+                profile.DisplayName,
+                profile.Transport.TransportId,
+                BuildProfileLaunchSubtitle(profile),
+                workingDirectory));
+        }
+
+        for (int i = 0; i < _viewModel.ShellProfiles.Count; i++)
+        {
+            ShellProfileOption shellProfile = _viewModel.ShellProfiles[i];
+            options.Add(new SessionLaunchOption(
+                $"shell:{shellProfile.Id}",
+                shellProfile.DisplayName,
+                TerminalTransportIds.Pty,
+                string.IsNullOrWhiteSpace(shellProfile.CommandPath)
+                    ? "Default local shell"
+                    : shellProfile.CommandPath,
+                null));
+        }
+
+        _viewModel.SetSessionLaunchOptions(options);
+    }
+
+    private static string BuildProfileLaunchSubtitle(TerminalSessionProfile profile)
+    {
+        string transportId = profile.Transport.TransportId;
+        if (string.Equals(transportId, TerminalTransportIds.Pty, StringComparison.Ordinal))
+        {
+            return string.IsNullOrWhiteSpace(profile.Transport.Pty.ShellPath)
+                ? "PTY / default shell"
+                : $"PTY / {profile.Transport.Pty.ShellPath}";
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.Pipe, StringComparison.Ordinal))
+        {
+            return string.IsNullOrWhiteSpace(profile.Transport.Pipe.FileName)
+                ? "Pipe"
+                : $"Pipe / {profile.Transport.Pipe.FileName}";
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.Ssh, StringComparison.Ordinal))
+        {
+            TerminalSessionSshSettings ssh = profile.Transport.Ssh;
+            return $"SSH / {ssh.Username}@{ssh.Host}:{ssh.Port.ToString(CultureInfo.InvariantCulture)}";
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.RawTcp, StringComparison.Ordinal))
+        {
+            TerminalSessionRawTcpSettings rawTcp = profile.Transport.RawTcp;
+            return $"Raw TCP / {rawTcp.Host}:{rawTcp.Port.ToString(CultureInfo.InvariantCulture)}";
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.Telnet, StringComparison.Ordinal))
+        {
+            TerminalSessionTelnetSettings telnet = profile.Transport.Telnet;
+            return $"Telnet / {telnet.Host}:{telnet.Port.ToString(CultureInfo.InvariantCulture)}";
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.Serial, StringComparison.Ordinal))
+        {
+            return $"Serial / {profile.Transport.Serial.PortName}";
+        }
+
+        return transportId;
+    }
+
+    private static string? GetProfileWorkingDirectory(TerminalSessionProfile profile)
+    {
+        if (string.Equals(profile.Transport.TransportId, TerminalTransportIds.Pty, StringComparison.Ordinal))
+        {
+            return NormalizeOptional(profile.Transport.Pty.WorkingDirectory);
+        }
+
+        if (string.Equals(profile.Transport.TransportId, TerminalTransportIds.Pipe, StringComparison.Ordinal))
+        {
+            return NormalizeOptional(profile.Transport.Pipe.WorkingDirectory);
+        }
+
+        return null;
+    }
+
+    private async Task LaunchSessionProfileAsync(string launchOptionId)
+    {
+        if (string.IsNullOrWhiteSpace(launchOptionId))
+        {
+            return;
+        }
+
+        TerminalSessionProfilesDocument document = _sessionLauncherDocument
+            ?? await LoadLauncherProfileDocumentAsync();
+        _sessionLauncherDocument = document;
+
+        if (launchOptionId.StartsWith("profile:", StringComparison.Ordinal))
+        {
+            string profileId = launchOptionId["profile:".Length..];
+            TerminalSessionProfile? profile = FindProfile(document, profileId);
+            if (profile is null)
+            {
+                UpdateStatus($"Profile '{profileId}' was not found.");
+                return;
+            }
+
+            ApplySessionProfile(profile);
+            CreateNewTab(profile.Id, profile.DisplayName);
+            RefreshSessionLauncherOptions(document);
+            return;
+        }
+
+        if (launchOptionId.StartsWith("shell:", StringComparison.Ordinal))
+        {
+            string shellProfileId = launchOptionId["shell:".Length..];
+            ShellProfileOption? shellProfile = FindShellProfile(shellProfileId);
+            if (shellProfile is null)
+            {
+                UpdateStatus($"Shell profile '{shellProfileId}' was not found.");
+                return;
+            }
+
+            _viewModel.SelectedTransportMode = ResolveViewModelTransportMode(TerminalTransportIds.Pty);
+            _viewModel.SessionName = shellProfile.DisplayName;
+            _viewModel.SelectedShellProfile = shellProfile;
+            CreateNewTab(shellProfile.Id, shellProfile.DisplayName);
+            RefreshSessionLauncherOptions(document);
+        }
+    }
+
+    private static TerminalSessionProfile? FindProfile(TerminalSessionProfilesDocument document, string profileId)
+    {
+        for (int i = 0; i < document.Profiles.Count; i++)
+        {
+            TerminalSessionProfile profile = document.Profiles[i];
+            if (string.Equals(profile.Id, profileId, StringComparison.Ordinal))
+            {
+                return profile;
+            }
+        }
+
+        return null;
+    }
+
+    private ShellProfileOption? FindShellProfile(string shellProfileId)
+    {
+        for (int i = 0; i < _viewModel.ShellProfiles.Count; i++)
+        {
+            ShellProfileOption option = _viewModel.ShellProfiles[i];
+            if (string.Equals(option.Id, shellProfileId, StringComparison.Ordinal))
+            {
+                return option;
+            }
+        }
+
+        return null;
+    }
+
+    private void ApplySessionProfile(TerminalSessionProfile profile)
+    {
+        _viewModel.SessionName = profile.DisplayName;
+        _viewModel.SelectedTransportMode = ResolveViewModelTransportMode(profile.Transport.TransportId);
+        ApplyProfileAppearance(profile.Appearance);
+        ApplyProfileBehavior(profile.Behavior);
+        ApplyProfileLogging(profile.Logging);
+        ApplyProfileTransport(profile);
+        _viewModel.SetStatus($"Launch profile: {profile.DisplayName}");
+    }
+
+    private void ApplyProfileAppearance(TerminalSessionAppearanceSettings appearance)
+    {
+        _viewModel.FontSource = appearance.FontSource;
+        _viewModel.FontFamilyName = appearance.FontFamilyName;
+        _viewModel.FontFilePath = appearance.FontFilePath ?? string.Empty;
+        _viewModel.SetFontSizeFromSettings(appearance.FontSize > 0 ? appearance.FontSize : 14.0);
+        _viewModel.FontSubpixelPositioning = appearance.FontRendering.SubpixelPositioning;
+        _viewModel.FontEdging = appearance.FontRendering.Edging;
+        _viewModel.FontHinting = appearance.FontRendering.Hinting;
+        _viewModel.FontBaselineSnap = appearance.FontRendering.BaselineSnap;
+        _viewModel.FontEmbeddedBitmaps = appearance.FontRendering.EmbeddedBitmaps;
+        _viewModel.FontEmbolden = appearance.FontRendering.Embolden;
+        _viewModel.FontForceAutoHinting = appearance.FontRendering.ForceAutoHinting;
+        _viewModel.FontLinearMetrics = appearance.FontRendering.LinearMetrics;
+        _viewModel.TextHighlightingMode = appearance.TextHighlightingMode;
+        _viewModel.TextHighlightRules = BuildRuntimeTextHighlightRules(null, appearance);
+    }
+
+    private static IReadOnlyList<TerminalTextHighlightRule> BuildRuntimeTextHighlightRules(
+        TerminalSessionProfile? profile,
+        TerminalSessionAppearanceSettings? appearance = null)
+    {
+        TerminalSessionAppearanceSettings source = appearance ?? profile?.Appearance ?? new TerminalSessionAppearanceSettings();
+        if (source.TextHighlightRules.Count == 0)
+        {
+            return [];
+        }
+
+        List<TerminalTextHighlightRule> rules = new(source.TextHighlightRules.Count);
+        for (int i = 0; i < source.TextHighlightRules.Count; i++)
+        {
+            TerminalSessionTextHighlightRule rule = source.TextHighlightRules[i];
+            if (string.IsNullOrWhiteSpace(rule.Pattern))
+            {
+                continue;
+            }
+
+            rules.Add(new TerminalTextHighlightRule
+            {
+                Name = string.IsNullOrWhiteSpace(rule.Name) ? "Highlight Rule" : rule.Name.Trim(),
+                Pattern = rule.Pattern.Trim(),
+                IsEnabled = rule.IsEnabled,
+                Foreground = TryParseArgbColor(rule.ForegroundColor, out uint foreground) ? foreground : null,
+                Background = TryParseArgbColor(rule.BackgroundColor, out uint background) ? background : null,
+                DarkForeground = TryParseArgbColor(rule.DarkForegroundColor, out uint darkForeground) ? darkForeground : null,
+                DarkBackground = TryParseArgbColor(rule.DarkBackgroundColor, out uint darkBackground) ? darkBackground : null,
+            });
+        }
+
+        return rules.Count == 0 ? [] : rules;
+    }
+
+    private void ApplyProfileBehavior(TerminalSessionBehaviorSettings behavior)
+    {
+        _viewModel.CopyOnSelectEnabled = behavior.CopyOnSelectEnabled;
+        _viewModel.EnableBellNotifications = behavior.EnableBellNotifications;
+        _viewModel.BackspaceSendsControlH = behavior.BackspaceSendsControlH;
+        _viewModel.EnableTextShaping = behavior.EnableTextShaping;
+        _viewModel.ReflowOnResize = behavior.ReflowOnResize;
+        _viewModel.SixelGraphicsEnabled = behavior.SixelGraphicsEnabled;
+        _viewModel.EnableLigatures = behavior.EnableLigatures;
+        _viewModel.SelectedPasteSafetyPolicy = ParsePasteSafetyPolicy(behavior.PasteSafetyPolicy);
+    }
+
+    private void ApplyProfileLogging(TerminalSessionLoggingSettings logging)
+    {
+        _viewModel.SessionLoggingEnabled = logging.Enabled;
+        _viewModel.SessionLogFilePath = logging.FilePath ?? string.Empty;
+        _viewModel.SelectedSessionLogFormat = logging.Format;
+        _viewModel.SessionLogFlushFrequently = logging.FlushFrequently;
+        _viewModel.EventLogEnabled = logging.EventLogEnabled;
+    }
+
+    private void ApplyProfileTransport(TerminalSessionProfile profile)
+    {
+        string transportId = profile.Transport.TransportId;
+        if (string.Equals(transportId, TerminalTransportIds.Pty, StringComparison.Ordinal))
+        {
+            ApplyPtyProfileTransport(profile);
+            return;
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.Pipe, StringComparison.Ordinal))
+        {
+            TerminalSessionPipeSettings pipe = profile.Transport.Pipe;
+            _viewModel.WorkingDirectory = pipe.WorkingDirectory ?? _viewModel.WorkingDirectory;
+            _viewModel.PipeCommandText = BuildPipeCommandText(pipe);
+            _viewModel.PipeMergeStdErrIntoStdOut = pipe.MergeStdErrIntoStdOut;
+            SelectOrAddRuntimeShellProfile(profile.Id, profile.DisplayName, null);
+            return;
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.RawTcp, StringComparison.Ordinal))
+        {
+            _viewModel.RawTcpHost = profile.Transport.RawTcp.Host;
+            _viewModel.RawTcpPort = profile.Transport.RawTcp.Port.ToString(CultureInfo.InvariantCulture);
+            SelectOrAddRuntimeShellProfile(profile.Id, profile.DisplayName, null);
+            return;
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.Telnet, StringComparison.Ordinal))
+        {
+            TerminalSessionTelnetSettings telnet = profile.Transport.Telnet;
+            _viewModel.TelnetHost = telnet.Host;
+            _viewModel.TelnetPort = telnet.Port.ToString(CultureInfo.InvariantCulture);
+            _viewModel.TelnetTerminalType = telnet.TerminalType;
+            _viewModel.TelnetInitialCommand = telnet.InitialCommand ?? string.Empty;
+            SelectOrAddRuntimeShellProfile(profile.Id, profile.DisplayName, null);
+            return;
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.Serial, StringComparison.Ordinal))
+        {
+            TerminalSessionSerialSettings serial = profile.Transport.Serial;
+            _viewModel.SerialPortName = serial.PortName;
+            _viewModel.SerialBaudRate = serial.BaudRate.ToString(CultureInfo.InvariantCulture);
+            _viewModel.SerialDataBits = serial.DataBits.ToString(CultureInfo.InvariantCulture);
+            _viewModel.SelectedSerialParity = serial.Parity;
+            _viewModel.SelectedSerialStopBits = serial.StopBits;
+            _viewModel.SelectedSerialHandshake = serial.Handshake;
+            _viewModel.SerialNewLine = serial.NewLine;
+            SelectOrAddRuntimeShellProfile(profile.Id, profile.DisplayName, null);
+            return;
+        }
+
+        if (string.Equals(transportId, TerminalTransportIds.Ssh, StringComparison.Ordinal))
+        {
+            ApplySshProfileTransport(profile);
+        }
+    }
+
+    private void ApplyPtyProfileTransport(TerminalSessionProfile profile)
+    {
+        TerminalSessionPtySettings pty = profile.Transport.Pty;
+        _viewModel.WorkingDirectory = pty.WorkingDirectory ?? _viewModel.WorkingDirectory;
+        SelectOrAddRuntimeShellProfile(profile.Id, profile.DisplayName, pty.ShellPath);
+    }
+
+    private void ApplySshProfileTransport(TerminalSessionProfile profile)
+    {
+        TerminalSessionSshSettings ssh = profile.Transport.Ssh;
+        _viewModel.SshHost = ssh.Host;
+        _viewModel.SshPort = ssh.Port.ToString(CultureInfo.InvariantCulture);
+        _viewModel.SshUsername = ssh.Username;
+        _viewModel.SshRequestPty = ssh.RequestPty;
+        _viewModel.SshTerminalType = ssh.TerminalType;
+        _viewModel.SshInitialCommand = ssh.InitialCommand ?? string.Empty;
+        _viewModel.SshExpectedHostKeyFingerprintSha256 = ssh.ExpectedHostKeyFingerprintSha256 ?? string.Empty;
+        _viewModel.SshKeepAliveIntervalSeconds = ssh.Policy.KeepAliveIntervalSeconds.ToString(CultureInfo.InvariantCulture);
+        _viewModel.SshConnectTimeoutSeconds = ssh.Policy.ConnectTimeoutSeconds.ToString(CultureInfo.InvariantCulture);
+        _viewModel.SelectedSshAuthMode = ResolveSshAuthMode(ssh.Authentication);
+        SelectOrAddRuntimeShellProfile(profile.Id, profile.DisplayName, null);
+    }
+
+    private void SelectOrAddRuntimeShellProfile(string profileId, string displayName, string? shellPath)
+    {
+        string normalizedShellPath = NormalizeOptional(shellPath) ?? string.Empty;
+        for (int i = 0; i < _viewModel.ShellProfiles.Count; i++)
+        {
+            ShellProfileOption option = _viewModel.ShellProfiles[i];
+            if (string.Equals(option.Id, profileId, StringComparison.Ordinal))
+            {
+                _viewModel.SelectedShellProfile = option;
+                return;
+            }
+        }
+
+        List<ShellProfileOption> profiles = new(_viewModel.ShellProfiles.Count + 1);
+        profiles.AddRange(_viewModel.ShellProfiles);
+        ShellProfileOption launcherProfile = new(profileId, displayName, normalizedShellPath);
+        profiles.Add(launcherProfile);
+        _viewModel.SetShellProfiles(profiles);
+        _viewModel.SelectedShellProfile = launcherProfile;
+    }
+
+    private static string BuildPipeCommandText(TerminalSessionPipeSettings pipe)
+    {
+        if (string.IsNullOrWhiteSpace(pipe.FileName))
+        {
+            return "echo RoyalTerminal pipe transport";
+        }
+
+        if (pipe.Arguments.Count == 0)
+        {
+            return pipe.FileName.Trim();
+        }
+
+        StringBuilder builder = new(pipe.FileName.Length + pipe.Arguments.Count * 8);
+        builder.Append(QuoteShellArgument(pipe.FileName.Trim()));
+        for (int i = 0; i < pipe.Arguments.Count; i++)
+        {
+            builder.Append(' ');
+            builder.Append(QuoteShellArgument(pipe.Arguments[i]));
+        }
+
+        return builder.ToString();
+    }
+
+    private static string QuoteShellArgument(string value)
+    {
+        if (value.Length == 0)
+        {
+            return "\"\"";
+        }
+
+        bool requiresQuoting = false;
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (char.IsWhiteSpace(value[i]) || value[i] is '"' or '\'')
+            {
+                requiresQuoting = true;
+                break;
+            }
+        }
+
+        if (!requiresQuoting)
+        {
+            return value;
+        }
+
+        return "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+    }
+
+    private SshAuthModeOption ResolveSshAuthMode(TerminalSessionSshAuthenticationSettings authentication)
+    {
+        string id =
+            authentication.UsePassword && authentication.PrivateKeySecretIds.Count > 0
+                ? SshAuthModeOption.PasswordAndKeyModeId
+                : authentication.PrivateKeySecretIds.Count > 0
+                    ? SshAuthModeOption.PrivateKeyModeId
+                    : authentication.UseAgent
+                        ? SshAuthModeOption.AgentModeId
+                        : SshAuthModeOption.PasswordModeId;
+        return ResolveViewModelSshAuthMode(id);
+    }
+
+    private static TerminalPasteSafetyPolicy ParsePasteSafetyPolicy(string? policy)
+    {
+        return Enum.TryParse(policy, ignoreCase: true, out TerminalPasteSafetyPolicy parsed)
+            ? parsed
+            : TerminalPasteSafetyPolicy.None;
+    }
+
+    private TerminalSessionProfile BuildLaunchProfileFromViewModel(string profileId, string displayName)
+    {
+        string transportId = _viewModel.SelectedTransportMode.Id;
+        TerminalSessionTransportProfile transport = new()
+        {
+            TransportId = transportId,
+            Pty = new TerminalSessionPtySettings
+            {
+                ShellPath = NormalizeOptional(_viewModel.SelectedShellProfile?.CommandPath),
+                WorkingDirectory = NormalizeOptional(_viewModel.WorkingDirectory),
+            },
+            Pipe = BuildLaunchPipeSettings(),
+            RawTcp = string.Equals(transportId, TerminalTransportIds.RawTcp, StringComparison.Ordinal)
+                ? BuildLaunchRawTcpSettings()
+                : new TerminalSessionRawTcpSettings(),
+            Telnet = string.Equals(transportId, TerminalTransportIds.Telnet, StringComparison.Ordinal)
+                ? BuildLaunchTelnetSettings()
+                : new TerminalSessionTelnetSettings(),
+            Serial = string.Equals(transportId, TerminalTransportIds.Serial, StringComparison.Ordinal)
+                ? BuildLaunchSerialSettings()
+                : new TerminalSessionSerialSettings(),
+            Ssh = string.Equals(transportId, TerminalTransportIds.Ssh, StringComparison.Ordinal)
+                ? BuildLaunchSshSettings()
+                : new TerminalSessionSshSettings(),
+        };
+
+        return new TerminalSessionProfile
+        {
+            Id = profileId,
+            DisplayName = displayName,
+            Transport = transport,
+        };
+    }
+
+    private TerminalSessionPipeSettings BuildLaunchPipeSettings()
+    {
+        TerminalCommandSpec command = BuildPipeCommand(_viewModel.SelectedShellProfile);
+        return new TerminalSessionPipeSettings
+        {
+            FileName = command.FileName,
+            Arguments = new List<string>(command.Arguments),
+            WorkingDirectory = NormalizeOptional(_viewModel.WorkingDirectory),
+            MergeStdErrIntoStdOut = _viewModel.PipeMergeStdErrIntoStdOut,
+        };
+    }
+
+    private TerminalSessionRawTcpSettings BuildLaunchRawTcpSettings()
+    {
+        return new TerminalSessionRawTcpSettings
+        {
+            Host = NormalizeOptional(_viewModel.RawTcpHost) ?? "localhost",
+            Port = ParsePort(_viewModel.RawTcpPort, "Raw TCP port"),
+        };
+    }
+
+    private TerminalSessionTelnetSettings BuildLaunchTelnetSettings()
+    {
+        return new TerminalSessionTelnetSettings
+        {
+            Host = NormalizeOptional(_viewModel.TelnetHost) ?? "localhost",
+            Port = ParsePort(_viewModel.TelnetPort, "Telnet port"),
+            TerminalType = NormalizeOptional(_viewModel.TelnetTerminalType) ?? "xterm",
+            InitialCommand = NormalizeOptional(_viewModel.TelnetInitialCommand),
+        };
+    }
+
+    private TerminalSessionSerialSettings BuildLaunchSerialSettings()
+    {
+        return new TerminalSessionSerialSettings
+        {
+            PortName = NormalizeOptional(_viewModel.SerialPortName) ?? string.Empty,
+            BaudRate = ParsePositiveInt(_viewModel.SerialBaudRate, "Serial baud rate"),
+            DataBits = ParseIntInRange(_viewModel.SerialDataBits, 5, 8, "Serial data bits"),
+            Parity = _viewModel.SelectedSerialParity,
+            StopBits = _viewModel.SelectedSerialStopBits,
+            Handshake = _viewModel.SelectedSerialHandshake,
+            NewLine = string.IsNullOrEmpty(_viewModel.SerialNewLine) ? "\n" : _viewModel.SerialNewLine,
+        };
+    }
+
+    private TerminalSessionSshSettings BuildLaunchSshSettings()
+    {
+        return new TerminalSessionSshSettings
+        {
+            Host = NormalizeOptional(_viewModel.SshHost) ?? "localhost",
+            Port = ParsePort(_viewModel.SshPort, "SSH port"),
+            Username = NormalizeOptional(_viewModel.SshUsername) ?? Environment.UserName,
+            RequestPty = _viewModel.SshRequestPty,
+            TerminalType = NormalizeOptional(_viewModel.SshTerminalType) ?? "xterm-256color",
+            InitialCommand = NormalizeOptional(_viewModel.SshInitialCommand),
+            ExpectedHostKeyFingerprintSha256 = NormalizeOptional(_viewModel.SshExpectedHostKeyFingerprintSha256),
+            Authentication = BuildLaunchSshAuthenticationSettings(),
+            Proxy = BuildSshProxyOptions(),
+            PortForwardings = new List<SshPortForwardOptions>(BuildSshPortForwardings()),
+            X11 = BuildSshX11Options(),
+            Policy = BuildSshPolicyOptions(),
+        };
+    }
+
+    private TerminalSessionSshAuthenticationSettings BuildLaunchSshAuthenticationSettings()
+    {
+        string authModeId = _viewModel.SelectedSshAuthMode.Id;
+        bool usePassword = string.Equals(authModeId, SshAuthModeOption.PasswordModeId, StringComparison.Ordinal)
+                           || string.Equals(authModeId, SshAuthModeOption.PasswordAndKeyModeId, StringComparison.Ordinal);
+        bool usePrivateKey = string.Equals(authModeId, SshAuthModeOption.PrivateKeyModeId, StringComparison.Ordinal)
+                             || string.Equals(authModeId, SshAuthModeOption.PasswordAndKeyModeId, StringComparison.Ordinal);
+        bool useAgent = string.Equals(authModeId, SshAuthModeOption.AgentModeId, StringComparison.Ordinal);
+
+        return new TerminalSessionSshAuthenticationSettings
+        {
+            UsePassword = usePassword,
+            PasswordSecretId = usePassword ? DemoSshCredentialProvider.PasswordSecretId : null,
+            PrivateKeySecretIds = usePrivateKey ? [DemoSshCredentialProvider.PrivateKeySecretId] : [],
+            UseAgent = useAgent,
+        };
+    }
+
     #region Tab Management
+
+    private void CreateInitialTabs()
+    {
+        if (ReadEnvironmentToggle(StartAllRenderModesEnvVar))
+        {
+            CreateInitialTabsForSupportedModes();
+            return;
+        }
+
+        if (TryRestoreWorkspaceTabs())
+        {
+            return;
+        }
+
+        TerminalRenderMode startupMode = _modeResolver.ResolveSupportedMode(
+            TerminalRenderMode.RenderedAuto,
+            _terminalCapabilities);
+        _viewModel.SetRenderMode(startupMode);
+        CreateNewTab();
+    }
+
+    private bool TryRestoreWorkspaceTabs()
+    {
+        TerminalWorkspaceDocument document;
+        try
+        {
+            document = _workspaceStore.LoadAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            AppendEventLog($"Workspace restore failed: {ex.Message}");
+            return false;
+        }
+
+        TerminalWorkspaceWindow? window = SelectWorkspaceWindow(document);
+        if (window is null || window.Tabs.Count == 0)
+        {
+            return false;
+        }
+
+        int selectedIndex = 0;
+        for (int i = 0; i < window.Tabs.Count; i++)
+        {
+            TerminalWorkspaceTab workspaceTab = window.Tabs[i];
+            RestoreWorkspaceTab(workspaceTab);
+
+            if (string.Equals(workspaceTab.Id, window.SelectedTabId, StringComparison.OrdinalIgnoreCase))
+            {
+                selectedIndex = i;
+            }
+        }
+
+        if (_tabs.Count > 0)
+        {
+            SwitchToTab(Math.Clamp(selectedIndex, 0, _tabs.Count - 1));
+        }
+
+        AppendEventLog($"Restored {window.Tabs.Count} workspace tab(s).");
+        return true;
+    }
+
+    private void RestoreWorkspaceTab(TerminalWorkspaceTab workspaceTab)
+    {
+        _tabCounter++;
+        string tabName = string.IsNullOrWhiteSpace(workspaceTab.Title)
+            ? $"Terminal {_tabCounter}"
+            : workspaceTab.Title!.Trim();
+
+        TerminalRenderMode resolvedMode = ResolveWorkspaceTabMode(workspaceTab);
+        TabVisualMode tabMode = CreateDeferredWorkspaceTabMode(workspaceTab, resolvedMode);
+        Button headerButton = CreateTabHeader(tabName, tabMode);
+
+        string profileId = NormalizeOptional(workspaceTab.ProfileId) ?? "default";
+        string transportId = NormalizeOptional(workspaceTab.TransportId) ?? TerminalTransportIds.Pty;
+        string? workingDirectory = NormalizeOptional(workspaceTab.WorkingDirectory);
+        Grid deferredContainer = new()
+        {
+            Background = Brushes.Transparent,
+        };
+
+        TerminalTab tab = new(
+            headerButton,
+            deferredContainer,
+            deferredContainer,
+            _tabCounter,
+            tabMode.Name,
+            autoStartSession: true,
+            resolvedMode: resolvedMode,
+            profileId: profileId,
+            transportId: transportId,
+            workingDirectory: workingDirectory,
+            workspaceId: NormalizeOptional(workspaceTab.Id),
+            rootPane: workspaceTab.RootPane,
+            rootPaneNode: null,
+            leafControls: [],
+            deferredWorkspaceTab: workspaceTab);
+        tab.CloseButton.Command = _viewModel.CloseTabCommand;
+        tab.CloseButton.CommandParameter = tab.Index;
+        headerButton.Command = _viewModel.ActivateTabCommand;
+        headerButton.CommandParameter = tab.Index;
+
+        _tabs.Add(tab);
+        deferredContainer.IsVisible = false;
+        _terminalHost.Children.Add(deferredContainer);
+        _tabStrip.Children.Add(headerButton);
+        AppendEventLog($"[{tabName}] Workspace tab restored lazily.");
+    }
+
+    private bool EnsureTabMaterialized(TerminalTab tab)
+    {
+        if (!tab.IsDeferredWorkspaceTab)
+        {
+            return true;
+        }
+
+        TerminalWorkspaceTab workspaceTab = tab.DeferredWorkspaceTab
+            ?? throw new InvalidOperationException("Deferred workspace tab metadata is missing.");
+
+        try
+        {
+            ApplyWorkspaceTabConfiguration(workspaceTab);
+
+            List<TerminalControl> leafControls = [];
+            List<TerminalRenderMode> resolvedModes = [];
+            TerminalPaneRuntimeNode rootPaneNode = CreateWorkspacePaneNode(
+                workspaceTab.RootPane,
+                workspaceTab,
+                leafControls,
+                resolvedModes);
+            Control paneRoot = rootPaneNode.Visual;
+
+            int hostIndex = _terminalHost.Children.IndexOf(tab.Container);
+            bool wasVisible = tab.Container.IsVisible;
+            if (hostIndex >= 0)
+            {
+                _terminalHost.Children.RemoveAt(hostIndex);
+            }
+
+            ReplaceTabRootVisual(tab, paneRoot, rootPaneNode, hostIndex, wasVisible);
+            if (leafControls.Count > 0 && resolvedModes.Count > 0)
+            {
+                UpdateTabHeaderVisual(tab, ResolveTabMode(leafControls[0], resolvedModes[0]));
+            }
+
+            AppendEventLog($"[{tab.Title}] Workspace tab materialized ({leafControls.Count.ToString(CultureInfo.InvariantCulture)} pane(s)).");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus($"Workspace tab restore failed: {ex.Message}");
+            AppendEventLog($"[{tab.Title}] Workspace tab restore failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private TerminalPaneRuntimeNode CreateWorkspacePaneNode(
+        TerminalWorkspacePane pane,
+        TerminalWorkspaceTab tab,
+        List<TerminalControl> leafControls,
+        List<TerminalRenderMode> resolvedModes)
+    {
+        if (pane.Split is not { } split)
+        {
+            return CreateWorkspaceLeafNode(pane, tab, leafControls, resolvedModes);
+        }
+
+        double ratio = Math.Clamp(split.Ratio, 0.05, 0.95);
+
+        TerminalPaneRuntimeNode node = new(
+            NormalizeOptional(pane.Id) ?? CreatePaneId(),
+            NormalizeOptional(pane.Title),
+            NormalizeOptional(pane.ProfileId),
+            NormalizeOptional(pane.WorkingDirectory),
+            NormalizeOptional(pane.TransportId),
+            NormalizeOptional(pane.TransportProfileId));
+
+        TerminalPaneRuntimeNode first = CreateWorkspacePaneNode(split.FirstPane, tab, leafControls, resolvedModes);
+        TerminalPaneRuntimeNode second = CreateWorkspacePaneNode(split.SecondPane, tab, leafControls, resolvedModes);
+        node.SetSplit(
+            NormalizeSplitOrientation(split.Orientation),
+            ratio,
+            first,
+            second,
+            CreateSplitGrid(NormalizeSplitOrientation(split.Orientation), ratio, first.Visual, second.Visual));
+        first.Parent = node;
+        second.Parent = node;
+        return node;
+    }
+
+    private TerminalPaneRuntimeNode CreateWorkspaceLeafNode(
+        TerminalWorkspacePane pane,
+        TerminalWorkspaceTab tab,
+        List<TerminalControl> leafControls,
+        List<TerminalRenderMode> resolvedModes)
+    {
+        ApplyWorkspacePaneConfiguration(pane, tab);
+        TerminalModeSelection modeSelection = ResolveModeSelectionForNewTab();
+        TerminalControl terminal = CreateTerminalControlWithRuntimeFallback(
+            modeSelection,
+            out TerminalModeSelection finalizedModeSelection);
+
+        string profileId = NormalizeOptional(pane.ProfileId) ?? tab.ProfileId;
+        string title = NormalizeOptional(pane.Title) ?? NormalizeOptional(tab.Title) ?? profileId;
+        _launchConfigurations[terminal] = new TerminalLaunchConfiguration(
+            BuildLaunchProfileFromViewModel(profileId, title));
+        leafControls.Add(terminal);
+        resolvedModes.Add(finalizedModeSelection.ResolvedMode);
+
+        ScrollViewer container = CreatePaneScrollViewer(terminal);
+        TerminalPaneRuntimeNode node = new(
+            NormalizeOptional(pane.Id) ?? CreatePaneId(),
+            NormalizeOptional(pane.Title),
+            profileId,
+            NormalizeOptional(pane.WorkingDirectory) ?? NormalizeOptional(tab.WorkingDirectory),
+            NormalizeOptional(pane.TransportId) ?? NormalizeOptional(tab.TransportId),
+            NormalizeOptional(pane.TransportProfileId));
+        node.SetLeaf(terminal, container);
+        RegisterPaneControl(terminal, node);
+
+        return node;
+    }
+
+    private static ScrollViewer CreatePaneScrollViewer(TerminalControl terminal)
+    {
+        return new ScrollViewer
+        {
+            Content = terminal,
+            VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+        };
+    }
+
+    private static Grid CreateSplitGrid(string orientation, double ratio, Control first, Control second)
+    {
+        double normalizedRatio = Math.Clamp(ratio, 0.05, 0.95);
+        Grid grid = new()
+        {
+            Background = Brushes.Transparent,
+        };
+
+        if (string.Equals(orientation, TerminalWorkspacePaneSplitOrientations.Vertical, StringComparison.Ordinal))
+        {
+            grid.RowDefinitions.Add(new RowDefinition(new GridLength(normalizedRatio, GridUnitType.Star)));
+            grid.RowDefinitions.Add(new RowDefinition(new GridLength(4, GridUnitType.Pixel)));
+            grid.RowDefinitions.Add(new RowDefinition(new GridLength(1.0 - normalizedRatio, GridUnitType.Star)));
+            Grid.SetRow(first, 0);
+            Grid.SetRow(second, 2);
+            grid.Children.Add(first);
+            GridSplitter splitter = new()
+            {
+                Height = 4,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Center,
+                Background = Brushes.Transparent,
+            };
+            Grid.SetRow(splitter, 1);
+            grid.Children.Add(splitter);
+            grid.Children.Add(second);
+            return grid;
+        }
+
+        grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(normalizedRatio, GridUnitType.Star)));
+        grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(4, GridUnitType.Pixel)));
+        grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1.0 - normalizedRatio, GridUnitType.Star)));
+        Grid.SetColumn(first, 0);
+        Grid.SetColumn(second, 2);
+        grid.Children.Add(first);
+        GridSplitter columnSplitter = new()
+        {
+            Width = 4,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Background = Brushes.Transparent,
+        };
+        Grid.SetColumn(columnSplitter, 1);
+        grid.Children.Add(columnSplitter);
+        grid.Children.Add(second);
+        return grid;
+    }
+
+    private string CreatePaneId()
+    {
+        _paneCounter++;
+        return $"pane-{_paneCounter.ToString(CultureInfo.InvariantCulture)}";
+    }
+
+    private static string NormalizeSplitOrientation(string? orientation)
+    {
+        return string.Equals(orientation, TerminalWorkspacePaneSplitOrientations.Vertical, StringComparison.OrdinalIgnoreCase)
+            ? TerminalWorkspacePaneSplitOrientations.Vertical
+            : TerminalWorkspacePaneSplitOrientations.Horizontal;
+    }
+
+    private void RegisterPaneControl(TerminalControl control, TerminalPaneRuntimeNode node)
+    {
+        _paneRuntimeNodes[control] = node;
+        control.GotFocus += (_, _) => _activePaneControl = control;
+        control.PointerPressed += (_, _) => _activePaneControl = control;
+    }
+
+    private static TerminalWorkspaceWindow? SelectWorkspaceWindow(TerminalWorkspaceDocument document)
+    {
+        if (document.Windows.Count == 0)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(document.SelectedWindowId))
+        {
+            for (int i = 0; i < document.Windows.Count; i++)
+            {
+                if (string.Equals(
+                        document.Windows[i].Id,
+                        document.SelectedWindowId,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return document.Windows[i];
+                }
+            }
+        }
+
+        return document.Windows[0];
+    }
+
+    private void ApplyWorkspaceTabConfiguration(TerminalWorkspaceTab workspaceTab)
+    {
+        _viewModel.SessionName = string.IsNullOrWhiteSpace(workspaceTab.Title)
+            ? workspaceTab.ProfileId
+            : workspaceTab.Title;
+        SetSelectedTransportMode(workspaceTab.TransportId);
+        SetSelectedShellProfile(workspaceTab.ProfileId);
+        if (!string.IsNullOrWhiteSpace(workspaceTab.WorkingDirectory))
+        {
+            _viewModel.WorkingDirectory = workspaceTab.WorkingDirectory;
+        }
+
+        TerminalRenderMode requestedMode = MapWorkspaceRenderMode(workspaceTab.RenderMode);
+        TerminalRenderMode startupMode = _modeResolver.ResolveSupportedMode(
+            requestedMode,
+            _terminalCapabilities);
+        _viewModel.SetRenderMode(startupMode);
+    }
+
+    private TerminalRenderMode ResolveWorkspaceTabMode(TerminalWorkspaceTab workspaceTab)
+    {
+        TerminalRenderMode requestedMode = MapWorkspaceRenderMode(workspaceTab.RenderMode);
+        return _modeResolver.ResolveSupportedMode(
+            requestedMode,
+            _terminalCapabilities);
+    }
+
+    private static TabVisualMode CreateDeferredWorkspaceTabMode(
+        TerminalWorkspaceTab workspaceTab,
+        TerminalRenderMode resolvedMode)
+    {
+        string transportId = NormalizeOptional(workspaceTab.TransportId) ?? TerminalTransportIds.Pty;
+        string modeName = $"{GetModeDisplayName(resolvedMode)} ({transportId} - deferred)";
+        return new TabVisualMode(
+            modeName,
+            CreateStandaloneModeGlyph(resolvedMode),
+            CreateStandaloneModeGlyphBrush(resolvedMode));
+    }
+
+    private void ApplyWorkspacePaneConfiguration(TerminalWorkspacePane pane, TerminalWorkspaceTab tab)
+    {
+        string profileId = NormalizeOptional(pane.ProfileId) ?? tab.ProfileId;
+        TerminalSessionProfile? profile = _sessionLauncherDocument is null
+            ? null
+            : FindProfile(_sessionLauncherDocument, profileId);
+        if (profile is not null)
+        {
+            ApplySessionProfile(profile);
+        }
+        else
+        {
+            _viewModel.SessionName = NormalizeOptional(pane.Title)
+                ?? NormalizeOptional(tab.Title)
+                ?? profileId;
+            SetSelectedShellProfile(profileId);
+        }
+
+        SetSelectedTransportMode(NormalizeOptional(pane.TransportId) ?? tab.TransportId);
+        string? workingDirectory = NormalizeOptional(pane.WorkingDirectory) ?? NormalizeOptional(tab.WorkingDirectory);
+        if (workingDirectory is not null)
+        {
+            _viewModel.WorkingDirectory = workingDirectory;
+        }
+    }
+
+    private void SetSelectedTransportMode(string? transportId)
+    {
+        if (string.IsNullOrWhiteSpace(transportId))
+        {
+            return;
+        }
+
+        for (int i = 0; i < _viewModel.TransportModes.Count; i++)
+        {
+            TransportModeOption option = _viewModel.TransportModes[i];
+            if (string.Equals(option.Id, transportId, StringComparison.OrdinalIgnoreCase))
+            {
+                _viewModel.SelectedTransportMode = option;
+                return;
+            }
+        }
+    }
+
+    private void SetSelectedShellProfile(string? profileId)
+    {
+        if (string.IsNullOrWhiteSpace(profileId))
+        {
+            return;
+        }
+
+        for (int i = 0; i < _viewModel.ShellProfiles.Count; i++)
+        {
+            ShellProfileOption option = _viewModel.ShellProfiles[i];
+            if (string.Equals(option.Id, profileId, StringComparison.OrdinalIgnoreCase))
+            {
+                _viewModel.SelectedShellProfile = option;
+                return;
+            }
+        }
+    }
+
+    private static TerminalRenderMode MapWorkspaceRenderMode(string? renderMode)
+    {
+        if (string.Equals(renderMode, TerminalWorkspaceRenderModes.Ghostty, StringComparison.OrdinalIgnoreCase))
+        {
+            return TerminalRenderMode.NativeVt;
+        }
+
+        if (string.Equals(renderMode, TerminalWorkspaceRenderModes.Text, StringComparison.OrdinalIgnoreCase))
+        {
+            return TerminalRenderMode.ManagedVt;
+        }
+
+        return TerminalRenderMode.RenderedAuto;
+    }
+
+    private static string MapWorkspaceRenderMode(TerminalRenderMode renderMode)
+    {
+        return renderMode switch
+        {
+            TerminalRenderMode.NativeVt => TerminalWorkspaceRenderModes.Ghostty,
+            TerminalRenderMode.ManagedVt => TerminalWorkspaceRenderModes.Text,
+            TerminalRenderMode.RenderedAuto => TerminalWorkspaceRenderModes.Skia,
+            _ => TerminalWorkspaceRenderModes.Default,
+        };
+    }
+
+    private string? GetSelectedTransportWorkingDirectory()
+    {
+        return _viewModel.IsPtyTransportSelected || _viewModel.IsPipeTransportSelected
+            ? NormalizeOptional(_viewModel.WorkingDirectory)
+            : null;
+    }
 
     private void CreateInitialTabsForSupportedModes()
     {
@@ -418,10 +1539,12 @@ internal sealed class MainWindowController
         }
     }
 
-    private void CreateNewTab()
+    private void CreateNewTab(string? profileIdOverride = null, string? titleOverride = null)
     {
         _tabCounter++;
-        string tabName = $"Terminal {_tabCounter}";
+        string tabName = string.IsNullOrWhiteSpace(titleOverride)
+            ? $"Terminal {_tabCounter}"
+            : titleOverride.Trim();
         TerminalModeSelection modeSelection = ResolveModeSelectionForNewTab();
         TerminalControl terminal = CreateTerminalControlWithRuntimeFallback(
             modeSelection,
@@ -429,13 +1552,23 @@ internal sealed class MainWindowController
 
         TabVisualMode tabMode = ResolveTabMode(terminal, finalizedModeSelection.ResolvedMode);
         Button headerButton = CreateTabHeader(tabName, tabMode);
+        string profileId = NormalizeOptional(profileIdOverride) ?? _viewModel.SelectedShellProfile?.Id ?? "default";
+        string transportId = _viewModel.SelectedTransportMode.Id;
+        string? workingDirectory = GetSelectedTransportWorkingDirectory();
+        TerminalLaunchConfiguration launchConfiguration = new(
+            BuildLaunchProfileFromViewModel(profileId, tabName));
+        _launchConfigurations[terminal] = launchConfiguration;
 
-        ScrollViewer container = new()
-        {
-            Content = terminal,
-            VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-        };
+        ScrollViewer container = CreatePaneScrollViewer(terminal);
+        TerminalPaneRuntimeNode rootPaneNode = new(
+            CreatePaneId(),
+            tabName,
+            profileId,
+            workingDirectory,
+            transportId,
+            transportProfileId: null);
+        rootPaneNode.SetLeaf(terminal, container);
+        RegisterPaneControl(terminal, rootPaneNode);
 
         TerminalTab tab = new(
             headerButton,
@@ -444,7 +1577,14 @@ internal sealed class MainWindowController
             _tabCounter,
             tabMode.Name,
             autoStartSession: true,
-            resolvedMode: finalizedModeSelection.ResolvedMode);
+            resolvedMode: finalizedModeSelection.ResolvedMode,
+            profileId: profileId,
+            transportId: transportId,
+            workingDirectory: workingDirectory,
+            workspaceId: null,
+            rootPane: null,
+            rootPaneNode: rootPaneNode,
+            leafControls: [terminal]);
         tab.CloseButton.Command = _viewModel.CloseTabCommand;
         tab.CloseButton.CommandParameter = tab.Index;
         headerButton.Command = _viewModel.ActivateTabCommand;
@@ -491,7 +1631,14 @@ internal sealed class MainWindowController
             _tabCounter,
             tabMode.Name,
             autoStartSession: false,
-            resolvedMode: TerminalRenderMode.RenderedAuto);
+            resolvedMode: TerminalRenderMode.RenderedAuto,
+            profileId: "replay",
+            transportId: TerminalTransportIds.Pipe,
+            workingDirectory: null,
+            workspaceId: null,
+            rootPane: null,
+            rootPaneNode: null,
+            leafControls: []);
         if (!string.IsNullOrWhiteSpace(sourceLabel))
         {
             tab.UpdateTitle($"Replay: {sourceLabel}");
@@ -639,6 +1786,7 @@ internal sealed class MainWindowController
         {
             WriteSessionLogInput(standaloneControl, args.Data);
         };
+        RegisterCommandHistoryCapture(standaloneControl);
         standaloneControl.PointerReleased += async (_, e) =>
         {
             if (!_viewModel.CopyOnSelectEnabled ||
@@ -658,7 +1806,6 @@ internal sealed class MainWindowController
             handledEventsToo: true);
 
         UpdateSessionLoggingSubscription(standaloneControl);
-        QueueStandaloneSessionStart(standaloneControl);
 
         return standaloneControl;
     }
@@ -692,6 +1839,11 @@ internal sealed class MainWindowController
 
     private void QueueStandaloneSessionStart(TerminalControl standaloneControl)
     {
+        if (ReadEnvironmentToggle(DisableSessionAutostartEnvVar))
+        {
+            return;
+        }
+
         if (standaloneControl.HasActiveSession || standaloneControl.HasPty)
         {
             return;
@@ -937,97 +2089,108 @@ internal sealed class MainWindowController
         TerminalControl standaloneControl,
         bool preserveScrollback = false)
     {
-        string workingDirectory = ResolveWorkingDirectory();
-        string transportId = _viewModel.SelectedTransportMode.Id;
         string tabName = GetTabDisplayName(standaloneControl);
         TerminalSessionDimensions dimensions = BuildSessionDimensions(standaloneControl);
+        TerminalLaunchConfiguration launchConfiguration = GetLaunchConfiguration(standaloneControl);
+        TerminalSessionProfile launchProfile = ApplyLaunchDimensions(
+            launchConfiguration.Profile,
+            dimensions);
+        ITerminalTransportOptions transportOptions = TerminalSessionProfileMapper.ToTransportOptions(launchProfile);
 
-        if (string.Equals(transportId, TerminalTransportIds.Pty, StringComparison.OrdinalIgnoreCase))
+        if (transportOptions is PtyTransportOptions ptyOptions)
         {
             if (!IsPtyPlatformSupported())
             {
                 throw new PlatformNotSupportedException("PTY transport is only supported on macOS, Linux, and Windows.");
             }
 
-            string? shellPath = _viewModel.SelectedShellProfile?.CommandPath;
-            TerminalCommandSpec? command = string.IsNullOrWhiteSpace(shellPath)
-                ? null
-                : new TerminalCommandSpec(shellPath, Array.Empty<string>());
-            PtyTransportOptions options = new(
-                Command: command,
-                WorkingDirectory: workingDirectory,
-                Environment: null,
-                Dimensions: dimensions);
+            await standaloneControl.StartSessionAsync(ptyOptions, preserveScrollback);
 
-            await standaloneControl.StartSessionAsync(options, preserveScrollback);
-
-            string shellDisplay = _viewModel.SelectedShellProfile?.DisplayName ?? "Default shell";
+            string? shellPath = ptyOptions.Command?.FileName;
+            string shellDisplay = string.IsNullOrWhiteSpace(shellPath)
+                ? "Default shell"
+                : Path.GetFileName(shellPath);
             AppendEventLog($"[{tabName}] Starting PTY session ({shellDisplay}).");
             UpdateSessionStartedStatus(standaloneControl, $"Started PTY session ({shellDisplay})");
             AppendEventLog($"[{tabName}] PTY session started.");
             return;
         }
 
-        if (string.Equals(transportId, TerminalTransportIds.Pipe, StringComparison.OrdinalIgnoreCase))
+        if (transportOptions is PipeTransportOptions pipeOptions)
         {
-            TerminalCommandSpec command = BuildPipeCommand(_viewModel.SelectedShellProfile);
-            AppendEventLog($"[{tabName}] Starting Pipe session ({command.FileName}).");
-            PipeTransportOptions options = new(
-                Command: command,
-                WorkingDirectory: workingDirectory,
-                Environment: null,
-                MergeStdErrIntoStdOut: _viewModel.PipeMergeStdErrIntoStdOut,
-                Dimensions: dimensions);
-
-            await standaloneControl.StartPipeAsync(options, preserveScrollback);
-            UpdateSessionStartedStatus(standaloneControl, $"Started Pipe session ({command.FileName})");
+            AppendEventLog($"[{tabName}] Starting Pipe session ({pipeOptions.Command.FileName}).");
+            await standaloneControl.StartPipeAsync(pipeOptions, preserveScrollback);
+            UpdateSessionStartedStatus(standaloneControl, $"Started Pipe session ({pipeOptions.Command.FileName})");
             AppendEventLog($"[{tabName}] Pipe session started.");
             return;
         }
 
-        if (string.Equals(transportId, TerminalTransportIds.RawTcp, StringComparison.OrdinalIgnoreCase))
+        if (transportOptions is RawTcpTransportOptions rawTcpOptions)
         {
-            RawTcpTransportOptions options = BuildRawTcpOptions(dimensions);
-            AppendEventLog($"[{tabName}] Starting Raw TCP session {options.Host}:{options.Port}.");
-            await standaloneControl.StartRawTcpAsync(options, preserveScrollback);
-            UpdateSessionStartedStatus(standaloneControl, $"Started Raw TCP session {options.Host}:{options.Port}");
+            AppendEventLog($"[{tabName}] Starting Raw TCP session {rawTcpOptions.Host}:{rawTcpOptions.Port}.");
+            await standaloneControl.StartRawTcpAsync(rawTcpOptions, preserveScrollback);
+            UpdateSessionStartedStatus(standaloneControl, $"Started Raw TCP session {rawTcpOptions.Host}:{rawTcpOptions.Port}");
             AppendEventLog($"[{tabName}] Raw TCP session started.");
             return;
         }
 
-        if (string.Equals(transportId, TerminalTransportIds.Telnet, StringComparison.OrdinalIgnoreCase))
+        if (transportOptions is TelnetTransportOptions telnetOptions)
         {
-            TelnetTransportOptions options = BuildTelnetOptions(dimensions);
-            AppendEventLog($"[{tabName}] Starting Telnet session {options.Host}:{options.Port}.");
-            await standaloneControl.StartTelnetAsync(options, preserveScrollback);
-            UpdateSessionStartedStatus(standaloneControl, $"Started Telnet session {options.Host}:{options.Port}");
+            AppendEventLog($"[{tabName}] Starting Telnet session {telnetOptions.Host}:{telnetOptions.Port}.");
+            await standaloneControl.StartTelnetAsync(telnetOptions, preserveScrollback);
+            UpdateSessionStartedStatus(standaloneControl, $"Started Telnet session {telnetOptions.Host}:{telnetOptions.Port}");
             AppendEventLog($"[{tabName}] Telnet session started.");
             return;
         }
 
-        if (string.Equals(transportId, TerminalTransportIds.Serial, StringComparison.OrdinalIgnoreCase))
+        if (transportOptions is SerialTransportOptions serialOptions)
         {
-            SerialTransportOptions options = BuildSerialOptions(dimensions);
-            AppendEventLog($"[{tabName}] Starting Serial session {options.PortName} ({options.BaudRate}).");
-            await standaloneControl.StartSerialAsync(options, preserveScrollback);
-            UpdateSessionStartedStatus(standaloneControl, $"Started Serial session {options.PortName} ({options.BaudRate})");
+            AppendEventLog($"[{tabName}] Starting Serial session {serialOptions.PortName} ({serialOptions.BaudRate}).");
+            await standaloneControl.StartSerialAsync(serialOptions, preserveScrollback);
+            UpdateSessionStartedStatus(standaloneControl, $"Started Serial session {serialOptions.PortName} ({serialOptions.BaudRate})");
             AppendEventLog($"[{tabName}] Serial session started.");
             return;
         }
 
-        if (string.Equals(transportId, TerminalTransportIds.Ssh, StringComparison.OrdinalIgnoreCase))
+        if (transportOptions is SshTransportOptions sshOptions)
         {
-            SshTransportOptions options = BuildSshOptions(dimensions);
-            AppendEventLog($"[{tabName}] Starting SSH session {options.Endpoint.Username}@{options.Endpoint.Host}:{options.Endpoint.Port}.");
-            await standaloneControl.StartSshAsync(options, preserveScrollback);
+            AppendEventLog($"[{tabName}] Starting SSH session {sshOptions.Endpoint.Username}@{sshOptions.Endpoint.Host}:{sshOptions.Endpoint.Port}.");
+            await standaloneControl.StartSshAsync(sshOptions, preserveScrollback);
             UpdateSessionStartedStatus(
                 standaloneControl,
-                $"Started SSH session {_viewModel.SshUsername}@{_viewModel.SshHost}:{_viewModel.SshPort}");
+                $"Started SSH session {sshOptions.Endpoint.Username}@{sshOptions.Endpoint.Host}:{sshOptions.Endpoint.Port}");
             AppendEventLog($"[{tabName}] SSH session started.");
             return;
         }
 
-        throw new InvalidOperationException($"Unsupported transport id '{transportId}'.");
+        throw new InvalidOperationException($"Unsupported transport options type '{transportOptions.GetType().FullName}'.");
+    }
+
+    private TerminalLaunchConfiguration GetLaunchConfiguration(TerminalControl control)
+    {
+        if (_launchConfigurations.TryGetValue(control, out TerminalLaunchConfiguration configuration))
+        {
+            return configuration;
+        }
+
+        string profileId = _viewModel.SelectedShellProfile?.Id ?? "default";
+        return new TerminalLaunchConfiguration(BuildLaunchProfileFromViewModel(profileId, GetTabDisplayName(control)));
+    }
+
+    private static TerminalSessionProfile ApplyLaunchDimensions(
+        TerminalSessionProfile profile,
+        TerminalSessionDimensions dimensions)
+    {
+        return profile with
+        {
+            Layout = new TerminalSessionLayoutSettings
+            {
+                Columns = dimensions.Columns,
+                Rows = dimensions.Rows,
+                WidthPixels = dimensions.WidthPixels,
+                HeightPixels = dimensions.HeightPixels,
+            },
+        };
     }
 
     private SshTransportOptions BuildSshOptions(TerminalSessionDimensions dimensions)
@@ -1370,6 +2533,11 @@ internal sealed class MainWindowController
                string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static string? NormalizeOptional(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
     private static TerminalTextRenderPipeline ReadTextRenderPipeline(string variableName)
     {
         string? value = Environment.GetEnvironmentVariable(variableName);
@@ -1456,7 +2624,7 @@ internal sealed class MainWindowController
         _terminalHost.Children.Remove(tab.Container);
         _tabStrip.Children.Remove(tab.HeaderButton);
 
-        DisposeTerminal(tab.Control);
+        DisposeTabTerminals(tab);
 
         if (_tabs.Count == 0)
         {
@@ -1491,27 +2659,44 @@ internal sealed class MainWindowController
             return;
         }
 
+        TerminalTab target = _tabs[index];
+        if (!EnsureTabMaterialized(target))
+        {
+            return;
+        }
+
         foreach (TerminalTab tab in _tabs)
         {
             tab.Container.IsVisible = false;
             tab.HeaderButton.Classes.Remove("active");
         }
 
-        TerminalTab target = _tabs[index];
         target.Container.IsVisible = true;
         target.HeaderButton.Classes.Add("active");
         _activeTab = target;
-        UpdateTextRenderPipelineIndicator(target.Control as TerminalControl);
-
-        if (target.AutoStartSession && target.Control is TerminalControl standaloneControl)
+        if (_activePaneControl is null || !ContainsControl(target.LeafControls, _activePaneControl))
         {
-            QueueStandaloneSessionStart(standaloneControl);
+            _activePaneControl = target.LeafControls.Count > 0
+                ? target.LeafControls[0]
+                : target.Control as TerminalControl;
+        }
+        UpdateTextRenderPipelineIndicator(_activePaneControl);
+
+        if (target.AutoStartSession)
+        {
+            for (int i = 0; i < target.LeafControls.Count; i++)
+            {
+                QueueStandaloneSessionStart(target.LeafControls[i]);
+            }
         }
 
         Dispatcher.UIThread.Post(() =>
         {
-            target.Control.Focus();
-            if (target.Control is TerminalControl standalone)
+            Control focusTarget = target.LeafControls.Count > 0
+                ? _activePaneControl ?? target.LeafControls[0]
+                : target.Control;
+            focusTarget.Focus();
+            if (focusTarget is TerminalControl standalone)
             {
                 standalone.InvalidateTerminal();
             }
@@ -1535,6 +2720,424 @@ internal sealed class MainWindowController
         SwitchToTab(next);
     }
 
+    private void SplitActivePane(TerminalPaneSplitRequest request)
+    {
+        TerminalTab? tab = GetActiveTab();
+        TerminalControl? activeControl = GetActiveStandaloneControl();
+        if (tab is null || activeControl is null)
+        {
+            UpdateStatus("No active pane to split.");
+            return;
+        }
+
+        if (!_paneRuntimeNodes.TryGetValue(activeControl, out TerminalPaneRuntimeNode? activeNode) ||
+            activeNode.LeafContainer is null)
+        {
+            UpdateStatus("The active pane cannot be split.");
+            return;
+        }
+
+        TerminalModeSelection modeSelection = ResolveModeSelectionForNewTab();
+        TerminalControl newControl = CreateTerminalControlWithRuntimeFallback(
+            modeSelection,
+            out TerminalModeSelection finalizedModeSelection);
+        TerminalLaunchConfiguration activeLaunchConfiguration = GetLaunchConfiguration(activeControl);
+        _launchConfigurations[newControl] = activeLaunchConfiguration;
+
+        ScrollViewer newContainer = CreatePaneScrollViewer(newControl);
+        TerminalPaneRuntimeNode newNode = new(
+            CreatePaneId(),
+            $"{tab.Title} Pane",
+            activeNode.ProfileId ?? tab.ProfileId,
+            activeNode.WorkingDirectory ?? tab.WorkingDirectory,
+            activeNode.TransportId ?? tab.TransportId,
+            activeNode.TransportProfileId);
+        newNode.SetLeaf(newControl, newContainer);
+        RegisterPaneControl(newControl, newNode);
+
+        string orientation = request == TerminalPaneSplitRequest.Down
+            ? TerminalWorkspacePaneSplitOrientations.Vertical
+            : TerminalWorkspacePaneSplitOrientations.Horizontal;
+        TerminalPaneRuntimeNode splitNode = new(
+            CreatePaneId(),
+            activeNode.Title,
+            activeNode.ProfileId,
+            activeNode.WorkingDirectory,
+            activeNode.TransportId,
+            activeNode.TransportProfileId);
+        TerminalPaneRuntimeNode? previousParent = activeNode.Parent;
+        int hostIndex = -1;
+        bool wasVisible = true;
+        int parentChildIndex = -1;
+        int parentChildRow = 0;
+        int parentChildColumn = 0;
+
+        if (previousParent is null)
+        {
+            hostIndex = _terminalHost.Children.IndexOf(tab.Container);
+            wasVisible = tab.Container.IsVisible;
+            if (hostIndex >= 0)
+            {
+                _terminalHost.Children.RemoveAt(hostIndex);
+            }
+        }
+        else if (previousParent.SplitGrid is not null)
+        {
+            parentChildIndex = previousParent.SplitGrid.Children.IndexOf(activeNode.Visual);
+            if (parentChildIndex >= 0)
+            {
+                parentChildRow = Grid.GetRow(activeNode.Visual);
+                parentChildColumn = Grid.GetColumn(activeNode.Visual);
+                previousParent.SplitGrid.Children.RemoveAt(parentChildIndex);
+            }
+        }
+
+        Grid splitGrid = CreateSplitGrid(orientation, 0.5, activeNode.Visual, newNode.Visual);
+        splitNode.SetSplit(orientation, 0.5, activeNode, newNode, splitGrid);
+
+        splitNode.Parent = previousParent;
+        activeNode.Parent = splitNode;
+        newNode.Parent = splitNode;
+
+        if (previousParent is null)
+        {
+            ReplaceTabRootVisual(tab, splitGrid, splitNode, hostIndex, wasVisible);
+        }
+        else
+        {
+            ReplaceChildPane(
+                previousParent,
+                activeNode,
+                splitNode,
+                parentChildIndex,
+                parentChildRow,
+                parentChildColumn);
+            tab.SetLeafControls(CollectLeafControls(tab.RootPaneNode));
+        }
+
+        SetActivePane(newControl, focus: true);
+        QueueStandaloneSessionStart(newControl);
+        UpdateStatus(request == TerminalPaneSplitRequest.Down
+            ? $"Split {tab.Title} downward."
+            : $"Split {tab.Title} to the right.");
+        AppendEventLog($"[{tab.Title}] Split active pane ({orientation}).");
+
+        if (finalizedModeSelection.FallbackApplied && finalizedModeSelection.FallbackReason is not null)
+        {
+            AppendEventLog($"[{tab.Title}] Pane mode fallback: {finalizedModeSelection.FallbackReason}");
+        }
+    }
+
+    private void FocusPane(TerminalPaneDirection direction)
+    {
+        TerminalTab? tab = GetActiveTab();
+        TerminalControl? activeControl = GetActiveStandaloneControl();
+        if (tab is null || activeControl is null || tab.LeafControls.Count <= 1)
+        {
+            return;
+        }
+
+        TerminalControl? target = FindDirectionalPane(tab, activeControl, direction)
+            ?? FindSequentialPane(tab, activeControl, IsForwardDirection(direction));
+        if (target is null || ReferenceEquals(target, activeControl))
+        {
+            return;
+        }
+
+        SetActivePane(target, focus: true);
+        UpdateStatus($"Focused pane {GetPaneOrdinal(tab, target)} of {tab.LeafControls.Count.ToString(CultureInfo.InvariantCulture)}.");
+    }
+
+    private void ResizePane(TerminalPaneDirection direction)
+    {
+        TerminalTab? tab = GetActiveTab();
+        TerminalControl? activeControl = GetActiveStandaloneControl();
+        if (tab is null || activeControl is null ||
+            !_paneRuntimeNodes.TryGetValue(activeControl, out TerminalPaneRuntimeNode? activeNode))
+        {
+            return;
+        }
+
+        bool wantsHorizontal = direction is TerminalPaneDirection.Left or TerminalPaneDirection.Right;
+        TerminalPaneRuntimeNode? splitNode = FindResizeSplit(activeNode, wantsHorizontal);
+        if (splitNode is null)
+        {
+            return;
+        }
+
+        double delta = direction is TerminalPaneDirection.Right or TerminalPaneDirection.Down
+            ? 0.05
+            : -0.05;
+        double ratio = Math.Clamp(splitNode.Ratio + delta, 0.05, 0.95);
+        ApplySplitRatio(splitNode, ratio);
+        UpdateStatus($"Pane ratio {ratio.ToString("0.00", CultureInfo.InvariantCulture)}.");
+        AppendEventLog($"[{tab.Title}] Resized pane split to {ratio.ToString("0.00", CultureInfo.InvariantCulture)}.");
+    }
+
+    private static bool IsForwardDirection(TerminalPaneDirection direction)
+    {
+        return direction is TerminalPaneDirection.Right or TerminalPaneDirection.Down;
+    }
+
+    private static TerminalPaneRuntimeNode? FindResizeSplit(TerminalPaneRuntimeNode activeNode, bool wantsHorizontal)
+    {
+        TerminalPaneRuntimeNode? node = activeNode.Parent;
+        while (node is not null)
+        {
+            bool isHorizontal = string.Equals(
+                node.Orientation,
+                TerminalWorkspacePaneSplitOrientations.Horizontal,
+                StringComparison.Ordinal);
+            if (isHorizontal == wantsHorizontal)
+            {
+                return node;
+            }
+
+            node = node.Parent;
+        }
+
+        return null;
+    }
+
+    private static void ApplySplitRatio(TerminalPaneRuntimeNode splitNode, double ratio)
+    {
+        splitNode.Ratio = Math.Clamp(ratio, 0.05, 0.95);
+        if (splitNode.SplitGrid is null)
+        {
+            return;
+        }
+
+        if (string.Equals(splitNode.Orientation, TerminalWorkspacePaneSplitOrientations.Vertical, StringComparison.Ordinal))
+        {
+            splitNode.SplitGrid.RowDefinitions[0].Height = new GridLength(splitNode.Ratio, GridUnitType.Star);
+            splitNode.SplitGrid.RowDefinitions[2].Height = new GridLength(1.0 - splitNode.Ratio, GridUnitType.Star);
+            return;
+        }
+
+        splitNode.SplitGrid.ColumnDefinitions[0].Width = new GridLength(splitNode.Ratio, GridUnitType.Star);
+        splitNode.SplitGrid.ColumnDefinitions[2].Width = new GridLength(1.0 - splitNode.Ratio, GridUnitType.Star);
+    }
+
+    private void ReplaceTabRootVisual(
+        TerminalTab tab,
+        Control newRootVisual,
+        TerminalPaneRuntimeNode rootNode,
+        int hostIndex,
+        bool wasVisible)
+    {
+        if (hostIndex >= 0)
+        {
+            _terminalHost.Children.Insert(hostIndex, newRootVisual);
+        }
+        else if (!_terminalHost.Children.Contains(newRootVisual))
+        {
+            _terminalHost.Children.Add(newRootVisual);
+        }
+
+        newRootVisual.IsVisible = wasVisible;
+        tab.SetPaneRoot(newRootVisual, newRootVisual, rootNode, CollectLeafControls(rootNode));
+        if (ReferenceEquals(_activeTab, tab))
+        {
+            _activeTab = tab;
+        }
+    }
+
+    private static void ReplaceChildPane(
+        TerminalPaneRuntimeNode parent,
+        TerminalPaneRuntimeNode oldChild,
+        TerminalPaneRuntimeNode newChild,
+        int childIndex,
+        int row,
+        int column)
+    {
+        if (parent.SplitGrid is null)
+        {
+            return;
+        }
+
+        if (childIndex >= 0)
+        {
+            Grid.SetRow(newChild.Visual, row);
+            Grid.SetColumn(newChild.Visual, column);
+            parent.SplitGrid.Children.Insert(childIndex, newChild.Visual);
+        }
+
+        if (ReferenceEquals(parent.First, oldChild))
+        {
+            parent.First = newChild;
+        }
+        else if (ReferenceEquals(parent.Second, oldChild))
+        {
+            parent.Second = newChild;
+        }
+    }
+
+    private static IReadOnlyList<TerminalControl> CollectLeafControls(TerminalPaneRuntimeNode? rootNode)
+    {
+        if (rootNode is null)
+        {
+            return [];
+        }
+
+        List<TerminalControl> controls = [];
+        CollectLeafControls(rootNode, controls);
+        return controls;
+    }
+
+    private static void CollectLeafControls(TerminalPaneRuntimeNode node, List<TerminalControl> controls)
+    {
+        if (node.Control is not null)
+        {
+            controls.Add(node.Control);
+            return;
+        }
+
+        if (node.First is not null)
+        {
+            CollectLeafControls(node.First, controls);
+        }
+
+        if (node.Second is not null)
+        {
+            CollectLeafControls(node.Second, controls);
+        }
+    }
+
+    private void SetActivePane(TerminalControl control, bool focus)
+    {
+        _activePaneControl = control;
+        if (focus)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                control.Focus();
+                control.InvalidateTerminal();
+            }, DispatcherPriority.Input);
+        }
+
+        SyncActiveTerminalSurface();
+        SyncCaptureReplayState();
+    }
+
+    private TerminalControl? FindDirectionalPane(
+        TerminalTab tab,
+        TerminalControl activeControl,
+        TerminalPaneDirection direction)
+    {
+        if (!_paneRuntimeNodes.TryGetValue(activeControl, out TerminalPaneRuntimeNode? activeNode) ||
+            activeNode.LeafContainer is null)
+        {
+            return null;
+        }
+
+        Point? activeOrigin = activeNode.LeafContainer.TranslatePoint(new Point(0, 0), tab.Container);
+        if (activeOrigin is null)
+        {
+            return null;
+        }
+
+        Point activeCenter = new(
+            activeOrigin.Value.X + activeNode.LeafContainer.Bounds.Width / 2.0,
+            activeOrigin.Value.Y + activeNode.LeafContainer.Bounds.Height / 2.0);
+        TerminalControl? best = null;
+        double bestScore = double.MaxValue;
+
+        for (int i = 0; i < tab.LeafControls.Count; i++)
+        {
+            TerminalControl candidate = tab.LeafControls[i];
+            if (ReferenceEquals(candidate, activeControl) ||
+                !_paneRuntimeNodes.TryGetValue(candidate, out TerminalPaneRuntimeNode? candidateNode) ||
+                candidateNode.LeafContainer is null)
+            {
+                continue;
+            }
+
+            Point? candidateOrigin = candidateNode.LeafContainer.TranslatePoint(new Point(0, 0), tab.Container);
+            if (candidateOrigin is null)
+            {
+                continue;
+            }
+
+            Point candidateCenter = new(
+                candidateOrigin.Value.X + candidateNode.LeafContainer.Bounds.Width / 2.0,
+                candidateOrigin.Value.Y + candidateNode.LeafContainer.Bounds.Height / 2.0);
+            double dx = candidateCenter.X - activeCenter.X;
+            double dy = candidateCenter.Y - activeCenter.Y;
+            if (!IsCandidateInDirection(direction, dx, dy))
+            {
+                continue;
+            }
+
+            double primaryDistance = direction is TerminalPaneDirection.Left or TerminalPaneDirection.Right
+                ? Math.Abs(dx)
+                : Math.Abs(dy);
+            double secondaryDistance = direction is TerminalPaneDirection.Left or TerminalPaneDirection.Right
+                ? Math.Abs(dy)
+                : Math.Abs(dx);
+            double score = primaryDistance * 1000.0 + secondaryDistance;
+            if (score < bestScore)
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    private static bool IsCandidateInDirection(TerminalPaneDirection direction, double dx, double dy)
+    {
+        return direction switch
+        {
+            TerminalPaneDirection.Left => dx < -0.5,
+            TerminalPaneDirection.Right => dx > 0.5,
+            TerminalPaneDirection.Up => dy < -0.5,
+            TerminalPaneDirection.Down => dy > 0.5,
+            _ => false,
+        };
+    }
+
+    private static TerminalControl? FindSequentialPane(
+        TerminalTab tab,
+        TerminalControl activeControl,
+        bool forward)
+    {
+        int index = IndexOfControl(tab.LeafControls, activeControl);
+        if (index < 0 || tab.LeafControls.Count == 0)
+        {
+            return null;
+        }
+
+        int targetIndex = forward
+            ? (index + 1) % tab.LeafControls.Count
+            : (index - 1 + tab.LeafControls.Count) % tab.LeafControls.Count;
+        return tab.LeafControls[targetIndex];
+    }
+
+    private static string GetPaneOrdinal(TerminalTab tab, TerminalControl control)
+    {
+        int index = IndexOfControl(tab.LeafControls, control);
+        return (index + 1).ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static bool ContainsControl(IReadOnlyList<TerminalControl> controls, TerminalControl control)
+    {
+        return IndexOfControl(controls, control) >= 0;
+    }
+
+    private static int IndexOfControl(IReadOnlyList<TerminalControl> controls, TerminalControl control)
+    {
+        for (int i = 0; i < controls.Count; i++)
+        {
+            if (ReferenceEquals(controls[i], control))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     #endregion
 
     #region Capture And Replay
@@ -1554,7 +3157,8 @@ internal sealed class MainWindowController
 
     private TerminalCaptureRuntime? GetActiveCaptureRuntime(bool createIfMissing = false)
     {
-        if (_activeTab?.Control is not TerminalControl control)
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
         {
             return null;
         }
@@ -1572,7 +3176,7 @@ internal sealed class MainWindowController
         if (runtime is null)
         {
             _viewModel.SetCaptureState(false, false);
-            UpdateStatus("Capture is available for standalone terminal tabs only.");
+            UpdateStatus("Capture is available for terminal panes only.");
             return;
         }
 
@@ -1596,7 +3200,7 @@ internal sealed class MainWindowController
         TerminalCaptureRuntime? runtime = GetActiveCaptureRuntime();
         if (runtime is null)
         {
-            UpdateStatus("No standalone terminal is active to save capture.");
+            UpdateStatus("No terminal pane is active to save capture.");
             return;
         }
 
@@ -1926,8 +3530,8 @@ internal sealed class MainWindowController
 
     private async Task CopySelection()
     {
-        TerminalTab? tab = GetActiveTab();
-        if (tab?.Control is not TerminalControl standalone)
+        TerminalControl? standalone = GetActiveStandaloneControl();
+        if (standalone is null)
         {
             return;
         }
@@ -1937,8 +3541,8 @@ internal sealed class MainWindowController
 
     private async Task PasteClipboard()
     {
-        TerminalTab? tab = GetActiveTab();
-        if (tab?.Control is not TerminalControl standalone)
+        TerminalControl? standalone = GetActiveStandaloneControl();
+        if (standalone is null)
         {
             return;
         }
@@ -1948,8 +3552,8 @@ internal sealed class MainWindowController
 
     private void SelectAll()
     {
-        TerminalTab? tab = GetActiveTab();
-        if (tab?.Control is not TerminalControl standalone)
+        TerminalControl? standalone = GetActiveStandaloneControl();
+        if (standalone is null)
         {
             return;
         }
@@ -2243,16 +3847,23 @@ internal sealed class MainWindowController
 
     private TerminalControl? GetActiveStandaloneControl()
     {
-        for (int i = 0; i < _tabs.Count; i++)
+        TerminalTab? activeTab = GetActiveTab();
+        if (activeTab is not null)
         {
-            TerminalTab tab = _tabs[i];
-            if (tab.Container.IsVisible && tab.Control is TerminalControl visibleControl)
+            if (_activePaneControl is not null && ContainsControl(activeTab.LeafControls, _activePaneControl))
+            {
+                return _activePaneControl;
+            }
+
+            if (activeTab.Control is TerminalControl visibleControl)
             {
                 return visibleControl;
             }
+
+            return activeTab.LeafControls.Count > 0 ? activeTab.LeafControls[0] : null;
         }
 
-        return GetActiveTab()?.Control as TerminalControl;
+        return null;
     }
 
     private string BuildGhosttyDiagnosticsText()
@@ -2395,7 +4006,13 @@ internal sealed class MainWindowController
     {
         foreach (TerminalTab tab in _tabs)
         {
-            if (tab.Control is TerminalControl standalone)
+            for (int i = 0; i < tab.LeafControls.Count; i++)
+            {
+                tab.LeafControls[i].TerminalFontSize = fontSize;
+                tab.LeafControls[i].InvalidateTerminal();
+            }
+
+            if (tab.LeafControls.Count == 0 && tab.Control is TerminalControl standalone)
             {
                 standalone.TerminalFontSize = fontSize;
                 standalone.InvalidateTerminal();
@@ -2412,7 +4029,13 @@ internal sealed class MainWindowController
     {
         foreach (TerminalTab tab in _tabs)
         {
-            if (tab.Control is TerminalControl standalone)
+            for (int i = 0; i < tab.LeafControls.Count; i++)
+            {
+                tab.LeafControls[i].ApplyTheme(theme);
+                tab.LeafControls[i].InvalidateTerminal();
+            }
+
+            if (tab.LeafControls.Count == 0 && tab.Control is TerminalControl standalone)
             {
                 standalone.ApplyTheme(theme);
                 standalone.InvalidateTerminal();
@@ -2427,7 +4050,14 @@ internal sealed class MainWindowController
         TerminalShaderSampleOption option = TerminalShaderSampleCatalog.FindOption(shaderId);
         for (int i = 0; i < _tabs.Count; i++)
         {
-            if (_tabs[i].Control is TerminalControl standalone)
+            TerminalTab tab = _tabs[i];
+            for (int paneIndex = 0; paneIndex < tab.LeafControls.Count; paneIndex++)
+            {
+                ApplyShaderSampleToControl(tab.LeafControls[paneIndex]);
+                tab.LeafControls[paneIndex].InvalidateTerminal();
+            }
+
+            if (tab.LeafControls.Count == 0 && tab.Control is TerminalControl standalone)
             {
                 ApplyShaderSampleToControl(standalone);
                 standalone.InvalidateTerminal();
@@ -2451,6 +4081,7 @@ internal sealed class MainWindowController
 
     private static void UpdateTabHeaderVisual(TerminalTab tab, TabVisualMode tabMode)
     {
+        tab.SetModeName(tabMode.Name);
         ToolTip.SetTip(tab.HeaderButton, tabMode.Name);
         if (tab.HeaderButton.Content is StackPanel headerContent
             && headerContent.Children.Count > 0
@@ -2550,11 +4181,15 @@ internal sealed class MainWindowController
 
             state.LoadDocument(document);
             _settingsProfilesLoaded = true;
+            _sessionLauncherDocument = state.BuildDocument();
+            RefreshSessionLauncherOptions(_sessionLauncherDocument);
         }
 
         if (alreadyLoaded && !state.IsDirty)
         {
             SyncSettingsStateFromViewModel(state);
+            _sessionLauncherDocument = state.BuildDocument();
+            RefreshSessionLauncherOptions(_sessionLauncherDocument);
         }
     }
 
@@ -2701,6 +4336,7 @@ internal sealed class MainWindowController
 
         _viewModel.SessionName = state.SessionName;
         _viewModel.SelectedTransportMode = ResolveViewModelTransportMode(state.SelectedTransportMode?.Id);
+        SelectOrAddRuntimeShellProfile(state.SelectedProfile?.Id ?? "settings", state.SessionName, state.ShellPath);
         _viewModel.WorkingDirectory = state.WorkingDirectory;
         _viewModel.PipeCommandText = state.PipeCommandText;
         _viewModel.PipeMergeStdErrIntoStdOut = state.PipeMergeStdErrIntoStdOut;
@@ -2797,6 +4433,8 @@ internal sealed class MainWindowController
         }
 
         ApplyTerminalBehaviorSettingsToAllStandaloneTabs();
+        _sessionLauncherDocument = state.BuildDocument();
+        RefreshSessionLauncherOptions(_sessionLauncherDocument);
         state.SetStatus("Applied settings to demo runtime.");
     }
 
@@ -2888,6 +4526,8 @@ internal sealed class MainWindowController
                 ? fileStore.FilePath
                 : "configured profile store";
             _viewModel.SettingsPanelState.MarkSaved($"Saved profile document to '{storeLabel}'.");
+            _sessionLauncherDocument = document;
+            RefreshSessionLauncherOptions(document);
             UpdateStatus("Saved settings profiles.");
         }
         catch (Exception ex)
@@ -2986,6 +4626,153 @@ internal sealed class MainWindowController
         }
     }
 
+    private void RegisterCommandHistoryCapture(TerminalControl control)
+    {
+        if (_commandHistoryHandlers.ContainsKey(control))
+        {
+            return;
+        }
+
+        TerminalCommandHistoryCaptureService capture = new(
+            new TerminalCommandHistoryCaptureContext(
+                ProfileId: _viewModel.SelectedShellProfile?.Id,
+                TransportId: _viewModel.SelectedTransportMode.Id,
+                ShellId: _viewModel.SelectedShellProfile?.Id));
+        EventHandler<TerminalShellIntegrationEventArgs> handler = (_, args) =>
+        {
+            TerminalCommandHistoryEntry? entry = capture.Process(args.Value);
+            if (entry is null)
+            {
+                return;
+            }
+
+            AppendEventLog($"[{GetTabDisplayName(control)}] Command completed: {entry.CommandLine}");
+            _ = AppendCommandHistoryEntryAsync(entry);
+        };
+
+        control.ShellIntegrationEventReceived += handler;
+        _commandHistoryCaptures[control] = capture;
+        _commandHistoryHandlers[control] = handler;
+    }
+
+    private void UnregisterCommandHistoryCapture(TerminalControl control)
+    {
+        if (_commandHistoryHandlers.Remove(control, out EventHandler<TerminalShellIntegrationEventArgs>? handler))
+        {
+            control.ShellIntegrationEventReceived -= handler;
+        }
+
+        _commandHistoryCaptures.Remove(control);
+    }
+
+    private async Task AppendCommandHistoryEntryAsync(TerminalCommandHistoryEntry entry)
+    {
+        await _commandHistorySync.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _commandHistoryDocument ??= await _commandHistoryStore.LoadAsync().ConfigureAwait(false);
+            List<TerminalCommandHistoryEntry> entries = new(_commandHistoryDocument.Entries.Count + 1);
+            entries.AddRange(_commandHistoryDocument.Entries);
+            entries.Add(entry);
+            TerminalCommandHistoryDocument updated = _commandHistoryDocument with
+            {
+                Entries = entries,
+            };
+
+            await _commandHistoryStore.SaveAsync(updated).ConfigureAwait(false);
+            _commandHistoryDocument = updated;
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.UIThread.Post(() =>
+                AppendEventLog($"Command history save failed: {ex.Message}"));
+        }
+        finally
+        {
+            _commandHistorySync.Release();
+        }
+    }
+
+    private async Task RefreshCommandSuggestionsAsync(string? query)
+    {
+        TerminalCommandHistoryDocument document;
+        await _commandHistorySync.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _commandHistoryDocument ??= await _commandHistoryStore.LoadAsync().ConfigureAwait(false);
+            document = _commandHistoryDocument;
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                _viewModel.SetCommandSuggestions(Array.Empty<TerminalCommandSuggestion>());
+                UpdateStatus($"Command history load failed: {ex.Message}");
+            });
+            return;
+        }
+        finally
+        {
+            _commandHistorySync.Release();
+        }
+
+        string? workingDirectory = NormalizeOptional(_activeTab?.WorkingDirectory) ?? NormalizeOptional(_viewModel.WorkingDirectory);
+        IReadOnlyList<TerminalCommandSuggestion> suggestions = _commandSuggestionService.GetSuggestions(
+            new TerminalCommandSuggestionRequest(document)
+            {
+                Query = query,
+                WorkingDirectory = workingDirectory,
+                ProfileId = _activeTab?.ProfileId,
+                TransportId = _activeTab?.TransportId,
+                Limit = 12,
+                Snippets = GetActiveCommandSnippets(),
+            });
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            _viewModel.SetCommandSuggestions(suggestions);
+            UpdateStatus(suggestions.Count == 0
+                ? "No command suggestions"
+                : $"Loaded {suggestions.Count.ToString(CultureInfo.InvariantCulture)} command suggestion(s)");
+        });
+    }
+
+    private void AcceptCommandSuggestion(string commandLine)
+    {
+        if (string.IsNullOrWhiteSpace(commandLine))
+        {
+            return;
+        }
+
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
+        {
+            UpdateStatus("No active terminal for command suggestion.");
+            return;
+        }
+
+        control.SendInput(commandLine);
+        control.Focus();
+        AppendEventLog($"[{GetTabDisplayName(control)}] Inserted command suggestion.");
+    }
+
+    private IReadOnlyList<TerminalCommandSnippet> GetActiveCommandSnippets()
+    {
+        IReadOnlyList<TerminalCommandSnippet> defaultSnippets = TerminalCommandSnippets.GetDefaultSnippets();
+        TerminalSessionProfile? activeProfile = _activeTab is null || _sessionLauncherDocument is null
+            ? null
+            : FindProfile(_sessionLauncherDocument, _activeTab.ProfileId);
+        if (activeProfile?.CommandSnippets is not { Count: > 0 } profileSnippets)
+        {
+            return defaultSnippets;
+        }
+
+        List<TerminalCommandSnippet> snippets = new(profileSnippets.Count + defaultSnippets.Count);
+        snippets.AddRange(profileSnippets);
+        snippets.AddRange(defaultSnippets);
+        return snippets;
+    }
+
     private void ApplyTerminalBehaviorSettings(TerminalControl control)
     {
         control.PasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
@@ -3061,10 +4848,14 @@ internal sealed class MainWindowController
 
     private string GetTabDisplayName(Control control)
     {
-        TerminalTab? tab = _tabs.Find(next => ReferenceEquals(next.Control, control));
-        if (tab is not null)
+        for (int i = 0; i < _tabs.Count; i++)
         {
-            return tab.Title;
+            TerminalTab tab = _tabs[i];
+            if (ReferenceEquals(tab.Control, control) ||
+                control is TerminalControl terminal && ContainsControl(tab.LeafControls, terminal))
+            {
+                return tab.Title;
+            }
         }
 
         return "Terminal";
@@ -3113,20 +4904,166 @@ internal sealed class MainWindowController
 
     private void DisposeResources()
     {
+        SaveWorkspaceSnapshot();
         _startingStandaloneControls.Clear();
 
         foreach (TerminalTab tab in _tabs)
         {
-            DisposeTerminal(tab.Control);
+            DisposeTabTerminals(tab);
         }
         _tabs.Clear();
         _captureRuntimes.Clear();
+        _commandHistoryHandlers.Clear();
+        _commandHistoryCaptures.Clear();
+        _launchConfigurations.Clear();
+        _paneRuntimeNodes.Clear();
+        _activePaneControl = null;
         foreach (SessionLogWriter writer in _sessionLogWriters.Values)
         {
             writer.Dispose();
         }
         _sessionLogWriters.Clear();
 
+    }
+
+    private void SaveWorkspaceSnapshot()
+    {
+        try
+        {
+            TerminalWorkspaceDocument document = CreateWorkspaceSnapshot();
+            _workspaceStore.SaveAsync(document).AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            AppendEventLog($"Workspace save failed: {ex.Message}");
+        }
+    }
+
+    private TerminalWorkspaceDocument CreateWorkspaceSnapshot()
+    {
+        List<TerminalWorkspaceTab> tabs = new(_tabs.Count);
+        string? selectedTabId = null;
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            TerminalTab tab = _tabs[i];
+            if (!tab.AutoStartSession)
+            {
+                continue;
+            }
+
+            string tabId = NormalizeOptional(tab.WorkspaceId) ??
+                           $"tab-{tab.Index.ToString(CultureInfo.InvariantCulture)}";
+            if (ReferenceEquals(tab, _activeTab))
+            {
+                selectedTabId = tabId;
+            }
+
+            tabs.Add(new TerminalWorkspaceTab
+            {
+                Id = tabId,
+                ProfileId = tab.ProfileId,
+                Title = tab.Title,
+                WorkingDirectory = tab.WorkingDirectory,
+                TransportId = tab.TransportId,
+                RenderMode = MapWorkspaceRenderMode(tab.ResolvedMode),
+                RootPane = CreateWorkspacePaneSnapshot(tab.RootPaneNode) ??
+                           tab.RootPane ??
+                           new TerminalWorkspacePane
+                           {
+                               Id = $"{tabId}-root",
+                               ProfileId = tab.ProfileId,
+                               WorkingDirectory = tab.WorkingDirectory,
+                               TransportId = tab.TransportId,
+                           },
+            });
+        }
+
+        TerminalWorkspaceWindow window = new()
+        {
+            Id = "main",
+            Title = _window.Title,
+            SelectedTabId = selectedTabId,
+            WidthPixels = Math.Max(1, (int)Math.Round(_window.Bounds.Width)),
+            HeightPixels = Math.Max(1, (int)Math.Round(_window.Bounds.Height)),
+            Tabs = tabs,
+        };
+
+        return new TerminalWorkspaceDocument
+        {
+            SelectedWindowId = window.Id,
+            Windows = [window],
+        };
+    }
+
+    private static TerminalWorkspacePane? CreateWorkspacePaneSnapshot(TerminalPaneRuntimeNode? node)
+    {
+        if (node is null)
+        {
+            return null;
+        }
+
+        if (node.First is not null && node.Second is not null)
+        {
+            UpdateRuntimeSplitRatio(node);
+            return new TerminalWorkspacePane
+            {
+                Id = node.Id,
+                Title = node.Title,
+                ProfileId = node.ProfileId,
+                WorkingDirectory = node.WorkingDirectory,
+                TransportId = node.TransportId,
+                TransportProfileId = node.TransportProfileId,
+                Split = new TerminalWorkspacePaneSplit
+                {
+                    Orientation = NormalizeSplitOrientation(node.Orientation),
+                    Ratio = Math.Clamp(node.Ratio, 0.05, 0.95),
+                    FirstPane = CreateWorkspacePaneSnapshot(node.First) ?? new TerminalWorkspacePane { Id = $"{node.Id}-first" },
+                    SecondPane = CreateWorkspacePaneSnapshot(node.Second) ?? new TerminalWorkspacePane { Id = $"{node.Id}-second" },
+                },
+            };
+        }
+
+        return new TerminalWorkspacePane
+        {
+            Id = node.Id,
+            Title = node.Title,
+            ProfileId = node.ProfileId,
+            WorkingDirectory = node.WorkingDirectory,
+            TransportId = node.TransportId,
+            TransportProfileId = node.TransportProfileId,
+        };
+    }
+
+    private static void UpdateRuntimeSplitRatio(TerminalPaneRuntimeNode node)
+    {
+        if (node.SplitGrid is null)
+        {
+            return;
+        }
+
+        double first;
+        double second;
+        if (string.Equals(node.Orientation, TerminalWorkspacePaneSplitOrientations.Vertical, StringComparison.Ordinal))
+        {
+            first = GetGridLengthValue(node.SplitGrid.RowDefinitions[0].Height);
+            second = GetGridLengthValue(node.SplitGrid.RowDefinitions[2].Height);
+        }
+        else
+        {
+            first = GetGridLengthValue(node.SplitGrid.ColumnDefinitions[0].Width);
+            second = GetGridLengthValue(node.SplitGrid.ColumnDefinitions[2].Width);
+        }
+
+        double total = first + second;
+        if (total > 0)
+        {
+            node.Ratio = Math.Clamp(first / total, 0.05, 0.95);
+        }
+    }
+
+    private static double GetGridLengthValue(GridLength length)
+    {
+        return length.Value > 0 ? length.Value : 0;
     }
 
     private void DisposeTerminal(Control control)
@@ -3138,6 +5075,13 @@ internal sealed class MainWindowController
                 runtime.StateChanged -= OnCaptureRuntimeStateChanged;
                 runtime.Dispose();
             }
+            UnregisterCommandHistoryCapture(standaloneControl);
+            _launchConfigurations.Remove(standaloneControl);
+            _paneRuntimeNodes.Remove(standaloneControl);
+            if (ReferenceEquals(_activePaneControl, standaloneControl))
+            {
+                _activePaneControl = null;
+            }
             if (_sessionLogWriters.Remove(standaloneControl, out SessionLogWriter? sessionLogWriter))
             {
                 sessionLogWriter.Dispose();
@@ -3145,6 +5089,20 @@ internal sealed class MainWindowController
 
             standaloneControl.StopPty();
             standaloneControl.DetachEndpoint();
+        }
+    }
+
+    private void DisposeTabTerminals(TerminalTab tab)
+    {
+        if (tab.LeafControls.Count == 0)
+        {
+            DisposeTerminal(tab.Control);
+            return;
+        }
+
+        for (int i = 0; i < tab.LeafControls.Count; i++)
+        {
+            DisposeTerminal(tab.LeafControls[i]);
         }
     }
 
@@ -3402,7 +5360,15 @@ internal sealed class MainWindowController
             int index,
             string modeName,
             bool autoStartSession,
-            TerminalRenderMode resolvedMode)
+            TerminalRenderMode resolvedMode,
+            string profileId,
+            string transportId,
+            string? workingDirectory,
+            string? workspaceId,
+            TerminalWorkspacePane? rootPane,
+            TerminalPaneRuntimeNode? rootPaneNode,
+            IReadOnlyList<TerminalControl> leafControls,
+            TerminalWorkspaceTab? deferredWorkspaceTab = null)
         {
             HeaderButton = headerButton;
             Control = control;
@@ -3411,6 +5377,14 @@ internal sealed class MainWindowController
             ModeName = modeName;
             AutoStartSession = autoStartSession;
             ResolvedMode = resolvedMode;
+            ProfileId = profileId;
+            TransportId = transportId;
+            WorkingDirectory = workingDirectory;
+            WorkspaceId = workspaceId;
+            RootPane = rootPane;
+            RootPaneNode = rootPaneNode;
+            LeafControls = leafControls;
+            DeferredWorkspaceTab = deferredWorkspaceTab;
             CloseButton = headerButton.Tag as Button
                 ?? throw new InvalidOperationException("Tab header close button is missing.");
             TitleText = ((headerButton.Content as StackPanel)?.Children[1] as TextBlock)
@@ -3419,18 +5393,112 @@ internal sealed class MainWindowController
 
         public Button HeaderButton { get; }
         public Button CloseButton { get; }
-        public Control Control { get; }
-        public Control Container { get; }
+        public Control Control { get; private set; }
+        public Control Container { get; private set; }
         public TextBlock TitleText { get; }
         public int Index { get; }
-        public string ModeName { get; }
+        public string ModeName { get; private set; }
         public bool AutoStartSession { get; }
         public TerminalRenderMode ResolvedMode { get; }
+        public string ProfileId { get; }
+        public string TransportId { get; }
+        public string? WorkingDirectory { get; }
+        public string? WorkspaceId { get; }
+        public TerminalWorkspacePane? RootPane { get; }
+        public TerminalPaneRuntimeNode? RootPaneNode { get; private set; }
+        public IReadOnlyList<TerminalControl> LeafControls { get; private set; }
+        public TerminalWorkspaceTab? DeferredWorkspaceTab { get; }
+        public bool IsDeferredWorkspaceTab => DeferredWorkspaceTab is not null && RootPaneNode is null;
         public string Title => TitleText.Text ?? $"Terminal {Index}";
 
         public void UpdateTitle(string title)
         {
             TitleText.Text = title;
+        }
+
+        public void SetModeName(string modeName)
+        {
+            ModeName = modeName;
+        }
+
+        public void SetPaneRoot(
+            Control control,
+            Control container,
+            TerminalPaneRuntimeNode rootPaneNode,
+            IReadOnlyList<TerminalControl> leafControls)
+        {
+            Control = control;
+            Container = container;
+            RootPaneNode = rootPaneNode;
+            LeafControls = leafControls;
+        }
+
+        public void SetLeafControls(IReadOnlyList<TerminalControl> leafControls)
+        {
+            LeafControls = leafControls;
+        }
+    }
+
+    private sealed class TerminalPaneRuntimeNode
+    {
+        public TerminalPaneRuntimeNode(
+            string id,
+            string? title,
+            string? profileId,
+            string? workingDirectory,
+            string? transportId,
+            string? transportProfileId)
+        {
+            Id = id;
+            Title = title;
+            ProfileId = profileId;
+            WorkingDirectory = workingDirectory;
+            TransportId = transportId;
+            TransportProfileId = transportProfileId;
+        }
+
+        public string Id { get; }
+        public string? Title { get; }
+        public string? ProfileId { get; }
+        public string? WorkingDirectory { get; }
+        public string? TransportId { get; }
+        public string? TransportProfileId { get; }
+        public TerminalPaneRuntimeNode? Parent { get; set; }
+        public TerminalPaneRuntimeNode? First { get; set; }
+        public TerminalPaneRuntimeNode? Second { get; set; }
+        public string? Orientation { get; private set; }
+        public double Ratio { get; set; } = 0.5;
+        public TerminalControl? Control { get; private set; }
+        public ScrollViewer? LeafContainer { get; private set; }
+        public Grid? SplitGrid { get; private set; }
+        public Control Visual { get; private set; } = new Grid();
+
+        public void SetLeaf(TerminalControl control, ScrollViewer container)
+        {
+            Control = control;
+            LeafContainer = container;
+            First = null;
+            Second = null;
+            Orientation = null;
+            SplitGrid = null;
+            Visual = container;
+        }
+
+        public void SetSplit(
+            string orientation,
+            double ratio,
+            TerminalPaneRuntimeNode first,
+            TerminalPaneRuntimeNode second,
+            Grid grid)
+        {
+            Control = null;
+            LeafContainer = null;
+            Orientation = orientation;
+            Ratio = Math.Clamp(ratio, 0.05, 0.95);
+            First = first;
+            Second = second;
+            SplitGrid = grid;
+            Visual = grid;
         }
     }
 
@@ -3439,6 +5507,8 @@ internal sealed class MainWindowController
         TerminalRenderMode ResolvedMode,
         bool FallbackApplied,
         string? FallbackReason);
+
+    private readonly record struct TerminalLaunchConfiguration(TerminalSessionProfile Profile);
 
     private readonly record struct TabVisualMode(string Name, string Glyph, IBrush GlyphBrush);
 

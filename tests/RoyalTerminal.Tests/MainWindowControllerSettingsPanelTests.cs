@@ -29,7 +29,8 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            settingsProfileStore: store);
+            settingsProfileStore: store,
+            workspaceStore: new InMemoryWorkspaceStore());
 
         IDisposable? lifetime = null;
         try
@@ -137,7 +138,8 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            settingsProfileStore: store);
+            settingsProfileStore: store,
+            workspaceStore: new InMemoryWorkspaceStore());
 
         IDisposable? lifetime = null;
         try

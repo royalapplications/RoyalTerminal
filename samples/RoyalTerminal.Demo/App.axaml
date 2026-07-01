@@ -1,7 +1,20 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="RoyalTerminal.Demo.App"
+             Name="RoyalTerminal"
              RequestedThemeVariant="Dark">
+  <NativeMenu.Menu>
+    <NativeMenu>
+      <NativeMenuItem Header="_About RoyalTerminal" />
+      <NativeMenuItemSeparator />
+      <NativeMenuItem Header="_Preferences..."
+                      Gesture="Meta+OemComma" />
+      <NativeMenuItemSeparator />
+      <NativeMenuItem Header="_Quit RoyalTerminal"
+                      Gesture="Meta+Q" />
+    </NativeMenu>
+  </NativeMenu.Menu>
+
   <Application.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>

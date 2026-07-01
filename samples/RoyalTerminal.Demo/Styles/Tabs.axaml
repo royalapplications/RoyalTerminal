@@ -1,15 +1,625 @@
-<Styles xmlns="https://github.com/avaloniaui">
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:settings="using:RoyalTerminal.Avalonia.Settings">
+  <Style Selector="Border.shellRail">
+    <Setter Property="Background" Value="{DynamicResource ToolbarBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,1,0" />
+  </Style>
+
+  <Style Selector="Border.brandMark">
+    <Setter Property="Width" Value="36" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="Margin" Value="10,10,10,6" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceRaisedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <Style Selector="Border.topBar">
+    <Setter Property="MinHeight" Value="{DynamicResource Shell.CommandHeight}" />
+    <Setter Property="Padding" Value="{DynamicResource Shell.CommandPadding}" />
+    <Setter Property="Background" Value="{DynamicResource ToolbarBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+
+  <Style Selector="Border.titleBarArea">
+    <Setter Property="Height" Value="{DynamicResource Shell.CommandHeight}" />
+    <Setter Property="MinHeight" Value="{DynamicResource Shell.CommandHeight}" />
+  </Style>
+
+  <Style Selector="Border.tabStripSurface">
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="Padding" Value="8,4,8,0" />
+    <Setter Property="Background" Value="{DynamicResource TabStripBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+
+  <Style Selector="Border.terminalSurface">
+    <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+  </Style>
+
+  <Style Selector="Border.statusBar">
+    <Setter Property="Height" Value="{DynamicResource Shell.StatusHeight}" />
+    <Setter Property="Padding" Value="10,3" />
+    <Setter Property="Background" Value="{DynamicResource StatusBarBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+  </Style>
+
+  <Style Selector="Border.flyoutPanel">
+    <Setter Property="Padding" Value="{DynamicResource Shell.FlyoutPadding}" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceRaisedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Large}" />
+    <Setter Property="BoxShadow" Value="0 18 48 0 #66000000" />
+  </Style>
+
+  <Style Selector="Border.settingsOverlayPanel">
+    <Setter Property="Padding" Value="14" />
+    <Setter Property="Background" Value="{DynamicResource SettingsOverlayBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BoxShadow" Value="0 18 52 0 #80000000" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel Border.settings-panel-root">
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel Border.settings-panel-header">
+    <Setter Property="Padding" Value="10,0,10,12" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TerminalSettings.Panel.DividerBrush}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel Border.settings-content-host">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel Border.settings-footer">
+    <Setter Property="Padding" Value="10,12,10,0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TerminalSettings.Panel.DividerBrush}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel TabItem">
+    <Setter Property="Foreground" Value="{DynamicResource ShellTextMutedBrush}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel TabItem:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel TabItem:selected">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel Button">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Padding" Value="{DynamicResource Shell.ControlPadding}" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel Button:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel TextBox">
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel ComboBox">
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel NumericUpDown">
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+
+  <Style Selector="Border.badge">
+    <Setter Property="Padding" Value="8,3" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+
+  <Style Selector="Border.diagnosticsPanel">
+    <Setter Property="Padding" Value="12" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+
+  <Style Selector="TextBox.diagnosticsTextBox">
+    <Setter Property="MinHeight" Value="72" />
+    <Setter Property="FontFamily" Value="Menlo,Consolas,monospace" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+    <Setter Property="Padding" Value="8,6" />
+  </Style>
+
+  <Style Selector="TextBlock.productTitle">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.sectionTitle">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.caption">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Foreground" Value="{DynamicResource ShellTextMutedBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.muted">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Foreground" Value="{DynamicResource ShellTextSubtleBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.statusText">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusBarForegroundBrush}" />
+  </Style>
+
+  <Style Selector="Border.replayTransport">
+    <Setter Property="Height" Value="24" />
+    <Setter Property="MinWidth" Value="358" />
+    <Setter Property="MaxWidth" Value="382" />
+    <Setter Property="Padding" Value="5,1" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
+  </Style>
+
+  <Style Selector="Button.statusButton">
+    <Setter Property="MinHeight" Value="22" />
+    <Setter Property="Height" Value="22" />
+    <Setter Property="Padding" Value="8,1" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.statusButton:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+  </Style>
+
+  <Style Selector="Button.statusIconButton">
+    <Setter Property="Width" Value="22" />
+    <Setter Property="Height" Value="22" />
+    <Setter Property="MinWidth" Value="22" />
+    <Setter Property="MinHeight" Value="22" />
+    <Setter Property="MaxWidth" Value="22" />
+    <Setter Property="MaxHeight" Value="22" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusBarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.statusIconButton:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+  </Style>
+
+  <Style Selector="Slider.replayTimeline">
+    <Setter Property="Width" Value="150" />
+    <Setter Property="MinWidth" Value="150" />
+    <Setter Property="MaxWidth" Value="150" />
+    <Setter Property="Height" Value="16" />
+    <Setter Property="MinHeight" Value="16" />
+    <Setter Property="MaxHeight" Value="16" />
+    <Setter Property="Background" Value="{DynamicResource ShellTextMutedBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Foreground" Value="{DynamicResource ShellAccentBrush}" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Slider.replayTimeline:horizontal">
+    <Setter Property="Template">
+      <ControlTemplate>
+        <DataValidationErrors>
+          <Border BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{TemplateBinding CornerRadius}">
+            <Grid x:Name="SliderContainer"
+                  Height="16"
+                  Margin="{TemplateBinding Padding}"
+                  Background="Transparent"
+                  ClipToBounds="False"
+                  VerticalAlignment="Center">
+              <Border Name="ReplayTimelineTrackRail"
+                      Height="3"
+                      Margin="6,0"
+                      Background="{DynamicResource ShellTextMutedBrush}"
+                      CornerRadius="2"
+                      Opacity="0.75"
+                      VerticalAlignment="Center"
+                      IsHitTestVisible="False" />
+              <Track Name="PART_Track"
+                     Height="16"
+                     Minimum="{TemplateBinding Minimum}"
+                     Maximum="{TemplateBinding Maximum}"
+                     Value="{TemplateBinding Value, Mode=TwoWay}"
+                     IsDirectionReversed="{TemplateBinding IsDirectionReversed}"
+                     Orientation="Horizontal"
+                     VerticalAlignment="Center">
+                <Track.DecreaseButton>
+                  <RepeatButton Name="PART_DecreaseButton"
+                                Background="Transparent"
+                                Focusable="False">
+                    <RepeatButton.Template>
+                      <ControlTemplate>
+                        <Grid Height="16"
+                              ClipToBounds="False"
+                              VerticalAlignment="Center">
+                          <Border Name="FocusTarget"
+                                  Margin="0,-4"
+                                  Background="Transparent" />
+                          <Border Name="TrackBackground"
+                                  Height="3"
+                                  Background="{DynamicResource ShellAccentBrush}"
+                                  CornerRadius="2"
+                                  VerticalAlignment="Center" />
+                        </Grid>
+                      </ControlTemplate>
+                    </RepeatButton.Template>
+                  </RepeatButton>
+                </Track.DecreaseButton>
+                <Track.IncreaseButton>
+                  <RepeatButton Name="PART_IncreaseButton"
+                                Background="Transparent"
+                                Focusable="False">
+                    <RepeatButton.Template>
+                      <ControlTemplate>
+                        <Grid Height="16"
+                              ClipToBounds="False"
+                              VerticalAlignment="Center">
+                          <Border Name="FocusTarget"
+                                  Margin="0,-4"
+                                  Background="Transparent" />
+                          <Border Name="TrackBackground"
+                                  Height="3"
+                                  Background="{DynamicResource ShellTextMutedBrush}"
+                                  CornerRadius="2"
+                                  Opacity="0.75"
+                                  VerticalAlignment="Center" />
+                        </Grid>
+                      </ControlTemplate>
+                    </RepeatButton.Template>
+                  </RepeatButton>
+                </Track.IncreaseButton>
+                <Thumb Name="thumb"
+                       Width="16"
+                       Height="16"
+                       Margin="0"
+                       Padding="0"
+                       Background="{DynamicResource ShellAccentBrush}"
+                       BorderThickness="0"
+                       DataContext="{TemplateBinding Value}">
+                  <Thumb.Template>
+                    <ControlTemplate>
+                      <Border Width="12"
+                              Height="12"
+                              Background="{TemplateBinding Background}"
+                              BorderBrush="{DynamicResource ShellSurfaceRaisedBrush}"
+                              BorderThickness="1"
+                              CornerRadius="6"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center" />
+                    </ControlTemplate>
+                  </Thumb.Template>
+                </Thumb>
+              </Track>
+            </Grid>
+          </Border>
+        </DataValidationErrors>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="Slider.replayTimeline:pointerover">
+    <Style Selector="^ /template/ RepeatButton#PART_DecreaseButton">
+      <Setter Property="Background" Value="{DynamicResource ShellAccentBrush}" />
+    </Style>
+    <Style Selector="^ /template/ RepeatButton#PART_IncreaseButton">
+      <Setter Property="Background" Value="{DynamicResource ShellTextMutedBrush}" />
+    </Style>
+    <Style Selector="^ /template/ Thumb">
+      <Setter Property="Background" Value="{DynamicResource ShellAccentBrush}" />
+    </Style>
+  </Style>
+
+  <Style Selector="Slider.replayTimeline:pressed">
+    <Style Selector="^ /template/ RepeatButton#PART_DecreaseButton">
+      <Setter Property="Background" Value="{DynamicResource ShellAccentBrush}" />
+    </Style>
+    <Style Selector="^ /template/ RepeatButton#PART_IncreaseButton">
+      <Setter Property="Background" Value="{DynamicResource ShellTextSubtleBrush}" />
+    </Style>
+    <Style Selector="^ /template/ Thumb">
+      <Setter Property="Background" Value="{DynamicResource ShellAccentBrush}" />
+    </Style>
+  </Style>
+
+  <Style Selector="Slider.replayTimeline:disabled">
+    <Style Selector="^ /template/ RepeatButton#PART_DecreaseButton">
+      <Setter Property="Background" Value="{DynamicResource ToolbarDividerBrush}" />
+    </Style>
+    <Style Selector="^ /template/ RepeatButton#PART_IncreaseButton">
+      <Setter Property="Background" Value="{DynamicResource ToolbarDividerBrush}" />
+    </Style>
+    <Style Selector="^ /template/ Thumb">
+      <Setter Property="Background" Value="{DynamicResource ShellTextSubtleBrush}" />
+    </Style>
+  </Style>
+
+  <Style Selector="PathIcon.statusIcon">
+    <Setter Property="Width" Value="13" />
+    <Setter Property="Height" Value="13" />
+    <Setter Property="Foreground" Value="{DynamicResource StatusBarForegroundBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.replayTime">
+    <Setter Property="FontFamily" Value="Menlo,Consolas,monospace" />
+    <Setter Property="TextAlignment" Value="Right" />
+  </Style>
+
+  <Style Selector="TextBlock.replayLabel">
+    <Setter Property="Foreground" Value="{DynamicResource ShellTextMutedBrush}" />
+  </Style>
+
+  <Style Selector="PathIcon.commandIcon">
+    <Setter Property="Width" Value="16" />
+    <Setter Property="Height" Value="16" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+  </Style>
+
+  <Style Selector="PathIcon.railIcon">
+    <Setter Property="Width" Value="18" />
+    <Setter Property="Height" Value="18" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+  </Style>
+
+  <Style Selector="PathIcon.primaryCommandIcon">
+    <Setter Property="Width" Value="16" />
+    <Setter Property="Height" Value="16" />
+    <Setter Property="Foreground" Value="#071019" />
+  </Style>
+
+  <Style Selector="StackPanel.iconLabel">
+    <Setter Property="Orientation" Value="Horizontal" />
+    <Setter Property="Spacing" Value="6" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.railCommand">
+    <Setter Property="Width" Value="40" />
+    <Setter Property="Height" Value="40" />
+    <Setter Property="Margin" Value="8,2" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.railCommand:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+  </Style>
+
+  <Style Selector="Button.commandButton">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Padding" Value="{DynamicResource Shell.ControlPadding}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+
+  <Style Selector="Button.commandButton:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+  </Style>
+
+  <Style Selector="ToggleButton.commandButton">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Padding" Value="{DynamicResource Shell.ControlPadding}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+
+  <Style Selector="ToggleButton.commandButton:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+  </Style>
+
+  <Style Selector="Button.primaryCommand">
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="Padding" Value="12,5" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Background" Value="{DynamicResource ShellAccentBrush}" />
+    <Setter Property="Foreground" Value="#071019" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+
+  <Style Selector="Button.iconButton">
+    <Setter Property="MinWidth" Value="32" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="MaxWidth" Value="32" />
+    <Setter Property="MaxHeight" Value="32" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.iconButton:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+  </Style>
+
+  <Style Selector="Button.iconButton:pressed">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfacePressedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+  </Style>
+
+  <Style Selector="Button.iconButton:disabled">
+    <Setter Property="Opacity" Value="0.55" />
+  </Style>
+
+  <Style Selector="ComboBox.compactField">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+
+  <Style Selector="TextBox.compactField">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+
+  <Style Selector="TextBox.searchField">
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="10,5" />
+    <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
+  </Style>
+
+  <Style Selector="TextBox.searchField:focus">
+    <Setter Property="BorderBrush" Value="{DynamicResource ShellAccentBrush}" />
+  </Style>
+
+  <Style Selector="ListBox.launcherList">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
+    <Setter Property="Padding" Value="4" />
+  </Style>
+
+  <Style Selector="ListBox.launcherList ListBoxItem">
+    <Setter Property="MinHeight" Value="46" />
+    <Setter Property="Padding" Value="8,6" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+
+  <Style Selector="ListBox.launcherList ListBoxItem:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+  </Style>
+
+  <Style Selector="ListBox.launcherList ListBoxItem:selected">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfacePressedBrush}" />
+  </Style>
+
+  <Style Selector="CheckBox.compactToggle">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+  </Style>
+
+  <Style Selector="FlyoutPresenter.product-flyout">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <Style Selector="FlyoutPresenter.product-flyout ScrollViewer">
+    <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+  </Style>
+
   <Style Selector="Button.tabHeader">
     <Setter Property="FontSize" Value="12" />
-    <Setter Property="Padding" Value="8,4" />
-    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="10,5" />
+    <Setter Property="MinHeight" Value="30" />
     <Setter Property="Background" Value="{DynamicResource TabHeaderBackgroundBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource TabHeaderForegroundBrush}" />
-    <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="4,4,0,0" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1,1,1,0" />
+    <Setter Property="CornerRadius" Value="6,6,0,0" />
+  </Style>
+  <Style Selector="Button.tabHeader:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
   </Style>
   <Style Selector="Button.tabHeader.active">
     <Setter Property="Background" Value="{DynamicResource TabHeaderActiveBackgroundBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TabHeaderActiveForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ShellAccentBrush}" />
+  </Style>
+  <Style Selector="Button.tabHeader Button">
+    <Setter Property="Foreground" Value="{DynamicResource TabHeaderForegroundBrush}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+  <Style Selector="Button.tabHeader.active Button">
     <Setter Property="Foreground" Value="{DynamicResource TabHeaderActiveForegroundBrush}" />
   </Style>
 </Styles>
