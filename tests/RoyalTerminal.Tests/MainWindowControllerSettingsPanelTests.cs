@@ -4,6 +4,7 @@
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
@@ -200,9 +201,65 @@ public sealed class MainWindowControllerSettingsPanelTests
 
     private static Window CreateControllerHostWindow(MainWindowViewModel viewModel, out Grid terminalHost)
     {
+        ContentControl titleBarTabStripHost = new()
+        {
+            Name = "TitleBarTabStripHost",
+        };
+
         StackPanel tabStrip = new()
         {
             Name = "TabStrip",
+        };
+        RepeatButton tabStripScrollLeftButton = new()
+        {
+            Name = "TabStripScrollLeftButton",
+            IsVisible = false,
+        };
+        ScrollViewer tabStripScrollViewer = new()
+        {
+            Name = "TabStripScrollViewer",
+            Content = tabStrip,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        RepeatButton tabStripScrollRightButton = new()
+        {
+            Name = "TabStripScrollRightButton",
+            IsVisible = false,
+        };
+        Button tabStripNewTabButton = new()
+        {
+            Name = "TabStripNewTabButton",
+            Command = viewModel.NewTabCommand,
+        };
+        Grid tabStripLayout = new()
+        {
+            Name = "TabStripLayout",
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Auto),
+            },
+        };
+        tabStripLayout.Children.Add(tabStripScrollLeftButton);
+        tabStripLayout.Children.Add(tabStripScrollViewer);
+        tabStripLayout.Children.Add(tabStripScrollRightButton);
+        tabStripLayout.Children.Add(tabStripNewTabButton);
+        Grid.SetColumn(tabStripScrollViewer, 1);
+        Grid.SetColumn(tabStripScrollRightButton, 2);
+        Grid.SetColumn(tabStripNewTabButton, 3);
+
+        Border tabStripSurface = new()
+        {
+            Name = "TabStripSurface",
+            Child = tabStripLayout,
+        };
+        ContentControl bodyTabStripHost = new()
+        {
+            Name = "BodyTabStripHost",
+            Content = tabStripSurface,
         };
 
         terminalHost = new Grid
@@ -212,11 +269,14 @@ public sealed class MainWindowControllerSettingsPanelTests
 
         Grid root = new();
         root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         root.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));
-        root.Children.Add(tabStrip);
+        root.Children.Add(titleBarTabStripHost);
+        root.Children.Add(bodyTabStripHost);
         root.Children.Add(terminalHost);
-        Grid.SetRow(tabStrip, 0);
-        Grid.SetRow(terminalHost, 1);
+        Grid.SetRow(titleBarTabStripHost, 0);
+        Grid.SetRow(bodyTabStripHost, 1);
+        Grid.SetRow(terminalHost, 2);
 
         Window window = new()
         {
@@ -229,6 +289,14 @@ public sealed class MainWindowControllerSettingsPanelTests
         NameScope nameScope = new();
         NameScope.SetNameScope(window, nameScope);
         nameScope.Register(tabStrip.Name!, tabStrip);
+        nameScope.Register(titleBarTabStripHost.Name!, titleBarTabStripHost);
+        nameScope.Register(bodyTabStripHost.Name!, bodyTabStripHost);
+        nameScope.Register(tabStripSurface.Name!, tabStripSurface);
+        nameScope.Register(tabStripLayout.Name!, tabStripLayout);
+        nameScope.Register(tabStripScrollLeftButton.Name!, tabStripScrollLeftButton);
+        nameScope.Register(tabStripScrollViewer.Name!, tabStripScrollViewer);
+        nameScope.Register(tabStripScrollRightButton.Name!, tabStripScrollRightButton);
+        nameScope.Register(tabStripNewTabButton.Name!, tabStripNewTabButton);
         nameScope.Register(terminalHost.Name!, terminalHost);
 
         window.Show();

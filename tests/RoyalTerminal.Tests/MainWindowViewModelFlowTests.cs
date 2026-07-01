@@ -10,6 +10,7 @@ using System.Reflection;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Chrome;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
@@ -267,6 +268,7 @@ public class MainWindowViewModelFlowTests
             AssertNativeMenuCommand(menu, viewModel.ToggleLeftPanelCommand, "Show _Left Panel");
             AssertNativeMenuCommand(menu, viewModel.ToggleSearchPanelCommand, "Show _Search Panel");
             AssertNativeMenuCommand(menu, viewModel.ToggleStatusBarCommand, "Show Status _Bar");
+            AssertNativeMenuCommand(menu, viewModel.ToggleTabsInTitleBarCommand, "Move _Tabs to Title Bar");
             AssertNativeMenuCommand(menu, viewModel.ToggleThemeCommand, "_Toggle Light Theme");
             AssertNativeMenuCommand(menu, viewModel.GenerateThemeCommand, "_Generate Theme");
             AssertNativeMenuCommand(menu, viewModel.PrepareSettingsPanelCommand, "_Preferences...");
@@ -301,6 +303,7 @@ public class MainWindowViewModelFlowTests
             Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show _Left Panel").ToggleType);
             Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show _Search Panel").ToggleType);
             Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show Status _Bar").ToggleType);
+            Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Move _Tabs to Title Bar").ToggleType);
             Assert.Equal(
                 viewModel.IsLeftPanelVisible,
                 FindNativeMenuItem(menu, "Show _Left Panel").IsChecked);
@@ -310,6 +313,9 @@ public class MainWindowViewModelFlowTests
             Assert.Equal(
                 viewModel.IsStatusBarVisible,
                 FindNativeMenuItem(menu, "Show Status _Bar").IsChecked);
+            Assert.Equal(
+                viewModel.IsTabsInTitleBar,
+                FindNativeMenuItem(menu, "Move _Tabs to Title Bar").IsChecked);
             Assert.Equal(
                 viewModel.PreserveScrollbackOnRestart,
                 FindNativeMenuItem(menu, "_Preserve Scrollback on Restart").IsChecked);
@@ -558,6 +564,12 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("TabStripNewTabButton was not found.");
             PathIcon tabStripNewTabIcon = window.FindControl<PathIcon>("TabStripNewTabIcon")
                 ?? throw new InvalidOperationException("TabStripNewTabIcon was not found.");
+            ScrollViewer tabStripScrollViewer = window.FindControl<ScrollViewer>("TabStripScrollViewer")
+                ?? throw new InvalidOperationException("TabStripScrollViewer was not found.");
+            RepeatButton tabStripScrollLeftButton = window.FindControl<RepeatButton>("TabStripScrollLeftButton")
+                ?? throw new InvalidOperationException("TabStripScrollLeftButton was not found.");
+            RepeatButton tabStripScrollRightButton = window.FindControl<RepeatButton>("TabStripScrollRightButton")
+                ?? throw new InvalidOperationException("TabStripScrollRightButton was not found.");
 
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
@@ -568,7 +580,18 @@ public class MainWindowViewModelFlowTests
             Assert.True(topSearchPanel.ClipToBounds);
             Assert.True(topSearchPanel.IsVisible);
             Assert.True(tabStripLayout.ClipToBounds);
+            Assert.Equal(4, tabStripLayout.ColumnDefinitions.Count);
             Assert.Empty(topCommandBar.Children.OfType<ScrollViewer>());
+            Assert.Equal(ScrollBarVisibility.Auto, tabStripScrollViewer.HorizontalScrollBarVisibility);
+            Assert.Equal(ScrollBarVisibility.Disabled, tabStripScrollViewer.VerticalScrollBarVisibility);
+            Assert.Contains("tabStripScrollViewer", tabStripScrollViewer.Classes);
+            Assert.Contains("tabStripScrollButton", tabStripScrollLeftButton.Classes);
+            Assert.Contains("tabStripScrollButton", tabStripScrollRightButton.Classes);
+            Assert.Equal(VerticalAlignment.Center, tabStripScrollLeftButton.VerticalAlignment);
+            Assert.Equal(VerticalAlignment.Center, tabStripScrollRightButton.VerticalAlignment);
+            Assert.Empty(tabStripScrollViewer.GetVisualDescendants().OfType<ScrollBar>());
+            Assert.False(tabStripScrollLeftButton.IsVisible);
+            Assert.False(tabStripScrollRightButton.IsVisible);
             Assert.Same(topSearchPanel, topSearchBox.Parent);
             Assert.Contains("searchField", topSearchBox.Classes);
             Assert.Equal(240d, topSearchBox.MinWidth);
@@ -713,9 +736,16 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("TopSearchPanel was not found.");
             Border statusBar = window.FindControl<Border>("StatusBar")
                 ?? throw new InvalidOperationException("StatusBar was not found.");
+            ContentControl titleBarTabStripHost = window.FindControl<ContentControl>("TitleBarTabStripHost")
+                ?? throw new InvalidOperationException("TitleBarTabStripHost was not found.");
+            ContentControl bodyTabStripHost = window.FindControl<ContentControl>("BodyTabStripHost")
+                ?? throw new InvalidOperationException("BodyTabStripHost was not found.");
+            Border titleBarBrandIcon = window.FindControl<Border>("TitleBarBrandIcon")
+                ?? throw new InvalidOperationException("TitleBarBrandIcon was not found.");
             NativeMenuItem showLeftPanelItem = FindNativeMenuItem(menu, "Show _Left Panel");
             NativeMenuItem showSearchPanelItem = FindNativeMenuItem(menu, "Show _Search Panel");
             NativeMenuItem showStatusBarItem = FindNativeMenuItem(menu, "Show Status _Bar");
+            NativeMenuItem moveTabsItem = FindNativeMenuItem(menu, "Move _Tabs to Title Bar");
 
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
@@ -723,31 +753,47 @@ public class MainWindowViewModelFlowTests
             Assert.True(viewModel.IsLeftPanelVisible);
             Assert.True(viewModel.IsSearchPanelVisible);
             Assert.True(viewModel.IsStatusBarVisible);
+            Assert.False(viewModel.IsTabsInTitleBar);
+            Assert.True(viewModel.IsBodyTabStripVisible);
+            Assert.True(viewModel.IsTitleBarLogoVisible);
             Assert.True(shellRail.IsVisible);
             Assert.True(topSearchPanel.IsVisible);
             Assert.True(statusBar.IsVisible);
+            Assert.False(titleBarTabStripHost.IsVisible);
+            Assert.True(bodyTabStripHost.IsVisible);
+            Assert.True(titleBarBrandIcon.IsVisible);
             Assert.True(showLeftPanelItem.IsChecked);
             Assert.True(showSearchPanelItem.IsChecked);
             Assert.True(showStatusBarItem.IsChecked);
+            Assert.False(moveTabsItem.IsChecked);
             Assert.Same(viewModel.ToggleLeftPanelCommand, showLeftPanelItem.Command);
             Assert.Same(viewModel.ToggleSearchPanelCommand, showSearchPanelItem.Command);
             Assert.Same(viewModel.ToggleStatusBarCommand, showStatusBarItem.Command);
+            Assert.Same(viewModel.ToggleTabsInTitleBarCommand, moveTabsItem.Command);
 
             viewModel.ToggleLeftPanelCommand.Execute().Wait();
             viewModel.ToggleSearchPanelCommand.Execute().Wait();
             viewModel.ToggleStatusBarCommand.Execute().Wait();
+            viewModel.ToggleTabsInTitleBarCommand.Execute().Wait();
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
             Assert.False(viewModel.IsLeftPanelVisible);
             Assert.False(viewModel.IsSearchPanelVisible);
             Assert.False(viewModel.IsStatusBarVisible);
+            Assert.True(viewModel.IsTabsInTitleBar);
+            Assert.False(viewModel.IsBodyTabStripVisible);
+            Assert.False(viewModel.IsTitleBarLogoVisible);
             Assert.False(shellRail.IsVisible);
             Assert.False(topSearchPanel.IsVisible);
             Assert.False(statusBar.IsVisible);
+            Assert.True(titleBarTabStripHost.IsVisible);
+            Assert.False(bodyTabStripHost.IsVisible);
+            Assert.False(titleBarBrandIcon.IsVisible);
             Assert.False(showLeftPanelItem.IsChecked);
             Assert.False(showSearchPanelItem.IsChecked);
             Assert.False(showStatusBarItem.IsChecked);
+            Assert.True(moveTabsItem.IsChecked);
         }
         finally
         {

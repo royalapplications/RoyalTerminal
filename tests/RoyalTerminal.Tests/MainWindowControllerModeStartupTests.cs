@@ -6,7 +6,12 @@ using System.Reactive.Linq;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Chrome;
+using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Presenters;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -19,6 +24,7 @@ using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Demo.ViewModels;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.Terminal;
+using ReactiveUI;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -134,6 +140,206 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_TabsInTitleBar_MovesTabStripHidesLogoAndPersistsWorkspace()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        InMemoryWorkspaceStore workspaceStore = new();
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo titlebar-tabs";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool createdSingleTab = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(createdSingleTab);
+
+            ContentControl titleBarTabStripHost = window.FindControl<ContentControl>("TitleBarTabStripHost")
+                ?? throw new InvalidOperationException("TitleBarTabStripHost was not found.");
+            ContentControl bodyTabStripHost = window.FindControl<ContentControl>("BodyTabStripHost")
+                ?? throw new InvalidOperationException("BodyTabStripHost was not found.");
+            Border tabStripSurface = window.FindControl<Border>("TabStripSurface")
+                ?? throw new InvalidOperationException("TabStripSurface was not found.");
+            Grid tabStripLayout = window.FindControl<Grid>("TabStripLayout")
+                ?? throw new InvalidOperationException("TabStripLayout was not found.");
+            ScrollViewer tabStripScrollViewer = window.FindControl<ScrollViewer>("TabStripScrollViewer")
+                ?? throw new InvalidOperationException("TabStripScrollViewer was not found.");
+            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
+            RepeatButton tabStripScrollLeftButton = window.FindControl<RepeatButton>("TabStripScrollLeftButton")
+                ?? throw new InvalidOperationException("TabStripScrollLeftButton was not found.");
+            RepeatButton tabStripScrollRightButton = window.FindControl<RepeatButton>("TabStripScrollRightButton")
+                ?? throw new InvalidOperationException("TabStripScrollRightButton was not found.");
+            Button tabStripNewTabButton = window.FindControl<Button>("TabStripNewTabButton")
+                ?? throw new InvalidOperationException("TabStripNewTabButton was not found.");
+            Border titleBarBrandIcon = window.FindControl<Border>("TitleBarBrandIcon")
+                ?? throw new InvalidOperationException("TitleBarBrandIcon was not found.");
+            ScrollContentPresenter tabStripScrollContentPresenter =
+                FindTabStripScrollContentPresenter(tabStripScrollViewer);
+
+            Button tabHeader = Assert.IsType<Button>(tabStrip.Children[0]);
+            Button closeButton = Assert.IsType<Button>(tabHeader.Tag);
+
+            Assert.False(viewModel.IsTabsInTitleBar);
+            Assert.Same(tabStripSurface, bodyTabStripHost.Content);
+            Assert.Null(titleBarTabStripHost.Content);
+            Assert.True(bodyTabStripHost.IsVisible);
+            Assert.False(titleBarTabStripHost.IsVisible);
+            Assert.True(titleBarBrandIcon.IsVisible);
+            Assert.Contains("bodyTabs", tabStripSurface.Classes);
+            Assert.DoesNotContain("titleBarTabs", tabStripSurface.Classes);
+            Assert.Equal(WindowDecorationsElementRole.None, WindowDecorationProperties.GetElementRole(tabStripSurface));
+            Assert.Equal(WindowDecorationsElementRole.None, WindowDecorationProperties.GetElementRole(tabStripLayout));
+            Assert.Equal(WindowDecorationsElementRole.None, WindowDecorationProperties.GetElementRole(tabStripScrollViewer));
+            Assert.Equal(WindowDecorationsElementRole.None, WindowDecorationProperties.GetElementRole(tabStripScrollContentPresenter));
+
+            await viewModel.ToggleTabsInTitleBarCommand.Execute();
+            Dispatcher.UIThread.RunJobs();
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+            tabStripScrollContentPresenter = FindTabStripScrollContentPresenter(tabStripScrollViewer);
+
+            Assert.True(viewModel.IsTabsInTitleBar);
+            Assert.Same(tabStripSurface, titleBarTabStripHost.Content);
+            Assert.Null(bodyTabStripHost.Content);
+            Assert.True(titleBarTabStripHost.IsVisible);
+            Assert.False(bodyTabStripHost.IsVisible);
+            Assert.False(titleBarBrandIcon.IsVisible);
+            Assert.Contains("titleBarTabs", tabStripSurface.Classes);
+            Assert.DoesNotContain("bodyTabs", tabStripSurface.Classes);
+            Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(tabStripSurface));
+            Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(tabStripLayout));
+            Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(tabStripScrollViewer));
+            Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(tabStripScrollContentPresenter));
+            Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(tabStrip));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(tabHeader));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(closeButton));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(tabStripScrollLeftButton));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(tabStripScrollRightButton));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(tabStripNewTabButton));
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        TerminalWorkspaceWindow savedWindow = Assert.Single(workspaceStore.Document.Windows);
+        Assert.True(savedWindow.TabsInTitleBar);
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_TabStripScrollButtons_ScrollOverflowingTabs()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo tab-scroll";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        window.Width = 460;
+        window.Height = 320;
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool createdSingleTab = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(createdSingleTab);
+
+            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
+            ScrollViewer tabStripScrollViewer = window.FindControl<ScrollViewer>("TabStripScrollViewer")
+                ?? throw new InvalidOperationException("TabStripScrollViewer was not found.");
+            RepeatButton tabStripScrollLeftButton = window.FindControl<RepeatButton>("TabStripScrollLeftButton")
+                ?? throw new InvalidOperationException("TabStripScrollLeftButton was not found.");
+            RepeatButton tabStripScrollRightButton = window.FindControl<RepeatButton>("TabStripScrollRightButton")
+                ?? throw new InvalidOperationException("TabStripScrollRightButton was not found.");
+            Border tabStripSurface = window.FindControl<Border>("TabStripSurface")
+                ?? throw new InvalidOperationException("TabStripSurface was not found.");
+            tabStripScrollViewer.Width = 260;
+            tabStrip.Width = 920;
+
+            for (int i = 0; i < 9; i++)
+            {
+                viewModel.NewTabCommand.Execute().Wait();
+            }
+
+            bool tabsCreated = await WaitUntilAsync(
+                () => tabStrip.Children.Count >= 10,
+                TimeSpan.FromSeconds(2));
+            Assert.True(tabsCreated);
+
+            bool overflowReady = await WaitUntilAsync(
+                () =>
+                {
+                    window.Measure(new Size(window.Width, window.Height));
+                    window.Arrange(new Rect(0, 0, window.Width, window.Height));
+                    Dispatcher.UIThread.RunJobs();
+                    return tabStripScrollViewer.Extent.Width > tabStripScrollViewer.Viewport.Width &&
+                        tabStripScrollRightButton.IsVisible;
+                },
+                TimeSpan.FromSeconds(2));
+            Assert.True(
+                overflowReady,
+                $"Expected tab strip overflow. Extent={tabStripScrollViewer.Extent}, Viewport={tabStripScrollViewer.Viewport}, " +
+                $"RightVisible={tabStripScrollRightButton.IsVisible}, ChildBounds={tabStrip.Bounds}, ViewerBounds={tabStripScrollViewer.Bounds}.");
+
+            tabStripScrollViewer.Offset = new Vector(0, 0);
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(tabStripScrollLeftButton.IsVisible);
+            Assert.True(tabStripScrollRightButton.IsVisible);
+            Assert.False(tabStripScrollLeftButton.IsEnabled);
+            Assert.True(tabStripScrollRightButton.IsEnabled);
+
+            tabStripScrollRightButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            bool scrolledRight = await WaitUntilAsync(
+                () => tabStripScrollViewer.Offset.X > 0.5 && tabStripScrollLeftButton.IsEnabled,
+                TimeSpan.FromSeconds(2));
+            Assert.True(scrolledRight);
+
+            tabStripScrollViewer.Offset = new Vector(0, 0);
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            RaiseTabStripPointerWheel(tabStripSurface, window, new Vector(0, -1));
+            bool wheelScrolledRight = await WaitUntilAsync(
+                () => tabStripScrollViewer.Offset.X > 0.5 && tabStripScrollLeftButton.IsEnabled,
+                TimeSpan.FromSeconds(2));
+            Assert.True(wheelScrolledRight);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Controller_Startup_RestoresWorkspaceTabs_AndShutdownSavesWorkspace()
     {
         using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
@@ -149,6 +355,7 @@ public sealed class MainWindowControllerModeStartupTests
                     WidthPixels = 1366,
                     HeightPixels = 777,
                     IsMaximized = true,
+                    TabsInTitleBar = true,
                     Tabs =
                     [
                         new TerminalWorkspaceTab
@@ -194,6 +401,7 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.Equal(1366, window.Width);
             Assert.Equal(777, window.Height);
             Assert.Equal(WindowState.Maximized, window.WindowState);
+            Assert.True(viewModel.IsTabsInTitleBar);
 
             Assert.Single(GetStandaloneControls(terminalHost));
 
@@ -220,6 +428,7 @@ public sealed class MainWindowControllerModeStartupTests
         Assert.Equal("main", workspaceStore.Document.SelectedWindowId);
         Assert.False(string.IsNullOrWhiteSpace(savedWindow.SelectedTabId));
         Assert.True(savedWindow.IsMaximized);
+        Assert.True(savedWindow.TabsInTitleBar);
     }
 
     [AvaloniaFact]
@@ -1336,10 +1545,82 @@ public sealed class MainWindowControllerModeStartupTests
 
     private static Window CreateControllerHostWindow(MainWindowViewModel viewModel, out Grid terminalHost)
     {
+        Border titleBarBrandIcon = new()
+        {
+            Name = "TitleBarBrandIcon",
+            IsVisible = viewModel.IsTitleBarLogoVisible,
+        };
+        titleBarBrandIcon.Bind(Visual.IsVisibleProperty, viewModel.WhenAnyValue(static model => model.IsTitleBarLogoVisible));
+
+        ContentControl titleBarTabStripHost = new()
+        {
+            Name = "TitleBarTabStripHost",
+            IsVisible = viewModel.IsTabsInTitleBar,
+        };
+        titleBarTabStripHost.Bind(Visual.IsVisibleProperty, viewModel.WhenAnyValue(static model => model.IsTabsInTitleBar));
+
         StackPanel tabStrip = new()
         {
             Name = "TabStrip",
         };
+        RepeatButton tabStripScrollLeftButton = new()
+        {
+            Name = "TabStripScrollLeftButton",
+            IsVisible = false,
+        };
+        ScrollViewer tabStripScrollViewer = new()
+        {
+            Name = "TabStripScrollViewer",
+            Content = tabStrip,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        RepeatButton tabStripScrollRightButton = new()
+        {
+            Name = "TabStripScrollRightButton",
+            IsVisible = false,
+        };
+        Button tabStripNewTabButton = new()
+        {
+            Name = "TabStripNewTabButton",
+            Command = viewModel.NewTabCommand,
+        };
+        WindowDecorationProperties.SetElementRole(tabStripScrollLeftButton, WindowDecorationsElementRole.User);
+        WindowDecorationProperties.SetElementRole(tabStripScrollRightButton, WindowDecorationsElementRole.User);
+        WindowDecorationProperties.SetElementRole(tabStripNewTabButton, WindowDecorationsElementRole.User);
+
+        Grid tabStripLayout = new()
+        {
+            Name = "TabStripLayout",
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Auto),
+            },
+        };
+        tabStripLayout.Children.Add(tabStripScrollLeftButton);
+        tabStripLayout.Children.Add(tabStripScrollViewer);
+        tabStripLayout.Children.Add(tabStripScrollRightButton);
+        tabStripLayout.Children.Add(tabStripNewTabButton);
+        Grid.SetColumn(tabStripScrollViewer, 1);
+        Grid.SetColumn(tabStripScrollRightButton, 2);
+        Grid.SetColumn(tabStripNewTabButton, 3);
+
+        Border tabStripSurface = new()
+        {
+            Name = "TabStripSurface",
+            Child = tabStripLayout,
+        };
+
+        ContentControl bodyTabStripHost = new()
+        {
+            Name = "BodyTabStripHost",
+            Content = tabStripSurface,
+            IsVisible = viewModel.IsBodyTabStripVisible,
+        };
+        bodyTabStripHost.Bind(Visual.IsVisibleProperty, viewModel.WhenAnyValue(static model => model.IsBodyTabStripVisible));
 
         terminalHost = new Grid
         {
@@ -1348,11 +1629,25 @@ public sealed class MainWindowControllerModeStartupTests
 
         Grid root = new();
         root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         root.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));
-        root.Children.Add(tabStrip);
+        Grid titleBar = new()
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
+            },
+        };
+        titleBar.Children.Add(titleBarBrandIcon);
+        titleBar.Children.Add(titleBarTabStripHost);
+        Grid.SetColumn(titleBarTabStripHost, 1);
+        root.Children.Add(titleBar);
+        root.Children.Add(bodyTabStripHost);
         root.Children.Add(terminalHost);
-        Grid.SetRow(tabStrip, 0);
-        Grid.SetRow(terminalHost, 1);
+        Grid.SetRow(titleBar, 0);
+        Grid.SetRow(bodyTabStripHost, 1);
+        Grid.SetRow(terminalHost, 2);
 
         Window window = new()
         {
@@ -1365,6 +1660,15 @@ public sealed class MainWindowControllerModeStartupTests
         NameScope nameScope = new();
         NameScope.SetNameScope(window, nameScope);
         nameScope.Register(tabStrip.Name!, tabStrip);
+        nameScope.Register(titleBarBrandIcon.Name!, titleBarBrandIcon);
+        nameScope.Register(titleBarTabStripHost.Name!, titleBarTabStripHost);
+        nameScope.Register(bodyTabStripHost.Name!, bodyTabStripHost);
+        nameScope.Register(tabStripSurface.Name!, tabStripSurface);
+        nameScope.Register(tabStripLayout.Name!, tabStripLayout);
+        nameScope.Register(tabStripScrollLeftButton.Name!, tabStripScrollLeftButton);
+        nameScope.Register(tabStripScrollViewer.Name!, tabStripScrollViewer);
+        nameScope.Register(tabStripScrollRightButton.Name!, tabStripScrollRightButton);
+        nameScope.Register(tabStripNewTabButton.Name!, tabStripNewTabButton);
         nameScope.Register(terminalHost.Name!, terminalHost);
 
         window.Show();
@@ -1489,6 +1793,41 @@ public sealed class MainWindowControllerModeStartupTests
         }
 
         return false;
+    }
+
+    private static void RaiseTabStripPointerWheel(Control target, Window window, Vector delta)
+    {
+        Pointer pointer = new(id: 6, PointerType.Mouse, isPrimary: true);
+        ulong timestamp = (ulong)Environment.TickCount64;
+        Point localPoint = new(
+            Math.Max(1d, target.Bounds.Width / 2d),
+            Math.Max(1d, target.Bounds.Height / 2d));
+        Point windowPoint = target.TranslatePoint(localPoint, window) ?? localPoint;
+
+        PointerWheelEventArgs wheel = new(
+            target,
+            pointer,
+            window,
+            windowPoint,
+            timestamp,
+            new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.Other),
+            KeyModifiers.None,
+            delta);
+        target.RaiseEvent(wheel);
+    }
+
+    private static ScrollContentPresenter FindTabStripScrollContentPresenter(ScrollViewer scrollViewer)
+    {
+        scrollViewer.ApplyTemplate();
+        foreach (object descendant in scrollViewer.GetVisualDescendants())
+        {
+            if (descendant is ScrollContentPresenter presenter)
+            {
+                return presenter;
+            }
+        }
+
+        throw new InvalidOperationException("Tab strip scroll content presenter was not found.");
     }
 
     private static bool ViewportContainsHyperlink(TerminalControl control)
