@@ -134,6 +134,10 @@
                             ToggleType="CheckBox"
                             IsChecked="{Binding IsSearchPanelVisible}"
                             Command="{Binding ToggleSearchPanelCommand}" />
+            <NativeMenuItem Header="Show Status _Bar"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding IsStatusBarVisible}"
+                            Command="{Binding ToggleStatusBarCommand}" />
             <NativeMenuItemSeparator />
             <NativeMenuItem Header="_Increase Font Size"
                             Command="{Binding IncreaseFontSizeCommand}"
@@ -841,7 +845,10 @@
           </Border>
         </Grid>
 
-        <Border Grid.Row="2" Classes="statusBar">
+        <Border Grid.Row="2"
+                x:Name="StatusBar"
+                Classes="statusBar"
+                IsVisible="{Binding IsStatusBarVisible}">
           <Grid x:Name="StatusBarLayout"
                 ColumnDefinitions="Auto,Auto,*,Auto,Auto"
                 ColumnSpacing="8"

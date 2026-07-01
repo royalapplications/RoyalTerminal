@@ -266,6 +266,7 @@ public class MainWindowViewModelFlowTests
             AssertNativeMenuCommand(menu, viewModel.ResetFontSizeCommand, "_Reset Font Size");
             AssertNativeMenuCommand(menu, viewModel.ToggleLeftPanelCommand, "Show _Left Panel");
             AssertNativeMenuCommand(menu, viewModel.ToggleSearchPanelCommand, "Show _Search Panel");
+            AssertNativeMenuCommand(menu, viewModel.ToggleStatusBarCommand, "Show Status _Bar");
             AssertNativeMenuCommand(menu, viewModel.ToggleThemeCommand, "_Toggle Light Theme");
             AssertNativeMenuCommand(menu, viewModel.GenerateThemeCommand, "_Generate Theme");
             AssertNativeMenuCommand(menu, viewModel.PrepareSettingsPanelCommand, "_Preferences...");
@@ -299,12 +300,16 @@ public class MainWindowViewModelFlowTests
             Assert.Equal(MenuItemToggleType.Radio, FindNativeMenuItem(menu, "Asciicast v3").ToggleType);
             Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show _Left Panel").ToggleType);
             Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show _Search Panel").ToggleType);
+            Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show Status _Bar").ToggleType);
             Assert.Equal(
                 viewModel.IsLeftPanelVisible,
                 FindNativeMenuItem(menu, "Show _Left Panel").IsChecked);
             Assert.Equal(
                 viewModel.IsSearchPanelVisible,
                 FindNativeMenuItem(menu, "Show _Search Panel").IsChecked);
+            Assert.Equal(
+                viewModel.IsStatusBarVisible,
+                FindNativeMenuItem(menu, "Show Status _Bar").IsChecked);
             Assert.Equal(
                 viewModel.PreserveScrollbackOnRestart,
                 FindNativeMenuItem(menu, "_Preserve Scrollback on Restart").IsChecked);
@@ -687,7 +692,7 @@ public class MainWindowViewModelFlowTests
     }
 
     [AvaloniaFact]
-    public void MainWindow_ViewMenuTogglesLeftAndSearchPanels()
+    public void MainWindow_ViewMenuTogglesShellPanels()
     {
         MainWindow window = new()
         {
@@ -705,32 +710,43 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("ShellRail was not found.");
             Grid topSearchPanel = window.FindControl<Grid>("TopSearchPanel")
                 ?? throw new InvalidOperationException("TopSearchPanel was not found.");
+            Border statusBar = window.FindControl<Border>("StatusBar")
+                ?? throw new InvalidOperationException("StatusBar was not found.");
             NativeMenuItem showLeftPanelItem = FindNativeMenuItem(menu, "Show _Left Panel");
             NativeMenuItem showSearchPanelItem = FindNativeMenuItem(menu, "Show _Search Panel");
+            NativeMenuItem showStatusBarItem = FindNativeMenuItem(menu, "Show Status _Bar");
 
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
             Assert.True(viewModel.IsLeftPanelVisible);
             Assert.True(viewModel.IsSearchPanelVisible);
+            Assert.True(viewModel.IsStatusBarVisible);
             Assert.True(shellRail.IsVisible);
             Assert.True(topSearchPanel.IsVisible);
+            Assert.True(statusBar.IsVisible);
             Assert.True(showLeftPanelItem.IsChecked);
             Assert.True(showSearchPanelItem.IsChecked);
+            Assert.True(showStatusBarItem.IsChecked);
             Assert.Same(viewModel.ToggleLeftPanelCommand, showLeftPanelItem.Command);
             Assert.Same(viewModel.ToggleSearchPanelCommand, showSearchPanelItem.Command);
+            Assert.Same(viewModel.ToggleStatusBarCommand, showStatusBarItem.Command);
 
             viewModel.ToggleLeftPanelCommand.Execute().Wait();
             viewModel.ToggleSearchPanelCommand.Execute().Wait();
+            viewModel.ToggleStatusBarCommand.Execute().Wait();
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
             Assert.False(viewModel.IsLeftPanelVisible);
             Assert.False(viewModel.IsSearchPanelVisible);
+            Assert.False(viewModel.IsStatusBarVisible);
             Assert.False(shellRail.IsVisible);
             Assert.False(topSearchPanel.IsVisible);
+            Assert.False(statusBar.IsVisible);
             Assert.False(showLeftPanelItem.IsChecked);
             Assert.False(showSearchPanelItem.IsChecked);
+            Assert.False(showStatusBarItem.IsChecked);
         }
         finally
         {
