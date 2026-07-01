@@ -255,6 +255,26 @@ public sealed class TerminalShellIntegrationContractTests
     }
 
     [Fact]
+    public void BootstrapBuilder_BashChainsExistingDebugTrap()
+    {
+        string? script = TerminalShellIntegrationBootstrapBuilder.Build(
+            new TerminalShellIntegrationBootstrapOptions(TerminalShellIntegrationBootstrapShell.Bash));
+
+        Assert.NotNull(script);
+        Assert.Contains("trap -p DEBUG", script, StringComparison.Ordinal);
+        Assert.Contains("__ROYALTERMINAL_PREVIOUS_DEBUG_TRAP", script, StringComparison.Ordinal);
+        Assert.Contains("__royalterminal_install_debug_trap", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "trap \"__royalterminal_preexec \\\"${BASH_COMMAND:-}\\\"; $__ROYALTERMINAL_PREVIOUS_DEBUG_TRAP\" DEBUG",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "trap '__royalterminal_preexec \"${BASH_COMMAND:-}\"' DEBUG",
+            script,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BootstrapBuilder_ZshUsesByteLocaleForUrlEncode()
     {
         string? script = TerminalShellIntegrationBootstrapBuilder.Build(

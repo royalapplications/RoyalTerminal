@@ -117,12 +117,31 @@ public static class TerminalShellIntegrationBootstrapBuilder
                 "  history_id=\"${history_line%%[[:space:]]*}\"",
                 "  cmd=\"${history_line#\"$history_id\"}\"",
                 "  cmd=\"${cmd#\"${cmd%%[![:space:]]*}\"}\"",
-                "  if [ -z \"$cmd\" ] || [ \"$cmd\" = \"$history_line\" ]; then cmd=\"${BASH_COMMAND:-}\"; fi",
+                "  if [ -z \"$cmd\" ] || [ \"$cmd\" = \"$history_line\" ]; then cmd=\"${1:-${BASH_COMMAND:-}}\"; fi",
                 "  case \"$cmd\" in __royalterminal_prompt_command*|__royalterminal_preexec*|history\\ *) return ;; esac",
                 "  if [ -n \"$history_id\" ] && [ \"${__ROYALTERMINAL_LAST_HISTORY_ID:-}\" = \"$history_id\" ]; then return; fi",
                 "  __ROYALTERMINAL_LAST_HISTORY_ID=\"$history_id\"",
                 "  __ROYALTERMINAL_COMMAND_ACTIVE=1",
                 "  printf '\\033]133;C;cmdline_url=%s\\007' \"$(__royalterminal_urlencode \"$cmd\")\"",
+                "}",
+                "__royalterminal_capture_debug_trap() {",
+                "  local trap_line encoded",
+                "  __ROYALTERMINAL_PREVIOUS_DEBUG_TRAP=",
+                "  trap_line=\"$(trap -p DEBUG)\"",
+                "  if [ -z \"$trap_line\" ]; then return; fi",
+                "  encoded=\"${trap_line#trap -- }\"",
+                "  if [ \"$encoded\" = \"$trap_line\" ]; then return; fi",
+                "  encoded=\"${encoded% DEBUG}\"",
+                "  eval \"__ROYALTERMINAL_PREVIOUS_DEBUG_TRAP=$encoded\"",
+                "  case \"$__ROYALTERMINAL_PREVIOUS_DEBUG_TRAP\" in *__royalterminal_preexec*) __ROYALTERMINAL_PREVIOUS_DEBUG_TRAP= ;; esac",
+                "}",
+                "__royalterminal_install_debug_trap() {",
+                "  __royalterminal_capture_debug_trap",
+                "  if [ -n \"${__ROYALTERMINAL_PREVIOUS_DEBUG_TRAP:-}\" ]; then",
+                "    trap \"__royalterminal_preexec \\\"${BASH_COMMAND:-}\\\"; $__ROYALTERMINAL_PREVIOUS_DEBUG_TRAP\" DEBUG",
+                "  else",
+                "    trap '__royalterminal_preexec \"${BASH_COMMAND:-}\"' DEBUG",
+                "  fi",
                 "}",
             ]);
         }
@@ -148,7 +167,7 @@ public static class TerminalShellIntegrationBootstrapBuilder
         lines.Add("}");
         if (options.EmitSemanticPrompt)
         {
-            lines.Add("trap '__royalterminal_preexec' DEBUG");
+            lines.Add("__royalterminal_install_debug_trap");
         }
 
         lines.Add("case \";${PROMPT_COMMAND:-};\" in *__royalterminal_prompt_command*) ;; *) PROMPT_COMMAND=\"__royalterminal_prompt_command${PROMPT_COMMAND:+;$PROMPT_COMMAND}\" ;; esac");
