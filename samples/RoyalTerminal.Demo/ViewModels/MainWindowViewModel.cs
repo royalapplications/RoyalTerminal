@@ -89,6 +89,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     private readonly Dictionary<TerminalRenderMode, ModeThemeState> _modeThemes = [];
     private TerminalSettingsPanelState? _settingsPanelState;
     private bool _isSettingsPanelOpen;
+    private bool _isLeftPanelVisible = true;
+    private bool _isSearchPanelVisible = true;
 
     private IReadOnlyList<ShellProfileOption> _shellProfiles =
     [
@@ -311,6 +313,8 @@ public sealed class MainWindowViewModel : ReactiveObject
         CycleThemePresetCommand = ReactiveCommand.CreateFromObservable(CycleThemePreset);
         GenerateThemeCommand = ReactiveCommand.CreateFromObservable(GenerateTheme);
         CycleRenderModeCommand = ReactiveCommand.Create(CycleRenderMode);
+        ToggleLeftPanelCommand = ReactiveCommand.Create(ToggleLeftPanel);
+        ToggleSearchPanelCommand = ReactiveCommand.Create(ToggleSearchPanel);
         IObservable<bool> canSaveCapture = ObserveCanSaveCapture();
         IObservable<bool> canReplayControl = ObserveCanReplayControl();
         IObservable<bool> canApplySearch = ObserveCanExecuteProperty(nameof(CanApplySearch), () => CanApplySearch);
@@ -449,6 +453,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> CycleThemePresetCommand { get; }
     public ReactiveCommand<Unit, Unit> GenerateThemeCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleRenderModeCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleLeftPanelCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleSearchPanelCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleCaptureCommand { get; }
     public ReactiveCommand<object?, Unit> SelectCaptureFormatCommand { get; }
     public ReactiveCommand<Unit, Unit> SaveCaptureCommand { get; }
@@ -499,6 +505,18 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _isSettingsPanelOpen;
         private set => this.RaiseAndSetIfChanged(ref _isSettingsPanelOpen, value);
+    }
+
+    public bool IsLeftPanelVisible
+    {
+        get => _isLeftPanelVisible;
+        set => this.RaiseAndSetIfChanged(ref _isLeftPanelVisible, value);
+    }
+
+    public bool IsSearchPanelVisible
+    {
+        get => _isSearchPanelVisible;
+        set => this.RaiseAndSetIfChanged(ref _isSearchPanelVisible, value);
     }
 
     public bool IsSshHostKeyPromptVisible
@@ -2054,6 +2072,16 @@ public sealed class MainWindowViewModel : ReactiveObject
         UpdateThemePresetButtonText();
 
         return ApplyCurrentModeTheme($"Generated theme: {state.DisplayName}");
+    }
+
+    private void ToggleLeftPanel()
+    {
+        IsLeftPanelVisible = !IsLeftPanelVisible;
+    }
+
+    private void ToggleSearchPanel()
+    {
+        IsSearchPanelVisible = !IsSearchPanelVisible;
     }
 
     private IObservable<Unit> ToggleCapture()

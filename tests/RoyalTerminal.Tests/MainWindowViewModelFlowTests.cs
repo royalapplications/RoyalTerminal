@@ -264,6 +264,8 @@ public class MainWindowViewModelFlowTests
             AssertNativeMenuCommand(menu, viewModel.IncreaseFontSizeCommand, "_Increase Font Size");
             AssertNativeMenuCommand(menu, viewModel.DecreaseFontSizeCommand, "_Decrease Font Size");
             AssertNativeMenuCommand(menu, viewModel.ResetFontSizeCommand, "_Reset Font Size");
+            AssertNativeMenuCommand(menu, viewModel.ToggleLeftPanelCommand, "Show _Left Panel");
+            AssertNativeMenuCommand(menu, viewModel.ToggleSearchPanelCommand, "Show _Search Panel");
             AssertNativeMenuCommand(menu, viewModel.ToggleThemeCommand, "_Toggle Light Theme");
             AssertNativeMenuCommand(menu, viewModel.GenerateThemeCommand, "_Generate Theme");
             AssertNativeMenuCommand(menu, viewModel.PrepareSettingsPanelCommand, "_Preferences...");
@@ -295,6 +297,14 @@ public class MainWindowViewModelFlowTests
                 FindNativeMenuItem(menu, "Asciicast v3").CommandParameter);
             Assert.Equal(MenuItemToggleType.Radio, FindNativeMenuItem(menu, "RoyalTerminal JSON").ToggleType);
             Assert.Equal(MenuItemToggleType.Radio, FindNativeMenuItem(menu, "Asciicast v3").ToggleType);
+            Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show _Left Panel").ToggleType);
+            Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show _Search Panel").ToggleType);
+            Assert.Equal(
+                viewModel.IsLeftPanelVisible,
+                FindNativeMenuItem(menu, "Show _Left Panel").IsChecked);
+            Assert.Equal(
+                viewModel.IsSearchPanelVisible,
+                FindNativeMenuItem(menu, "Show _Search Panel").IsChecked);
             Assert.Equal(
                 viewModel.PreserveScrollbackOnRestart,
                 FindNativeMenuItem(menu, "_Preserve Scrollback on Restart").IsChecked);
@@ -550,10 +560,12 @@ public class MainWindowViewModelFlowTests
             Assert.Null(window.FindControl<Button>("TopNewTabButton"));
             Assert.True(topCommandBar.ClipToBounds);
             Assert.True(topSearchPanel.ClipToBounds);
+            Assert.True(topSearchPanel.IsVisible);
             Assert.True(tabStripLayout.ClipToBounds);
             Assert.Empty(topCommandBar.Children.OfType<ScrollViewer>());
             Assert.Same(topSearchPanel, topSearchBox.Parent);
             Assert.Contains("searchField", topSearchBox.Classes);
+            Assert.Equal(240d, topSearchBox.MinWidth);
             Assert.Equal(VerticalAlignment.Center, topSearchBox.VerticalContentAlignment);
             Assert.Equal(new Thickness(10, 3), topSearchBox.Padding);
             Assert.Contains("iconButton", topSearchApplyButton.Classes);
@@ -653,7 +665,8 @@ public class MainWindowViewModelFlowTests
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
             Assert.Equal(HorizontalAlignment.Right, topSearchPanel.HorizontalAlignment);
-            Assert.Equal(640d, topSearchPanel.MaxWidth);
+            Assert.Equal(960d, topSearchPanel.MaxWidth);
+            Assert.Equal(240d, topSearchBox.MinWidth);
             Assert.True(
                 topSearchPanel.Bounds.Width <= topSearchPanel.MaxWidth + 0.5,
                 $"Expected search panel width to be capped. Search={topSearchPanel.Bounds}, MaxWidth={topSearchPanel.MaxWidth}.");
@@ -661,8 +674,63 @@ public class MainWindowViewModelFlowTests
                 Math.Abs(topSearchPanel.Bounds.Right - topCommandBar.Bounds.Width) <= 0.5,
                 $"Expected search panel to align to the right edge of the command bar. Search={topSearchPanel.Bounds}, TopBar={topCommandBar.Bounds}.");
             Assert.True(
-                topSearchBox.Bounds.Width < topCommandBar.Bounds.Width * 0.5,
-                $"Expected search input to remain compact on wide windows. SearchBox={topSearchBox.Bounds}, TopBar={topCommandBar.Bounds}.");
+                topSearchBox.Bounds.Width >= topSearchBox.MinWidth - 0.5,
+                $"Expected search input to keep its larger minimum width. SearchBox={topSearchBox.Bounds}, MinWidth={topSearchBox.MinWidth}.");
+            Assert.True(
+                topSearchBox.Bounds.Width < topCommandBar.Bounds.Width * 0.75,
+                $"Expected search input to remain bounded on wide windows. SearchBox={topSearchBox.Bounds}, TopBar={topCommandBar.Bounds}.");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void MainWindow_ViewMenuTogglesLeftAndSearchPanels()
+    {
+        MainWindow window = new()
+        {
+            Width = 900,
+            Height = 520,
+        };
+
+        try
+        {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+            NativeMenu menu = NativeMenu.GetMenu(window)
+                ?? throw new InvalidOperationException("MainWindow native menu was not found.");
+            Border shellRail = window.FindControl<Border>("ShellRail")
+                ?? throw new InvalidOperationException("ShellRail was not found.");
+            Grid topSearchPanel = window.FindControl<Grid>("TopSearchPanel")
+                ?? throw new InvalidOperationException("TopSearchPanel was not found.");
+            NativeMenuItem showLeftPanelItem = FindNativeMenuItem(menu, "Show _Left Panel");
+            NativeMenuItem showSearchPanelItem = FindNativeMenuItem(menu, "Show _Search Panel");
+
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+
+            Assert.True(viewModel.IsLeftPanelVisible);
+            Assert.True(viewModel.IsSearchPanelVisible);
+            Assert.True(shellRail.IsVisible);
+            Assert.True(topSearchPanel.IsVisible);
+            Assert.True(showLeftPanelItem.IsChecked);
+            Assert.True(showSearchPanelItem.IsChecked);
+            Assert.Same(viewModel.ToggleLeftPanelCommand, showLeftPanelItem.Command);
+            Assert.Same(viewModel.ToggleSearchPanelCommand, showSearchPanelItem.Command);
+
+            viewModel.ToggleLeftPanelCommand.Execute().Wait();
+            viewModel.ToggleSearchPanelCommand.Execute().Wait();
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+
+            Assert.False(viewModel.IsLeftPanelVisible);
+            Assert.False(viewModel.IsSearchPanelVisible);
+            Assert.False(shellRail.IsVisible);
+            Assert.False(topSearchPanel.IsVisible);
+            Assert.False(showLeftPanelItem.IsChecked);
+            Assert.False(showSearchPanelItem.IsChecked);
         }
         finally
         {

@@ -44,10 +44,11 @@ Window-level menus contain Shell, Edit, View, Session, Window, and Help actions.
 They expose the same low-frequency command surface that is available from the
 demo UI: command-history suggestions, profile refresh and launch, settings,
 settings profile actions, apply/save, font browsing, text-highlight rule
-creation, theme and shader controls, diagnostics, capture and replay controls,
-pane navigation, tab switching, and snapshot actions. Per-rule text-highlight
-removal remains contextual in the settings panel because each rule owns its own
-remove command. This prevents the default
+creation, shell panel visibility, titlebar search visibility, theme and shader
+controls, diagnostics, capture and replay controls, pane navigation, tab
+switching, and snapshot actions. Per-rule text-highlight removal remains
+contextual in the settings panel because each rule owns its own remove command.
+This prevents the default
 Avalonia application menu from surfacing an `About Avalonia` item. About and
 Quit stay application-level commands; Preferences also appears in the View menu
 as a cross-platform fallback.

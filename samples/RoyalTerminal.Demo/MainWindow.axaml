@@ -126,6 +126,15 @@
       <NativeMenuItem Header="_View">
         <NativeMenuItem.Menu>
           <NativeMenu>
+            <NativeMenuItem Header="Show _Left Panel"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding IsLeftPanelVisible}"
+                            Command="{Binding ToggleLeftPanelCommand}" />
+            <NativeMenuItem Header="Show _Search Panel"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding IsSearchPanelVisible}"
+                            Command="{Binding ToggleSearchPanelCommand}" />
+            <NativeMenuItemSeparator />
             <NativeMenuItem Header="_Increase Font Size"
                             Command="{Binding IncreaseFontSizeCommand}"
                             Gesture="Ctrl+Add" />
@@ -348,13 +357,14 @@
                   x:Name="TopSearchPanel"
                   ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
                   ColumnSpacing="4"
-                  MaxWidth="640"
+                  MaxWidth="960"
                   HorizontalAlignment="Right"
                   VerticalAlignment="Center"
+                  IsVisible="{Binding IsSearchPanelVisible}"
                   ClipToBounds="True">
               <TextBox x:Name="TopSearchBox"
                        Grid.Column="0"
-                       MinWidth="80"
+                       MinWidth="240"
                        HorizontalAlignment="Stretch"
                        Classes="compactField searchField"
                        Padding="10,3"
@@ -495,8 +505,12 @@
         </Grid>
       </Border>
 
-      <Grid Grid.Row="1" ColumnDefinitions="56,*">
-        <Border Grid.Column="0" Classes="shellRail">
+      <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
+        <Border Grid.Column="0"
+                x:Name="ShellRail"
+                Classes="shellRail"
+                Width="{DynamicResource Shell.RailWidth}"
+                IsVisible="{Binding IsLeftPanelVisible}">
         <DockPanel>
           <StackPanel Spacing="4"
                       Margin="0,8,0,0">
