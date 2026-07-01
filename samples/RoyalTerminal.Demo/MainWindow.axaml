@@ -422,12 +422,64 @@
                 <PathIcon Classes="commandIcon"
                           Data="{StaticResource Icon.DismissRegular}" />
               </Button>
-              <TextBlock Grid.Column="5"
-                         Text="{Binding SearchResultText}"
-                         Classes="caption"
-                         MaxWidth="84"
-                         TextTrimming="CharacterEllipsis"
-                         VerticalAlignment="Center" />
+              <Border x:Name="TopSearchStatusIdleChip"
+                      Grid.Column="5"
+                      Classes="searchStatusChip searchStatusIdle"
+                      IsHitTestVisible="False"
+                      IsVisible="{Binding IsSearchIdle}"
+                      Opacity="0.68"
+                      ToolTip.Tip="{Binding SearchResultText}"
+                      VerticalAlignment="Center"
+                      chrome:WindowDecorationProperties.ElementRole="TitleBar">
+                <StackPanel Classes="searchStatusContent">
+                  <PathIcon x:Name="TopSearchStatusIdleIcon"
+                            Classes="searchStatusIcon"
+                            Data="{StaticResource Icon.SearchRegular}" />
+                  <TextBlock x:Name="TopSearchStatusIdleText"
+                             Text="{Binding SearchStatusSummaryText}"
+                             Classes="searchStatusText"
+                             TextTrimming="CharacterEllipsis"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </Border>
+              <Border x:Name="TopSearchStatusMatchesChip"
+                      Grid.Column="5"
+                      Classes="searchStatusChip searchStatusMatches"
+                      IsHitTestVisible="False"
+                      IsVisible="{Binding HasSearchMatches}"
+                      ToolTip.Tip="{Binding SearchResultText}"
+                      VerticalAlignment="Center"
+                      chrome:WindowDecorationProperties.ElementRole="TitleBar">
+                <StackPanel Classes="searchStatusContent">
+                  <PathIcon x:Name="TopSearchStatusMatchesIcon"
+                            Classes="searchStatusIcon"
+                            Data="{StaticResource Icon.CheckmarkRegular}" />
+                  <TextBlock x:Name="TopSearchStatusMatchesText"
+                             Text="{Binding SearchStatusSummaryText}"
+                             Classes="searchStatusText"
+                             TextTrimming="CharacterEllipsis"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </Border>
+              <Border x:Name="TopSearchStatusNoMatchesChip"
+                      Grid.Column="5"
+                      Classes="searchStatusChip searchStatusNoMatches"
+                      IsHitTestVisible="False"
+                      IsVisible="{Binding HasSearchNoMatches}"
+                      ToolTip.Tip="{Binding SearchResultText}"
+                      VerticalAlignment="Center"
+                      chrome:WindowDecorationProperties.ElementRole="TitleBar">
+                <StackPanel Classes="searchStatusContent">
+                  <PathIcon x:Name="TopSearchStatusNoMatchesIcon"
+                            Classes="searchStatusIcon"
+                            Data="{StaticResource Icon.DismissRegular}" />
+                  <TextBlock x:Name="TopSearchStatusNoMatchesText"
+                             Text="{Binding SearchStatusSummaryText}"
+                             Classes="searchStatusText"
+                             TextTrimming="CharacterEllipsis"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </Border>
             </Grid>
 
           </Grid>

@@ -521,6 +521,20 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("TopSearchApplyButton was not found.");
             Button topSearchPreviousButton = window.FindControl<Button>("TopSearchPreviousButton")
                 ?? throw new InvalidOperationException("TopSearchPreviousButton was not found.");
+            Border topSearchStatusIdleChip = window.FindControl<Border>("TopSearchStatusIdleChip")
+                ?? throw new InvalidOperationException("TopSearchStatusIdleChip was not found.");
+            Border topSearchStatusMatchesChip = window.FindControl<Border>("TopSearchStatusMatchesChip")
+                ?? throw new InvalidOperationException("TopSearchStatusMatchesChip was not found.");
+            Border topSearchStatusNoMatchesChip = window.FindControl<Border>("TopSearchStatusNoMatchesChip")
+                ?? throw new InvalidOperationException("TopSearchStatusNoMatchesChip was not found.");
+            PathIcon topSearchStatusIdleIcon = window.FindControl<PathIcon>("TopSearchStatusIdleIcon")
+                ?? throw new InvalidOperationException("TopSearchStatusIdleIcon was not found.");
+            TextBlock topSearchStatusIdleText = window.FindControl<TextBlock>("TopSearchStatusIdleText")
+                ?? throw new InvalidOperationException("TopSearchStatusIdleText was not found.");
+            TextBlock topSearchStatusMatchesText = window.FindControl<TextBlock>("TopSearchStatusMatchesText")
+                ?? throw new InvalidOperationException("TopSearchStatusMatchesText was not found.");
+            TextBlock topSearchStatusNoMatchesText = window.FindControl<TextBlock>("TopSearchStatusNoMatchesText")
+                ?? throw new InvalidOperationException("TopSearchStatusNoMatchesText was not found.");
             Button tabStripNewTabButton = window.FindControl<Button>("TabStripNewTabButton")
                 ?? throw new InvalidOperationException("TabStripNewTabButton was not found.");
             PathIcon tabStripNewTabIcon = window.FindControl<PathIcon>("TabStripNewTabIcon")
@@ -539,9 +553,46 @@ public class MainWindowViewModelFlowTests
             Assert.Contains("searchField", topSearchBox.Classes);
             Assert.Contains("iconButton", topSearchApplyButton.Classes);
             Assert.Contains("iconButton", topSearchPreviousButton.Classes);
+            Assert.Contains("searchStatusChip", topSearchStatusIdleChip.Classes);
+            Assert.Contains("searchStatusIdle", topSearchStatusIdleChip.Classes);
+            Assert.Contains("searchStatusIcon", topSearchStatusIdleIcon.Classes);
+            Assert.Contains("searchStatusText", topSearchStatusIdleText.Classes);
+            Assert.True(topSearchStatusIdleChip.IsVisible);
+            Assert.False(topSearchStatusMatchesChip.IsVisible);
+            Assert.False(topSearchStatusNoMatchesChip.IsVisible);
+            Assert.False(topSearchStatusIdleChip.IsHitTestVisible);
+            Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(topSearchStatusIdleChip));
+            Assert.Equal("Idle", topSearchStatusIdleText.Text);
+            Assert.Equal(viewModel.SearchResultText, ToolTip.GetTip(topSearchStatusIdleChip));
+            Assert.True(
+                topSearchStatusIdleChip.Opacity < 0.8,
+                $"Expected idle search status to be visually muted. Opacity={topSearchStatusIdleChip.Opacity}.");
             Assert.Contains("tabStripNewTab", tabStripNewTabButton.Classes);
             Assert.Contains("tabStripNewTabIcon", tabStripNewTabIcon.Classes);
             Assert.Same(viewModel.NewTabCommand, tabStripNewTabButton.Command);
+
+            viewModel.SetSearchState("needle", total: 2, selected: 0, usesNativeScrollback: true);
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+
+            Assert.False(topSearchStatusIdleChip.IsVisible);
+            Assert.True(topSearchStatusMatchesChip.IsVisible);
+            Assert.False(topSearchStatusNoMatchesChip.IsVisible);
+            Assert.Contains("searchStatusMatches", topSearchStatusMatchesChip.Classes);
+            Assert.Equal("1/2", topSearchStatusMatchesText.Text);
+            Assert.Equal(viewModel.SearchResultText, ToolTip.GetTip(topSearchStatusMatchesChip));
+
+            viewModel.SetSearchState("missing", total: 0, selected: 0, usesNativeScrollback: false);
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+
+            Assert.False(topSearchStatusIdleChip.IsVisible);
+            Assert.False(topSearchStatusMatchesChip.IsVisible);
+            Assert.True(topSearchStatusNoMatchesChip.IsVisible);
+            Assert.Contains("searchStatusNoMatches", topSearchStatusNoMatchesChip.Classes);
+            Assert.Equal("No matches", topSearchStatusNoMatchesText.Text);
+            Assert.Equal(viewModel.SearchResultText, ToolTip.GetTip(topSearchStatusNoMatchesChip));
+
             Assert.True(topSearchPanel.Bounds.Width > 0);
             Assert.True(tabStripNewTabButton.Bounds.Width > 0);
             Assert.True(
@@ -1679,16 +1730,31 @@ public class MainWindowViewModelFlowTests
         Assert.True(viewModel.CanApplySearch);
         Assert.True(viewModel.CanAdvanceSearch);
         Assert.True(viewModel.CanClearSearch);
+        Assert.False(viewModel.IsSearchIdle);
+        Assert.True(viewModel.HasSearchMatches);
+        Assert.False(viewModel.HasSearchNoMatches);
+        Assert.Equal("2/3", viewModel.SearchStatusSummaryText);
         Assert.Equal("2/3 matches · native scrollback", viewModel.SearchResultText);
         Assert.True(viewModel.ShowGhosttyDiagnostics);
         Assert.Equal("Hide Diagnostics", viewModel.GhosttyDiagnosticsButtonText);
         Assert.Equal("SIMD: yes", viewModel.GhosttyDiagnosticsText);
+
+        viewModel.SetSearchState("ghostty", total: 0, selected: 0, usesNativeScrollback: true);
+
+        Assert.False(viewModel.IsSearchIdle);
+        Assert.False(viewModel.HasSearchMatches);
+        Assert.True(viewModel.HasSearchNoMatches);
+        Assert.Equal("No matches", viewModel.SearchStatusSummaryText);
 
         viewModel.ClearSearchState();
         viewModel.SetGhosttyDiagnostics(show: false, text: string.Empty);
 
         Assert.False(viewModel.CanAdvanceSearch);
         Assert.False(viewModel.CanClearSearch);
+        Assert.True(viewModel.IsSearchIdle);
+        Assert.False(viewModel.HasSearchMatches);
+        Assert.False(viewModel.HasSearchNoMatches);
+        Assert.Equal("Idle", viewModel.SearchStatusSummaryText);
         Assert.Equal("Search idle", viewModel.SearchResultText);
         Assert.False(viewModel.ShowGhosttyDiagnostics);
         Assert.Equal("Native Diagnostics", viewModel.GhosttyDiagnosticsButtonText);

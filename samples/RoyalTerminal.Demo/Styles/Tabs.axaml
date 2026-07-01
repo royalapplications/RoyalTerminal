@@ -202,6 +202,12 @@
     <Setter Property="Foreground" Value="{DynamicResource ShellTextMutedBrush}" />
   </Style>
 
+  <Style Selector="TextBlock.searchStatusText">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource ShellTextMutedBrush}" />
+    <Setter Property="MaxWidth" Value="72" />
+  </Style>
+
   <Style Selector="TextBlock.muted">
     <Setter Property="FontSize" Value="11" />
     <Setter Property="Foreground" Value="{DynamicResource ShellTextSubtleBrush}" />
@@ -446,6 +452,12 @@
     <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
   </Style>
 
+  <Style Selector="PathIcon.searchStatusIcon">
+    <Setter Property="Width" Value="14" />
+    <Setter Property="Height" Value="14" />
+    <Setter Property="Foreground" Value="{DynamicResource ShellTextMutedBrush}" />
+  </Style>
+
   <Style Selector="PathIcon.railIcon">
     <Setter Property="Width" Value="18" />
     <Setter Property="Height" Value="18" />
@@ -461,6 +473,12 @@
   <Style Selector="StackPanel.iconLabel">
     <Setter Property="Orientation" Value="Horizontal" />
     <Setter Property="Spacing" Value="6" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="StackPanel.searchStatusContent">
+    <Setter Property="Orientation" Value="Horizontal" />
+    <Setter Property="Spacing" Value="5" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
@@ -610,6 +628,49 @@
 
   <Style Selector="TextBox.searchField:focus">
     <Setter Property="BorderBrush" Value="{DynamicResource ShellAccentBrush}" />
+  </Style>
+
+  <Style Selector="Border.searchStatusChip">
+    <Setter Property="Height" Value="28" />
+    <Setter Property="MaxWidth" Value="112" />
+    <Setter Property="Padding" Value="7,0" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+
+  <Style Selector="Border.searchStatusIdle">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="Opacity" Value="0.68" />
+  </Style>
+
+  <Style Selector="Border.searchStatusMatches">
+    <Setter Property="Background" Value="#1A68D391" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ShellSuccessBrush}" />
+  </Style>
+
+  <Style Selector="Border.searchStatusNoMatches">
+    <Setter Property="Background" Value="#1AF2C94C" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ShellWarningBrush}" />
+  </Style>
+
+  <Style Selector="Border.searchStatusMatches PathIcon.searchStatusIcon">
+    <Setter Property="Foreground" Value="{DynamicResource ShellSuccessBrush}" />
+  </Style>
+
+  <Style Selector="Border.searchStatusMatches TextBlock.searchStatusText">
+    <Setter Property="Foreground" Value="{DynamicResource ShellSuccessBrush}" />
+  </Style>
+
+  <Style Selector="Border.searchStatusNoMatches PathIcon.searchStatusIcon">
+    <Setter Property="Foreground" Value="{DynamicResource ShellWarningBrush}" />
+  </Style>
+
+  <Style Selector="Border.searchStatusNoMatches TextBlock.searchStatusText">
+    <Setter Property="Foreground" Value="{DynamicResource ShellWarningBrush}" />
   </Style>
 
   <Style Selector="ListBox.launcherList">

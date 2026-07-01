@@ -944,7 +944,7 @@ public sealed class MainWindowViewModel : ReactiveObject
             this.RaiseAndSetIfChanged(ref _searchQuery, value);
             this.RaisePropertyChanged(nameof(CanApplySearch));
             this.RaisePropertyChanged(nameof(CanClearSearch));
-            this.RaisePropertyChanged(nameof(SearchResultText));
+            RaiseSearchStatusChanged();
         }
     }
 
@@ -953,6 +953,33 @@ public sealed class MainWindowViewModel : ReactiveObject
     public bool CanAdvanceSearch => _searchApplied && _searchMatchTotal > 0;
 
     public bool CanClearSearch => !string.IsNullOrWhiteSpace(SearchQuery) || _searchApplied;
+
+    public bool IsSearchIdle => !_searchApplied || string.IsNullOrWhiteSpace(SearchQuery);
+
+    public bool HasSearchMatches => !IsSearchIdle && _searchMatchTotal > 0;
+
+    public bool HasSearchNoMatches => !IsSearchIdle && _searchMatchTotal <= 0;
+
+    public string SearchStatusSummaryText
+    {
+        get
+        {
+            if (IsSearchIdle)
+            {
+                return "Idle";
+            }
+
+            if (_searchMatchTotal <= 0)
+            {
+                return "No matches";
+            }
+
+            int selectedDisplay = Math.Clamp(_searchMatchSelected + 1, 1, _searchMatchTotal);
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"{selectedDisplay}/{_searchMatchTotal}");
+        }
+    }
 
     public string SearchResultText
     {
@@ -2504,6 +2531,15 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         this.RaisePropertyChanged(nameof(CanAdvanceSearch));
         this.RaisePropertyChanged(nameof(CanClearSearch));
+        RaiseSearchStatusChanged();
+    }
+
+    private void RaiseSearchStatusChanged()
+    {
+        this.RaisePropertyChanged(nameof(IsSearchIdle));
+        this.RaisePropertyChanged(nameof(HasSearchMatches));
+        this.RaisePropertyChanged(nameof(HasSearchNoMatches));
+        this.RaisePropertyChanged(nameof(SearchStatusSummaryText));
         this.RaisePropertyChanged(nameof(SearchResultText));
     }
 
