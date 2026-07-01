@@ -4122,7 +4122,6 @@ internal sealed class MainWindowController
         Color background = ToAvaloniaColor(theme.DefaultBackground);
         Color foreground = ToAvaloniaColor(theme.DefaultForeground);
         Color accent = ToAvaloniaColor(theme.Palette[4]);
-        Color softAccent = BlendColor(background, accent, 0.18);
         Color divider = BlendColor(background, foreground, 0.24);
         Color toolbarBackground = BlendColor(background, foreground, 0.06);
         Color tabHeaderBackground = BlendColor(background, foreground, 0.10);
@@ -4134,7 +4133,7 @@ internal sealed class MainWindowController
             ToolbarDivider: divider,
             ToolbarForeground: foreground,
             TabStripBackground: BlendColor(background, foreground, 0.04),
-            StatusBarBackground: softAccent,
+            StatusBarBackground: toolbarBackground,
             StatusBarForeground: foreground,
             TabHeaderBackground: tabHeaderBackground,
             TabHeaderForeground: foreground,

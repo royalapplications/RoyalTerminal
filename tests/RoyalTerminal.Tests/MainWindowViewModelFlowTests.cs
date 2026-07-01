@@ -12,6 +12,7 @@ using Avalonia.Controls.Chrome;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Avalonia.Services;
@@ -53,6 +54,21 @@ public class MainWindowViewModelFlowTests
 
         Assert.Equal("_About RoyalTerminal", Assert.IsType<NativeMenuItem>(applicationMenu.Items[0]).Header);
         Assert.False(ContainsNativeMenuItem(applicationMenu, "About Avalonia"));
+    }
+
+    [AvaloniaFact]
+    public void DemoApp_ProvidesRoyalTerminalLogoGeometry()
+    {
+        App app = new();
+
+        app.Initialize();
+
+        Assert.True(app.Resources.TryGetResource("Icon.RoyalTerminalLogo", null, out object? resource));
+
+        Geometry geometry = Assert.IsAssignableFrom<Geometry>(resource);
+
+        Assert.True(geometry.Bounds.Width > 0);
+        Assert.True(geometry.Bounds.Height > 0);
     }
 
     [AvaloniaFact]
@@ -567,6 +583,8 @@ public class MainWindowViewModelFlowTests
 
         try
         {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
             Grid topCommandBar = window.FindControl<Grid>("TopCommandBar")
                 ?? throw new InvalidOperationException("TopCommandBar was not found.");
             Grid titleBarLayout = window.FindControl<Grid>("TitleBarLayout")
@@ -585,6 +603,16 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("MacTrafficLightReserve was not found.");
             TextBox topSearchBox = window.FindControl<TextBox>("TopSearchBox")
                 ?? throw new InvalidOperationException("TopSearchBox was not found.");
+            Grid statusBarLayout = window.FindControl<Grid>("StatusBarLayout")
+                ?? throw new InvalidOperationException("StatusBarLayout was not found.");
+            Border statusRenderChip = window.FindControl<Border>("StatusRenderChip")
+                ?? throw new InvalidOperationException("StatusRenderChip was not found.");
+            Border statusSessionChip = window.FindControl<Border>("StatusSessionChip")
+                ?? throw new InvalidOperationException("StatusSessionChip was not found.");
+            TextBlock statusSessionTextBlock = window.FindControl<TextBlock>("StatusSessionTextBlock")
+                ?? throw new InvalidOperationException("StatusSessionTextBlock was not found.");
+            Border statusDimensionsChip = window.FindControl<Border>("StatusDimensionsChip")
+                ?? throw new InvalidOperationException("StatusDimensionsChip was not found.");
 
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
@@ -627,8 +655,20 @@ public class MainWindowViewModelFlowTests
             Assert.DoesNotContain(
                 titleBarBrandDragZone.GetVisualDescendants().OfType<TextBlock>(),
                 textBlock => string.Equals(textBlock.Text, "RoyalTerminal", StringComparison.Ordinal));
+            Assert.DoesNotContain(
+                titleBarBrandDragZone.GetVisualDescendants().OfType<TextBlock>(),
+                textBlock => string.Equals(textBlock.Text, viewModel.ActiveSessionDisplay, StringComparison.Ordinal));
             Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(topSearchBox));
             Assert.Null(window.FindControl<Button>("TopNewTabButton"));
+            Assert.True(statusBarLayout.ClipToBounds);
+            Assert.Contains("statusChip", statusRenderChip.Classes);
+            Assert.Contains("statusRenderChip", statusRenderChip.Classes);
+            Assert.Contains("statusChip", statusSessionChip.Classes);
+            Assert.Contains("statusSessionChip", statusSessionChip.Classes);
+            Assert.Contains("statusChip", statusDimensionsChip.Classes);
+            Assert.Contains("statusDimensionsChip", statusDimensionsChip.Classes);
+            Assert.Equal(viewModel.ActiveSessionDisplay, statusSessionTextBlock.Text);
+            Assert.Equal(viewModel.ActiveSessionDisplay, ToolTip.GetTip(statusSessionChip));
             Assert.True(
                 titleBar.Bounds.Width >= topCommandBar.Bounds.Width,
                 $"Expected titlebar surface to host the top command bar. TitleBar={titleBar.Bounds}, TopBar={topCommandBar.Bounds}.");
@@ -1592,6 +1632,7 @@ public class MainWindowViewModelFlowTests
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
             Assert.True(replayStatusControls.IsVisible);
+            Assert.Contains("statusChip", replayStatusControls.Classes);
             Assert.Contains("replayTransport", replayStatusControls.Classes);
             Assert.Contains("statusIconButton", replayPlayPauseButton.Classes);
             Assert.Contains("statusIconButton", replayStopButton.Classes);

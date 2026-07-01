@@ -339,14 +339,7 @@
                         Classes="titleBrandIcon">
                   <PathIcon x:Name="TitleBarBrandPathIcon"
                             Classes="titleBrandIconGlyph"
-                            Data="{StaticResource Icon.WindowRegular}" />
-                </Border>
-                <Border Classes="badge"
-                        MaxWidth="78">
-                  <TextBlock Text="{Binding ActiveSessionDisplay}"
-                             Classes="caption"
-                             TextTrimming="CharacterEllipsis"
-                             VerticalAlignment="Center" />
+                            Data="{StaticResource Icon.RoyalTerminalLogo}" />
                 </Border>
               </StackPanel>
             </Border>
@@ -787,18 +780,37 @@
         </Grid>
 
         <Border Grid.Row="2" Classes="statusBar">
-          <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="14">
-            <TextBlock Text="{Binding TextRenderPipelineIndicatorText}"
-                       Classes="statusText"
-                       VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1"
+          <Grid x:Name="StatusBarLayout"
+                ColumnDefinitions="Auto,Auto,*,Auto,Auto"
+                ColumnSpacing="8"
+                ClipToBounds="True">
+            <Border x:Name="StatusRenderChip"
+                    Classes="statusChip statusRenderChip"
+                    VerticalAlignment="Center">
+              <TextBlock Text="{Binding TextRenderPipelineIndicatorText}"
+                         Classes="statusText statusChipText"
+                         VerticalAlignment="Center" />
+            </Border>
+            <Border x:Name="StatusSessionChip"
+                    Grid.Column="1"
+                    Classes="statusChip statusSessionChip"
+                    ToolTip.Tip="{Binding ActiveSessionDisplay}"
+                    VerticalAlignment="Center">
+              <TextBlock x:Name="StatusSessionTextBlock"
+                         Text="{Binding ActiveSessionDisplay}"
+                         Classes="statusText statusChipText"
+                         MaxWidth="144"
+                         TextTrimming="CharacterEllipsis"
+                         VerticalAlignment="Center" />
+            </Border>
+            <TextBlock Grid.Column="2"
                        Text="{Binding StatusText}"
                        Classes="statusText"
                        TextTrimming="CharacterEllipsis"
                        VerticalAlignment="Center" />
             <Border x:Name="ReplayStatusControls"
-                    Grid.Column="2"
-                    Classes="replayTransport"
+                    Grid.Column="3"
+                    Classes="statusChip replayTransport"
                     Height="24"
                     MaxHeight="24"
                     ClipToBounds="True"
@@ -863,10 +875,14 @@
                            VerticalAlignment="Center" />
               </Grid>
             </Border>
-            <TextBlock Grid.Column="3"
-                       Text="{Binding DimensionsText}"
-                       Classes="statusText"
-                       VerticalAlignment="Center" />
+            <Border x:Name="StatusDimensionsChip"
+                    Grid.Column="4"
+                    Classes="statusChip statusDimensionsChip"
+                    VerticalAlignment="Center">
+              <TextBlock Text="{Binding DimensionsText}"
+                         Classes="statusText statusChipText"
+                         VerticalAlignment="Center" />
+            </Border>
           </Grid>
         </Border>
       </Grid>

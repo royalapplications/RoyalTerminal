@@ -44,7 +44,7 @@
 
   <Style Selector="Border.statusBar">
     <Setter Property="Height" Value="{DynamicResource Shell.StatusHeight}" />
-    <Setter Property="Padding" Value="10,3" />
+    <Setter Property="Padding" Value="8,3" />
     <Setter Property="Background" Value="{DynamicResource StatusBarBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
     <Setter Property="BorderThickness" Value="0,1,0,0" />
@@ -212,15 +212,24 @@
     <Setter Property="Foreground" Value="{DynamicResource StatusBarForegroundBrush}" />
   </Style>
 
+  <Style Selector="Border.statusChip">
+    <Setter Property="Height" Value="24" />
+    <Setter Property="Padding" Value="8,1" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
+  </Style>
+
+  <Style Selector="TextBlock.statusChipText">
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+  </Style>
+
   <Style Selector="Border.replayTransport">
     <Setter Property="Height" Value="24" />
     <Setter Property="MinWidth" Value="358" />
     <Setter Property="MaxWidth" Value="382" />
     <Setter Property="Padding" Value="5,1" />
-    <Setter Property="Background" Value="{DynamicResource ShellSurfaceSubtleBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
   </Style>
 
   <Style Selector="Button.statusButton">
