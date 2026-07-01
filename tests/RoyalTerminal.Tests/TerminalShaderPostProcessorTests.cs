@@ -3,7 +3,7 @@
 // RoyalTerminal.Tests - Terminal framebuffer shader tests.
 
 using RoyalTerminal.Avalonia.Rendering;
-using RoyalTerminal.Demo.Services;
+using RoyalTerminal.Avalonia.App.Services;
 using RoyalTerminal.Shaders;
 using SkiaSharp;
 using Xunit;
@@ -13,7 +13,7 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalShaderPostProcessorTests
 {
     [Fact]
-    public void DemoShaderSamples_Compile()
+    public void SharedShellShaderSamples_Compile()
     {
         foreach (TerminalShaderSampleOption option in TerminalShaderSampleCatalog.Options)
         {

@@ -1,6 +1,6 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Tests — UI flow tests for demo ViewModel command surface.
+// RoyalTerminal.Tests — UI flow tests for shared shell ViewModel command surface.
 
 using System.Reactive;
 using System.Reactive.Linq;
@@ -15,15 +15,16 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Avalonia.Services;
-using RoyalTerminal.Demo;
-using RoyalTerminal.Demo.Services;
-using RoyalTerminal.Demo.ViewModels;
-using RoyalTerminal.Demo.Views;
+using RoyalTerminal.Avalonia.App;
+using RoyalTerminal.Avalonia.App.Services;
+using RoyalTerminal.Avalonia.App.ViewModels;
+using RoyalTerminal.Avalonia.App.Views;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using ReactiveUI;
@@ -36,7 +37,7 @@ namespace RoyalTerminal.Tests;
 public class MainWindowViewModelFlowTests
 {
     [Fact]
-    public void DemoAssembly_UsesRoyalTerminalProductTitle()
+    public void SharedShellAssembly_UsesRoyalTerminalProductTitle()
     {
         Assembly assembly = typeof(MainWindow).Assembly;
 
@@ -45,29 +46,12 @@ public class MainWindowViewModelFlowTests
     }
 
     [AvaloniaFact]
-    public void DemoApp_UsesRoyalTerminalApplicationName()
+    public void SharedShellTheme_ProvidesRoyalTerminalLogoGeometry()
     {
-        App app = new();
+        ResourceDictionary resources = Assert.IsType<ResourceDictionary>(
+            AvaloniaXamlLoader.Load(new Uri("avares://RoyalTerminal.Avalonia.App/Styles/Theme.axaml")));
 
-        app.Initialize();
-
-        Assert.Equal("RoyalTerminal", app.Name);
-
-        NativeMenu applicationMenu = NativeMenu.GetMenu(app)
-            ?? throw new InvalidOperationException("Application native menu was not initialized from App.axaml.");
-
-        Assert.Equal("_About RoyalTerminal", Assert.IsType<NativeMenuItem>(applicationMenu.Items[0]).Header);
-        Assert.False(ContainsNativeMenuItem(applicationMenu, "About Avalonia"));
-    }
-
-    [AvaloniaFact]
-    public void DemoApp_ProvidesRoyalTerminalLogoGeometry()
-    {
-        App app = new();
-
-        app.Initialize();
-
-        Assert.True(app.Resources.TryGetResource("Icon.RoyalTerminalLogo", null, out object? resource));
+        Assert.True(resources.TryGetResource("Icon.RoyalTerminalLogo", null, out object? resource));
 
         Geometry geometry = Assert.IsAssignableFrom<Geometry>(resource);
 
@@ -232,7 +216,7 @@ public class MainWindowViewModelFlowTests
     }
 
     [AvaloniaFact]
-    public void MainWindow_NativeMenu_ExposesDemoCommandSurface()
+    public void MainWindow_NativeMenu_ExposesSharedShellCommandSurface()
     {
         MainWindow window = new();
 
@@ -476,9 +460,9 @@ public class MainWindowViewModelFlowTests
 
         try
         {
-            AvaloniaPath logo = window.FindControl<AvaloniaPath>("AboutLogoGlyph")
+            AvaloniaPath logo = FindShellControl<AvaloniaPath>(window, "AboutLogoGlyph")
                 ?? throw new InvalidOperationException("AboutLogoGlyph was not found.");
-            TextBlock productName = window.FindControl<TextBlock>("AboutProductName")
+            TextBlock productName = FindShellControl<TextBlock>(window, "AboutProductName")
                 ?? throw new InvalidOperationException("AboutProductName was not found.");
 
             window.Measure(new Size(window.Width, window.Height));
@@ -505,9 +489,9 @@ public class MainWindowViewModelFlowTests
         {
             MainWindowViewModel viewModel = window.ViewModel
                 ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
-            Button profileLauncherButton = window.FindControl<Button>("ProfileLauncherButton")
+            Button profileLauncherButton = FindShellControl<Button>(window, "ProfileLauncherButton")
                 ?? throw new InvalidOperationException("ProfileLauncherButton was not found.");
-            Button commandHistoryButton = window.FindControl<Button>("CommandHistoryButton")
+            Button commandHistoryButton = FindShellControl<Button>(window, "CommandHistoryButton")
                 ?? throw new InvalidOperationException("CommandHistoryButton was not found.");
 
             Assert.Same(viewModel.RefreshSessionLauncherCommand, profileLauncherButton.Command);
@@ -532,50 +516,50 @@ public class MainWindowViewModelFlowTests
         {
             MainWindowViewModel viewModel = window.ViewModel
                 ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
-            NativeMenuBar mainMenuBar = window.FindControl<NativeMenuBar>("MainMenuBar")
+            NativeMenuBar mainMenuBar = FindShellControl<NativeMenuBar>(window, "MainMenuBar")
                 ?? throw new InvalidOperationException("MainMenuBar was not found.");
-            Grid topCommandBar = window.FindControl<Grid>("TopCommandBar")
+            Grid topCommandBar = FindShellControl<Grid>(window, "TopCommandBar")
                 ?? throw new InvalidOperationException("TopCommandBar was not found.");
-            Grid topSearchPanel = window.FindControl<Grid>("TopSearchPanel")
+            Grid topSearchPanel = FindShellControl<Grid>(window, "TopSearchPanel")
                 ?? throw new InvalidOperationException("TopSearchPanel was not found.");
-            Grid tabStripLayout = window.FindControl<Grid>("TabStripLayout")
+            Grid tabStripLayout = FindShellControl<Grid>(window, "TabStripLayout")
                 ?? throw new InvalidOperationException("TabStripLayout was not found.");
-            TextBox topSearchBox = window.FindControl<TextBox>("TopSearchBox")
+            TextBox topSearchBox = FindShellControl<TextBox>(window, "TopSearchBox")
                 ?? throw new InvalidOperationException("TopSearchBox was not found.");
-            Button topSearchApplyButton = window.FindControl<Button>("TopSearchApplyButton")
+            Button topSearchApplyButton = FindShellControl<Button>(window, "TopSearchApplyButton")
                 ?? throw new InvalidOperationException("TopSearchApplyButton was not found.");
-            Button topSearchPreviousButton = window.FindControl<Button>("TopSearchPreviousButton")
+            Button topSearchPreviousButton = FindShellControl<Button>(window, "TopSearchPreviousButton")
                 ?? throw new InvalidOperationException("TopSearchPreviousButton was not found.");
-            Border topSearchStatusIdleChip = window.FindControl<Border>("TopSearchStatusIdleChip")
+            Border topSearchStatusIdleChip = FindShellControl<Border>(window, "TopSearchStatusIdleChip")
                 ?? throw new InvalidOperationException("TopSearchStatusIdleChip was not found.");
-            Border topSearchStatusMatchesChip = window.FindControl<Border>("TopSearchStatusMatchesChip")
+            Border topSearchStatusMatchesChip = FindShellControl<Border>(window, "TopSearchStatusMatchesChip")
                 ?? throw new InvalidOperationException("TopSearchStatusMatchesChip was not found.");
-            Border topSearchStatusNoMatchesChip = window.FindControl<Border>("TopSearchStatusNoMatchesChip")
+            Border topSearchStatusNoMatchesChip = FindShellControl<Border>(window, "TopSearchStatusNoMatchesChip")
                 ?? throw new InvalidOperationException("TopSearchStatusNoMatchesChip was not found.");
-            PathIcon topSearchStatusIdleIcon = window.FindControl<PathIcon>("TopSearchStatusIdleIcon")
+            PathIcon topSearchStatusIdleIcon = FindShellControl<PathIcon>(window, "TopSearchStatusIdleIcon")
                 ?? throw new InvalidOperationException("TopSearchStatusIdleIcon was not found.");
-            TextBlock topSearchStatusIdleText = window.FindControl<TextBlock>("TopSearchStatusIdleText")
+            TextBlock topSearchStatusIdleText = FindShellControl<TextBlock>(window, "TopSearchStatusIdleText")
                 ?? throw new InvalidOperationException("TopSearchStatusIdleText was not found.");
-            TextBlock topSearchStatusMatchesText = window.FindControl<TextBlock>("TopSearchStatusMatchesText")
+            TextBlock topSearchStatusMatchesText = FindShellControl<TextBlock>(window, "TopSearchStatusMatchesText")
                 ?? throw new InvalidOperationException("TopSearchStatusMatchesText was not found.");
-            TextBlock topSearchStatusNoMatchesText = window.FindControl<TextBlock>("TopSearchStatusNoMatchesText")
+            TextBlock topSearchStatusNoMatchesText = FindShellControl<TextBlock>(window, "TopSearchStatusNoMatchesText")
                 ?? throw new InvalidOperationException("TopSearchStatusNoMatchesText was not found.");
-            Button tabStripNewTabButton = window.FindControl<Button>("TabStripNewTabButton")
+            Button tabStripNewTabButton = FindShellControl<Button>(window, "TabStripNewTabButton")
                 ?? throw new InvalidOperationException("TabStripNewTabButton was not found.");
-            PathIcon tabStripNewTabIcon = window.FindControl<PathIcon>("TabStripNewTabIcon")
+            PathIcon tabStripNewTabIcon = FindShellControl<PathIcon>(window, "TabStripNewTabIcon")
                 ?? throw new InvalidOperationException("TabStripNewTabIcon was not found.");
-            ScrollViewer tabStripScrollViewer = window.FindControl<ScrollViewer>("TabStripScrollViewer")
+            ScrollViewer tabStripScrollViewer = FindShellControl<ScrollViewer>(window, "TabStripScrollViewer")
                 ?? throw new InvalidOperationException("TabStripScrollViewer was not found.");
-            RepeatButton tabStripScrollLeftButton = window.FindControl<RepeatButton>("TabStripScrollLeftButton")
+            RepeatButton tabStripScrollLeftButton = FindShellControl<RepeatButton>(window, "TabStripScrollLeftButton")
                 ?? throw new InvalidOperationException("TabStripScrollLeftButton was not found.");
-            RepeatButton tabStripScrollRightButton = window.FindControl<RepeatButton>("TabStripScrollRightButton")
+            RepeatButton tabStripScrollRightButton = FindShellControl<RepeatButton>(window, "TabStripScrollRightButton")
                 ?? throw new InvalidOperationException("TabStripScrollRightButton was not found.");
 
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
             Assert.NotNull(mainMenuBar);
-            Assert.Null(window.FindControl<Button>("TopNewTabButton"));
+            Assert.Null(FindShellControl<Button>(window, "TopNewTabButton"));
             Assert.True(topCommandBar.ClipToBounds);
             Assert.True(topSearchPanel.ClipToBounds);
             Assert.True(topSearchPanel.IsVisible);
@@ -683,11 +667,11 @@ public class MainWindowViewModelFlowTests
 
         try
         {
-            Grid topCommandBar = window.FindControl<Grid>("TopCommandBar")
+            Grid topCommandBar = FindShellControl<Grid>(window, "TopCommandBar")
                 ?? throw new InvalidOperationException("TopCommandBar was not found.");
-            Grid topSearchPanel = window.FindControl<Grid>("TopSearchPanel")
+            Grid topSearchPanel = FindShellControl<Grid>(window, "TopSearchPanel")
                 ?? throw new InvalidOperationException("TopSearchPanel was not found.");
-            TextBox topSearchBox = window.FindControl<TextBox>("TopSearchBox")
+            TextBox topSearchBox = FindShellControl<TextBox>(window, "TopSearchBox")
                 ?? throw new InvalidOperationException("TopSearchBox was not found.");
 
             window.Measure(new Size(window.Width, window.Height));
@@ -730,17 +714,17 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
             NativeMenu menu = NativeMenu.GetMenu(window)
                 ?? throw new InvalidOperationException("MainWindow native menu was not found.");
-            Border shellRail = window.FindControl<Border>("ShellRail")
+            Border shellRail = FindShellControl<Border>(window, "ShellRail")
                 ?? throw new InvalidOperationException("ShellRail was not found.");
-            Grid topSearchPanel = window.FindControl<Grid>("TopSearchPanel")
+            Grid topSearchPanel = FindShellControl<Grid>(window, "TopSearchPanel")
                 ?? throw new InvalidOperationException("TopSearchPanel was not found.");
-            Border statusBar = window.FindControl<Border>("StatusBar")
+            Border statusBar = FindShellControl<Border>(window, "StatusBar")
                 ?? throw new InvalidOperationException("StatusBar was not found.");
-            ContentControl titleBarTabStripHost = window.FindControl<ContentControl>("TitleBarTabStripHost")
+            ContentControl titleBarTabStripHost = FindShellControl<ContentControl>(window, "TitleBarTabStripHost")
                 ?? throw new InvalidOperationException("TitleBarTabStripHost was not found.");
-            ContentControl bodyTabStripHost = window.FindControl<ContentControl>("BodyTabStripHost")
+            ContentControl bodyTabStripHost = FindShellControl<ContentControl>(window, "BodyTabStripHost")
                 ?? throw new InvalidOperationException("BodyTabStripHost was not found.");
-            Border titleBarBrandIcon = window.FindControl<Border>("TitleBarBrandIcon")
+            Border titleBarBrandIcon = FindShellControl<Border>(window, "TitleBarBrandIcon")
                 ?? throw new InvalidOperationException("TitleBarBrandIcon was not found.");
             NativeMenuItem showLeftPanelItem = FindNativeMenuItem(menu, "Show _Left Panel");
             NativeMenuItem showSearchPanelItem = FindNativeMenuItem(menu, "Show _Search Panel");
@@ -814,33 +798,33 @@ public class MainWindowViewModelFlowTests
         {
             MainWindowViewModel viewModel = window.ViewModel
                 ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
-            Grid topCommandBar = window.FindControl<Grid>("TopCommandBar")
+            Grid topCommandBar = FindShellControl<Grid>(window, "TopCommandBar")
                 ?? throw new InvalidOperationException("TopCommandBar was not found.");
-            Grid titleBarLayout = window.FindControl<Grid>("TitleBarLayout")
+            Grid titleBarLayout = FindShellControl<Grid>(window, "TitleBarLayout")
                 ?? throw new InvalidOperationException("TitleBarLayout was not found.");
-            Border titleBarDragSurface = window.FindControl<Border>("TitleBarDragSurface")
+            Border titleBarDragSurface = FindShellControl<Border>(window, "TitleBarDragSurface")
                 ?? throw new InvalidOperationException("TitleBarDragSurface was not found.");
-            Border titleBarBrandDragZone = window.FindControl<Border>("TitleBarBrandDragZone")
+            Border titleBarBrandDragZone = FindShellControl<Border>(window, "TitleBarBrandDragZone")
                 ?? throw new InvalidOperationException("TitleBarBrandDragZone was not found.");
-            StackPanel titleBarBrandContent = window.FindControl<StackPanel>("TitleBarBrandContent")
+            StackPanel titleBarBrandContent = FindShellControl<StackPanel>(window, "TitleBarBrandContent")
                 ?? throw new InvalidOperationException("TitleBarBrandContent was not found.");
-            Border titleBarBrandIcon = window.FindControl<Border>("TitleBarBrandIcon")
+            Border titleBarBrandIcon = FindShellControl<Border>(window, "TitleBarBrandIcon")
                 ?? throw new InvalidOperationException("TitleBarBrandIcon was not found.");
-            PathIcon titleBarBrandPathIcon = window.FindControl<PathIcon>("TitleBarBrandPathIcon")
+            PathIcon titleBarBrandPathIcon = FindShellControl<PathIcon>(window, "TitleBarBrandPathIcon")
                 ?? throw new InvalidOperationException("TitleBarBrandPathIcon was not found.");
-            Border macTrafficLightReserve = window.FindControl<Border>("MacTrafficLightReserve")
+            Border macTrafficLightReserve = FindShellControl<Border>(window, "MacTrafficLightReserve")
                 ?? throw new InvalidOperationException("MacTrafficLightReserve was not found.");
-            TextBox topSearchBox = window.FindControl<TextBox>("TopSearchBox")
+            TextBox topSearchBox = FindShellControl<TextBox>(window, "TopSearchBox")
                 ?? throw new InvalidOperationException("TopSearchBox was not found.");
-            Grid statusBarLayout = window.FindControl<Grid>("StatusBarLayout")
+            Grid statusBarLayout = FindShellControl<Grid>(window, "StatusBarLayout")
                 ?? throw new InvalidOperationException("StatusBarLayout was not found.");
-            Border statusRenderChip = window.FindControl<Border>("StatusRenderChip")
+            Border statusRenderChip = FindShellControl<Border>(window, "StatusRenderChip")
                 ?? throw new InvalidOperationException("StatusRenderChip was not found.");
-            Border statusSessionChip = window.FindControl<Border>("StatusSessionChip")
+            Border statusSessionChip = FindShellControl<Border>(window, "StatusSessionChip")
                 ?? throw new InvalidOperationException("StatusSessionChip was not found.");
-            TextBlock statusSessionTextBlock = window.FindControl<TextBlock>("StatusSessionTextBlock")
+            TextBlock statusSessionTextBlock = FindShellControl<TextBlock>(window, "StatusSessionTextBlock")
                 ?? throw new InvalidOperationException("StatusSessionTextBlock was not found.");
-            Border statusDimensionsChip = window.FindControl<Border>("StatusDimensionsChip")
+            Border statusDimensionsChip = FindShellControl<Border>(window, "StatusDimensionsChip")
                 ?? throw new InvalidOperationException("StatusDimensionsChip was not found.");
 
             window.Measure(new Size(window.Width, window.Height));
@@ -891,7 +875,7 @@ public class MainWindowViewModelFlowTests
                 titleBarBrandDragZone.GetVisualDescendants().OfType<TextBlock>(),
                 textBlock => string.Equals(textBlock.Text, viewModel.ActiveSessionDisplay, StringComparison.Ordinal));
             Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(topSearchBox));
-            Assert.Null(window.FindControl<Button>("TopNewTabButton"));
+            Assert.Null(FindShellControl<Button>(window, "TopNewTabButton"));
             Assert.True(statusBarLayout.ClipToBounds);
             Assert.Contains("statusChip", statusRenderChip.Classes);
             Assert.Contains("statusRenderChip", statusRenderChip.Classes);
@@ -937,7 +921,7 @@ public class MainWindowViewModelFlowTests
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
-            Border settingsOverlay = window.FindControl<Border>("SettingsOverlay")
+            Border settingsOverlay = FindShellControl<Border>(window, "SettingsOverlay")
                 ?? throw new InvalidOperationException("SettingsOverlay was not found.");
             TerminalSettingsPanel settingsPanel = Assert.Single(
                 settingsOverlay.GetVisualDescendants().OfType<TerminalSettingsPanel>());
@@ -1894,17 +1878,17 @@ public class MainWindowViewModelFlowTests
         {
             MainWindowViewModel viewModel = window.ViewModel
                 ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
-            Border replayStatusControls = window.FindControl<Border>("ReplayStatusControls")
+            Border replayStatusControls = FindShellControl<Border>(window, "ReplayStatusControls")
                 ?? throw new InvalidOperationException("ReplayStatusControls was not found.");
-            Button replayPlayPauseButton = window.FindControl<Button>("ReplayPlayPauseButton")
+            Button replayPlayPauseButton = FindShellControl<Button>(window, "ReplayPlayPauseButton")
                 ?? throw new InvalidOperationException("ReplayPlayPauseButton was not found.");
-            Button replayStopButton = window.FindControl<Button>("ReplayStopButton")
+            Button replayStopButton = FindShellControl<Button>(window, "ReplayStopButton")
                 ?? throw new InvalidOperationException("ReplayStopButton was not found.");
-            Slider replayTimelineSlider = window.FindControl<Slider>("ReplayTimelineSlider")
+            Slider replayTimelineSlider = FindShellControl<Slider>(window, "ReplayTimelineSlider")
                 ?? throw new InvalidOperationException("ReplayTimelineSlider was not found.");
-            TextBlock replayTransportLabelTextBlock = window.FindControl<TextBlock>("ReplayTransportLabelTextBlock")
+            TextBlock replayTransportLabelTextBlock = FindShellControl<TextBlock>(window, "ReplayTransportLabelTextBlock")
                 ?? throw new InvalidOperationException("ReplayTransportLabelTextBlock was not found.");
-            TextBlock replayTimelineTextBlock = window.FindControl<TextBlock>("ReplayTimelineTextBlock")
+            TextBlock replayTimelineTextBlock = FindShellControl<TextBlock>(window, "ReplayTimelineTextBlock")
                 ?? throw new InvalidOperationException("ReplayTimelineTextBlock was not found.");
 
             window.Measure(new Size(window.Width, window.Height));
@@ -2016,11 +2000,11 @@ public class MainWindowViewModelFlowTests
         {
             MainWindowViewModel viewModel = window.ViewModel
                 ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
-            TextBox diagnosticsTextBox = window.FindControl<TextBox>("GhosttyDiagnosticsTextBox")
+            TextBox diagnosticsTextBox = FindShellControl<TextBox>(window, "GhosttyDiagnosticsTextBox")
                 ?? throw new InvalidOperationException("GhosttyDiagnosticsTextBox was not found.");
-            TextBox eventLogTextBox = window.FindControl<TextBox>("EventLogTextBox")
+            TextBox eventLogTextBox = FindShellControl<TextBox>(window, "EventLogTextBox")
                 ?? throw new InvalidOperationException("EventLogTextBox was not found.");
-            Button clearEventLogButton = window.FindControl<Button>("DiagnosticsClearEventLogButton")
+            Button clearEventLogButton = FindShellControl<Button>(window, "DiagnosticsClearEventLogButton")
                 ?? throw new InvalidOperationException("DiagnosticsClearEventLogButton was not found.");
 
             viewModel.SetGhosttyDiagnostics(show: true, text: "SIMD: yes");
@@ -2343,6 +2327,13 @@ public class MainWindowViewModelFlowTests
         }
 
         return false;
+    }
+
+    private static T? FindShellControl<T>(Control root, string name)
+        where T : Control
+    {
+        return root.FindControl<MainView>("MainView")?.FindControl<T>(name)
+            ?? root.FindControl<T>(name);
     }
 
     private static SshHostKeyTrustPromptRequest CreateSshHostKeyPromptRequest()

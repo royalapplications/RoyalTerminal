@@ -1,6 +1,6 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Tests — startup/fallback smoke coverage for demo controller mode routing.
+// RoyalTerminal.Tests — startup/fallback smoke coverage for shared shell controller mode routing.
 
 using System.Reactive.Linq;
 using System.Text;
@@ -20,8 +20,8 @@ using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
-using RoyalTerminal.Demo.Services;
-using RoyalTerminal.Demo.ViewModels;
+using RoyalTerminal.Avalonia.App.Services;
+using RoyalTerminal.Avalonia.App.ViewModels;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.Terminal;
 using ReactiveUI;

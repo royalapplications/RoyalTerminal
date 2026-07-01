@@ -10,8 +10,8 @@ using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
-using RoyalTerminal.Demo.Services;
-using RoyalTerminal.Demo.ViewModels;
+using RoyalTerminal.Avalonia.App.Services;
+using RoyalTerminal.Avalonia.App.ViewModels;
 using RoyalTerminal.Terminal;
 using Xunit;
 
