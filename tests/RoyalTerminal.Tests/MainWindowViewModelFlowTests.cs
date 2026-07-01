@@ -632,6 +632,45 @@ public class MainWindowViewModelFlowTests
     }
 
     [AvaloniaFact]
+    public void MainWindow_TopCommandBar_LimitsSearchPanelWidthAtWideSize()
+    {
+        MainWindow window = new()
+        {
+            Width = 1400,
+            Height = 460,
+        };
+
+        try
+        {
+            Grid topCommandBar = window.FindControl<Grid>("TopCommandBar")
+                ?? throw new InvalidOperationException("TopCommandBar was not found.");
+            Grid topSearchPanel = window.FindControl<Grid>("TopSearchPanel")
+                ?? throw new InvalidOperationException("TopSearchPanel was not found.");
+            TextBox topSearchBox = window.FindControl<TextBox>("TopSearchBox")
+                ?? throw new InvalidOperationException("TopSearchBox was not found.");
+
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+
+            Assert.Equal(HorizontalAlignment.Right, topSearchPanel.HorizontalAlignment);
+            Assert.Equal(640d, topSearchPanel.MaxWidth);
+            Assert.True(
+                topSearchPanel.Bounds.Width <= topSearchPanel.MaxWidth + 0.5,
+                $"Expected search panel width to be capped. Search={topSearchPanel.Bounds}, MaxWidth={topSearchPanel.MaxWidth}.");
+            Assert.True(
+                Math.Abs(topSearchPanel.Bounds.Right - topCommandBar.Bounds.Width) <= 0.5,
+                $"Expected search panel to align to the right edge of the command bar. Search={topSearchPanel.Bounds}, TopBar={topCommandBar.Bounds}.");
+            Assert.True(
+                topSearchBox.Bounds.Width < topCommandBar.Bounds.Width * 0.5,
+                $"Expected search input to remain compact on wide windows. SearchBox={topSearchBox.Bounds}, TopBar={topCommandBar.Bounds}.");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void MainWindow_UsesExtendedClientTitleBarLayout()
     {
         MainWindow window = new()

@@ -348,6 +348,8 @@
                   x:Name="TopSearchPanel"
                   ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
                   ColumnSpacing="4"
+                  MaxWidth="640"
+                  HorizontalAlignment="Right"
                   VerticalAlignment="Center"
                   ClipToBounds="True">
               <TextBox x:Name="TopSearchBox"
