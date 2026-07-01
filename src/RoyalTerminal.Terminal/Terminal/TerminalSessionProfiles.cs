@@ -168,6 +168,11 @@ public sealed record TerminalSessionProfile
     /// Proxy settings.
     /// </summary>
     public TerminalSessionProxySettings Proxy { get; init; } = new();
+
+    /// <summary>
+    /// Profile-scoped command snippets offered by command suggestion providers.
+    /// </summary>
+    public List<TerminalCommandSnippet> CommandSnippets { get; init; } = [];
 }
 
 /// <summary>
