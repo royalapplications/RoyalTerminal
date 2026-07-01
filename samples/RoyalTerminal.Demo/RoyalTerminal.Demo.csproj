@@ -17,31 +17,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\RoyalTerminal.Shaders\RoyalTerminal.Shaders.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia\RoyalTerminal.Avalonia.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia.Settings\RoyalTerminal.Avalonia.Settings.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Vt.Ghostty\RoyalTerminal.Terminal.Vt.Ghostty.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent\RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Raw\RoyalTerminal.Terminal.Transport.Raw.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Telnet\RoyalTerminal.Terminal.Transport.Telnet.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Serial\RoyalTerminal.Terminal.Transport.Serial.csproj" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp.Native.OSX\RoyalTerminal.GhosttySharp.Native.OSX.csproj" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp.Native.Win64\RoyalTerminal.GhosttySharp.Native.Win64.csproj" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
-    <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp.Native.Linux64\RoyalTerminal.GhosttySharp.Native.Linux64.csproj" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia.App\RoyalTerminal.Avalonia.App.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Desktop" />
-    <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
-    <PackageReference Include="ProDiagnostics" />
-    <PackageReference Include="ReactiveUI" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="ReactiveUI.Avalonia" />
-    <PackageReference Include="ReactiveUI.SourceGenerators">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
   </ItemGroup>
 
   <!-- Import native asset targets for file copying (same mechanism as NuGet package) -->

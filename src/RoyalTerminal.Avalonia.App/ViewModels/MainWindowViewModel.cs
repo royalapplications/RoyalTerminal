@@ -1,6 +1,6 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Demo — Main window view model and command surface.
+// RoyalTerminal.Avalonia.App — Main window view model and command surface.
 
 using System;
 using System.Collections.Generic;
@@ -13,16 +13,16 @@ using System.Runtime.InteropServices;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
-using RoyalTerminal.Demo.Services;
+using RoyalTerminal.Avalonia.App.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using ReactiveUI;
 using ReactiveUI.Avalonia;
 
-namespace RoyalTerminal.Demo.ViewModels;
+namespace RoyalTerminal.Avalonia.App.ViewModels;
 
 /// <summary>
-/// Identifies pane split requests exposed by the demo command surface.
+/// Identifies pane split requests exposed by the shell command surface.
 /// </summary>
 public enum TerminalPaneSplitRequest
 {
@@ -777,12 +777,12 @@ public sealed class MainWindowViewModel : ReactiveObject
     }
 
     /// <summary>
-    /// Gets the compact profile and transport label displayed in the demo shell chrome.
+    /// Gets the compact profile and transport label displayed in the shell chrome.
     /// </summary>
     public string ActiveSessionDisplay => $"{ActiveProfileDisplay} / {SelectedTransportMode.DisplayName}";
 
     /// <summary>
-    /// Gets the selected shell profile label displayed in the demo shell chrome.
+    /// Gets the selected shell profile label displayed in the shell chrome.
     /// </summary>
     public string ActiveProfileDisplay => SelectedShellProfile?.DisplayName ?? "Default shell";
 

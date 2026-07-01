@@ -1,18 +1,26 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Demo - Application-level native menu composition.
+// RoyalTerminal.Avalonia.App - Application-level native menu composition.
 
 using System;
 using System.Globalization;
 using System.Windows.Input;
 using Avalonia.Controls;
 using Avalonia.Input;
-using RoyalTerminal.Demo.ViewModels;
+using RoyalTerminal.Avalonia.App.ViewModels;
 
-namespace RoyalTerminal.Demo.Services;
+namespace RoyalTerminal.Avalonia.App.Services;
 
-internal static class ApplicationNativeMenuFactory
+/// <summary>
+/// Creates and binds the RoyalTerminal application-level native menu.
+/// </summary>
+public static class ApplicationNativeMenuFactory
 {
+    /// <summary>
+    /// Creates a new application menu and binds it to the supplied view model.
+    /// </summary>
+    /// <param name="viewModel">The main shell view model that supplies menu commands.</param>
+    /// <returns>A native application menu bound to <paramref name="viewModel"/>.</returns>
     public static NativeMenu Create(MainWindowViewModel viewModel)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
@@ -22,6 +30,10 @@ internal static class ApplicationNativeMenuFactory
         return menu;
     }
 
+    /// <summary>
+    /// Creates the unbound RoyalTerminal application menu shell.
+    /// </summary>
+    /// <returns>A native menu containing the RoyalTerminal application menu items.</returns>
     public static NativeMenu CreateShell()
     {
         return new NativeMenu
@@ -34,6 +46,11 @@ internal static class ApplicationNativeMenuFactory
         };
     }
 
+    /// <summary>
+    /// Binds a RoyalTerminal application menu shell to the supplied view model.
+    /// </summary>
+    /// <param name="menu">The menu created by <see cref="CreateShell"/> or an equivalent application menu.</param>
+    /// <param name="viewModel">The main shell view model that supplies menu commands.</param>
     public static void Bind(NativeMenu menu, MainWindowViewModel viewModel)
     {
         ArgumentNullException.ThrowIfNull(menu);

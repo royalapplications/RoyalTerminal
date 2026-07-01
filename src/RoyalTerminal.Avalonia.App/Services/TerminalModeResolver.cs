@@ -1,8 +1,8 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Demo — Capability-driven render-mode resolution for demo orchestration.
+// RoyalTerminal.Avalonia.App — Capability-driven render-mode resolution for shell orchestration.
 
-namespace RoyalTerminal.Demo.Services;
+namespace RoyalTerminal.Avalonia.App.Services;
 
 internal readonly record struct TerminalModeCapabilities(
     bool NativeVtAvailable,

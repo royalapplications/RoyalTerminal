@@ -1,10 +1,10 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Demo - About dialog view model.
+// RoyalTerminal.Avalonia.App - About dialog view model.
 
 using ReactiveUI;
 
-namespace RoyalTerminal.Demo.ViewModels;
+namespace RoyalTerminal.Avalonia.App.ViewModels;
 
 /// <summary>
 /// Provides product metadata for the RoyalTerminal about dialog.
@@ -35,15 +35,15 @@ public sealed class AboutRoyalTerminalViewModel : ReactiveObject
     }
 
     /// <summary>
-    /// Gets the default about dialog metadata for the sample application.
+    /// Gets the default about dialog metadata for the reusable application shell.
     /// </summary>
     /// <returns>A new about dialog view model.</returns>
     public static AboutRoyalTerminalViewModel CreateDefault()
     {
         return new AboutRoyalTerminalViewModel(
             "RoyalTerminal",
-            "Demo Preview",
-            "A modern terminal sample with PTY sessions, command history, profiles, search, replay capture, and VT rendering.",
+            "App Shell Preview",
+            "A modern terminal shell with PTY sessions, command history, profiles, search, replay capture, and VT rendering.",
             "Built with Avalonia and ReactiveUI.",
             "(c) 2026 Royal Apps");
     }

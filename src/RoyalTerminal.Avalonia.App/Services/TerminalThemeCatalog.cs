@@ -1,10 +1,10 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Demo — Theme catalog with preset and generated mode-specific themes.
+// RoyalTerminal.Avalonia.App — Theme catalog with preset and generated mode-specific themes.
 
 using RoyalTerminal.Terminal.Theming;
 
-namespace RoyalTerminal.Demo.Services;
+namespace RoyalTerminal.Avalonia.App.Services;
 
 internal readonly record struct TerminalThemePreset(string Id, string DisplayName);
 

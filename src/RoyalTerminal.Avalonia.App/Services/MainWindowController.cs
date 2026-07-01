@@ -1,6 +1,6 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Demo — Runtime controller for terminal tab orchestration.
+// RoyalTerminal.Avalonia.App — Runtime controller for terminal tab orchestration.
 
 using System;
 using System.Collections.Generic;
@@ -31,8 +31,8 @@ using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
-using RoyalTerminal.Demo.Views;
-using RoyalTerminal.Demo.ViewModels;
+using RoyalTerminal.Avalonia.App.Views;
+using RoyalTerminal.Avalonia.App.ViewModels;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
 using RoyalTerminal.Shaders;
@@ -49,7 +49,7 @@ using RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent;
 using RoyalTerminal.Terminal.Transport.Telnet;
 using ReactiveUI;
 
-namespace RoyalTerminal.Demo.Services;
+namespace RoyalTerminal.Avalonia.App.Services;
 
 internal sealed class MainWindowController
 {
@@ -147,7 +147,8 @@ internal sealed class MainWindowController
         ITerminalModeResolver modeResolver,
         ITerminalSessionProfileStore? settingsProfileStore = null,
         ITerminalCommandHistoryStore? commandHistoryStore = null,
-        ITerminalWorkspaceStore? workspaceStore = null)
+        ITerminalWorkspaceStore? workspaceStore = null,
+        Control? visualRoot = null)
     {
         _window = window ?? throw new ArgumentNullException(nameof(window));
         _viewModel = viewModel;
@@ -157,25 +158,26 @@ internal sealed class MainWindowController
         _settingsProfileStore = settingsProfileStore ?? TerminalSessionProfileStoreFactory.CreateDefault();
         _commandHistoryStore = commandHistoryStore ?? TerminalCommandHistoryStoreFactory.CreateDefault();
         _workspaceStore = workspaceStore ?? TerminalWorkspaceStoreFactory.CreateDefault();
-        _terminalHost = _window.FindControl<Grid>("TerminalHost")
+        Control controlRoot = visualRoot ?? (Control?)_window.FindControl<MainView>("MainView") ?? _window;
+        _terminalHost = controlRoot.FindControl<Grid>("TerminalHost")
             ?? throw new InvalidOperationException("TerminalHost was not found in MainWindow.");
-        _titleBarTabStripHost = _window.FindControl<ContentControl>("TitleBarTabStripHost")
+        _titleBarTabStripHost = controlRoot.FindControl<ContentControl>("TitleBarTabStripHost")
             ?? throw new InvalidOperationException("TitleBarTabStripHost was not found in MainWindow.");
-        _bodyTabStripHost = _window.FindControl<ContentControl>("BodyTabStripHost")
+        _bodyTabStripHost = controlRoot.FindControl<ContentControl>("BodyTabStripHost")
             ?? throw new InvalidOperationException("BodyTabStripHost was not found in MainWindow.");
-        _tabStripSurface = _window.FindControl<Border>("TabStripSurface")
+        _tabStripSurface = controlRoot.FindControl<Border>("TabStripSurface")
             ?? throw new InvalidOperationException("TabStripSurface was not found in MainWindow.");
-        _tabStripLayout = _window.FindControl<Grid>("TabStripLayout")
+        _tabStripLayout = controlRoot.FindControl<Grid>("TabStripLayout")
             ?? throw new InvalidOperationException("TabStripLayout was not found in MainWindow.");
-        _tabStripScrollViewer = _window.FindControl<ScrollViewer>("TabStripScrollViewer")
+        _tabStripScrollViewer = controlRoot.FindControl<ScrollViewer>("TabStripScrollViewer")
             ?? throw new InvalidOperationException("TabStripScrollViewer was not found in MainWindow.");
-        _tabStripScrollLeftButton = _window.FindControl<RepeatButton>("TabStripScrollLeftButton")
+        _tabStripScrollLeftButton = controlRoot.FindControl<RepeatButton>("TabStripScrollLeftButton")
             ?? throw new InvalidOperationException("TabStripScrollLeftButton was not found in MainWindow.");
-        _tabStripScrollRightButton = _window.FindControl<RepeatButton>("TabStripScrollRightButton")
+        _tabStripScrollRightButton = controlRoot.FindControl<RepeatButton>("TabStripScrollRightButton")
             ?? throw new InvalidOperationException("TabStripScrollRightButton was not found in MainWindow.");
-        _tabStrip = _window.FindControl<StackPanel>("TabStrip")
+        _tabStrip = controlRoot.FindControl<StackPanel>("TabStrip")
             ?? throw new InvalidOperationException("TabStrip was not found in MainWindow.");
-        _tabStripNewTabButton = _window.FindControl<Button>("TabStripNewTabButton")
+        _tabStripNewTabButton = controlRoot.FindControl<Button>("TabStripNewTabButton")
             ?? throw new InvalidOperationException("TabStripNewTabButton was not found in MainWindow.");
     }
 
@@ -1461,8 +1463,8 @@ internal sealed class MainWindowController
         return new TerminalSessionSshAuthenticationSettings
         {
             UsePassword = usePassword,
-            PasswordSecretId = usePassword ? DemoSshCredentialProvider.PasswordSecretId : null,
-            PrivateKeySecretIds = usePrivateKey ? [DemoSshCredentialProvider.PrivateKeySecretId] : [],
+            PasswordSecretId = usePassword ? ShellSshCredentialProvider.PasswordSecretId : null,
+            PrivateKeySecretIds = usePrivateKey ? [ShellSshCredentialProvider.PrivateKeySecretId] : [],
             UseAgent = useAgent,
         };
     }
@@ -2560,7 +2562,7 @@ internal sealed class MainWindowController
     {
         INativeVtProcessorProvider[] nativeProviders = [new GhosttyVtProcessorProvider()];
         DefaultPtyFactory ptyFactory = new();
-        DemoSshCredentialProvider credentialProvider = new(_viewModel);
+        ShellSshCredentialProvider credentialProvider = new(_viewModel);
         PromptingSshHostKeyValidator hostKeyValidator = new(
             new KnownHostsSshHostKeyValidator(),
             PromptForSshHostKeyTrust);
@@ -2920,13 +2922,13 @@ internal sealed class MainWindowController
         IReadOnlyList<string> privateKeySecretIds = usePrivateKey
             ?
             [
-                DemoSshCredentialProvider.PrivateKeySecretId,
+                ShellSshCredentialProvider.PrivateKeySecretId,
             ]
             : Array.Empty<string>();
 
         return new SshAuthenticationOptions(
             UsePassword: usePassword,
-            PasswordSecretId: usePassword ? DemoSshCredentialProvider.PasswordSecretId : null,
+            PasswordSecretId: usePassword ? ShellSshCredentialProvider.PasswordSecretId : null,
             PrivateKeySecretIds: privateKeySecretIds,
             UseAgent: useAgent);
     }
@@ -5094,7 +5096,7 @@ internal sealed class MainWindowController
         ApplyTerminalBehaviorSettingsToAllStandaloneTabs();
         _sessionLauncherDocument = state.BuildDocument();
         RefreshSessionLauncherOptions(_sessionLauncherDocument);
-        state.SetStatus("Applied settings to demo runtime.");
+        state.SetStatus("Applied settings to shell runtime.");
     }
 
     private void UpdateLaunchConfigurationsFromRuntimeControls()
@@ -6136,14 +6138,14 @@ internal sealed class MainWindowController
         }
     }
 
-    private sealed class DemoSshCredentialProvider : ISshCredentialProvider
+    private sealed class ShellSshCredentialProvider : ISshCredentialProvider
     {
-        public const string PasswordSecretId = "demo-runtime-password";
-        public const string PrivateKeySecretId = "demo-runtime-private-key";
+        public const string PasswordSecretId = "royalterminal-runtime-password";
+        public const string PrivateKeySecretId = "royalterminal-runtime-private-key";
 
         private readonly MainWindowViewModel _viewModel;
 
-        public DemoSshCredentialProvider(MainWindowViewModel viewModel)
+        public ShellSshCredentialProvider(MainWindowViewModel viewModel)
         {
             _viewModel = viewModel;
         }

@@ -1,13 +1,13 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Demo — Avalonia Application setup.
+// RoyalTerminal.Demo - Avalonia application setup.
 
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Diagnostics;
 using Avalonia.Markup.Xaml;
-using RoyalTerminal.Demo.Services;
+using RoyalTerminal.Avalonia.App;
+using RoyalTerminal.Avalonia.App.Services;
 
 namespace RoyalTerminal.Demo;
 
@@ -34,9 +34,5 @@ public class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
-
-#if DEBUG
-        this.AttachDevTools();
-#endif
     }
 }

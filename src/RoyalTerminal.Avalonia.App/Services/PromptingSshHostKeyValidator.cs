@@ -1,12 +1,12 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Demo - SSH host-key prompt validator.
+// RoyalTerminal.Avalonia.App - SSH host-key prompt validator.
 
 using System.Text;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Transport.Ssh;
 
-namespace RoyalTerminal.Demo.Services;
+namespace RoyalTerminal.Avalonia.App.Services;
 
 internal sealed class PromptingSshHostKeyValidator : ISshHostKeyValidator
 {
