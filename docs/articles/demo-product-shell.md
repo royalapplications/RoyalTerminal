@@ -70,7 +70,7 @@ The main window uses Avalonia extended client area:
 ```xml
 ExtendClientAreaToDecorationsHint="True"
 WindowDecorations="Full"
-ExtendClientAreaTitleBarHeightHint="44"
+ExtendClientAreaTitleBarHeightHint="-1"
 ```
 
 The titlebar band is marked with
@@ -78,6 +78,9 @@ The titlebar band is marked with
 drag, double-click, and titlebar gesture hit testing. Interactive controls placed
 inside the titlebar, such as search and New Tab, are marked with
 `ElementRole="User"` so they keep normal pointer and keyboard behavior.
+The `-1` titlebar-height hint follows Dock's BrowserTabTheme sample: native
+chrome placement remains platform-managed, which keeps macOS traffic lights
+vertically centered, while RoyalTerminal keeps a compact titlebar command band.
 
 The layout reserves space for macOS traffic lights and for right-side decoration
 margins:

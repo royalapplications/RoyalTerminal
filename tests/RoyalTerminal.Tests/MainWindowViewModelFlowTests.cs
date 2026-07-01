@@ -813,9 +813,12 @@ public class MainWindowViewModelFlowTests
 
             Assert.True(window.ExtendClientAreaToDecorationsHint);
             Assert.Equal(WindowDecorations.Full, window.WindowDecorations);
-            Assert.Equal(44d, window.ExtendClientAreaTitleBarHeightHint);
+            Assert.Equal(-1d, window.ExtendClientAreaTitleBarHeightHint);
             Assert.Contains("titleBarArea", titleBar.Classes);
             Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(titleBar));
+            Assert.True(
+                titleBarLayout.Bounds.Height >= 32,
+                $"Expected platform-managed titlebar height to keep 32px command controls visible. Layout={titleBarLayout.Bounds}.");
             Assert.True(
                 titleBarLayout.Bounds.Height <= 48,
                 $"Expected compact titlebar layout. Layout={titleBarLayout.Bounds}.");
