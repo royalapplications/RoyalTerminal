@@ -1215,25 +1215,66 @@ internal sealed class MainWindowController
     {
         if (value.Length == 0)
         {
-            return "\"\"";
+            return OperatingSystem.IsWindows() ? "\"\"" : "''";
         }
 
-        bool requiresQuoting = false;
-        for (int i = 0; i < value.Length; i++)
+        if (OperatingSystem.IsWindows())
         {
-            if (char.IsWhiteSpace(value[i]) || value[i] is '"' or '\'')
-            {
-                requiresQuoting = true;
-                break;
-            }
+            return QuoteWindowsShellArgument(value);
         }
 
-        if (!requiresQuoting)
+        return QuotePosixShellArgument(value);
+    }
+
+    private static string QuotePosixShellArgument(string value)
+    {
+        if (IsPosixShellSafe(value))
         {
             return value;
         }
 
-        return "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+        return "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
+    }
+
+    private static string QuoteWindowsShellArgument(string value)
+    {
+        if (IsWindowsShellSafe(value))
+        {
+            return value;
+        }
+
+        return "\"" + value
+            .Replace("^", "^^", StringComparison.Ordinal)
+            .Replace("%", "^%", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+    }
+
+    private static bool IsPosixShellSafe(string value)
+    {
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (!(char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.' or '/' or ':' or ',' or '+'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsWindowsShellSafe(string value)
+    {
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (!(char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.' or '/' or ':' or ',' or '+'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private SshAuthModeOption ResolveSshAuthMode(TerminalSessionSshAuthenticationSettings authentication)
@@ -3390,13 +3431,24 @@ internal sealed class MainWindowController
             return;
         }
 
-        double delta = direction is TerminalPaneDirection.Right or TerminalPaneDirection.Down
-            ? 0.05
-            : -0.05;
+        double delta = GetFocusedPaneResizeDelta(splitNode, activeNode, direction);
         double ratio = Math.Clamp(splitNode.Ratio + delta, 0.05, 0.95);
         ApplySplitRatio(splitNode, ratio);
         UpdateStatus($"Pane ratio {ratio.ToString("0.00", CultureInfo.InvariantCulture)}.");
         AppendEventLog($"[{tab.Title}] Resized pane split to {ratio.ToString("0.00", CultureInfo.InvariantCulture)}.");
+    }
+
+    private static double GetFocusedPaneResizeDelta(
+        TerminalPaneRuntimeNode splitNode,
+        TerminalPaneRuntimeNode activeNode,
+        TerminalPaneDirection direction)
+    {
+        double requestedDelta = direction is TerminalPaneDirection.Right or TerminalPaneDirection.Down
+            ? 0.05
+            : -0.05;
+        return ContainsPaneNode(splitNode.First, activeNode)
+            ? requestedDelta
+            : -requestedDelta;
     }
 
     private static bool IsForwardDirection(TerminalPaneDirection direction)
@@ -3422,6 +3474,21 @@ internal sealed class MainWindowController
         }
 
         return null;
+    }
+
+    private static bool ContainsPaneNode(TerminalPaneRuntimeNode? root, TerminalPaneRuntimeNode target)
+    {
+        if (root is null)
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(root, target))
+        {
+            return true;
+        }
+
+        return ContainsPaneNode(root.First, target) || ContainsPaneNode(root.Second, target);
     }
 
     private static void ApplySplitRatio(TerminalPaneRuntimeNode splitNode, double ratio)

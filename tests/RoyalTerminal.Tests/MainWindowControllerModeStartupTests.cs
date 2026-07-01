@@ -792,6 +792,59 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_ResizePaneRight_GrowsFocusedSecondPane()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo resize-pane";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            commandHistoryStore: new InMemoryCommandHistoryStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabCreated);
+
+            viewModel.SplitPaneRightCommand.Execute().Wait();
+            bool splitCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1 &&
+                      terminalHost.Children[0] is Grid { Children.Count: 3 } &&
+                      GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(splitCreated);
+
+            Grid splitGrid = Assert.IsType<Grid>(terminalHost.Children[0]);
+            Assert.Equal(0.5, splitGrid.ColumnDefinitions[0].Width.Value, precision: 3);
+            Assert.Equal(0.5, splitGrid.ColumnDefinitions[2].Width.Value, precision: 3);
+
+            viewModel.ResizePaneRightCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(0.45, splitGrid.ColumnDefinitions[0].Width.Value, precision: 3);
+            Assert.Equal(0.55, splitGrid.ColumnDefinitions[2].Width.Value, precision: 3);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Controller_Startup_DiagnosticMode_CreatesTabsForEachSupportedMode()
     {
         using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, "1");
@@ -1161,6 +1214,74 @@ public sealed class MainWindowControllerModeStartupTests
             TerminalControl launched = GetVisibleStandaloneControl(terminalHost);
             Assert.False(launched.AutoScroll);
             Assert.True(launched.BackgroundOpacityEnabled);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_ProfileLaunch_QuotesPipeProfileShellMetacharacters()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        TerminalSessionProfilesDocument document = new()
+        {
+            DefaultProfileId = "quoted-pipe",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "quoted-pipe",
+                    DisplayName = "Quoted Pipe",
+                    Transport = new TerminalSessionTransportProfile
+                    {
+                        TransportId = TerminalTransportIds.Pipe,
+                        Pipe = new TerminalSessionPipeSettings
+                        {
+                            FileName = "/tmp/a&b",
+                            Arguments = ["$HOME", "has space", "it's"],
+                        },
+                    },
+                },
+            ],
+        };
+        InMemoryProfileStore profileStore = new(document);
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo startup";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: profileStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.LaunchSessionProfileCommand.Execute("profile:quoted-pipe").Wait();
+            bool profileTabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(profileTabCreated);
+
+            string expected = OperatingSystem.IsWindows()
+                ? "\"/tmp/a&b\" \"$HOME\" \"has space\" \"it's\""
+                : "'/tmp/a&b' '$HOME' 'has space' 'it'\"'\"'s'";
+            Assert.Equal(expected, viewModel.PipeCommandText);
         }
         finally
         {
