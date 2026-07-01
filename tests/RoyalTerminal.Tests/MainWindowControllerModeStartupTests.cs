@@ -782,6 +782,78 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_ProfileLaunch_AppliesAppearanceRuntimeSettings()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        TerminalSessionProfilesDocument document = new()
+        {
+            DefaultProfileId = "profile-appearance",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "profile-appearance",
+                    DisplayName = "Profile Appearance",
+                    Transport = new TerminalSessionTransportProfile
+                    {
+                        TransportId = TerminalTransportIds.Pipe,
+                        Pipe = new TerminalSessionPipeSettings
+                        {
+                            FileName = "echo",
+                            Arguments = ["appearance"],
+                        },
+                    },
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        AutoScroll = false,
+                        BackgroundOpacityEnabled = true,
+                    },
+                },
+            ],
+        };
+        InMemoryProfileStore profileStore = new(document);
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo startup";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: profileStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-appearance").Wait();
+            bool profileTabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(profileTabCreated);
+
+            TerminalControl launched = GetVisibleStandaloneControl(terminalHost);
+            Assert.False(launched.AutoScroll);
+            Assert.True(launched.BackgroundOpacityEnabled);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Controller_StandaloneTerminalOutput_DoesNotSpamStatusBar()
     {
         MainWindowViewModel viewModel = new();
@@ -1526,6 +1598,22 @@ public sealed class MainWindowControllerModeStartupTests
         public TerminalModeCapabilities Resolve(bool nativeVtAvailable)
         {
             return _capabilities;
+        }
+    }
+
+    private sealed class InMemoryProfileStore(TerminalSessionProfilesDocument document) : ITerminalSessionProfileStore
+    {
+        public TerminalSessionProfilesDocument Document { get; private set; } = document;
+
+        public ValueTask<TerminalSessionProfilesDocument> LoadAsync(CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(Document);
+
+        public ValueTask SaveAsync(
+            TerminalSessionProfilesDocument document,
+            CancellationToken cancellationToken = default)
+        {
+            Document = document;
+            return ValueTask.CompletedTask;
         }
     }
 

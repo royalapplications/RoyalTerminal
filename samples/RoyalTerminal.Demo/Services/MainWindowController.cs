@@ -1336,6 +1336,7 @@ internal sealed class MainWindowController
             savedProfile);
         _launchConfigurations[terminal] = new TerminalLaunchConfiguration(
             launchProfile);
+        ApplyLaunchAppearanceSettings(terminal, launchProfile);
         leafControls.Add(terminal);
         resolvedModes.Add(finalizedModeSelection.ResolvedMode);
 
@@ -1710,6 +1711,7 @@ internal sealed class MainWindowController
         string? workingDirectory = GetProfileWorkingDirectory(launchProfile);
         TerminalLaunchConfiguration launchConfiguration = new(launchProfile);
         _launchConfigurations[terminal] = launchConfiguration;
+        ApplyLaunchAppearanceSettings(terminal, launchProfile);
 
         ScrollViewer container = CreatePaneScrollViewer(terminal);
         TerminalPaneRuntimeNode rootPaneNode = new(
@@ -2921,14 +2923,22 @@ internal sealed class MainWindowController
             modeSelection,
             out TerminalModeSelection finalizedModeSelection);
         TerminalLaunchConfiguration activeLaunchConfiguration = GetLaunchConfiguration(activeControl);
-        _launchConfigurations[newControl] = activeLaunchConfiguration;
+        string? splitWorkingDirectory = NormalizeOptional(activeNode.WorkingDirectory) ??
+                                        NormalizeOptional(tab.WorkingDirectory);
+        TerminalLaunchConfiguration newLaunchConfiguration = splitWorkingDirectory is null
+            ? activeLaunchConfiguration
+            : new TerminalLaunchConfiguration(ApplyLaunchWorkingDirectory(
+                activeLaunchConfiguration.Profile,
+                splitWorkingDirectory));
+        _launchConfigurations[newControl] = newLaunchConfiguration;
+        ApplyLaunchAppearanceSettings(newControl, newLaunchConfiguration.Profile);
 
         ScrollViewer newContainer = CreatePaneScrollViewer(newControl);
         TerminalPaneRuntimeNode newNode = new(
             CreatePaneId(),
             $"{tab.Title} Pane",
             activeNode.ProfileId ?? tab.ProfileId,
-            activeNode.WorkingDirectory ?? tab.WorkingDirectory,
+            splitWorkingDirectory,
             activeNode.TransportId ?? tab.TransportId,
             activeNode.TransportProfileId);
         newNode.SetLeaf(newControl, newContainer);
@@ -4165,6 +4175,14 @@ internal sealed class MainWindowController
         standalone.FontEmbolden = _viewModel.FontEmbolden;
         standalone.FontForceAutoHinting = _viewModel.FontForceAutoHinting;
         standalone.FontLinearMetrics = _viewModel.FontLinearMetrics;
+    }
+
+    private static void ApplyLaunchAppearanceSettings(
+        TerminalControl standalone,
+        TerminalSessionProfile profile)
+    {
+        standalone.AutoScroll = profile.Appearance.AutoScroll;
+        standalone.BackgroundOpacityEnabled = profile.Appearance.BackgroundOpacityEnabled;
     }
 
     private static string NormalizeFontFamily(string? fontFamilyName)
