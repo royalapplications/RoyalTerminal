@@ -28,6 +28,7 @@ The profile model is the durable description of a session, not the running sessi
 | --- | --- |
 | `TerminalSessionProfilesDocument` | Versioned top-level profile document. |
 | `TerminalSessionProfile` | One named profile. |
+| `TerminalCommandSnippet` | Profile-scoped command snippet offered by suggestion providers. |
 | `TerminalSessionLayoutSettings` | Grid, viewport, and scrollback settings. |
 | `TerminalSessionAppearanceSettings` | Font, size, auto-scroll, opacity, and text highlighting settings. |
 | `TerminalTextHighlightingMode` | Regex text highlighting evaluation mode. |
@@ -46,7 +47,12 @@ The profile model is the durable description of a session, not the running sessi
 | `TerminalSessionLogFormat` | Stored log format enum. |
 | `TerminalSessionProxyType` | Stored proxy type enum. |
 
-The model is intentionally broad. It is meant to cover what a terminal application needs to remember between runs, not just what is required to start a shell on the current machine.
+The model is intentionally broad. It is meant to cover what a terminal
+application needs to remember between runs, not just what is required to start a
+shell on the current machine. `TerminalSessionProfile.CommandSnippets` stores
+profile-scoped snippets for host suggestion UIs; the serializer trims and
+deduplicates these entries even when a host edits them outside the reusable
+settings panel.
 
 ## Editing profiles in the UI
 

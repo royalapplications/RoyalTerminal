@@ -13,6 +13,7 @@ RoyalTerminal is published as a family of packages so you can compose the exact 
 | Managed Avalonia terminal | `RoyalApps.RoyalTerminal.Avalonia` |
 | Avalonia terminal plus reusable settings UI | `RoyalApps.RoyalTerminal.Avalonia`, `RoyalApps.RoyalTerminal.Avalonia.Settings` |
 | Avalonia terminal with native Ghostty VT available | `RoyalApps.RoyalTerminal.Avalonia`, `RoyalApps.RoyalTerminal.Terminal.Vt.Ghostty`; RID-aware restore/publish selects the matching `RoyalApps.RoyalTerminal.GhosttySharp.Native.*` package |
+| Product terminal workflow state | `RoyalApps.RoyalTerminal.Terminal` for workspace documents, split panes, shell integration events, bootstrap scripts, command history, stores, snippets, and suggestion providers |
 | Custom transport/profile orchestration without Avalonia | `RoyalApps.RoyalTerminal.Terminal`, `RoyalApps.RoyalTerminal.Terminal.Services`, selected `RoyalApps.RoyalTerminal.Terminal.Transport.*` packages |
 | Shader source models and compatibility translation without Avalonia or Skia | `RoyalApps.RoyalTerminal.Shaders` |
 | Custom rendering integration | `RoyalApps.RoyalTerminal.Rendering.Contracts`, `RoyalApps.RoyalTerminal.Rendering.Skia`, optional `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty*` |
@@ -23,6 +24,11 @@ RoyalTerminal is published as a family of packages so you can compose the exact 
 | --- | --- |
 | Hosting the control, input, selection, capture, and Avalonia GPU interop | [Embedding In Avalonia](/articles/avalonia-control) |
 | Session documents, settings panels, themes, capture files, and profile stores | [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings) |
+| Workspace documents, stores, serializer normalization, and sample startup restore | [Workspace Restore](/articles/workspace-restore) |
+| Pane document trees, split ratios, runtime focus/resize behavior, and active-pane features | [Split Panes](/articles/split-panes) |
+| OSC 7/OSC 133 event parsing and control-level shell metadata relay | [Shell Integration](/articles/shell-integration) |
+| Command history persistence, capture, retention, and suggestions | [Command History And Suggestions](/articles/command-history-and-suggestions) |
+| Demo shell titlebar, native menus, settings overlay, and product startup behavior | [Demo Product Shell](/articles/demo-product-shell) |
 | RoyalTerminal JSON, asciicast v3, and pluggable recording formats | [Capture Formats](/articles/capture-formats) |
 | User-configurable regex text highlighting and persisted highlight rules | [Regex Text Highlighting](/articles/text-highlighting) |
 | PTY, pipe, SSH, raw TCP, Telnet, serial, trust policy, and secret handling | [Transports And Remote Access](/articles/transports) |
@@ -49,7 +55,7 @@ The API section is generated from the packable managed libraries under `src/` an
 
 | Package | Responsibility |
 | --- | --- |
-| `RoyalApps.RoyalTerminal.Terminal` | Core contracts, terminal screen model, transport option records, themes, regex highlight profile settings, capture/snapshot contracts, pluggable capture formats, shell profiles, profile persistence, and SSH support contracts. |
+| `RoyalApps.RoyalTerminal.Terminal` | Core contracts, terminal screen model, transport option records, themes, regex highlight profile settings, capture/snapshot contracts, pluggable capture formats, shell profiles, profile persistence, workspace/pane documents, shell integration events/bootstrap scripts, command history, profile snippets, suggestion providers, and SSH support contracts. |
 | `RoyalApps.RoyalTerminal.Terminal.Services.Contracts` | Contracts for terminal session lifecycle services. |
 | `RoyalApps.RoyalTerminal.Terminal.Services` | The default `TerminalSessionService` implementation. |
 | `RoyalApps.RoyalTerminal.Unicode` | Deterministic Unicode width helpers used by the terminal stack. |
@@ -108,7 +114,7 @@ to let NuGet resolve only the native package for that target.
 
 | Project | Purpose |
 | --- | --- |
-| `samples/RoyalTerminal.Demo` | End-user style Avalonia sample with tabs, settings, profiles, logging, selectable-format capture/replay, search, and diagnostics. |
+| `samples/RoyalTerminal.Demo` | End-user style Avalonia sample with tabs, split panes, workspace restore, command-history suggestions, settings, profiles, logging, selectable-format capture/replay, search, titlebar/native-menu integration, and diagnostics. |
 | `samples/RoyalTerminal.WinFormsHost` | Windows Forms interop sample using `Avalonia.Win32.Interoperability` and `TerminalControl.Padding`. |
 | `samples/RoyalTerminal.ControlCatalog` | Terminal validation, rendering gallery, TUI parity, and interactive scenario catalog. |
 | `samples/RoyalTerminal.MacNativeTabbed` | Native macOS SwiftUI/GhosttyKit sample outside the managed RoyalTerminal surface. |

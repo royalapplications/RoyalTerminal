@@ -19,6 +19,9 @@ const guideSidebarItems = [
     items: [
       { text: "Embedding in Avalonia", link: "/articles/avalonia-control" },
       { text: "Sessions, Profiles, and Settings", link: "/articles/sessions-profiles-and-settings" },
+      { text: "Workspace Restore", link: "/articles/workspace-restore" },
+      { text: "Split Panes", link: "/articles/split-panes" },
+      { text: "Command History and Suggestions", link: "/articles/command-history-and-suggestions" },
       { text: "Session History and Scrollback", link: "/articles/session-history" },
       { text: "Session Restart Semantics", link: "/articles/session-restart-semantics" },
       { text: "Session Restart Reference Analysis", link: "/articles/session-restart-reference-analysis" },
@@ -31,6 +34,7 @@ const guideSidebarItems = [
     items: [
       { text: "Transports and Remote Access", link: "/articles/transports" },
       { text: "Terminal Engine and Screen State", link: "/articles/vt-modes" },
+      { text: "Shell Integration", link: "/articles/shell-integration" },
       { text: "Regex Text Highlighting", link: "/articles/text-highlighting" },
       { text: "Ghostty Integration", link: "/articles/ghostty-integration" },
       { text: "Windows x64 Native Compatibility", link: "/articles/windows-x64-native-compatibility" }
@@ -53,6 +57,7 @@ const guideSidebarItems = [
     collapsed: false,
     items: [
       { text: "Samples and Tooling", link: "/articles/samples-tooling" },
+      { text: "Demo Product Shell", link: "/articles/demo-product-shell" },
       { text: "Build, Test, and Release", link: "/articles/build-test-release" },
       { text: "Troubleshooting", link: "/articles/troubleshooting" }
     ]

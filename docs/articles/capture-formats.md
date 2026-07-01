@@ -94,4 +94,4 @@ Because asciicast payloads are JSON strings, output and input chunks must be val
 
 ## Demo app behavior
 
-`samples/RoyalTerminal.Demo` exposes the built-in formats in the capture toolbar. `Save Capture` uses the selected format's descriptor to choose the default extension and file type. `Load Replay` accepts RoyalTerminal JSON and asciicast v3 files, then uses the default registry to infer or probe the recording format before loading the replay timeline.
+`samples/RoyalTerminal.Demo` exposes the built-in formats in the Session menu's `Capture Format` submenu. `Save Capture` uses the selected format's descriptor to choose the default extension and file type. `Load Replay` accepts RoyalTerminal JSON and asciicast v3 files, then uses the default registry to infer or probe the recording format before loading the replay timeline.
