@@ -17,6 +17,7 @@ using RoyalTerminal.Demo.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using ReactiveUI;
+using ReactiveUI.Avalonia;
 
 namespace RoyalTerminal.Demo.ViewModels;
 
@@ -2121,6 +2122,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         return PrepareSettingsPanelInteraction
             .Handle(Unit.Default)
+            .ObserveOn(AvaloniaScheduler.Instance)
             .Do(_ => IsSettingsPanelOpen = true);
     }
 

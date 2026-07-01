@@ -275,8 +275,8 @@ internal sealed class MainWindowController
 
         disposables.Add(_viewModel.PrepareSettingsPanelInteraction.RegisterHandler(async context =>
         {
-            await PrepareSettingsPanelAsync();
-            context.SetOutput(Unit.Default);
+            await PrepareSettingsPanelAsync().ConfigureAwait(false);
+            await Dispatcher.UIThread.InvokeAsync(() => context.SetOutput(Unit.Default));
         }));
 
         disposables.Add(_viewModel.RefreshSessionLauncherInteraction.RegisterHandler(async context =>
@@ -4168,28 +4168,37 @@ internal sealed class MainWindowController
     {
         TerminalSettingsPanelState state = _viewModel.SettingsPanelState;
         bool alreadyLoaded = _settingsProfilesLoaded;
+        TerminalSessionProfilesDocument? loadedDocument = null;
         if (!_settingsProfilesLoaded)
         {
-            TerminalSessionProfilesDocument document = await _settingsProfileStore.LoadAsync();
-            if (document.Profiles.Count == 0)
+            loadedDocument = await _settingsProfileStore.LoadAsync().ConfigureAwait(false);
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (loadedDocument is not null)
             {
-                SyncSettingsStateFromViewModel(state);
-                document = state.BuildDocument();
-                state.MarkSaved("Initialized settings profiles from current runtime values.");
+                TerminalSessionProfilesDocument document = loadedDocument;
+                if (document.Profiles.Count == 0)
+                {
+                    SyncSettingsStateFromViewModel(state);
+                    document = state.BuildDocument();
+                    state.MarkSaved("Initialized settings profiles from current runtime values.");
+                }
+
+                state.LoadDocument(document);
+                _settingsProfilesLoaded = true;
+                _sessionLauncherDocument = state.BuildDocument();
+                RefreshSessionLauncherOptions(_sessionLauncherDocument);
             }
 
-            state.LoadDocument(document);
-            _settingsProfilesLoaded = true;
-            _sessionLauncherDocument = state.BuildDocument();
-            RefreshSessionLauncherOptions(_sessionLauncherDocument);
-        }
-
-        if (alreadyLoaded && !state.IsDirty)
-        {
-            SyncSettingsStateFromViewModel(state);
-            _sessionLauncherDocument = state.BuildDocument();
-            RefreshSessionLauncherOptions(_sessionLauncherDocument);
-        }
+            if (alreadyLoaded && !state.IsDirty)
+            {
+                SyncSettingsStateFromViewModel(state);
+                _sessionLauncherDocument = state.BuildDocument();
+                RefreshSessionLauncherOptions(_sessionLauncherDocument);
+            }
+        });
     }
 
     private void SyncSettingsStateFromViewModel(TerminalSettingsPanelState state)

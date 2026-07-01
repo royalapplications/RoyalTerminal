@@ -4,6 +4,7 @@
 
 using System.Reactive;
 using System.Reactive.Linq;
+using System.Reactive.Threading.Tasks;
 using System.Globalization;
 using System.Reflection;
 using Avalonia;
@@ -13,6 +14,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Avalonia.Services;
@@ -928,6 +930,45 @@ public class MainWindowViewModelFlowTests
         viewModel.CloseSettingsPanelCommand.Execute().Wait();
 
         Assert.False(viewModel.IsSettingsPanelOpen);
+    }
+
+    [AvaloniaFact]
+    public async Task SettingsPanel_PreparationCompletedOffUiThread_UpdatesBoundCommandsOnUiThread()
+    {
+        MainWindow window = new()
+        {
+            Width = 720,
+            Height = 520,
+        };
+
+        try
+        {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+            Button closeSettingsPanelButton = new()
+            {
+                Command = viewModel.CloseSettingsPanelCommand,
+            };
+            using IDisposable preparationRegistration = viewModel.PrepareSettingsPanelInteraction.RegisterHandler(async context =>
+            {
+                await Task
+                    .Run(() => context.SetOutput(Unit.Default))
+                    .ConfigureAwait(false);
+            });
+
+            await viewModel.PrepareSettingsPanelCommand.Execute().ToTask();
+            await Dispatcher.UIThread.InvokeAsync(() => { });
+
+            Assert.True(viewModel.IsSettingsPanelOpen);
+            Assert.True(closeSettingsPanelButton.Command?.CanExecute(null));
+            Assert.Equal(
+                Dispatcher.UIThread.CheckAccess(),
+                closeSettingsPanelButton.CheckAccess());
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 
     [AvaloniaFact]
