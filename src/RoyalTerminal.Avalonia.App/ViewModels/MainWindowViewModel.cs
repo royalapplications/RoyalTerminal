@@ -1,9 +1,10 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Demo — Main window view model and command surface.
+// RoyalTerminal.Avalonia.App — Main window view model and command surface.
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Reactive;
@@ -12,12 +13,47 @@ using System.Runtime.InteropServices;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
-using RoyalTerminal.Demo.Services;
+using RoyalTerminal.Avalonia.App.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using ReactiveUI;
+using ReactiveUI.Avalonia;
 
-namespace RoyalTerminal.Demo.ViewModels;
+namespace RoyalTerminal.Avalonia.App.ViewModels;
+
+/// <summary>
+/// Identifies pane split requests exposed by the shell command surface.
+/// </summary>
+public enum TerminalPaneSplitRequest
+{
+    /// <summary>
+    /// Split the focused pane into side-by-side panes and place the new pane on the right.
+    /// </summary>
+    Right,
+
+    /// <summary>
+    /// Split the focused pane into stacked panes and place the new pane below.
+    /// </summary>
+    Down,
+}
+
+/// <summary>
+/// Identifies directional pane focus or resize requests.
+/// </summary>
+public enum TerminalPaneDirection
+{
+    /// <summary>Move or resize toward the left.</summary>
+    Left,
+
+    /// <summary>Move or resize toward the right.</summary>
+    Right,
+
+    /// <summary>Move or resize upward.</summary>
+    Up,
+
+    /// <summary>Move or resize downward.</summary>
+    Down,
+}
 
 public sealed class MainWindowViewModel : ReactiveObject
 {
@@ -52,12 +88,21 @@ public sealed class MainWindowViewModel : ReactiveObject
     private readonly IReadOnlyList<TerminalThemePreset> _themePresets;
     private readonly Dictionary<TerminalRenderMode, ModeThemeState> _modeThemes = [];
     private TerminalSettingsPanelState? _settingsPanelState;
+    private bool _isSettingsPanelOpen;
+    private bool _isLeftPanelVisible = true;
+    private bool _isSearchPanelVisible = true;
+    private bool _isStatusBarVisible = true;
+    private bool _isTabsInTitleBar;
 
     private IReadOnlyList<ShellProfileOption> _shellProfiles =
     [
         new ShellProfileOption("default", "Default shell", string.Empty),
     ];
     private ShellProfileOption? _selectedShellProfile;
+    private IReadOnlyList<SessionLaunchOption> _sessionLaunchOptions = [];
+    private IReadOnlyList<SessionLaunchOption> _filteredSessionLaunchOptions = [];
+    private SessionLaunchOption? _selectedSessionLaunchOption;
+    private string _sessionLauncherQuery = string.Empty;
 
     private readonly IReadOnlyList<SettingsCategoryOption> _settingsCategories;
     private SettingsCategoryOption _selectedSettingsCategory;
@@ -154,6 +199,10 @@ public sealed class MainWindowViewModel : ReactiveObject
     private int _searchMatchSelected = -1;
     private bool _searchUsesNativeScrollback;
     private bool _searchApplied;
+    private bool _isCommandHistoryOverlayOpen;
+    private string _commandSuggestionQuery = string.Empty;
+    private IReadOnlyList<TerminalCommandSuggestion> _commandSuggestions = [];
+    private TerminalCommandSuggestion? _selectedCommandSuggestion;
     private bool _showGhosttyDiagnostics;
     private string _ghosttyDiagnosticsText = "Ghostty VT diagnostics are unavailable for the active tab.";
     private readonly IReadOnlyList<TerminalShaderSampleOption> _shaderSamples;
@@ -226,10 +275,14 @@ public sealed class MainWindowViewModel : ReactiveObject
         SetReplayPlayingInteraction = new Interaction<bool, Unit>();
         StopReplayInteraction = new Interaction<Unit, Unit>();
         PrepareSettingsPanelInteraction = new Interaction<Unit, Unit>();
+        RefreshSessionLauncherInteraction = new Interaction<Unit, Unit>();
+        LaunchSessionProfileInteraction = new Interaction<string, Unit>();
         ApplySearchInteraction = new Interaction<string?, Unit>();
         NextSearchInteraction = new Interaction<Unit, Unit>();
         PreviousSearchInteraction = new Interaction<Unit, Unit>();
         ClearSearchInteraction = new Interaction<Unit, Unit>();
+        RefreshCommandSuggestionsInteraction = new Interaction<string?, Unit>();
+        AcceptCommandSuggestionInteraction = new Interaction<string, Unit>();
         RestartActiveSessionInteraction = new Interaction<Unit, Unit>();
         ClearActiveScrollbackInteraction = new Interaction<Unit, Unit>();
         ShowHyperlinkSampleInteraction = new Interaction<Unit, Unit>();
@@ -237,6 +290,11 @@ public sealed class MainWindowViewModel : ReactiveObject
         ToggleGhosttyDiagnosticsInteraction = new Interaction<bool, Unit>();
         CopySnapshotInteraction = new Interaction<TerminalSnapshotExportFormat, Unit>();
         ApplyShaderSampleInteraction = new Interaction<string, Unit>();
+        ShowAboutInteraction = new Interaction<Unit, Unit>();
+        QuitApplicationInteraction = new Interaction<Unit, Unit>();
+        SplitPaneInteraction = new Interaction<TerminalPaneSplitRequest, Unit>();
+        FocusPaneInteraction = new Interaction<TerminalPaneDirection, Unit>();
+        ResizePaneInteraction = new Interaction<TerminalPaneDirection, Unit>();
         AcceptSshHostKeyCommand = ReactiveCommand.Create(AcceptSshHostKeyPrompt);
         DeclineSshHostKeyCommand = ReactiveCommand.Create(DeclineSshHostKeyPrompt);
 
@@ -257,17 +315,53 @@ public sealed class MainWindowViewModel : ReactiveObject
         CycleThemePresetCommand = ReactiveCommand.CreateFromObservable(CycleThemePreset);
         GenerateThemeCommand = ReactiveCommand.CreateFromObservable(GenerateTheme);
         CycleRenderModeCommand = ReactiveCommand.Create(CycleRenderMode);
+        ToggleLeftPanelCommand = ReactiveCommand.Create(ToggleLeftPanel);
+        ToggleSearchPanelCommand = ReactiveCommand.Create(ToggleSearchPanel);
+        ToggleStatusBarCommand = ReactiveCommand.Create(ToggleStatusBar);
+        ToggleTabsInTitleBarCommand = ReactiveCommand.Create(ToggleTabsInTitleBar);
+        IObservable<bool> canSaveCapture = ObserveCanSaveCapture();
+        IObservable<bool> canReplayControl = ObserveCanReplayControl();
+        IObservable<bool> canApplySearch = ObserveCanExecuteProperty(nameof(CanApplySearch), () => CanApplySearch);
+        IObservable<bool> canAdvanceSearch = ObserveCanExecuteProperty(nameof(CanAdvanceSearch), () => CanAdvanceSearch);
+        IObservable<bool> canClearSearch = ObserveCanExecuteProperty(nameof(CanClearSearch), () => CanClearSearch);
+        IObservable<bool> canCloseSettingsPanel = ObserveCanExecuteProperty(nameof(IsSettingsPanelOpen), () => IsSettingsPanelOpen);
+        IObservable<bool> canLaunchSelectedProfile = ObserveCanExecuteProperty(
+            nameof(CanLaunchSelectedSessionProfile),
+            () => CanLaunchSelectedSessionProfile);
+        IObservable<bool> canCloseCommandHistoryOverlay = ObserveCanExecuteProperty(
+            nameof(IsCommandHistoryOverlayOpen),
+            () => IsCommandHistoryOverlayOpen);
+        IObservable<bool> canAcceptCommandSuggestion = ObserveCanExecuteProperty(
+            nameof(CanAcceptCommandSuggestion),
+            () => CanAcceptCommandSuggestion);
+        IObservable<bool> canClearEventLog = ObserveCanExecuteProperty(nameof(HasEventLogEntries), () => HasEventLogEntries);
+
         ToggleCaptureCommand = ReactiveCommand.CreateFromObservable(ToggleCapture);
-        SaveCaptureCommand = ReactiveCommand.CreateFromObservable(SaveCapture);
+        SelectCaptureFormatCommand = ReactiveCommand.Create<object?>(SelectCaptureFormat);
+        SaveCaptureCommand = ReactiveCommand.CreateFromObservable(SaveCapture, canSaveCapture);
         LoadReplayCommand = ReactiveCommand.CreateFromObservable(LoadReplay);
-        ToggleReplayPlaybackCommand = ReactiveCommand.CreateFromObservable(ToggleReplayPlayback);
-        StopReplayCommand = ReactiveCommand.CreateFromObservable(StopReplay);
+        ToggleReplayPlaybackCommand = ReactiveCommand.CreateFromObservable(ToggleReplayPlayback, canReplayControl);
+        StopReplayCommand = ReactiveCommand.CreateFromObservable(StopReplay, canReplayControl);
         PrepareSettingsPanelCommand = ReactiveCommand.CreateFromObservable(PrepareSettingsPanel);
-        ClearEventLogCommand = ReactiveCommand.Create(ClearEventLog);
-        ApplySearchCommand = ReactiveCommand.CreateFromObservable(ApplySearch);
-        NextSearchCommand = ReactiveCommand.CreateFromObservable(NextSearch);
-        PreviousSearchCommand = ReactiveCommand.CreateFromObservable(PreviousSearch);
-        ClearSearchCommand = ReactiveCommand.CreateFromObservable(ClearSearch);
+        CloseSettingsPanelCommand = ReactiveCommand.Create(CloseSettingsPanel, canCloseSettingsPanel);
+        RefreshSessionLauncherCommand = ReactiveCommand.CreateFromObservable(RefreshSessionLauncher);
+        LaunchSelectedSessionProfileCommand = ReactiveCommand.CreateFromObservable(
+            LaunchSelectedSessionProfile,
+            canLaunchSelectedProfile);
+        LaunchSessionProfileCommand = ReactiveCommand.CreateFromObservable<object?, Unit>(LaunchSessionProfile);
+        ClearEventLogCommand = ReactiveCommand.Create(ClearEventLog, canClearEventLog);
+        ApplySearchCommand = ReactiveCommand.CreateFromObservable(ApplySearch, canApplySearch);
+        NextSearchCommand = ReactiveCommand.CreateFromObservable(NextSearch, canAdvanceSearch);
+        PreviousSearchCommand = ReactiveCommand.CreateFromObservable(PreviousSearch, canAdvanceSearch);
+        ClearSearchCommand = ReactiveCommand.CreateFromObservable(ClearSearch, canClearSearch);
+        OpenCommandHistoryOverlayCommand = ReactiveCommand.CreateFromObservable(OpenCommandHistoryOverlay);
+        CloseCommandHistoryOverlayCommand = ReactiveCommand.Create(
+            CloseCommandHistoryOverlay,
+            canCloseCommandHistoryOverlay);
+        RefreshCommandSuggestionsCommand = ReactiveCommand.CreateFromObservable(RefreshCommandSuggestions);
+        AcceptCommandSuggestionCommand = ReactiveCommand.CreateFromObservable(
+            AcceptCommandSuggestion,
+            canAcceptCommandSuggestion);
         RestartActiveSessionCommand = ReactiveCommand.CreateFromObservable(RestartActiveSession);
         ClearActiveScrollbackCommand = ReactiveCommand.CreateFromObservable(ClearActiveScrollback);
         ShowHyperlinkSampleCommand = ReactiveCommand.CreateFromObservable(ShowHyperlinkSample);
@@ -277,6 +371,30 @@ public sealed class MainWindowViewModel : ReactiveObject
         CopyStyledVtSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.StyledVt));
         CopyHtmlSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.Html));
         CycleShaderSampleCommand = ReactiveCommand.CreateFromObservable(CycleShaderSample);
+        ShowAboutCommand = ReactiveCommand.CreateFromObservable(() => ShowAboutInteraction.Handle(Unit.Default));
+        QuitApplicationCommand = ReactiveCommand.CreateFromObservable(() => QuitApplicationInteraction.Handle(Unit.Default));
+        TogglePreserveScrollbackOnRestartCommand = ReactiveCommand.Create(TogglePreserveScrollbackOnRestart);
+        ToggleSixelGraphicsCommand = ReactiveCommand.Create(ToggleSixelGraphics);
+        SplitPaneRightCommand = ReactiveCommand.CreateFromObservable(
+            () => SplitPaneInteraction.Handle(TerminalPaneSplitRequest.Right));
+        SplitPaneDownCommand = ReactiveCommand.CreateFromObservable(
+            () => SplitPaneInteraction.Handle(TerminalPaneSplitRequest.Down));
+        FocusPaneLeftCommand = ReactiveCommand.CreateFromObservable(
+            () => FocusPaneInteraction.Handle(TerminalPaneDirection.Left));
+        FocusPaneRightCommand = ReactiveCommand.CreateFromObservable(
+            () => FocusPaneInteraction.Handle(TerminalPaneDirection.Right));
+        FocusPaneUpCommand = ReactiveCommand.CreateFromObservable(
+            () => FocusPaneInteraction.Handle(TerminalPaneDirection.Up));
+        FocusPaneDownCommand = ReactiveCommand.CreateFromObservable(
+            () => FocusPaneInteraction.Handle(TerminalPaneDirection.Down));
+        ResizePaneLeftCommand = ReactiveCommand.CreateFromObservable(
+            () => ResizePaneInteraction.Handle(TerminalPaneDirection.Left));
+        ResizePaneRightCommand = ReactiveCommand.CreateFromObservable(
+            () => ResizePaneInteraction.Handle(TerminalPaneDirection.Right));
+        ResizePaneUpCommand = ReactiveCommand.CreateFromObservable(
+            () => ResizePaneInteraction.Handle(TerminalPaneDirection.Up));
+        ResizePaneDownCommand = ReactiveCommand.CreateFromObservable(
+            () => ResizePaneInteraction.Handle(TerminalPaneDirection.Down));
 
         UpdateThemePresetButtonText();
     }
@@ -299,10 +417,14 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<bool, Unit> SetReplayPlayingInteraction { get; }
     public Interaction<Unit, Unit> StopReplayInteraction { get; }
     public Interaction<Unit, Unit> PrepareSettingsPanelInteraction { get; }
+    public Interaction<Unit, Unit> RefreshSessionLauncherInteraction { get; }
+    public Interaction<string, Unit> LaunchSessionProfileInteraction { get; }
     public Interaction<string?, Unit> ApplySearchInteraction { get; }
     public Interaction<Unit, Unit> NextSearchInteraction { get; }
     public Interaction<Unit, Unit> PreviousSearchInteraction { get; }
     public Interaction<Unit, Unit> ClearSearchInteraction { get; }
+    public Interaction<string?, Unit> RefreshCommandSuggestionsInteraction { get; }
+    public Interaction<string, Unit> AcceptCommandSuggestionInteraction { get; }
     public Interaction<Unit, Unit> RestartActiveSessionInteraction { get; }
     public Interaction<Unit, Unit> ClearActiveScrollbackInteraction { get; }
     public Interaction<Unit, Unit> ShowHyperlinkSampleInteraction { get; }
@@ -310,6 +432,11 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<bool, Unit> ToggleGhosttyDiagnosticsInteraction { get; }
     public Interaction<TerminalSnapshotExportFormat, Unit> CopySnapshotInteraction { get; }
     public Interaction<string, Unit> ApplyShaderSampleInteraction { get; }
+    public Interaction<Unit, Unit> ShowAboutInteraction { get; }
+    public Interaction<Unit, Unit> QuitApplicationInteraction { get; }
+    public Interaction<TerminalPaneSplitRequest, Unit> SplitPaneInteraction { get; }
+    public Interaction<TerminalPaneDirection, Unit> FocusPaneInteraction { get; }
+    public Interaction<TerminalPaneDirection, Unit> ResizePaneInteraction { get; }
 
     public ReactiveCommand<Unit, Unit> AcceptSshHostKeyCommand { get; }
     public ReactiveCommand<Unit, Unit> DeclineSshHostKeyCommand { get; }
@@ -330,17 +457,30 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> CycleThemePresetCommand { get; }
     public ReactiveCommand<Unit, Unit> GenerateThemeCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleRenderModeCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleLeftPanelCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleSearchPanelCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleStatusBarCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleTabsInTitleBarCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleCaptureCommand { get; }
+    public ReactiveCommand<object?, Unit> SelectCaptureFormatCommand { get; }
     public ReactiveCommand<Unit, Unit> SaveCaptureCommand { get; }
     public ReactiveCommand<Unit, Unit> LoadReplayCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleReplayPlaybackCommand { get; }
     public ReactiveCommand<Unit, Unit> StopReplayCommand { get; }
     public ReactiveCommand<Unit, Unit> PrepareSettingsPanelCommand { get; }
+    public ReactiveCommand<Unit, Unit> CloseSettingsPanelCommand { get; }
+    public ReactiveCommand<Unit, Unit> RefreshSessionLauncherCommand { get; }
+    public ReactiveCommand<Unit, Unit> LaunchSelectedSessionProfileCommand { get; }
+    public ReactiveCommand<object?, Unit> LaunchSessionProfileCommand { get; }
     public ReactiveCommand<Unit, Unit> ClearEventLogCommand { get; }
     public ReactiveCommand<Unit, Unit> ApplySearchCommand { get; }
     public ReactiveCommand<Unit, Unit> NextSearchCommand { get; }
     public ReactiveCommand<Unit, Unit> PreviousSearchCommand { get; }
     public ReactiveCommand<Unit, Unit> ClearSearchCommand { get; }
+    public ReactiveCommand<Unit, Unit> OpenCommandHistoryOverlayCommand { get; }
+    public ReactiveCommand<Unit, Unit> CloseCommandHistoryOverlayCommand { get; }
+    public ReactiveCommand<Unit, Unit> RefreshCommandSuggestionsCommand { get; }
+    public ReactiveCommand<Unit, Unit> AcceptCommandSuggestionCommand { get; }
     public ReactiveCommand<Unit, Unit> RestartActiveSessionCommand { get; }
     public ReactiveCommand<Unit, Unit> ClearActiveScrollbackCommand { get; }
     public ReactiveCommand<Unit, Unit> ShowHyperlinkSampleCommand { get; }
@@ -350,8 +490,66 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> CopyStyledVtSnapshotCommand { get; }
     public ReactiveCommand<Unit, Unit> CopyHtmlSnapshotCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleShaderSampleCommand { get; }
+    public ReactiveCommand<Unit, Unit> ShowAboutCommand { get; }
+    public ReactiveCommand<Unit, Unit> QuitApplicationCommand { get; }
+    public ReactiveCommand<Unit, Unit> TogglePreserveScrollbackOnRestartCommand { get; }
+    public ReactiveCommand<Unit, Unit> ToggleSixelGraphicsCommand { get; }
+    public ReactiveCommand<Unit, Unit> SplitPaneRightCommand { get; }
+    public ReactiveCommand<Unit, Unit> SplitPaneDownCommand { get; }
+    public ReactiveCommand<Unit, Unit> FocusPaneLeftCommand { get; }
+    public ReactiveCommand<Unit, Unit> FocusPaneRightCommand { get; }
+    public ReactiveCommand<Unit, Unit> FocusPaneUpCommand { get; }
+    public ReactiveCommand<Unit, Unit> FocusPaneDownCommand { get; }
+    public ReactiveCommand<Unit, Unit> ResizePaneLeftCommand { get; }
+    public ReactiveCommand<Unit, Unit> ResizePaneRightCommand { get; }
+    public ReactiveCommand<Unit, Unit> ResizePaneUpCommand { get; }
+    public ReactiveCommand<Unit, Unit> ResizePaneDownCommand { get; }
 
     public TerminalSettingsPanelState SettingsPanelState => _settingsPanelState ??= new TerminalSettingsPanelState();
+
+    public bool IsSettingsPanelOpen
+    {
+        get => _isSettingsPanelOpen;
+        private set => this.RaiseAndSetIfChanged(ref _isSettingsPanelOpen, value);
+    }
+
+    public bool IsLeftPanelVisible
+    {
+        get => _isLeftPanelVisible;
+        set => this.RaiseAndSetIfChanged(ref _isLeftPanelVisible, value);
+    }
+
+    public bool IsSearchPanelVisible
+    {
+        get => _isSearchPanelVisible;
+        set => this.RaiseAndSetIfChanged(ref _isSearchPanelVisible, value);
+    }
+
+    public bool IsStatusBarVisible
+    {
+        get => _isStatusBarVisible;
+        set => this.RaiseAndSetIfChanged(ref _isStatusBarVisible, value);
+    }
+
+    public bool IsTabsInTitleBar
+    {
+        get => _isTabsInTitleBar;
+        set
+        {
+            if (_isTabsInTitleBar == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _isTabsInTitleBar, value);
+            this.RaisePropertyChanged(nameof(IsBodyTabStripVisible));
+            this.RaisePropertyChanged(nameof(IsTitleBarLogoVisible));
+        }
+    }
+
+    public bool IsBodyTabStripVisible => !IsTabsInTitleBar;
+
+    public bool IsTitleBarLogoVisible => !IsTabsInTitleBar;
 
     public bool IsSshHostKeyPromptVisible
     {
@@ -578,6 +776,69 @@ public sealed class MainWindowViewModel : ReactiveObject
         private set => this.RaiseAndSetIfChanged(ref _modeButtonText, value);
     }
 
+    /// <summary>
+    /// Gets the compact profile and transport label displayed in the shell chrome.
+    /// </summary>
+    public string ActiveSessionDisplay => $"{ActiveProfileDisplay} / {SelectedTransportMode.DisplayName}";
+
+    /// <summary>
+    /// Gets the selected shell profile label displayed in the shell chrome.
+    /// </summary>
+    public string ActiveProfileDisplay => SelectedShellProfile?.DisplayName ?? "Default shell";
+
+    public IReadOnlyList<SessionLaunchOption> SessionLaunchOptions => _sessionLaunchOptions;
+
+    public IReadOnlyList<SessionLaunchOption> FilteredSessionLaunchOptions => _filteredSessionLaunchOptions;
+
+    public bool HasSessionLaunchOptions => _filteredSessionLaunchOptions.Count > 0;
+
+    public bool CanLaunchSelectedSessionProfile => _selectedSessionLaunchOption is not null;
+
+    public SessionLaunchOption? SelectedSessionLaunchOption
+    {
+        get => _selectedSessionLaunchOption;
+        set
+        {
+            if (_selectedSessionLaunchOption == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _selectedSessionLaunchOption, value);
+            this.RaisePropertyChanged(nameof(CanLaunchSelectedSessionProfile));
+        }
+    }
+
+    public string SessionLauncherStatusText
+    {
+        get
+        {
+            if (_sessionLaunchOptions.Count == 0)
+            {
+                return "No launch profiles";
+            }
+
+            return _filteredSessionLaunchOptions.Count == _sessionLaunchOptions.Count
+                ? $"{_sessionLaunchOptions.Count.ToString(CultureInfo.InvariantCulture)} profile(s)"
+                : $"{_filteredSessionLaunchOptions.Count.ToString(CultureInfo.InvariantCulture)} match(es)";
+        }
+    }
+
+    public string SessionLauncherQuery
+    {
+        get => _sessionLauncherQuery;
+        set
+        {
+            if (_sessionLauncherQuery == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _sessionLauncherQuery, value);
+            RefreshFilteredSessionLaunchOptions();
+        }
+    }
+
     public bool IsCaptureActive
     {
         get => _isCaptureActive;
@@ -711,8 +972,15 @@ public sealed class MainWindowViewModel : ReactiveObject
             }
 
             this.RaiseAndSetIfChanged(ref _selectedCaptureFormat, value);
+            RaiseCaptureFormatSelectionChanged();
         }
     }
+
+    public bool IsRoyalTerminalJsonCaptureFormatSelected
+        => IsCaptureFormatSelected(TerminalCaptureSessionFormats.RoyalTerminalJsonId);
+
+    public bool IsAsciicastV3CaptureFormatSelected
+        => IsCaptureFormatSelected(TerminalCaptureSessionFormats.AsciicastV3Id);
 
     public string SearchQuery
     {
@@ -727,7 +995,7 @@ public sealed class MainWindowViewModel : ReactiveObject
             this.RaiseAndSetIfChanged(ref _searchQuery, value);
             this.RaisePropertyChanged(nameof(CanApplySearch));
             this.RaisePropertyChanged(nameof(CanClearSearch));
-            this.RaisePropertyChanged(nameof(SearchResultText));
+            RaiseSearchStatusChanged();
         }
     }
 
@@ -736,6 +1004,33 @@ public sealed class MainWindowViewModel : ReactiveObject
     public bool CanAdvanceSearch => _searchApplied && _searchMatchTotal > 0;
 
     public bool CanClearSearch => !string.IsNullOrWhiteSpace(SearchQuery) || _searchApplied;
+
+    public bool IsSearchIdle => !_searchApplied || string.IsNullOrWhiteSpace(SearchQuery);
+
+    public bool HasSearchMatches => !IsSearchIdle && _searchMatchTotal > 0;
+
+    public bool HasSearchNoMatches => !IsSearchIdle && _searchMatchTotal <= 0;
+
+    public string SearchStatusSummaryText
+    {
+        get
+        {
+            if (IsSearchIdle)
+            {
+                return "Idle";
+            }
+
+            if (_searchMatchTotal <= 0)
+            {
+                return "No matches";
+            }
+
+            int selectedDisplay = Math.Clamp(_searchMatchSelected + 1, 1, _searchMatchTotal);
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"{selectedDisplay}/{_searchMatchTotal}");
+        }
+    }
 
     public string SearchResultText
     {
@@ -756,6 +1051,61 @@ public sealed class MainWindowViewModel : ReactiveObject
 
             int selectedDisplay = Math.Clamp(_searchMatchSelected + 1, 1, _searchMatchTotal);
             return $"{selectedDisplay}/{_searchMatchTotal} matches · {scope}";
+        }
+    }
+
+    public bool IsCommandHistoryOverlayOpen
+    {
+        get => _isCommandHistoryOverlayOpen;
+        private set
+        {
+            if (_isCommandHistoryOverlayOpen == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _isCommandHistoryOverlayOpen, value);
+            this.RaisePropertyChanged(nameof(CanAcceptCommandSuggestion));
+        }
+    }
+
+    public string CommandSuggestionQuery
+    {
+        get => _commandSuggestionQuery;
+        set => this.RaiseAndSetIfChanged(ref _commandSuggestionQuery, value);
+    }
+
+    public IReadOnlyList<TerminalCommandSuggestion> CommandSuggestions => _commandSuggestions;
+
+    public TerminalCommandSuggestion? SelectedCommandSuggestion
+    {
+        get => _selectedCommandSuggestion;
+        set
+        {
+            if (_selectedCommandSuggestion == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _selectedCommandSuggestion, value);
+            this.RaisePropertyChanged(nameof(CanAcceptCommandSuggestion));
+        }
+    }
+
+    public bool HasCommandSuggestions => _commandSuggestions.Count > 0;
+
+    public bool CanAcceptCommandSuggestion => IsCommandHistoryOverlayOpen && _selectedCommandSuggestion is not null;
+
+    public string CommandSuggestionStatusText
+    {
+        get
+        {
+            if (_commandSuggestions.Count == 0)
+            {
+                return "No suggestions";
+            }
+
+            return $"{_commandSuggestions.Count.ToString(CultureInfo.InvariantCulture)} suggestion(s)";
         }
     }
 
@@ -867,6 +1217,7 @@ public sealed class MainWindowViewModel : ReactiveObject
             }
 
             this.RaiseAndSetIfChanged(ref _selectedTransportMode, value);
+            this.RaisePropertyChanged(nameof(ActiveSessionDisplay));
             RaiseSessionConfigurationVisibilityChanged();
         }
     }
@@ -876,7 +1227,17 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ShellProfileOption? SelectedShellProfile
     {
         get => _selectedShellProfile;
-        set => this.RaiseAndSetIfChanged(ref _selectedShellProfile, value);
+        set
+        {
+            if (_selectedShellProfile == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _selectedShellProfile, value);
+            this.RaisePropertyChanged(nameof(ActiveProfileDisplay));
+            this.RaisePropertyChanged(nameof(ActiveSessionDisplay));
+        }
     }
 
     public string SessionName
@@ -1388,6 +1749,84 @@ public sealed class MainWindowViewModel : ReactiveObject
         }
     }
 
+    public void SetSessionLaunchOptions(IReadOnlyList<SessionLaunchOption> options)
+    {
+        _sessionLaunchOptions = options;
+        this.RaisePropertyChanged(nameof(SessionLaunchOptions));
+        RefreshFilteredSessionLaunchOptions();
+    }
+
+    private void RefreshFilteredSessionLaunchOptions()
+    {
+        string query = _sessionLauncherQuery.Trim();
+        if (query.Length == 0)
+        {
+            _filteredSessionLaunchOptions = _sessionLaunchOptions;
+        }
+        else
+        {
+            List<SessionLaunchOption> matches = new(_sessionLaunchOptions.Count);
+            for (int i = 0; i < _sessionLaunchOptions.Count; i++)
+            {
+                SessionLaunchOption option = _sessionLaunchOptions[i];
+                if (SessionLaunchOptionMatches(option, query))
+                {
+                    matches.Add(option);
+                }
+            }
+
+            _filteredSessionLaunchOptions = matches;
+        }
+
+        if (_filteredSessionLaunchOptions.Count == 0)
+        {
+            SelectedSessionLaunchOption = null;
+        }
+        else if (_selectedSessionLaunchOption is null ||
+                 !ContainsSessionLaunchOption(_filteredSessionLaunchOptions, _selectedSessionLaunchOption.Id))
+        {
+            SelectedSessionLaunchOption = _filteredSessionLaunchOptions[0];
+        }
+
+        this.RaisePropertyChanged(nameof(FilteredSessionLaunchOptions));
+        this.RaisePropertyChanged(nameof(HasSessionLaunchOptions));
+        this.RaisePropertyChanged(nameof(SessionLauncherStatusText));
+    }
+
+    private static bool SessionLaunchOptionMatches(SessionLaunchOption option, string query)
+    {
+        return option.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               option.TransportId.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               option.Subtitle.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               option.WorkingDirectory?.Contains(query, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static bool ContainsSessionLaunchOption(IReadOnlyList<SessionLaunchOption> options, string id)
+    {
+        for (int i = 0; i < options.Count; i++)
+        {
+            if (string.Equals(options[i].Id, id, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsCommandSuggestion(IReadOnlyList<TerminalCommandSuggestion> suggestions, string commandLine)
+    {
+        for (int i = 0; i < suggestions.Count; i++)
+        {
+            if (string.Equals(suggestions[i].CommandLine, commandLine, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public string GetNewTabModeName()
     {
         switch (_activeRenderMode)
@@ -1405,6 +1844,47 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         IsCaptureActive = isCaptureActive;
         HasCapture = hasCapture;
+    }
+
+    private IObservable<bool> ObserveCanSaveCapture()
+    {
+        return Observable
+            .FromEventPattern<PropertyChangedEventHandler, PropertyChangedEventArgs>(
+                handler => PropertyChanged += handler,
+                handler => PropertyChanged -= handler)
+            .Where(args =>
+                string.Equals(args.EventArgs.PropertyName, nameof(HasCapture), StringComparison.Ordinal) ||
+                string.Equals(args.EventArgs.PropertyName, nameof(IsCaptureActive), StringComparison.Ordinal))
+            .Select(_ => CanSaveCapture)
+            .StartWith(CanSaveCapture)
+            .DistinctUntilChanged();
+    }
+
+    private IObservable<bool> ObserveCanReplayControl()
+    {
+        return Observable
+            .FromEventPattern<PropertyChangedEventHandler, PropertyChangedEventArgs>(
+                handler => PropertyChanged += handler,
+                handler => PropertyChanged -= handler)
+            .Where(args => string.Equals(args.EventArgs.PropertyName, nameof(IsReplayEnabled), StringComparison.Ordinal))
+            .Select(_ => CanReplayControl)
+            .StartWith(CanReplayControl)
+            .DistinctUntilChanged();
+    }
+
+    private IObservable<bool> ObserveCanExecuteProperty(string propertyName, Func<bool> valueFactory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(propertyName);
+        ArgumentNullException.ThrowIfNull(valueFactory);
+
+        return Observable
+            .FromEventPattern<PropertyChangedEventHandler, PropertyChangedEventArgs>(
+                handler => PropertyChanged += handler,
+                handler => PropertyChanged -= handler)
+            .Where(args => string.Equals(args.EventArgs.PropertyName, propertyName, StringComparison.Ordinal))
+            .Select(_ => valueFactory())
+            .StartWith(valueFactory())
+            .DistinctUntilChanged();
     }
 
     public void SetReplayState(
@@ -1448,6 +1928,25 @@ public sealed class MainWindowViewModel : ReactiveObject
         _searchMatchSelected = -1;
         _searchUsesNativeScrollback = false;
         RaiseSearchSurfaceChanged();
+    }
+
+    public void SetCommandSuggestions(IReadOnlyList<TerminalCommandSuggestion> suggestions)
+    {
+        _commandSuggestions = suggestions;
+        this.RaisePropertyChanged(nameof(CommandSuggestions));
+
+        if (_commandSuggestions.Count == 0)
+        {
+            SelectedCommandSuggestion = null;
+        }
+        else if (_selectedCommandSuggestion is null ||
+                 !ContainsCommandSuggestion(_commandSuggestions, _selectedCommandSuggestion.CommandLine))
+        {
+            SelectedCommandSuggestion = _commandSuggestions[0];
+        }
+
+        this.RaisePropertyChanged(nameof(HasCommandSuggestions));
+        this.RaisePropertyChanged(nameof(CommandSuggestionStatusText));
     }
 
     public void SetGhosttyDiagnostics(bool show, string text)
@@ -1616,10 +2115,65 @@ public sealed class MainWindowViewModel : ReactiveObject
         return ApplyCurrentModeTheme($"Generated theme: {state.DisplayName}");
     }
 
+    private void ToggleLeftPanel()
+    {
+        IsLeftPanelVisible = !IsLeftPanelVisible;
+    }
+
+    private void ToggleSearchPanel()
+    {
+        IsSearchPanelVisible = !IsSearchPanelVisible;
+    }
+
+    private void ToggleStatusBar()
+    {
+        IsStatusBarVisible = !IsStatusBarVisible;
+    }
+
+    private void ToggleTabsInTitleBar()
+    {
+        IsTabsInTitleBar = !IsTabsInTitleBar;
+    }
+
     private IObservable<Unit> ToggleCapture()
     {
         bool shouldStartCapture = !IsCaptureActive;
         return ToggleCaptureInteraction.Handle(shouldStartCapture);
+    }
+
+    private void TogglePreserveScrollbackOnRestart()
+    {
+        PreserveScrollbackOnRestart = !PreserveScrollbackOnRestart;
+    }
+
+    private void ToggleSixelGraphics()
+    {
+        SixelGraphicsEnabled = !SixelGraphicsEnabled;
+    }
+
+    private void SelectCaptureFormat(object? parameter)
+    {
+        string? formatId = Convert.ToString(parameter, CultureInfo.InvariantCulture);
+        if (string.IsNullOrWhiteSpace(formatId))
+        {
+            return;
+        }
+
+        for (int i = 0; i < _captureFormats.Count; i++)
+        {
+            TerminalCaptureFormatOption option = _captureFormats[i];
+            if (string.Equals(option.FormatId, formatId, StringComparison.Ordinal))
+            {
+                if (string.Equals(SelectedCaptureFormat.FormatId, option.FormatId, StringComparison.Ordinal))
+                {
+                    RaiseCaptureFormatSelectionChanged();
+                    return;
+                }
+
+                SelectedCaptureFormat = option;
+                return;
+            }
+        }
     }
 
     private IObservable<Unit> SaveCapture()
@@ -1645,7 +2199,46 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private IObservable<Unit> PrepareSettingsPanel()
     {
-        return PrepareSettingsPanelInteraction.Handle(Unit.Default);
+        return PrepareSettingsPanelInteraction
+            .Handle(Unit.Default)
+            .ObserveOn(AvaloniaScheduler.Instance)
+            .Do(_ => IsSettingsPanelOpen = true);
+    }
+
+    private void CloseSettingsPanel()
+    {
+        IsSettingsPanelOpen = false;
+    }
+
+    private IObservable<Unit> RefreshSessionLauncher()
+    {
+        return RefreshSessionLauncherInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> LaunchSelectedSessionProfile()
+    {
+        return SelectedSessionLaunchOption is null
+            ? Observable.Return(Unit.Default)
+            : LaunchSessionProfile(SelectedSessionLaunchOption);
+    }
+
+    private IObservable<Unit> LaunchSessionProfile(object? parameter)
+    {
+        string? profileId = parameter switch
+        {
+            SessionLaunchOption option => option.Id,
+            string text => text,
+            _ => null,
+        };
+
+        if (string.IsNullOrWhiteSpace(profileId))
+        {
+            return Observable.Return(Unit.Default);
+        }
+
+        return LaunchSessionProfileInteraction
+            .Handle(profileId.Trim())
+            .Do(_ => SetStatus("Opened launch profile"));
     }
 
     private IObservable<Unit> ApplySearch()
@@ -1666,6 +2259,41 @@ public sealed class MainWindowViewModel : ReactiveObject
     private IObservable<Unit> ClearSearch()
     {
         return ClearSearchInteraction.Handle(Unit.Default);
+    }
+
+    private IObservable<Unit> OpenCommandHistoryOverlay()
+    {
+        IsCommandHistoryOverlayOpen = true;
+        return RefreshCommandSuggestions();
+    }
+
+    private void CloseCommandHistoryOverlay()
+    {
+        IsCommandHistoryOverlayOpen = false;
+    }
+
+    private IObservable<Unit> RefreshCommandSuggestions()
+    {
+        return RefreshCommandSuggestionsInteraction.Handle(CommandSuggestionQuery);
+    }
+
+    private IObservable<Unit> AcceptCommandSuggestion()
+    {
+        if (!IsCommandHistoryOverlayOpen ||
+            SelectedCommandSuggestion is null ||
+            string.IsNullOrWhiteSpace(SelectedCommandSuggestion.CommandLine))
+        {
+            return Observable.Return(Unit.Default);
+        }
+
+        string commandLine = SelectedCommandSuggestion.CommandLine;
+        return AcceptCommandSuggestionInteraction
+            .Handle(commandLine)
+            .Do(_ =>
+            {
+                IsCommandHistoryOverlayOpen = false;
+                SetStatus("Inserted command suggestion");
+            });
     }
 
     private IObservable<Unit> RestartActiveSession()
@@ -1934,6 +2562,17 @@ public sealed class MainWindowViewModel : ReactiveObject
         return options;
     }
 
+    private bool IsCaptureFormatSelected(string formatId)
+    {
+        return string.Equals(SelectedCaptureFormat.FormatId, formatId, StringComparison.Ordinal);
+    }
+
+    private void RaiseCaptureFormatSelectionChanged()
+    {
+        this.RaisePropertyChanged(nameof(IsRoyalTerminalJsonCaptureFormatSelected));
+        this.RaisePropertyChanged(nameof(IsAsciicastV3CaptureFormatSelected));
+    }
+
     private static bool ContainsShellProfile(IReadOnlyList<ShellProfileOption> profiles, string id)
     {
         for (int i = 0; i < profiles.Count; i++)
@@ -1974,6 +2613,15 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         this.RaisePropertyChanged(nameof(CanAdvanceSearch));
         this.RaisePropertyChanged(nameof(CanClearSearch));
+        RaiseSearchStatusChanged();
+    }
+
+    private void RaiseSearchStatusChanged()
+    {
+        this.RaisePropertyChanged(nameof(IsSearchIdle));
+        this.RaisePropertyChanged(nameof(HasSearchMatches));
+        this.RaisePropertyChanged(nameof(HasSearchNoMatches));
+        this.RaisePropertyChanged(nameof(SearchStatusSummaryText));
         this.RaisePropertyChanged(nameof(SearchResultText));
     }
 
@@ -2059,6 +2707,13 @@ public sealed class MainWindowViewModel : ReactiveObject
 public sealed record TransportModeOption(string Id, string DisplayName);
 
 public sealed record ShellProfileOption(string Id, string DisplayName, string CommandPath);
+
+public sealed record SessionLaunchOption(
+    string Id,
+    string DisplayName,
+    string TransportId,
+    string Subtitle,
+    string? WorkingDirectory);
 
 /// <summary>
 /// User-selectable terminal capture file format option.

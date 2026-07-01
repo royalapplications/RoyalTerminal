@@ -566,6 +566,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// <summary>Raised when the terminal bell rings.</summary>
     public event EventHandler? Bell;
 
+    /// <summary>Raised when shell integration metadata is received from OSC 7 or OSC 133.</summary>
+    public event EventHandler<TerminalShellIntegrationEventArgs>? ShellIntegrationEventReceived;
+
     /// <summary>Raised when the terminal process exits.</summary>
     public event EventHandler<int>? ProcessExited;
 
@@ -1098,6 +1101,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _screen.ApplyTheme(activeTheme);
 
         _vtProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
+        AttachShellIntegrationEventSource(_vtProcessor);
         ApplySixelGraphicsSettingToProcessor(_vtProcessor);
         ApplyEraseDisplayOptionsToProcessor(_vtProcessor, transportId: null);
         if (_vtProcessor is ITerminalThemeSink themeSink)
@@ -1543,7 +1547,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         ApplySixelGraphicsSettingToProcessor(nextProcessor);
         ApplyEraseDisplayOptionsToProcessor(nextProcessor, _activeTransportId);
         IVtProcessor? previousProcessor = _vtProcessor;
+        DetachShellIntegrationEventSource(previousProcessor);
         _vtProcessor = nextProcessor;
+        AttachShellIntegrationEventSource(_vtProcessor);
         if (_theme is not null && _vtProcessor is ITerminalThemeSink themeSink)
         {
             lock (_screen.SyncRoot)
@@ -1553,6 +1559,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
         _appliedVtProcessorPreference = VtProcessorPreference;
         previousProcessor?.Dispose();
+    }
+
+    private void AttachShellIntegrationEventSource(IVtProcessor? processor)
+    {
+        if (processor is ITerminalShellIntegrationEventSource source)
+        {
+            source.ShellIntegrationEventReceived += OnVtProcessorShellIntegrationEventReceived;
+        }
+    }
+
+    private void DetachShellIntegrationEventSource(IVtProcessor? processor)
+    {
+        if (processor is ITerminalShellIntegrationEventSource source)
+        {
+            source.ShellIntegrationEventReceived -= OnVtProcessorShellIntegrationEventReceived;
+        }
     }
 
     private void ApplySixelGraphicsSetting()
@@ -5540,6 +5562,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private void OnVtProcessorTitleChanged(string title)
     {
         Dispatcher.UIThread.Post(() => TitleChanged?.Invoke(this, title));
+    }
+
+    private void OnVtProcessorShellIntegrationEventReceived(object? sender, TerminalShellIntegrationEventArgs e)
+    {
+        _ = sender;
+        Dispatcher.UIThread.Post(() => ShellIntegrationEventReceived?.Invoke(this, e));
     }
 
     private void OnPtyDataReceived(byte[] data, int length)

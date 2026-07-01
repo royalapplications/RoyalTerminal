@@ -1,15 +1,17 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
-using RoyalTerminal.Demo.Services;
-using RoyalTerminal.Demo.ViewModels;
+using RoyalTerminal.Avalonia.App.Services;
+using RoyalTerminal.Avalonia.App.ViewModels;
 using RoyalTerminal.Terminal;
 using Xunit;
 
@@ -18,9 +20,12 @@ namespace RoyalTerminal.Tests;
 [Collection("MainWindowControllerHeadlessTests")]
 public sealed class MainWindowControllerSettingsPanelTests
 {
+    private const string DisableSessionAutostartEnvVar = "ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART";
+
     [AvaloniaFact]
-    public void Controller_PrepareSettingsPanel_LoadsStoredProfile_AndApplyUpdatesViewModel()
+    public async Task Controller_PrepareSettingsPanel_LoadsStoredProfile_AndApplyUpdatesViewModel()
     {
+        using IDisposable autostart = SetProcessEnvironmentVariable(DisableSessionAutostartEnvVar, "1");
         InMemoryProfileStore store = new(CreateStoredDocument());
         MainWindowViewModel viewModel = new();
         Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
@@ -29,14 +34,15 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            settingsProfileStore: store);
+            settingsProfileStore: store,
+            workspaceStore: new InMemoryWorkspaceStore());
 
         IDisposable? lifetime = null;
         try
         {
             lifetime = controller.Activate();
 
-            viewModel.PrepareSettingsPanelCommand.Execute().Wait();
+            await viewModel.PrepareSettingsPanelCommand.Execute();
             Dispatcher.UIThread.RunJobs();
 
             Assert.NotNull(viewModel.SettingsPanelState.SelectedProfile);
@@ -129,6 +135,7 @@ public sealed class MainWindowControllerSettingsPanelTests
     [AvaloniaFact]
     public async Task Controller_SaveSettingsPanel_PersistsEditedDocument()
     {
+        using IDisposable autostart = SetProcessEnvironmentVariable(DisableSessionAutostartEnvVar, "1");
         InMemoryProfileStore store = new(CreateStoredDocument());
         MainWindowViewModel viewModel = new();
         Window window = CreateControllerHostWindow(viewModel, out _);
@@ -137,14 +144,15 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            settingsProfileStore: store);
+            settingsProfileStore: store,
+            workspaceStore: new InMemoryWorkspaceStore());
 
         IDisposable? lifetime = null;
         try
         {
             lifetime = controller.Activate();
 
-            viewModel.PrepareSettingsPanelCommand.Execute().Wait();
+            await viewModel.PrepareSettingsPanelCommand.Execute();
             Dispatcher.UIThread.RunJobs();
 
             viewModel.SettingsPanelState.SessionName = "Renamed Stored Profile";
@@ -193,9 +201,65 @@ public sealed class MainWindowControllerSettingsPanelTests
 
     private static Window CreateControllerHostWindow(MainWindowViewModel viewModel, out Grid terminalHost)
     {
+        ContentControl titleBarTabStripHost = new()
+        {
+            Name = "TitleBarTabStripHost",
+        };
+
         StackPanel tabStrip = new()
         {
             Name = "TabStrip",
+        };
+        RepeatButton tabStripScrollLeftButton = new()
+        {
+            Name = "TabStripScrollLeftButton",
+            IsVisible = false,
+        };
+        ScrollViewer tabStripScrollViewer = new()
+        {
+            Name = "TabStripScrollViewer",
+            Content = tabStrip,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        RepeatButton tabStripScrollRightButton = new()
+        {
+            Name = "TabStripScrollRightButton",
+            IsVisible = false,
+        };
+        Button tabStripNewTabButton = new()
+        {
+            Name = "TabStripNewTabButton",
+            Command = viewModel.NewTabCommand,
+        };
+        Grid tabStripLayout = new()
+        {
+            Name = "TabStripLayout",
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Auto),
+            },
+        };
+        tabStripLayout.Children.Add(tabStripScrollLeftButton);
+        tabStripLayout.Children.Add(tabStripScrollViewer);
+        tabStripLayout.Children.Add(tabStripScrollRightButton);
+        tabStripLayout.Children.Add(tabStripNewTabButton);
+        Grid.SetColumn(tabStripScrollViewer, 1);
+        Grid.SetColumn(tabStripScrollRightButton, 2);
+        Grid.SetColumn(tabStripNewTabButton, 3);
+
+        Border tabStripSurface = new()
+        {
+            Name = "TabStripSurface",
+            Child = tabStripLayout,
+        };
+        ContentControl bodyTabStripHost = new()
+        {
+            Name = "BodyTabStripHost",
+            Content = tabStripSurface,
         };
 
         terminalHost = new Grid
@@ -205,11 +269,14 @@ public sealed class MainWindowControllerSettingsPanelTests
 
         Grid root = new();
         root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         root.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));
-        root.Children.Add(tabStrip);
+        root.Children.Add(titleBarTabStripHost);
+        root.Children.Add(bodyTabStripHost);
         root.Children.Add(terminalHost);
-        Grid.SetRow(tabStrip, 0);
-        Grid.SetRow(terminalHost, 1);
+        Grid.SetRow(titleBarTabStripHost, 0);
+        Grid.SetRow(bodyTabStripHost, 1);
+        Grid.SetRow(terminalHost, 2);
 
         Window window = new()
         {
@@ -222,6 +289,14 @@ public sealed class MainWindowControllerSettingsPanelTests
         NameScope nameScope = new();
         NameScope.SetNameScope(window, nameScope);
         nameScope.Register(tabStrip.Name!, tabStrip);
+        nameScope.Register(titleBarTabStripHost.Name!, titleBarTabStripHost);
+        nameScope.Register(bodyTabStripHost.Name!, bodyTabStripHost);
+        nameScope.Register(tabStripSurface.Name!, tabStripSurface);
+        nameScope.Register(tabStripLayout.Name!, tabStripLayout);
+        nameScope.Register(tabStripScrollLeftButton.Name!, tabStripScrollLeftButton);
+        nameScope.Register(tabStripScrollViewer.Name!, tabStripScrollViewer);
+        nameScope.Register(tabStripScrollRightButton.Name!, tabStripScrollRightButton);
+        nameScope.Register(tabStripNewTabButton.Name!, tabStripNewTabButton);
         nameScope.Register(terminalHost.Name!, terminalHost);
 
         window.Show();
@@ -306,6 +381,13 @@ public sealed class MainWindowControllerSettingsPanelTests
     private static string GetSavedFontPath()
     {
         return Path.Combine(Path.GetTempPath(), "royalterminal-saved-font.otf");
+    }
+
+    private static IDisposable SetProcessEnvironmentVariable(string variable, string? value)
+    {
+        string? previous = Environment.GetEnvironmentVariable(variable);
+        Environment.SetEnvironmentVariable(variable, value);
+        return Disposable.Create(() => Environment.SetEnvironmentVariable(variable, previous));
     }
 
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)

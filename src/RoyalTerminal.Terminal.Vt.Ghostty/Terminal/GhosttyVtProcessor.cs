@@ -19,6 +19,7 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 public sealed class GhosttyVtProcessor : IVtProcessor,
     ITerminalThemeSink,
+    ITerminalShellIntegrationEventSource,
     IKittyKeyboardStateSource,
     ITerminalCursorStyleSource,
     ITerminalFocusEventModeSource,
@@ -35,6 +36,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     ITerminalSixelOptionsSink,
     ITerminalResizeReflowPolicySink
 {
+    private const int MaxShellIntegrationOscBufferBytes = 4096;
+
     private static readonly GhosttyVtNative.GhosttyMode s_wraparoundMode =
         GhosttyVtNative.CreateMode(7, ansi: false);
     private static readonly GhosttyVtNative.GhosttyMode[] s_preserveScrollbackResetDisabledModes =
@@ -154,6 +157,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     private readonly TerminalWin32InputModeTracker _win32InputModeTracker = new();
     private readonly TerminalUnsupportedWindowsSequenceSanitizer _unsupportedWindowsSequenceSanitizer = new();
+    private readonly TerminalShellIntegrationParser _shellIntegrationParser = new();
+    private readonly List<byte> _shellIntegrationOscBuffer = [];
+    private ShellIntegrationOscParserState _shellIntegrationOscState;
+    private bool _shellIntegrationOscDiscarding;
 
     // Keep delegates alive for the duration of the native terminal.
     private GhosttyVtNative.GhosttyTerminalWritePtyCallback? _writePtyDelegate;
@@ -166,6 +173,14 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private GhosttyVtNative.GhosttyTerminalDeviceAttributesCallback? _deviceAttributesDelegate;
     private static readonly byte[] s_answerbackBytes = "RoyalTerminal"u8.ToArray();
     private static readonly GCHandle s_answerbackHandle = GCHandle.Alloc(s_answerbackBytes, GCHandleType.Pinned);
+
+    private enum ShellIntegrationOscParserState
+    {
+        Ground,
+        Escape,
+        OscString,
+        OscEscape,
+    }
 
     /// <inheritdoc />
     public TerminalViewportScrollState ViewportScrollState =>
@@ -272,6 +287,13 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     public event EventHandler<TerminalModeState>? ModeChanged;
 
     /// <inheritdoc />
+    public event EventHandler<TerminalShellIntegrationEventArgs>? ShellIntegrationEventReceived
+    {
+        add => _shellIntegrationParser.EventReceived += value;
+        remove => _shellIntegrationParser.EventReceived -= value;
+    }
+
+    /// <inheritdoc />
     public Action<byte[]>? ResponseCallback { get; set; }
 
     /// <inheritdoc />
@@ -345,6 +367,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         try
         {
+            ProcessShellIntegrationOsc(input);
             _terminal.Write(input);
             if (_sixelGraphicsEnabled)
             {
@@ -362,6 +385,139 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         RefreshStateAndScreenFromNative();
         SyncSixelOverlayRasterGraphics();
         RaiseModeChangedIfNeeded(before);
+    }
+
+    private void ProcessShellIntegrationOsc(ReadOnlySpan<byte> data)
+    {
+        for (int i = 0; i < data.Length; i++)
+        {
+            ProcessShellIntegrationOscByte(data[i]);
+        }
+    }
+
+    private void ProcessShellIntegrationOscByte(byte value)
+    {
+        switch (_shellIntegrationOscState)
+        {
+            case ShellIntegrationOscParserState.Ground:
+                if (value == 0x1B)
+                {
+                    _shellIntegrationOscState = ShellIntegrationOscParserState.Escape;
+                }
+                else if (value == 0x9D)
+                {
+                    StartShellIntegrationOsc();
+                }
+
+                break;
+
+            case ShellIntegrationOscParserState.Escape:
+                if (value == (byte)']')
+                {
+                    StartShellIntegrationOsc();
+                }
+                else
+                {
+                    _shellIntegrationOscState = ShellIntegrationOscParserState.Ground;
+                }
+
+                break;
+
+            case ShellIntegrationOscParserState.OscString:
+                if (value == 0x07 || value == 0x9C)
+                {
+                    HandleShellIntegrationOsc();
+                    _shellIntegrationOscState = ShellIntegrationOscParserState.Ground;
+                }
+                else if (value == 0x1B)
+                {
+                    _shellIntegrationOscState = ShellIntegrationOscParserState.OscEscape;
+                }
+                else
+                {
+                    AppendShellIntegrationOscByte(value);
+                }
+
+                break;
+
+            case ShellIntegrationOscParserState.OscEscape:
+                if (value == (byte)'\\')
+                {
+                    HandleShellIntegrationOsc();
+                    _shellIntegrationOscState = ShellIntegrationOscParserState.Ground;
+                }
+                else
+                {
+                    AppendShellIntegrationOscByte(0x1B);
+                    AppendShellIntegrationOscByte(value);
+                    _shellIntegrationOscState = ShellIntegrationOscParserState.OscString;
+                }
+
+                break;
+        }
+    }
+
+    private void StartShellIntegrationOsc()
+    {
+        _shellIntegrationOscBuffer.Clear();
+        _shellIntegrationOscDiscarding = false;
+        _shellIntegrationOscState = ShellIntegrationOscParserState.OscString;
+    }
+
+    private void AppendShellIntegrationOscByte(byte value)
+    {
+        if (_shellIntegrationOscDiscarding)
+        {
+            return;
+        }
+
+        if (_shellIntegrationOscBuffer.Count >= MaxShellIntegrationOscBufferBytes)
+        {
+            _shellIntegrationOscBuffer.Clear();
+            _shellIntegrationOscDiscarding = true;
+            return;
+        }
+
+        _shellIntegrationOscBuffer.Add(value);
+    }
+
+    private void HandleShellIntegrationOsc()
+    {
+        if (_shellIntegrationOscDiscarding)
+        {
+            _shellIntegrationOscBuffer.Clear();
+            _shellIntegrationOscDiscarding = false;
+            return;
+        }
+
+        if (_shellIntegrationOscBuffer.Count == 0)
+        {
+            return;
+        }
+
+        string payload = Encoding.UTF8.GetString(_shellIntegrationOscBuffer.ToArray());
+        _shellIntegrationOscBuffer.Clear();
+
+        int separator = payload.IndexOf(';');
+        if (separator < 0)
+        {
+            return;
+        }
+
+        if (!int.TryParse(payload.AsSpan(0, separator), out int selectorCode))
+        {
+            return;
+        }
+
+        if (selectorCode is not 7 and not 133)
+        {
+            return;
+        }
+
+        string value = separator + 1 < payload.Length
+            ? payload[(separator + 1)..]
+            : string.Empty;
+        _shellIntegrationParser.TryHandleOsc(selectorCode, value);
     }
 
     /// <inheritdoc />

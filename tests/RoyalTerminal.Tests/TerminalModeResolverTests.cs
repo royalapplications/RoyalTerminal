@@ -2,7 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests — capability and mode resolver matrix coverage.
 
-using RoyalTerminal.Demo.Services;
+using RoyalTerminal.Avalonia.App.Services;
 using Xunit;
 
 namespace RoyalTerminal.Tests;

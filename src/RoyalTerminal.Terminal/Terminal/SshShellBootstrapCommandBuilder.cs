@@ -44,6 +44,18 @@ public static class SshShellBootstrapCommandBuilder
         string? initialCommand,
         IReadOnlyDictionary<string, string>? environmentVariables)
     {
+        return Build(initialCommand, environmentVariables, shellIntegration: null);
+    }
+
+    /// <summary>
+    /// Builds a shell bootstrap command from initial command, optional environment variables,
+    /// and optional shell integration bootstrap options.
+    /// </summary>
+    public static string? Build(
+        string? initialCommand,
+        IReadOnlyDictionary<string, string>? environmentVariables,
+        TerminalShellIntegrationBootstrapOptions? shellIntegration)
+    {
         ValidateEnvironmentVariables(environmentVariables);
 
         StringBuilder? command = null;
@@ -64,6 +76,20 @@ public static class SshShellBootstrapCommandBuilder
                 command.Append(EscapeSingleQuoted(value));
                 command.Append('\'');
             }
+        }
+
+        string? shellIntegrationScript = shellIntegration is null
+            ? null
+            : TerminalShellIntegrationBootstrapBuilder.Build(shellIntegration);
+        if (!string.IsNullOrWhiteSpace(shellIntegrationScript))
+        {
+            command ??= new StringBuilder();
+            if (command.Length > 0)
+            {
+                command.Append("; ");
+            }
+
+            command.Append(shellIntegrationScript);
         }
 
         if (!string.IsNullOrWhiteSpace(initialCommand))

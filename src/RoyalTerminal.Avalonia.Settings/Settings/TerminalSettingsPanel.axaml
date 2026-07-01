@@ -4,24 +4,29 @@
         xmlns:settings="using:RoyalTerminal.Avalonia.Settings">
   <Styles.Resources>
     <ResourceDictionary>
+      <SolidColorBrush x:Key="TerminalSettings.Panel.BackgroundBrush" Color="#252525" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.ContentBackgroundBrush" Color="#252525" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.BorderBrush" Color="#4A4A4A" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.DividerBrush" Color="#3A3A3A" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.SecondaryTextBrush" Color="#B8B8B8" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.SubtleTextBrush" Color="#9F9F9F" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.CardBorderBrush" Color="#505050" />
+
       <ControlTheme x:Key="{x:Type settings:TerminalSettingsPanel}" TargetType="settings:TerminalSettingsPanel">
         <Setter Property="Template">
           <ControlTemplate TargetType="settings:TerminalSettingsPanel">
-            <Border Width="720"
-                    Height="700"
+            <Border Classes="settings-panel-root"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
                     Padding="0"
-                    Background="#252525"
-                    BorderBrush="#4A4A4A"
-                    BorderThickness="1"
-                    CornerRadius="8"
                     ClipToBounds="True"
                     DataContext="{Binding DataContext, RelativeSource={RelativeSource TemplatedParent}}"
                     x:DataType="settings:TerminalSettingsPanelState">
               <Grid RowDefinitions="Auto,*,Auto">
                 <Border Grid.Row="0"
+                        Classes="settings-panel-header"
                         Padding="18,14"
-                        BorderBrush="#3A3A3A"
-                        BorderThickness="0,0,0,1">
+                        ClipToBounds="True">
                   <Grid ColumnDefinitions="Auto,220,*"
                         RowDefinitions="Auto,Auto"
                         ColumnSpacing="12"
@@ -48,9 +53,9 @@
                                 VerticalAlignment="Center"
                                 Orientation="Horizontal"
                                 Spacing="16">
-                      <TextBlock Foreground="#B8B8B8"
+                      <TextBlock Foreground="{DynamicResource TerminalSettings.Panel.SecondaryTextBrush}"
                                  Text="{Binding DefaultProfileId, StringFormat='Default: {0}'}" />
-                      <TextBlock Foreground="#B8B8B8"
+                      <TextBlock Foreground="{DynamicResource TerminalSettings.Panel.SecondaryTextBrush}"
                                  IsVisible="{Binding IsDirty}"
                                  Text="Unsaved changes" />
                     </StackPanel>
@@ -78,16 +83,17 @@
                 <Border Grid.Row="1"
                         Classes="settings-content-host"
                         MinHeight="0"
-                        Background="#252525"
                         ClipToBounds="True">
                   <TabControl TabStripPlacement="Left"
                               Padding="0"
                               FontSize="14"
+                              MinHeight="0"
                               HorizontalContentAlignment="Stretch"
                               VerticalContentAlignment="Stretch"
                               ClipToBounds="True">
                     <TabControl.Styles>
                       <Style Selector="TabControl /template/ ContentPresenter#PART_SelectedContentHost">
+                        <Setter Property="MinHeight" Value="0" />
                         <Setter Property="HorizontalAlignment" Value="Stretch" />
                         <Setter Property="VerticalAlignment" Value="Stretch" />
                         <Setter Property="ClipToBounds" Value="True" />
@@ -104,81 +110,87 @@
                     <TabItem Header="Session">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
                                     HorizontalScrollBarVisibility="Disabled"
                                     VerticalScrollBarVisibility="Auto">
-                        <settings:TerminalSettingsSessionPanel DataContext="{Binding Session}" />
+                        <Border Padding="20,16,20,36">
+                          <settings:TerminalSettingsSessionPanel DataContext="{Binding Session}" />
+                        </Border>
                       </ScrollViewer>
                     </TabItem>
 
                     <TabItem Header="Connection">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
                                     HorizontalScrollBarVisibility="Disabled"
                                     VerticalScrollBarVisibility="Auto">
-                        <settings:TerminalSettingsConnectionPanel
-                          DataContext="{Binding Connection}" />
+                        <Border Padding="20,16,20,36">
+                          <settings:TerminalSettingsConnectionPanel
+                            DataContext="{Binding Connection}" />
+                        </Border>
                       </ScrollViewer>
                     </TabItem>
 
                     <TabItem Header="Terminal">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
                                     HorizontalScrollBarVisibility="Disabled"
                                     VerticalScrollBarVisibility="Auto">
-                        <settings:TerminalSettingsTerminalPanel
-                          DataContext="{Binding TerminalBehavior}" />
+                        <Border Padding="20,16,20,36">
+                          <settings:TerminalSettingsTerminalPanel
+                            DataContext="{Binding TerminalBehavior}" />
+                        </Border>
                       </ScrollViewer>
                     </TabItem>
 
                     <TabItem Header="Appearance">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
                                     HorizontalScrollBarVisibility="Disabled"
                                     VerticalScrollBarVisibility="Auto">
-                        <settings:TerminalSettingsAppearancePanel
-                          DataContext="{Binding Appearance}" />
+                        <Border Padding="20,16,20,36">
+                          <settings:TerminalSettingsAppearancePanel
+                            DataContext="{Binding Appearance}" />
+                        </Border>
                       </ScrollViewer>
                     </TabItem>
 
                     <TabItem Header="SSH">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
                                     HorizontalScrollBarVisibility="Disabled"
                                     VerticalScrollBarVisibility="Auto">
-                        <settings:TerminalSettingsSshPanel DataContext="{Binding Ssh}" />
+                        <Border Padding="20,16,20,36">
+                          <settings:TerminalSettingsSshPanel DataContext="{Binding Ssh}" />
+                        </Border>
                       </ScrollViewer>
                     </TabItem>
 
                     <TabItem Header="Logging">
                       <ScrollViewer Classes="settings-tab-scroll"
                                     AllowAutoHide="False"
-                                    Padding="20,16"
                                     HorizontalAlignment="Stretch"
                                     VerticalAlignment="Stretch"
                                     ClipToBounds="True"
                                     HorizontalScrollBarVisibility="Disabled"
                                     VerticalScrollBarVisibility="Auto">
-                        <settings:TerminalSettingsLoggingPanel DataContext="{Binding Logging}" />
+                        <Border Padding="20,16,20,36">
+                          <settings:TerminalSettingsLoggingPanel DataContext="{Binding Logging}" />
+                        </Border>
                       </ScrollViewer>
                     </TabItem>
                   </TabControl>
@@ -187,13 +199,11 @@
                 <Border Grid.Row="2"
                         Classes="settings-footer"
                         Padding="18,12"
-                        Background="#252525"
-                        BorderBrush="#3A3A3A"
-                        BorderThickness="0,1,0,0">
+                        ClipToBounds="True">
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
                     <TextBlock Grid.Column="0"
                                VerticalAlignment="Center"
-                               Foreground="#B8B8B8"
+                               Foreground="{DynamicResource TerminalSettings.Panel.SecondaryTextBrush}"
                                Text="{Binding LastOperationStatus}" />
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
                       <Button Content="Apply"
@@ -409,7 +419,7 @@
                   <TextBlock Grid.Row="0"
                              Grid.Column="0"
                              VerticalAlignment="Center"
-                             Foreground="#B8B8B8"
+                             Foreground="{DynamicResource TerminalSettings.Panel.SecondaryTextBrush}"
                              Text="Font source" />
                   <ComboBox Grid.Row="0"
                             Grid.Column="1"
@@ -428,7 +438,7 @@
                   <TextBlock Grid.Row="1"
                              Grid.Column="0"
                              VerticalAlignment="Center"
-                             Foreground="#B8B8B8"
+                             Foreground="{DynamicResource TerminalSettings.Panel.SecondaryTextBrush}"
                              Text="System font"
                              IsVisible="{Binding IsSystemFontSourceSelected}" />
                   <ComboBox Grid.Row="1"
@@ -442,7 +452,7 @@
                   <TextBlock Grid.Row="2"
                              Grid.Column="0"
                              VerticalAlignment="Center"
-                             Foreground="#B8B8B8"
+                             Foreground="{DynamicResource TerminalSettings.Panel.SecondaryTextBrush}"
                              Text="Font file"
                              IsVisible="{Binding IsFileFontSourceSelected}" />
                   <Grid Grid.Row="2"
@@ -463,7 +473,7 @@
                   <TextBlock Grid.Row="3"
                              Grid.Column="0"
                              VerticalAlignment="Center"
-                             Foreground="#B8B8B8"
+                             Foreground="{DynamicResource TerminalSettings.Panel.SecondaryTextBrush}"
                              Text="Font size" />
                   <NumericUpDown Grid.Row="3"
                                  Grid.Column="1"
@@ -474,7 +484,7 @@
                                  Increment="1"
                                  Value="{Binding FontSize}" />
                 </Grid>
-                <TextBlock Foreground="#9F9F9F"
+                <TextBlock Foreground="{DynamicResource TerminalSettings.Panel.SubtleTextBrush}"
                            IsVisible="{Binding IsFileFontSourceSelected}"
                            Text="{Binding FontFamilyName, StringFormat='Resolved family: {0}'}" />
               </StackPanel>
@@ -510,7 +520,7 @@
                       Width="520">
                   <TextBlock Grid.Column="0"
                              VerticalAlignment="Center"
-                             Foreground="#B8B8B8"
+                             Foreground="{DynamicResource TerminalSettings.Panel.SecondaryTextBrush}"
                              Text="Evaluation" />
                   <ComboBox Grid.Column="1"
                             Width="220"
@@ -529,7 +539,6 @@
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="settings:TerminalSettingsHighlightRuleState">
                       <Border Classes="settings-highlight-rule-card"
-                              BorderBrush="#505050"
                               BorderThickness="1"
                               CornerRadius="6"
                               Padding="10"
@@ -557,7 +566,7 @@
                                 ColumnSpacing="10">
                             <TextBlock Grid.Column="0"
                                        VerticalAlignment="Center"
-                                       Foreground="#B8B8B8"
+                                       Foreground="{DynamicResource TerminalSettings.Panel.SecondaryTextBrush}"
                                        Text="Regex" />
                             <TextBox Grid.Column="1"
                                      PlaceholderText="\b(ERROR|WARN)\b"
@@ -742,7 +751,7 @@
                   <TextBlock Grid.Row="8"
                              Grid.Column="0"
                              VerticalAlignment="Center"
-                             Foreground="#B8B8B8"
+                             Foreground="{DynamicResource TerminalSettings.Panel.SecondaryTextBrush}"
                              Text="Edges" />
                   <ComboBox Grid.Row="8"
                             Grid.Column="1"
@@ -760,7 +769,7 @@
                   <TextBlock Grid.Row="9"
                              Grid.Column="0"
                              VerticalAlignment="Center"
-                             Foreground="#B8B8B8"
+                             Foreground="{DynamicResource TerminalSettings.Panel.SecondaryTextBrush}"
                              Text="Hinting" />
                   <ComboBox Grid.Row="9"
                             Grid.Column="1"
@@ -901,6 +910,33 @@
 
   <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml" />
 
+  <Style Selector="settings|TerminalSettingsPanel Border.settings-panel-root">
+    <Setter Property="Background" Value="{DynamicResource TerminalSettings.Panel.BackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TerminalSettings.Panel.BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel Border.settings-panel-header">
+    <Setter Property="Background" Value="{DynamicResource TerminalSettings.Panel.BackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TerminalSettings.Panel.DividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel Border.settings-content-host">
+    <Setter Property="Background" Value="{DynamicResource TerminalSettings.Panel.ContentBackgroundBrush}" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel Border.settings-footer">
+    <Setter Property="Background" Value="{DynamicResource TerminalSettings.Panel.BackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TerminalSettings.Panel.DividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+  </Style>
+
+  <Style Selector="settings|TerminalSettingsPanel Border.settings-highlight-rule-card">
+    <Setter Property="BorderBrush" Value="{DynamicResource TerminalSettings.Panel.CardBorderBrush}" />
+  </Style>
+
   <Style Selector="settings|TerminalSettingsPanel">
     <Setter Property="Theme" Value="{StaticResource {x:Type settings:TerminalSettingsPanel}}" />
   </Style>
@@ -943,11 +979,13 @@
 
   <Style Selector="settings|TerminalSettingsPanel ScrollViewer.settings-tab-scroll">
     <Setter Property="AllowAutoHide" Value="False" />
+    <Setter Property="MinHeight" Value="0" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="VerticalAlignment" Value="Stretch" />
     <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
     <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+    <Setter Property="BringIntoViewOnFocusChange" Value="True" />
   </Style>
 
   <Style Selector="settings|TerminalSettingsSessionPanel">

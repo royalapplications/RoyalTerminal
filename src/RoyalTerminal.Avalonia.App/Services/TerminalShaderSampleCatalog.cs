@@ -1,12 +1,12 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Demo - Built-in shader samples.
+// RoyalTerminal.Avalonia.App - Built-in shader samples.
 
 using System;
 using System.Collections.Generic;
 using RoyalTerminal.Shaders;
 
-namespace RoyalTerminal.Demo.Services;
+namespace RoyalTerminal.Avalonia.App.Services;
 
 internal static class TerminalShaderSampleCatalog
 {

@@ -28,6 +28,7 @@ The profile model is the durable description of a session, not the running sessi
 | --- | --- |
 | `TerminalSessionProfilesDocument` | Versioned top-level profile document. |
 | `TerminalSessionProfile` | One named profile. |
+| `TerminalCommandSnippet` | Profile-scoped command snippet offered by suggestion providers. |
 | `TerminalSessionLayoutSettings` | Grid, viewport, and scrollback settings. |
 | `TerminalSessionAppearanceSettings` | Font, size, auto-scroll, opacity, and text highlighting settings. |
 | `TerminalTextHighlightingMode` | Regex text highlighting evaluation mode. |
@@ -46,7 +47,12 @@ The profile model is the durable description of a session, not the running sessi
 | `TerminalSessionLogFormat` | Stored log format enum. |
 | `TerminalSessionProxyType` | Stored proxy type enum. |
 
-The model is intentionally broad. It is meant to cover what a terminal application needs to remember between runs, not just what is required to start a shell on the current machine.
+The model is intentionally broad. It is meant to cover what a terminal
+application needs to remember between runs, not just what is required to start a
+shell on the current machine. `TerminalSessionProfile.CommandSnippets` stores
+profile-scoped snippets for host suggestion UIs; the serializer trims and
+deduplicates these entries even when a host edits them outside the reusable
+settings panel.
 
 ## Editing profiles in the UI
 
@@ -139,7 +145,7 @@ RoyalTerminal also treats captures as durable documents. That makes them useful 
 | `TerminalCaptureSessionFormats` | Built-in RoyalTerminal JSON and asciicast v3 formats. |
 | `TerminalCaptureRuntime` | Avalonia-facing capture and replay runtime bound to a control. |
 
-Use RoyalTerminal JSON (`.rtcap.json`) when capture fidelity matters most. Use asciicast v3 (`.cast`) when interoperability with asciinema-compatible tooling matters. See [Capture Formats](/articles/capture-formats) for the event mapping, extension model, and demo app behavior.
+Use RoyalTerminal JSON (`.rtcap.json`) when capture fidelity matters most. Use asciicast v3 (`.cast`) when interoperability with asciinema-compatible tooling matters. See [Capture Formats](/articles/capture-formats) for the event mapping, extension model, and shared shell behavior.
 
 ## Shell profiles and defaults
 

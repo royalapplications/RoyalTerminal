@@ -1,18 +1,32 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="RoyalTerminal.Demo.App"
+             Name="RoyalTerminal"
              RequestedThemeVariant="Dark">
+  <NativeMenu.Menu>
+    <NativeMenu>
+      <NativeMenuItem Header="_About RoyalTerminal" />
+      <NativeMenuItemSeparator />
+      <NativeMenuItem Header="_Preferences..."
+                      Gesture="Meta+OemComma" />
+      <NativeMenuItemSeparator />
+      <NativeMenuItem Header="_Quit RoyalTerminal"
+                      Gesture="Meta+Q" />
+    </NativeMenu>
+  </NativeMenu.Menu>
+
   <Application.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
-        <ResourceInclude Source="avares://RoyalTerminal.Demo/Styles/Theme.axaml" />
+        <ResourceInclude Source="avares://RoyalTerminal.Avalonia.App/Styles/Theme.axaml" />
       </ResourceDictionary.MergedDictionaries>
     </ResourceDictionary>
   </Application.Resources>
+
   <Application.Styles>
     <FluentTheme />
     <StyleInclude Source="avares://RoyalTerminal.Avalonia.Settings/Settings/TerminalSettingsPanel.axaml" />
-    <StyleInclude Source="avares://RoyalTerminal.Demo/Styles/Tabs.axaml" />
+    <StyleInclude Source="avares://RoyalTerminal.Avalonia.App/Styles/Tabs.axaml" />
 
     <Style Selector="FlyoutPresenter.settings-popup">
       <Setter Property="Padding" Value="0" />

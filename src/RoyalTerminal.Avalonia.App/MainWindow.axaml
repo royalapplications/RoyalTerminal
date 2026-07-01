@@ -1,0 +1,316 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:RoyalTerminal.Avalonia.App.ViewModels"
+        xmlns:views="using:RoyalTerminal.Avalonia.App.Views"
+        x:Class="RoyalTerminal.Avalonia.App.MainWindow"
+        x:Name="RootWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="RoyalTerminal"
+        Width="1180"
+        Height="760"
+        MinWidth="720"
+        MinHeight="460"
+        WindowStartupLocation="CenterScreen"
+        ExtendClientAreaToDecorationsHint="True"
+        WindowDecorations="Full"
+        ExtendClientAreaTitleBarHeightHint="-1"
+        Background="{DynamicResource WindowBackgroundBrush}">
+
+  <Window.KeyBindings>
+    <KeyBinding Gesture="Ctrl+T" Command="{Binding NewTabCommand}" />
+    <KeyBinding Gesture="Ctrl+W" Command="{Binding CloseCurrentTabCommand}" />
+    <KeyBinding Gesture="Ctrl+Tab" Command="{Binding CycleTabForwardCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+Tab" Command="{Binding CycleTabBackwardCommand}" />
+    <KeyBinding Gesture="Ctrl+Add" Command="{Binding IncreaseFontSizeCommand}" />
+    <KeyBinding Gesture="Ctrl+OemPlus" Command="{Binding IncreaseFontSizeCommand}" />
+    <KeyBinding Gesture="Ctrl+Subtract" Command="{Binding DecreaseFontSizeCommand}" />
+    <KeyBinding Gesture="Ctrl+OemMinus" Command="{Binding DecreaseFontSizeCommand}" />
+    <KeyBinding Gesture="Ctrl+D0" Command="{Binding ResetFontSizeCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+C" Command="{Binding CopySelectionCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+V" Command="{Binding PasteClipboardCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+A" Command="{Binding SelectAllCommand}" />
+    <KeyBinding Gesture="Ctrl+Space" Command="{Binding OpenCommandHistoryOverlayCommand}" />
+    <KeyBinding Gesture="Ctrl+Enter" Command="{Binding AcceptCommandSuggestionCommand}" />
+    <KeyBinding Gesture="Alt+Shift+OemPlus" Command="{Binding SplitPaneRightCommand}" />
+    <KeyBinding Gesture="Alt+Shift+OemMinus" Command="{Binding SplitPaneDownCommand}" />
+    <KeyBinding Gesture="Alt+Left" Command="{Binding FocusPaneLeftCommand}" />
+    <KeyBinding Gesture="Alt+Right" Command="{Binding FocusPaneRightCommand}" />
+    <KeyBinding Gesture="Alt+Up" Command="{Binding FocusPaneUpCommand}" />
+    <KeyBinding Gesture="Alt+Down" Command="{Binding FocusPaneDownCommand}" />
+    <KeyBinding Gesture="Alt+Shift+Left" Command="{Binding ResizePaneLeftCommand}" />
+    <KeyBinding Gesture="Alt+Shift+Right" Command="{Binding ResizePaneRightCommand}" />
+    <KeyBinding Gesture="Alt+Shift+Up" Command="{Binding ResizePaneUpCommand}" />
+    <KeyBinding Gesture="Alt+Shift+Down" Command="{Binding ResizePaneDownCommand}" />
+    <KeyBinding Gesture="Ctrl+D1" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="0" />
+    <KeyBinding Gesture="Ctrl+D2" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="1" />
+    <KeyBinding Gesture="Ctrl+D3" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="2" />
+    <KeyBinding Gesture="Ctrl+D4" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="3" />
+    <KeyBinding Gesture="Ctrl+D5" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="4" />
+    <KeyBinding Gesture="Ctrl+D6" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="5" />
+    <KeyBinding Gesture="Ctrl+D7" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="6" />
+    <KeyBinding Gesture="Ctrl+D8" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="7" />
+    <KeyBinding Gesture="Ctrl+D9" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="8" />
+  </Window.KeyBindings>
+
+  <NativeMenu.Menu>
+    <NativeMenu>
+      <NativeMenuItem Header="_Shell">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="_New Tab"
+                            Command="{Binding NewTabCommand}"
+                            Gesture="Ctrl+T" />
+            <NativeMenuItem Header="_Close Tab"
+                            Command="{Binding CloseCurrentTabCommand}"
+                            Gesture="Ctrl+W" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Command History"
+                            Command="{Binding OpenCommandHistoryOverlayCommand}"
+                            Gesture="Ctrl+Space" />
+            <NativeMenuItem Header="_Refresh Command Suggestions"
+                            Command="{Binding RefreshCommandSuggestionsCommand}" />
+            <NativeMenuItem Header="_Insert Selected Suggestion"
+                            Command="{Binding AcceptCommandSuggestionCommand}"
+                            Gesture="Ctrl+Enter"
+                            IsEnabled="{Binding CanAcceptCommandSuggestion}" />
+            <NativeMenuItem Header="Close Command _History"
+                            Command="{Binding CloseCommandHistoryOverlayCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Split Pane _Right"
+                            Command="{Binding SplitPaneRightCommand}"
+                            Gesture="Alt+Shift+OemPlus" />
+            <NativeMenuItem Header="Split Pane _Down"
+                            Command="{Binding SplitPaneDownCommand}"
+                            Gesture="Alt+Shift+OemMinus" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Refresh Profiles"
+                            Command="{Binding RefreshSessionLauncherCommand}" />
+            <NativeMenuItem Header="_Launch Selected Profile"
+                            Command="{Binding LaunchSelectedSessionProfileCommand}"
+                            IsEnabled="{Binding CanLaunchSelectedSessionProfile}" />
+            <NativeMenuItem Header="_Restart Session"
+                            Command="{Binding RestartActiveSessionCommand}" />
+            <NativeMenuItem Header="_Clear Scrollback"
+                            Command="{Binding ClearActiveScrollbackCommand}" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
+
+      <NativeMenuItem Header="_Edit">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="_Copy"
+                            Command="{Binding CopySelectionCommand}"
+                            Gesture="Ctrl+Shift+C" />
+            <NativeMenuItem Header="_Paste"
+                            Command="{Binding PasteClipboardCommand}"
+                            Gesture="Ctrl+Shift+V" />
+            <NativeMenuItem Header="Select _All"
+                            Command="{Binding SelectAllCommand}"
+                            Gesture="Ctrl+Shift+A" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Find"
+                            Command="{Binding ApplySearchCommand}" />
+            <NativeMenuItem Header="Find _Next"
+                            Command="{Binding NextSearchCommand}" />
+            <NativeMenuItem Header="Find _Previous"
+                            Command="{Binding PreviousSearchCommand}" />
+            <NativeMenuItem Header="_Clear Search"
+                            Command="{Binding ClearSearchCommand}" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
+
+      <NativeMenuItem Header="_View">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="Show _Left Panel"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding IsLeftPanelVisible}"
+                            Command="{Binding ToggleLeftPanelCommand}" />
+            <NativeMenuItem Header="Show _Search Panel"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding IsSearchPanelVisible}"
+                            Command="{Binding ToggleSearchPanelCommand}" />
+            <NativeMenuItem Header="Show Status _Bar"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding IsStatusBarVisible}"
+                            Command="{Binding ToggleStatusBarCommand}" />
+            <NativeMenuItem Header="Move _Tabs to Title Bar"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding IsTabsInTitleBar}"
+                            Command="{Binding ToggleTabsInTitleBarCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Increase Font Size"
+                            Command="{Binding IncreaseFontSizeCommand}"
+                            Gesture="Ctrl+Add" />
+            <NativeMenuItem Header="_Decrease Font Size"
+                            Command="{Binding DecreaseFontSizeCommand}"
+                            Gesture="Ctrl+Subtract" />
+            <NativeMenuItem Header="_Reset Font Size"
+                            Command="{Binding ResetFontSizeCommand}"
+                            Gesture="Ctrl+D0" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="{Binding ModeButtonText}"
+                            Command="{Binding CycleRenderModeCommand}" />
+            <NativeMenuItem Header="{Binding ThemePresetButtonText}"
+                            Command="{Binding CycleThemePresetCommand}" />
+            <NativeMenuItem Header="_Toggle Light Theme"
+                            Command="{Binding ToggleThemeCommand}" />
+            <NativeMenuItem Header="_Generate Theme"
+                            Command="{Binding GenerateThemeCommand}" />
+            <NativeMenuItem Header="{Binding ShaderSampleButtonText}"
+                            Command="{Binding CycleShaderSampleCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Preferences..."
+                            Command="{Binding PrepareSettingsPanelCommand}" />
+            <NativeMenuItem Header="Close Preferences"
+                            Command="{Binding CloseSettingsPanelCommand}" />
+            <NativeMenuItem Header="Preferences _Actions"
+                            IsEnabled="{Binding IsSettingsPanelOpen}">
+              <NativeMenuItem.Menu>
+                <NativeMenu>
+                  <NativeMenuItem Header="_New Profile"
+                                  Command="{Binding SettingsPanelState.NewProfileCommand}" />
+                  <NativeMenuItem Header="_Duplicate Profile"
+                                  Command="{Binding SettingsPanelState.DuplicateProfileCommand}" />
+                  <NativeMenuItem Header="_Delete Profile"
+                                  Command="{Binding SettingsPanelState.DeleteProfileCommand}" />
+                  <NativeMenuItem Header="Set _Default Profile"
+                                  Command="{Binding SettingsPanelState.SetDefaultProfileCommand}" />
+                  <NativeMenuItemSeparator />
+                  <NativeMenuItem Header="_Apply Settings"
+                                  Command="{Binding SettingsPanelState.ApplyCommand}" />
+                  <NativeMenuItem Header="_Save Settings"
+                                  Command="{Binding SettingsPanelState.SaveCommand}" />
+                  <NativeMenuItemSeparator />
+                  <NativeMenuItem Header="_Browse Font File"
+                                  Command="{Binding SettingsPanelState.BrowseFontFileCommand}" />
+                  <NativeMenuItem Header="Add Text Highlight _Rule"
+                                  Command="{Binding SettingsPanelState.AddTextHighlightRuleCommand}" />
+                </NativeMenu>
+              </NativeMenuItem.Menu>
+            </NativeMenuItem>
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Diagnostics"
+                            Command="{Binding ToggleGhosttyDiagnosticsCommand}" />
+            <NativeMenuItem Header="_Clear Event Log"
+                            Command="{Binding ClearEventLogCommand}"
+                            IsEnabled="{Binding HasEventLogEntries}" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
+
+      <NativeMenuItem Header="_Session">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="_Preserve Scrollback on Restart"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding PreserveScrollbackOnRestart}"
+                            Command="{Binding TogglePreserveScrollbackOnRestartCommand}" />
+            <NativeMenuItem Header="_Sixel Graphics"
+                            ToggleType="CheckBox"
+                            IsChecked="{Binding SixelGraphicsEnabled}"
+                            Command="{Binding ToggleSixelGraphicsCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="{Binding CaptureToggleButtonText}"
+                            Command="{Binding ToggleCaptureCommand}" />
+            <NativeMenuItem Header="Capture _Format">
+              <NativeMenuItem.Menu>
+                <NativeMenu>
+                  <NativeMenuItem Header="RoyalTerminal JSON"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding IsRoyalTerminalJsonCaptureFormatSelected}"
+                                  Command="{Binding SelectCaptureFormatCommand}"
+                                  CommandParameter="royalterminal-json" />
+                  <NativeMenuItem Header="Asciicast v3"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding IsAsciicastV3CaptureFormatSelected}"
+                                  Command="{Binding SelectCaptureFormatCommand}"
+                                  CommandParameter="asciicast-v3" />
+                </NativeMenu>
+              </NativeMenuItem.Menu>
+            </NativeMenuItem>
+            <NativeMenuItem Header="_Save Capture"
+                            Command="{Binding SaveCaptureCommand}" />
+            <NativeMenuItem Header="_Load Replay"
+                            Command="{Binding LoadReplayCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Replay _Play/Pause"
+                            Command="{Binding ToggleReplayPlaybackCommand}" />
+            <NativeMenuItem Header="_Stop Replay"
+                            Command="{Binding StopReplayCommand}" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
+
+      <NativeMenuItem Header="_Window">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="_Next Tab"
+                            Command="{Binding CycleTabForwardCommand}"
+                            Gesture="Ctrl+Tab" />
+            <NativeMenuItem Header="_Previous Tab"
+                            Command="{Binding CycleTabBackwardCommand}"
+                            Gesture="Ctrl+Shift+Tab" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Focus Pane _Left"
+                            Command="{Binding FocusPaneLeftCommand}"
+                            Gesture="Alt+Left" />
+            <NativeMenuItem Header="Focus Pane _Right"
+                            Command="{Binding FocusPaneRightCommand}"
+                            Gesture="Alt+Right" />
+            <NativeMenuItem Header="Focus Pane _Up"
+                            Command="{Binding FocusPaneUpCommand}"
+                            Gesture="Alt+Up" />
+            <NativeMenuItem Header="Focus Pane _Down"
+                            Command="{Binding FocusPaneDownCommand}"
+                            Gesture="Alt+Down" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Resize Pane Left"
+                            Command="{Binding ResizePaneLeftCommand}"
+                            Gesture="Alt+Shift+Left" />
+            <NativeMenuItem Header="Resize Pane Right"
+                            Command="{Binding ResizePaneRightCommand}"
+                            Gesture="Alt+Shift+Right" />
+            <NativeMenuItem Header="Resize Pane Up"
+                            Command="{Binding ResizePaneUpCommand}"
+                            Gesture="Alt+Shift+Up" />
+            <NativeMenuItem Header="Resize Pane Down"
+                            Command="{Binding ResizePaneDownCommand}"
+                            Gesture="Alt+Shift+Down" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Tab _1" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="0" Gesture="Ctrl+D1" />
+            <NativeMenuItem Header="Tab _2" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="1" Gesture="Ctrl+D2" />
+            <NativeMenuItem Header="Tab _3" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="2" Gesture="Ctrl+D3" />
+            <NativeMenuItem Header="Tab _4" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="3" Gesture="Ctrl+D4" />
+            <NativeMenuItem Header="Tab _5" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="4" Gesture="Ctrl+D5" />
+            <NativeMenuItem Header="Tab _6" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="5" Gesture="Ctrl+D6" />
+            <NativeMenuItem Header="Tab _7" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="6" Gesture="Ctrl+D7" />
+            <NativeMenuItem Header="Tab _8" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="7" Gesture="Ctrl+D8" />
+            <NativeMenuItem Header="Tab _9" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="8" Gesture="Ctrl+D9" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
+
+      <NativeMenuItem Header="_Help">
+        <NativeMenuItem.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="_Hyperlink Sample"
+                            Command="{Binding ShowHyperlinkSampleCommand}" />
+            <NativeMenuItem Header="_Kitty Graphics Sample"
+                            Command="{Binding ShowKittyGraphicsSampleCommand}" />
+            <NativeMenuItem Header="_Copy Plain Snapshot"
+                            Command="{Binding CopyPlainSnapshotCommand}" />
+            <NativeMenuItem Header="Copy _VT Snapshot"
+                            Command="{Binding CopyStyledVtSnapshotCommand}" />
+            <NativeMenuItem Header="Copy _HTML Snapshot"
+                            Command="{Binding CopyHtmlSnapshotCommand}" />
+          </NativeMenu>
+        </NativeMenuItem.Menu>
+      </NativeMenuItem>
+    </NativeMenu>
+  </NativeMenu.Menu>
+
+  <views:MainView x:Name="MainView" />
+</Window>

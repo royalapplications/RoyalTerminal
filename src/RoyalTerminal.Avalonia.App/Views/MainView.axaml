@@ -1,0 +1,782 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:RoyalTerminal.Avalonia.App.ViewModels"
+        xmlns:chrome="using:Avalonia.Controls.Chrome"
+        xmlns:terminal="using:RoyalTerminal.Terminal"
+        xmlns:settings="using:RoyalTerminal.Avalonia.Settings"
+        x:Class="RoyalTerminal.Avalonia.App.Views.MainView"
+        x:Name="RootView"
+        x:DataType="vm:MainWindowViewModel"
+        Background="{DynamicResource WindowBackgroundBrush}">
+
+  <UserControl.Resources>
+    <ControlTemplate x:Key="TabStripScrollViewerTemplate" TargetType="ScrollViewer">
+      <ScrollContentPresenter Name="PART_ContentPresenter"
+                              Background="{TemplateBinding Background}"
+                              HorizontalSnapPointsType="{TemplateBinding HorizontalSnapPointsType}"
+                              VerticalSnapPointsType="{TemplateBinding VerticalSnapPointsType}"
+                              HorizontalSnapPointsAlignment="{TemplateBinding HorizontalSnapPointsAlignment}"
+                              VerticalSnapPointsAlignment="{TemplateBinding VerticalSnapPointsAlignment}"
+                              Padding="{TemplateBinding Padding}" />
+    </ControlTemplate>
+  </UserControl.Resources>
+
+  <Grid RowDefinitions="Auto,*">
+    <NativeMenuBar x:Name="MainMenuBar"
+                   Grid.Row="0" />
+
+    <Grid Grid.Row="1" RowDefinitions="Auto,*">
+      <Border Grid.Row="0"
+              Classes="topBar titleBarArea"
+              Padding="0"
+              ClipToBounds="True"
+              chrome:WindowDecorationProperties.ElementRole="TitleBar">
+        <Grid x:Name="TitleBarLayout"
+              Height="{DynamicResource Shell.CommandHeight}"
+              ColumnDefinitions="88,*,Auto"
+              ClipToBounds="True">
+          <Border x:Name="MacTrafficLightReserve"
+                  Grid.Column="0"
+                  IsHitTestVisible="False" />
+
+          <Border x:Name="TitleBarDragSurface"
+                  Grid.Column="1"
+                  Background="Transparent"
+                  chrome:WindowDecorationProperties.ElementRole="TitleBar" />
+
+          <Grid Grid.Column="1"
+                x:Name="TopCommandBar"
+                Margin="{DynamicResource Shell.CommandPadding}"
+                ColumnDefinitions="Auto,*,Auto"
+                ColumnSpacing="12"
+                ClipToBounds="True">
+            <Border x:Name="TitleBarBrandDragZone"
+                    Background="Transparent"
+                    VerticalAlignment="Center"
+                    chrome:WindowDecorationProperties.ElementRole="TitleBar">
+              <StackPanel x:Name="TitleBarBrandContent"
+                          Orientation="Horizontal"
+                          Spacing="8"
+                          IsHitTestVisible="False"
+                          VerticalAlignment="Center">
+                <Border x:Name="TitleBarBrandIcon"
+                        Classes="titleBrandIcon"
+                        IsVisible="{Binding IsTitleBarLogoVisible}">
+                  <PathIcon x:Name="TitleBarBrandPathIcon"
+                            Classes="titleBrandIconGlyph"
+                            Data="{StaticResource Icon.RoyalTerminalLogo}" />
+                </Border>
+              </StackPanel>
+            </Border>
+
+            <ContentControl x:Name="TitleBarTabStripHost"
+                            Grid.Column="1"
+                            IsVisible="{Binding IsTabsInTitleBar}"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            ClipToBounds="True"
+                            chrome:WindowDecorationProperties.ElementRole="TitleBar" />
+
+            <Grid Grid.Column="2"
+                  x:Name="TopSearchPanel"
+                  ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
+                  ColumnSpacing="4"
+                  MinWidth="600"
+                  MaxWidth="960"
+                  HorizontalAlignment="Right"
+                  VerticalAlignment="Center"
+                  IsVisible="{Binding IsSearchPanelVisible}"
+                  ClipToBounds="True">
+              <TextBox x:Name="TopSearchBox"
+                       Grid.Column="0"
+                       MinWidth="240"
+                       HorizontalAlignment="Stretch"
+                       Classes="compactField searchField"
+                       Padding="10,3"
+                       PlaceholderText="Search"
+                       VerticalContentAlignment="Center"
+                       chrome:WindowDecorationProperties.ElementRole="User"
+                       Text="{Binding SearchQuery}" />
+              <Button x:Name="TopSearchApplyButton"
+                      Grid.Column="1"
+                      Classes="iconButton"
+                      MinWidth="32"
+                      MinHeight="32"
+                      Width="32"
+                      Height="32"
+                      MaxWidth="32"
+                      MaxHeight="32"
+                      IsEnabled="{Binding CanApplySearch}"
+                      Command="{Binding ApplySearchCommand}"
+                      chrome:WindowDecorationProperties.ElementRole="User"
+                      ToolTip.Tip="Find">
+                <PathIcon Classes="commandIcon"
+                          Data="{StaticResource Icon.SearchRegular}" />
+              </Button>
+              <Button x:Name="TopSearchPreviousButton"
+                      Grid.Column="2"
+                      Classes="iconButton"
+                      MinWidth="32"
+                      MinHeight="32"
+                      Width="32"
+                      Height="32"
+                      MaxWidth="32"
+                      MaxHeight="32"
+                      IsEnabled="{Binding CanAdvanceSearch}"
+                      Command="{Binding PreviousSearchCommand}"
+                      chrome:WindowDecorationProperties.ElementRole="User"
+                      ToolTip.Tip="Previous match">
+                <PathIcon Classes="commandIcon"
+                          Data="{StaticResource Icon.ChevronLeftRegular}" />
+              </Button>
+              <Button x:Name="TopSearchNextButton"
+                      Grid.Column="3"
+                      Classes="iconButton"
+                      MinWidth="32"
+                      MinHeight="32"
+                      Width="32"
+                      Height="32"
+                      MaxWidth="32"
+                      MaxHeight="32"
+                      IsEnabled="{Binding CanAdvanceSearch}"
+                      Command="{Binding NextSearchCommand}"
+                      chrome:WindowDecorationProperties.ElementRole="User"
+                      ToolTip.Tip="Next match">
+                <PathIcon Classes="commandIcon"
+                          Data="{StaticResource Icon.ChevronRightRegular}" />
+              </Button>
+              <Button x:Name="TopSearchClearButton"
+                      Grid.Column="4"
+                      Classes="iconButton"
+                      MinWidth="32"
+                      MinHeight="32"
+                      Width="32"
+                      Height="32"
+                      MaxWidth="32"
+                      MaxHeight="32"
+                      IsEnabled="{Binding CanClearSearch}"
+                      Command="{Binding ClearSearchCommand}"
+                      chrome:WindowDecorationProperties.ElementRole="User"
+                      ToolTip.Tip="Clear search">
+                <PathIcon Classes="commandIcon"
+                          Data="{StaticResource Icon.DismissRegular}" />
+              </Button>
+              <Border x:Name="TopSearchStatusIdleChip"
+                      Grid.Column="5"
+                      Classes="searchStatusChip searchStatusIdle"
+                      IsHitTestVisible="False"
+                      IsVisible="{Binding IsSearchIdle}"
+                      Opacity="0.68"
+                      ToolTip.Tip="{Binding SearchResultText}"
+                      VerticalAlignment="Center"
+                      chrome:WindowDecorationProperties.ElementRole="TitleBar">
+                <StackPanel Classes="searchStatusContent">
+                  <PathIcon x:Name="TopSearchStatusIdleIcon"
+                            Classes="searchStatusIcon"
+                            Data="{StaticResource Icon.SearchRegular}" />
+                  <TextBlock x:Name="TopSearchStatusIdleText"
+                             Text="{Binding SearchStatusSummaryText}"
+                             Classes="searchStatusText"
+                             TextTrimming="CharacterEllipsis"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </Border>
+              <Border x:Name="TopSearchStatusMatchesChip"
+                      Grid.Column="5"
+                      Classes="searchStatusChip searchStatusMatches"
+                      IsHitTestVisible="False"
+                      IsVisible="{Binding HasSearchMatches}"
+                      ToolTip.Tip="{Binding SearchResultText}"
+                      VerticalAlignment="Center"
+                      chrome:WindowDecorationProperties.ElementRole="TitleBar">
+                <StackPanel Classes="searchStatusContent">
+                  <PathIcon x:Name="TopSearchStatusMatchesIcon"
+                            Classes="searchStatusIcon"
+                            Data="{StaticResource Icon.CheckmarkRegular}" />
+                  <TextBlock x:Name="TopSearchStatusMatchesText"
+                             Text="{Binding SearchStatusSummaryText}"
+                             Classes="searchStatusText"
+                             TextTrimming="CharacterEllipsis"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </Border>
+              <Border x:Name="TopSearchStatusNoMatchesChip"
+                      Grid.Column="5"
+                      Classes="searchStatusChip searchStatusNoMatches"
+                      IsHitTestVisible="False"
+                      IsVisible="{Binding HasSearchNoMatches}"
+                      ToolTip.Tip="{Binding SearchResultText}"
+                      VerticalAlignment="Center"
+                      chrome:WindowDecorationProperties.ElementRole="TitleBar">
+                <StackPanel Classes="searchStatusContent">
+                  <PathIcon x:Name="TopSearchStatusNoMatchesIcon"
+                            Classes="searchStatusIcon"
+                            Data="{StaticResource Icon.DismissRegular}" />
+                  <TextBlock x:Name="TopSearchStatusNoMatchesText"
+                             Text="{Binding SearchStatusSummaryText}"
+                             Classes="searchStatusText"
+                             TextTrimming="CharacterEllipsis"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </Border>
+            </Grid>
+
+          </Grid>
+
+          <Border x:Name="TitleBarRightDecorationReserve"
+                  Grid.Column="2"
+                  Width="{Binding $parent[Window].WindowDecorationMargin.Right}"
+                  IsHitTestVisible="False" />
+        </Grid>
+      </Border>
+
+      <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
+        <Border Grid.Column="0"
+                x:Name="ShellRail"
+                Classes="shellRail"
+                Width="{DynamicResource Shell.RailWidth}"
+                IsVisible="{Binding IsLeftPanelVisible}">
+        <DockPanel>
+          <StackPanel Spacing="4"
+                      Margin="0,8,0,0">
+            <Button Classes="railCommand"
+                    Command="{Binding NewTabCommand}"
+                    ToolTip.Tip="New tab">
+              <PathIcon Classes="railIcon"
+                        Data="{StaticResource Icon.AddSquareMultipleRegular}" />
+            </Button>
+            <Button x:Name="ProfileLauncherButton"
+                    Classes="railCommand"
+                    Command="{Binding RefreshSessionLauncherCommand}"
+                    ToolTip.Tip="Profiles">
+              <PathIcon Classes="railIcon"
+                        Data="{StaticResource Icon.ProfileRegular}" />
+              <Button.Flyout>
+                <Flyout Placement="RightEdgeAlignedTop"
+                        FlyoutPresenterClasses="product-flyout">
+                  <Border Classes="flyoutPanel"
+                          Width="360">
+                    <StackPanel Spacing="10">
+                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <TextBlock Text="Profiles"
+                                   Classes="sectionTitle"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding SessionLauncherStatusText}"
+                                   Classes="caption"
+                                   VerticalAlignment="Center" />
+                      </Grid>
+                      <TextBox Classes="compactField"
+                               PlaceholderText="Filter profiles"
+                               Text="{Binding SessionLauncherQuery, Mode=TwoWay}" />
+                      <ListBox Classes="launcherList"
+                               MinHeight="120"
+                               MaxHeight="280"
+                               ItemsSource="{Binding FilteredSessionLaunchOptions}"
+                               SelectedItem="{Binding SelectedSessionLaunchOption, Mode=TwoWay}">
+                        <ListBox.ItemTemplate>
+                          <DataTemplate x:DataType="vm:SessionLaunchOption">
+                            <Grid RowDefinitions="Auto,Auto"
+                                  ColumnDefinitions="*,Auto,Auto"
+                                  ColumnSpacing="8"
+                                  RowSpacing="2"
+                                  Margin="2">
+                              <TextBlock Text="{Binding DisplayName}"
+                                         Foreground="{DynamicResource ToolbarForegroundBrush}"
+                                         TextTrimming="CharacterEllipsis" />
+                              <Border Grid.Column="1"
+                                      Classes="badge">
+                                <TextBlock Text="{Binding TransportId}"
+                                           Classes="caption" />
+                              </Border>
+                              <Button Grid.Column="2"
+                                      Grid.RowSpan="2"
+                                      Classes="iconButton"
+                                      Width="28"
+                                      Height="28"
+                                      MinWidth="28"
+                                      MinHeight="28"
+                                      MaxWidth="28"
+                                      MaxHeight="28"
+                                      VerticalAlignment="Center"
+                                      Command="{Binding #RootView.DataContext.LaunchSessionProfileCommand}"
+                                      CommandParameter="{Binding}"
+                                      ToolTip.Tip="Launch profile">
+                                <PathIcon Classes="commandIcon"
+                                          Width="14"
+                                          Height="14"
+                                          Data="{StaticResource Icon.PlayRegular}" />
+                              </Button>
+                              <TextBlock Grid.Row="1"
+                                         Grid.ColumnSpan="2"
+                                         Text="{Binding Subtitle}"
+                                         Classes="caption"
+                                         TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                          </DataTemplate>
+                        </ListBox.ItemTemplate>
+                      </ListBox>
+                      <Button Classes="primaryCommand"
+                              HorizontalAlignment="Stretch"
+                              IsEnabled="{Binding CanLaunchSelectedSessionProfile}"
+                              Command="{Binding LaunchSelectedSessionProfileCommand}">
+                        <StackPanel Classes="iconLabel">
+                          <PathIcon Classes="primaryCommandIcon"
+                                    Data="{StaticResource Icon.PlayRegular}" />
+                          <TextBlock Text="Launch"
+                                     VerticalAlignment="Center" />
+                        </StackPanel>
+                      </Button>
+                    </StackPanel>
+                  </Border>
+                </Flyout>
+              </Button.Flyout>
+            </Button>
+            <Button x:Name="CommandHistoryButton"
+                    Classes="railCommand"
+                    Command="{Binding OpenCommandHistoryOverlayCommand}"
+                    ToolTip.Tip="Command history">
+              <PathIcon Classes="railIcon"
+                        Data="{StaticResource Icon.HistoryRegular}" />
+            </Button>
+            <Button Classes="railCommand"
+                    Command="{Binding PrepareSettingsPanelCommand}"
+                    ToolTip.Tip="Settings">
+              <PathIcon Classes="railIcon"
+                        Data="{StaticResource Icon.SettingsRegular}" />
+            </Button>
+            <Button Classes="railCommand"
+                    Command="{Binding ToggleGhosttyDiagnosticsCommand}"
+                    ToolTip.Tip="Diagnostics">
+              <PathIcon Classes="railIcon"
+                        Data="{StaticResource Icon.PulseRegular}" />
+            </Button>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto">
+        <ContentControl x:Name="BodyTabStripHost"
+                        Grid.Row="0"
+                        IsVisible="{Binding IsBodyTabStripVisible}"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        ClipToBounds="True">
+          <Border x:Name="TabStripSurface"
+                  Classes="tabStripSurface bodyTabs">
+            <Grid x:Name="TabStripLayout"
+                  ColumnDefinitions="Auto,*,Auto,Auto"
+                  ColumnSpacing="4"
+                  ClipToBounds="True">
+              <RepeatButton x:Name="TabStripScrollLeftButton"
+                            Grid.Column="0"
+                            Classes="tabStripScrollButton"
+                            IsVisible="False"
+                            ToolTip.Tip="Scroll tabs left"
+                            chrome:WindowDecorationProperties.ElementRole="User">
+                <PathIcon Classes="tabStripScrollIcon"
+                          Data="{StaticResource Icon.ChevronLeftRegular}" />
+              </RepeatButton>
+              <ScrollViewer x:Name="TabStripScrollViewer"
+                            Grid.Column="1"
+                            Classes="tabStripScrollViewer"
+                            Template="{StaticResource TabStripScrollViewerTemplate}"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Disabled">
+                <StackPanel Name="TabStrip"
+                            Orientation="Horizontal"
+                            Spacing="4" />
+              </ScrollViewer>
+              <RepeatButton x:Name="TabStripScrollRightButton"
+                            Grid.Column="2"
+                            Classes="tabStripScrollButton"
+                            IsVisible="False"
+                            ToolTip.Tip="Scroll tabs right"
+                            chrome:WindowDecorationProperties.ElementRole="User">
+                <PathIcon Classes="tabStripScrollIcon"
+                          Data="{StaticResource Icon.ChevronRightRegular}" />
+              </RepeatButton>
+              <Button x:Name="TabStripNewTabButton"
+                      Grid.Column="3"
+                      Classes="tabStripNewTab"
+                      Width="30"
+                      Height="30"
+                      MinWidth="30"
+                      MinHeight="30"
+                      MaxWidth="30"
+                      MaxHeight="30"
+                      Command="{Binding NewTabCommand}"
+                      ToolTip.Tip="New tab"
+                      chrome:WindowDecorationProperties.ElementRole="User">
+                <PathIcon x:Name="TabStripNewTabIcon"
+                          Classes="tabStripNewTabIcon"
+                          Data="{StaticResource Icon.AddRegular}" />
+              </Button>
+            </Grid>
+          </Border>
+        </ContentControl>
+
+        <Grid Grid.Row="1">
+          <Border Classes="terminalSurface">
+            <Grid Name="TerminalHost"
+                  Background="{DynamicResource WindowBackgroundBrush}" />
+          </Border>
+
+          <Border Classes="diagnosticsPanel"
+                  VerticalAlignment="Top"
+                  MaxHeight="360"
+                  IsVisible="{Binding ShowGhosttyDiagnostics}">
+            <Grid RowDefinitions="Auto,Auto,*"
+                  RowSpacing="8">
+              <Grid ColumnDefinitions="*,Auto"
+                    ColumnSpacing="10">
+                <TextBlock Text="Diagnostics"
+                           Classes="sectionTitle"
+                           VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            VerticalAlignment="Center">
+                  <TextBlock Text="{Binding EventLogEntryCountText}"
+                             Classes="caption"
+                             VerticalAlignment="Center" />
+                  <Button x:Name="DiagnosticsClearEventLogButton"
+                          Classes="statusButton"
+                          IsEnabled="{Binding HasEventLogEntries}"
+                          Command="{Binding ClearEventLogCommand}">
+                    <TextBlock Text="Clear Log" />
+                  </Button>
+                </StackPanel>
+              </Grid>
+              <TextBox x:Name="GhosttyDiagnosticsTextBox"
+                       Grid.Row="1"
+                       Classes="diagnosticsTextBox"
+                       Height="88"
+                       IsReadOnly="True"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                       ScrollViewer.VerticalScrollBarVisibility="Auto"
+                       Text="{Binding GhosttyDiagnosticsText}" />
+              <TextBox x:Name="EventLogTextBox"
+                       Grid.Row="2"
+                       Classes="diagnosticsTextBox"
+                       MinHeight="96"
+                       IsReadOnly="True"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                       ScrollViewer.VerticalScrollBarVisibility="Auto"
+                       Text="{Binding EventLogText}" />
+            </Grid>
+          </Border>
+
+          <Border x:Name="SettingsOverlay"
+                  Classes="flyoutPanel settingsOverlayPanel"
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Stretch"
+                  Margin="24"
+                  MaxWidth="900"
+                  MaxHeight="620"
+                  ClipToBounds="True"
+                  IsVisible="{Binding IsSettingsPanelOpen}">
+            <Grid RowDefinitions="Auto,*" RowSpacing="12" ClipToBounds="True">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBlock Text="Preferences"
+                           Classes="sectionTitle"
+                           VerticalAlignment="Center" />
+                <Button Grid.Column="1"
+                        Classes="commandButton"
+                        Command="{Binding CloseSettingsPanelCommand}">
+                  <StackPanel Classes="iconLabel">
+                    <PathIcon Classes="commandIcon"
+                              Data="{StaticResource Icon.DismissRegular}" />
+                    <TextBlock Text="Close"
+                               VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+              </Grid>
+              <settings:TerminalSettingsPanel Grid.Row="1"
+                                              MinHeight="0"
+                                              HorizontalAlignment="Stretch"
+                                              VerticalAlignment="Stretch"
+                                              DataContext="{Binding SettingsPanelState}" />
+            </Grid>
+          </Border>
+
+          <Border Classes="flyoutPanel commandHistoryOverlay"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Top"
+                  Margin="0,18,0,0"
+                  Width="560"
+                  IsVisible="{Binding IsCommandHistoryOverlayOpen}">
+            <StackPanel Spacing="10">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBlock Text="Command History"
+                           Classes="sectionTitle"
+                           VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding CommandSuggestionStatusText}"
+                           Classes="caption"
+                           VerticalAlignment="Center" />
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Classes="compactField"
+                         PlaceholderText="Search command or snippet"
+                         Text="{Binding CommandSuggestionQuery, Mode=TwoWay}" />
+                <Button Grid.Column="1"
+                        Classes="commandButton"
+                        Command="{Binding RefreshCommandSuggestionsCommand}">
+                  <StackPanel Classes="iconLabel">
+                    <PathIcon Classes="commandIcon"
+                              Data="{StaticResource Icon.ArrowSyncRegular}" />
+                    <TextBlock Text="Refresh"
+                               VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+              </Grid>
+              <ListBox Classes="launcherList"
+                       MinHeight="140"
+                       MaxHeight="300"
+                       ItemsSource="{Binding CommandSuggestions}"
+                       SelectedItem="{Binding SelectedCommandSuggestion, Mode=TwoWay}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="terminal:TerminalCommandSuggestion">
+                    <Grid RowDefinitions="Auto,Auto,Auto"
+                          ColumnDefinitions="*,Auto"
+                          ColumnSpacing="8"
+                          RowSpacing="2"
+                          Margin="2">
+                      <TextBlock Text="{Binding CommandLine}"
+                                 FontFamily="Menlo,Consolas,monospace"
+                                 Foreground="{DynamicResource ToolbarForegroundBrush}"
+                                 TextTrimming="CharacterEllipsis" />
+                      <Border Grid.Column="1"
+                              Classes="badge">
+                        <TextBlock Text="{Binding Kind}"
+                                   Classes="caption" />
+                      </Border>
+                      <TextBlock Grid.Row="1"
+                                 Grid.ColumnSpan="2"
+                                 Text="{Binding Description}"
+                                 Classes="caption"
+                                 TextTrimming="CharacterEllipsis" />
+                      <TextBlock Grid.Row="2"
+                                 Grid.ColumnSpan="2"
+                                 Text="{Binding WorkingDirectory}"
+                                 Classes="caption"
+                                 TextTrimming="CharacterEllipsis" />
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <StackPanel Orientation="Horizontal"
+                          Spacing="8"
+                          HorizontalAlignment="Right">
+                <Button Classes="commandButton"
+                        Command="{Binding CloseCommandHistoryOverlayCommand}">
+                  <StackPanel Classes="iconLabel">
+                    <PathIcon Classes="commandIcon"
+                              Data="{StaticResource Icon.DismissRegular}" />
+                    <TextBlock Text="Close"
+                               VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+                <Button Classes="primaryCommand"
+                        IsEnabled="{Binding CanAcceptCommandSuggestion}"
+                        Command="{Binding AcceptCommandSuggestionCommand}">
+                  <StackPanel Classes="iconLabel">
+                    <PathIcon Classes="primaryCommandIcon"
+                              Data="{StaticResource Icon.SendRegular}" />
+                    <TextBlock Text="Insert"
+                               VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </Grid>
+
+        <Border Grid.Row="2"
+                x:Name="StatusBar"
+                Classes="statusBar"
+                IsVisible="{Binding IsStatusBarVisible}">
+          <Grid x:Name="StatusBarLayout"
+                ColumnDefinitions="Auto,Auto,*,Auto,Auto"
+                ColumnSpacing="8"
+                ClipToBounds="True">
+            <Border x:Name="StatusRenderChip"
+                    Classes="statusChip statusRenderChip"
+                    VerticalAlignment="Center">
+              <TextBlock Text="{Binding TextRenderPipelineIndicatorText}"
+                         Classes="statusText statusChipText"
+                         VerticalAlignment="Center" />
+            </Border>
+            <Border x:Name="StatusSessionChip"
+                    Grid.Column="1"
+                    Classes="statusChip statusSessionChip"
+                    ToolTip.Tip="{Binding ActiveSessionDisplay}"
+                    VerticalAlignment="Center">
+              <TextBlock x:Name="StatusSessionTextBlock"
+                         Text="{Binding ActiveSessionDisplay}"
+                         Classes="statusText statusChipText"
+                         MaxWidth="144"
+                         TextTrimming="CharacterEllipsis"
+                         VerticalAlignment="Center" />
+            </Border>
+            <TextBlock Grid.Column="2"
+                       Text="{Binding StatusText}"
+                       Classes="statusText"
+                       TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Center" />
+            <Border x:Name="ReplayStatusControls"
+                    Grid.Column="3"
+                    Classes="statusChip replayTransport"
+                    Height="24"
+                    MaxHeight="24"
+                    ClipToBounds="True"
+                    IsVisible="{Binding IsReplayEnabled}"
+                    ToolTip.Tip="{Binding ReplaySourceLabel}"
+                    VerticalAlignment="Center">
+              <Grid ColumnDefinitions="Auto,Auto,Auto,150,94"
+                    Height="22"
+                    ColumnSpacing="6"
+                    VerticalAlignment="Center">
+                <TextBlock x:Name="ReplayTransportLabelTextBlock"
+                           Grid.Column="0"
+                           Text="Replay"
+                           Classes="statusText replayLabel"
+                           VerticalAlignment="Center" />
+                <Button x:Name="ReplayPlayPauseButton"
+                        Grid.Column="1"
+                        Classes="statusIconButton"
+                        Width="22"
+                        Height="22"
+                        MinWidth="22"
+                        MinHeight="22"
+                        MaxWidth="22"
+                        MaxHeight="22"
+                        IsEnabled="{Binding CanReplayControl}"
+                        Command="{Binding ToggleReplayPlaybackCommand}"
+                        ToolTip.Tip="{Binding ReplayPlayPauseButtonText}">
+                  <PathIcon Classes="statusIcon"
+                            Data="{StaticResource Icon.PlayRegular}" />
+                </Button>
+                <Button x:Name="ReplayStopButton"
+                        Grid.Column="2"
+                        Classes="statusIconButton"
+                        Width="22"
+                        Height="22"
+                        MinWidth="22"
+                        MinHeight="22"
+                        MaxWidth="22"
+                        MaxHeight="22"
+                        IsEnabled="{Binding CanReplayControl}"
+                        Command="{Binding StopReplayCommand}"
+                        ToolTip.Tip="Stop replay">
+                  <PathIcon Classes="statusIcon"
+                            Data="{StaticResource Icon.StopRegular}" />
+                </Button>
+                <Slider x:Name="ReplayTimelineSlider"
+                        Grid.Column="3"
+                        Classes="replayTimeline"
+                        Width="150"
+                        Height="16"
+                        MinWidth="150"
+                        MaxWidth="150"
+                        MaxHeight="16"
+                        Minimum="0"
+                        Maximum="{Binding ReplayDurationSeconds}"
+                        Value="{Binding ReplayTimelineValue, Mode=TwoWay}"
+                        IsEnabled="{Binding CanSeekReplay}" />
+                <TextBlock x:Name="ReplayTimelineTextBlock"
+                           Grid.Column="4"
+                           Text="{Binding ReplayTimelineText}"
+                           Classes="statusText replayTime"
+                           VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+            <Border x:Name="StatusDimensionsChip"
+                    Grid.Column="4"
+                    Classes="statusChip statusDimensionsChip"
+                    VerticalAlignment="Center">
+              <TextBlock Text="{Binding DimensionsText}"
+                         Classes="statusText statusChipText"
+                         VerticalAlignment="Center" />
+            </Border>
+          </Grid>
+        </Border>
+      </Grid>
+    </Grid>
+    </Grid>
+
+    <Border Grid.Row="1"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Width="560"
+            Classes="flyoutPanel"
+            IsVisible="{Binding IsSshHostKeyPromptVisible}">
+      <StackPanel Spacing="12">
+        <TextBlock Text="{Binding SshHostKeyPromptTitle}"
+                   Classes="sectionTitle" />
+        <TextBlock Text="{Binding SshHostKeyPromptEndpoint}"
+                   Classes="caption" />
+        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="6" ColumnSpacing="10">
+          <TextBlock Text="Algorithm" Classes="muted" />
+          <TextBlock Grid.Column="1"
+                     Text="{Binding SshHostKeyPromptAlgorithm}"
+                     Foreground="{DynamicResource ToolbarForegroundBrush}" />
+          <TextBlock Grid.Row="1" Text="SHA256" Classes="muted" />
+          <TextBlock Grid.Row="1"
+                     Grid.Column="1"
+                     Text="{Binding SshHostKeyPromptFingerprintSha256}"
+                     TextWrapping="Wrap"
+                     Foreground="{DynamicResource ToolbarForegroundBrush}" />
+          <TextBlock Grid.Row="2" Text="MD5" Classes="muted" />
+          <TextBlock Grid.Row="2"
+                     Grid.Column="1"
+                     Text="{Binding SshHostKeyPromptFingerprintMd5}"
+                     TextWrapping="Wrap"
+                     Foreground="{DynamicResource ToolbarForegroundBrush}" />
+        </Grid>
+        <TextBlock Text="{Binding SshHostKeyPromptPersistenceText}"
+                   Classes="caption"
+                   TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal"
+                    Spacing="8"
+                    HorizontalAlignment="Right">
+          <Button Classes="commandButton"
+                  Command="{Binding DeclineSshHostKeyCommand}">
+            <StackPanel Classes="iconLabel">
+              <PathIcon Classes="commandIcon"
+                        Data="{StaticResource Icon.DismissRegular}" />
+              <TextBlock Text="Decline"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Button Classes="primaryCommand"
+                  Command="{Binding AcceptSshHostKeyCommand}">
+            <StackPanel Classes="iconLabel">
+              <PathIcon Classes="primaryCommandIcon"
+                        Data="{StaticResource Icon.CheckmarkRegular}" />
+              <TextBlock Text="Accept"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <Grid.ContextMenu>
+      <ContextMenu DataContext="{Binding #RootView.DataContext}">
+        <MenuItem Header="_Copy" InputGesture="Ctrl+Shift+C" Command="{Binding CopySelectionCommand}" />
+        <MenuItem Header="_Paste" InputGesture="Ctrl+Shift+V" Command="{Binding PasteClipboardCommand}" />
+        <Separator />
+        <MenuItem Header="Select _All" InputGesture="Ctrl+Shift+A" Command="{Binding SelectAllCommand}" />
+        <Separator />
+        <MenuItem Header="_New Tab" InputGesture="Ctrl+T" Command="{Binding NewTabCommand}" />
+        <MenuItem Header="C_lose Tab" InputGesture="Ctrl+W" Command="{Binding CloseCurrentTabCommand}" />
+      </ContextMenu>
+    </Grid.ContextMenu>
+  </Grid>
+</UserControl>

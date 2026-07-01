@@ -104,6 +104,37 @@ public sealed class TerminalSessionProfileSerializerTests
     }
 
     [Fact]
+    public void Serializer_RoundTripsProfileCommandSnippets_AndNormalizesEntries()
+    {
+        TerminalSessionProfilesDocument document = new()
+        {
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "dev",
+                    DisplayName = "Dev",
+                    CommandSnippets =
+                    [
+                        new TerminalCommandSnippet(" gs ", " git status ", " status "),
+                        new TerminalCommandSnippet("gs", "git status", "duplicate"),
+                        new TerminalCommandSnippet(" ", "git diff", "ignored"),
+                    ],
+                },
+            ],
+        };
+
+        TerminalSessionProfilesDocument restored = TerminalSessionProfileSerializer.FromJson(
+            TerminalSessionProfileSerializer.ToJson(document));
+
+        TerminalSessionProfile profile = Assert.Single(restored.Profiles);
+        TerminalCommandSnippet snippet = Assert.Single(profile.CommandSnippets);
+        Assert.Equal("gs", snippet.Trigger);
+        Assert.Equal("git status", snippet.CommandLine);
+        Assert.Equal("status", snippet.Description);
+    }
+
+    [Fact]
     public void Serializer_RoundTripsFileFontAppearance()
     {
         TerminalSessionProfilesDocument document = new()

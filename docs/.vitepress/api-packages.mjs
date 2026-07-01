@@ -10,6 +10,13 @@ export const apiPackageGroups = [
         guideLink: "/articles/avalonia-control"
       },
       {
+        packageId: "RoyalApps.RoyalTerminal.Avalonia.App",
+        slug: "royalterminal-avalonia-app",
+        project: "src/RoyalTerminal.Avalonia.App/RoyalTerminal.Avalonia.App.csproj",
+        guideTitle: "Reusable App Shell",
+        guideLink: "/articles/reusable-app-shell"
+      },
+      {
         packageId: "RoyalApps.RoyalTerminal.Avalonia.Settings",
         slug: "royalterminal-avalonia-settings",
         project: "src/RoyalTerminal.Avalonia.Settings/RoyalTerminal.Avalonia.Settings.csproj",

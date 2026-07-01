@@ -11,10 +11,17 @@ The repository includes multiple samples and validation tools. They are part of 
 The main Avalonia demo is the most complete integration example. It includes:
 
 - runtime tabs
+- interactive split panes with keyboard focus and resize commands
+- workspace restore/save for windows, tabs, pane trees, render mode, working
+  directory, profile id, and transport id
 - mode switching across `Native VT`, `Managed VT`, and `Rendered (Auto VT)`
 - transport forms for PTY, pipe, raw TCP, Telnet, serial, and SSH
+- searchable profile launcher backed by persisted session profiles and shell
+  discovery
+- shell-integrated command history capture and command suggestions
 - a tabbed settings flyout
 - profile CRUD and default-profile handling
+- settings profile actions exposed through the window menu
 - session logging and event logging
 - capture and replay with selectable RoyalTerminal JSON or asciicast v3 files
 - search
@@ -22,6 +29,9 @@ The main Avalonia demo is the most complete integration example. It includes:
 - framebuffer shader samples
 - snapshot copy actions
 - hyperlink and Kitty graphics showcase actions
+- macOS application menu replacement for About, Preferences, and Quit
+- window native menus for shell, edit, view, session, window, and help commands
+- compact extended-titlebar command bar with native titlebar hit-test roles
 
 Settings categories in the demo:
 
@@ -32,9 +42,10 @@ Settings categories in the demo:
 - `SSH`
 - `Logging`
 
-If you want a realistic host application example, start here.
+If you want a realistic host application launcher, start here. The reusable shell
+implementation lives in `RoyalApps.RoyalTerminal.Avalonia.App`.
 
-The demo toolbar includes a shader button that cycles through built-in post-process effects:
+The shared shell View menu includes a shader sample action that cycles through built-in post-process effects:
 
 - `Off`
 - `CRT Amber`
@@ -44,7 +55,30 @@ The demo toolbar includes a shader button that cycles through built-in post-proc
 - `Windows Terminal CRT`
 - `Ghostty Shadertoy`
 
-The capture persistence behavior is covered in [Capture Formats](/articles/capture-formats). The sample catalog is documented in [Applying Shaders](/articles/shaders-applying#demo-app-samples). The compatibility details are covered in [Shader Support](/articles/shaders).
+The capture persistence behavior is covered in [Capture Formats](/articles/capture-formats). The sample catalog is documented in [Applying Shaders](/articles/shaders-applying#shared-shell-samples). The compatibility details are covered in [Shader Support](/articles/shaders).
+Product workflow topics are split into dedicated articles:
+
+- [Workspace Restore](/articles/workspace-restore)
+- [Split Panes](/articles/split-panes)
+- [Shell Integration](/articles/shell-integration)
+- [Command History And Suggestions](/articles/command-history-and-suggestions)
+- [Demo Product Shell](/articles/demo-product-shell)
+
+Pane shortcuts in the demo:
+
+| Command | Shortcut |
+| --- | --- |
+| Split pane right | `Alt+Shift+OemPlus` |
+| Split pane down | `Alt+Shift+OemMinus` |
+| Focus pane left/right/up/down | `Alt+Arrow` |
+| Resize pane left/right/up/down | `Alt+Shift+Arrow` |
+
+Command-history shortcuts in the demo:
+
+| Command | Shortcut |
+| --- | --- |
+| Open command-history overlay | `Ctrl+Space` |
+| Accept selected suggestion | `Ctrl+Enter` |
 
 ## `RoyalTerminal.ControlCatalog`
 

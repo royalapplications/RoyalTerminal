@@ -6,7 +6,7 @@ title: Capture Formats
 
 RoyalTerminal capture files store a terminal session as a timed event stream, not as rendered pixels. The same `TerminalCaptureSession` document can drive replay inside `TerminalControl`, be saved for support/debugging, or be converted to a different recording format.
 
-The built-in persistence layer supports the native RoyalTerminal JSON capture format and [asciicast v3](https://docs.asciinema.org/manual/asciicast/v3/) files. Hosts can add more formats through the same registry API used by the demo app.
+The built-in persistence layer supports the native RoyalTerminal JSON capture format and [asciicast v3](https://docs.asciinema.org/manual/asciicast/v3/) files. Hosts can add more formats through the same registry API used by the reusable app shell.
 
 ## Capture model
 
@@ -92,6 +92,6 @@ Asciicast intervals are stored as seconds relative to the previous written event
 
 Because asciicast payloads are JSON strings, output and input chunks must be valid UTF-8. The writer handles UTF-8 sequences split across adjacent chunks, but it rejects invalid or incomplete sequences. Use RoyalTerminal JSON when byte-for-byte preservation matters more than asciicast interoperability.
 
-## Demo app behavior
+## Shared shell behavior
 
-`samples/RoyalTerminal.Demo` exposes the built-in formats in the capture toolbar. `Save Capture` uses the selected format's descriptor to choose the default extension and file type. `Load Replay` accepts RoyalTerminal JSON and asciicast v3 files, then uses the default registry to infer or probe the recording format before loading the replay timeline.
+`RoyalApps.RoyalTerminal.Avalonia.App` exposes the built-in formats in the Session menu's `Capture Format` submenu. `Save Capture` uses the selected format's descriptor to choose the default extension and file type. `Load Replay` accepts RoyalTerminal JSON and asciicast v3 files, then uses the default registry to infer or probe the recording format before loading the replay timeline.

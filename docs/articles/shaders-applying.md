@@ -141,9 +141,9 @@ bool applied = processor.TryApply(canvas, inputFrame, destinationRect, frameCont
 
 Invalid shader sources are skipped and recorded in `CompileLog`. `TryApply` returns `false` when no shader could be applied, letting callers fall back to drawing the unmodified terminal frame.
 
-## Demo app samples
+## Shared shell samples
 
-`RoyalTerminal.Demo` includes a toolbar shader button that cycles through built-in samples:
+`RoyalApps.RoyalTerminal.Avalonia.App` includes a View-menu shader action that cycles through built-in samples:
 
 - `Off`
 - `CRT Amber`

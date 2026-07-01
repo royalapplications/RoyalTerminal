@@ -19,6 +19,10 @@ public static class Program
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            .With(new MacOSPlatformOptions
+            {
+                DisableDefaultApplicationMenuItems = true,
+            })
             .UseReactiveUI(_ => { })
             .WithInterFont()
             .LogToTrace();
