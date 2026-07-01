@@ -93,7 +93,7 @@ public static class TerminalShellIntegrationBootstrapBuilder
         List<string> lines =
         [
             "__royalterminal_urlencode() {",
-            "  local input=\"$1\" output=\"\" i c hex",
+            "  local LC_ALL=C input=\"$1\" output=\"\" i c hex",
             "  for (( i=0; i<${#input}; i++ )); do",
             "    c=\"${input:i:1}\"",
             "    case \"$c\" in",
@@ -110,8 +110,17 @@ public static class TerminalShellIntegrationBootstrapBuilder
             lines.AddRange(
             [
                 "__royalterminal_preexec() {",
-                "  local cmd=\"${BASH_COMMAND:-}\"",
-                "  case \"$cmd\" in __royalterminal_prompt_command*|__royalterminal_preexec*) return ;; esac",
+                "  if [ \"${__ROYALTERMINAL_COMMAND_ACTIVE:-0}\" = \"1\" ]; then return; fi",
+                "  local history_line history_id cmd",
+                "  history_line=\"$(HISTTIMEFORMAT= history 1 2>/dev/null)\" || history_line=\"\"",
+                "  history_line=\"${history_line#\"${history_line%%[![:space:]]*}\"}\"",
+                "  history_id=\"${history_line%%[[:space:]]*}\"",
+                "  cmd=\"${history_line#\"$history_id\"}\"",
+                "  cmd=\"${cmd#\"${cmd%%[![:space:]]*}\"}\"",
+                "  if [ -z \"$cmd\" ] || [ \"$cmd\" = \"$history_line\" ]; then cmd=\"${BASH_COMMAND:-}\"; fi",
+                "  case \"$cmd\" in __royalterminal_prompt_command*|__royalterminal_preexec*|history\\ *) return ;; esac",
+                "  if [ -n \"$history_id\" ] && [ \"${__ROYALTERMINAL_LAST_HISTORY_ID:-}\" = \"$history_id\" ]; then return; fi",
+                "  __ROYALTERMINAL_LAST_HISTORY_ID=\"$history_id\"",
                 "  __ROYALTERMINAL_COMMAND_ACTIVE=1",
                 "  printf '\\033]133;C;cmdline_url=%s\\007' \"$(__royalterminal_urlencode \"$cmd\")\"",
                 "}",
@@ -151,7 +160,7 @@ public static class TerminalShellIntegrationBootstrapBuilder
         [
             "__royalterminal_urlencode() {",
             "  emulate -L zsh",
-            "  local input=\"$1\" output=\"\" i c hex",
+            "  local LC_ALL=C input=\"$1\" output=\"\" i c hex",
             "  for (( i = 1; i <= ${#input}; i++ )); do",
             "    c=\"${input[i]}\"",
             "    case \"$c\" in",
@@ -243,10 +252,27 @@ public static class TerminalShellIntegrationBootstrapBuilder
         List<string> lines =
         [
             "if (Test-Path function:\\prompt) { Copy-Item function:\\prompt function:\\__RoyalTerminalOriginalPrompt -Force }",
-            "function global:prompt {",
-            "  $rtExitCode = if ($?) { 0 } elseif ($global:LASTEXITCODE -is [int]) { $global:LASTEXITCODE } else { 1 }",
         ];
 
+        if (options.EmitSemanticPrompt)
+        {
+            lines.AddRange(
+            [
+                "if (Get-Module -Name PSReadLine) {",
+                "  function global:PSConsoleHostReadLine {",
+                "    $rtLine = [Microsoft.PowerShell.PSConsoleReadLine]::ReadLine($host.Runspace, $ExecutionContext)",
+                "    if (-not [string]::IsNullOrWhiteSpace($rtLine)) {",
+                "      $rtCommand = [Uri]::EscapeDataString($rtLine)",
+                "      [Console]::Write(\"`e]133;C;cmdline_url=$rtCommand`a\")",
+                "    }",
+                "    $rtLine",
+                "  }",
+                "}",
+            ]);
+        }
+
+        lines.Add("function global:prompt {");
+        lines.Add("  $rtExitCode = if ($?) { 0 } elseif ($global:LASTEXITCODE -is [int]) { $global:LASTEXITCODE } else { 1 }");
         if (options.EmitSemanticPrompt)
         {
             lines.Add("  [Console]::Write(\"`e]133;D;$rtExitCode`a\")");

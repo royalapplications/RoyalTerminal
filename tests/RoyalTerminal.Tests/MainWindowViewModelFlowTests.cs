@@ -414,7 +414,7 @@ public class MainWindowViewModelFlowTests
         [
             new TerminalCommandSuggestion("git status", "/repo", DateTimeOffset.UtcNow, 1),
         ]);
-        AssertCanExecuteNativeMenuCommand(viewModel.AcceptCommandSuggestionCommand);
+        AssertCannotExecuteNativeMenuCommand(viewModel.AcceptCommandSuggestionCommand);
 
         viewModel.SetSessionLaunchOptions(
         [
@@ -436,6 +436,7 @@ public class MainWindowViewModelFlowTests
         });
 
         viewModel.OpenCommandHistoryOverlayCommand.Execute().Wait();
+        AssertCanExecuteNativeMenuCommand(viewModel.AcceptCommandSuggestionCommand);
         AssertCanExecuteNativeMenuCommand(viewModel.CloseCommandHistoryOverlayCommand);
 
         viewModel.PrepareSettingsPanelCommand.Execute().Wait();
@@ -1001,6 +1002,28 @@ public class MainWindowViewModelFlowTests
         Assert.Contains("git", refreshQueries);
         Assert.Equal("git status", accepted);
         Assert.False(viewModel.IsCommandHistoryOverlayOpen);
+        Assert.False(viewModel.AcceptCommandSuggestionCommand.CanExecute.FirstAsync().Wait());
+    }
+
+    [Fact]
+    public void CommandHistoryOverlay_ClosedOverlay_DisablesSelectedSuggestionInsertion()
+    {
+        MainWindowViewModel viewModel = new();
+        string? accepted = null;
+        using IDisposable acceptRegistration = viewModel.AcceptCommandSuggestionInteraction.RegisterHandler(context =>
+        {
+            accepted = context.Input;
+            context.SetOutput(Unit.Default);
+        });
+
+        viewModel.SetCommandSuggestions(
+        [
+            new TerminalCommandSuggestion("git status", "/repo", DateTimeOffset.UtcNow, 3),
+        ]);
+
+        Assert.False(viewModel.AcceptCommandSuggestionCommand.CanExecute.FirstAsync().Wait());
+
+        Assert.Null(accepted);
     }
 
     [Fact]

@@ -30,6 +30,23 @@ public sealed class TerminalShellIntegrationContractTests
     }
 
     [Fact]
+    public void Parser_Osc7_WindowsFileUri_RemovesLeadingSlashFromDrivePath()
+    {
+        TerminalShellIntegrationParser parser = new();
+        TerminalShellIntegrationEvent? value = null;
+        parser.EventReceived += (_, e) => value = e.Value;
+
+        bool handled = parser.TryHandleOsc(
+            7,
+            "file://DESKTOP/C%3A%5CUsers%5CAlice%5CProject");
+
+        Assert.True(handled);
+        Assert.NotNull(value);
+        Assert.Equal(@"C:\Users\Alice\Project", value!.WorkingDirectory);
+        Assert.Equal("desktop", value.Host);
+    }
+
+    [Fact]
     public void Parser_Osc133_OutputStartAndFinish_RaisesStructuredCommandEvents()
     {
         TerminalShellIntegrationParser parser = new();
@@ -190,6 +207,40 @@ public sealed class TerminalShellIntegrationContractTests
         Assert.Contains("]7;", script, StringComparison.Ordinal);
         Assert.Contains("]133;", script, StringComparison.Ordinal);
         Assert.DoesNotContain("Tab", script, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BootstrapBuilder_BashCapturesOneHistoryLine_AndUsesByteLocaleForUrlEncode()
+    {
+        string? script = TerminalShellIntegrationBootstrapBuilder.Build(
+            new TerminalShellIntegrationBootstrapOptions(TerminalShellIntegrationBootstrapShell.Bash));
+
+        Assert.NotNull(script);
+        Assert.Contains("local LC_ALL=C", script, StringComparison.Ordinal);
+        Assert.Contains("history 1", script, StringComparison.Ordinal);
+        Assert.Contains("__ROYALTERMINAL_LAST_HISTORY_ID", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BootstrapBuilder_ZshUsesByteLocaleForUrlEncode()
+    {
+        string? script = TerminalShellIntegrationBootstrapBuilder.Build(
+            new TerminalShellIntegrationBootstrapOptions(TerminalShellIntegrationBootstrapShell.Zsh));
+
+        Assert.NotNull(script);
+        Assert.Contains("local LC_ALL=C", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BootstrapBuilder_PowerShellEmitsCommandStartFromReadLine()
+    {
+        string? script = TerminalShellIntegrationBootstrapBuilder.Build(
+            new TerminalShellIntegrationBootstrapOptions(TerminalShellIntegrationBootstrapShell.PowerShell));
+
+        Assert.NotNull(script);
+        Assert.Contains("function global:PSConsoleHostReadLine", script, StringComparison.Ordinal);
+        Assert.Contains("]133;C;cmdline_url=", script, StringComparison.Ordinal);
+        Assert.Contains("[Uri]::EscapeDataString($rtLine)", script, StringComparison.Ordinal);
     }
 
     [Fact]

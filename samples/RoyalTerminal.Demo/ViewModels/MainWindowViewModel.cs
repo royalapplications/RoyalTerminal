@@ -1034,7 +1034,16 @@ public sealed class MainWindowViewModel : ReactiveObject
     public bool IsCommandHistoryOverlayOpen
     {
         get => _isCommandHistoryOverlayOpen;
-        private set => this.RaiseAndSetIfChanged(ref _isCommandHistoryOverlayOpen, value);
+        private set
+        {
+            if (_isCommandHistoryOverlayOpen == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _isCommandHistoryOverlayOpen, value);
+            this.RaisePropertyChanged(nameof(CanAcceptCommandSuggestion));
+        }
     }
 
     public string CommandSuggestionQuery
@@ -1062,7 +1071,7 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public bool HasCommandSuggestions => _commandSuggestions.Count > 0;
 
-    public bool CanAcceptCommandSuggestion => _selectedCommandSuggestion is not null;
+    public bool CanAcceptCommandSuggestion => IsCommandHistoryOverlayOpen && _selectedCommandSuggestion is not null;
 
     public string CommandSuggestionStatusText
     {
@@ -2242,7 +2251,8 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private IObservable<Unit> AcceptCommandSuggestion()
     {
-        if (SelectedCommandSuggestion is null ||
+        if (!IsCommandHistoryOverlayOpen ||
+            SelectedCommandSuggestion is null ||
             string.IsNullOrWhiteSpace(SelectedCommandSuggestion.CommandLine))
         {
             return Observable.Return(Unit.Default);

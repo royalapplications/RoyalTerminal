@@ -96,6 +96,15 @@ public static class TerminalCommandHistorySerializer
     }
 
     /// <summary>
+    /// Normalizes and validates a command history document without serializing it.
+    /// </summary>
+    public static TerminalCommandHistoryDocument Normalize(TerminalCommandHistoryDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        return NormalizeAndValidate(document);
+    }
+
+    /// <summary>
     /// Deserializes a command history document from JSON text.
     /// </summary>
     public static TerminalCommandHistoryDocument FromJson(string json)

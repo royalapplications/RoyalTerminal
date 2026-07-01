@@ -294,6 +294,29 @@ public sealed class TerminalCommandHistorySerializerTests
         Assert.Equal("deploy prod", suggestion.CommandLine);
     }
 
+    [Fact]
+    public void Serializer_Normalize_AppliesRetentionLimitWithoutSerializing()
+    {
+        DateTimeOffset baseTime = new(2026, 6, 30, 10, 0, 0, TimeSpan.Zero);
+        TerminalCommandHistoryDocument document = new()
+        {
+            RetentionLimit = 2,
+            Entries =
+            [
+                CreateEntry("old", "echo old", baseTime),
+                CreateEntry("middle", "echo middle", baseTime.AddMinutes(1)),
+                CreateEntry("new", "echo new", baseTime.AddMinutes(2)),
+            ],
+        };
+
+        TerminalCommandHistoryDocument normalized = TerminalCommandHistorySerializer.Normalize(document);
+
+        Assert.Equal(2, normalized.Entries.Count);
+        Assert.DoesNotContain(normalized.Entries, entry => entry.Id == "old");
+        Assert.Contains(normalized.Entries, entry => entry.Id == "middle");
+        Assert.Contains(normalized.Entries, entry => entry.Id == "new");
+    }
+
     [Fact(
         Skip = "macOS/xUnit v3 intermittently hangs JSON file-store roundtrips that use the shared atomic file writer in a multi-test process.",
         SkipType = typeof(TestPlatformConditions),

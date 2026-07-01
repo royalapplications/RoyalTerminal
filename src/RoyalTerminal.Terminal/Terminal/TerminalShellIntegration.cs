@@ -144,7 +144,7 @@ public sealed class TerminalShellIntegrationParser
             return false;
         }
 
-        string workingDirectory = Uri.UnescapeDataString(uri.AbsolutePath);
+        string workingDirectory = GetWorkingDirectoryPath(uri);
         if (string.IsNullOrWhiteSpace(workingDirectory))
         {
             return false;
@@ -158,6 +158,25 @@ public sealed class TerminalShellIntegrationParser
             Host = string.IsNullOrWhiteSpace(uri.Host) ? null : uri.Host,
         });
         return true;
+    }
+
+    private static string GetWorkingDirectoryPath(Uri uri)
+    {
+        string workingDirectory = Uri.UnescapeDataString(uri.AbsolutePath);
+        if (workingDirectory.Length >= 3 &&
+            workingDirectory[0] == '/' &&
+            IsAsciiLetter(workingDirectory[1]) &&
+            workingDirectory[2] == ':')
+        {
+            return workingDirectory[1..];
+        }
+
+        return workingDirectory;
+    }
+
+    private static bool IsAsciiLetter(char value)
+    {
+        return value is >= 'A' and <= 'Z' or >= 'a' and <= 'z';
     }
 
     private bool TryHandleSemanticPrompt(string value, DateTimeOffset? timestampUtc)
