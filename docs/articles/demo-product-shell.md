@@ -4,14 +4,14 @@ title: Demo Product Shell
 
 # Demo Product Shell
 
-`samples/RoyalTerminal.Demo` is an end-user style terminal application sample.
-It demonstrates how to compose the lower-level RoyalTerminal libraries into a
-resource-conscious product surface without moving behavior into Avalonia view
-code-behind.
+`RoyalApps.RoyalTerminal.Avalonia.App` is the reusable end-user style terminal
+application shell. `samples/RoyalTerminal.Demo` is now a thin executable launcher
+that configures Avalonia, owns the `Application`/theme bootstrap, and opens the
+shared `MainWindow`.
 
 ## Shell Layout
 
-The demo shell is intentionally compact:
+The shared shell is intentionally compact:
 
 - terminal content is the primary surface;
 - the top command bar is placed inside the extended titlebar;
@@ -26,15 +26,16 @@ The demo shell is intentionally compact:
 - most low-frequency settings live in the native/menu surface or settings panel.
 
 The shell avoids large marketing-style sections and nested card surfaces. Styling
-is defined in resource dictionaries under `samples/RoyalTerminal.Demo/Styles`.
+is defined in resource dictionaries under
+`src/RoyalTerminal.Avalonia.App/Styles`.
 
 ## Native Menus
 
 On macOS, application-level commands belong in the application menu, not the
-window menu. The demo declares the application native menu in `App.axaml` so
-Avalonia sees it during startup and does not install the default
-`About Avalonia` item. `ApplicationNativeMenuFactory` then binds the declared
-menu items to the main ViewModel commands:
+window menu. The demo application declares the application native menu in
+`samples/RoyalTerminal.Demo/App.axaml` so Avalonia sees it during startup and
+does not install the default `About Avalonia` item. `ApplicationNativeMenuFactory` then
+binds the declared menu items to the main ViewModel commands:
 
 - About RoyalTerminal;
 - Preferences;
@@ -42,7 +43,7 @@ menu items to the main ViewModel commands:
 
 Window-level menus contain Shell, Edit, View, Session, Window, and Help actions.
 They expose the same low-frequency command surface that is available from the
-demo UI: command-history suggestions, profile refresh and launch, settings,
+shell UI: command-history suggestions, profile refresh and launch, settings,
 settings profile actions, apply/save, font browsing, text-highlight rule
 creation, shell panel visibility, titlebar search visibility, status bar
 visibility, theme and shader controls, diagnostics, capture and replay controls,
@@ -65,7 +66,7 @@ new MacOSPlatformOptions
 
 ## Extended Titlebar
 
-The main window uses Avalonia extended client area:
+The shared `MainWindow` uses Avalonia extended client area:
 
 ```xml
 ExtendClientAreaToDecorationsHint="True"
@@ -102,9 +103,11 @@ The overlay:
 
 ## ViewModel Boundaries
 
-The sample follows the repository MVVM rules:
+The shared shell follows the repository MVVM rules:
 
 - XAML defines layout and visuals;
+- `MainWindow` owns top-level key bindings, native menus, and window metadata;
+- `MainView` owns the visual terminal shell;
 - `MainWindowViewModel` exposes commands and interactions;
 - `MainWindowController` handles concrete window, terminal, storage, and menu
   orchestration;
@@ -115,7 +118,7 @@ route through commands or ReactiveUI interactions.
 
 ## Product Startup
 
-The demo starts in resource-conscious mode:
+The shared shell starts in resource-conscious mode:
 
 - restore a saved workspace when available;
 - otherwise open one terminal tab;

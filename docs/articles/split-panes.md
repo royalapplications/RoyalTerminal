@@ -57,7 +57,7 @@ through `0.95`.
 
 ## Runtime Behavior
 
-The demo app builds a runtime pane tree from the workspace pane tree. Each leaf
+The reusable app shell builds a runtime pane tree from the workspace pane tree. Each leaf
 creates a `TerminalControl` wrapped in a `ScrollViewer`. Each split creates an
 Avalonia `Grid` with a `GridSplitter` between its children.
 
@@ -75,7 +75,7 @@ the nearest split that matches the requested horizontal or vertical direction.
 
 ## Persistence
 
-On shutdown, the demo snapshots the live runtime pane tree back into
+On shutdown, the reusable app shell snapshots the live runtime pane tree back into
 `TerminalWorkspacePane` data. Before writing a split, it reads the current
 Avalonia grid star sizes so splitter movement is persisted without a separate
 event handler.

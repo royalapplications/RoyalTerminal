@@ -88,10 +88,10 @@ await store.SaveAsync(workspace);
 the default session profile file. Pass an explicit path when a host needs a
 portable workspace, a profile-specific workspace, or a test store.
 
-## Demo Integration
+## Shared Shell Integration
 
-`samples/RoyalTerminal.Demo` uses the workspace store as a product startup and
-shutdown boundary:
+`RoyalApps.RoyalTerminal.Avalonia.App` uses the workspace store as a product
+startup and shutdown boundary:
 
 - startup loads the selected window and restores tabs;
 - default product startup opens one tab when no workspace exists;

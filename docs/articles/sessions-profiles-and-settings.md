@@ -145,7 +145,7 @@ RoyalTerminal also treats captures as durable documents. That makes them useful 
 | `TerminalCaptureSessionFormats` | Built-in RoyalTerminal JSON and asciicast v3 formats. |
 | `TerminalCaptureRuntime` | Avalonia-facing capture and replay runtime bound to a control. |
 
-Use RoyalTerminal JSON (`.rtcap.json`) when capture fidelity matters most. Use asciicast v3 (`.cast`) when interoperability with asciinema-compatible tooling matters. See [Capture Formats](/articles/capture-formats) for the event mapping, extension model, and demo app behavior.
+Use RoyalTerminal JSON (`.rtcap.json`) when capture fidelity matters most. Use asciicast v3 (`.cast`) when interoperability with asciinema-compatible tooling matters. See [Capture Formats](/articles/capture-formats) for the event mapping, extension model, and shared shell behavior.
 
 ## Shell profiles and defaults
 

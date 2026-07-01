@@ -141,9 +141,9 @@ RoyalTerminal ships default snippets through
 built-in list. The serializer trims snippet trigger, command, and description
 and drops blank or duplicate snippet entries.
 
-## Demo Integration
+## Shared Shell Integration
 
-The demo command-history overlay uses explicit shortcuts:
+The shared shell command-history overlay uses explicit shortcuts:
 
 | Command | Shortcut |
 | --- | --- |
@@ -154,9 +154,9 @@ Tab is not intercepted. Native shell completion keeps its default behavior.
 
 Command history capture is registered per pane. Suggestions use the active pane
 context, so profile, transport, working directory, shell id, and shell
-integration metadata stay aligned with the pane the user is typing in. The demo
-passes active profile snippets first, then built-in snippets, into the provider
-request.
+integration metadata stay aligned with the pane the user is typing in. The shared
+shell passes active profile snippets first, then built-in snippets, into the
+provider request.
 
 ## Tests
 

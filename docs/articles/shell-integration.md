@@ -113,9 +113,9 @@ environment exports, an optional shell-integration script, and the initial
 command in that order. Existing SSH bootstrap callers keep their current
 behavior unless they pass `TerminalShellIntegrationBootstrapOptions`.
 
-## Demo Integration
+## Shared Shell Integration
 
-The demo registers shell-integration capture per `TerminalControl` pane. Working
+The shared app shell registers shell-integration capture per `TerminalControl` pane. Working
 directory updates and command lifecycle events feed command history capture, and
 the active pane remains the context for command suggestions.
 

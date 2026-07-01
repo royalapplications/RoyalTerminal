@@ -42,9 +42,10 @@ Settings categories in the demo:
 - `SSH`
 - `Logging`
 
-If you want a realistic host application example, start here.
+If you want a realistic host application launcher, start here. The reusable shell
+implementation lives in `RoyalApps.RoyalTerminal.Avalonia.App`.
 
-The demo View menu includes a shader sample action that cycles through built-in post-process effects:
+The shared shell View menu includes a shader sample action that cycles through built-in post-process effects:
 
 - `Off`
 - `CRT Amber`
@@ -54,7 +55,7 @@ The demo View menu includes a shader sample action that cycles through built-in 
 - `Windows Terminal CRT`
 - `Ghostty Shadertoy`
 
-The capture persistence behavior is covered in [Capture Formats](/articles/capture-formats). The sample catalog is documented in [Applying Shaders](/articles/shaders-applying#demo-app-samples). The compatibility details are covered in [Shader Support](/articles/shaders).
+The capture persistence behavior is covered in [Capture Formats](/articles/capture-formats). The sample catalog is documented in [Applying Shaders](/articles/shaders-applying#shared-shell-samples). The compatibility details are covered in [Shader Support](/articles/shaders).
 Product workflow topics are split into dedicated articles:
 
 - [Workspace Restore](/articles/workspace-restore)

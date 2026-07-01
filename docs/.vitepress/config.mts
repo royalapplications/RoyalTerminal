@@ -18,6 +18,7 @@ const guideSidebarItems = [
     collapsed: false,
     items: [
       { text: "Embedding in Avalonia", link: "/articles/avalonia-control" },
+      { text: "Reusable App Shell", link: "/articles/reusable-app-shell" },
       { text: "Sessions, Profiles, and Settings", link: "/articles/sessions-profiles-and-settings" },
       { text: "Workspace Restore", link: "/articles/workspace-restore" },
       { text: "Split Panes", link: "/articles/split-panes" },
