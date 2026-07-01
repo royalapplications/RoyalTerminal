@@ -7,16 +7,6 @@
     <Setter Property="BorderThickness" Value="0,0,1,0" />
   </Style>
 
-  <Style Selector="Border.brandMark">
-    <Setter Property="Width" Value="36" />
-    <Setter Property="Height" Value="36" />
-    <Setter Property="Margin" Value="10,10,10,6" />
-    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
-    <Setter Property="Background" Value="{DynamicResource ShellSurfaceRaisedBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
-    <Setter Property="BorderThickness" Value="1" />
-  </Style>
-
   <Style Selector="Border.topBar">
     <Setter Property="MinHeight" Value="{DynamicResource Shell.CommandHeight}" />
     <Setter Property="Padding" Value="{DynamicResource Shell.CommandPadding}" />

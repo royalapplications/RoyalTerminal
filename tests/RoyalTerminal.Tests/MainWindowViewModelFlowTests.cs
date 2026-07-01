@@ -575,6 +575,9 @@ public class MainWindowViewModelFlowTests
             Assert.Contains("tabStripNewTab", tabStripNewTabButton.Classes);
             Assert.Contains("tabStripNewTabIcon", tabStripNewTabIcon.Classes);
             Assert.Same(viewModel.NewTabCommand, tabStripNewTabButton.Command);
+            Assert.DoesNotContain(
+                window.GetVisualDescendants().OfType<Border>(),
+                border => border.Classes.Contains("brandMark"));
 
             viewModel.SetSearchState("needle", total: 2, selected: 0, usesNativeScrollback: true);
             window.Measure(new Size(window.Width, window.Height));
