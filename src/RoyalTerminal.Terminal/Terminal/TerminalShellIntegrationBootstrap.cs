@@ -144,6 +144,7 @@ public static class TerminalShellIntegrationBootstrapBuilder
             lines.Add("  printf '\\033]133;A\\007'");
         }
 
+        lines.Add("  return \"$exit_code\"");
         lines.Add("}");
         if (options.EmitSemanticPrompt)
         {
@@ -272,7 +273,15 @@ public static class TerminalShellIntegrationBootstrapBuilder
         }
 
         lines.Add("function global:prompt {");
-        lines.Add("  $rtExitCode = if ($?) { 0 } elseif ($global:LASTEXITCODE -is [int]) { $global:LASTEXITCODE } else { 1 }");
+        lines.Add("  $rtCommandSucceeded = $?");
+        lines.Add("  $rtLastExitCode = $global:LASTEXITCODE");
+        lines.Add("  $rtExitCode = if ($rtCommandSucceeded) { 0 } elseif ($rtLastExitCode -is [int]) { $rtLastExitCode } else { 1 }");
+        lines.Add("  if (-not $rtCommandSucceeded) {");
+        lines.Add("    Write-Error -Message __RoyalTerminalRestoreStatus -ErrorAction Ignore");
+        lines.Add("    $rtPrompt = if (Test-Path function:\\__RoyalTerminalOriginalPrompt) { & __RoyalTerminalOriginalPrompt } else { \"PS $($executionContext.SessionState.Path.CurrentLocation)> \" }");
+        lines.Add("  } else {");
+        lines.Add("    $rtPrompt = if (Test-Path function:\\__RoyalTerminalOriginalPrompt) { & __RoyalTerminalOriginalPrompt } else { \"PS $($executionContext.SessionState.Path.CurrentLocation)> \" }");
+        lines.Add("  }");
         if (options.EmitSemanticPrompt)
         {
             lines.Add("  [Console]::Write(\"`e]133;D;$rtExitCode`a\")");
@@ -289,7 +298,7 @@ public static class TerminalShellIntegrationBootstrapBuilder
             lines.Add("  [Console]::Write(\"`e]133;A`a\")");
         }
 
-        lines.Add("  if (Test-Path function:\\__RoyalTerminalOriginalPrompt) { & __RoyalTerminalOriginalPrompt } else { \"PS $($executionContext.SessionState.Path.CurrentLocation)> \" }");
+        lines.Add("  $rtPrompt");
         lines.Add("}");
         return string.Join('\n', lines);
     }

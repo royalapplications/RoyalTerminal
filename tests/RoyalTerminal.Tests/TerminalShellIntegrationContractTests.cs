@@ -234,6 +234,7 @@ public sealed class TerminalShellIntegrationContractTests
         Assert.Contains("local LC_ALL=C", script, StringComparison.Ordinal);
         Assert.Contains("history 1", script, StringComparison.Ordinal);
         Assert.Contains("__ROYALTERMINAL_LAST_HISTORY_ID", script, StringComparison.Ordinal);
+        Assert.Contains("return \"$exit_code\"", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -256,6 +257,34 @@ public sealed class TerminalShellIntegrationContractTests
         Assert.Contains("function global:PSConsoleHostReadLine", script, StringComparison.Ordinal);
         Assert.Contains("]133;C;cmdline_url=", script, StringComparison.Ordinal);
         Assert.Contains("[Uri]::EscapeDataString($rtLine)", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BootstrapBuilder_PowerShellInvokesOriginalPromptBeforeConsoleWrites()
+    {
+        string? script = TerminalShellIntegrationBootstrapBuilder.Build(
+            new TerminalShellIntegrationBootstrapOptions(TerminalShellIntegrationBootstrapShell.PowerShell));
+
+        Assert.NotNull(script);
+        int promptIndex = script.IndexOf("function global:prompt {", StringComparison.Ordinal);
+        int captureIndex = script.IndexOf("$rtCommandSucceeded = $?", promptIndex, StringComparison.Ordinal);
+        int restoreIndex = script.IndexOf(
+            "Write-Error -Message __RoyalTerminalRestoreStatus -ErrorAction Ignore",
+            promptIndex,
+            StringComparison.Ordinal);
+        int originalPromptIndex = script.IndexOf(
+            "$rtPrompt = if (Test-Path function:\\__RoyalTerminalOriginalPrompt) { & __RoyalTerminalOriginalPrompt }",
+            promptIndex,
+            StringComparison.Ordinal);
+        int firstWriteIndex = script.IndexOf("[Console]::Write(\"`e]133;D;", promptIndex, StringComparison.Ordinal);
+        int returnPromptIndex = script.IndexOf("$rtPrompt", firstWriteIndex, StringComparison.Ordinal);
+
+        Assert.True(promptIndex >= 0);
+        Assert.True(captureIndex > promptIndex);
+        Assert.True(restoreIndex > captureIndex);
+        Assert.True(originalPromptIndex > restoreIndex);
+        Assert.True(firstWriteIndex > originalPromptIndex);
+        Assert.True(returnPromptIndex > firstWriteIndex);
     }
 
     [Fact]

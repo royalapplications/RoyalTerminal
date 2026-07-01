@@ -5019,7 +5019,7 @@ internal sealed class MainWindowController
                 ProfileId = scope.ProfileId,
                 TransportId = scope.TransportId,
                 Limit = 12,
-                Snippets = GetActiveCommandSnippets(),
+                Snippets = GetActiveCommandSnippets(scope.ProfileId),
             });
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -5084,12 +5084,10 @@ internal sealed class MainWindowController
         AppendEventLog($"[{GetTabDisplayName(control)}] Inserted command suggestion.");
     }
 
-    private IReadOnlyList<TerminalCommandSnippet> GetActiveCommandSnippets()
+    private IReadOnlyList<TerminalCommandSnippet> GetActiveCommandSnippets(string? scopedProfileId)
     {
         IReadOnlyList<TerminalCommandSnippet> defaultSnippets = TerminalCommandSnippets.GetDefaultSnippets();
-        TerminalSessionProfile? activeProfile = _activeTab is null || _sessionLauncherDocument is null
-            ? null
-            : FindProfile(_sessionLauncherDocument, _activeTab.ProfileId);
+        TerminalSessionProfile? activeProfile = GetActiveCommandSnippetProfile(scopedProfileId);
         if (activeProfile?.CommandSnippets is not { Count: > 0 } profileSnippets)
         {
             return defaultSnippets;
@@ -5099,6 +5097,22 @@ internal sealed class MainWindowController
         snippets.AddRange(profileSnippets);
         snippets.AddRange(defaultSnippets);
         return snippets;
+    }
+
+    private TerminalSessionProfile? GetActiveCommandSnippetProfile(string? scopedProfileId)
+    {
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is not null &&
+            _launchConfigurations.TryGetValue(control, out TerminalLaunchConfiguration launchConfiguration) &&
+            launchConfiguration.Profile.CommandSnippets.Count > 0)
+        {
+            return launchConfiguration.Profile;
+        }
+
+        string? profileId = NormalizeOptional(scopedProfileId) ?? _activeTab?.ProfileId;
+        return profileId is null || _sessionLauncherDocument is null
+            ? null
+            : FindProfile(_sessionLauncherDocument, profileId);
     }
 
     private void ApplyTerminalBehaviorSettings(TerminalControl control)

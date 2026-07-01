@@ -311,6 +311,113 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_CommandSuggestions_UseFocusedSplitPaneProfileSnippets()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        TerminalSessionProfilesDocument profiles = new()
+        {
+            DefaultProfileId = "root-profile",
+            Profiles =
+            [
+                CreateSnippetProfile("root-profile", "Root Profile", "root-only", "echo root-only"),
+                CreateSnippetProfile("pane-profile", "Pane Profile", "pane-only", "echo pane-only"),
+            ],
+        };
+        TerminalWorkspacePane rootPane = new()
+        {
+            Id = "root",
+            Split = new TerminalWorkspacePaneSplit
+            {
+                Orientation = TerminalWorkspacePaneSplitOrientations.Horizontal,
+                Ratio = 0.5,
+                FirstPane = new TerminalWorkspacePane
+                {
+                    Id = "left",
+                    ProfileId = "root-profile",
+                    TransportId = TerminalTransportIds.Pipe,
+                },
+                SecondPane = new TerminalWorkspacePane
+                {
+                    Id = "right",
+                    ProfileId = "pane-profile",
+                    TransportId = TerminalTransportIds.Pipe,
+                },
+            },
+        };
+        InMemoryWorkspaceStore workspaceStore = new(new TerminalWorkspaceDocument
+        {
+            SelectedWindowId = "main",
+            Windows =
+            [
+                new TerminalWorkspaceWindow
+                {
+                    Id = "main",
+                    SelectedTabId = "tab-split",
+                    Tabs =
+                    [
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "tab-split",
+                            ProfileId = "root-profile",
+                            Title = "Split",
+                            TransportId = TerminalTransportIds.Pipe,
+                            RenderMode = TerminalWorkspaceRenderModes.Skia,
+                            RootPane = rootPane,
+                        },
+                    ],
+                },
+            ],
+        });
+        InMemoryProfileStore profileStore = new(profiles);
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo snippets";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            settingsProfileStore: profileStore,
+            commandHistoryStore: new InMemoryCommandHistoryStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool restoredSplit = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1 &&
+                      terminalHost.Children[0] is Grid { Children.Count: 3 } &&
+                      GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(restoredSplit);
+
+            await viewModel.FocusPaneRightCommand.Execute();
+            Dispatcher.UIThread.RunJobs();
+            viewModel.CommandSuggestionQuery = "pane";
+            await viewModel.OpenCommandHistoryOverlayCommand.Execute();
+
+            bool snippetsLoaded = await WaitUntilAsync(
+                () => viewModel.CommandSuggestions.Any(
+                    suggestion => suggestion.CommandLine == "echo pane-only"),
+                TimeSpan.FromSeconds(2));
+            Assert.True(snippetsLoaded);
+            Assert.DoesNotContain(
+                viewModel.CommandSuggestions,
+                suggestion => suggestion.CommandLine == "echo root-only");
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Controller_Shutdown_PreservesDeferredSplitPaneWorkspace()
     {
         using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
@@ -1584,6 +1691,32 @@ public sealed class MainWindowControllerModeStartupTests
         }
 
         return glyphs;
+    }
+
+    private static TerminalSessionProfile CreateSnippetProfile(
+        string id,
+        string displayName,
+        string trigger,
+        string commandLine)
+    {
+        return new TerminalSessionProfile
+        {
+            Id = id,
+            DisplayName = displayName,
+            Transport = new TerminalSessionTransportProfile
+            {
+                TransportId = TerminalTransportIds.Pipe,
+                Pipe = new TerminalSessionPipeSettings
+                {
+                    FileName = "echo",
+                    Arguments = [id],
+                },
+            },
+            CommandSnippets =
+            [
+                new TerminalCommandSnippet(trigger, commandLine, displayName),
+            ],
+        };
     }
 
     private sealed class FixedTerminalModeCapabilityResolver : ITerminalModeCapabilityResolver
