@@ -323,7 +323,7 @@
           <Grid Grid.Column="1"
                 x:Name="TopCommandBar"
                 Margin="{DynamicResource Shell.CommandPadding}"
-                ColumnDefinitions="Auto,*,Auto"
+                ColumnDefinitions="Auto,*"
                 ColumnSpacing="12"
                 ClipToBounds="True">
             <Border x:Name="TitleBarBrandDragZone"
@@ -437,18 +437,6 @@
                          VerticalAlignment="Center" />
             </Grid>
 
-            <Button Grid.Column="2"
-                    x:Name="TopNewTabButton"
-                    Classes="primaryCommand"
-                    Command="{Binding NewTabCommand}"
-                    chrome:WindowDecorationProperties.ElementRole="User">
-              <StackPanel Classes="iconLabel">
-                <PathIcon Classes="primaryCommandIcon"
-                          Data="{StaticResource Icon.AddSquareMultipleRegular}" />
-                <TextBlock Text="New Tab"
-                           VerticalAlignment="Center" />
-              </StackPanel>
-            </Button>
           </Grid>
 
           <Border x:Name="TitleBarRightDecorationReserve"
@@ -589,12 +577,32 @@
 
       <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto">
         <Border Grid.Row="0" Classes="tabStripSurface">
-          <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                        VerticalScrollBarVisibility="Disabled">
-            <StackPanel Name="TabStrip"
-                        Orientation="Horizontal"
-                        Spacing="4" />
-          </ScrollViewer>
+          <Grid x:Name="TabStripLayout"
+                ColumnDefinitions="*,Auto"
+                ColumnSpacing="6"
+                ClipToBounds="True">
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Disabled">
+              <StackPanel Name="TabStrip"
+                          Orientation="Horizontal"
+                          Spacing="4" />
+            </ScrollViewer>
+            <Button x:Name="TabStripNewTabButton"
+                    Grid.Column="1"
+                    Classes="tabStripNewTab"
+                    Width="30"
+                    Height="30"
+                    MinWidth="30"
+                    MinHeight="30"
+                    MaxWidth="30"
+                    MaxHeight="30"
+                    Command="{Binding NewTabCommand}"
+                    ToolTip.Tip="New tab">
+              <PathIcon x:Name="TabStripNewTabIcon"
+                        Classes="tabStripNewTabIcon"
+                        Data="{StaticResource Icon.AddRegular}" />
+            </Button>
+          </Grid>
         </Border>
 
         <Grid Grid.Row="1">

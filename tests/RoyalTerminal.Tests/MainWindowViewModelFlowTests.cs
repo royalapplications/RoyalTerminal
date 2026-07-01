@@ -489,34 +489,45 @@ public class MainWindowViewModelFlowTests
 
         try
         {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
             NativeMenuBar mainMenuBar = window.FindControl<NativeMenuBar>("MainMenuBar")
                 ?? throw new InvalidOperationException("MainMenuBar was not found.");
             Grid topCommandBar = window.FindControl<Grid>("TopCommandBar")
                 ?? throw new InvalidOperationException("TopCommandBar was not found.");
             Grid topSearchPanel = window.FindControl<Grid>("TopSearchPanel")
                 ?? throw new InvalidOperationException("TopSearchPanel was not found.");
+            Grid tabStripLayout = window.FindControl<Grid>("TabStripLayout")
+                ?? throw new InvalidOperationException("TabStripLayout was not found.");
             TextBox topSearchBox = window.FindControl<TextBox>("TopSearchBox")
                 ?? throw new InvalidOperationException("TopSearchBox was not found.");
             Button topSearchApplyButton = window.FindControl<Button>("TopSearchApplyButton")
                 ?? throw new InvalidOperationException("TopSearchApplyButton was not found.");
             Button topSearchPreviousButton = window.FindControl<Button>("TopSearchPreviousButton")
                 ?? throw new InvalidOperationException("TopSearchPreviousButton was not found.");
-            Button topNewTabButton = window.FindControl<Button>("TopNewTabButton")
-                ?? throw new InvalidOperationException("TopNewTabButton was not found.");
+            Button tabStripNewTabButton = window.FindControl<Button>("TabStripNewTabButton")
+                ?? throw new InvalidOperationException("TabStripNewTabButton was not found.");
+            PathIcon tabStripNewTabIcon = window.FindControl<PathIcon>("TabStripNewTabIcon")
+                ?? throw new InvalidOperationException("TabStripNewTabIcon was not found.");
 
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
             Assert.NotNull(mainMenuBar);
+            Assert.Null(window.FindControl<Button>("TopNewTabButton"));
             Assert.True(topCommandBar.ClipToBounds);
             Assert.True(topSearchPanel.ClipToBounds);
+            Assert.True(tabStripLayout.ClipToBounds);
             Assert.Empty(topCommandBar.Children.OfType<ScrollViewer>());
             Assert.Same(topSearchPanel, topSearchBox.Parent);
             Assert.Contains("searchField", topSearchBox.Classes);
             Assert.Contains("iconButton", topSearchApplyButton.Classes);
             Assert.Contains("iconButton", topSearchPreviousButton.Classes);
+            Assert.Contains("tabStripNewTab", tabStripNewTabButton.Classes);
+            Assert.Contains("tabStripNewTabIcon", tabStripNewTabIcon.Classes);
+            Assert.Same(viewModel.NewTabCommand, tabStripNewTabButton.Command);
             Assert.True(topSearchPanel.Bounds.Width > 0);
-            Assert.True(topNewTabButton.Bounds.Width > 0);
+            Assert.True(tabStripNewTabButton.Bounds.Width > 0);
             Assert.True(
                 Math.Abs(topSearchApplyButton.Bounds.Width - 32) <= 0.5,
                 $"Expected compact search icon button width. Button={topSearchApplyButton.Bounds}.");
@@ -530,11 +541,14 @@ public class MainWindowViewModelFlowTests
                 topSearchPreviousButton.Bounds.Left <= topSearchApplyButton.Bounds.Right + 4.5,
                 $"Search navigation buttons should use compact spacing. Apply={topSearchApplyButton.Bounds}, Previous={topSearchPreviousButton.Bounds}.");
             Assert.True(
-                topSearchPanel.Bounds.Right <= topNewTabButton.Bounds.Left + 0.5,
-                $"Top search panel overlaps New Tab. Search={topSearchPanel.Bounds}, NewTab={topNewTabButton.Bounds}.");
+                topSearchPanel.Bounds.Right <= topCommandBar.Bounds.Width + 0.5,
+                $"Top search panel escapes the command bar. Search={topSearchPanel.Bounds}, TopBar={topCommandBar.Bounds}.");
             Assert.True(
-                topNewTabButton.Bounds.Right <= topCommandBar.Bounds.Width + 0.5,
-                $"Top New Tab button escapes the command bar. TopBar={topCommandBar.Bounds}, NewTab={topNewTabButton.Bounds}.");
+                Math.Abs(tabStripNewTabButton.Bounds.Width - 30) <= 0.5,
+                $"Expected compact tab strip add button width. Button={tabStripNewTabButton.Bounds}.");
+            Assert.True(
+                Math.Abs(tabStripNewTabButton.Bounds.Height - 30) <= 0.5,
+                $"Expected compact tab strip add button height. Button={tabStripNewTabButton.Bounds}.");
         }
         finally
         {
@@ -571,8 +585,6 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("MacTrafficLightReserve was not found.");
             TextBox topSearchBox = window.FindControl<TextBox>("TopSearchBox")
                 ?? throw new InvalidOperationException("TopSearchBox was not found.");
-            Button topNewTabButton = window.FindControl<Button>("TopNewTabButton")
-                ?? throw new InvalidOperationException("TopNewTabButton was not found.");
 
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
@@ -616,7 +628,7 @@ public class MainWindowViewModelFlowTests
                 titleBarBrandDragZone.GetVisualDescendants().OfType<TextBlock>(),
                 textBlock => string.Equals(textBlock.Text, "RoyalTerminal", StringComparison.Ordinal));
             Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(topSearchBox));
-            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(topNewTabButton));
+            Assert.Null(window.FindControl<Button>("TopNewTabButton"));
             Assert.True(
                 titleBar.Bounds.Width >= topCommandBar.Bounds.Width,
                 $"Expected titlebar surface to host the top command bar. TitleBar={titleBar.Bounds}, TopBar={topCommandBar.Bounds}.");
