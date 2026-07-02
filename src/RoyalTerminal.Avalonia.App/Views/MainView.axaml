@@ -4,6 +4,7 @@
         xmlns:chrome="using:Avalonia.Controls.Chrome"
         xmlns:terminal="using:RoyalTerminal.Terminal"
         xmlns:settings="using:RoyalTerminal.Avalonia.Settings"
+        xmlns:appControls="using:RoyalTerminal.Avalonia.App.Controls"
         x:Class="RoyalTerminal.Avalonia.App.Views.MainView"
         x:Name="RootView"
         x:DataType="vm:MainWindowViewModel"
@@ -79,146 +80,86 @@
 
             <Grid Grid.Column="2"
                   x:Name="TopSearchPanel"
-                  ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
-                  ColumnSpacing="4"
-                  MinWidth="600"
-                  MaxWidth="960"
+                  MinWidth="234"
+                  MaxWidth="624"
+                  Margin="0,0,12,0"
                   HorizontalAlignment="Right"
                   VerticalAlignment="Center"
                   IsVisible="{Binding IsSearchPanelVisible}"
                   ClipToBounds="True">
               <TextBox x:Name="TopSearchBox"
-                       Grid.Column="0"
-                       MinWidth="240"
+                       MinWidth="104"
                        HorizontalAlignment="Stretch"
                        Classes="compactField searchField"
-                       Padding="10,3"
+                       Padding="6,3"
                        PlaceholderText="Search"
                        VerticalContentAlignment="Center"
                        chrome:WindowDecorationProperties.ElementRole="User"
-                       Text="{Binding SearchQuery}" />
-              <Button x:Name="TopSearchApplyButton"
-                      Grid.Column="1"
-                      Classes="iconButton"
-                      MinWidth="32"
-                      MinHeight="32"
-                      Width="32"
-                      Height="32"
-                      MaxWidth="32"
-                      MaxHeight="32"
-                      IsEnabled="{Binding CanApplySearch}"
-                      Command="{Binding ApplySearchCommand}"
-                      chrome:WindowDecorationProperties.ElementRole="User"
-                      ToolTip.Tip="Find">
-                <PathIcon Classes="commandIcon"
-                          Data="{StaticResource Icon.SearchRegular}" />
-              </Button>
-              <Button x:Name="TopSearchPreviousButton"
-                      Grid.Column="2"
-                      Classes="iconButton"
-                      MinWidth="32"
-                      MinHeight="32"
-                      Width="32"
-                      Height="32"
-                      MaxWidth="32"
-                      MaxHeight="32"
-                      IsEnabled="{Binding CanAdvanceSearch}"
-                      Command="{Binding PreviousSearchCommand}"
-                      chrome:WindowDecorationProperties.ElementRole="User"
-                      ToolTip.Tip="Previous match">
-                <PathIcon Classes="commandIcon"
-                          Data="{StaticResource Icon.ChevronLeftRegular}" />
-              </Button>
-              <Button x:Name="TopSearchNextButton"
-                      Grid.Column="3"
-                      Classes="iconButton"
-                      MinWidth="32"
-                      MinHeight="32"
-                      Width="32"
-                      Height="32"
-                      MaxWidth="32"
-                      MaxHeight="32"
-                      IsEnabled="{Binding CanAdvanceSearch}"
-                      Command="{Binding NextSearchCommand}"
-                      chrome:WindowDecorationProperties.ElementRole="User"
-                      ToolTip.Tip="Next match">
-                <PathIcon Classes="commandIcon"
-                          Data="{StaticResource Icon.ChevronRightRegular}" />
-              </Button>
-              <Button x:Name="TopSearchClearButton"
-                      Grid.Column="4"
-                      Classes="iconButton"
-                      MinWidth="32"
-                      MinHeight="32"
-                      Width="32"
-                      Height="32"
-                      MaxWidth="32"
-                      MaxHeight="32"
-                      IsEnabled="{Binding CanClearSearch}"
-                      Command="{Binding ClearSearchCommand}"
-                      chrome:WindowDecorationProperties.ElementRole="User"
-                      ToolTip.Tip="Clear search">
-                <PathIcon Classes="commandIcon"
-                          Data="{StaticResource Icon.DismissRegular}" />
-              </Button>
-              <Border x:Name="TopSearchStatusIdleChip"
-                      Grid.Column="5"
-                      Classes="searchStatusChip searchStatusIdle"
-                      IsHitTestVisible="False"
-                      IsVisible="{Binding IsSearchIdle}"
-                      Opacity="0.68"
-                      ToolTip.Tip="{Binding SearchResultText}"
-                      VerticalAlignment="Center"
-                      chrome:WindowDecorationProperties.ElementRole="TitleBar">
-                <StackPanel Classes="searchStatusContent">
-                  <PathIcon x:Name="TopSearchStatusIdleIcon"
-                            Classes="searchStatusIcon"
-                            Data="{StaticResource Icon.SearchRegular}" />
-                  <TextBlock x:Name="TopSearchStatusIdleText"
-                             Text="{Binding SearchStatusSummaryText}"
-                             Classes="searchStatusText"
-                             TextTrimming="CharacterEllipsis"
-                             VerticalAlignment="Center" />
-                </StackPanel>
-              </Border>
-              <Border x:Name="TopSearchStatusMatchesChip"
-                      Grid.Column="5"
-                      Classes="searchStatusChip searchStatusMatches"
-                      IsHitTestVisible="False"
-                      IsVisible="{Binding HasSearchMatches}"
-                      ToolTip.Tip="{Binding SearchResultText}"
-                      VerticalAlignment="Center"
-                      chrome:WindowDecorationProperties.ElementRole="TitleBar">
-                <StackPanel Classes="searchStatusContent">
-                  <PathIcon x:Name="TopSearchStatusMatchesIcon"
-                            Classes="searchStatusIcon"
-                            Data="{StaticResource Icon.CheckmarkRegular}" />
-                  <TextBlock x:Name="TopSearchStatusMatchesText"
-                             Text="{Binding SearchStatusSummaryText}"
-                             Classes="searchStatusText"
-                             TextTrimming="CharacterEllipsis"
-                             VerticalAlignment="Center" />
-                </StackPanel>
-              </Border>
-              <Border x:Name="TopSearchStatusNoMatchesChip"
-                      Grid.Column="5"
-                      Classes="searchStatusChip searchStatusNoMatches"
-                      IsHitTestVisible="False"
-                      IsVisible="{Binding HasSearchNoMatches}"
-                      ToolTip.Tip="{Binding SearchResultText}"
-                      VerticalAlignment="Center"
-                      chrome:WindowDecorationProperties.ElementRole="TitleBar">
-                <StackPanel Classes="searchStatusContent">
-                  <PathIcon x:Name="TopSearchStatusNoMatchesIcon"
-                            Classes="searchStatusIcon"
-                            Data="{StaticResource Icon.DismissRegular}" />
-                  <TextBlock x:Name="TopSearchStatusNoMatchesText"
-                             Text="{Binding SearchStatusSummaryText}"
-                             Classes="searchStatusText"
-                             TextTrimming="CharacterEllipsis"
-                             VerticalAlignment="Center" />
-                </StackPanel>
-              </Border>
+                       Text="{Binding SearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                <TextBox.InnerLeftContent>
+                  <Panel x:Name="TopSearchLeftContent"
+                         Width="22"
+                         MinHeight="24"
+                         Margin="4,0,2,0">
+                    <PathIcon x:Name="TopSearchIcon"
+                              Classes="searchInlineIcon"
+                              Data="{StaticResource Icon.SearchRegular}"
+                              IsVisible="{Binding IsSearchReadyIconVisible}" />
+                    <appControls:CompositionRingSpinner x:Name="TopSearchBusyIndicator"
+                                                        Width="14"
+                                                        Height="14"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        ForegroundColor="#4FB7FF"
+                                                        IsActive="{Binding IsSearchBusy}"
+                                                        IsVisible="{Binding IsSearchBusy}" />
+                  </Panel>
+                </TextBox.InnerLeftContent>
+
+                <TextBox.InnerRightContent>
+                  <StackPanel x:Name="TopSearchRightContent"
+                              Orientation="Horizontal"
+                              VerticalAlignment="Center"
+                              Margin="2,0,4,0"
+                              Spacing="0">
+                    <TextBlock x:Name="TopSearchStatusText"
+                               Classes="searchInlineStatusText"
+                               Classes.searchMatches="{Binding HasSearchMatches}"
+                               Classes.searchNoMatches="{Binding HasSearchNoMatches}"
+                               IsVisible="{Binding HasSearchStatusText}"
+                               Text="{Binding SearchStatusSummaryText}"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip.Tip="{Binding SearchResultText}"
+                               VerticalAlignment="Center" />
+                    <Button x:Name="TopSearchNextButton"
+                            Classes="searchInlineButton"
+                            Command="{Binding NextSearchCommand}"
+                            IsEnabled="{Binding CanAdvanceSearch}"
+                            IsVisible="{Binding HasSearchMatches}"
+                            ToolTip.Tip="Next match">
+                      <PathIcon Classes="searchInlineButtonIcon"
+                                Data="{StaticResource Icon.ChevronDownRegular}" />
+                    </Button>
+                    <Button x:Name="TopSearchPreviousButton"
+                            Classes="searchInlineButton"
+                            Command="{Binding PreviousSearchCommand}"
+                            IsEnabled="{Binding CanAdvanceSearch}"
+                            IsVisible="{Binding HasSearchMatches}"
+                            ToolTip.Tip="Previous match">
+                      <PathIcon Classes="searchInlineButtonIcon"
+                                Data="{StaticResource Icon.ChevronUpRegular}" />
+                    </Button>
+                    <Button x:Name="TopSearchClearButton"
+                            Classes="searchInlineButton"
+                            Command="{Binding ClearSearchCommand}"
+                            IsVisible="{Binding CanClearSearch}"
+                            ToolTip.Tip="Clear search">
+                      <PathIcon Classes="searchInlineButtonIcon"
+                                Data="{StaticResource Icon.DismissRegular}" />
+                    </Button>
+                  </StackPanel>
+                </TextBox.InnerRightContent>
+              </TextBox>
             </Grid>
 
           </Grid>

@@ -169,6 +169,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private int _searchMatchSelected = -1;
     private bool _searchUsesNativeScrollback;
     private bool _searchApplied;
+    private bool _isSearchBusy;
     private bool _isCommandHistoryOverlayOpen;
     private string _commandSuggestionQuery = string.Empty;
     private IReadOnlyList<TerminalCommandSuggestion> _commandSuggestions = [];
@@ -980,6 +981,25 @@ public sealed class MainWindowViewModel : ReactiveObject
     public bool HasSearchMatches => !IsSearchIdle && _searchMatchTotal > 0;
 
     public bool HasSearchNoMatches => !IsSearchIdle && _searchMatchTotal <= 0;
+
+    public bool HasSearchStatusText => !IsSearchIdle;
+
+    public bool IsSearchBusy
+    {
+        get => _isSearchBusy;
+        set
+        {
+            if (_isSearchBusy == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _isSearchBusy, value);
+            this.RaisePropertyChanged(nameof(IsSearchReadyIconVisible));
+        }
+    }
+
+    public bool IsSearchReadyIconVisible => !IsSearchBusy;
 
     public string SearchStatusSummaryText
     {
@@ -2591,6 +2611,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         this.RaisePropertyChanged(nameof(IsSearchIdle));
         this.RaisePropertyChanged(nameof(HasSearchMatches));
         this.RaisePropertyChanged(nameof(HasSearchNoMatches));
+        this.RaisePropertyChanged(nameof(HasSearchStatusText));
         this.RaisePropertyChanged(nameof(SearchStatusSummaryText));
         this.RaisePropertyChanged(nameof(SearchResultText));
     }

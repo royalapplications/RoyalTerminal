@@ -101,6 +101,7 @@ internal sealed class MainWindowController
     private readonly RepeatButton _tabStripScrollRightButton;
     private readonly StackPanel _tabStrip;
     private readonly Button _tabStripNewTabButton;
+    private readonly TextBox? _topSearchBox;
     private ScrollContentPresenter? _tabStripScrollContentPresenter;
     private readonly List<TerminalTab> _tabs = [];
     private readonly HashSet<TerminalControl> _startingStandaloneControls = [];
@@ -189,6 +190,7 @@ internal sealed class MainWindowController
             ?? throw new InvalidOperationException("TabStrip was not found in MainWindow.");
         _tabStripNewTabButton = controlRoot.FindControl<Button>("TabStripNewTabButton")
             ?? throw new InvalidOperationException("TabStripNewTabButton was not found in MainWindow.");
+        _topSearchBox = controlRoot.FindControl<TextBox>("TopSearchBox");
     }
 
     public IDisposable Activate()
@@ -523,6 +525,11 @@ internal sealed class MainWindowController
             OnTabStripPointerWheelChanged,
             RoutingStrategies.Tunnel,
             handledEventsToo: true);
+        if (_topSearchBox is not null)
+        {
+            _topSearchBox.AddHandler(InputElement.KeyDownEvent, OnTopSearchBoxKeyDown, RoutingStrategies.Tunnel);
+        }
+
         disposables.Add(Disposable.Create(() =>
         {
             _tabStripScrollLeftButton.Click -= OnTabStripScrollLeftClicked;
@@ -530,10 +537,68 @@ internal sealed class MainWindowController
             _tabStripScrollViewer.TemplateApplied -= OnTabStripScrollViewerTemplateApplied;
             _tabStripScrollViewer.ScrollChanged -= OnTabStripScrollChanged;
             _tabStripSurface.RemoveHandler(InputElement.PointerWheelChangedEvent, OnTabStripPointerWheelChanged);
+            if (_topSearchBox is not null)
+            {
+                _topSearchBox.RemoveHandler(InputElement.KeyDownEvent, OnTopSearchBoxKeyDown);
+            }
         }));
 
         QueueTabStripScrollStateUpdate();
     }
+
+    private void OnTopSearchBoxKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            HandleTopSearchBoxEnter(e.KeyModifiers.HasFlag(KeyModifiers.Shift));
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key != Key.Escape)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_viewModel.SearchQuery))
+        {
+            ClearSearch();
+            _topSearchBox?.Focus();
+        }
+        else
+        {
+            GetActiveStandaloneControl()?.Focus();
+        }
+
+        e.Handled = true;
+    }
+
+
+    private void HandleTopSearchBoxEnter(bool reverse)
+    {
+        TerminalControl? control = GetActiveStandaloneControl();
+        if (control is null)
+        {
+            ApplySearch(_viewModel.SearchQuery);
+            return;
+        }
+
+        if (!string.Equals(control.SearchNeedle, _viewModel.SearchQuery, StringComparison.Ordinal))
+        {
+            ApplySearch(_viewModel.SearchQuery);
+            return;
+        }
+
+        if (reverse)
+        {
+            SelectPreviousSearchMatch();
+        }
+        else
+        {
+            SelectNextSearchMatch();
+        }
+    }
+
 
     private void ApplyTabsInTitleBarLayout(bool tabsInTitleBar)
     {
@@ -4299,47 +4364,63 @@ internal sealed class MainWindowController
 
     private void ApplySearch(string? needle)
     {
-        TerminalControl? control = GetActiveStandaloneControl();
-        if (control is null)
+        _viewModel.IsSearchBusy = true;
+        try
         {
-            _viewModel.ClearSearchState();
-            UpdateStatus("Search is available for standalone terminal tabs only.");
-            return;
-        }
+            TerminalControl? control = GetActiveStandaloneControl();
+            if (control is null)
+            {
+                _viewModel.ClearSearchState();
+                UpdateStatus("Search is available for standalone terminal tabs only.");
+                return;
+            }
 
-        if (string.IsNullOrWhiteSpace(needle))
-        {
-            control.EndSearch();
-            _viewModel.ClearSearchState();
-            UpdateStatus($"Search cleared in {GetTabDisplayName(control)}.");
-            return;
-        }
+            if (string.IsNullOrWhiteSpace(needle))
+            {
+                control.EndSearch();
+                _viewModel.ClearSearchState();
+                UpdateStatus($"Search cleared in {GetTabDisplayName(control)}.");
+                return;
+            }
 
-        control.StartSearch(needle);
-        SyncSearchSurface(control);
-        if (control.SearchTotal > 0)
-        {
-            string scope = control.IsUsingNativeVtProcessor ? "native scrollback" : "viewport mirror";
-            UpdateStatus($"Found {control.SearchTotal} match(es) in {scope}.");
+            control.StartSearch(needle);
+            SyncSearchSurface(control);
+            if (control.SearchTotal > 0)
+            {
+                string scope = control.IsUsingNativeVtProcessor ? "native scrollback" : "viewport mirror";
+                UpdateStatus($"Found {control.SearchTotal} match(es) in {scope}.");
+            }
+            else
+            {
+                UpdateStatus($"No matches found in {GetTabDisplayName(control)}.");
+            }
         }
-        else
+        finally
         {
-            UpdateStatus($"No matches found in {GetTabDisplayName(control)}.");
+            _viewModel.IsSearchBusy = false;
         }
     }
 
     private void ClearSearch()
     {
-        TerminalControl? control = GetActiveStandaloneControl();
-        if (control is null)
+        _viewModel.IsSearchBusy = true;
+        try
         {
-            _viewModel.ClearSearchState();
-            return;
-        }
+            TerminalControl? control = GetActiveStandaloneControl();
+            if (control is null)
+            {
+                _viewModel.ClearSearchState();
+                return;
+            }
 
-        control.EndSearch();
-        _viewModel.ClearSearchState();
-        UpdateStatus($"Search cleared in {GetTabDisplayName(control)}.");
+            control.EndSearch();
+            _viewModel.ClearSearchState();
+            UpdateStatus($"Search cleared in {GetTabDisplayName(control)}.");
+        }
+        finally
+        {
+            _viewModel.IsSearchBusy = false;
+        }
     }
 
     private async Task RestartActiveSessionAsync()
@@ -4408,26 +4489,34 @@ internal sealed class MainWindowController
 
     private void SelectSearchMatch(bool directionForward)
     {
-        TerminalControl? control = GetActiveStandaloneControl();
-        if (control is null)
+        _viewModel.IsSearchBusy = true;
+        try
         {
-            _viewModel.ClearSearchState();
-            return;
+            TerminalControl? control = GetActiveStandaloneControl();
+            if (control is null)
+            {
+                _viewModel.ClearSearchState();
+                return;
+            }
+
+            bool moved = directionForward
+                ? control.SelectNextSearchMatch()
+                : control.SelectPreviousSearchMatch();
+            SyncSearchSurface(control);
+
+            if (!moved)
+            {
+                UpdateStatus("No search matches are active.");
+                return;
+            }
+
+            int selectedDisplay = Math.Clamp(control.SearchSelectedDisplayIndex + 1, 1, Math.Max(1, control.SearchTotal));
+            UpdateStatus($"Search match {selectedDisplay} of {control.SearchTotal}.");
         }
-
-        bool moved = directionForward
-            ? control.SelectNextSearchMatch()
-            : control.SelectPreviousSearchMatch();
-        SyncSearchSurface(control);
-
-        if (!moved)
+        finally
         {
-            UpdateStatus("No search matches are active.");
-            return;
+            _viewModel.IsSearchBusy = false;
         }
-
-        int selectedDisplay = Math.Clamp(control.SearchSelected + 1, 1, Math.Max(1, control.SearchTotal));
-        UpdateStatus($"Search match {selectedDisplay} of {control.SearchTotal}.");
     }
 
     private void ShowHyperlinkSample()
@@ -4510,7 +4599,7 @@ internal sealed class MainWindowController
         _viewModel.SetSearchState(
             control.SearchNeedle,
             control.SearchTotal,
-            control.SearchSelected,
+            control.SearchSelectedDisplayIndex,
             control.IsUsingNativeVtProcessor);
     }
 
@@ -4591,7 +4680,7 @@ internal sealed class MainWindowController
             .AppendLine(control.Rows.ToString(CultureInfo.InvariantCulture));
         builder.Append("  Search: ").AppendLine(string.IsNullOrWhiteSpace(control.SearchNeedle)
             ? "inactive"
-            : $"{Math.Clamp(control.SearchSelected + 1, 1, Math.Max(1, control.SearchTotal))}/{control.SearchTotal} for '{control.SearchNeedle}'");
+            : $"{Math.Clamp(control.SearchSelectedDisplayIndex + 1, 1, Math.Max(1, control.SearchTotal))}/{control.SearchTotal} for '{control.SearchNeedle}'");
         builder.Append("  Hovered link: ").AppendLine(control.HoveredLinkUrl ?? "(none)");
         builder.Append("  Sixel graphics enabled: ").AppendLine(control.SixelGraphicsEnabled ? "yes" : "no");
         builder.Append("  Sixel graphics on screen: ").AppendLine(control.Screen?.HasRasterGraphics == true ? "yes" : "no");

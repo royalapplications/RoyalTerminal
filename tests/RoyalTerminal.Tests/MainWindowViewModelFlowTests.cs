@@ -1976,17 +1976,28 @@ public class MainWindowViewModelFlowTests
         Assert.False(viewModel.IsSearchIdle);
         Assert.True(viewModel.HasSearchMatches);
         Assert.False(viewModel.HasSearchNoMatches);
+        Assert.True(viewModel.HasSearchStatusText);
+        Assert.False(viewModel.IsSearchBusy);
+        Assert.True(viewModel.IsSearchReadyIconVisible);
         Assert.Equal("2/3", viewModel.SearchStatusSummaryText);
         Assert.Equal("2/3 matches · native scrollback", viewModel.SearchResultText);
         Assert.True(viewModel.ShowGhosttyDiagnostics);
         Assert.Equal("Hide Diagnostics", viewModel.GhosttyDiagnosticsButtonText);
         Assert.Equal("SIMD: yes", viewModel.GhosttyDiagnosticsText);
 
+        viewModel.IsSearchBusy = true;
+
+        Assert.True(viewModel.IsSearchBusy);
+        Assert.False(viewModel.IsSearchReadyIconVisible);
+
+        viewModel.IsSearchBusy = false;
         viewModel.SetSearchState("ghostty", total: 0, selected: 0, usesNativeScrollback: true);
 
         Assert.False(viewModel.IsSearchIdle);
         Assert.False(viewModel.HasSearchMatches);
         Assert.True(viewModel.HasSearchNoMatches);
+        Assert.True(viewModel.HasSearchStatusText);
+        Assert.True(viewModel.IsSearchReadyIconVisible);
         Assert.Equal("No matches", viewModel.SearchStatusSummaryText);
 
         viewModel.ClearSearchState();
@@ -1997,6 +2008,9 @@ public class MainWindowViewModelFlowTests
         Assert.True(viewModel.IsSearchIdle);
         Assert.False(viewModel.HasSearchMatches);
         Assert.False(viewModel.HasSearchNoMatches);
+        Assert.False(viewModel.HasSearchStatusText);
+        Assert.False(viewModel.IsSearchBusy);
+        Assert.True(viewModel.IsSearchReadyIconVisible);
         Assert.Equal("Idle", viewModel.SearchStatusSummaryText);
         Assert.Equal("Search idle", viewModel.SearchResultText);
         Assert.False(viewModel.ShowGhosttyDiagnostics);

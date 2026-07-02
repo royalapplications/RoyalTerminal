@@ -28,8 +28,10 @@
 
   <ItemGroup>
     <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Skia" />
     <PackageReference Include="ReactiveUI" />
     <PackageReference Include="ReactiveUI.Avalonia" />
+    <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 
 </Project>

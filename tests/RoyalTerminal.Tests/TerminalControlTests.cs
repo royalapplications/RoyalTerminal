@@ -4443,19 +4443,85 @@ public class TerminalControlTests
 
         Assert.Equal("needle", control.SearchNeedle);
         Assert.Equal(3, control.SearchTotal);
-        Assert.Equal(0, control.SearchSelected);
+        Assert.Equal(2, control.SearchSelected);
+        Assert.Equal(0, control.SearchSelectedDisplayIndex);
 
         Assert.True(control.SelectNextSearchMatch());
         Assert.Equal(1, control.SearchSelected);
+        Assert.Equal(1, control.SearchSelectedDisplayIndex);
 
         Assert.True(control.SelectPreviousSearchMatch());
-        Assert.Equal(0, control.SearchSelected);
+        Assert.Equal(2, control.SearchSelected);
+        Assert.Equal(0, control.SearchSelectedDisplayIndex);
 
         control.EndSearch();
 
         Assert.Null(control.SearchNeedle);
         Assert.Equal(0, control.SearchTotal);
         Assert.Equal(-1, control.SearchSelected);
+    }
+
+    [AvaloniaFact]
+    public void Control_SearchSelectionMove_InvalidatesViewportRowsWithoutScrolling()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            Columns = 32,
+            Rows = 5,
+        };
+
+        control.WriteOutput("needle alpha needle\nbeta needle"u8);
+        control.StartSearch("needle");
+
+        TerminalScreen screen = control.Screen
+            ?? throw new InvalidOperationException("Terminal screen was not initialized.");
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            screen.GetViewportRow(row).IsDirty = false;
+        }
+
+        Assert.False(screen.HasDirtyRows());
+        Assert.Equal(2, control.SearchSelected);
+
+        Assert.True(control.SelectNextSearchMatch());
+
+        Assert.Equal(1, control.SearchSelected);
+        Assert.True(screen.HasDirtyRows());
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            Assert.True(screen.GetViewportRow(row).IsDirty);
+        }
+    }
+
+    [AvaloniaFact]
+    public void Control_SearchLifecycle_AlternateScreen_StartsAtTopMatch()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 20, OffsetRows: 0, VisibleRows: 4),
+            [
+                new TerminalSearchMatch(2, 0, 6),
+                new TerminalSearchMatch(6, 0, 6),
+                new TerminalSearchMatch(10, 0, 6),
+            ],
+            alternateScreen: true);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        control.StartSearch("needle");
+
+        Assert.Equal("needle", control.SearchNeedle);
+        Assert.Equal(3, control.SearchTotal);
+        Assert.Equal(0, control.SearchSelected);
+        Assert.Equal(0, control.SearchSelectedDisplayIndex);
+
+        Assert.True(control.SelectPreviousSearchMatch());
+        Assert.Equal(2, control.SearchSelected);
+        Assert.Equal(2, control.SearchSelectedDisplayIndex);
     }
 
     [AvaloniaFact]
@@ -7353,7 +7419,8 @@ public class TerminalControlTests
 
     private sealed class FakeSearchViewportVtProcessor(
         TerminalViewportScrollState viewportScrollState,
-        IReadOnlyList<TerminalSearchMatch> matches) :
+        IReadOnlyList<TerminalSearchMatch> matches,
+        bool alternateScreen = false) :
         IVtProcessor,
         ITerminalViewportScrollSource,
         ITerminalSearchSource,
@@ -7367,7 +7434,7 @@ public class TerminalControlTests
         public bool CursorVisible => true;
         public bool ApplicationCursorKeys => false;
         public bool ApplicationKeypad => false;
-        public bool AlternateScreen => false;
+        public bool AlternateScreen => alternateScreen;
         public bool BracketedPaste => false;
         public bool Win32InputMode => false;
         public TerminalModeState ModeState => new(
@@ -7554,6 +7621,7 @@ public class TerminalControlTests
             return true;
         }
     }
+
 
     private sealed class ThreadTrackingVtProcessorFactory : IVtProcessorFactory
     {

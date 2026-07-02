@@ -715,6 +715,71 @@
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
 
+  <Style Selector="TextBox#TopSearchBox.searchField">
+    <Setter Property="Height" Value="28" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="MaxHeight" Value="28" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Padding" Value="6,2" />
+  </Style>
+
+  <Style Selector="TextBox.searchField:focus">
+    <Setter Property="BorderBrush" Value="{DynamicResource ShellAccentBrush}" />
+  </Style>
+
+  <Style Selector="PathIcon.searchInlineIcon">
+    <Setter Property="Width" Value="14" />
+    <Setter Property="Height" Value="14" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Foreground" Value="{DynamicResource ShellTextMutedBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.searchInlineStatusText">
+    <Setter Property="MaxWidth" Value="86" />
+    <Setter Property="Margin" Value="2,0,4,0" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource ShellTextMutedBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.searchInlineStatusText.searchMatches">
+    <Setter Property="Foreground" Value="{DynamicResource ShellSuccessBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.searchInlineStatusText.searchNoMatches">
+    <Setter Property="Foreground" Value="{DynamicResource ShellDangerBrush}" />
+  </Style>
+
+  <Style Selector="Button.searchInlineButton">
+    <Setter Property="MinWidth" Value="24" />
+    <Setter Property="MinHeight" Value="24" />
+    <Setter Property="Width" Value="24" />
+    <Setter Property="Height" Value="24" />
+    <Setter Property="Padding" Value="2" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+  </Style>
+
+  <Style Selector="Button.searchInlineButton:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+  </Style>
+
+  <Style Selector="Button.searchInlineButton:pressed">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfacePressedBrush}" />
+  </Style>
+
+  <Style Selector="Button.searchInlineButton:disabled">
+    <Setter Property="Opacity" Value="0.55" />
+  </Style>
+
+  <Style Selector="PathIcon.searchInlineButtonIcon">
+    <Setter Property="Width" Value="12" />
+    <Setter Property="Height" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+  </Style>
+
   <Style Selector="TextBox.searchField:focus">
     <Setter Property="BorderBrush" Value="{DynamicResource ShellAccentBrush}" />
   </Style>

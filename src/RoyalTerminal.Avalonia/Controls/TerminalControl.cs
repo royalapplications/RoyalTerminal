@@ -615,6 +615,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private string? _searchNeedle;
     private int _searchTotal;
     private int _searchSelected = -1;
+    private bool _searchSelectInitialMatchOnNextRefresh;
     private const int InitialRowTextScratchCapacity = 256;
     private readonly List<TerminalHighlightSpan> _highlightSpanScratch = [];
     private readonly List<TerminalSearchMatch> _searchMatchScratch = [];
@@ -804,6 +805,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     /// <summary>Gets the selected match index for active search highlights.</summary>
     public int SearchSelected => _searchSelected;
+
+    /// <summary>Gets the selected match index in the user-facing search traversal order.</summary>
+    public int SearchSelectedDisplayIndex => GetSearchDisplayIndex(_searchSelected, _searchTotal);
 
     /// <summary>Gets whether the terminal currently has a text selection.</summary>
     public bool HasSelection =>
@@ -4649,11 +4653,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     public void StartSearch(string? needle)
     {
         _searchNeedle = string.IsNullOrWhiteSpace(needle) ? null : needle;
-        _searchSelected = 0;
+        _searchSelected = -1;
+        _searchSelectInitialMatchOnNextRefresh = _searchNeedle is not null;
         _searchTotal = 0;
-        UpdateRendererParityStateFromScreen();
+        UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
         _ = ScrollSelectedSearchMatchIntoView();
-        UpdateRendererParityStateFromScreen();
+        UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
     }
 
     /// <summary>
@@ -4668,9 +4673,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         _searchNeedle = null;
         _searchSelected = -1;
+        _searchSelectInitialMatchOnNextRefresh = false;
         _searchTotal = 0;
         _searchMatchScratch.Clear();
-        UpdateRendererParityStateFromScreen();
+        UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
     }
 
     /// <summary>
@@ -4685,7 +4691,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _searchTotal = normalized;
-        UpdateRendererParityStateFromScreen();
+        UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
     }
 
     /// <summary>
@@ -4700,7 +4706,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         _searchSelected = selected;
         _ = ScrollSelectedSearchMatchIntoView();
-        UpdateRendererParityStateFromScreen();
+        UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
     }
 
     /// <summary>
@@ -6950,20 +6956,29 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return true;
     }
 
-    private void UpdateRendererParityStateFromScreen()
+    private void UpdateRendererParityStateFromScreen(bool invalidateViewportRows = false)
     {
-        if (_screen is null || _renderer is null)
+        if (_screen is null)
         {
             return;
         }
 
         lock (_screen.SyncRoot)
         {
-            UpdateRendererParityStateLocked();
+            if (_renderer is not null)
+            {
+                UpdateRendererParityStateLocked();
+            }
+
+            if (invalidateViewportRows)
+            {
+                _screen.InvalidateViewport();
+            }
         }
 
-        _presenter?.Invalidate();
+        _presenter?.Invalidate(fullRedraw: invalidateViewportRows, dirtyRowsOnly: false);
     }
+
 
     private void UpdateRendererParityStateLocked()
     {
@@ -7013,6 +7028,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             _searchTotal = 0;
             _searchSelected = -1;
+            _searchSelectInitialMatchOnNextRefresh = false;
             _searchMatchScratch.Clear();
             return;
         }
@@ -7022,6 +7038,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             _searchTotal = 0;
             _searchSelected = -1;
+            _searchSelectInitialMatchOnNextRefresh = false;
             _searchMatchScratch.Clear();
             return;
         }
@@ -7043,16 +7060,23 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        if (_searchSelected < 0)
+        if (_searchSelectInitialMatchOnNextRefresh || _searchSelected < 0)
         {
-            _searchSelected = 0;
+            _searchSelected = IsSearchStartAtTopLocked() ? 0 : _searchTotal - 1;
+            _searchSelectInitialMatchOnNextRefresh = false;
         }
         else if (_searchSelected >= _searchTotal)
         {
             _searchSelected = _searchTotal - 1;
         }
 
-        int viewportTopAbsoluteRow = GetViewportTopAbsoluteRowLocked();
+        ITerminalViewportScrollSource? viewportScrollSource = null;
+        if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? nativeViewportScrollSource))
+        {
+            viewportScrollSource = nativeViewportScrollSource;
+        }
+
+        int viewportTopAbsoluteRow = GetViewportTopAbsoluteRowLocked(viewportScrollSource);
         for (int index = 0; index < _searchMatchScratch.Count; index++)
         {
             TerminalSearchMatch match = _searchMatchScratch[index];
@@ -7065,14 +7089,37 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             TerminalHighlightKind kind = index == _searchSelected
                 ? TerminalHighlightKind.SearchSelected
                 : TerminalHighlightKind.SearchMatch;
-            _highlightSpanScratch.Add(
-                new TerminalHighlightSpan(
-                    viewportRow,
-                    match.StartColumn,
-                    match.EndColumn,
-                    kind));
+            TerminalHighlightSpan span = new(
+                viewportRow,
+                match.StartColumn,
+                match.EndColumn,
+                kind);
+            _highlightSpanScratch.Add(span);
         }
     }
+
+    private bool IsSearchStartAtTopLocked()
+    {
+        return _vtProcessor?.AlternateScreen == true || _screen?.AlternateBufferActive == true;
+    }
+
+    private bool IsSearchTraversalReversed()
+    {
+        return _vtProcessor?.AlternateScreen != true && _screen?.AlternateBufferActive != true;
+    }
+
+    private int GetSearchDisplayIndex(int selected, int total)
+    {
+        if (selected < 0 || total <= 0)
+        {
+            return -1;
+        }
+
+        int clamped = Math.Clamp(selected, 0, total - 1);
+        return IsSearchTraversalReversed() ? total - clamped - 1 : clamped;
+    }
+
+
 
     private void PopulateSearchMatchesFromScreenLocked(string needle)
     {
@@ -7419,7 +7466,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
-        UpdateRendererParityStateFromScreen();
+        UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
         if (_searchTotal <= 0)
         {
             return false;
@@ -7427,13 +7474,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         int previousSelection = _searchSelected;
         int selected = _searchSelected;
+        int effectiveDelta = IsSearchTraversalReversed() ? -delta : delta;
         if (selected < 0 || selected >= _searchTotal)
         {
-            selected = 0;
+            selected = IsSearchTraversalReversed() ? _searchTotal - 1 : 0;
         }
         else
         {
-            selected = (selected + delta) % _searchTotal;
+            selected = (selected + effectiveDelta) % _searchTotal;
             if (selected < 0)
             {
                 selected += _searchTotal;
@@ -7447,7 +7495,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         _searchSelected = selected;
         bool scrolled = ScrollSelectedSearchMatchIntoView();
-        UpdateRendererParityStateFromScreen();
+        UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
         if (scrolled)
         {
             RaiseScrollInvalidated();
