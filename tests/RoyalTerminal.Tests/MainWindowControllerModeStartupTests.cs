@@ -109,7 +109,8 @@ public sealed class MainWindowControllerModeStartupTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            workspaceStore: new InMemoryWorkspaceStore());
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: CreateEmptyProfileStore());
         IDisposable? lifetime = null;
 
         try
@@ -213,7 +214,8 @@ public sealed class MainWindowControllerModeStartupTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            workspaceStore: new InMemoryWorkspaceStore());
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: CreateEmptyProfileStore());
         IDisposable? lifetime = null;
 
         try
@@ -381,7 +383,8 @@ public sealed class MainWindowControllerModeStartupTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            workspaceStore: new InMemoryWorkspaceStore());
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: CreateEmptyProfileStore());
         IDisposable? lifetime = null;
 
         try
@@ -1565,6 +1568,7 @@ public sealed class MainWindowControllerModeStartupTests
             TerminalModeResolver.Default,
             workspaceStore: new InMemoryWorkspaceStore(),
             commandHistoryStore: new InMemoryCommandHistoryStore(),
+            settingsProfileStore: CreateEmptyProfileStore(),
             paneSplitPolicy: TerminalPaneSplitPolicies.PtyOnly);
         IDisposable? lifetime = null;
 
@@ -1637,6 +1641,7 @@ public sealed class MainWindowControllerModeStartupTests
             TerminalModeResolver.Default,
             workspaceStore: workspaceStore,
             commandHistoryStore: new InMemoryCommandHistoryStore(),
+            settingsProfileStore: CreateEmptyProfileStore(),
             paneSplitPolicy: splitPolicy);
         IDisposable? lifetime = null;
 
@@ -1741,7 +1746,8 @@ public sealed class MainWindowControllerModeStartupTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            workspaceStore: new InMemoryWorkspaceStore());
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: CreateEmptyProfileStore());
         IDisposable? lifetime = null;
 
         try
@@ -1986,7 +1992,8 @@ public sealed class MainWindowControllerModeStartupTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            workspaceStore: new InMemoryWorkspaceStore());
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: CreateEmptyProfileStore());
         IDisposable? lifetime = null;
 
         try
@@ -2252,12 +2259,12 @@ public sealed class MainWindowControllerModeStartupTests
             List<TerminalControl> controls = GetStandaloneControls(terminalHost);
             AssertTerminalBehaviorSettings(
                 [controls[0]],
-                TerminalPasteSafetyPolicy.None,
-                enableTextShaping: true,
-                reflowOnResize: true,
+                TerminalPasteSafetyPolicy.SanitizeControlSequences,
+                enableTextShaping: false,
+                reflowOnResize: false,
                 preserveScrollbackOnSessionStart: false,
-                sixelGraphicsEnabled: true,
-                enableLigatures: true);
+                sixelGraphicsEnabled: false,
+                enableLigatures: false);
             AssertTerminalBehaviorSettings(
                 [controls[1]],
                 TerminalPasteSafetyPolicy.SanitizeControlSequences,
@@ -2517,13 +2524,13 @@ public sealed class MainWindowControllerModeStartupTests
             bool logsWritten = await WaitUntilAsync(
                 () => File.Exists(firstLogPath) &&
                       File.Exists(secondLogPath) &&
-                      File.ReadAllText(firstLogPath).Contains("first-profile-output", StringComparison.Ordinal) &&
-                      File.ReadAllText(secondLogPath).Contains("second-profile-output", StringComparison.Ordinal),
+                      ReadSharedText(firstLogPath).Contains("first-profile-output", StringComparison.Ordinal) &&
+                      ReadSharedText(secondLogPath).Contains("second-profile-output", StringComparison.Ordinal),
                 TimeSpan.FromSeconds(2));
             Assert.True(logsWritten);
 
-            string firstLog = File.ReadAllText(firstLogPath);
-            string secondLog = File.ReadAllText(secondLogPath);
+            string firstLog = ReadSharedText(firstLogPath);
+            string secondLog = ReadSharedText(secondLogPath);
             Assert.DoesNotContain("second-profile-output", firstLog, StringComparison.Ordinal);
             Assert.DoesNotContain("first-profile-output", secondLog, StringComparison.Ordinal);
         }
@@ -2560,7 +2567,8 @@ public sealed class MainWindowControllerModeStartupTests
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
             workspaceStore: new InMemoryWorkspaceStore(),
-            commandHistoryStore: new InMemoryCommandHistoryStore());
+            commandHistoryStore: new InMemoryCommandHistoryStore(),
+            settingsProfileStore: CreateEmptyProfileStore());
         IDisposable? lifetime = null;
 
         try
@@ -2704,6 +2712,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(profileAReactivated);
 
+            HashSet<TerminalControl> controlsBeforeSplit = [.. GetStandaloneControls(terminalHost)];
             viewModel.SplitPaneRightCommand.Execute().Wait();
             bool splitCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 4,
@@ -2712,7 +2721,7 @@ public sealed class MainWindowControllerModeStartupTests
 
             TerminalControl splitControl = Assert.Single(
                 GetStandaloneControls(terminalHost),
-                control => !ReferenceEquals(control, profileAControl) && control.TerminalFontSize == 19.0);
+                control => !controlsBeforeSplit.Contains(control) && control.TerminalFontSize == 19.0);
             Assert.Equal("Profile A Mono", splitControl.FontFamilyName);
             Assert.Equal(TerminalFontSource.System, splitControl.FontSource);
             Assert.False(splitControl.FontSubpixelPositioning);
@@ -3755,6 +3764,20 @@ public sealed class MainWindowControllerModeStartupTests
                 new TerminalCommandSnippet(trigger, commandLine, displayName),
             ],
         };
+    }
+
+    private static InMemoryProfileStore CreateEmptyProfileStore()
+        => new(new TerminalSessionProfilesDocument());
+
+    private static string ReadSharedText(string path)
+    {
+        using FileStream stream = new(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using StreamReader reader = new(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
     }
 
     private sealed class FixedTerminalModeCapabilityResolver : ITerminalModeCapabilityResolver

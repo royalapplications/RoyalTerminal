@@ -132,6 +132,7 @@ internal sealed class MainWindowController
     private readonly TerminalCommandSuggestionService _commandSuggestionService = new();
     private readonly SemaphoreSlim _commandHistorySync = new(1, 1);
     private bool _suppressReplayTimelineSeek;
+    private bool _suppressRuntimeSettingPropagation;
     private bool _settingsProfilesLoaded;
     private TerminalCommandHistoryDocument? _commandHistoryDocument;
     private TerminalSessionProfilesDocument? _sessionLauncherDocument;
@@ -552,7 +553,13 @@ internal sealed class MainWindowController
                 model => model.PreserveScrollbackOnRestart,
                 model => model.SixelGraphicsEnabled,
                 model => model.EnableLigatures)
-            .Subscribe(_ => ApplyTerminalBehaviorSettingsToAllStandaloneTabs()));
+            .Subscribe(_ =>
+            {
+                if (!_suppressRuntimeSettingPropagation)
+                {
+                    ApplyTerminalBehaviorSettingsToAllStandaloneTabs();
+                }
+            }));
 
         disposables.Add(_viewModel
             .WhenAnyValue(model => model.SixelGraphicsEnabled)
@@ -561,7 +568,13 @@ internal sealed class MainWindowController
 
         disposables.Add(_viewModel
             .WhenAnyValue(model => model.SessionLoggingEnabled)
-            .Subscribe(_ => ApplySessionLoggingSubscriptionsToAllStandaloneTabs()));
+            .Subscribe(_ =>
+            {
+                if (!_suppressRuntimeSettingPropagation)
+                {
+                    ApplySessionLoggingSubscriptionsToAllStandaloneTabs();
+                }
+            }));
     }
 
     private void RegisterShellLayoutHandlers(CompositeDisposable disposables)
@@ -1072,12 +1085,20 @@ internal sealed class MainWindowController
 
     private void ApplySessionProfile(TerminalSessionProfile profile)
     {
+        using IDisposable suppression = SuppressRuntimeSettingPropagation();
         _viewModel.SessionName = profile.DisplayName;
         _viewModel.SelectedTransportMode = ResolveViewModelTransportMode(profile.Transport.TransportId);
         ApplyProfileAppearance(profile.Appearance);
         ApplyProfileLogging(profile.Logging);
         ApplyProfileTransport(profile);
         _viewModel.SetStatus($"Launch profile: {profile.DisplayName}");
+    }
+
+    private IDisposable SuppressRuntimeSettingPropagation()
+    {
+        bool previous = _suppressRuntimeSettingPropagation;
+        _suppressRuntimeSettingPropagation = true;
+        return Disposable.Create(() => _suppressRuntimeSettingPropagation = previous);
     }
 
     private void ApplyProfileAppearance(TerminalSessionAppearanceSettings appearance)
