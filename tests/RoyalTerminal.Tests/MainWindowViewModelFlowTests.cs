@@ -109,7 +109,7 @@ public class MainWindowViewModelFlowTests
         }
     }
 
-    [Fact]
+    [AvaloniaFact]
     public void ApplicationNativeMenu_ReplacesAvaloniaDefaultApplicationItems()
     {
         MainWindowViewModel viewModel = new();
@@ -134,7 +134,7 @@ public class MainWindowViewModelFlowTests
         Assert.False(ContainsNativeMenuItem(menu, "About Avalonia"));
     }
 
-    [Fact]
+    [AvaloniaFact]
     public void ApplicationNativeMenu_BindsDeclaredApplicationMenuShell()
     {
         MainWindowViewModel viewModel = new();
@@ -154,7 +154,7 @@ public class MainWindowViewModelFlowTests
         Assert.False(ContainsNativeMenuItem(menu, "About Avalonia"));
     }
 
-    [Fact]
+    [AvaloniaFact]
     public void ApplicationNativeMenu_LeafItemsAreCommandBackedAfterBinding()
     {
         MainWindowViewModel viewModel = new();
