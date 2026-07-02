@@ -26,6 +26,8 @@
   <Application.Styles>
     <FluentTheme />
     <StyleInclude Source="avares://RoyalTerminal.Avalonia.Settings/Settings/TerminalSettingsPanel.axaml" />
+    <StyleInclude Source="avares://RoyalTerminal.Avalonia.App/Styles/WindowChrome.axaml" />
+    <StyleInclude Source="avares://RoyalTerminal.Avalonia.App/Styles/WindowsMenuChrome.axaml" />
     <StyleInclude Source="avares://RoyalTerminal.Avalonia.App/Styles/Tabs.axaml" />
 
     <Style Selector="FlyoutPresenter.settings-popup">
