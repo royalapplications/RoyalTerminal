@@ -63,6 +63,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _isSearchPanelVisible = true;
     private bool _isStatusBarVisible = true;
     private bool _isTabsInTitleBar;
+    private bool _isMicaBackdropEnabled;
 
     private IReadOnlyList<ShellProfileOption> _shellProfiles =
     [
@@ -515,12 +516,48 @@ public sealed class MainWindowViewModel : ReactiveObject
             this.RaiseAndSetIfChanged(ref _isTabsInTitleBar, value);
             this.RaisePropertyChanged(nameof(IsBodyTabStripVisible));
             this.RaisePropertyChanged(nameof(IsTitleBarLogoVisible));
+            this.RaisePropertyChanged(nameof(IsShellMenuBarVisible));
+            this.RaisePropertyChanged(nameof(IsManagedShellMenuBarVisible));
+            this.RaisePropertyChanged(nameof(IsNativeShellMenuBarVisible));
+            this.RaisePropertyChanged(nameof(IsShellMenuButtonVisible));
+            this.RaisePropertyChanged(nameof(TitleBarLeftReserveWidth));
         }
     }
 
     public bool IsBodyTabStripVisible => !IsTabsInTitleBar;
 
-    public bool IsTitleBarLogoVisible => !IsTabsInTitleBar;
+    public string ShellWindowTitle => OperatingSystem.IsMacOS() ? "RoyalTerminal" : string.Empty;
+
+    public bool IsTitleBarLogoVisible => OperatingSystem.IsMacOS() && !IsTabsInTitleBar;
+
+    public bool IsShellMenuBarVisible => !IsTabsInTitleBar;
+
+    public bool IsManagedShellMenuBarVisible => !OperatingSystem.IsMacOS() && !IsTabsInTitleBar;
+
+    public bool IsNativeShellMenuBarVisible => OperatingSystem.IsMacOS() && !IsTabsInTitleBar;
+
+    public bool IsShellMenuButtonVisible => !OperatingSystem.IsMacOS() && IsTabsInTitleBar;
+
+    public double TitleBarLeftReserveWidth => !OperatingSystem.IsMacOS() && IsTabsInTitleBar ? 48d : 88d;
+
+    /// <summary>
+    /// Gets a value indicating whether the window is currently using the Windows Mica backdrop.
+    /// </summary>
+    public bool IsMicaBackdropEnabled
+    {
+        get => _isMicaBackdropEnabled;
+        internal set => this.RaiseAndSetIfChanged(ref _isMicaBackdropEnabled, value);
+    }
+
+    /// <summary>
+    /// Gets the fallback title-bar gutter reserved for native window caption buttons.
+    /// </summary>
+    public double TitleBarRightDecorationReserveWidth => OperatingSystem.IsMacOS() ? 0d : 184d;
+
+    /// <summary>
+    /// Gets a value indicating whether the app-owned Windows caption buttons should be shown.
+    /// </summary>
+    public bool IsWindowsCaptionButtonStripVisible => OperatingSystem.IsWindows();
 
     public bool IsSshHostKeyPromptVisible
     {

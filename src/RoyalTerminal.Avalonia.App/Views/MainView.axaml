@@ -2,13 +2,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:RoyalTerminal.Avalonia.App.ViewModels"
         xmlns:chrome="using:Avalonia.Controls.Chrome"
+        xmlns:drag="using:Avalonia.Xaml.Interactions.Draggable"
+        xmlns:i="using:Avalonia.Xaml.Interactivity"
         xmlns:terminal="using:RoyalTerminal.Terminal"
         xmlns:settings="using:RoyalTerminal.Avalonia.Settings"
         xmlns:appControls="using:RoyalTerminal.Avalonia.App.Controls"
         x:Class="RoyalTerminal.Avalonia.App.Views.MainView"
         x:Name="RootView"
-        x:DataType="vm:MainWindowViewModel"
-        Background="{DynamicResource WindowBackgroundBrush}">
+        x:DataType="vm:MainWindowViewModel">
 
   <UserControl.Resources>
     <ControlTemplate x:Key="TabStripScrollViewerTemplate" TargetType="ScrollViewer">
@@ -22,11 +23,25 @@
     </ControlTemplate>
   </UserControl.Resources>
 
-  <Grid RowDefinitions="Auto,*">
-    <NativeMenuBar x:Name="MainMenuBar"
-                   Grid.Row="0" />
+  <UserControl.Styles>
+    <Style Selector="ItemsControl#TabStrip > ContentPresenter">
+      <Setter Property="(i:Interaction.Behaviors)">
+        <BehaviorCollectionTemplate>
+          <BehaviorCollection>
+            <drag:ItemDragBehavior HorizontalDragThreshold="3"
+                                   VerticalDragThreshold="3"
+                                   Orientation="Horizontal" />
+          </BehaviorCollection>
+        </BehaviorCollectionTemplate>
+      </Setter>
+    </Style>
 
-    <Grid Grid.Row="1" RowDefinitions="Auto,*">
+    <Style Selector="ItemsControl#TabStrip > ContentPresenter:pressed">
+      <Setter Property="ZIndex" Value="1" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*">
       <Border Grid.Row="0"
               Classes="topBar titleBarArea"
               Padding="0"
@@ -34,11 +49,650 @@
               chrome:WindowDecorationProperties.ElementRole="TitleBar">
         <Grid x:Name="TitleBarLayout"
               Height="{DynamicResource Shell.CommandHeight}"
-              ColumnDefinitions="88,*,Auto"
+              ColumnDefinitions="Auto,*,Auto"
               ClipToBounds="True">
           <Border x:Name="MacTrafficLightReserve"
                   Grid.Column="0"
-                  IsHitTestVisible="False" />
+                  MinWidth="{Binding TitleBarLeftReserveWidth}"
+                  IsHitTestVisible="True">
+            <Grid>
+              <Border x:Name="MainMenuBarHost"
+                      Margin="48,0,0,0"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Center"
+                      IsVisible="{Binding IsShellMenuBarVisible}"
+                      chrome:WindowDecorationProperties.ElementRole="User">
+                <Grid>
+                  <Menu x:Name="MainMenuBar"
+                        IsVisible="{Binding IsManagedShellMenuBarVisible}">
+                  <MenuItem Header="_Shell">
+                    <MenuItem Header="_New Tab"
+                              Command="{Binding NewTabCommand}"
+                              InputGesture="Ctrl+T">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.AddSquareMultipleRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Close Tab"
+                              Command="{Binding CloseCurrentTabCommand}"
+                              InputGesture="Ctrl+W">
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="_Command History"
+                              Command="{Binding OpenCommandHistoryOverlayCommand}"
+                              InputGesture="Ctrl+Space">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.HistoryRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Refresh Command Suggestions"
+                              Command="{Binding RefreshCommandSuggestionsCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.ArrowSyncRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Insert Selected Suggestion"
+                              Command="{Binding AcceptCommandSuggestionCommand}"
+                              InputGesture="Ctrl+Enter"
+                              IsEnabled="{Binding CanAcceptCommandSuggestion}" />
+                    <MenuItem Header="Close Command _History"
+                              Command="{Binding CloseCommandHistoryOverlayCommand}">
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="Split Pane _Right"
+                              Command="{Binding SplitPaneRightCommand}"
+                              InputGesture="Alt+Shift+OemPlus">
+                    </MenuItem>
+                    <MenuItem Header="Split Pane _Down"
+                              Command="{Binding SplitPaneDownCommand}"
+                              InputGesture="Alt+Shift+OemMinus">
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="_Refresh Profiles"
+                              Command="{Binding RefreshSessionLauncherCommand}">
+                    </MenuItem>
+                    <MenuItem Header="_Launch Selected Profile"
+                              Command="{Binding LaunchSelectedSessionProfileCommand}"
+                              IsEnabled="{Binding CanLaunchSelectedSessionProfile}">
+                    </MenuItem>
+                    <MenuItem Header="_Restart Session"
+                              Command="{Binding RestartActiveSessionCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.ArrowClockwiseRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Clear Scrollback"
+                              Command="{Binding ClearActiveScrollbackCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.EraserRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                  </MenuItem>
+
+                  <MenuItem Header="_Edit">
+                    <MenuItem Header="_Copy"
+                              Command="{Binding CopySelectionCommand}"
+                              InputGesture="Ctrl+Shift+C" />
+                    <MenuItem Header="_Paste"
+                              Command="{Binding PasteClipboardCommand}"
+                              InputGesture="Ctrl+Shift+V" />
+                    <MenuItem Header="Select _All"
+                              Command="{Binding SelectAllCommand}"
+                              InputGesture="Ctrl+Shift+A" />
+                    <Separator />
+                    <MenuItem Header="_Find"
+                              Command="{Binding ApplySearchCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.SearchRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="Find _Next"
+                              Command="{Binding NextSearchCommand}" />
+                    <MenuItem Header="Find _Previous"
+                              Command="{Binding PreviousSearchCommand}" />
+                    <MenuItem Header="_Clear Search"
+                              Command="{Binding ClearSearchCommand}">
+                    </MenuItem>
+                  </MenuItem>
+
+                  <MenuItem Header="_View">
+                    <MenuItem Header="Show _Left Panel"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding IsLeftPanelVisible}"
+                              Command="{Binding ToggleLeftPanelCommand}" />
+                    <MenuItem Header="Show _Search Panel"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding IsSearchPanelVisible}"
+                              Command="{Binding ToggleSearchPanelCommand}" />
+                    <MenuItem Header="Show Status _Bar"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding IsStatusBarVisible}"
+                              Command="{Binding ToggleStatusBarCommand}" />
+                    <MenuItem Header="Move _Tabs to Title Bar"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding IsTabsInTitleBar}"
+                              Command="{Binding ToggleTabsInTitleBarCommand}" />
+                    <Separator />
+                    <MenuItem Header="_Increase Font Size"
+                              Command="{Binding IncreaseFontSizeCommand}"
+                              InputGesture="Ctrl+Add">
+                    </MenuItem>
+                    <MenuItem Header="_Decrease Font Size"
+                              Command="{Binding DecreaseFontSizeCommand}"
+                              InputGesture="Ctrl+Subtract">
+                    </MenuItem>
+                    <MenuItem Header="_Reset Font Size"
+                              Command="{Binding ResetFontSizeCommand}"
+                              InputGesture="Ctrl+D0">
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="{Binding ModeButtonText}"
+                              Command="{Binding CycleRenderModeCommand}" />
+                    <MenuItem Header="{Binding ThemePresetButtonText}"
+                              Command="{Binding CycleThemePresetCommand}" />
+                    <MenuItem Header="_Toggle Light Theme"
+                              Command="{Binding ToggleThemeCommand}">
+                    </MenuItem>
+                    <MenuItem Header="_Generate Theme"
+                              Command="{Binding GenerateThemeCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.ColorRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="{Binding ShaderSampleButtonText}"
+                              Command="{Binding CycleShaderSampleCommand}" />
+                    <Separator />
+                    <MenuItem Header="_Preferences..."
+                              Command="{Binding PrepareSettingsPanelCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.SettingsRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="Close Preferences"
+                              Command="{Binding CloseSettingsPanelCommand}" />
+                    <MenuItem Header="Preferences _Actions"
+                              IsEnabled="{Binding IsSettingsPanelOpen}">
+                      <MenuItem Header="_New Profile"
+                                Command="{Binding SettingsPanelState.NewProfileCommand}" />
+                      <MenuItem Header="_Duplicate Profile"
+                                Command="{Binding SettingsPanelState.DuplicateProfileCommand}" />
+                      <MenuItem Header="_Delete Profile"
+                                Command="{Binding SettingsPanelState.DeleteProfileCommand}" />
+                      <MenuItem Header="Set _Default Profile"
+                                Command="{Binding SettingsPanelState.SetDefaultProfileCommand}" />
+                      <Separator />
+                      <MenuItem Header="_Apply Settings"
+                                Command="{Binding SettingsPanelState.ApplyCommand}" />
+                      <MenuItem Header="_Save Settings"
+                                Command="{Binding SettingsPanelState.SaveCommand}" />
+                      <Separator />
+                      <MenuItem Header="_Browse Font File"
+                                Command="{Binding SettingsPanelState.BrowseFontFileCommand}" />
+                      <MenuItem Header="Add Text Highlight _Rule"
+                                Command="{Binding SettingsPanelState.AddTextHighlightRuleCommand}" />
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="_Diagnostics"
+                              Command="{Binding ToggleGhosttyDiagnosticsCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.PulseRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Clear Event Log"
+                              Command="{Binding ClearEventLogCommand}"
+                              IsEnabled="{Binding HasEventLogEntries}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.EraserRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                  </MenuItem>
+
+                  <MenuItem Header="_Session">
+                    <MenuItem Header="_Preserve Scrollback on Restart"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding PreserveScrollbackOnRestart}"
+                              Command="{Binding TogglePreserveScrollbackOnRestartCommand}" />
+                    <MenuItem Header="_Sixel Graphics"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding SixelGraphicsEnabled}"
+                              Command="{Binding ToggleSixelGraphicsCommand}" />
+                    <Separator />
+                    <MenuItem Header="{Binding CaptureToggleButtonText}"
+                              Command="{Binding ToggleCaptureCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.RecordRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="Capture _Format">
+                      <MenuItem Header="RoyalTerminal JSON"
+                                ToggleType="Radio"
+                                IsChecked="{Binding IsRoyalTerminalJsonCaptureFormatSelected}"
+                                Command="{Binding SelectCaptureFormatCommand}"
+                                CommandParameter="royalterminal-json" />
+                      <MenuItem Header="Asciicast v3"
+                                ToggleType="Radio"
+                                IsChecked="{Binding IsAsciicastV3CaptureFormatSelected}"
+                                Command="{Binding SelectCaptureFormatCommand}"
+                                CommandParameter="asciicast-v3" />
+                    </MenuItem>
+                    <MenuItem Header="_Save Capture"
+                              Command="{Binding SaveCaptureCommand}">
+                    </MenuItem>
+                    <MenuItem Header="_Load Replay"
+                              Command="{Binding LoadReplayCommand}">
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="Replay _Play/Pause"
+                              Command="{Binding ToggleReplayPlaybackCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.PlayRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Stop Replay"
+                              Command="{Binding StopReplayCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.StopRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                  </MenuItem>
+
+                  <MenuItem Header="_Window">
+                    <MenuItem Header="_Next Tab"
+                              Command="{Binding CycleTabForwardCommand}"
+                              InputGesture="Ctrl+Tab" />
+                    <MenuItem Header="_Previous Tab"
+                              Command="{Binding CycleTabBackwardCommand}"
+                              InputGesture="Ctrl+Shift+Tab" />
+                    <Separator />
+                    <MenuItem Header="Focus Pane _Left"
+                              Command="{Binding FocusPaneLeftCommand}"
+                              InputGesture="Alt+Left" />
+                    <MenuItem Header="Focus Pane _Right"
+                              Command="{Binding FocusPaneRightCommand}"
+                              InputGesture="Alt+Right" />
+                    <MenuItem Header="Focus Pane _Up"
+                              Command="{Binding FocusPaneUpCommand}"
+                              InputGesture="Alt+Up" />
+                    <MenuItem Header="Focus Pane _Down"
+                              Command="{Binding FocusPaneDownCommand}"
+                              InputGesture="Alt+Down" />
+                    <Separator />
+                    <MenuItem Header="Resize Pane Left"
+                              Command="{Binding ResizePaneLeftCommand}"
+                              InputGesture="Alt+Shift+Left" />
+                    <MenuItem Header="Resize Pane Right"
+                              Command="{Binding ResizePaneRightCommand}"
+                              InputGesture="Alt+Shift+Right" />
+                    <MenuItem Header="Resize Pane Up"
+                              Command="{Binding ResizePaneUpCommand}"
+                              InputGesture="Alt+Shift+Up" />
+                    <MenuItem Header="Resize Pane Down"
+                              Command="{Binding ResizePaneDownCommand}"
+                              InputGesture="Alt+Shift+Down" />
+                    <Separator />
+                    <MenuItem Header="Tab _1" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="0" InputGesture="Ctrl+D1" />
+                    <MenuItem Header="Tab _2" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="1" InputGesture="Ctrl+D2" />
+                    <MenuItem Header="Tab _3" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="2" InputGesture="Ctrl+D3" />
+                    <MenuItem Header="Tab _4" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="3" InputGesture="Ctrl+D4" />
+                    <MenuItem Header="Tab _5" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="4" InputGesture="Ctrl+D5" />
+                    <MenuItem Header="Tab _6" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="5" InputGesture="Ctrl+D6" />
+                    <MenuItem Header="Tab _7" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="6" InputGesture="Ctrl+D7" />
+                    <MenuItem Header="Tab _8" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="7" InputGesture="Ctrl+D8" />
+                    <MenuItem Header="Tab _9" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="8" InputGesture="Ctrl+D9" />
+                  </MenuItem>
+
+                  <MenuItem Header="_Help">
+                    <MenuItem Header="_Hyperlink Sample"
+                              Command="{Binding ShowHyperlinkSampleCommand}" />
+                    <MenuItem Header="_Kitty Graphics Sample"
+                              Command="{Binding ShowKittyGraphicsSampleCommand}" />
+                    <MenuItem Header="_Copy Plain Snapshot"
+                              Command="{Binding CopyPlainSnapshotCommand}" />
+                    <MenuItem Header="Copy _VT Snapshot"
+                              Command="{Binding CopyStyledVtSnapshotCommand}" />
+                    <MenuItem Header="Copy _HTML Snapshot"
+                              Command="{Binding CopyHtmlSnapshotCommand}" />
+                  </MenuItem>
+                  </Menu>
+                  <NativeMenuBar x:Name="MainNativeMenuBar"
+                                 IsVisible="{Binding IsNativeShellMenuBarVisible}" />
+                </Grid>
+              </Border>
+
+              <Border x:Name="MainMenuLogo"
+                      Width="32"
+                      Height="32"
+                      MinWidth="32"
+                      MinHeight="32"
+                      MaxWidth="32"
+                      MaxHeight="32"
+                      Margin="12,6,0,6"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Center"
+                      IsHitTestVisible="False"
+                      IsVisible="{Binding IsShellMenuBarVisible}">
+                <PathIcon Classes="railIcon"
+                          Data="{StaticResource Icon.RoyalTerminalLogo}" />
+              </Border>
+
+            <Button x:Name="ShellMenuButton"
+                    Classes="iconButton"
+                    Width="32"
+                    Height="32"
+                    MinWidth="32"
+                    MinHeight="32"
+                    MaxWidth="32"
+                    MaxHeight="32"
+                    Margin="12,6,0,6"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    IsVisible="{Binding IsShellMenuButtonVisible}"
+                    chrome:WindowDecorationProperties.ElementRole="User"
+                    ToolTip.Tip="Menu">
+              <PathIcon Classes="railIcon"
+                        Data="{StaticResource Icon.NavigationRegular}" />
+              <Button.Flyout>
+                <MenuFlyout Placement="BottomEdgeAlignedLeft"
+                            FlyoutPresenterClasses="shell-menu-flyout">
+                  <MenuItem Header="_Shell"
+                            DataContext="{Binding #RootView.DataContext}">
+                    <MenuItem Header="_New Tab"
+                              Command="{Binding NewTabCommand}"
+                              InputGesture="Ctrl+T">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.AddSquareMultipleRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Close Tab"
+                              Command="{Binding CloseCurrentTabCommand}"
+                              InputGesture="Ctrl+W">
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="_Command History"
+                              Command="{Binding OpenCommandHistoryOverlayCommand}"
+                              InputGesture="Ctrl+Space">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.HistoryRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Refresh Command Suggestions"
+                              Command="{Binding RefreshCommandSuggestionsCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.ArrowSyncRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Insert Selected Suggestion"
+                              Command="{Binding AcceptCommandSuggestionCommand}"
+                              InputGesture="Ctrl+Enter"
+                              IsEnabled="{Binding CanAcceptCommandSuggestion}" />
+                    <MenuItem Header="Close Command _History"
+                              Command="{Binding CloseCommandHistoryOverlayCommand}">
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="Split Pane _Right"
+                              Command="{Binding SplitPaneRightCommand}"
+                              InputGesture="Alt+Shift+OemPlus">
+                    </MenuItem>
+                    <MenuItem Header="Split Pane _Down"
+                              Command="{Binding SplitPaneDownCommand}"
+                              InputGesture="Alt+Shift+OemMinus">
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="_Refresh Profiles"
+                              Command="{Binding RefreshSessionLauncherCommand}">
+                    </MenuItem>
+                    <MenuItem Header="_Launch Selected Profile"
+                              Command="{Binding LaunchSelectedSessionProfileCommand}"
+                              IsEnabled="{Binding CanLaunchSelectedSessionProfile}">
+                    </MenuItem>
+                    <MenuItem Header="_Restart Session"
+                              Command="{Binding RestartActiveSessionCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.ArrowClockwiseRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Clear Scrollback"
+                              Command="{Binding ClearActiveScrollbackCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.EraserRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                  </MenuItem>
+
+                  <MenuItem Header="_Edit"
+                            DataContext="{Binding #RootView.DataContext}">
+                    <MenuItem Header="_Copy"
+                              Command="{Binding CopySelectionCommand}"
+                              InputGesture="Ctrl+Shift+C" />
+                    <MenuItem Header="_Paste"
+                              Command="{Binding PasteClipboardCommand}"
+                              InputGesture="Ctrl+Shift+V" />
+                    <MenuItem Header="Select _All"
+                              Command="{Binding SelectAllCommand}"
+                              InputGesture="Ctrl+Shift+A" />
+                    <Separator />
+                    <MenuItem Header="_Find"
+                              Command="{Binding ApplySearchCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.SearchRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="Find _Next"
+                              Command="{Binding NextSearchCommand}" />
+                    <MenuItem Header="Find _Previous"
+                              Command="{Binding PreviousSearchCommand}" />
+                    <MenuItem Header="_Clear Search"
+                              Command="{Binding ClearSearchCommand}">
+                    </MenuItem>
+                  </MenuItem>
+
+                  <MenuItem Header="_View"
+                            DataContext="{Binding #RootView.DataContext}">
+                    <MenuItem Header="Show _Left Panel"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding IsLeftPanelVisible}"
+                              Command="{Binding ToggleLeftPanelCommand}" />
+                    <MenuItem Header="Show _Search Panel"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding IsSearchPanelVisible}"
+                              Command="{Binding ToggleSearchPanelCommand}" />
+                    <MenuItem Header="Show Status _Bar"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding IsStatusBarVisible}"
+                              Command="{Binding ToggleStatusBarCommand}" />
+                    <MenuItem Header="Move _Tabs to Title Bar"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding IsTabsInTitleBar}"
+                              Command="{Binding ToggleTabsInTitleBarCommand}" />
+                    <Separator />
+                    <MenuItem Header="_Increase Font Size"
+                              Command="{Binding IncreaseFontSizeCommand}"
+                              InputGesture="Ctrl+Add">
+                    </MenuItem>
+                    <MenuItem Header="_Decrease Font Size"
+                              Command="{Binding DecreaseFontSizeCommand}"
+                              InputGesture="Ctrl+Subtract">
+                    </MenuItem>
+                    <MenuItem Header="_Reset Font Size"
+                              Command="{Binding ResetFontSizeCommand}"
+                              InputGesture="Ctrl+D0">
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="{Binding ModeButtonText}"
+                              Command="{Binding CycleRenderModeCommand}" />
+                    <MenuItem Header="{Binding ThemePresetButtonText}"
+                              Command="{Binding CycleThemePresetCommand}" />
+                    <MenuItem Header="_Toggle Light Theme"
+                              Command="{Binding ToggleThemeCommand}">
+                    </MenuItem>
+                    <MenuItem Header="_Generate Theme"
+                              Command="{Binding GenerateThemeCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.ColorRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="{Binding ShaderSampleButtonText}"
+                              Command="{Binding CycleShaderSampleCommand}" />
+                    <Separator />
+                    <MenuItem Header="_Preferences..."
+                              Command="{Binding PrepareSettingsPanelCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.SettingsRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="Close Preferences"
+                              Command="{Binding CloseSettingsPanelCommand}" />
+                    <MenuItem Header="Preferences _Actions"
+                              IsEnabled="{Binding IsSettingsPanelOpen}">
+                      <MenuItem Header="_New Profile"
+                                Command="{Binding SettingsPanelState.NewProfileCommand}" />
+                      <MenuItem Header="_Duplicate Profile"
+                                Command="{Binding SettingsPanelState.DuplicateProfileCommand}" />
+                      <MenuItem Header="_Delete Profile"
+                                Command="{Binding SettingsPanelState.DeleteProfileCommand}" />
+                      <MenuItem Header="Set _Default Profile"
+                                Command="{Binding SettingsPanelState.SetDefaultProfileCommand}" />
+                      <Separator />
+                      <MenuItem Header="_Apply Settings"
+                                Command="{Binding SettingsPanelState.ApplyCommand}" />
+                      <MenuItem Header="_Save Settings"
+                                Command="{Binding SettingsPanelState.SaveCommand}" />
+                      <Separator />
+                      <MenuItem Header="_Browse Font File"
+                                Command="{Binding SettingsPanelState.BrowseFontFileCommand}" />
+                      <MenuItem Header="Add Text Highlight _Rule"
+                                Command="{Binding SettingsPanelState.AddTextHighlightRuleCommand}" />
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="_Diagnostics"
+                              Command="{Binding ToggleGhosttyDiagnosticsCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.PulseRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Clear Event Log"
+                              Command="{Binding ClearEventLogCommand}"
+                              IsEnabled="{Binding HasEventLogEntries}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.EraserRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                  </MenuItem>
+
+                  <MenuItem Header="_Session"
+                            DataContext="{Binding #RootView.DataContext}">
+                    <MenuItem Header="_Preserve Scrollback on Restart"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding PreserveScrollbackOnRestart}"
+                              Command="{Binding TogglePreserveScrollbackOnRestartCommand}" />
+                    <MenuItem Header="_Sixel Graphics"
+                              ToggleType="CheckBox"
+                              IsChecked="{Binding SixelGraphicsEnabled}"
+                              Command="{Binding ToggleSixelGraphicsCommand}" />
+                    <Separator />
+                    <MenuItem Header="{Binding CaptureToggleButtonText}"
+                              Command="{Binding ToggleCaptureCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.RecordRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="Capture _Format">
+                      <MenuItem Header="RoyalTerminal JSON"
+                                ToggleType="Radio"
+                                IsChecked="{Binding IsRoyalTerminalJsonCaptureFormatSelected}"
+                                Command="{Binding SelectCaptureFormatCommand}"
+                                CommandParameter="royalterminal-json" />
+                      <MenuItem Header="Asciicast v3"
+                                ToggleType="Radio"
+                                IsChecked="{Binding IsAsciicastV3CaptureFormatSelected}"
+                                Command="{Binding SelectCaptureFormatCommand}"
+                                CommandParameter="asciicast-v3" />
+                    </MenuItem>
+                    <MenuItem Header="_Save Capture"
+                              Command="{Binding SaveCaptureCommand}">
+                    </MenuItem>
+                    <MenuItem Header="_Load Replay"
+                              Command="{Binding LoadReplayCommand}">
+                    </MenuItem>
+                    <Separator />
+                    <MenuItem Header="Replay _Play/Pause"
+                              Command="{Binding ToggleReplayPlaybackCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.PlayRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                    <MenuItem Header="_Stop Replay"
+                              Command="{Binding StopReplayCommand}">
+                      <MenuItem.Icon>
+                        <PathIcon Data="{StaticResource Icon.StopRegular}" />
+                      </MenuItem.Icon>
+                    </MenuItem>
+                  </MenuItem>
+
+                  <MenuItem Header="_Window"
+                            DataContext="{Binding #RootView.DataContext}">
+                    <MenuItem Header="_Next Tab"
+                              Command="{Binding CycleTabForwardCommand}"
+                              InputGesture="Ctrl+Tab" />
+                    <MenuItem Header="_Previous Tab"
+                              Command="{Binding CycleTabBackwardCommand}"
+                              InputGesture="Ctrl+Shift+Tab" />
+                    <Separator />
+                    <MenuItem Header="Focus Pane _Left"
+                              Command="{Binding FocusPaneLeftCommand}"
+                              InputGesture="Alt+Left" />
+                    <MenuItem Header="Focus Pane _Right"
+                              Command="{Binding FocusPaneRightCommand}"
+                              InputGesture="Alt+Right" />
+                    <MenuItem Header="Focus Pane _Up"
+                              Command="{Binding FocusPaneUpCommand}"
+                              InputGesture="Alt+Up" />
+                    <MenuItem Header="Focus Pane _Down"
+                              Command="{Binding FocusPaneDownCommand}"
+                              InputGesture="Alt+Down" />
+                    <Separator />
+                    <MenuItem Header="Resize Pane Left"
+                              Command="{Binding ResizePaneLeftCommand}"
+                              InputGesture="Alt+Shift+Left" />
+                    <MenuItem Header="Resize Pane Right"
+                              Command="{Binding ResizePaneRightCommand}"
+                              InputGesture="Alt+Shift+Right" />
+                    <MenuItem Header="Resize Pane Up"
+                              Command="{Binding ResizePaneUpCommand}"
+                              InputGesture="Alt+Shift+Up" />
+                    <MenuItem Header="Resize Pane Down"
+                              Command="{Binding ResizePaneDownCommand}"
+                              InputGesture="Alt+Shift+Down" />
+                    <Separator />
+                    <MenuItem Header="Tab _1" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="0" InputGesture="Ctrl+D1" />
+                    <MenuItem Header="Tab _2" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="1" InputGesture="Ctrl+D2" />
+                    <MenuItem Header="Tab _3" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="2" InputGesture="Ctrl+D3" />
+                    <MenuItem Header="Tab _4" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="3" InputGesture="Ctrl+D4" />
+                    <MenuItem Header="Tab _5" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="4" InputGesture="Ctrl+D5" />
+                    <MenuItem Header="Tab _6" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="5" InputGesture="Ctrl+D6" />
+                    <MenuItem Header="Tab _7" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="6" InputGesture="Ctrl+D7" />
+                    <MenuItem Header="Tab _8" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="7" InputGesture="Ctrl+D8" />
+                    <MenuItem Header="Tab _9" Command="{Binding SwitchToTabByIndexCommand}" CommandParameter="8" InputGesture="Ctrl+D9" />
+                  </MenuItem>
+
+                  <MenuItem Header="_Help"
+                            DataContext="{Binding #RootView.DataContext}">
+                    <MenuItem Header="_Hyperlink Sample"
+                              Command="{Binding ShowHyperlinkSampleCommand}" />
+                    <MenuItem Header="_Kitty Graphics Sample"
+                              Command="{Binding ShowKittyGraphicsSampleCommand}" />
+                    <MenuItem Header="_Copy Plain Snapshot"
+                              Command="{Binding CopyPlainSnapshotCommand}" />
+                    <MenuItem Header="Copy _VT Snapshot"
+                              Command="{Binding CopyStyledVtSnapshotCommand}" />
+                    <MenuItem Header="Copy _HTML Snapshot"
+                              Command="{Binding CopyHtmlSnapshotCommand}" />
+                  </MenuItem>
+                </MenuFlyout>
+              </Button.Flyout>
+            </Button>
+            </Grid>
+          </Border>
 
           <Border x:Name="TitleBarDragSurface"
                   Grid.Column="1"
@@ -47,9 +701,9 @@
 
           <Grid Grid.Column="1"
                 x:Name="TopCommandBar"
-                Margin="{DynamicResource Shell.CommandPadding}"
+                Classes.tabsInTitleBar="{Binding IsTabsInTitleBar}"
                 ColumnDefinitions="Auto,*,Auto"
-                ColumnSpacing="12"
+                ColumnSpacing="4"
                 ClipToBounds="True">
             <Border x:Name="TitleBarBrandDragZone"
                     Background="Transparent"
@@ -164,10 +818,56 @@
 
           </Grid>
 
-          <Border x:Name="TitleBarRightDecorationReserve"
-                  Grid.Column="2"
-                  Width="{Binding $parent[Window].WindowDecorationMargin.Right}"
-                  IsHitTestVisible="False" />
+          <Grid x:Name="TitleBarRightDecorationReserve"
+                Grid.Column="2"
+                Width="{Binding $parent[Window].WindowDecorationMargin.Right}"
+                MinWidth="{Binding TitleBarRightDecorationReserveWidth}"
+                Background="Transparent"
+                chrome:WindowDecorationProperties.ElementRole="TitleBar">
+            <StackPanel x:Name="WindowsCaptionButtonStrip"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Stretch"
+                        IsVisible="{Binding IsWindowsCaptionButtonStripVisible}"
+                        chrome:WindowDecorationProperties.ElementRole="User">
+              <Button x:Name="CaptionMinimizeButton"
+                      Classes="captionButton"
+                      ToolTip.Tip="Minimize"
+                      chrome:WindowDecorationProperties.ElementRole="User">
+                <PathIcon Classes="captionButtonIcon"
+                          Data="{StaticResource Icon.SubtractRegular}" />
+              </Button>
+              <Button x:Name="CaptionMaximizeButton"
+                      Classes="captionButton"
+                      ToolTip.Tip="Maximize"
+                      chrome:WindowDecorationProperties.ElementRole="User">
+                <PathIcon Classes="captionButtonIcon"
+                          Data="{StaticResource Icon.MaximizeRegular}" />
+              </Button>
+              <Button x:Name="CaptionRestoreButton"
+                      Classes="captionButton"
+                      IsVisible="False"
+                      ToolTip.Tip="Restore"
+                      chrome:WindowDecorationProperties.ElementRole="User">
+                <PathIcon Classes="captionButtonIcon"
+                          Data="{StaticResource Icon.RestoreRegular}" />
+              </Button>
+              <Button x:Name="CaptionFullscreenButton"
+                      Classes="captionButton"
+                      ToolTip.Tip="Fullscreen"
+                      chrome:WindowDecorationProperties.ElementRole="User">
+                <PathIcon Classes="captionButtonIcon"
+                          Data="{StaticResource Icon.FullScreenRegular}" />
+              </Button>
+              <Button x:Name="CaptionCloseButton"
+                      Classes="captionButton closeCaptionButton"
+                      ToolTip.Tip="Close"
+                      chrome:WindowDecorationProperties.ElementRole="User">
+                <PathIcon Classes="captionButtonIcon"
+                          Data="{StaticResource Icon.DismissRegular}" />
+              </Button>
+            </StackPanel>
+          </Grid>
         </Grid>
       </Border>
 
@@ -324,9 +1024,14 @@
                             Template="{StaticResource TabStripScrollViewerTemplate}"
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Disabled">
-                <StackPanel Name="TabStrip"
-                            Orientation="Horizontal"
-                            Spacing="4" />
+                <ItemsControl Name="TabStrip">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Orientation="Horizontal"
+                                  Spacing="4" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                </ItemsControl>
               </ScrollViewer>
               <RepeatButton x:Name="TabStripScrollRightButton"
                             Grid.Column="2"
@@ -649,7 +1354,6 @@
         </Border>
       </Grid>
     </Grid>
-    </Grid>
 
     <Border Grid.Row="1"
             HorizontalAlignment="Center"
@@ -715,7 +1419,11 @@
         <Separator />
         <MenuItem Header="Select _All" InputGesture="Ctrl+Shift+A" Command="{Binding SelectAllCommand}" />
         <Separator />
-        <MenuItem Header="_New Tab" InputGesture="Ctrl+T" Command="{Binding NewTabCommand}" />
+        <MenuItem Header="_New Tab" InputGesture="Ctrl+T" Command="{Binding NewTabCommand}">
+          <MenuItem.Icon>
+            <PathIcon Data="{StaticResource Icon.AddSquareMultipleRegular}" />
+          </MenuItem.Icon>
+        </MenuItem>
         <MenuItem Header="C_lose Tab" InputGesture="Ctrl+W" Command="{Binding CloseCurrentTabCommand}" />
       </ContextMenu>
     </Grid.ContextMenu>

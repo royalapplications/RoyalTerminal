@@ -9,6 +9,8 @@ using Avalonia.Controls;
 using Avalonia.Controls.Chrome;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Templates;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -22,6 +24,7 @@ using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.App.Services;
 using RoyalTerminal.Avalonia.App.ViewModels;
+using RoyalTerminal.Avalonia.App.Views;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.Terminal;
 using ReactiveUI;
@@ -118,13 +121,76 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(createdSingleTab);
 
-            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+            ItemsControl tabStrip = window.FindControl<ItemsControl>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
-            Button startupHeader = Assert.IsType<Button>(tabStrip.Children[0]);
+            Button startupHeader = GetTabHeader(tabStrip, 0);
             TerminalRenderMode startupMode = ResolveModeFromContainer(
                 terminalHost.Children[0],
                 startupHeader);
             Assert.Equal(TerminalRenderMode.RenderedAuto, startupMode);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_Startup_UsesStoredDefaultProfileAppearance()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        TerminalSessionProfilesDocument document = new()
+        {
+            DefaultProfileId = "default",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "default",
+                    DisplayName = "Default Session",
+                    Transport = CreatePipeTransportProfile("echo default-profile"),
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        FontSource = TerminalFontSource.System,
+                        FontFamilyName = "Cascadia Code",
+                        FontSize = 13,
+                    },
+                    Behavior = new TerminalSessionBehaviorSettings
+                    {
+                        EnableTextShaping = true,
+                        EnableLigatures = true,
+                    },
+                },
+            ],
+        };
+        MainWindowViewModel viewModel = new();
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            settingsProfileStore: new InMemoryProfileStore(document),
+            workspaceStore: new InMemoryWorkspaceStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool createdSingleTab = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(createdSingleTab);
+
+            TerminalControl control = Assert.Single(GetStandaloneControls(terminalHost));
+            Assert.Equal("Cascadia Code", control.FontFamilyName);
+            Assert.Equal(TerminalFontSource.System, control.FontSource);
+            Assert.Equal(13, control.TerminalFontSize);
+            Assert.NotNull(control.Renderer);
+            Assert.True(control.Renderer!.EnableLigatures);
         }
         finally
         {
@@ -159,9 +225,9 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(createdSingleTab);
 
-            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+            ItemsControl tabStrip = window.FindControl<ItemsControl>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
-            Button startupHeader = Assert.IsType<Button>(tabStrip.Children[0]);
+            Button startupHeader = GetTabHeader(tabStrip, 0);
             Button closeButton = Assert.IsType<Button>(startupHeader.Tag);
             PathIcon closeIcon = Assert.IsType<PathIcon>(closeButton.Content);
 
@@ -234,7 +300,7 @@ public sealed class MainWindowControllerModeStartupTests
                 ?? throw new InvalidOperationException("TabStripLayout was not found.");
             ScrollViewer tabStripScrollViewer = window.FindControl<ScrollViewer>("TabStripScrollViewer")
                 ?? throw new InvalidOperationException("TabStripScrollViewer was not found.");
-            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+            ItemsControl tabStrip = window.FindControl<ItemsControl>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
             RepeatButton tabStripScrollLeftButton = window.FindControl<RepeatButton>("TabStripScrollLeftButton")
                 ?? throw new InvalidOperationException("TabStripScrollLeftButton was not found.");
@@ -247,7 +313,7 @@ public sealed class MainWindowControllerModeStartupTests
             ScrollContentPresenter tabStripScrollContentPresenter =
                 FindTabStripScrollContentPresenter(tabStripScrollViewer);
 
-            Button tabHeader = Assert.IsType<Button>(tabStrip.Children[0]);
+            Button tabHeader = GetTabHeader(tabStrip, 0);
             Button closeButton = Assert.IsType<Button>(tabHeader.Tag);
 
             Assert.False(viewModel.IsTabsInTitleBar);
@@ -255,7 +321,7 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.Null(titleBarTabStripHost.Content);
             Assert.True(bodyTabStripHost.IsVisible);
             Assert.False(titleBarTabStripHost.IsVisible);
-            Assert.True(titleBarBrandIcon.IsVisible);
+            Assert.Equal(viewModel.IsTitleBarLogoVisible, titleBarBrandIcon.IsVisible);
             Assert.Contains("bodyTabs", tabStripSurface.Classes);
             Assert.DoesNotContain("titleBarTabs", tabStripSurface.Classes);
             Assert.Equal(WindowDecorationsElementRole.None, WindowDecorationProperties.GetElementRole(tabStripSurface));
@@ -327,7 +393,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(createdSingleTab);
 
-            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+            ItemsControl tabStrip = window.FindControl<ItemsControl>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
             ScrollViewer tabStripScrollViewer = window.FindControl<ScrollViewer>("TabStripScrollViewer")
                 ?? throw new InvalidOperationException("TabStripScrollViewer was not found.");
@@ -346,7 +412,7 @@ public sealed class MainWindowControllerModeStartupTests
             }
 
             bool tabsCreated = await WaitUntilAsync(
-                () => tabStrip.Children.Count >= 10,
+                () => GetTabHeaders(tabStrip).Count >= 10,
                 TimeSpan.FromSeconds(2));
             Assert.True(tabsCreated);
 
@@ -389,6 +455,173 @@ public sealed class MainWindowControllerModeStartupTests
                 () => tabStripScrollViewer.Offset.X > 0.5 && tabStripScrollLeftButton.IsEnabled,
                 TimeSpan.FromSeconds(2));
             Assert.True(wheelScrolledRight);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_TabStripItemDragBehavior_ReordersTabsAndPersistsWorkspaceOrder()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryWorkspaceStore workspaceStore = new();
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo tab-reorder";
+
+        MainView mainView = new()
+        {
+            DataContext = viewModel,
+        };
+        Window window = new()
+        {
+            Width = 900,
+            Height = 520,
+            DataContext = viewModel,
+            Content = mainView,
+        };
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            visualRoot: mainView);
+        IDisposable? lifetime = null;
+        string[] reorderedTitles = [];
+
+        try
+        {
+            window.Show();
+            window.Focus();
+            lifetime = controller.Activate();
+
+            bool createdSingleTab = await WaitUntilAsync(
+                () => GetStandaloneControls(mainView.FindControl<Grid>("TerminalHost")!).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(createdSingleTab);
+
+            viewModel.NewTabCommand.Execute().Wait();
+            viewModel.NewTabCommand.Execute().Wait();
+
+            ItemsControl tabStrip = mainView.FindControl<ItemsControl>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
+            bool tabsCreated = await WaitUntilAsync(
+                () => GetTabHeaders(tabStrip).Count == 3,
+                TimeSpan.FromSeconds(2));
+            Assert.True(tabsCreated);
+
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            string[] originalTitles = GetTabHeaderTitles(tabStrip);
+            Assert.Equal(3, originalTitles.Length);
+            reorderedTitles = [originalTitles[1], originalTitles[2], originalTitles[0]];
+
+            IReadOnlyList<ContentPresenter> presenters = GetTabItemPresenters(tabStrip);
+            Point start = GetCenterPointInWindow(presenters[0], window);
+            Point end = GetCenterPointInWindow(presenters[2], window);
+            window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+            window.MouseMove(new Point((start.X + end.X) / 2d, start.Y), RawInputModifiers.LeftMouseButton);
+            window.MouseMove(end, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(end, MouseButton.Left, RawInputModifiers.None);
+
+            bool reordered = await WaitUntilAsync(
+                () => GetTabHeaderTitles(tabStrip).SequenceEqual(reorderedTitles),
+                TimeSpan.FromSeconds(2));
+            Assert.True(reordered);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        TerminalWorkspaceWindow savedWindow = Assert.Single(workspaceStore.Document.Windows);
+        Assert.Equal(reorderedTitles, savedWindow.Tabs.Select(static tab => tab.Title ?? string.Empty).ToArray());
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_TabStripItemDragBehavior_ClickAndCloseDoNotReorderTabs()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo tab-click-close";
+
+        MainView mainView = new()
+        {
+            DataContext = viewModel,
+        };
+        Window window = new()
+        {
+            Width = 900,
+            Height = 520,
+            DataContext = viewModel,
+            Content = mainView,
+        };
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            visualRoot: mainView);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            window.Show();
+            window.Focus();
+            lifetime = controller.Activate();
+
+            bool createdSingleTab = await WaitUntilAsync(
+                () => GetStandaloneControls(mainView.FindControl<Grid>("TerminalHost")!).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(createdSingleTab);
+
+            viewModel.NewTabCommand.Execute().Wait();
+            viewModel.NewTabCommand.Execute().Wait();
+
+            ItemsControl tabStrip = mainView.FindControl<ItemsControl>("TabStrip")
+                ?? throw new InvalidOperationException("TabStrip was not found.");
+            bool tabsCreated = await WaitUntilAsync(
+                () => GetTabHeaders(tabStrip).Count == 3,
+                TimeSpan.FromSeconds(2));
+            Assert.True(tabsCreated);
+
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            string[] originalTitles = GetTabHeaderTitles(tabStrip);
+            Button secondHeader = GetTabHeader(tabStrip, 1);
+            Point secondHeaderCenter = GetCenterPointInWindow(secondHeader, window);
+            window.MouseDown(secondHeaderCenter, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(secondHeaderCenter, MouseButton.Left, RawInputModifiers.None);
+
+            bool secondTabActivated = await WaitUntilAsync(
+                () => GetTabHeader(tabStrip, 1).Classes.Contains("active"),
+                TimeSpan.FromSeconds(2));
+            Assert.True(secondTabActivated);
+            Assert.Equal(originalTitles, GetTabHeaderTitles(tabStrip));
+
+            Button closeButton = Assert.IsType<Button>(GetTabHeader(tabStrip, 1).Tag);
+            Point closeButtonCenter = GetCenterPointInWindow(closeButton, window);
+            window.MouseDown(closeButtonCenter, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(closeButtonCenter, MouseButton.Left, RawInputModifiers.None);
+
+            string[] remainingTitles = [originalTitles[0], originalTitles[2]];
+            bool secondTabClosed = await WaitUntilAsync(
+                () => GetTabHeaderTitles(tabStrip).SequenceEqual(remainingTitles),
+                TimeSpan.FromSeconds(2));
+            Assert.True(secondTabClosed);
         }
         finally
         {
@@ -463,11 +696,11 @@ public sealed class MainWindowControllerModeStartupTests
 
             Assert.Single(GetStandaloneControls(terminalHost));
 
-            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+            ItemsControl tabStrip = window.FindControl<ItemsControl>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
-            Assert.Equal(2, tabStrip.Children.Count);
+            Assert.Equal(2, GetTabHeaders(tabStrip).Count);
 
-            Button firstTab = Assert.IsType<Button>(tabStrip.Children[0]);
+            Button firstTab = GetTabHeader(tabStrip, 0);
             firstTab.Command!.Execute(firstTab.CommandParameter);
             bool materializedInactiveTab = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 2,
@@ -565,6 +798,95 @@ public sealed class MainWindowControllerModeStartupTests
 
             TerminalControl control = Assert.Single(GetStandaloneControls(terminalHost));
             Assert.Equal(1_234, control.ScrollbackLimit);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_WorkspaceRestore_MissingProfileUsesDefaultAppearance()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryWorkspaceStore workspaceStore = new(new TerminalWorkspaceDocument
+        {
+            SelectedWindowId = "main",
+            Windows =
+            [
+                new TerminalWorkspaceWindow
+                {
+                    Id = "main",
+                    SelectedTabId = "tab-pwsh",
+                    Tabs =
+                    [
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "tab-pwsh",
+                            ProfileId = "pwsh",
+                            Title = "Terminal 1",
+                            TransportId = TerminalTransportIds.Pty,
+                            RenderMode = TerminalWorkspaceRenderModes.Skia,
+                            RootPane = new TerminalWorkspacePane
+                            {
+                                Id = "pane-pwsh",
+                                ProfileId = "pwsh",
+                                TransportId = TerminalTransportIds.Pty,
+                            },
+                        },
+                    ],
+                },
+            ],
+        });
+        InMemoryProfileStore profileStore = new(new TerminalSessionProfilesDocument
+        {
+            DefaultProfileId = "default",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "default",
+                    DisplayName = "Default Session",
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        FontSource = TerminalFontSource.System,
+                        FontFamilyName = "Cascadia Code",
+                        FontSize = 13,
+                    },
+                    Behavior = new TerminalSessionBehaviorSettings
+                    {
+                        EnableLigatures = true,
+                    },
+                },
+            ],
+        });
+        MainWindowViewModel viewModel = new();
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            settingsProfileStore: profileStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool restoredPane = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(restoredPane);
+
+            TerminalControl control = Assert.Single(GetStandaloneControls(terminalHost));
+            Assert.Equal("Cascadia Code", control.FontFamilyName);
+            Assert.Equal(13, control.TerminalFontSize);
+            Assert.True(control.Renderer?.EnableLigatures);
         }
         finally
         {
@@ -1468,7 +1790,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabsCreated);
 
-            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+            ItemsControl tabStrip = window.FindControl<ItemsControl>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
             Dictionary<string, Color> standaloneModeColors = GetStandaloneModeIndicatorColors(tabStrip);
             Dictionary<string, string> standaloneModeGlyphs = GetStandaloneModeIndicatorGlyphs(tabStrip);
@@ -1511,7 +1833,7 @@ public sealed class MainWindowControllerModeStartupTests
 
             TerminalModeCapabilities capabilities = TerminalModeCapabilities.Create(viewModel.NativeVtAvailable);
             TerminalModeResolver resolver = TerminalModeResolver.Default;
-            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+            ItemsControl tabStrip = window.FindControl<ItemsControl>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
 
             TerminalRenderMode[] requestedModes =
@@ -1535,7 +1857,7 @@ public sealed class MainWindowControllerModeStartupTests
                 Assert.True(created);
 
                 Control newContainer = terminalHost.Children[^1];
-                Button newHeader = Assert.IsType<Button>(tabStrip.Children[^1]);
+                Button newHeader = GetLastTabHeader(tabStrip);
                 TerminalRenderMode actualMode = ResolveModeFromContainer(newContainer, newHeader);
                 TerminalRenderMode expectedMode = resolver.ResolveSupportedMode(requestedMode, capabilities);
                 Assert.Equal(expectedMode, actualMode);
@@ -1590,9 +1912,9 @@ public sealed class MainWindowControllerModeStartupTests
             TerminalControl standalone = Assert.IsType<TerminalControl>(scrollViewer.Content);
             Assert.Equal(VtProcessorPreference.Auto, standalone.VtProcessorPreference);
 
-            StackPanel tabStrip = window.FindControl<StackPanel>("TabStrip")
+            ItemsControl tabStrip = window.FindControl<ItemsControl>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
-            Button headerButton = Assert.IsType<Button>(tabStrip.Children[^1]);
+            Button headerButton = GetLastTabHeader(tabStrip);
             string expectedVtLabel = standalone.IsUsingNativeVtProcessor ? "Ghostty VT" : "Basic VT";
             Assert.Equal($"Rendered (Pipe - {expectedVtLabel})", ToolTip.GetTip(headerButton) as string);
         }
@@ -1681,7 +2003,7 @@ public sealed class MainWindowControllerModeStartupTests
             AssertTerminalBehaviorSettings(
                 controls,
                 TerminalPasteSafetyPolicy.BlockUnsafe,
-                enableTextShaping: false,
+                enableTextShaping: true,
                 reflowOnResize: false,
                 preserveScrollbackOnSessionStart: true,
                 sixelGraphicsEnabled: true,
@@ -2616,11 +2938,16 @@ public sealed class MainWindowControllerModeStartupTests
 
             Assert.Equal("alpha", activeControl.SearchNeedle);
             Assert.Equal(2, activeControl.SearchTotal);
+            Assert.Equal(1, activeControl.SearchSelected);
+            Assert.Equal(0, activeControl.SearchSelectedDisplayIndex);
+            Assert.Contains("1/2 matches", viewModel.SearchResultText, StringComparison.Ordinal);
             Assert.Contains("/2 matches", viewModel.SearchResultText, StringComparison.Ordinal);
 
             viewModel.NextSearchCommand.Execute().Wait();
             Dispatcher.UIThread.RunJobs();
-            Assert.Equal(1, activeControl.SearchSelected);
+            Assert.Equal(0, activeControl.SearchSelected);
+            Assert.Equal(1, activeControl.SearchSelectedDisplayIndex);
+            Assert.Contains("2/2 matches", viewModel.SearchResultText, StringComparison.Ordinal);
 
             viewModel.ClearSearchCommand.Execute().Wait();
             Dispatcher.UIThread.RunJobs();
@@ -2806,9 +3133,10 @@ public sealed class MainWindowControllerModeStartupTests
         };
         titleBarTabStripHost.Bind(Visual.IsVisibleProperty, viewModel.WhenAnyValue(static model => model.IsTabsInTitleBar));
 
-        StackPanel tabStrip = new()
+        ItemsControl tabStrip = new()
         {
             Name = "TabStrip",
+            ItemsPanel = new FuncTemplate<Panel?>(() => new StackPanel { Orientation = Orientation.Horizontal }),
         };
         RepeatButton tabStripScrollLeftButton = new()
         {
@@ -2832,9 +3160,16 @@ public sealed class MainWindowControllerModeStartupTests
             Name = "TabStripNewTabButton",
             Command = viewModel.NewTabCommand,
         };
+        StackPanel windowsCaptionButtonStrip = CreateWindowsCaptionButtonStrip(
+            out Button captionMinimizeButton,
+            out Button captionMaximizeButton,
+            out Button captionRestoreButton,
+            out Button captionFullscreenButton,
+            out Button captionCloseButton);
         WindowDecorationProperties.SetElementRole(tabStripScrollLeftButton, WindowDecorationsElementRole.User);
         WindowDecorationProperties.SetElementRole(tabStripScrollRightButton, WindowDecorationsElementRole.User);
         WindowDecorationProperties.SetElementRole(tabStripNewTabButton, WindowDecorationsElementRole.User);
+        WindowDecorationProperties.SetElementRole(windowsCaptionButtonStrip, WindowDecorationsElementRole.User);
 
         Grid tabStripLayout = new()
         {
@@ -2884,11 +3219,14 @@ public sealed class MainWindowControllerModeStartupTests
             {
                 new ColumnDefinition(GridLength.Auto),
                 new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
+                new ColumnDefinition(GridLength.Auto),
             },
         };
         titleBar.Children.Add(titleBarBrandIcon);
         titleBar.Children.Add(titleBarTabStripHost);
+        titleBar.Children.Add(windowsCaptionButtonStrip);
         Grid.SetColumn(titleBarTabStripHost, 1);
+        Grid.SetColumn(windowsCaptionButtonStrip, 2);
         root.Children.Add(titleBar);
         root.Children.Add(bodyTabStripHost);
         root.Children.Add(terminalHost);
@@ -2916,11 +3254,43 @@ public sealed class MainWindowControllerModeStartupTests
         nameScope.Register(tabStripScrollViewer.Name!, tabStripScrollViewer);
         nameScope.Register(tabStripScrollRightButton.Name!, tabStripScrollRightButton);
         nameScope.Register(tabStripNewTabButton.Name!, tabStripNewTabButton);
+        nameScope.Register(windowsCaptionButtonStrip.Name!, windowsCaptionButtonStrip);
+        nameScope.Register(captionMinimizeButton.Name!, captionMinimizeButton);
+        nameScope.Register(captionMaximizeButton.Name!, captionMaximizeButton);
+        nameScope.Register(captionRestoreButton.Name!, captionRestoreButton);
+        nameScope.Register(captionFullscreenButton.Name!, captionFullscreenButton);
+        nameScope.Register(captionCloseButton.Name!, captionCloseButton);
         nameScope.Register(terminalHost.Name!, terminalHost);
 
         window.Show();
         window.Focus();
         return window;
+    }
+
+    private static StackPanel CreateWindowsCaptionButtonStrip(
+        out Button minimizeButton,
+        out Button maximizeButton,
+        out Button restoreButton,
+        out Button fullscreenButton,
+        out Button closeButton)
+    {
+        minimizeButton = new Button { Name = "CaptionMinimizeButton" };
+        maximizeButton = new Button { Name = "CaptionMaximizeButton" };
+        restoreButton = new Button { Name = "CaptionRestoreButton" };
+        fullscreenButton = new Button { Name = "CaptionFullscreenButton" };
+        closeButton = new Button { Name = "CaptionCloseButton" };
+
+        StackPanel strip = new()
+        {
+            Name = "WindowsCaptionButtonStrip",
+            Orientation = Orientation.Horizontal,
+        };
+        strip.Children.Add(minimizeButton);
+        strip.Children.Add(maximizeButton);
+        strip.Children.Add(restoreButton);
+        strip.Children.Add(fullscreenButton);
+        strip.Children.Add(closeButton);
+        return strip;
     }
 
     private static TransportModeOption FindTransportMode(MainWindowViewModel viewModel, string id)
@@ -3218,17 +3588,77 @@ public sealed class MainWindowControllerModeStartupTests
         return new ProcessEnvironmentVariableScope(variableName, originalValue);
     }
 
-    private static Dictionary<string, Color> GetStandaloneModeIndicatorColors(StackPanel tabStrip)
+    private static IReadOnlyList<Button> GetTabHeaders(ItemsControl tabStrip)
+    {
+        tabStrip.ApplyTemplate();
+        Dispatcher.UIThread.RunJobs();
+        return tabStrip
+            .GetVisualDescendants()
+            .OfType<Button>()
+            .Where(static button => button.Classes.Contains("tabHeader"))
+            .ToArray();
+    }
+
+    private static Button GetTabHeader(ItemsControl tabStrip, int index)
+    {
+        IReadOnlyList<Button> headers = GetTabHeaders(tabStrip);
+        Assert.InRange(index, 0, headers.Count - 1);
+        return headers[index];
+    }
+
+    private static Button GetLastTabHeader(ItemsControl tabStrip)
+    {
+        IReadOnlyList<Button> headers = GetTabHeaders(tabStrip);
+        Assert.NotEmpty(headers);
+        return headers[^1];
+    }
+
+    private static string[] GetTabHeaderTitles(ItemsControl tabStrip)
+    {
+        return GetTabHeaders(tabStrip)
+            .Select(GetTabHeaderTitle)
+            .ToArray();
+    }
+
+    private static string GetTabHeaderTitle(Button headerButton)
+    {
+        if (headerButton.Content is StackPanel content &&
+            content.Children.Count > 1 &&
+            content.Children[1] is TextBlock titleText)
+        {
+            return titleText.Text ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private static IReadOnlyList<ContentPresenter> GetTabItemPresenters(ItemsControl tabStrip)
+    {
+        tabStrip.ApplyTemplate();
+        Dispatcher.UIThread.RunJobs();
+        return tabStrip
+            .GetVisualDescendants()
+            .OfType<ContentPresenter>()
+            .Where(static presenter => presenter.GetVisualDescendants()
+                .OfType<Button>()
+                .Any(static button => button.Classes.Contains("tabHeader")))
+            .ToArray();
+    }
+
+    private static Point GetCenterPointInWindow(Control control, Window window)
+    {
+        Point localPoint = new(control.Bounds.Width / 2d, control.Bounds.Height / 2d);
+        return control.TranslatePoint(localPoint, window) ?? localPoint;
+    }
+
+    private static Dictionary<string, Color> GetStandaloneModeIndicatorColors(ItemsControl tabStrip)
     {
         Dictionary<string, Color> colors = new(StringComparer.Ordinal);
+        IReadOnlyList<Button> headers = GetTabHeaders(tabStrip);
 
-        for (int i = 0; i < tabStrip.Children.Count; i++)
+        for (int i = 0; i < headers.Count; i++)
         {
-            if (tabStrip.Children[i] is not Button headerButton)
-            {
-                continue;
-            }
-
+            Button headerButton = headers[i];
             string? tip = ToolTip.GetTip(headerButton) as string;
             if (string.IsNullOrWhiteSpace(tip) || !tip.Contains(" - ", StringComparison.Ordinal))
             {
@@ -3261,17 +3691,14 @@ public sealed class MainWindowControllerModeStartupTests
         return colors;
     }
 
-    private static Dictionary<string, string> GetStandaloneModeIndicatorGlyphs(StackPanel tabStrip)
+    private static Dictionary<string, string> GetStandaloneModeIndicatorGlyphs(ItemsControl tabStrip)
     {
         Dictionary<string, string> glyphs = new(StringComparer.Ordinal);
+        IReadOnlyList<Button> headers = GetTabHeaders(tabStrip);
 
-        for (int i = 0; i < tabStrip.Children.Count; i++)
+        for (int i = 0; i < headers.Count; i++)
         {
-            if (tabStrip.Children[i] is not Button headerButton)
-            {
-                continue;
-            }
-
+            Button headerButton = headers[i];
             string? tip = ToolTip.GetTip(headerButton) as string;
             if (string.IsNullOrWhiteSpace(tip) || !tip.Contains(" - ", StringComparison.Ordinal))
             {

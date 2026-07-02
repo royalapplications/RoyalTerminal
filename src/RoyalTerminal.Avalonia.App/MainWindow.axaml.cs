@@ -34,11 +34,18 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
     {
         InitializeComponent();
 
+        MainWindowBackdropCoordinator.ConfigureTransparencyHint(this);
+        Icon = RoyalTerminalWindowIconHelper.CreateWindowIcon();
+
         ViewModel = new MainWindowViewModel();
 
         this.WhenActivated(disposables =>
         {
+            var backdropCoordinator = new MainWindowBackdropCoordinator(this, ViewModel!);
+            var borderAccentCoordinator = new WindowsWindowBorderAccentCoordinator(this);
             var controller = new MainWindowController(this, ViewModel!, PaneSplitPolicy);
+            disposables.Add(backdropCoordinator.Activate());
+            disposables.Add(borderAccentCoordinator.Activate());
             disposables.Add(controller.Activate());
         });
     }
@@ -47,4 +54,5 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
     {
         AvaloniaXamlLoader.Load(this);
     }
+
 }

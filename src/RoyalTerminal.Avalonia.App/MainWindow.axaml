@@ -5,16 +5,17 @@
         x:Class="RoyalTerminal.Avalonia.App.MainWindow"
         x:Name="RootWindow"
         x:DataType="vm:MainWindowViewModel"
-        Title="RoyalTerminal"
+        Classes="royalTerminalMainWindow"
+        Title="{Binding ShellWindowTitle}"
         Width="1180"
         Height="760"
         MinWidth="720"
         MinHeight="460"
         WindowStartupLocation="CenterScreen"
         ExtendClientAreaToDecorationsHint="True"
-        WindowDecorations="Full"
+        WindowDecorations="BorderOnly"
         ExtendClientAreaTitleBarHeightHint="-1"
-        Background="{DynamicResource WindowBackgroundBrush}">
+        TransparencyBackgroundFallback="{DynamicResource WindowBackgroundBrush}">
 
   <Window.KeyBindings>
     <KeyBinding Gesture="Ctrl+T" Command="{Binding NewTabCommand}" />

@@ -32,6 +32,7 @@
     <PackageReference Include="ReactiveUI" />
     <PackageReference Include="ReactiveUI.Avalonia" />
     <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="Xaml.Behaviors.Avalonia" />
   </ItemGroup>
 
 </Project>

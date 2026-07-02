@@ -17,12 +17,14 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.App;
+using RoyalTerminal.Avalonia.App.Controls;
 using RoyalTerminal.Avalonia.App.Services;
 using RoyalTerminal.Avalonia.App.ViewModels;
 using RoyalTerminal.Avalonia.App.Views;
@@ -74,6 +76,124 @@ public class MainWindowViewModelFlowTests
 
         Assert.True(geometry.Bounds.Width > 0);
         Assert.True(geometry.Bounds.Height > 0);
+
+        Assert.True(resources.TryGetResource("Icon.NavigationRegular", null, out object? navigationResource));
+
+        Geometry navigationGeometry = Assert.IsAssignableFrom<Geometry>(navigationResource);
+
+        Assert.True(navigationGeometry.Bounds.Width > 0);
+        Assert.True(navigationGeometry.Bounds.Height > 0);
+    }
+
+    [AvaloniaFact]
+    public void SharedShellWindowsMenuChrome_ProvidesAcrylicMenuResources()
+    {
+        Application app = Application.Current
+            ?? throw new InvalidOperationException("Avalonia application was not initialized.");
+
+        Assert.True(app.TryGetResource("PopupChromeMenuPopupPadding", null, out object? popupPadding));
+        Assert.Equal(new Thickness(4), Assert.IsType<Thickness>(popupPadding));
+
+        Assert.True(app.TryGetResource("PopupChromeMenuItemPadding", null, out object? itemPadding));
+        Assert.Equal(new Thickness(0, 6), Assert.IsType<Thickness>(itemPadding));
+
+        Assert.True(app.TryGetResource("PopupChromeMenuItemCornerRadius", null, out object? itemCornerRadius));
+        Assert.Equal(new CornerRadius(5), Assert.IsType<CornerRadius>(itemCornerRadius));
+
+        Assert.True(app.TryGetResource("MenuFlyoutPresenterThemePadding", null, out object? presenterPadding));
+        Assert.Equal(new Thickness(4), Assert.IsType<Thickness>(presenterPadding));
+
+        Assert.True(app.TryGetResource("MenuFlyoutItemThemePaddingNarrow", null, out object? narrowItemPadding));
+        Assert.Equal(new Thickness(0, 6), Assert.IsType<Thickness>(narrowItemPadding));
+
+        Assert.True(app.TryGetResource("MenuFlyoutScrollerMargin", null, out object? scrollerMargin));
+        Assert.Equal(new Thickness(0), Assert.IsType<Thickness>(scrollerMargin));
+
+        Assert.True(app.TryGetResource("MenuIconPresenterMargin", null, out object? iconMargin));
+        Assert.Equal(new Thickness(0, 0, 8, 0), Assert.IsType<Thickness>(iconMargin));
+
+        Assert.True(app.TryGetResource("MenuInputGestureTextMargin", null, out object? inputGestureMargin));
+        Assert.Equal(new Thickness(16, 0, 0, 0), Assert.IsType<Thickness>(inputGestureMargin));
+
+        Assert.True(app.TryGetResource("MenuFlyoutItemChevronMargin", null, out object? chevronMargin));
+        Assert.Equal(new Thickness(8, 0, 0, 0), Assert.IsType<Thickness>(chevronMargin));
+
+        Assert.True(app.TryGetResource("PopupChromeMenuItemIconColumnWidth", null, out object? iconColumnWidth));
+        Assert.Equal(36d, Assert.IsType<double>(iconColumnWidth));
+
+        Assert.True(app.TryGetResource("PopupChromeMenuItemPopupColumnWidth", null, out object? popupColumnWidth));
+        Assert.Equal(30d, Assert.IsType<double>(popupColumnWidth));
+
+        Assert.True(app.TryGetResource("CheckMarkPathData", null, out object? checkMarkPathData));
+        Assert.True(Assert.IsAssignableFrom<Geometry>(checkMarkPathData).Bounds.Width > 0);
+
+        Assert.True(app.TryGetResource("MenuItemChevronPathData", null, out object? chevronPathData));
+        Assert.True(Assert.IsAssignableFrom<Geometry>(chevronPathData).Bounds.Width > 0);
+
+        Assert.True(app.TryGetResource("PopupChromeAcrylicBackgroundBrush", null, out object? backgroundBrush));
+        SolidColorBrush brush = Assert.IsType<SolidColorBrush>(backgroundBrush);
+        Color[] expectedAcrylicColors =
+        [
+            Color.Parse("#C5F8F8F8"),
+            Color.Parse("#C5303030"),
+        ];
+        Assert.Contains(brush.Color, expectedAcrylicColors);
+
+        Assert.True(app.TryGetResource("MenuFlyoutItemBackgroundPointerOver", null, out object? pointerOverBrush));
+        SolidColorBrush pointerOver = Assert.IsType<SolidColorBrush>(pointerOverBrush);
+        Color[] expectedPointerOverColors =
+        [
+            Color.Parse("#1F000000"),
+            Color.Parse("#2EFFFFFF"),
+        ];
+        Assert.Contains(pointerOver.Color, expectedPointerOverColors);
+
+        Assert.True(app.TryGetResource("MenuFlyoutItemBackgroundPressed", null, out object? pressedBrush));
+        SolidColorBrush pressed = Assert.IsType<SolidColorBrush>(pressedBrush);
+        Color[] expectedPressedColors =
+        [
+            Color.Parse("#2B000000"),
+            Color.Parse("#3AFFFFFF"),
+        ];
+        Assert.Contains(pressed.Color, expectedPressedColors);
+    }
+
+    [AvaloniaFact]
+    public void RoyalTerminalWindowIconHelper_CreatesInMemoryIcoFromLogoSvg()
+    {
+        byte[] icoBytes = RoyalTerminalWindowIconHelper.CreateIcoBytes();
+
+        Assert.True(icoBytes.Length > 6);
+        Assert.Equal(0, BitConverter.ToUInt16(icoBytes, 0));
+        Assert.Equal(1, BitConverter.ToUInt16(icoBytes, 2));
+        Assert.Equal(7, BitConverter.ToUInt16(icoBytes, 4));
+
+        int firstImageOffset = BitConverter.ToInt32(icoBytes, 18);
+        Assert.Equal(0x89, icoBytes[firstImageOffset]);
+        Assert.Equal((byte)'P', icoBytes[firstImageOffset + 1]);
+        Assert.Equal((byte)'N', icoBytes[firstImageOffset + 2]);
+        Assert.Equal((byte)'G', icoBytes[firstImageOffset + 3]);
+
+        using var stream = new MemoryStream(icoBytes, writable: false);
+        var icon = new WindowIcon(stream);
+
+        Assert.NotNull(icon);
+        Assert.Contains("<svg", RoyalTerminalWindowIconHelper.CreateLogoSvg(), StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
+    public void MainWindow_UsesGeneratedRoyalTerminalWindowIcon()
+    {
+        MainWindow window = new();
+
+        try
+        {
+            Assert.NotNull(window.Icon);
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 
     [AvaloniaFact]
@@ -225,6 +345,178 @@ public class MainWindowViewModelFlowTests
                     ContainsNativeMenuCommand(menu, keyBinding.Command),
                     $"Expected key binding '{keyBinding.Gesture}' command to be mirrored in the native menu.");
             }
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void MainWindow_ShellMenuSurfaces_SwitchBetweenMenuBarAndTitleBarLogoButton()
+    {
+        MainWindow window = new();
+
+        try
+        {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+            MainView mainView = window.FindControl<MainView>("MainView")
+                ?? throw new InvalidOperationException("MainView was not found.");
+            NativeMenu nativeMenu = NativeMenu.GetMenu(window)
+                ?? throw new InvalidOperationException("MainWindow native menu was not found.");
+            Border mainMenuBarHost = FindShellControl<Border>(window, "MainMenuBarHost")
+                ?? throw new InvalidOperationException("MainMenuBarHost was not found.");
+            Menu mainMenuBar = FindShellControl<Menu>(window, "MainMenuBar")
+                ?? throw new InvalidOperationException("MainMenuBar was not found.");
+            NativeMenuBar mainNativeMenuBar = FindShellControl<NativeMenuBar>(window, "MainNativeMenuBar")
+                ?? throw new InvalidOperationException("MainNativeMenuBar was not found.");
+            Border mainMenuLogo = FindShellControl<Border>(window, "MainMenuLogo")
+                ?? throw new InvalidOperationException("MainMenuLogo was not found.");
+            Button shellMenuButton = FindShellControl<Button>(window, "ShellMenuButton")
+                ?? throw new InvalidOperationException("ShellMenuButton was not found.");
+            PathIcon mainMenuLogoIcon = Assert.Single(mainMenuLogo.GetVisualDescendants().OfType<PathIcon>());
+            PathIcon shellMenuButtonIcon = Assert.IsType<PathIcon>(shellMenuButton.Content);
+
+            Assert.Same(mainMenuBar, mainView.FindControl<Menu>("MainMenuBar"));
+            Assert.Same(mainNativeMenuBar, mainView.FindControl<NativeMenuBar>("MainNativeMenuBar"));
+            Application app = Application.Current
+                ?? throw new InvalidOperationException("Avalonia application was not initialized.");
+            Assert.True(app.TryGetResource("PopupChromeTopLevelMenuItemTheme", null, out object? topLevelThemeResource));
+            Assert.True(app.TryGetResource("PopupChromeMenuItemTheme", null, out object? popupItemThemeResource));
+            ControlTheme topLevelTheme = Assert.IsType<ControlTheme>(topLevelThemeResource);
+            ControlTheme popupItemTheme = Assert.IsType<ControlTheme>(popupItemThemeResource);
+            Assert.Same(topLevelTheme, mainMenuBar.ItemContainerTheme);
+            Assert.Contains(
+                mainMenuBarHost.GetVisualAncestors().OfType<Border>(),
+                border => border.Classes.Contains("titleBarArea"));
+            Assert.True(viewModel.IsShellMenuBarVisible);
+            Assert.Equal(!OperatingSystem.IsMacOS(), viewModel.IsManagedShellMenuBarVisible);
+            Assert.Equal(OperatingSystem.IsMacOS(), viewModel.IsNativeShellMenuBarVisible);
+            Assert.False(viewModel.IsShellMenuButtonVisible);
+            Assert.Equal(viewModel.IsShellMenuBarVisible, mainMenuBarHost.IsVisible);
+            Assert.Equal(viewModel.IsManagedShellMenuBarVisible, mainMenuBar.IsVisible);
+            Assert.Equal(viewModel.IsNativeShellMenuBarVisible, mainNativeMenuBar.IsVisible);
+            Assert.Equal(viewModel.IsShellMenuBarVisible, mainMenuLogo.IsVisible);
+            Assert.False(mainMenuLogo.IsHitTestVisible);
+            Assert.Contains("railIcon", mainMenuLogoIcon.Classes);
+            Assert.DoesNotContain("commandIcon", mainMenuLogoIcon.Classes);
+            Assert.False(shellMenuButton.IsVisible);
+            Assert.Equal(
+                NativeTopLevelHeaders(nativeMenu),
+                MenuTopLevelHeaders(mainMenuBar));
+            MenuItem shellMenuItem = Assert.IsType<MenuItem>(mainMenuBar.Items[0]);
+            Assert.NotNull(shellMenuItem.Theme);
+            Assert.Equal(popupItemTheme.TargetType, shellMenuItem.Theme!.TargetType);
+            AssertMenuCommand(mainMenuBar, viewModel.NewTabCommand, "_New Tab");
+            AssertMenuCommand(mainMenuBar, viewModel.CopySelectionCommand, "_Copy");
+            AssertMenuCommand(mainMenuBar, viewModel.ToggleLeftPanelCommand, "Show _Left Panel");
+
+            viewModel.IsTabsInTitleBar = true;
+
+            Assert.False(viewModel.IsShellMenuBarVisible);
+            Assert.False(viewModel.IsManagedShellMenuBarVisible);
+            Assert.False(viewModel.IsNativeShellMenuBarVisible);
+            Assert.Equal(!OperatingSystem.IsMacOS(), viewModel.IsShellMenuButtonVisible);
+            Assert.False(mainMenuBarHost.IsVisible);
+            Assert.False(mainMenuLogo.IsVisible);
+            Assert.Equal(viewModel.IsShellMenuButtonVisible, shellMenuButton.IsVisible);
+            Assert.Equal("Menu", ToolTip.GetTip(shellMenuButton));
+            Assert.Contains("railIcon", shellMenuButtonIcon.Classes);
+            Assert.DoesNotContain("commandIcon", shellMenuButtonIcon.Classes);
+
+            MenuFlyout flyout = Assert.IsType<MenuFlyout>(shellMenuButton.Flyout);
+            Assert.Contains("shell-menu-flyout", flyout.FlyoutPresenterClasses);
+            Assert.Equal(
+                NativeTopLevelHeaders(nativeMenu),
+                MenuFlyoutTopLevelHeaders(flyout));
+
+            AssertMenuFlyoutCommand(flyout, viewModel.NewTabCommand, "_New Tab");
+            AssertMenuFlyoutCommand(flyout, viewModel.CopySelectionCommand, "_Copy");
+            AssertMenuFlyoutCommand(flyout, viewModel.ToggleLeftPanelCommand, "Show _Left Panel");
+            AssertMenuFlyoutCommand(flyout, viewModel.SelectCaptureFormatCommand, "RoyalTerminal JSON");
+            AssertMenuFlyoutCommand(flyout, viewModel.SelectCaptureFormatCommand, "Asciicast v3");
+            AssertMenuFlyoutCommand(flyout, viewModel.CycleTabForwardCommand, "_Next Tab");
+            AssertMenuFlyoutCommand(flyout, viewModel.ShowHyperlinkSampleCommand, "_Hyperlink Sample");
+
+            MenuItem leftPanelItem = FindMenuFlyoutItem(flyout, "Show _Left Panel");
+            MenuItem jsonCaptureItem = FindMenuFlyoutItem(flyout, "RoyalTerminal JSON");
+            MenuItem asciicastCaptureItem = FindMenuFlyoutItem(flyout, "Asciicast v3");
+
+            Assert.Equal(MenuItemToggleType.CheckBox, leftPanelItem.ToggleType);
+            Assert.Equal(viewModel.IsLeftPanelVisible, leftPanelItem.IsChecked);
+            Assert.Equal(MenuItemToggleType.Radio, jsonCaptureItem.ToggleType);
+            Assert.Equal(MenuItemToggleType.Radio, asciicastCaptureItem.ToggleType);
+            Assert.Equal(viewModel.IsRoyalTerminalJsonCaptureFormatSelected, jsonCaptureItem.IsChecked);
+            Assert.Equal(viewModel.IsAsciicastV3CaptureFormatSelected, asciicastCaptureItem.IsChecked);
+            Assert.Equal(TerminalCaptureSessionFormats.RoyalTerminalJsonId, jsonCaptureItem.CommandParameter);
+            Assert.Equal(TerminalCaptureSessionFormats.AsciicastV3Id, asciicastCaptureItem.CommandParameter);
+
+            Assert.Same(
+                FindNativeMenuItem(nativeMenu, "_New Tab").Command,
+                FindMenuFlyoutItem(flyout, "_New Tab").Command);
+            Assert.Same(
+                FindNativeMenuItem(nativeMenu, "_Copy").Command,
+                FindMenuFlyoutItem(flyout, "_Copy").Command);
+
+            Grid rootGrid = Assert.IsType<Grid>(mainView.Content);
+            ContextMenu contextMenu = rootGrid.ContextMenu
+                ?? throw new InvalidOperationException("Terminal context menu was not found.");
+
+            AssertContextMenuCommand(contextMenu, viewModel.CopySelectionCommand, "_Copy");
+            AssertContextMenuCommand(contextMenu, viewModel.PasteClipboardCommand, "_Paste");
+            AssertContextMenuCommand(contextMenu, viewModel.SelectAllCommand, "Select _All");
+            AssertContextMenuCommand(contextMenu, viewModel.NewTabCommand, "_New Tab");
+            AssertContextMenuCommand(contextMenu, viewModel.CloseCurrentTabCommand, "C_lose Tab");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void MainWindow_ContextMenu_ShowsIconOnlyForNewTab()
+    {
+        MainWindow window = new();
+
+        try
+        {
+            MainView mainView = Assert.IsType<MainView>(window.Content);
+            Grid rootGrid = Assert.IsType<Grid>(mainView.Content);
+            ContextMenu contextMenu = rootGrid.ContextMenu
+                ?? throw new InvalidOperationException("Terminal context menu was not found.");
+
+            Assert.Null(FindContextMenuItem(contextMenu, "_Copy").Icon);
+            Assert.Null(FindContextMenuItem(contextMenu, "_Paste").Icon);
+            Assert.Null(FindContextMenuItem(contextMenu, "Select _All").Icon);
+            Assert.NotNull(FindContextMenuItem(contextMenu, "_New Tab").Icon);
+            Assert.Null(FindContextMenuItem(contextMenu, "C_lose Tab").Icon);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void MainWindow_TitleCaptionAndTitleBarLogo_AreHiddenOutsideMacOS()
+    {
+        MainWindow window = new();
+
+        try
+        {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+            Border titleBarBrandIcon = FindShellControl<Border>(window, "TitleBarBrandIcon")
+                ?? throw new InvalidOperationException("TitleBarBrandIcon was not found.");
+
+            string expectedTitle = OperatingSystem.IsMacOS() ? "RoyalTerminal" : string.Empty;
+
+            Assert.Equal(expectedTitle, viewModel.ShellWindowTitle);
+            Assert.Equal(expectedTitle, window.Title);
+            Assert.Equal(OperatingSystem.IsMacOS() && !viewModel.IsTabsInTitleBar, viewModel.IsTitleBarLogoVisible);
+            Assert.Equal(viewModel.IsTitleBarLogoVisible, titleBarBrandIcon.IsVisible);
         }
         finally
         {
@@ -533,8 +825,8 @@ public class MainWindowViewModelFlowTests
         {
             MainWindowViewModel viewModel = window.ViewModel
                 ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
-            NativeMenuBar mainMenuBar = FindShellControl<NativeMenuBar>(window, "MainMenuBar")
-                ?? throw new InvalidOperationException("MainMenuBar was not found.");
+            Button shellMenuButton = FindShellControl<Button>(window, "ShellMenuButton")
+                ?? throw new InvalidOperationException("ShellMenuButton was not found.");
             Grid topCommandBar = FindShellControl<Grid>(window, "TopCommandBar")
                 ?? throw new InvalidOperationException("TopCommandBar was not found.");
             Grid topSearchPanel = FindShellControl<Grid>(window, "TopSearchPanel")
@@ -543,24 +835,22 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("TabStripLayout was not found.");
             TextBox topSearchBox = FindShellControl<TextBox>(window, "TopSearchBox")
                 ?? throw new InvalidOperationException("TopSearchBox was not found.");
-            Button topSearchApplyButton = FindShellControl<Button>(window, "TopSearchApplyButton")
-                ?? throw new InvalidOperationException("TopSearchApplyButton was not found.");
+            Panel topSearchLeftContent = FindShellControl<Panel>(window, "TopSearchLeftContent")
+                ?? throw new InvalidOperationException("TopSearchLeftContent was not found.");
+            PathIcon topSearchIcon = FindShellControl<PathIcon>(window, "TopSearchIcon")
+                ?? throw new InvalidOperationException("TopSearchIcon was not found.");
+            CompositionRingSpinner topSearchBusyIndicator = FindShellControl<CompositionRingSpinner>(window, "TopSearchBusyIndicator")
+                ?? throw new InvalidOperationException("TopSearchBusyIndicator was not found.");
+            StackPanel topSearchRightContent = FindShellControl<StackPanel>(window, "TopSearchRightContent")
+                ?? throw new InvalidOperationException("TopSearchRightContent was not found.");
+            TextBlock topSearchStatusText = FindShellControl<TextBlock>(window, "TopSearchStatusText")
+                ?? throw new InvalidOperationException("TopSearchStatusText was not found.");
+            Button topSearchNextButton = FindShellControl<Button>(window, "TopSearchNextButton")
+                ?? throw new InvalidOperationException("TopSearchNextButton was not found.");
             Button topSearchPreviousButton = FindShellControl<Button>(window, "TopSearchPreviousButton")
                 ?? throw new InvalidOperationException("TopSearchPreviousButton was not found.");
-            Border topSearchStatusIdleChip = FindShellControl<Border>(window, "TopSearchStatusIdleChip")
-                ?? throw new InvalidOperationException("TopSearchStatusIdleChip was not found.");
-            Border topSearchStatusMatchesChip = FindShellControl<Border>(window, "TopSearchStatusMatchesChip")
-                ?? throw new InvalidOperationException("TopSearchStatusMatchesChip was not found.");
-            Border topSearchStatusNoMatchesChip = FindShellControl<Border>(window, "TopSearchStatusNoMatchesChip")
-                ?? throw new InvalidOperationException("TopSearchStatusNoMatchesChip was not found.");
-            PathIcon topSearchStatusIdleIcon = FindShellControl<PathIcon>(window, "TopSearchStatusIdleIcon")
-                ?? throw new InvalidOperationException("TopSearchStatusIdleIcon was not found.");
-            TextBlock topSearchStatusIdleText = FindShellControl<TextBlock>(window, "TopSearchStatusIdleText")
-                ?? throw new InvalidOperationException("TopSearchStatusIdleText was not found.");
-            TextBlock topSearchStatusMatchesText = FindShellControl<TextBlock>(window, "TopSearchStatusMatchesText")
-                ?? throw new InvalidOperationException("TopSearchStatusMatchesText was not found.");
-            TextBlock topSearchStatusNoMatchesText = FindShellControl<TextBlock>(window, "TopSearchStatusNoMatchesText")
-                ?? throw new InvalidOperationException("TopSearchStatusNoMatchesText was not found.");
+            Button topSearchClearButton = FindShellControl<Button>(window, "TopSearchClearButton")
+                ?? throw new InvalidOperationException("TopSearchClearButton was not found.");
             Button tabStripNewTabButton = FindShellControl<Button>(window, "TabStripNewTabButton")
                 ?? throw new InvalidOperationException("TabStripNewTabButton was not found.");
             PathIcon tabStripNewTabIcon = FindShellControl<PathIcon>(window, "TabStripNewTabIcon")
@@ -575,11 +865,12 @@ public class MainWindowViewModelFlowTests
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
-            Assert.NotNull(mainMenuBar);
+            Assert.Equal(viewModel.IsShellMenuButtonVisible, shellMenuButton.IsVisible);
             Assert.Null(FindShellControl<Button>(window, "TopNewTabButton"));
             Assert.True(topCommandBar.ClipToBounds);
             Assert.True(topSearchPanel.ClipToBounds);
             Assert.True(topSearchPanel.IsVisible);
+            Assert.DoesNotContain(topSearchBox.KeyBindings, keyBinding => keyBinding.Gesture?.Key == Key.Enter);
             Assert.True(tabStripLayout.ClipToBounds);
             Assert.Equal(4, tabStripLayout.ColumnDefinitions.Count);
             Assert.Empty(topCommandBar.Children.OfType<ScrollViewer>());
@@ -595,25 +886,30 @@ public class MainWindowViewModelFlowTests
             Assert.False(tabStripScrollRightButton.IsVisible);
             Assert.Same(topSearchPanel, topSearchBox.Parent);
             Assert.Contains("searchField", topSearchBox.Classes);
-            Assert.Equal(240d, topSearchBox.MinWidth);
+            Assert.Equal(104d, topSearchBox.MinWidth);
+            Assert.Equal(new Thickness(0, 0, 12, 0), topSearchPanel.Margin);
             Assert.Equal(VerticalAlignment.Center, topSearchBox.VerticalContentAlignment);
-            Assert.Equal(new Thickness(10, 3), topSearchBox.Padding);
-            Assert.Contains("iconButton", topSearchApplyButton.Classes);
-            Assert.Contains("iconButton", topSearchPreviousButton.Classes);
-            Assert.Contains("searchStatusChip", topSearchStatusIdleChip.Classes);
-            Assert.Contains("searchStatusIdle", topSearchStatusIdleChip.Classes);
-            Assert.Contains("searchStatusIcon", topSearchStatusIdleIcon.Classes);
-            Assert.Contains("searchStatusText", topSearchStatusIdleText.Classes);
-            Assert.True(topSearchStatusIdleChip.IsVisible);
-            Assert.False(topSearchStatusMatchesChip.IsVisible);
-            Assert.False(topSearchStatusNoMatchesChip.IsVisible);
-            Assert.False(topSearchStatusIdleChip.IsHitTestVisible);
-            Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(topSearchStatusIdleChip));
-            Assert.Equal("Idle", topSearchStatusIdleText.Text);
-            Assert.Equal(viewModel.SearchResultText, ToolTip.GetTip(topSearchStatusIdleChip));
-            Assert.True(
-                topSearchStatusIdleChip.Opacity < 0.8,
-                $"Expected idle search status to be visually muted. Opacity={topSearchStatusIdleChip.Opacity}.");
+            Assert.Equal(new Thickness(6, 3), topSearchBox.Padding);
+            Assert.Same(topSearchLeftContent, topSearchBox.InnerLeftContent);
+            Assert.Same(topSearchRightContent, topSearchBox.InnerRightContent);
+            Assert.Null(FindShellControl<Button>(window, "TopSearchApplyButton"));
+            Assert.Null(FindShellControl<Border>(window, "TopSearchStatusIdleChip"));
+            Assert.Null(FindShellControl<Border>(window, "TopSearchStatusMatchesChip"));
+            Assert.Null(FindShellControl<Border>(window, "TopSearchStatusNoMatchesChip"));
+            Assert.Contains("searchInlineIcon", topSearchIcon.Classes);
+            Assert.Contains("searchInlineStatusText", topSearchStatusText.Classes);
+            Assert.Contains("searchInlineButton", topSearchNextButton.Classes);
+            Assert.Contains("searchInlineButton", topSearchPreviousButton.Classes);
+            Assert.Contains("searchInlineButton", topSearchClearButton.Classes);
+            Assert.True(topSearchIcon.IsVisible);
+            Assert.False(topSearchBusyIndicator.IsVisible);
+            Assert.False(topSearchBusyIndicator.IsActive);
+            Assert.False(topSearchStatusText.IsVisible);
+            Assert.False(topSearchNextButton.IsVisible);
+            Assert.False(topSearchPreviousButton.IsVisible);
+            Assert.False(topSearchClearButton.IsVisible);
+            Assert.Equal("Idle", topSearchStatusText.Text);
+            Assert.Equal(viewModel.SearchResultText, ToolTip.GetTip(topSearchStatusText));
             Assert.Contains("tabStripNewTab", tabStripNewTabButton.Classes);
             Assert.Contains("tabStripNewTabIcon", tabStripNewTabIcon.Classes);
             Assert.Same(viewModel.NewTabCommand, tabStripNewTabButton.Command);
@@ -621,42 +917,47 @@ public class MainWindowViewModelFlowTests
                 window.GetVisualDescendants().OfType<Border>(),
                 border => border.Classes.Contains("brandMark"));
 
+            viewModel.IsSearchBusy = true;
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+
+            Assert.False(topSearchIcon.IsVisible);
+            Assert.True(topSearchBusyIndicator.IsVisible);
+            Assert.True(topSearchBusyIndicator.IsActive);
+
+            viewModel.IsSearchBusy = false;
             viewModel.SetSearchState("needle", total: 2, selected: 0, usesNativeScrollback: true);
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
-            Assert.False(topSearchStatusIdleChip.IsVisible);
-            Assert.True(topSearchStatusMatchesChip.IsVisible);
-            Assert.False(topSearchStatusNoMatchesChip.IsVisible);
-            Assert.Contains("searchStatusMatches", topSearchStatusMatchesChip.Classes);
-            Assert.Equal("1/2", topSearchStatusMatchesText.Text);
-            Assert.Equal(viewModel.SearchResultText, ToolTip.GetTip(topSearchStatusMatchesChip));
+            Assert.True(topSearchIcon.IsVisible);
+            Assert.False(topSearchBusyIndicator.IsVisible);
+            Assert.True(topSearchStatusText.IsVisible);
+            Assert.True(topSearchNextButton.IsVisible);
+            Assert.True(topSearchPreviousButton.IsVisible);
+            Assert.True(topSearchClearButton.IsVisible);
+            Assert.True(topSearchNextButton.IsEnabled);
+            Assert.True(topSearchPreviousButton.IsEnabled);
+            Assert.Contains("searchMatches", topSearchStatusText.Classes);
+            Assert.DoesNotContain("searchNoMatches", topSearchStatusText.Classes);
+            Assert.Equal("1/2", topSearchStatusText.Text);
+            Assert.Equal(viewModel.SearchResultText, ToolTip.GetTip(topSearchStatusText));
 
             viewModel.SetSearchState("missing", total: 0, selected: 0, usesNativeScrollback: false);
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
-            Assert.False(topSearchStatusIdleChip.IsVisible);
-            Assert.False(topSearchStatusMatchesChip.IsVisible);
-            Assert.True(topSearchStatusNoMatchesChip.IsVisible);
-            Assert.Contains("searchStatusNoMatches", topSearchStatusNoMatchesChip.Classes);
-            Assert.Equal("No matches", topSearchStatusNoMatchesText.Text);
-            Assert.Equal(viewModel.SearchResultText, ToolTip.GetTip(topSearchStatusNoMatchesChip));
+            Assert.True(topSearchStatusText.IsVisible);
+            Assert.False(topSearchNextButton.IsVisible);
+            Assert.False(topSearchPreviousButton.IsVisible);
+            Assert.True(topSearchClearButton.IsVisible);
+            Assert.DoesNotContain("searchMatches", topSearchStatusText.Classes);
+            Assert.Contains("searchNoMatches", topSearchStatusText.Classes);
+            Assert.Equal("No matches", topSearchStatusText.Text);
+            Assert.Equal(viewModel.SearchResultText, ToolTip.GetTip(topSearchStatusText));
 
             Assert.True(topSearchPanel.Bounds.Width > 0);
             Assert.True(tabStripNewTabButton.Bounds.Width > 0);
-            Assert.True(
-                Math.Abs(topSearchApplyButton.Bounds.Width - 32) <= 0.5,
-                $"Expected compact search icon button width. Button={topSearchApplyButton.Bounds}.");
-            Assert.True(
-                Math.Abs(topSearchApplyButton.Bounds.Height - 32) <= 0.5,
-                $"Expected compact search icon button height. Button={topSearchApplyButton.Bounds}.");
-            Assert.True(
-                topSearchApplyButton.Bounds.Left <= topSearchBox.Bounds.Right + 4.5,
-                $"Search action button should sit directly after input. Search={topSearchBox.Bounds}, Button={topSearchApplyButton.Bounds}.");
-            Assert.True(
-                topSearchPreviousButton.Bounds.Left <= topSearchApplyButton.Bounds.Right + 4.5,
-                $"Search navigation buttons should use compact spacing. Apply={topSearchApplyButton.Bounds}, Previous={topSearchPreviousButton.Bounds}.");
             Assert.True(
                 topSearchPanel.Bounds.Right <= topCommandBar.Bounds.Width + 0.5,
                 $"Top search panel escapes the command bar. Search={topSearchPanel.Bounds}, TopBar={topCommandBar.Bounds}.");
@@ -695,20 +996,21 @@ public class MainWindowViewModelFlowTests
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
 
             Assert.Equal(HorizontalAlignment.Right, topSearchPanel.HorizontalAlignment);
-            Assert.Equal(960d, topSearchPanel.MaxWidth);
-            Assert.Equal(240d, topSearchBox.MinWidth);
+            Assert.Equal(624d, topSearchPanel.MaxWidth);
+            Assert.Equal(104d, topSearchBox.MinWidth);
+            Assert.Equal(new Thickness(0, 0, 12, 0), topSearchPanel.Margin);
             Assert.True(
                 topSearchPanel.Bounds.Width <= topSearchPanel.MaxWidth + 0.5,
                 $"Expected search panel width to be capped. Search={topSearchPanel.Bounds}, MaxWidth={topSearchPanel.MaxWidth}.");
             Assert.True(
-                Math.Abs(topSearchPanel.Bounds.Right - topCommandBar.Bounds.Width) <= 0.5,
-                $"Expected search panel to align to the right edge of the command bar. Search={topSearchPanel.Bounds}, TopBar={topCommandBar.Bounds}.");
+                Math.Abs(topSearchPanel.Bounds.Right - (topCommandBar.Bounds.Width - topSearchPanel.Margin.Right)) <= 0.5,
+                $"Expected search panel to keep its right margin from the command bar edge. Search={topSearchPanel.Bounds}, TopBar={topCommandBar.Bounds}.");
             Assert.True(
                 topSearchBox.Bounds.Width >= topSearchBox.MinWidth - 0.5,
                 $"Expected search input to keep its larger minimum width. SearchBox={topSearchBox.Bounds}, MinWidth={topSearchBox.MinWidth}.");
             Assert.True(
-                topSearchBox.Bounds.Width < topCommandBar.Bounds.Width * 0.75,
-                $"Expected search input to remain bounded on wide windows. SearchBox={topSearchBox.Bounds}, TopBar={topCommandBar.Bounds}.");
+                Math.Abs(topSearchBox.Bounds.Width - topSearchPanel.Bounds.Width) <= 0.5,
+                $"Expected search input to own the bounded search panel width. SearchBox={topSearchBox.Bounds}, Search={topSearchPanel.Bounds}.");
         }
         finally
         {
@@ -756,13 +1058,13 @@ public class MainWindowViewModelFlowTests
             Assert.True(viewModel.IsStatusBarVisible);
             Assert.False(viewModel.IsTabsInTitleBar);
             Assert.True(viewModel.IsBodyTabStripVisible);
-            Assert.True(viewModel.IsTitleBarLogoVisible);
+            Assert.Equal(OperatingSystem.IsMacOS(), viewModel.IsTitleBarLogoVisible);
             Assert.True(shellRail.IsVisible);
             Assert.True(topSearchPanel.IsVisible);
             Assert.True(statusBar.IsVisible);
             Assert.False(titleBarTabStripHost.IsVisible);
             Assert.True(bodyTabStripHost.IsVisible);
-            Assert.True(titleBarBrandIcon.IsVisible);
+            Assert.Equal(viewModel.IsTitleBarLogoVisible, titleBarBrandIcon.IsVisible);
             Assert.True(showLeftPanelItem.IsChecked);
             Assert.True(showSearchPanelItem.IsChecked);
             Assert.True(showStatusBarItem.IsChecked);
@@ -831,6 +1133,22 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("TitleBarBrandPathIcon was not found.");
             Border macTrafficLightReserve = FindShellControl<Border>(window, "MacTrafficLightReserve")
                 ?? throw new InvalidOperationException("MacTrafficLightReserve was not found.");
+            Grid titleBarRightDecorationReserve = FindShellControl<Grid>(window, "TitleBarRightDecorationReserve")
+                ?? throw new InvalidOperationException("TitleBarRightDecorationReserve was not found.");
+            StackPanel windowsCaptionButtonStrip = FindShellControl<StackPanel>(window, "WindowsCaptionButtonStrip")
+                ?? throw new InvalidOperationException("WindowsCaptionButtonStrip was not found.");
+            Button captionMinimizeButton = FindShellControl<Button>(window, "CaptionMinimizeButton")
+                ?? throw new InvalidOperationException("CaptionMinimizeButton was not found.");
+            Button captionMaximizeButton = FindShellControl<Button>(window, "CaptionMaximizeButton")
+                ?? throw new InvalidOperationException("CaptionMaximizeButton was not found.");
+            Button captionRestoreButton = FindShellControl<Button>(window, "CaptionRestoreButton")
+                ?? throw new InvalidOperationException("CaptionRestoreButton was not found.");
+            Button captionFullscreenButton = FindShellControl<Button>(window, "CaptionFullscreenButton")
+                ?? throw new InvalidOperationException("CaptionFullscreenButton was not found.");
+            Button captionCloseButton = FindShellControl<Button>(window, "CaptionCloseButton")
+                ?? throw new InvalidOperationException("CaptionCloseButton was not found.");
+            Grid topSearchPanel = FindShellControl<Grid>(window, "TopSearchPanel")
+                ?? throw new InvalidOperationException("TopSearchPanel was not found.");
             TextBox topSearchBox = FindShellControl<TextBox>(window, "TopSearchBox")
                 ?? throw new InvalidOperationException("TopSearchBox was not found.");
             Grid statusBarLayout = FindShellControl<Grid>(window, "StatusBarLayout")
@@ -858,9 +1176,13 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("Title bar is not attached to the window visual tree.");
             Point shellRailOrigin = shellRail.TranslatePoint(new Point(0, 0), window)
                 ?? throw new InvalidOperationException("Shell rail is not attached to the window visual tree.");
+            Point topSearchPanelOrigin = topSearchPanel.TranslatePoint(new Point(0, 0), titleBarLayout)
+                ?? throw new InvalidOperationException("Search panel is not attached to the title bar layout.");
+            Point rightDecorationReserveOrigin = titleBarRightDecorationReserve.TranslatePoint(new Point(0, 0), titleBarLayout)
+                ?? throw new InvalidOperationException("Title bar right decoration reserve is not attached to the title bar layout.");
 
             Assert.True(window.ExtendClientAreaToDecorationsHint);
-            Assert.Equal(WindowDecorations.Full, window.WindowDecorations);
+            Assert.Equal(WindowDecorations.BorderOnly, window.WindowDecorations);
             Assert.Equal(-1d, window.ExtendClientAreaTitleBarHeightHint);
             Assert.Contains("titleBarArea", titleBar.Classes);
             Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(titleBar));
@@ -874,13 +1196,30 @@ public class MainWindowViewModelFlowTests
                 macTrafficLightReserve.Bounds.Width >= 88 - 0.5,
                 $"Expected titlebar to reserve macOS traffic-light space. Reserve={macTrafficLightReserve.Bounds}.");
             Assert.True(
+                titleBarRightDecorationReserve.Bounds.Width >= viewModel.TitleBarRightDecorationReserveWidth - 0.5,
+                $"Expected titlebar to reserve caption button space. Reserve={titleBarRightDecorationReserve.Bounds}.");
+            Assert.True(
+                topSearchPanelOrigin.X + topSearchPanel.Bounds.Width <= rightDecorationReserveOrigin.X + 0.5,
+                $"Expected search panel to stay out of caption button space. Search={topSearchPanelOrigin}+{topSearchPanel.Bounds}, Reserve={rightDecorationReserveOrigin}+{titleBarRightDecorationReserve.Bounds}.");
+            Assert.True(
                 titleBarDragSurface.Bounds.Height >= titleBarLayout.Bounds.Height - 0.5,
                 $"Expected titlebar drag surface to cover the titlebar height. Drag={titleBarDragSurface.Bounds}, Layout={titleBarLayout.Bounds}.");
-            Assert.True(
-                titleBarBrandDragZone.Bounds.Width > 0,
-                $"Expected brand icon area to be a drag zone. BrandDrag={titleBarBrandDragZone.Bounds}.");
+            if (viewModel.IsTitleBarLogoVisible)
+            {
+                Assert.True(
+                    titleBarBrandDragZone.Bounds.Width > 0,
+                    $"Expected brand icon area to be a drag zone. BrandDrag={titleBarBrandDragZone.Bounds}.");
+            }
             Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(titleBarDragSurface));
             Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(titleBarBrandDragZone));
+            Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(titleBarRightDecorationReserve));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(windowsCaptionButtonStrip));
+            Assert.Equal(viewModel.IsWindowsCaptionButtonStripVisible, windowsCaptionButtonStrip.IsVisible);
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(captionMinimizeButton));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(captionMaximizeButton));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(captionRestoreButton));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(captionFullscreenButton));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(captionCloseButton));
             Assert.True(titleBarBrandDragZone.IsHitTestVisible);
             Assert.False(titleBarBrandContent.IsHitTestVisible);
             Assert.Contains("titleBrandIcon", titleBarBrandIcon.Classes);
@@ -908,6 +1247,75 @@ public class MainWindowViewModelFlowTests
             Assert.True(
                 shellRailOrigin.Y >= titleBarOrigin.Y + titleBar.Bounds.Height - 0.5,
                 $"Expected shell rail to start below titlebar. RailY={shellRailOrigin.Y}, TitleBar={titleBarOrigin.Y}+{titleBar.Bounds.Height}.");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void MainWindow_ConfiguresMicaTransparencyHintWhenPlatformSupportsMica()
+    {
+        MainWindow window = new();
+
+        try
+        {
+            if (MainWindowBackdropCoordinator.IsMicaSupportedByCurrentPlatform)
+            {
+                Assert.Contains(WindowTransparencyLevel.Mica, window.TransparencyLevelHint);
+                Assert.Contains(WindowTransparencyLevel.AcrylicBlur, window.TransparencyLevelHint);
+                Assert.Contains(WindowTransparencyLevel.Blur, window.TransparencyLevelHint);
+                Assert.DoesNotContain(WindowTransparencyLevel.None, window.TransparencyLevelHint);
+                Assert.NotNull(window.TransparencyBackgroundFallback);
+            }
+            else
+            {
+                Assert.DoesNotContain(WindowTransparencyLevel.Mica, window.TransparencyLevelHint);
+            }
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [Fact]
+    public void WindowsWindowBorderAccentCoordinator_ConvertsAccentColorsForDwmBorder()
+    {
+        Color activeColor = Color.FromRgb(0x12, 0x34, 0x56);
+
+        uint colorRef = WindowsWindowBorderAccentCoordinator.ToDwmColorRef(activeColor);
+        Color inactiveColor = WindowsWindowBorderAccentCoordinator.GetInactiveWindowBorderColor(activeColor);
+
+        Assert.Equal(0x00563412u, colorRef);
+        Assert.Equal(inactiveColor.R, inactiveColor.G);
+        Assert.Equal(inactiveColor.G, inactiveColor.B);
+        Assert.NotEqual(activeColor, inactiveColor);
+    }
+
+    [AvaloniaFact]
+    public void MainWindowBackdropCoordinator_MirrorsActualMicaState()
+    {
+        MainWindow window = new()
+        {
+            Width = 720,
+            Height = 460,
+        };
+
+        try
+        {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+            MainWindowBackdropCoordinator coordinator = new(window, viewModel);
+
+            coordinator.UpdateBackdropState(WindowTransparencyLevel.Mica);
+
+            Assert.True(viewModel.IsMicaBackdropEnabled);
+
+            coordinator.UpdateBackdropState(WindowTransparencyLevel.Blur);
+
+            Assert.False(viewModel.IsMicaBackdropEnabled);
         }
         finally
         {
@@ -1651,14 +2059,13 @@ public class MainWindowViewModelFlowTests
         Assert.True(viewModel.PreserveScrollbackOnRestart);
         Assert.True(viewModel.SixelGraphicsEnabled);
         Assert.Equal("Sixel: On", viewModel.SixelButtonText);
-        Assert.True(viewModel.EnableLigatures);
-        viewModel.SetFontSizeFromSettings(13.5);
-        Assert.Equal("13.5", viewModel.FontSizeDisplay);
         viewModel.PreserveScrollbackOnRestart = false;
         Assert.False(viewModel.PreserveScrollbackOnRestart);
         viewModel.SixelGraphicsEnabled = false;
         Assert.Equal("Sixel: Off", viewModel.SixelButtonText);
-        Assert.False(viewModel.EnableLigatures);
+        Assert.True(viewModel.EnableLigatures);
+        viewModel.SetFontSizeFromSettings(13.5);
+        Assert.Equal("13.5", viewModel.FontSizeDisplay);
         Assert.Equal(TerminalPasteSafetyPolicy.None, viewModel.SelectedPasteSafetyPolicy);
         Assert.Contains(TerminalPasteSafetyPolicy.BlockUnsafe, viewModel.PasteSafetyPolicies);
     }
@@ -2227,6 +2634,109 @@ public class MainWindowViewModelFlowTests
         }
 
         throw new InvalidOperationException($"Settings category '{categoryId}' was not found.");
+    }
+
+    private static string[] NativeTopLevelHeaders(NativeMenu menu)
+    {
+        return menu.Items
+            .OfType<NativeMenuItem>()
+            .Select(static item => Convert.ToString(item.Header, CultureInfo.InvariantCulture) ?? string.Empty)
+            .ToArray();
+    }
+
+    private static string[] MenuFlyoutTopLevelHeaders(MenuFlyout flyout)
+    {
+        return flyout.Items
+            .OfType<MenuItem>()
+            .Select(static item => Convert.ToString(item.Header, CultureInfo.InvariantCulture) ?? string.Empty)
+            .ToArray();
+    }
+
+    private static string[] MenuTopLevelHeaders(Menu menu)
+    {
+        return menu.Items
+            .OfType<MenuItem>()
+            .Select(static item => Convert.ToString(item.Header, CultureInfo.InvariantCulture) ?? string.Empty)
+            .ToArray();
+    }
+
+    private static void AssertMenuCommand(Menu menu, object command, string header)
+    {
+        Assert.Same(command, FindMenuItem(menu, header).Command);
+    }
+
+    private static void AssertMenuFlyoutCommand(MenuFlyout flyout, object command, string header)
+    {
+        Assert.Same(command, FindMenuFlyoutItem(flyout, header).Command);
+    }
+
+    private static void AssertContextMenuCommand(ContextMenu contextMenu, object command, string header)
+    {
+        Assert.Same(command, FindContextMenuItem(contextMenu, header).Command);
+    }
+
+    private static MenuItem FindMenuFlyoutItem(MenuFlyout flyout, string header)
+    {
+        foreach (object? item in flyout.Items)
+        {
+            if (TryFindMenuItem(item, header, out MenuItem? found))
+            {
+                return found!;
+            }
+        }
+
+        throw new InvalidOperationException($"Menu flyout item '{header}' was not found.");
+    }
+
+    private static MenuItem FindMenuItem(Menu menu, string header)
+    {
+        foreach (object? item in menu.Items)
+        {
+            if (TryFindMenuItem(item, header, out MenuItem? found))
+            {
+                return found!;
+            }
+        }
+
+        throw new InvalidOperationException($"Menu item '{header}' was not found.");
+    }
+
+    private static MenuItem FindContextMenuItem(ContextMenu contextMenu, string header)
+    {
+        foreach (object? item in contextMenu.Items)
+        {
+            if (TryFindMenuItem(item, header, out MenuItem? found))
+            {
+                return found!;
+            }
+        }
+
+        throw new InvalidOperationException($"Context menu item '{header}' was not found.");
+    }
+
+    private static bool TryFindMenuItem(object? itemObject, string header, out MenuItem? found)
+    {
+        found = null;
+        if (itemObject is not MenuItem item)
+        {
+            return false;
+        }
+
+        if (string.Equals(Convert.ToString(item.Header, CultureInfo.InvariantCulture), header, StringComparison.Ordinal))
+        {
+            found = item;
+            return true;
+        }
+
+        foreach (object? child in item.Items)
+        {
+            if (TryFindMenuItem(child, header, out found))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static NativeMenuItem FindNativeMenuItem(NativeMenu menu, string header)

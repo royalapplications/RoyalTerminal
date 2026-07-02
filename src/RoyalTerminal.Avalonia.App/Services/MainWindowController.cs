@@ -3,6 +3,7 @@
 // RoyalTerminal.Avalonia.App — Runtime controller for terminal tab orchestration.
 
 using System;
+using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -18,6 +19,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Chrome;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -99,11 +101,17 @@ internal sealed class MainWindowController
     private readonly ScrollViewer _tabStripScrollViewer;
     private readonly RepeatButton _tabStripScrollLeftButton;
     private readonly RepeatButton _tabStripScrollRightButton;
-    private readonly StackPanel _tabStrip;
+    private readonly ItemsControl _tabStrip;
     private readonly Button _tabStripNewTabButton;
     private readonly TextBox? _topSearchBox;
+    private readonly StackPanel _windowsCaptionButtonStrip;
+    private readonly Button _captionMinimizeButton;
+    private readonly Button _captionMaximizeButton;
+    private readonly Button _captionRestoreButton;
+    private readonly Button _captionFullscreenButton;
+    private readonly Button _captionCloseButton;
     private ScrollContentPresenter? _tabStripScrollContentPresenter;
-    private readonly List<TerminalTab> _tabs = [];
+    private readonly ObservableCollection<TerminalTab> _tabs = [];
     private readonly HashSet<TerminalControl> _startingStandaloneControls = [];
     private readonly Dictionary<TerminalControl, TerminalCaptureRuntime> _captureRuntimes = [];
     private readonly Dictionary<TerminalControl, EventHandler<TerminalDataEventArgs>> _sessionLogOutputHandlers = [];
@@ -186,16 +194,33 @@ internal sealed class MainWindowController
             ?? throw new InvalidOperationException("TabStripScrollLeftButton was not found in MainWindow.");
         _tabStripScrollRightButton = controlRoot.FindControl<RepeatButton>("TabStripScrollRightButton")
             ?? throw new InvalidOperationException("TabStripScrollRightButton was not found in MainWindow.");
-        _tabStrip = controlRoot.FindControl<StackPanel>("TabStrip")
+        _tabStrip = controlRoot.FindControl<ItemsControl>("TabStrip")
             ?? throw new InvalidOperationException("TabStrip was not found in MainWindow.");
+        _tabStrip.ItemTemplate = new FuncDataTemplate<TerminalTab>(
+            (tab, _) => tab.HeaderButton,
+            supportsRecycling: false);
+        _tabStrip.ItemsSource = _tabs;
         _tabStripNewTabButton = controlRoot.FindControl<Button>("TabStripNewTabButton")
             ?? throw new InvalidOperationException("TabStripNewTabButton was not found in MainWindow.");
         _topSearchBox = controlRoot.FindControl<TextBox>("TopSearchBox");
+        _windowsCaptionButtonStrip = controlRoot.FindControl<StackPanel>("WindowsCaptionButtonStrip")
+            ?? throw new InvalidOperationException("WindowsCaptionButtonStrip was not found in MainWindow.");
+        _captionMinimizeButton = controlRoot.FindControl<Button>("CaptionMinimizeButton")
+            ?? throw new InvalidOperationException("CaptionMinimizeButton was not found in MainWindow.");
+        _captionMaximizeButton = controlRoot.FindControl<Button>("CaptionMaximizeButton")
+            ?? throw new InvalidOperationException("CaptionMaximizeButton was not found in MainWindow.");
+        _captionRestoreButton = controlRoot.FindControl<Button>("CaptionRestoreButton")
+            ?? throw new InvalidOperationException("CaptionRestoreButton was not found in MainWindow.");
+        _captionFullscreenButton = controlRoot.FindControl<Button>("CaptionFullscreenButton")
+            ?? throw new InvalidOperationException("CaptionFullscreenButton was not found in MainWindow.");
+        _captionCloseButton = controlRoot.FindControl<Button>("CaptionCloseButton")
+            ?? throw new InvalidOperationException("CaptionCloseButton was not found in MainWindow.");
     }
 
     public IDisposable Activate()
     {
         CompositeDisposable lifetime = new();
+        RegisterCaptionButtonHandlers(lifetime);
         RegisterInteractionHandlers(lifetime);
         RegisterShellLayoutHandlers(lifetime);
         RegisterWindowInputStateResetHandlers(lifetime);
@@ -229,6 +254,19 @@ internal sealed class MainWindowController
         return lifetime;
     }
 
+    private void RegisterCaptionButtonHandlers(CompositeDisposable disposables)
+    {
+        _windowsCaptionButtonStrip.IsVisible = _viewModel.IsWindowsCaptionButtonStripVisible;
+        _captionMinimizeButton.Command = ReactiveCommand.Create(() => _window.WindowState = WindowState.Minimized);
+        _captionMaximizeButton.Command = ReactiveCommand.Create(() => _window.WindowState = WindowState.Maximized);
+        _captionRestoreButton.Command = ReactiveCommand.Create(() => _window.WindowState = WindowState.Normal);
+        _captionFullscreenButton.Command = ReactiveCommand.Create(ToggleFullScreen);
+        _captionCloseButton.Command = ReactiveCommand.Create(_window.Close);
+
+        UpdateCaptionButtonState(_window.WindowState);
+        disposables.Add(_window.GetObservable(Window.WindowStateProperty).Subscribe(UpdateCaptionButtonState));
+    }
+
     private void RegisterWindowInputStateResetHandlers(CompositeDisposable disposables)
     {
         void DeactivatedHandler(object? sender, EventArgs args)
@@ -240,6 +278,22 @@ internal sealed class MainWindowController
 
         _window.Deactivated += DeactivatedHandler;
         disposables.Add(Disposable.Create(() => _window.Deactivated -= DeactivatedHandler));
+    }
+
+    private void ToggleFullScreen()
+    {
+        _window.WindowState = _window.WindowState == WindowState.FullScreen
+            ? WindowState.Normal
+            : WindowState.FullScreen;
+    }
+
+    private void UpdateCaptionButtonState(WindowState windowState)
+    {
+        _captionMaximizeButton.IsVisible = windowState == WindowState.Normal;
+        _captionRestoreButton.IsVisible = windowState == WindowState.Maximized;
+        ToolTip.SetTip(
+            _captionFullscreenButton,
+            windowState == WindowState.FullScreen ? "Exit fullscreen" : "Fullscreen");
     }
 
     private void RegisterInteractionHandlers(CompositeDisposable disposables)
@@ -573,7 +627,6 @@ internal sealed class MainWindowController
         e.Handled = true;
     }
 
-
     private void HandleTopSearchBoxEnter(bool reverse)
     {
         TerminalControl? control = GetActiveStandaloneControl();
@@ -598,7 +651,6 @@ internal sealed class MainWindowController
             SelectNextSearchMatch();
         }
     }
-
 
     private void ApplyTabsInTitleBarLayout(bool tabsInTitleBar)
     {
@@ -1750,7 +1802,11 @@ internal sealed class MainWindowController
             TerminalRenderMode.RenderedAuto,
             _terminalCapabilities);
         _viewModel.SetRenderMode(startupMode);
-        CreateNewTab();
+        TerminalSessionProfile? defaultProfile = GetDefaultLaunchProfile();
+        CreateNewTab(
+            defaultProfile?.Id,
+            defaultProfile?.DisplayName,
+            defaultProfile);
     }
 
     private bool TryRestoreWorkspaceTabs()
@@ -1909,7 +1965,6 @@ internal sealed class MainWindowController
         _tabs.Add(tab);
         deferredContainer.IsVisible = false;
         _terminalHost.Children.Add(deferredContainer);
-        _tabStrip.Children.Add(headerButton);
         QueueTabStripScrollStateUpdate();
         AppendEventLog($"[{tabName}] Workspace tab restored lazily.");
     }
@@ -2170,6 +2225,12 @@ internal sealed class MainWindowController
         }
         else
         {
+            TerminalSessionProfile? fallbackProfile = GetDefaultLaunchProfile();
+            if (fallbackProfile is not null)
+            {
+                ApplySessionProfile(fallbackProfile);
+            }
+
             _viewModel.SessionName = NormalizeOptional(pane.Title)
                 ?? NormalizeOptional(tab.Title)
                 ?? profileId;
@@ -2307,6 +2368,7 @@ internal sealed class MainWindowController
 
     private void CreateInitialTabsForSupportedModes()
     {
+        TerminalSessionProfile? defaultProfile = GetDefaultLaunchProfile();
         TerminalRenderMode[] startupModes =
         [
             TerminalRenderMode.NativeVt,
@@ -2323,14 +2385,37 @@ internal sealed class MainWindowController
             }
 
             _viewModel.SetRenderMode(mode);
-            CreateNewTab();
+            CreateNewTab(
+                defaultProfile?.Id,
+                defaultProfile?.DisplayName,
+                defaultProfile);
         }
 
         if (_tabs.Count == 0)
         {
             _viewModel.SetRenderMode(TerminalRenderMode.RenderedAuto);
-            CreateNewTab();
+            CreateNewTab(
+                defaultProfile?.Id,
+                defaultProfile?.DisplayName,
+                defaultProfile);
         }
+    }
+
+    private TerminalSessionProfile? GetDefaultLaunchProfile()
+    {
+        TerminalSessionProfilesDocument? document = _sessionLauncherDocument;
+        if (document is null || document.Profiles.Count == 0)
+        {
+            return null;
+        }
+
+        if (NormalizeOptional(document.DefaultProfileId) is { } defaultProfileId &&
+            FindProfile(document, defaultProfileId) is { } defaultProfile)
+        {
+            return defaultProfile;
+        }
+
+        return document.Profiles[0];
     }
 
     private void CreateNewTab(
@@ -2401,7 +2486,6 @@ internal sealed class MainWindowController
 
         container.IsVisible = false;
         _terminalHost.Children.Add(container);
-        _tabStrip.Children.Add(headerButton);
         QueueTabStripScrollStateUpdate();
 
         SwitchToTab(_tabs.Count - 1);
@@ -2460,7 +2544,6 @@ internal sealed class MainWindowController
         _tabs.Add(tab);
         container.IsVisible = false;
         _terminalHost.Children.Add(container);
-        _tabStrip.Children.Add(headerButton);
         QueueTabStripScrollStateUpdate();
 
         SwitchToTab(_tabs.Count - 1);
@@ -3422,8 +3505,6 @@ internal sealed class MainWindowController
         Button headerButton = new()
         {
             Content = headerContent,
-            Padding = new Thickness(12, 6),
-            BorderThickness = new Thickness(0),
         };
         headerButton.Classes.Add("tabHeader");
         WindowDecorationProperties.SetElementRole(headerButton, WindowDecorationsElementRole.User);
@@ -3444,9 +3525,36 @@ internal sealed class MainWindowController
         return s_dismissRegularIconFallback;
     }
 
+    private TerminalTab? FindTabById(int tabId)
+    {
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            TerminalTab tab = _tabs[i];
+            if (tab.Index == tabId)
+            {
+                return tab;
+            }
+        }
+
+        return null;
+    }
+
+    private int FindTabIndexById(int tabId)
+    {
+        for (int i = 0; i < _tabs.Count; i++)
+        {
+            if (_tabs[i].Index == tabId)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     private void ActivateTabById(int tabId)
     {
-        int tabIndex = _tabs.FindIndex(tab => tab.Index == tabId);
+        int tabIndex = FindTabIndexById(tabId);
         if (tabIndex >= 0)
         {
             SwitchToTab(tabIndex);
@@ -3455,7 +3563,7 @@ internal sealed class MainWindowController
 
     private void CloseTabById(int tabId)
     {
-        TerminalTab? tab = _tabs.Find(candidate => candidate.Index == tabId);
+        TerminalTab? tab = FindTabById(tabId);
         if (tab is not null)
         {
             CloseTab(tab);
@@ -3473,7 +3581,6 @@ internal sealed class MainWindowController
         _tabs.Remove(tab);
 
         _terminalHost.Children.Remove(tab.Container);
-        _tabStrip.Children.Remove(tab.HeaderButton);
         QueueTabStripScrollStateUpdate();
 
         DisposeTabTerminals(tab);

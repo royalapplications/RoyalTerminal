@@ -5,7 +5,9 @@ using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Templates;
 using Avalonia.Headless.XUnit;
+using Avalonia.Layout;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Services;
@@ -324,9 +326,10 @@ public sealed class MainWindowControllerSettingsPanelTests
             Name = "TitleBarTabStripHost",
         };
 
-        StackPanel tabStrip = new()
+        ItemsControl tabStrip = new()
         {
             Name = "TabStrip",
+            ItemsPanel = new FuncTemplate<Panel?>(() => new StackPanel { Orientation = Orientation.Horizontal }),
         };
         RepeatButton tabStripScrollLeftButton = new()
         {
@@ -350,6 +353,12 @@ public sealed class MainWindowControllerSettingsPanelTests
             Name = "TabStripNewTabButton",
             Command = viewModel.NewTabCommand,
         };
+        StackPanel windowsCaptionButtonStrip = CreateWindowsCaptionButtonStrip(
+            out Button captionMinimizeButton,
+            out Button captionMaximizeButton,
+            out Button captionRestoreButton,
+            out Button captionFullscreenButton,
+            out Button captionCloseButton);
         Grid tabStripLayout = new()
         {
             Name = "TabStripLayout",
@@ -389,10 +398,21 @@ public sealed class MainWindowControllerSettingsPanelTests
         root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         root.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));
-        root.Children.Add(titleBarTabStripHost);
+        Grid titleBar = new()
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
+                new ColumnDefinition(GridLength.Auto),
+            },
+        };
+        titleBar.Children.Add(titleBarTabStripHost);
+        titleBar.Children.Add(windowsCaptionButtonStrip);
+        Grid.SetColumn(windowsCaptionButtonStrip, 1);
+        root.Children.Add(titleBar);
         root.Children.Add(bodyTabStripHost);
         root.Children.Add(terminalHost);
-        Grid.SetRow(titleBarTabStripHost, 0);
+        Grid.SetRow(titleBar, 0);
         Grid.SetRow(bodyTabStripHost, 1);
         Grid.SetRow(terminalHost, 2);
 
@@ -415,11 +435,43 @@ public sealed class MainWindowControllerSettingsPanelTests
         nameScope.Register(tabStripScrollViewer.Name!, tabStripScrollViewer);
         nameScope.Register(tabStripScrollRightButton.Name!, tabStripScrollRightButton);
         nameScope.Register(tabStripNewTabButton.Name!, tabStripNewTabButton);
+        nameScope.Register(windowsCaptionButtonStrip.Name!, windowsCaptionButtonStrip);
+        nameScope.Register(captionMinimizeButton.Name!, captionMinimizeButton);
+        nameScope.Register(captionMaximizeButton.Name!, captionMaximizeButton);
+        nameScope.Register(captionRestoreButton.Name!, captionRestoreButton);
+        nameScope.Register(captionFullscreenButton.Name!, captionFullscreenButton);
+        nameScope.Register(captionCloseButton.Name!, captionCloseButton);
         nameScope.Register(terminalHost.Name!, terminalHost);
 
         window.Show();
         window.Focus();
         return window;
+    }
+
+    private static StackPanel CreateWindowsCaptionButtonStrip(
+        out Button minimizeButton,
+        out Button maximizeButton,
+        out Button restoreButton,
+        out Button fullscreenButton,
+        out Button closeButton)
+    {
+        minimizeButton = new Button { Name = "CaptionMinimizeButton" };
+        maximizeButton = new Button { Name = "CaptionMaximizeButton" };
+        restoreButton = new Button { Name = "CaptionRestoreButton" };
+        fullscreenButton = new Button { Name = "CaptionFullscreenButton" };
+        closeButton = new Button { Name = "CaptionCloseButton" };
+
+        StackPanel strip = new()
+        {
+            Name = "WindowsCaptionButtonStrip",
+            Orientation = Orientation.Horizontal,
+        };
+        strip.Children.Add(minimizeButton);
+        strip.Children.Add(maximizeButton);
+        strip.Children.Add(restoreButton);
+        strip.Children.Add(fullscreenButton);
+        strip.Children.Add(closeButton);
+        return strip;
     }
 
     private static TerminalSessionProfile FindProfile(

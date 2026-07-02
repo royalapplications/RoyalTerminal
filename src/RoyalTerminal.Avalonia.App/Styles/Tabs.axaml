@@ -1,24 +1,6 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:settings="using:RoyalTerminal.Avalonia.Settings">
-  <Style Selector="Border.shellRail">
-    <Setter Property="Background" Value="{DynamicResource ToolbarBackgroundBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
-    <Setter Property="BorderThickness" Value="0,0,1,0" />
-  </Style>
-
-  <Style Selector="Border.topBar">
-    <Setter Property="MinHeight" Value="{DynamicResource Shell.CommandHeight}" />
-    <Setter Property="Padding" Value="{DynamicResource Shell.CommandPadding}" />
-    <Setter Property="Background" Value="{DynamicResource ToolbarBackgroundBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
-    <Setter Property="BorderThickness" Value="0,0,0,1" />
-  </Style>
-
-  <Style Selector="Border.titleBarArea">
-    <Setter Property="Height" Value="{DynamicResource Shell.CommandHeight}" />
-    <Setter Property="MinHeight" Value="{DynamicResource Shell.CommandHeight}" />
-  </Style>
 
   <Style Selector="Border.tabStripSurface">
     <Setter Property="MinHeight" Value="36" />
@@ -30,9 +12,18 @@
 
   <Style Selector="Border.tabStripSurface.titleBarTabs">
     <Setter Property="MinHeight" Value="{DynamicResource Shell.CommandHeight}" />
-    <Setter Property="Padding" Value="0,6,0,0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <Style Selector="Grid#TopCommandBar">
+    <Setter Property="Margin" Value="{DynamicResource Shell.CommandPadding}" />
+  </Style>
+
+  <Style Selector="Grid#TopCommandBar.tabsInTitleBar">
+    <Setter Property="Margin" Value="0" />
   </Style>
 
   <Style Selector="Border.tabStripSurface.bodyTabs">
@@ -41,14 +32,6 @@
 
   <Style Selector="Border.terminalSurface">
     <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
-  </Style>
-
-  <Style Selector="Border.statusBar">
-    <Setter Property="Height" Value="{DynamicResource Shell.StatusHeight}" />
-    <Setter Property="Padding" Value="8,3" />
-    <Setter Property="Background" Value="{DynamicResource StatusBarBackgroundBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
-    <Setter Property="BorderThickness" Value="0,1,0,0" />
   </Style>
 
   <Style Selector="Border.flyoutPanel">
@@ -174,22 +157,6 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
     <Setter Property="Padding" Value="8,6" />
-  </Style>
-
-  <Style Selector="Border.titleBrandIcon">
-    <Setter Property="Width" Value="28" />
-    <Setter Property="Height" Value="28" />
-    <Setter Property="Padding" Value="5" />
-    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
-    <Setter Property="Background" Value="{DynamicResource ShellSurfaceRaisedBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
-    <Setter Property="BorderThickness" Value="1" />
-  </Style>
-
-  <Style Selector="PathIcon.titleBrandIconGlyph">
-    <Setter Property="Width" Value="18" />
-    <Setter Property="Height" Value="18" />
-    <Setter Property="Foreground" Value="{DynamicResource ShellAccentBrush}" />
   </Style>
 
   <Style Selector="TextBlock.sectionTitle">
@@ -495,6 +462,7 @@
     <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
   <Style Selector="Button.railCommand:pointerover">
@@ -606,6 +574,10 @@
     <Setter Property="VerticalScrollBarVisibility" Value="Disabled" />
     <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Border.titleBarTabs ScrollViewer.tabStripScrollViewer">
+    <Setter Property="Margin" Value="0,6,0,0" />
   </Style>
 
   <Style Selector="RepeatButton.tabStripScrollButton">
@@ -780,10 +752,6 @@
     <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
   </Style>
 
-  <Style Selector="TextBox.searchField:focus">
-    <Setter Property="BorderBrush" Value="{DynamicResource ShellAccentBrush}" />
-  </Style>
-
   <Style Selector="Border.searchStatusChip">
     <Setter Property="Height" Value="28" />
     <Setter Property="MaxWidth" Value="112" />
@@ -868,17 +836,19 @@
     <Setter Property="FontSize" Value="12" />
     <Setter Property="Padding" Value="10,5" />
     <Setter Property="MinHeight" Value="30" />
-    <Setter Property="Background" Value="{DynamicResource TabHeaderBackgroundBrush}" />
+    <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource TabHeaderForegroundBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
-    <Setter Property="BorderThickness" Value="1,1,1,0" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="6,6,0,0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
   <Style Selector="Border.titleBarTabs Button.tabHeader">
     <Setter Property="MinHeight" Value="28" />
     <Setter Property="Padding" Value="10,4" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Medium}" />
+    <Setter Property="CornerRadius" Value="6,6,0,0" />
+    <Setter Property="VerticalAlignment" Value="Bottom" />
   </Style>
   <Style Selector="Button.tabHeader:pointerover">
     <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
@@ -886,7 +856,8 @@
   <Style Selector="Button.tabHeader.active">
     <Setter Property="Background" Value="{DynamicResource TabHeaderActiveBackgroundBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource TabHeaderActiveForegroundBrush}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource ShellAccentBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1,1,1,0" />
   </Style>
   <Style Selector="Button.tabHeader Button">
     <Setter Property="Foreground" Value="{DynamicResource TabHeaderForegroundBrush}" />
