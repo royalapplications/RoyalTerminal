@@ -319,8 +319,16 @@ public sealed class TerminalShellIntegrationContractTests
 
         Assert.NotNull(script);
         Assert.Contains("function global:PSConsoleHostReadLine", script, StringComparison.Ordinal);
+        Assert.Contains("$rtLastRunStatus = $?", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "[Microsoft.PowerShell.PSConsoleReadLine]::ReadLine($host.Runspace, $ExecutionContext, $rtLastRunStatus)",
+            script,
+            StringComparison.Ordinal);
         Assert.Contains("]133;C;cmdline_url=", script, StringComparison.Ordinal);
         Assert.Contains("[Uri]::EscapeDataString($rtLine)", script, StringComparison.Ordinal);
+        Assert.True(
+            script.IndexOf("$rtLastRunStatus = $?", StringComparison.Ordinal) <
+            script.IndexOf("[Microsoft.PowerShell.PSConsoleReadLine]::ReadLine", StringComparison.Ordinal));
     }
 
     [Fact]

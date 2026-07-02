@@ -297,7 +297,8 @@ public static class TerminalShellIntegrationBootstrapBuilder
             [
                 "if (Get-Module -Name PSReadLine) {",
                 "  function global:PSConsoleHostReadLine {",
-                "    $rtLine = [Microsoft.PowerShell.PSConsoleReadLine]::ReadLine($host.Runspace, $ExecutionContext)",
+                "    $rtLastRunStatus = $?",
+                "    $rtLine = [Microsoft.PowerShell.PSConsoleReadLine]::ReadLine($host.Runspace, $ExecutionContext, $rtLastRunStatus)",
                 "    if (-not [string]::IsNullOrWhiteSpace($rtLine)) {",
                 "      $rtCommand = [Uri]::EscapeDataString($rtLine)",
                 "      [Console]::Write(\"`e]133;C;cmdline_url=$rtCommand`a\")",
