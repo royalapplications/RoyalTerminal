@@ -110,7 +110,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _reflowOnResize = true;
     private bool _preserveScrollbackOnRestart = true;
     private bool _sixelGraphicsEnabled = true;
-    private bool _enableLigatures;
+    private bool _enableLigatures = true;
     private readonly IReadOnlyList<TerminalPasteSafetyPolicy> _pasteSafetyPolicies = Enum.GetValues<TerminalPasteSafetyPolicy>();
     private TerminalPasteSafetyPolicy _selectedPasteSafetyPolicy = TerminalPasteSafetyPolicy.None;
     private TaskCompletionSource<bool>? _sshHostKeyPromptCompletion;
@@ -579,7 +579,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         }
     }
 
-    public string FontSizeDisplay => FontSize.ToString("0", CultureInfo.InvariantCulture);
+    public string FontSizeDisplay => FormatFontSize(FontSize);
 
     public TerminalFontSource FontSource
     {
@@ -2061,7 +2061,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         FontSize = Math.Clamp(FontSize + delta, 8, 32);
         return ApplyFontSizeInteraction
             .Handle(FontSize)
-            .Do(_ => SetStatus($"Font size: {FontSize.ToString("0", CultureInfo.InvariantCulture)}"));
+            .Do(_ => SetStatus($"Font size: {FormatFontSize(FontSize)}"));
     }
 
     private IObservable<Unit> ResetFontSize()
@@ -2069,8 +2069,11 @@ public sealed class MainWindowViewModel : ReactiveObject
         FontSize = 14;
         return ApplyFontSizeInteraction
             .Handle(FontSize)
-            .Do(_ => SetStatus($"Font size: {FontSize.ToString("0", CultureInfo.InvariantCulture)}"));
+            .Do(_ => SetStatus($"Font size: {FormatFontSize(FontSize)}"));
     }
+
+    private static string FormatFontSize(double fontSize) =>
+        fontSize.ToString("0.#", CultureInfo.InvariantCulture);
 
     private IObservable<Unit> ToggleTheme()
     {

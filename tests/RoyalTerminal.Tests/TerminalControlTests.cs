@@ -1923,7 +1923,8 @@ public class TerminalControlTests
 
         Assert.NotNull(control.Renderer);
         Assert.NotSame(originalRenderer, control.Renderer);
-        Assert.Equal(18f, control.Renderer!.FontSize);
+        Assert.Equal(18.0, control.TerminalFontSize);
+        Assert.Equal(24f, control.Renderer!.FontSize);
     }
 
     [AvaloniaFact]
@@ -7621,7 +7622,6 @@ public class TerminalControlTests
             return true;
         }
     }
-
 
     private sealed class ThreadTrackingVtProcessorFactory : IVtProcessorFactory
     {

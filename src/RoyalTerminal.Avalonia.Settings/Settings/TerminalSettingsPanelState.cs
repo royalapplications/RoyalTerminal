@@ -529,7 +529,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(SixelGraphicsEnabled), true);
 
     public static readonly StyledProperty<bool> EnableLigaturesProperty =
-        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(EnableLigatures), false);
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(EnableLigatures), true);
 
     public static readonly StyledProperty<TerminalPasteSafetyPolicy> SelectedPasteSafetyPolicyProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, TerminalPasteSafetyPolicy>(nameof(SelectedPasteSafetyPolicy), TerminalPasteSafetyPolicy.None);
@@ -544,7 +544,10 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         AvaloniaProperty.Register<TerminalSettingsPanelState, string>(nameof(FontFilePath), string.Empty);
 
     public static readonly StyledProperty<double> FontSizeProperty =
-        AvaloniaProperty.Register<TerminalSettingsPanelState, double>(nameof(FontSize), 14.0);
+        AvaloniaProperty.Register<TerminalSettingsPanelState, double>(
+            nameof(FontSize),
+            14.0,
+            coerce: static (_, value) => NormalizeFontSize(value));
 
     public static readonly StyledProperty<bool> FontSubpixelPositioningProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(
@@ -2020,6 +2023,17 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     {
         string? normalized = NormalizeOptional(value);
         return normalized ?? fallback;
+    }
+
+    private static double NormalizeFontSize(double value)
+    {
+        if (!double.IsFinite(value))
+        {
+            return 14.0;
+        }
+
+        double clamped = Math.Clamp(value, 8.0, 72.0);
+        return Math.Round(clamped * 2.0, MidpointRounding.AwayFromZero) / 2.0;
     }
 
     private static string? NormalizeOptional(string? value)

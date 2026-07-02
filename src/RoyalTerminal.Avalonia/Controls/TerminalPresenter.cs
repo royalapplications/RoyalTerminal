@@ -27,6 +27,7 @@ public class TerminalPresenter : Control
     private bool _shaderAnimationEnabled;
     private bool _compositionCommitPending;
     private bool _compositionCommitQueued;
+    private bool _compositionCommitRequestedWhilePending;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TerminalPresenter"/> class.
@@ -172,6 +173,7 @@ public class TerminalPresenter : Control
 
         _compositionVisual.SendHandlerMessage(
             new TerminalDrawHandler.InvalidateMessage(fullRedraw, dirtyRowsOnly));
+        InvalidateVisual();
         RequestCompositionCommit();
     }
 
@@ -189,7 +191,18 @@ public class TerminalPresenter : Control
     private void RequestCompositionCommit()
     {
         CompositionCustomVisual? compositionVisual = _compositionVisual;
-        if (compositionVisual is null || _compositionCommitPending || _compositionCommitQueued)
+        if (compositionVisual is null)
+        {
+            return;
+        }
+
+        if (_compositionCommitPending)
+        {
+            _compositionCommitRequestedWhilePending = true;
+            return;
+        }
+
+        if (_compositionCommitQueued)
         {
             return;
         }
@@ -202,6 +215,11 @@ public class TerminalPresenter : Control
                 CompositionCustomVisual? queuedCompositionVisual = _compositionVisual;
                 if (queuedCompositionVisual is null || _compositionCommitPending)
                 {
+                    if (_compositionCommitPending)
+                    {
+                        _compositionCommitRequestedWhilePending = true;
+                    }
+
                     return;
                 }
 
@@ -227,5 +245,10 @@ public class TerminalPresenter : Control
     private void CompleteCompositionCommit()
     {
         _compositionCommitPending = false;
+        if (_compositionCommitRequestedWhilePending)
+        {
+            _compositionCommitRequestedWhilePending = false;
+            RequestCompositionCommit();
+        }
     }
 }

@@ -481,7 +481,8 @@
                                  HorizontalAlignment="Left"
                                  Minimum="8"
                                  Maximum="72"
-                                 Increment="1"
+                                 Increment="0.5"
+                                 FormatString="0.0"
                                  Value="{Binding FontSize}" />
                 </Grid>
                 <TextBlock Foreground="{DynamicResource TerminalSettings.Panel.SubtleTextBrush}"

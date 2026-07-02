@@ -336,7 +336,7 @@ public sealed record TerminalSessionBehaviorSettings
     /// <summary>
     /// Whether ligatures are enabled.
     /// </summary>
-    public bool EnableLigatures { get; init; }
+    public bool EnableLigatures { get; init; } = true;
 
     /// <summary>
     /// Paste safety policy for clipboard pastes.

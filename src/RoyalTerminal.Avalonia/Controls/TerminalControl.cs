@@ -46,6 +46,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 {
     private const float RendererBackgroundOpacity = 0.82f;
     private const bool RendererBackgroundOpacityCells = true;
+    private const double TerminalFontPointToDipScale = 96D / 72D;
     private static readonly TimeSpan CursorBlinkInterval = TimeSpan.FromMilliseconds(530);
     // Managed VT transport output is parsed off the UI thread, but UI finalize
     // work still stays bounded so input and layout can preempt output floods.
@@ -514,6 +515,23 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         SetAndRaise(TextHighlightRulesProperty, ref _textHighlightRules, next);
         ApplyPreparedTextHighlightRules(preparedRules);
+    }
+
+    /// <summary>
+    /// Invalidates cached terminal text pixels after renderer text-shaping behavior changes.
+    /// </summary>
+    public void InvalidateTextRendering()
+    {
+        if (_screen is not null)
+        {
+            lock (_screen.SyncRoot)
+            {
+                _screen.InvalidateAll();
+            }
+        }
+
+        _presenter?.Invalidate(fullRedraw: true);
+        InvalidateVisual();
     }
 
     /// <summary>
@@ -1131,7 +1149,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _scrollData.UpdateExtent(_screen.TotalRows, true);
 
         _scrollViewer = new VirtualizedTerminalScrollViewer(_screen, _scrollData);
-        UpdateRendererParityStateFromScreen();
+        UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -1295,7 +1313,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             : null;
         SkiaTerminalRenderer renderer = new(
             family,
-            (float)TerminalFontSize,
+            (float)GetActualTerminalFontSize(TerminalFontSize),
             FontSource,
             fontFilePath,
             CreateFontRenderingSettings());
@@ -1336,6 +1354,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         renderer.BackgroundOpacity = previous.BackgroundOpacity;
         return renderer;
     }
+
+    private static double GetActualTerminalFontSize(double configuredFontSize) =>
+        configuredFontSize * TerminalFontPointToDipScale;
 
     private TerminalFontRenderingSettings CreateFontRenderingSettings()
     {
@@ -1588,6 +1609,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         ApplySixelGraphicsSettingToProcessor(_vtProcessor);
         _presenter?.Invalidate();
+        InvalidateVisual();
     }
 
     private void ApplySixelGraphicsSettingToProcessor(IVtProcessor? processor)
@@ -4481,7 +4503,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         UpdateRendererCursorForViewport();
-        UpdateRendererParityStateFromScreen();
+        UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
         UpdateAutoScrollPinnedToBottom();
         UpdatePreservedRestartHistoryInputScrollGuardForViewportChange();
         e.Handled = true;
@@ -4644,7 +4666,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _hoveredLinkUrl = normalized;
-        UpdateRendererParityStateFromScreen();
+        UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
     }
 
     /// <summary>
@@ -4787,7 +4809,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         UpdateRendererCursorForViewport();
-        UpdateRendererParityStateFromScreen();
+        UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
         UpdateAutoScrollPinnedToBottom();
         UpdatePreservedRestartHistoryInputScrollGuardForViewportChange();
         RaiseScrollInvalidated();
@@ -6979,7 +7001,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _presenter?.Invalidate(fullRedraw: invalidateViewportRows, dirtyRowsOnly: false);
     }
 
-
     private void UpdateRendererParityStateLocked()
     {
         if (_screen is null || _renderer is null)
@@ -7118,7 +7139,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         int clamped = Math.Clamp(selected, 0, total - 1);
         return IsSearchTraversalReversed() ? total - clamped - 1 : clamped;
     }
-
 
 
     private void PopulateSearchMatchesFromScreenLocked(string needle)

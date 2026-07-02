@@ -5864,8 +5864,18 @@ internal sealed class MainWindowController
         SkiaTerminalRenderer? renderer = control.Renderer;
         if (renderer is not null)
         {
-            renderer.EnableTextShaping = behavior.EnableTextShaping;
+            bool enableTextShaping = behavior.EnableTextShaping || behavior.EnableLigatures;
+            bool textRenderingChanged =
+                renderer.EnableTextShaping != enableTextShaping ||
+                renderer.EnableLigatures != behavior.EnableLigatures;
+
+            renderer.EnableTextShaping = enableTextShaping;
             renderer.EnableLigatures = behavior.EnableLigatures;
+
+            if (textRenderingChanged)
+            {
+                control.InvalidateTextRendering();
+            }
         }
     }
 

@@ -122,6 +122,9 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.False(control.FontLinearMetrics);
             Assert.True(control.ReflowOnResize);
             Assert.False(control.SixelGraphicsEnabled);
+            Assert.NotNull(control.Renderer);
+            Assert.True(control.Renderer!.EnableTextShaping);
+            Assert.True(control.Renderer.EnableLigatures);
             Assert.Equal(TerminalTextHighlightingMode.Realtime, control.TextHighlightingMode);
             Assert.Single(control.TextHighlightRules!);
         }

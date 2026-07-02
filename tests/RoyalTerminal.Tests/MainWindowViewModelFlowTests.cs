@@ -1651,6 +1651,9 @@ public class MainWindowViewModelFlowTests
         Assert.True(viewModel.PreserveScrollbackOnRestart);
         Assert.True(viewModel.SixelGraphicsEnabled);
         Assert.Equal("Sixel: On", viewModel.SixelButtonText);
+        Assert.True(viewModel.EnableLigatures);
+        viewModel.SetFontSizeFromSettings(13.5);
+        Assert.Equal("13.5", viewModel.FontSizeDisplay);
         viewModel.PreserveScrollbackOnRestart = false;
         Assert.False(viewModel.PreserveScrollbackOnRestart);
         viewModel.SixelGraphicsEnabled = false;

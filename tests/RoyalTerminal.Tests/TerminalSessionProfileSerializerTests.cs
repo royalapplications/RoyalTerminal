@@ -68,6 +68,7 @@ public sealed class TerminalSessionProfileSerializerTests
         Assert.Equal("dev-ssh", profile.Id);
         Assert.Equal(TerminalTransportIds.Ssh, profile.Transport.TransportId);
         Assert.True(profile.Behavior.SixelGraphicsEnabled);
+        Assert.True(profile.Behavior.EnableLigatures);
         Assert.Equal("example.com", profile.Transport.Ssh.Host);
         Assert.Equal("alice", profile.Transport.Ssh.Username);
         Assert.True(profile.Transport.Ssh.Authentication.UsePassword);
