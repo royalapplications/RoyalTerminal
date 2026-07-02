@@ -4838,15 +4838,17 @@ internal sealed class MainWindowController
 
             if (alreadyLoaded && !state.IsDirty)
             {
-                SyncSettingsStateFromViewModel(state);
-                _sessionLauncherDocument = state.BuildDocument();
-                RefreshSessionLauncherOptions(_sessionLauncherDocument);
+                if (_sessionLauncherDocument is not null)
+                {
+                    RefreshSessionLauncherOptions(_sessionLauncherDocument);
+                }
             }
         });
     }
 
     private void SyncSettingsStateFromViewModel(TerminalSettingsPanelState state)
     {
+        RuntimeAppearanceFlags appearanceFlags = ResolveRuntimeAppearanceFlags(state);
         state.UpdateFromRuntime(current =>
         {
             current.SessionName = _viewModel.SessionName;
@@ -4919,8 +4921,8 @@ internal sealed class MainWindowController
             current.FontEmbolden = _viewModel.FontEmbolden;
             current.FontForceAutoHinting = _viewModel.FontForceAutoHinting;
             current.FontLinearMetrics = _viewModel.FontLinearMetrics;
-            current.AutoScroll = true;
-            current.BackgroundOpacityEnabled = false;
+            current.AutoScroll = appearanceFlags.AutoScroll;
+            current.BackgroundOpacityEnabled = appearanceFlags.BackgroundOpacityEnabled;
             current.SelectedTextHighlightingMode = ResolveSettingsTextHighlightingMode(
                 current,
                 _viewModel.TextHighlightingMode);
@@ -4931,6 +4933,29 @@ internal sealed class MainWindowController
             current.SessionLogFlushFrequently = _viewModel.SessionLogFlushFrequently;
             current.EventLogEnabled = _viewModel.EventLogEnabled;
         });
+    }
+
+    private RuntimeAppearanceFlags ResolveRuntimeAppearanceFlags(TerminalSettingsPanelState state)
+    {
+        TerminalControl? activeControl = GetActiveStandaloneControl();
+        if (activeControl is not null)
+        {
+            return new RuntimeAppearanceFlags(
+                activeControl.AutoScroll,
+                activeControl.BackgroundOpacityEnabled);
+        }
+
+        string? selectedProfileId = state.SelectedProfile?.Id;
+        if (selectedProfileId is not null &&
+            _sessionLauncherDocument is not null &&
+            FindProfile(_sessionLauncherDocument, selectedProfileId) is { } selectedProfile)
+        {
+            return new RuntimeAppearanceFlags(
+                selectedProfile.Appearance.AutoScroll,
+                selectedProfile.Appearance.BackgroundOpacityEnabled);
+        }
+
+        return RuntimeAppearanceFlags.Default;
     }
 
     private static TerminalSettingsTransportModeOption ResolveSettingsTransportMode(
@@ -6395,6 +6420,15 @@ internal sealed class MainWindowController
         string? FallbackReason);
 
     private readonly record struct TerminalLaunchConfiguration(TerminalSessionProfile Profile);
+
+    private readonly record struct RuntimeAppearanceFlags(
+        bool AutoScroll,
+        bool BackgroundOpacityEnabled)
+    {
+        public static RuntimeAppearanceFlags Default { get; } = new(
+            AutoScroll: true,
+            BackgroundOpacityEnabled: false);
+    }
 
     private readonly record struct TabVisualMode(string Name, string Glyph, IBrush GlyphBrush);
 

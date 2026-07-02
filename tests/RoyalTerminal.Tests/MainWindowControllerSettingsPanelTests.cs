@@ -199,6 +199,121 @@ public sealed class MainWindowControllerSettingsPanelTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task Controller_PrepareSettingsPanel_CleanReopenDoesNotMutateSelectedProfileFromRuntime()
+    {
+        using IDisposable autostart = SetProcessEnvironmentVariable(DisableSessionAutostartEnvVar, "1");
+        InMemoryProfileStore store = new(CreateTwoProfileDocument());
+        MainWindowViewModel viewModel = new();
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            settingsProfileStore: store,
+            workspaceStore: new InMemoryWorkspaceStore());
+
+        IDisposable? lifetime = null;
+        try
+        {
+            lifetime = controller.Activate();
+
+            await viewModel.PrepareSettingsPanelCommand.Execute();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.NotNull(viewModel.SettingsPanelState.SelectedProfile);
+            Assert.Equal("profile-a", viewModel.SettingsPanelState.SelectedProfile!.Id);
+            Assert.Equal("Profile A", viewModel.SettingsPanelState.SessionName);
+
+            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-b").Wait();
+            bool profileTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children
+                    .OfType<ScrollViewer>()
+                    .Select(viewer => viewer.Content)
+                    .OfType<TerminalControl>()
+                    .Count() == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(profileTabCreated);
+            Assert.Equal("Profile B", viewModel.SessionName);
+
+            await viewModel.PrepareSettingsPanelCommand.Execute();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal("profile-a", viewModel.SettingsPanelState.SelectedProfile!.Id);
+            Assert.Equal("Profile A", viewModel.SettingsPanelState.SessionName);
+            Assert.False(viewModel.SettingsPanelState.AutoScroll);
+            Assert.True(viewModel.SettingsPanelState.BackgroundOpacityEnabled);
+
+            TerminalSessionProfilesDocument document = viewModel.SettingsPanelState.BuildDocument();
+            TerminalSessionProfile profileA = FindProfile(document, "profile-a");
+            TerminalSessionProfile profileB = FindProfile(document, "profile-b");
+            Assert.Equal("Profile A", profileA.DisplayName);
+            Assert.Equal("echo profile-a", profileA.Transport.Pipe.FileName);
+            Assert.False(profileA.Appearance.AutoScroll);
+            Assert.True(profileA.Appearance.BackgroundOpacityEnabled);
+            Assert.Equal("Profile B", profileB.DisplayName);
+            Assert.Equal("echo profile-b", profileB.Transport.Pipe.FileName);
+            Assert.True(profileB.Appearance.AutoScroll);
+            Assert.False(profileB.Appearance.BackgroundOpacityEnabled);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_PrepareSettingsPanel_InitializesEmptyDocumentWithActiveControlAppearanceFlags()
+    {
+        using IDisposable autostart = SetProcessEnvironmentVariable(DisableSessionAutostartEnvVar, "1");
+        InMemoryProfileStore store = new(new TerminalSessionProfilesDocument());
+        MainWindowViewModel viewModel = new();
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            settingsProfileStore: store,
+            workspaceStore: new InMemoryWorkspaceStore());
+
+        IDisposable? lifetime = null;
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabCreated);
+
+            TerminalControl control = terminalHost.Children
+                .OfType<ScrollViewer>()
+                .Select(viewer => viewer.Content)
+                .OfType<TerminalControl>()
+                .First();
+            control.AutoScroll = false;
+            control.BackgroundOpacityEnabled = true;
+
+            await viewModel.PrepareSettingsPanelCommand.Execute();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(viewModel.SettingsPanelState.AutoScroll);
+            Assert.True(viewModel.SettingsPanelState.BackgroundOpacityEnabled);
+
+            TerminalSessionProfile profile = Assert.Single(viewModel.SettingsPanelState.BuildDocument().Profiles);
+            Assert.False(profile.Appearance.AutoScroll);
+            Assert.True(profile.Appearance.BackgroundOpacityEnabled);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
     private static Window CreateControllerHostWindow(MainWindowViewModel viewModel, out Grid terminalHost)
     {
         ContentControl titleBarTabStripHost = new()
@@ -302,6 +417,63 @@ public sealed class MainWindowControllerSettingsPanelTests
         window.Show();
         window.Focus();
         return window;
+    }
+
+    private static TerminalSessionProfile FindProfile(
+        TerminalSessionProfilesDocument document,
+        string profileId)
+    {
+        TerminalSessionProfile? profile = document.Profiles.FirstOrDefault(
+            candidate => string.Equals(candidate.Id, profileId, StringComparison.Ordinal));
+        Assert.NotNull(profile);
+        return profile;
+    }
+
+    private static TerminalSessionProfilesDocument CreateTwoProfileDocument()
+    {
+        return new TerminalSessionProfilesDocument
+        {
+            DefaultProfileId = "profile-a",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "profile-a",
+                    DisplayName = "Profile A",
+                    Transport = new TerminalSessionTransportProfile
+                    {
+                        TransportId = TerminalTransportIds.Pipe,
+                        Pipe = new TerminalSessionPipeSettings
+                        {
+                            FileName = "echo profile-a",
+                        },
+                    },
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        AutoScroll = false,
+                        BackgroundOpacityEnabled = true,
+                    },
+                },
+                new TerminalSessionProfile
+                {
+                    Id = "profile-b",
+                    DisplayName = "Profile B",
+                    Transport = new TerminalSessionTransportProfile
+                    {
+                        TransportId = TerminalTransportIds.Pipe,
+                        Pipe = new TerminalSessionPipeSettings
+                        {
+                            FileName = "echo profile-b",
+                        },
+                    },
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        AutoScroll = true,
+                        BackgroundOpacityEnabled = false,
+                    },
+                },
+            ],
+        };
     }
 
     private static TerminalSessionProfilesDocument CreateStoredDocument()
