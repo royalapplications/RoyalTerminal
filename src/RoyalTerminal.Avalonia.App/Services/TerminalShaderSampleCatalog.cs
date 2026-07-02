@@ -281,8 +281,16 @@ internal static class TerminalShaderSampleCatalog
         """;
 }
 
+/// <summary>
+/// Describes a shader sample selectable from the reusable app shell.
+/// </summary>
 public sealed class TerminalShaderSampleOption
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TerminalShaderSampleOption"/> class.
+    /// </summary>
+    /// <param name="id">Stable shader sample identifier.</param>
+    /// <param name="displayName">Display name shown in shell UI and menus.</param>
     public TerminalShaderSampleOption(string id, string displayName)
     {
         Id = string.IsNullOrWhiteSpace(id) ? throw new ArgumentException("Shader sample id is required.", nameof(id)) : id;
@@ -291,7 +299,13 @@ public sealed class TerminalShaderSampleOption
             : displayName;
     }
 
+    /// <summary>
+    /// Gets the stable shader sample identifier.
+    /// </summary>
     public string Id { get; }
 
+    /// <summary>
+    /// Gets the display name shown in shell UI and menus.
+    /// </summary>
     public string DisplayName { get; }
 }

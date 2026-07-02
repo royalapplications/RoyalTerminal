@@ -19,6 +19,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.App;
@@ -43,6 +44,22 @@ public class MainWindowViewModelFlowTests
 
         Assert.Equal("RoyalTerminal", assembly.GetCustomAttribute<AssemblyTitleAttribute>()?.Title);
         Assert.Equal("RoyalTerminal", assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product);
+    }
+
+    [AvaloniaFact]
+    public void MainWindow_PaneSplitPolicy_RejectsNull()
+    {
+        MainWindow window = new();
+
+        try
+        {
+            Assert.Throws<ArgumentNullException>(() => window.PaneSplitPolicy = null!);
+            Assert.Same(TerminalPaneSplitPolicies.AllowAll, window.PaneSplitPolicy);
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 
     [AvaloniaFact]

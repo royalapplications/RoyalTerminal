@@ -8,6 +8,11 @@ namespace RoyalTerminal.Avalonia.App.Services;
 
 internal readonly record struct TerminalThemePreset(string Id, string DisplayName);
 
+/// <summary>
+/// Describes a terminal theme selected by the reusable app shell.
+/// </summary>
+/// <param name="Theme">Theme model to apply to the active terminal surfaces.</param>
+/// <param name="ThemeName">Display name shown by shell UI and status text.</param>
 public readonly record struct TerminalThemeApplyRequest(TerminalTheme Theme, string ThemeName);
 
 internal interface ITerminalThemeCatalog

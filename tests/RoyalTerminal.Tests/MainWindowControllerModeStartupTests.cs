@@ -671,6 +671,94 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_SplitPanePolicyOverride_DoesNotInheritSourceTransportProfileId()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryWorkspaceStore workspaceStore = new(new TerminalWorkspaceDocument
+        {
+            SelectedWindowId = "main",
+            Windows =
+            [
+                new TerminalWorkspaceWindow
+                {
+                    Id = "main",
+                    SelectedTabId = "tab-transport-profile",
+                    Tabs =
+                    [
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "tab-transport-profile",
+                            ProfileId = "default",
+                            Title = "Transport Profile",
+                            TransportId = TerminalTransportIds.Pipe,
+                            RenderMode = TerminalWorkspaceRenderModes.Skia,
+                            RootPane = new TerminalWorkspacePane
+                            {
+                                Id = "pane-transport-profile",
+                                ProfileId = "default",
+                                TransportId = TerminalTransportIds.Pipe,
+                                TransportProfileId = "source-transport-profile",
+                            },
+                        },
+                    ],
+                },
+            ],
+        });
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo restored-source";
+        ITerminalPaneSplitPolicy splitPolicy = new DelegateTerminalPaneSplitPolicy(context =>
+            TerminalPaneSplitDecision.Allow(context.DefaultLaunchProfile with
+            {
+                Id = "policy-profile",
+                DisplayName = "Policy Profile",
+            }));
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            commandHistoryStore: new InMemoryCommandHistoryStore(),
+            paneSplitPolicy: splitPolicy);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool restoredPane = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1 &&
+                      GetStandaloneControls(terminalHost).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(restoredPane);
+
+            viewModel.SplitPaneRightCommand.Execute().Wait();
+            bool splitCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1 &&
+                      terminalHost.Children[0] is Grid { Children.Count: 3 } &&
+                      GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(splitCreated);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        TerminalWorkspaceTab savedTab = Assert.Single(workspaceStore.Document.Windows[0].Tabs);
+        TerminalWorkspacePaneSplit savedSplit = savedTab.RootPane.Split
+            ?? throw new InvalidOperationException("Saved split pane was not found.");
+        Assert.Equal("source-transport-profile", savedSplit.FirstPane.TransportProfileId);
+        Assert.Equal("policy-profile", savedSplit.SecondPane.ProfileId);
+        Assert.Null(savedSplit.SecondPane.TransportProfileId);
+    }
+
+    [AvaloniaFact]
     public async Task Controller_Shutdown_FlushesQueuedShellIntegrationBeforeSavingState()
     {
         using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
@@ -993,6 +1081,126 @@ public sealed class MainWindowControllerModeStartupTests
         Assert.Equal(0.7, savedSplit.Ratio, precision: 3);
         Assert.NotNull(savedSplit.FirstPane);
         Assert.NotNull(savedSplit.SecondPane);
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_SplitPanePolicy_DeniesSshTransport()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Ssh);
+        viewModel.SshHost = "example.test";
+        viewModel.SshUsername = "royal";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            commandHistoryStore: new InMemoryCommandHistoryStore(),
+            paneSplitPolicy: TerminalPaneSplitPolicies.PtyOnly);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabCreated);
+
+            viewModel.SplitPaneRightCommand.Execute().Wait();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Single(GetStandaloneControls(terminalHost));
+            Assert.Contains("not available for ssh sessions", viewModel.StatusText, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_SplitPanePolicy_CanOverrideClonedLaunchProfile()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryWorkspaceStore workspaceStore = new();
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo policy-source";
+        bool policyInvoked = false;
+        ITerminalPaneSplitPolicy splitPolicy = new DelegateTerminalPaneSplitPolicy(context =>
+        {
+            policyInvoked = true;
+            Assert.Equal(TerminalPaneSplitRequest.Right, context.Request);
+            Assert.Equal(TerminalTransportIds.Pipe, context.SourceTransportId);
+            Assert.False(context.SourceHasActiveSession);
+
+            TerminalSessionProfile launchProfile = context.DefaultLaunchProfile with
+            {
+                Id = "rebex-mfa-clone",
+                DisplayName = "Rebex MFA Clone",
+                Transport = context.DefaultLaunchProfile.Transport with
+                {
+                    TransportId = TerminalTransportIds.Pipe,
+                    Pipe = context.DefaultLaunchProfile.Transport.Pipe with
+                    {
+                        FileName = "echo",
+                        Arguments = ["policy-clone"],
+                    },
+                },
+            };
+
+            return TerminalPaneSplitDecision.Allow(launchProfile);
+        });
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            commandHistoryStore: new InMemoryCommandHistoryStore(),
+            paneSplitPolicy: splitPolicy);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabCreated);
+
+            viewModel.SplitPaneRightCommand.Execute().Wait();
+            bool splitCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1 &&
+                      terminalHost.Children[0] is Grid { Children.Count: 3 } &&
+                      GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(splitCreated);
+            Assert.True(policyInvoked);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        TerminalWorkspaceTab savedTab = Assert.Single(workspaceStore.Document.Windows[0].Tabs);
+        TerminalWorkspacePaneSplit savedSplit = savedTab.RootPane.Split
+            ?? throw new InvalidOperationException("Saved split pane was not found.");
+        Assert.Equal("rebex-mfa-clone", savedSplit.SecondPane.ProfileId);
+        Assert.Equal(TerminalTransportIds.Pipe, savedSplit.SecondPane.TransportId);
     }
 
     [AvaloniaFact]

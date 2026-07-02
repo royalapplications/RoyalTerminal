@@ -10,6 +10,7 @@ using System.IO;
 using System.Reactive;
 using System.Reactive.Linq;
 using System.Runtime.InteropServices;
+using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
@@ -22,39 +23,8 @@ using ReactiveUI.Avalonia;
 namespace RoyalTerminal.Avalonia.App.ViewModels;
 
 /// <summary>
-/// Identifies pane split requests exposed by the shell command surface.
+/// Exposes the reusable application shell state, commands, and ReactiveUI interactions.
 /// </summary>
-public enum TerminalPaneSplitRequest
-{
-    /// <summary>
-    /// Split the focused pane into side-by-side panes and place the new pane on the right.
-    /// </summary>
-    Right,
-
-    /// <summary>
-    /// Split the focused pane into stacked panes and place the new pane below.
-    /// </summary>
-    Down,
-}
-
-/// <summary>
-/// Identifies directional pane focus or resize requests.
-/// </summary>
-public enum TerminalPaneDirection
-{
-    /// <summary>Move or resize toward the left.</summary>
-    Left,
-
-    /// <summary>Move or resize toward the right.</summary>
-    Right,
-
-    /// <summary>Move or resize upward.</summary>
-    Up,
-
-    /// <summary>Move or resize downward.</summary>
-    Down,
-}
-
 public sealed class MainWindowViewModel : ReactiveObject
 {
     private double _fontSize = 14.0;
@@ -2704,10 +2674,29 @@ public sealed class MainWindowViewModel : ReactiveObject
     }
 }
 
+/// <summary>
+/// Describes a transport mode option shown by the reusable shell settings UI.
+/// </summary>
+/// <param name="Id">Stable transport identifier.</param>
+/// <param name="DisplayName">Display name shown in the settings UI.</param>
 public sealed record TransportModeOption(string Id, string DisplayName);
 
+/// <summary>
+/// Describes a discovered local shell profile shown by the reusable shell.
+/// </summary>
+/// <param name="Id">Stable shell profile identifier.</param>
+/// <param name="DisplayName">Display name shown in profile launch UI.</param>
+/// <param name="CommandPath">Executable path for the shell profile.</param>
 public sealed record ShellProfileOption(string Id, string DisplayName, string CommandPath);
 
+/// <summary>
+/// Describes a runnable session profile entry shown by the launcher UI.
+/// </summary>
+/// <param name="Id">Stable session profile identifier.</param>
+/// <param name="DisplayName">Display name shown in launcher UI.</param>
+/// <param name="TransportId">Transport identifier used by the profile.</param>
+/// <param name="Subtitle">Secondary descriptive text for the profile.</param>
+/// <param name="WorkingDirectory">Optional working directory associated with the profile.</param>
 public sealed record SessionLaunchOption(
     string Id,
     string DisplayName,
@@ -2718,22 +2707,72 @@ public sealed record SessionLaunchOption(
 /// <summary>
 /// User-selectable terminal capture file format option.
 /// </summary>
+/// <param name="FormatId">Stable capture format identifier.</param>
+/// <param name="DisplayName">Display name shown in shell UI and menus.</param>
 public sealed record TerminalCaptureFormatOption(string FormatId, string DisplayName);
 
+/// <summary>
+/// Describes a settings category shown by the reusable shell settings UI.
+/// </summary>
+/// <param name="Id">Stable settings category identifier.</param>
+/// <param name="DisplayName">Display name shown in category navigation.</param>
 public sealed record SettingsCategoryOption(string Id, string DisplayName)
 {
+    /// <summary>
+    /// Session category identifier.
+    /// </summary>
     public const string SessionCategoryId = "session";
+
+    /// <summary>
+    /// Connection category identifier.
+    /// </summary>
     public const string ConnectionCategoryId = "connection";
+
+    /// <summary>
+    /// Terminal behavior category identifier.
+    /// </summary>
     public const string TerminalCategoryId = "terminal";
+
+    /// <summary>
+    /// Appearance category identifier.
+    /// </summary>
     public const string AppearanceCategoryId = "appearance";
+
+    /// <summary>
+    /// SSH category identifier.
+    /// </summary>
     public const string SshCategoryId = "ssh";
+
+    /// <summary>
+    /// Logging category identifier.
+    /// </summary>
     public const string LoggingCategoryId = "logging";
 }
 
+/// <summary>
+/// Describes an SSH authentication mode option shown by the reusable shell.
+/// </summary>
+/// <param name="Id">Stable SSH authentication mode identifier.</param>
+/// <param name="DisplayName">Display name shown in shell UI.</param>
 public sealed record SshAuthModeOption(string Id, string DisplayName)
 {
+    /// <summary>
+    /// Password authentication mode identifier.
+    /// </summary>
     public const string PasswordModeId = "password";
+
+    /// <summary>
+    /// Private-key authentication mode identifier.
+    /// </summary>
     public const string PrivateKeyModeId = "private-key";
+
+    /// <summary>
+    /// SSH agent authentication mode identifier.
+    /// </summary>
     public const string AgentModeId = "agent";
+
+    /// <summary>
+    /// Combined password and private-key authentication mode identifier.
+    /// </summary>
     public const string PasswordAndKeyModeId = "password-key";
 }

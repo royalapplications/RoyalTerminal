@@ -110,7 +110,7 @@ internal sealed class MainWindowController
     private readonly Dictionary<TerminalControl, EventHandler<TerminalShellIntegrationEventArgs>> _commandHistoryHandlers = [];
     private readonly Dictionary<TerminalControl, TerminalCommandHistoryCaptureService> _commandHistoryCaptures = [];
     private readonly Dictionary<TerminalControl, TerminalLaunchConfiguration> _launchConfigurations = [];
-    private readonly Dictionary<TerminalControl, TerminalPaneRuntimeNode> _paneRuntimeNodes = [];
+    private readonly Dictionary<TerminalControl, TerminalPaneNode> _paneRuntimeNodes = [];
     private readonly HashSet<Task> _commandHistoryWriteTasks = [];
     private readonly object _commandHistoryWriteTaskSync = new();
     private readonly ITerminalModeCapabilityResolver _modeCapabilityResolver;
@@ -118,6 +118,7 @@ internal sealed class MainWindowController
     private readonly ITerminalSessionProfileStore _settingsProfileStore;
     private readonly ITerminalCommandHistoryStore _commandHistoryStore;
     private readonly ITerminalWorkspaceStore _workspaceStore;
+    private readonly ITerminalPaneSplitPolicy _paneSplitPolicy;
     private readonly TerminalCommandSuggestionService _commandSuggestionService = new();
     private readonly SemaphoreSlim _commandHistorySync = new(1, 1);
     private bool _suppressReplayTimelineSeek;
@@ -131,12 +132,16 @@ internal sealed class MainWindowController
     private int _paneCounter;
     private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(nativeVtAvailable: false);
 
-    public MainWindowController(Window window, MainWindowViewModel viewModel)
+    public MainWindowController(
+        Window window,
+        MainWindowViewModel viewModel,
+        ITerminalPaneSplitPolicy? paneSplitPolicy = null)
         : this(
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
-            TerminalModeResolver.Default)
+            TerminalModeResolver.Default,
+            paneSplitPolicy: paneSplitPolicy)
     {
     }
 
@@ -148,7 +153,8 @@ internal sealed class MainWindowController
         ITerminalSessionProfileStore? settingsProfileStore = null,
         ITerminalCommandHistoryStore? commandHistoryStore = null,
         ITerminalWorkspaceStore? workspaceStore = null,
-        Control? visualRoot = null)
+        Control? visualRoot = null,
+        ITerminalPaneSplitPolicy? paneSplitPolicy = null)
     {
         _window = window ?? throw new ArgumentNullException(nameof(window));
         _viewModel = viewModel;
@@ -158,6 +164,7 @@ internal sealed class MainWindowController
         _settingsProfileStore = settingsProfileStore ?? TerminalSessionProfileStoreFactory.CreateDefault();
         _commandHistoryStore = commandHistoryStore ?? TerminalCommandHistoryStoreFactory.CreateDefault();
         _workspaceStore = workspaceStore ?? TerminalWorkspaceStoreFactory.CreateDefault();
+        _paneSplitPolicy = paneSplitPolicy ?? TerminalPaneSplitPolicies.AllowAll;
         Control controlRoot = visualRoot ?? (Control?)_window.FindControl<MainView>("MainView") ?? _window;
         _terminalHost = controlRoot.FindControl<Grid>("TerminalHost")
             ?? throw new InvalidOperationException("TerminalHost was not found in MainWindow.");
@@ -1655,7 +1662,7 @@ internal sealed class MainWindowController
 
             List<TerminalControl> leafControls = [];
             List<TerminalRenderMode> resolvedModes = [];
-            TerminalPaneRuntimeNode rootPaneNode = CreateWorkspacePaneNode(
+            TerminalPaneNode rootPaneNode = CreateWorkspacePaneNode(
                 workspaceTab.RootPane,
                 workspaceTab,
                 leafControls,
@@ -1686,7 +1693,7 @@ internal sealed class MainWindowController
         }
     }
 
-    private TerminalPaneRuntimeNode CreateWorkspacePaneNode(
+    private TerminalPaneNode CreateWorkspacePaneNode(
         TerminalWorkspacePane pane,
         TerminalWorkspaceTab tab,
         List<TerminalControl> leafControls,
@@ -1697,9 +1704,13 @@ internal sealed class MainWindowController
             return CreateWorkspaceLeafNode(pane, tab, leafControls, resolvedModes);
         }
 
-        double ratio = Math.Clamp(split.Ratio, 0.05, 0.95);
+        double ratio = Math.Clamp(
+            split.Ratio,
+            TerminalPaneLayout.MinimumSplitRatio,
+            TerminalPaneLayout.MaximumSplitRatio);
+        TerminalPaneSplitOrientation orientation = ToPaneSplitOrientation(split.Orientation);
 
-        TerminalPaneRuntimeNode node = new(
+        TerminalPaneNode node = new(
             NormalizeOptional(pane.Id) ?? CreatePaneId(),
             NormalizeOptional(pane.Title),
             NormalizeOptional(pane.ProfileId),
@@ -1707,20 +1718,18 @@ internal sealed class MainWindowController
             NormalizeOptional(pane.TransportId),
             NormalizeOptional(pane.TransportProfileId));
 
-        TerminalPaneRuntimeNode first = CreateWorkspacePaneNode(split.FirstPane, tab, leafControls, resolvedModes);
-        TerminalPaneRuntimeNode second = CreateWorkspacePaneNode(split.SecondPane, tab, leafControls, resolvedModes);
+        TerminalPaneNode first = CreateWorkspacePaneNode(split.FirstPane, tab, leafControls, resolvedModes);
+        TerminalPaneNode second = CreateWorkspacePaneNode(split.SecondPane, tab, leafControls, resolvedModes);
         node.SetSplit(
-            NormalizeSplitOrientation(split.Orientation),
+            orientation,
             ratio,
             first,
             second,
-            CreateSplitGrid(NormalizeSplitOrientation(split.Orientation), ratio, first.Visual, second.Visual));
-        first.Parent = node;
-        second.Parent = node;
+            TerminalPaneLayout.CreateSplitGrid(orientation, ratio, first.Visual, second.Visual));
         return node;
     }
 
-    private TerminalPaneRuntimeNode CreateWorkspaceLeafNode(
+    private TerminalPaneNode CreateWorkspaceLeafNode(
         TerminalWorkspacePane pane,
         TerminalWorkspaceTab tab,
         List<TerminalControl> leafControls,
@@ -1748,8 +1757,8 @@ internal sealed class MainWindowController
         leafControls.Add(terminal);
         resolvedModes.Add(finalizedModeSelection.ResolvedMode);
 
-        ScrollViewer container = CreatePaneScrollViewer(terminal);
-        TerminalPaneRuntimeNode node = new(
+        ScrollViewer container = TerminalPaneLayout.CreatePaneScrollViewer(terminal);
+        TerminalPaneNode node = new(
             NormalizeOptional(pane.Id) ?? CreatePaneId(),
             NormalizeOptional(pane.Title),
             profileId,
@@ -1762,68 +1771,24 @@ internal sealed class MainWindowController
         return node;
     }
 
-    private static ScrollViewer CreatePaneScrollViewer(TerminalControl terminal)
-    {
-        return new ScrollViewer
-        {
-            Content = terminal,
-            VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-        };
-    }
-
-    private static Grid CreateSplitGrid(string orientation, double ratio, Control first, Control second)
-    {
-        double normalizedRatio = Math.Clamp(ratio, 0.05, 0.95);
-        Grid grid = new()
-        {
-            Background = Brushes.Transparent,
-        };
-
-        if (string.Equals(orientation, TerminalWorkspacePaneSplitOrientations.Vertical, StringComparison.Ordinal))
-        {
-            grid.RowDefinitions.Add(new RowDefinition(new GridLength(normalizedRatio, GridUnitType.Star)));
-            grid.RowDefinitions.Add(new RowDefinition(new GridLength(4, GridUnitType.Pixel)));
-            grid.RowDefinitions.Add(new RowDefinition(new GridLength(1.0 - normalizedRatio, GridUnitType.Star)));
-            Grid.SetRow(first, 0);
-            Grid.SetRow(second, 2);
-            grid.Children.Add(first);
-            GridSplitter splitter = new()
-            {
-                Height = 4,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Center,
-                Background = Brushes.Transparent,
-            };
-            Grid.SetRow(splitter, 1);
-            grid.Children.Add(splitter);
-            grid.Children.Add(second);
-            return grid;
-        }
-
-        grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(normalizedRatio, GridUnitType.Star)));
-        grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(4, GridUnitType.Pixel)));
-        grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1.0 - normalizedRatio, GridUnitType.Star)));
-        Grid.SetColumn(first, 0);
-        Grid.SetColumn(second, 2);
-        grid.Children.Add(first);
-        GridSplitter columnSplitter = new()
-        {
-            Width = 4,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Stretch,
-            Background = Brushes.Transparent,
-        };
-        Grid.SetColumn(columnSplitter, 1);
-        grid.Children.Add(columnSplitter);
-        grid.Children.Add(second);
-        return grid;
-    }
-
     private string CreatePaneId()
     {
         _paneCounter++;
         return $"pane-{_paneCounter.ToString(CultureInfo.InvariantCulture)}";
+    }
+
+    private static TerminalPaneSplitOrientation ToPaneSplitOrientation(string? orientation)
+    {
+        return string.Equals(orientation, TerminalWorkspacePaneSplitOrientations.Vertical, StringComparison.OrdinalIgnoreCase)
+            ? TerminalPaneSplitOrientation.Vertical
+            : TerminalPaneSplitOrientation.Horizontal;
+    }
+
+    private static string ToWorkspaceSplitOrientation(TerminalPaneSplitOrientation? orientation)
+    {
+        return orientation == TerminalPaneSplitOrientation.Vertical
+            ? TerminalWorkspacePaneSplitOrientations.Vertical
+            : TerminalWorkspacePaneSplitOrientations.Horizontal;
     }
 
     private static string NormalizeSplitOrientation(string? orientation)
@@ -1833,7 +1798,7 @@ internal sealed class MainWindowController
             : TerminalWorkspacePaneSplitOrientations.Horizontal;
     }
 
-    private void RegisterPaneControl(TerminalControl control, TerminalPaneRuntimeNode node)
+    private void RegisterPaneControl(TerminalControl control, TerminalPaneNode node)
     {
         _paneRuntimeNodes[control] = node;
         RegisterCommandHistoryCapture(control);
@@ -2123,8 +2088,8 @@ internal sealed class MainWindowController
         ApplyLaunchBehaviorSettings(terminal, launchProfile.Behavior);
         UpdateSessionLoggingSubscription(terminal);
 
-        ScrollViewer container = CreatePaneScrollViewer(terminal);
-        TerminalPaneRuntimeNode rootPaneNode = new(
+        ScrollViewer container = TerminalPaneLayout.CreatePaneScrollViewer(terminal);
+        TerminalPaneNode rootPaneNode = new(
             CreatePaneId(),
             tabName,
             profileId,
@@ -3328,55 +3293,104 @@ internal sealed class MainWindowController
             return;
         }
 
-        if (!_paneRuntimeNodes.TryGetValue(activeControl, out TerminalPaneRuntimeNode? activeNode) ||
+        if (!_paneRuntimeNodes.TryGetValue(activeControl, out TerminalPaneNode? activeNode) ||
             activeNode.LeafContainer is null)
         {
             UpdateStatus("The active pane cannot be split.");
             return;
         }
 
+        TerminalLaunchConfiguration activeLaunchConfiguration = GetLaunchConfiguration(activeControl);
+        string? splitWorkingDirectory = NormalizeOptional(activeNode.WorkingDirectory) ??
+                                        NormalizeOptional(tab.WorkingDirectory);
+        TerminalSessionProfile defaultSplitLaunchProfile = splitWorkingDirectory is null
+            ? activeLaunchConfiguration.Profile
+            : ApplyLaunchWorkingDirectory(activeLaunchConfiguration.Profile, splitWorkingDirectory);
+        defaultSplitLaunchProfile = defaultSplitLaunchProfile with
+        {
+            Appearance = BuildAppearanceSettingsFromControl(activeControl),
+        };
+        string sourceTransportId = NormalizeOptional(activeNode.TransportId) ??
+                                   NormalizeOptional(activeLaunchConfiguration.Profile.Transport.TransportId) ??
+                                   NormalizeOptional(tab.TransportId) ??
+                                   _viewModel.SelectedTransportMode.Id;
+        TerminalPaneSplitContext splitContext = new(
+            request,
+            tab.Title,
+            activeNode.Id,
+            activeNode.Title,
+            activeNode.ProfileId ?? tab.ProfileId,
+            sourceTransportId,
+            activeNode.TransportProfileId,
+            splitWorkingDirectory,
+            activeControl.HasActiveSession,
+            activeLaunchConfiguration.Profile,
+            defaultSplitLaunchProfile);
+        TerminalPaneSplitDecision splitDecision;
+        try
+        {
+            splitDecision = _paneSplitPolicy.Evaluate(splitContext) ??
+                            TerminalPaneSplitDecision.Deny("Split pane policy returned no decision.");
+        }
+        catch (Exception ex)
+        {
+            string message = $"Split pane policy failed: {ex.Message}";
+            UpdateStatus(message);
+            AppendEventLog($"[{tab.Title}] {message}");
+            return;
+        }
+
+        if (!splitDecision.IsAllowed)
+        {
+            string message = NormalizeOptional(splitDecision.StatusMessage) ??
+                             "Split panes are not available for this session.";
+            UpdateStatus(message);
+            AppendEventLog($"[{tab.Title}] Split active pane denied: {message}");
+            return;
+        }
+
+        bool usesDefaultSplitProfile = splitDecision.LaunchProfile is null;
+        TerminalSessionProfile splitLaunchProfile = splitDecision.LaunchProfile ?? defaultSplitLaunchProfile;
         TerminalModeSelection modeSelection = ResolveModeSelectionForNewTab();
         TerminalControl newControl = CreateTerminalControlWithRuntimeFallback(
             modeSelection,
             out TerminalModeSelection finalizedModeSelection);
-        TerminalLaunchConfiguration activeLaunchConfiguration = GetLaunchConfiguration(activeControl);
-        string? splitWorkingDirectory = NormalizeOptional(activeNode.WorkingDirectory) ??
-                                        NormalizeOptional(tab.WorkingDirectory);
-        TerminalSessionProfile splitLaunchProfile = splitWorkingDirectory is null
-            ? activeLaunchConfiguration.Profile
-            : ApplyLaunchWorkingDirectory(activeLaunchConfiguration.Profile, splitWorkingDirectory);
-        splitLaunchProfile = splitLaunchProfile with
-        {
-            Appearance = BuildAppearanceSettingsFromControl(activeControl),
-        };
         TerminalLaunchConfiguration newLaunchConfiguration = new(splitLaunchProfile);
         _launchConfigurations[newControl] = newLaunchConfiguration;
         ApplyLaunchAppearanceSettings(newControl, newLaunchConfiguration.Profile.Appearance);
         ApplyLaunchBehaviorSettings(newControl, newLaunchConfiguration.Profile.Behavior);
         UpdateSessionLoggingSubscription(newControl);
 
-        ScrollViewer newContainer = CreatePaneScrollViewer(newControl);
-        TerminalPaneRuntimeNode newNode = new(
+        string newProfileId = NormalizeOptional(splitLaunchProfile.Id) ?? activeNode.ProfileId ?? tab.ProfileId;
+        string newTransportId = NormalizeOptional(splitLaunchProfile.Transport.TransportId) ?? sourceTransportId;
+        string? newTransportProfileId = usesDefaultSplitProfile &&
+                                        string.Equals(newTransportId, sourceTransportId, StringComparison.OrdinalIgnoreCase)
+            ? activeNode.TransportProfileId
+            : null;
+        string? newWorkingDirectory = GetProfileWorkingDirectory(splitLaunchProfile) ?? splitWorkingDirectory;
+        ScrollViewer newContainer = TerminalPaneLayout.CreatePaneScrollViewer(newControl);
+        TerminalPaneNode newNode = new(
             CreatePaneId(),
             $"{tab.Title} Pane",
-            activeNode.ProfileId ?? tab.ProfileId,
-            splitWorkingDirectory,
-            activeNode.TransportId ?? tab.TransportId,
-            activeNode.TransportProfileId);
+            newProfileId,
+            newWorkingDirectory,
+            newTransportId,
+            newTransportProfileId);
         newNode.SetLeaf(newControl, newContainer);
         RegisterPaneControl(newControl, newNode);
 
-        string orientation = request == TerminalPaneSplitRequest.Down
-            ? TerminalWorkspacePaneSplitOrientations.Vertical
-            : TerminalWorkspacePaneSplitOrientations.Horizontal;
-        TerminalPaneRuntimeNode splitNode = new(
+        TerminalPaneSplitOrientation orientation = request == TerminalPaneSplitRequest.Down
+            ? TerminalPaneSplitOrientation.Vertical
+            : TerminalPaneSplitOrientation.Horizontal;
+        string orientationLabel = ToWorkspaceSplitOrientation(orientation);
+        TerminalPaneNode splitNode = new(
             CreatePaneId(),
             activeNode.Title,
             activeNode.ProfileId,
             activeNode.WorkingDirectory,
             activeNode.TransportId,
             activeNode.TransportProfileId);
-        TerminalPaneRuntimeNode? previousParent = activeNode.Parent;
+        TerminalPaneNode? previousParent = activeNode.Parent;
         int hostIndex = -1;
         bool wasVisible = true;
         int parentChildIndex = -1;
@@ -3403,7 +3417,7 @@ internal sealed class MainWindowController
             }
         }
 
-        Grid splitGrid = CreateSplitGrid(orientation, 0.5, activeNode.Visual, newNode.Visual);
+        Grid splitGrid = TerminalPaneLayout.CreateSplitGrid(orientation, 0.5, activeNode.Visual, newNode.Visual);
         splitNode.SetSplit(orientation, 0.5, activeNode, newNode, splitGrid);
 
         splitNode.Parent = previousParent;
@@ -3416,22 +3430,22 @@ internal sealed class MainWindowController
         }
         else
         {
-            ReplaceChildPane(
+            TerminalPaneLayout.ReplaceChildPane(
                 previousParent,
                 activeNode,
                 splitNode,
                 parentChildIndex,
                 parentChildRow,
                 parentChildColumn);
-            tab.SetLeafControls(CollectLeafControls(tab.RootPaneNode));
+            tab.SetLeafControls(TerminalPaneLayout.CollectLeafControls(tab.RootPaneNode));
         }
 
         SetActivePane(newControl, focus: true);
         QueueStandaloneSessionStart(newControl);
-        UpdateStatus(request == TerminalPaneSplitRequest.Down
+        UpdateStatus(NormalizeOptional(splitDecision.StatusMessage) ?? (request == TerminalPaneSplitRequest.Down
             ? $"Split {tab.Title} downward."
-            : $"Split {tab.Title} to the right.");
-        AppendEventLog($"[{tab.Title}] Split active pane ({orientation}).");
+            : $"Split {tab.Title} to the right."));
+        AppendEventLog($"[{tab.Title}] Split active pane ({orientationLabel}).");
 
         if (finalizedModeSelection.FallbackApplied && finalizedModeSelection.FallbackReason is not null)
         {
@@ -3464,36 +3478,26 @@ internal sealed class MainWindowController
         TerminalTab? tab = GetActiveTab();
         TerminalControl? activeControl = GetActiveStandaloneControl();
         if (tab is null || activeControl is null ||
-            !_paneRuntimeNodes.TryGetValue(activeControl, out TerminalPaneRuntimeNode? activeNode))
+            !_paneRuntimeNodes.TryGetValue(activeControl, out TerminalPaneNode? activeNode))
         {
             return;
         }
 
         bool wantsHorizontal = direction is TerminalPaneDirection.Left or TerminalPaneDirection.Right;
-        TerminalPaneRuntimeNode? splitNode = FindResizeSplit(activeNode, wantsHorizontal);
+        TerminalPaneNode? splitNode = TerminalPaneLayout.FindResizeSplit(activeNode, wantsHorizontal);
         if (splitNode is null)
         {
             return;
         }
 
-        double delta = GetFocusedPaneResizeDelta(splitNode, activeNode, direction);
-        double ratio = Math.Clamp(splitNode.Ratio + delta, 0.05, 0.95);
-        ApplySplitRatio(splitNode, ratio);
+        double delta = TerminalPaneLayout.GetFocusedPaneResizeDelta(splitNode, activeNode, direction);
+        double ratio = Math.Clamp(
+            splitNode.Ratio + delta,
+            TerminalPaneLayout.MinimumSplitRatio,
+            TerminalPaneLayout.MaximumSplitRatio);
+        TerminalPaneLayout.ApplySplitRatio(splitNode, ratio);
         UpdateStatus($"Pane ratio {ratio.ToString("0.00", CultureInfo.InvariantCulture)}.");
         AppendEventLog($"[{tab.Title}] Resized pane split to {ratio.ToString("0.00", CultureInfo.InvariantCulture)}.");
-    }
-
-    private static double GetFocusedPaneResizeDelta(
-        TerminalPaneRuntimeNode splitNode,
-        TerminalPaneRuntimeNode activeNode,
-        TerminalPaneDirection direction)
-    {
-        double requestedDelta = direction is TerminalPaneDirection.Right or TerminalPaneDirection.Down
-            ? 0.05
-            : -0.05;
-        return ContainsPaneNode(splitNode.First, activeNode)
-            ? requestedDelta
-            : -requestedDelta;
     }
 
     private static bool IsForwardDirection(TerminalPaneDirection direction)
@@ -3501,64 +3505,10 @@ internal sealed class MainWindowController
         return direction is TerminalPaneDirection.Right or TerminalPaneDirection.Down;
     }
 
-    private static TerminalPaneRuntimeNode? FindResizeSplit(TerminalPaneRuntimeNode activeNode, bool wantsHorizontal)
-    {
-        TerminalPaneRuntimeNode? node = activeNode.Parent;
-        while (node is not null)
-        {
-            bool isHorizontal = string.Equals(
-                node.Orientation,
-                TerminalWorkspacePaneSplitOrientations.Horizontal,
-                StringComparison.Ordinal);
-            if (isHorizontal == wantsHorizontal)
-            {
-                return node;
-            }
-
-            node = node.Parent;
-        }
-
-        return null;
-    }
-
-    private static bool ContainsPaneNode(TerminalPaneRuntimeNode? root, TerminalPaneRuntimeNode target)
-    {
-        if (root is null)
-        {
-            return false;
-        }
-
-        if (ReferenceEquals(root, target))
-        {
-            return true;
-        }
-
-        return ContainsPaneNode(root.First, target) || ContainsPaneNode(root.Second, target);
-    }
-
-    private static void ApplySplitRatio(TerminalPaneRuntimeNode splitNode, double ratio)
-    {
-        splitNode.Ratio = Math.Clamp(ratio, 0.05, 0.95);
-        if (splitNode.SplitGrid is null)
-        {
-            return;
-        }
-
-        if (string.Equals(splitNode.Orientation, TerminalWorkspacePaneSplitOrientations.Vertical, StringComparison.Ordinal))
-        {
-            splitNode.SplitGrid.RowDefinitions[0].Height = new GridLength(splitNode.Ratio, GridUnitType.Star);
-            splitNode.SplitGrid.RowDefinitions[2].Height = new GridLength(1.0 - splitNode.Ratio, GridUnitType.Star);
-            return;
-        }
-
-        splitNode.SplitGrid.ColumnDefinitions[0].Width = new GridLength(splitNode.Ratio, GridUnitType.Star);
-        splitNode.SplitGrid.ColumnDefinitions[2].Width = new GridLength(1.0 - splitNode.Ratio, GridUnitType.Star);
-    }
-
     private void ReplaceTabRootVisual(
         TerminalTab tab,
         Control newRootVisual,
-        TerminalPaneRuntimeNode rootNode,
+        TerminalPaneNode rootNode,
         int hostIndex,
         bool wasVisible)
     {
@@ -3572,71 +3522,10 @@ internal sealed class MainWindowController
         }
 
         newRootVisual.IsVisible = wasVisible;
-        tab.SetPaneRoot(newRootVisual, newRootVisual, rootNode, CollectLeafControls(rootNode));
+        tab.SetPaneRoot(newRootVisual, newRootVisual, rootNode, TerminalPaneLayout.CollectLeafControls(rootNode));
         if (ReferenceEquals(_activeTab, tab))
         {
             _activeTab = tab;
-        }
-    }
-
-    private static void ReplaceChildPane(
-        TerminalPaneRuntimeNode parent,
-        TerminalPaneRuntimeNode oldChild,
-        TerminalPaneRuntimeNode newChild,
-        int childIndex,
-        int row,
-        int column)
-    {
-        if (parent.SplitGrid is null)
-        {
-            return;
-        }
-
-        if (childIndex >= 0)
-        {
-            Grid.SetRow(newChild.Visual, row);
-            Grid.SetColumn(newChild.Visual, column);
-            parent.SplitGrid.Children.Insert(childIndex, newChild.Visual);
-        }
-
-        if (ReferenceEquals(parent.First, oldChild))
-        {
-            parent.First = newChild;
-        }
-        else if (ReferenceEquals(parent.Second, oldChild))
-        {
-            parent.Second = newChild;
-        }
-    }
-
-    private static IReadOnlyList<TerminalControl> CollectLeafControls(TerminalPaneRuntimeNode? rootNode)
-    {
-        if (rootNode is null)
-        {
-            return [];
-        }
-
-        List<TerminalControl> controls = [];
-        CollectLeafControls(rootNode, controls);
-        return controls;
-    }
-
-    private static void CollectLeafControls(TerminalPaneRuntimeNode node, List<TerminalControl> controls)
-    {
-        if (node.Control is not null)
-        {
-            controls.Add(node.Control);
-            return;
-        }
-
-        if (node.First is not null)
-        {
-            CollectLeafControls(node.First, controls);
-        }
-
-        if (node.Second is not null)
-        {
-            CollectLeafControls(node.Second, controls);
         }
     }
 
@@ -3661,77 +3550,12 @@ internal sealed class MainWindowController
         TerminalControl activeControl,
         TerminalPaneDirection direction)
     {
-        if (!_paneRuntimeNodes.TryGetValue(activeControl, out TerminalPaneRuntimeNode? activeNode) ||
-            activeNode.LeafContainer is null)
-        {
-            return null;
-        }
-
-        Point? activeOrigin = activeNode.LeafContainer.TranslatePoint(new Point(0, 0), tab.Container);
-        if (activeOrigin is null)
-        {
-            return null;
-        }
-
-        Point activeCenter = new(
-            activeOrigin.Value.X + activeNode.LeafContainer.Bounds.Width / 2.0,
-            activeOrigin.Value.Y + activeNode.LeafContainer.Bounds.Height / 2.0);
-        TerminalControl? best = null;
-        double bestScore = double.MaxValue;
-
-        for (int i = 0; i < tab.LeafControls.Count; i++)
-        {
-            TerminalControl candidate = tab.LeafControls[i];
-            if (ReferenceEquals(candidate, activeControl) ||
-                !_paneRuntimeNodes.TryGetValue(candidate, out TerminalPaneRuntimeNode? candidateNode) ||
-                candidateNode.LeafContainer is null)
-            {
-                continue;
-            }
-
-            Point? candidateOrigin = candidateNode.LeafContainer.TranslatePoint(new Point(0, 0), tab.Container);
-            if (candidateOrigin is null)
-            {
-                continue;
-            }
-
-            Point candidateCenter = new(
-                candidateOrigin.Value.X + candidateNode.LeafContainer.Bounds.Width / 2.0,
-                candidateOrigin.Value.Y + candidateNode.LeafContainer.Bounds.Height / 2.0);
-            double dx = candidateCenter.X - activeCenter.X;
-            double dy = candidateCenter.Y - activeCenter.Y;
-            if (!IsCandidateInDirection(direction, dx, dy))
-            {
-                continue;
-            }
-
-            double primaryDistance = direction is TerminalPaneDirection.Left or TerminalPaneDirection.Right
-                ? Math.Abs(dx)
-                : Math.Abs(dy);
-            double secondaryDistance = direction is TerminalPaneDirection.Left or TerminalPaneDirection.Right
-                ? Math.Abs(dy)
-                : Math.Abs(dx);
-            double score = primaryDistance * 1000.0 + secondaryDistance;
-            if (score < bestScore)
-            {
-                best = candidate;
-                bestScore = score;
-            }
-        }
-
-        return best;
-    }
-
-    private static bool IsCandidateInDirection(TerminalPaneDirection direction, double dx, double dy)
-    {
-        return direction switch
-        {
-            TerminalPaneDirection.Left => dx < -0.5,
-            TerminalPaneDirection.Right => dx > 0.5,
-            TerminalPaneDirection.Up => dy < -0.5,
-            TerminalPaneDirection.Down => dy > 0.5,
-            _ => false,
-        };
+        return TerminalPaneLayout.FindDirectionalPane(
+            tab.LeafControls,
+            _paneRuntimeNodes,
+            tab.Container,
+            activeControl,
+            direction);
     }
 
     private static TerminalControl? FindSequentialPane(
@@ -3739,40 +3563,18 @@ internal sealed class MainWindowController
         TerminalControl activeControl,
         bool forward)
     {
-        int index = IndexOfControl(tab.LeafControls, activeControl);
-        if (index < 0 || tab.LeafControls.Count == 0)
-        {
-            return null;
-        }
-
-        int targetIndex = forward
-            ? (index + 1) % tab.LeafControls.Count
-            : (index - 1 + tab.LeafControls.Count) % tab.LeafControls.Count;
-        return tab.LeafControls[targetIndex];
+        return TerminalPaneLayout.FindSequentialPane(tab.LeafControls, activeControl, forward);
     }
 
     private static string GetPaneOrdinal(TerminalTab tab, TerminalControl control)
     {
-        int index = IndexOfControl(tab.LeafControls, control);
-        return (index + 1).ToString(CultureInfo.InvariantCulture);
+        int ordinal = TerminalPaneLayout.GetPaneOrdinal(tab.LeafControls, control);
+        return ordinal.ToString(CultureInfo.InvariantCulture);
     }
 
     private static bool ContainsControl(IReadOnlyList<TerminalControl> controls, TerminalControl control)
     {
-        return IndexOfControl(controls, control) >= 0;
-    }
-
-    private static int IndexOfControl(IReadOnlyList<TerminalControl> controls, TerminalControl control)
-    {
-        for (int i = 0; i < controls.Count; i++)
-        {
-            if (ReferenceEquals(controls[i], control))
-            {
-                return i;
-            }
-        }
-
-        return -1;
+        return TerminalPaneLayout.ContainsControl(controls, control);
     }
 
     #endregion
@@ -5421,7 +5223,7 @@ internal sealed class MainWindowController
         }
 
         string? workingDirectory = NormalizeOptional(value.WorkingDirectory);
-        if (_paneRuntimeNodes.TryGetValue(control, out TerminalPaneRuntimeNode? node))
+        if (_paneRuntimeNodes.TryGetValue(control, out TerminalPaneNode? node))
         {
             node.SetWorkingDirectory(workingDirectory);
         }
@@ -5438,7 +5240,7 @@ internal sealed class MainWindowController
         string? profileId = null;
         string? transportId = null;
         string? shellId = null;
-        if (_paneRuntimeNodes.TryGetValue(control, out TerminalPaneRuntimeNode? node))
+        if (_paneRuntimeNodes.TryGetValue(control, out TerminalPaneNode? node))
         {
             profileId = NormalizeOptional(node.ProfileId);
             transportId = NormalizeOptional(node.TransportId);
@@ -5591,7 +5393,7 @@ internal sealed class MainWindowController
             string? workingDirectory = null;
             string? profileId = null;
             string? transportId = null;
-            if (_paneRuntimeNodes.TryGetValue(control, out TerminalPaneRuntimeNode? node))
+            if (_paneRuntimeNodes.TryGetValue(control, out TerminalPaneNode? node))
             {
                 workingDirectory = NormalizeOptional(node.WorkingDirectory);
                 profileId = NormalizeOptional(node.ProfileId);
@@ -5969,7 +5771,7 @@ internal sealed class MainWindowController
     }
 
     private static TerminalWorkspacePane? CreateWorkspacePaneSnapshot(
-        TerminalPaneRuntimeNode? node,
+        TerminalPaneNode? node,
         HashSet<string> paneIds)
     {
         if (node is null)
@@ -5991,8 +5793,11 @@ internal sealed class MainWindowController
                 TransportProfileId = node.TransportProfileId,
                 Split = new TerminalWorkspacePaneSplit
                 {
-                    Orientation = NormalizeSplitOrientation(node.Orientation),
-                    Ratio = Math.Clamp(node.Ratio, 0.05, 0.95),
+                    Orientation = ToWorkspaceSplitOrientation(node.Orientation),
+                    Ratio = Math.Clamp(
+                        node.Ratio,
+                        TerminalPaneLayout.MinimumSplitRatio,
+                        TerminalPaneLayout.MaximumSplitRatio),
                     FirstPane = CreateWorkspacePaneSnapshot(node.First, paneIds) ?? new TerminalWorkspacePane { Id = $"{paneId}-first" },
                     SecondPane = CreateWorkspacePaneSnapshot(node.Second, paneIds) ?? new TerminalWorkspacePane { Id = $"{paneId}-second" },
                 },
@@ -6034,7 +5839,10 @@ internal sealed class MainWindowController
             Split = new TerminalWorkspacePaneSplit
             {
                 Orientation = NormalizeSplitOrientation(split.Orientation),
-                Ratio = Math.Clamp(split.Ratio, 0.05, 0.95),
+                Ratio = Math.Clamp(
+                    split.Ratio,
+                    TerminalPaneLayout.MinimumSplitRatio,
+                    TerminalPaneLayout.MaximumSplitRatio),
                 FirstPane = CreateWorkspacePaneSnapshot(split.FirstPane, paneIds) ?? new TerminalWorkspacePane { Id = $"{paneId}-first" },
                 SecondPane = CreateWorkspacePaneSnapshot(split.SecondPane, paneIds) ?? new TerminalWorkspacePane { Id = $"{paneId}-second" },
             },
@@ -6062,7 +5870,7 @@ internal sealed class MainWindowController
         }
     }
 
-    private static void UpdateRuntimeSplitRatio(TerminalPaneRuntimeNode node)
+    private static void UpdateRuntimeSplitRatio(TerminalPaneNode node)
     {
         if (node.SplitGrid is null)
         {
@@ -6071,7 +5879,7 @@ internal sealed class MainWindowController
 
         double first;
         double second;
-        if (string.Equals(node.Orientation, TerminalWorkspacePaneSplitOrientations.Vertical, StringComparison.Ordinal))
+        if (node.Orientation == TerminalPaneSplitOrientation.Vertical)
         {
             first = GetGridLengthValue(node.SplitGrid.RowDefinitions[0].Height);
             second = GetGridLengthValue(node.SplitGrid.RowDefinitions[2].Height);
@@ -6085,7 +5893,10 @@ internal sealed class MainWindowController
         double total = first + second;
         if (total > 0)
         {
-            node.Ratio = Math.Clamp(first / total, 0.05, 0.95);
+            node.Ratio = Math.Clamp(
+                first / total,
+                TerminalPaneLayout.MinimumSplitRatio,
+                TerminalPaneLayout.MaximumSplitRatio);
         }
     }
 
@@ -6399,7 +6210,7 @@ internal sealed class MainWindowController
             string? workingDirectory,
             string? workspaceId,
             TerminalWorkspacePane? rootPane,
-            TerminalPaneRuntimeNode? rootPaneNode,
+            TerminalPaneNode? rootPaneNode,
             IReadOnlyList<TerminalControl> leafControls,
             TerminalWorkspaceTab? deferredWorkspaceTab = null)
         {
@@ -6438,7 +6249,7 @@ internal sealed class MainWindowController
         public string? WorkingDirectory { get; private set; }
         public string? WorkspaceId { get; }
         public TerminalWorkspacePane? RootPane { get; }
-        public TerminalPaneRuntimeNode? RootPaneNode { get; private set; }
+        public TerminalPaneNode? RootPaneNode { get; private set; }
         public IReadOnlyList<TerminalControl> LeafControls { get; private set; }
         public TerminalWorkspaceTab? DeferredWorkspaceTab { get; }
         public bool IsDeferredWorkspaceTab => DeferredWorkspaceTab is not null && RootPaneNode is null;
@@ -6462,7 +6273,7 @@ internal sealed class MainWindowController
         public void SetPaneRoot(
             Control control,
             Control container,
-            TerminalPaneRuntimeNode rootPaneNode,
+            TerminalPaneNode rootPaneNode,
             IReadOnlyList<TerminalControl> leafControls)
         {
             Control = control;
@@ -6474,74 +6285,6 @@ internal sealed class MainWindowController
         public void SetLeafControls(IReadOnlyList<TerminalControl> leafControls)
         {
             LeafControls = leafControls;
-        }
-    }
-
-    private sealed class TerminalPaneRuntimeNode
-    {
-        public TerminalPaneRuntimeNode(
-            string id,
-            string? title,
-            string? profileId,
-            string? workingDirectory,
-            string? transportId,
-            string? transportProfileId)
-        {
-            Id = id;
-            Title = title;
-            ProfileId = profileId;
-            WorkingDirectory = workingDirectory;
-            TransportId = transportId;
-            TransportProfileId = transportProfileId;
-        }
-
-        public string Id { get; }
-        public string? Title { get; }
-        public string? ProfileId { get; }
-        public string? WorkingDirectory { get; private set; }
-        public string? TransportId { get; }
-        public string? TransportProfileId { get; }
-        public TerminalPaneRuntimeNode? Parent { get; set; }
-        public TerminalPaneRuntimeNode? First { get; set; }
-        public TerminalPaneRuntimeNode? Second { get; set; }
-        public string? Orientation { get; private set; }
-        public double Ratio { get; set; } = 0.5;
-        public TerminalControl? Control { get; private set; }
-        public ScrollViewer? LeafContainer { get; private set; }
-        public Grid? SplitGrid { get; private set; }
-        public Control Visual { get; private set; } = new Grid();
-
-        public void SetLeaf(TerminalControl control, ScrollViewer container)
-        {
-            Control = control;
-            LeafContainer = container;
-            First = null;
-            Second = null;
-            Orientation = null;
-            SplitGrid = null;
-            Visual = container;
-        }
-
-        public void SetWorkingDirectory(string? workingDirectory)
-        {
-            WorkingDirectory = workingDirectory;
-        }
-
-        public void SetSplit(
-            string orientation,
-            double ratio,
-            TerminalPaneRuntimeNode first,
-            TerminalPaneRuntimeNode second,
-            Grid grid)
-        {
-            Control = null;
-            LeafContainer = null;
-            Orientation = orientation;
-            Ratio = Math.Clamp(ratio, 0.05, 0.95);
-            First = first;
-            Second = second;
-            SplitGrid = grid;
-            Visual = grid;
         }
     }
 
