@@ -432,6 +432,76 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_Shutdown_AssignsUniqueIdsAfterRestoringNumberedTabIds()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryWorkspaceStore workspaceStore = new(new TerminalWorkspaceDocument
+        {
+            SelectedWindowId = "main",
+            Windows =
+            [
+                new TerminalWorkspaceWindow
+                {
+                    Id = "main",
+                    SelectedTabId = "tab-2",
+                    Tabs =
+                    [
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "tab-2",
+                            ProfileId = "default",
+                            Title = "Restored",
+                            TransportId = TerminalTransportIds.Pipe,
+                            RenderMode = TerminalWorkspaceRenderModes.Skia,
+                        },
+                    ],
+                },
+            ],
+        });
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo unique-tab-id";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            commandHistoryStore: new InMemoryCommandHistoryStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool restoredTab = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(restoredTab);
+
+            viewModel.NewTabCommand.Execute().Wait();
+            bool newTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(newTabCreated);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        IReadOnlyList<TerminalWorkspaceTab> savedTabs = workspaceStore.Document.Windows[0].Tabs;
+        Assert.Equal(2, savedTabs.Count);
+        Assert.Equal(2, savedTabs.Select(tab => tab.Id).Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(savedTabs, tab => string.Equals(tab.Id, "tab-2", StringComparison.Ordinal));
+        Assert.Contains(savedTabs, tab => string.Equals(tab.Id, "tab-3", StringComparison.Ordinal));
+    }
+
+    [AvaloniaFact]
     public async Task Controller_Startup_RestoresSplitPaneWorkspace_AndShutdownPreservesPaneTree()
     {
         using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
@@ -517,6 +587,140 @@ public sealed class MainWindowControllerModeStartupTests
         Assert.Equal(TerminalWorkspacePaneSplitOrientations.Horizontal, savedTab.RootPane.Split!.Orientation);
         Assert.Equal("left", savedTab.RootPane.Split.FirstPane.Id);
         Assert.Equal("right", savedTab.RootPane.Split.SecondPane.Id);
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_SplitPaneAfterRestore_AssignsUniquePaneIds()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryWorkspaceStore workspaceStore = new(new TerminalWorkspaceDocument
+        {
+            SelectedWindowId = "main",
+            Windows =
+            [
+                new TerminalWorkspaceWindow
+                {
+                    Id = "main",
+                    SelectedTabId = "tab-split",
+                    Tabs =
+                    [
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "tab-split",
+                            ProfileId = "default",
+                            Title = "Split",
+                            TransportId = TerminalTransportIds.Pipe,
+                            RenderMode = TerminalWorkspaceRenderModes.Skia,
+                            RootPane = new TerminalWorkspacePane
+                            {
+                                Id = "pane-2",
+                                ProfileId = "default",
+                                TransportId = TerminalTransportIds.Pipe,
+                            },
+                        },
+                    ],
+                },
+            ],
+        });
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo unique-pane-id";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            commandHistoryStore: new InMemoryCommandHistoryStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool restoredPane = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1 &&
+                      GetStandaloneControls(terminalHost).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(restoredPane);
+
+            viewModel.SplitPaneRightCommand.Execute().Wait();
+            bool splitCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1 &&
+                      terminalHost.Children[0] is Grid { Children.Count: 3 } &&
+                      GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(splitCreated);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        TerminalWorkspaceTab savedTab = Assert.Single(workspaceStore.Document.Windows[0].Tabs);
+        List<string> paneIds = [];
+        CollectPaneIds(savedTab.RootPane, paneIds);
+        Assert.Equal(paneIds.Count, paneIds.Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains("pane-2", paneIds);
+        Assert.Contains("pane-3", paneIds);
+        Assert.Contains("pane-4", paneIds);
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_Shutdown_FlushesQueuedShellIntegrationBeforeSavingState()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryWorkspaceStore workspaceStore = new();
+        InMemoryCommandHistoryStore commandHistoryStore = new();
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo shutdown-flush";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            commandHistoryStore: commandHistoryStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool tabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(tabCreated);
+
+            TerminalControl control = Assert.Single(GetStandaloneControls(terminalHost));
+            byte[] shellIntegrationOutput = Encoding.UTF8.GetBytes(
+                "\u001b]7;file://localhost/tmp/shutdown-flush\u0007" +
+                "\u001b]133;C;cmdline_url=echo%20queued\u0007" +
+                "\u001b]133;D;0\u0007");
+            await Task.Run(() => control.WriteOutput(shellIntegrationOutput));
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        TerminalWorkspaceTab savedTab = Assert.Single(workspaceStore.Document.Windows[0].Tabs);
+        Assert.Equal("/tmp/shutdown-flush", savedTab.WorkingDirectory);
+        Assert.Equal("/tmp/shutdown-flush", savedTab.RootPane.WorkingDirectory);
+
+        TerminalCommandHistoryEntry savedEntry = Assert.Single(commandHistoryStore.Document.Entries);
+        Assert.Equal("echo queued", savedEntry.CommandLine);
+        Assert.Equal("/tmp/shutdown-flush", savedEntry.WorkingDirectory);
+        Assert.Equal(0, savedEntry.ExitCode);
     }
 
     [AvaloniaFact]
@@ -2375,6 +2579,18 @@ public sealed class MainWindowControllerModeStartupTests
         }
 
         return builder.ToString();
+    }
+
+    private static void CollectPaneIds(TerminalWorkspacePane pane, List<string> ids)
+    {
+        ids.Add(pane.Id);
+        if (pane.Split is null)
+        {
+            return;
+        }
+
+        CollectPaneIds(pane.Split.FirstPane, ids);
+        CollectPaneIds(pane.Split.SecondPane, ids);
     }
 
     private static void AssertTerminalBehaviorSettings(

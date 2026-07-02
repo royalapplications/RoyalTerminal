@@ -1511,6 +1511,8 @@ internal sealed class MainWindowController
             }
         }
 
+        SeedWorkspaceRuntimeCounters(window);
+
         if (_tabs.Count > 0)
         {
             SwitchToTab(Math.Clamp(selectedIndex, 0, _tabs.Count - 1));
@@ -1536,6 +1538,57 @@ internal sealed class MainWindowController
             ? WindowState.Maximized
             : WindowState.Normal;
         _viewModel.IsTabsInTitleBar = window.TabsInTitleBar;
+    }
+
+    private void SeedWorkspaceRuntimeCounters(TerminalWorkspaceWindow window)
+    {
+        int tabCounter = _tabCounter;
+        int paneCounter = _paneCounter;
+
+        for (int i = 0; i < window.Tabs.Count; i++)
+        {
+            TerminalWorkspaceTab tab = window.Tabs[i];
+            SeedCounterFromId(tab.Id, "tab-", ref tabCounter);
+            SeedPaneCounter(tab.RootPane, ref paneCounter);
+        }
+
+        _tabCounter = Math.Max(_tabCounter, tabCounter);
+        _paneCounter = Math.Max(_paneCounter, paneCounter);
+    }
+
+    private static void SeedPaneCounter(TerminalWorkspacePane? pane, ref int counter)
+    {
+        if (pane is null)
+        {
+            return;
+        }
+
+        SeedCounterFromId(pane.Id, "pane-", ref counter);
+        if (pane.Split is null)
+        {
+            return;
+        }
+
+        SeedPaneCounter(pane.Split.FirstPane, ref counter);
+        SeedPaneCounter(pane.Split.SecondPane, ref counter);
+    }
+
+    private static void SeedCounterFromId(string? id, string prefix, ref int counter)
+    {
+        string? normalized = NormalizeOptional(id);
+        if (normalized is null || !normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (int.TryParse(
+                normalized.AsSpan(prefix.Length),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int value))
+        {
+            counter = Math.Max(counter, value);
+        }
     }
 
     private void RestoreWorkspaceTab(TerminalWorkspaceTab workspaceTab)
@@ -5797,6 +5850,7 @@ internal sealed class MainWindowController
 
     private void DisposeResources()
     {
+        FlushTerminalRuntimeStateBeforePersistence();
         SaveWorkspaceSnapshot();
         FlushCommandHistoryWrites();
         _startingStandaloneControls.Clear();
@@ -5820,6 +5874,21 @@ internal sealed class MainWindowController
 
     }
 
+    private void FlushTerminalRuntimeStateBeforePersistence()
+    {
+        foreach (TerminalControl control in EnumerateTerminalControls())
+        {
+            try
+            {
+                control.FlushPendingTransportOutput();
+            }
+            catch (Exception ex)
+            {
+                AppendEventLog($"Terminal output flush failed: {ex.Message}");
+            }
+        }
+    }
+
     private void SaveWorkspaceSnapshot()
     {
         try
@@ -5836,6 +5905,7 @@ internal sealed class MainWindowController
     private TerminalWorkspaceDocument CreateWorkspaceSnapshot()
     {
         List<TerminalWorkspaceTab> tabs = new(_tabs.Count);
+        HashSet<string> tabIds = new(StringComparer.Ordinal);
         string? selectedTabId = null;
         for (int i = 0; i < _tabs.Count; i++)
         {
@@ -5845,13 +5915,13 @@ internal sealed class MainWindowController
                 continue;
             }
 
-            string tabId = NormalizeOptional(tab.WorkspaceId) ??
-                           $"tab-{tab.Index.ToString(CultureInfo.InvariantCulture)}";
+            string tabId = CreateWorkspaceTabSnapshotId(tab, tabIds);
             if (ReferenceEquals(tab, _activeTab))
             {
                 selectedTabId = tabId;
             }
 
+            HashSet<string> paneIds = new(StringComparer.Ordinal);
             tabs.Add(new TerminalWorkspaceTab
             {
                 Id = tabId,
@@ -5860,8 +5930,8 @@ internal sealed class MainWindowController
                 WorkingDirectory = tab.WorkingDirectory,
                 TransportId = tab.TransportId,
                 RenderMode = MapWorkspaceRenderMode(tab.ResolvedMode),
-                RootPane = CreateWorkspacePaneSnapshot(tab.RootPaneNode) ??
-                           tab.RootPane ??
+                RootPane = CreateWorkspacePaneSnapshot(tab.RootPaneNode, paneIds) ??
+                           CreateWorkspacePaneSnapshot(tab.RootPane, paneIds) ??
                            new TerminalWorkspacePane
                            {
                                Id = $"{tabId}-root",
@@ -5891,19 +5961,29 @@ internal sealed class MainWindowController
         };
     }
 
-    private static TerminalWorkspacePane? CreateWorkspacePaneSnapshot(TerminalPaneRuntimeNode? node)
+    private static string CreateWorkspaceTabSnapshotId(TerminalTab tab, HashSet<string> tabIds)
+    {
+        string baseId = NormalizeOptional(tab.WorkspaceId) ??
+                        $"tab-{tab.Index.ToString(CultureInfo.InvariantCulture)}";
+        return CreateUniqueWorkspaceId(baseId, "tab-", tabIds);
+    }
+
+    private static TerminalWorkspacePane? CreateWorkspacePaneSnapshot(
+        TerminalPaneRuntimeNode? node,
+        HashSet<string> paneIds)
     {
         if (node is null)
         {
             return null;
         }
 
+        string paneId = CreateUniqueWorkspaceId(node.Id, "pane-", paneIds);
         if (node.First is not null && node.Second is not null)
         {
             UpdateRuntimeSplitRatio(node);
             return new TerminalWorkspacePane
             {
-                Id = node.Id,
+                Id = paneId,
                 Title = node.Title,
                 ProfileId = node.ProfileId,
                 WorkingDirectory = node.WorkingDirectory,
@@ -5913,21 +5993,73 @@ internal sealed class MainWindowController
                 {
                     Orientation = NormalizeSplitOrientation(node.Orientation),
                     Ratio = Math.Clamp(node.Ratio, 0.05, 0.95),
-                    FirstPane = CreateWorkspacePaneSnapshot(node.First) ?? new TerminalWorkspacePane { Id = $"{node.Id}-first" },
-                    SecondPane = CreateWorkspacePaneSnapshot(node.Second) ?? new TerminalWorkspacePane { Id = $"{node.Id}-second" },
+                    FirstPane = CreateWorkspacePaneSnapshot(node.First, paneIds) ?? new TerminalWorkspacePane { Id = $"{paneId}-first" },
+                    SecondPane = CreateWorkspacePaneSnapshot(node.Second, paneIds) ?? new TerminalWorkspacePane { Id = $"{paneId}-second" },
                 },
             };
         }
 
         return new TerminalWorkspacePane
         {
-            Id = node.Id,
+            Id = paneId,
             Title = node.Title,
             ProfileId = node.ProfileId,
             WorkingDirectory = node.WorkingDirectory,
             TransportId = node.TransportId,
             TransportProfileId = node.TransportProfileId,
         };
+    }
+
+    private static TerminalWorkspacePane? CreateWorkspacePaneSnapshot(
+        TerminalWorkspacePane? pane,
+        HashSet<string> paneIds)
+    {
+        if (pane is null)
+        {
+            return null;
+        }
+
+        string paneId = CreateUniqueWorkspaceId(pane.Id, "pane-", paneIds);
+        if (pane.Split is not { } split)
+        {
+            return pane with
+            {
+                Id = paneId,
+            };
+        }
+
+        return pane with
+        {
+            Id = paneId,
+            Split = new TerminalWorkspacePaneSplit
+            {
+                Orientation = NormalizeSplitOrientation(split.Orientation),
+                Ratio = Math.Clamp(split.Ratio, 0.05, 0.95),
+                FirstPane = CreateWorkspacePaneSnapshot(split.FirstPane, paneIds) ?? new TerminalWorkspacePane { Id = $"{paneId}-first" },
+                SecondPane = CreateWorkspacePaneSnapshot(split.SecondPane, paneIds) ?? new TerminalWorkspacePane { Id = $"{paneId}-second" },
+            },
+        };
+    }
+
+    private static string CreateUniqueWorkspaceId(string? preferredId, string fallbackPrefix, HashSet<string> usedIds)
+    {
+        string baseId = NormalizeOptional(preferredId) ??
+                        $"{fallbackPrefix}{(usedIds.Count + 1).ToString(CultureInfo.InvariantCulture)}";
+        if (usedIds.Add(baseId))
+        {
+            return baseId;
+        }
+
+        int counter = usedIds.Count + 1;
+        while (true)
+        {
+            string candidate = $"{fallbackPrefix}{counter.ToString(CultureInfo.InvariantCulture)}";
+            counter++;
+            if (usedIds.Add(candidate))
+            {
+                return candidate;
+            }
+        }
     }
 
     private static void UpdateRuntimeSplitRatio(TerminalPaneRuntimeNode node)

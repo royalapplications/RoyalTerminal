@@ -645,8 +645,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private readonly TerminalMouseModeTracker _mouseModeTracker = new();
     private readonly object _pendingTransportOutputSync = new();
     private readonly object _pendingTransportOutputDrainExecutionSync = new();
+    private readonly object _pendingShellIntegrationEventSync = new();
     private readonly Queue<byte[]> _pendingTransportOutput = new();
     private readonly Queue<PendingTransportUiBatch> _pendingTransportUiBatches = new();
+    private readonly Queue<TerminalShellIntegrationEvent> _pendingShellIntegrationEvents = new();
     private EraseDisplaySequenceDetector _eraseDisplaySequenceDetector;
     private int _pendingTransportOutputBytes;
     private int _pendingTransportUiBatchBytes;
@@ -654,6 +656,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private long _suppressTransportVtResponsesUntilTimestamp;
     private bool _pendingTransportOutputDrainScheduled;
     private bool _pendingTransportUiDrainScheduled;
+    private bool _pendingShellIntegrationEventDrainScheduled;
     private bool _acceptPendingTransportOutput = true;
     private bool _outputScrollInvalidationPending;
     private DispatcherTimer? _transportResizeDebounceTimer;
@@ -5299,6 +5302,22 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     }
 
     /// <summary>
+    /// Drains queued transport output and shell integration events before host state is persisted.
+    /// </summary>
+    public void FlushPendingTransportOutput()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.InvokeAsync(FlushPendingTransportOutput).GetAwaiter().GetResult();
+            return;
+        }
+
+        DrainPendingTransportOutput(flushAll: true);
+        DrainPendingTransportOutputUiBatches(flushAll: true);
+        DrainPendingShellIntegrationEvents();
+    }
+
+    /// <summary>
     /// Stops the PTY and kills the child shell process.
     /// </summary>
     public void StopPty()
@@ -5326,21 +5345,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _activeTransportExitHandler = null;
         }
 
-        if (Dispatcher.UIThread.CheckAccess())
-        {
-            DrainPendingTransportOutput(flushAll: true);
-            DrainPendingTransportOutputUiBatches(flushAll: true);
-        }
-        else
-        {
-            Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    DrainPendingTransportOutput(flushAll: true);
-                    DrainPendingTransportOutputUiBatches(flushAll: true);
-                })
-                .GetAwaiter()
-                .GetResult();
-        }
+        FlushPendingTransportOutput();
         ResetPendingTransportOutputQueue();
         _activeTransportId = null;
         _mouseModeTracker.Reset();
@@ -5567,7 +5572,53 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private void OnVtProcessorShellIntegrationEventReceived(object? sender, TerminalShellIntegrationEventArgs e)
     {
         _ = sender;
-        Dispatcher.UIThread.Post(() => ShellIntegrationEventReceived?.Invoke(this, e));
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            ShellIntegrationEventReceived?.Invoke(this, e);
+            return;
+        }
+
+        bool scheduleDrain = false;
+        lock (_pendingShellIntegrationEventSync)
+        {
+            _pendingShellIntegrationEvents.Enqueue(e.Value);
+            if (!_pendingShellIntegrationEventDrainScheduled)
+            {
+                _pendingShellIntegrationEventDrainScheduled = true;
+                scheduleDrain = true;
+            }
+        }
+
+        if (scheduleDrain)
+        {
+            Dispatcher.UIThread.Post(DrainPendingShellIntegrationEvents);
+        }
+    }
+
+    private void DrainPendingShellIntegrationEvents()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.InvokeAsync(DrainPendingShellIntegrationEvents).GetAwaiter().GetResult();
+            return;
+        }
+
+        while (true)
+        {
+            TerminalShellIntegrationEvent value;
+            lock (_pendingShellIntegrationEventSync)
+            {
+                if (_pendingShellIntegrationEvents.Count == 0)
+                {
+                    _pendingShellIntegrationEventDrainScheduled = false;
+                    return;
+                }
+
+                value = _pendingShellIntegrationEvents.Dequeue();
+            }
+
+            ShellIntegrationEventReceived?.Invoke(this, new TerminalShellIntegrationEventArgs(value));
+        }
     }
 
     private void OnPtyDataReceived(byte[] data, int length)
