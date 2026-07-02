@@ -34,6 +34,41 @@ public sealed class MainWindowControllerModeStartupTests
 {
     private const string StartAllRenderModesEnvVar = "ROYALTERMINAL_DEMO_START_ALL_RENDER_MODES";
 
+    [Fact]
+    public void Controller_BuildPipeCommandSpec_UsesPowerShellArgumentsFromShellPath()
+    {
+        TerminalCommandSpec command = MainWindowController.BuildPipeCommandSpec(
+            "Write-Output ok",
+            "/usr/local/bin/pwsh");
+
+        Assert.Equal("/usr/local/bin/pwsh", command.FileName);
+        Assert.Equal(
+            ["-NoLogo", "-NoProfile", "-Command", "Write-Output ok"],
+            command.Arguments);
+    }
+
+    [Fact]
+    public void Controller_BuildPipeCommandSpec_UsesCmdArgumentsFromShellPath()
+    {
+        TerminalCommandSpec command = MainWindowController.BuildPipeCommandSpec(
+            "echo ok",
+            @"C:\Windows\System32\cmd.exe");
+
+        Assert.Equal(@"C:\Windows\System32\cmd.exe", command.FileName);
+        Assert.Equal(["/c", "echo ok"], command.Arguments);
+    }
+
+    [Fact]
+    public void Controller_BuildPipeCommandSpec_UsesPosixLoginCommandForNonPowerShellProfiles()
+    {
+        TerminalCommandSpec command = MainWindowController.BuildPipeCommandSpec(
+            "echo ok",
+            @"C:\Program Files\Git\bin\bash.exe");
+
+        Assert.Equal(@"C:\Program Files\Git\bin\bash.exe", command.FileName);
+        Assert.Equal(["-lc", "echo ok"], command.Arguments);
+    }
+
     [AvaloniaFact]
     public async Task Controller_Startup_CreatesSingleRenderedTabByDefault()
     {

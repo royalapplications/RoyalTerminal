@@ -1310,16 +1310,54 @@ internal sealed class MainWindowController
     }
 
     private static bool IsPowerShellProfile(ShellProfileOption? shellProfile)
+        => IsPowerShellShellPath(shellProfile?.CommandPath);
+
+    internal static TerminalCommandSpec BuildPipeCommandSpec(
+        string commandText,
+        string? shellPath)
     {
-        string? commandPath = NormalizeOptional(shellProfile?.CommandPath);
-        if (commandPath is null)
+        string normalizedCommandText = string.IsNullOrWhiteSpace(commandText)
+            ? "echo RoyalTerminal pipe transport"
+            : commandText.Trim();
+        string normalizedShellPath = NormalizeOptional(shellPath) ??
+                                     (OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh");
+
+        if (IsPowerShellShellPath(normalizedShellPath))
         {
-            return false;
+            return new TerminalCommandSpec(
+                normalizedShellPath,
+                [
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-Command",
+                    normalizedCommandText,
+                ]);
         }
 
-        string fileName = Path.GetFileNameWithoutExtension(commandPath.Replace('\\', '/'));
+        if (IsWindowsCommandShellPath(normalizedShellPath))
+        {
+            return new TerminalCommandSpec(normalizedShellPath, ["/c", normalizedCommandText]);
+        }
+
+        return new TerminalCommandSpec(normalizedShellPath, ["-lc", normalizedCommandText]);
+    }
+
+    private static bool IsPowerShellShellPath(string? shellPath)
+    {
+        string fileName = GetShellFileNameWithoutExtension(shellPath);
         return fileName.Contains("pwsh", StringComparison.OrdinalIgnoreCase) ||
                fileName.Contains("powershell", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsWindowsCommandShellPath(string? shellPath)
+        => string.Equals(GetShellFileNameWithoutExtension(shellPath), "cmd", StringComparison.OrdinalIgnoreCase);
+
+    private static string GetShellFileNameWithoutExtension(string? shellPath)
+    {
+        string? normalizedShellPath = NormalizeOptional(shellPath);
+        return normalizedShellPath is null
+            ? string.Empty
+            : Path.GetFileNameWithoutExtension(normalizedShellPath.Replace('\\', '/'));
     }
 
     private SshAuthModeOption ResolveSshAuthMode(TerminalSessionSshAuthenticationSettings authentication)
@@ -2997,32 +3035,7 @@ internal sealed class MainWindowController
             ? "echo RoyalTerminal pipe transport"
             : _viewModel.PipeCommandText.Trim();
 
-        string shellPath = !string.IsNullOrWhiteSpace(shellProfile?.CommandPath)
-            ? shellProfile.CommandPath
-            : OperatingSystem.IsWindows()
-                ? "cmd.exe"
-                : "/bin/sh";
-
-        string shellName = Path.GetFileName(shellPath).ToLowerInvariant();
-        if (OperatingSystem.IsWindows())
-        {
-            if (shellName.Contains("pwsh", StringComparison.Ordinal)
-                || shellName.Contains("powershell", StringComparison.Ordinal))
-            {
-                return new TerminalCommandSpec(
-                    shellPath,
-                    [
-                        "-NoLogo",
-                        "-NoProfile",
-                        "-Command",
-                        commandText,
-                    ]);
-            }
-
-            return new TerminalCommandSpec(shellPath, ["/c", commandText]);
-        }
-
-        return new TerminalCommandSpec(shellPath, ["-lc", commandText]);
+        return BuildPipeCommandSpec(commandText, shellProfile?.CommandPath);
     }
 
     private static int ParsePort(string value, string fieldName)
