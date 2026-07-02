@@ -275,6 +275,25 @@ public sealed class TerminalShellIntegrationContractTests
     }
 
     [Fact]
+    public void BootstrapBuilder_BashPreservesPromptCommandArrays()
+    {
+        string? script = TerminalShellIntegrationBootstrapBuilder.Build(
+            new TerminalShellIntegrationBootstrapOptions(TerminalShellIntegrationBootstrapShell.Bash));
+
+        Assert.NotNull(script);
+        Assert.Contains("declare -p PROMPT_COMMAND", script, StringComparison.Ordinal);
+        Assert.Contains("for prompt_command_entry in \"${PROMPT_COMMAND[@]}\"; do", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "PROMPT_COMMAND=(__royalterminal_prompt_command \"${PROMPT_COMMAND[@]}\")",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "PROMPT_COMMAND=\"__royalterminal_prompt_command${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"",
+            script,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BootstrapBuilder_ZshUsesByteLocaleForUrlEncode()
     {
         string? script = TerminalShellIntegrationBootstrapBuilder.Build(

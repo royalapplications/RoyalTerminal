@@ -170,7 +170,22 @@ public static class TerminalShellIntegrationBootstrapBuilder
             lines.Add("__royalterminal_install_debug_trap");
         }
 
-        lines.Add("case \";${PROMPT_COMMAND:-};\" in *__royalterminal_prompt_command*) ;; *) PROMPT_COMMAND=\"__royalterminal_prompt_command${PROMPT_COMMAND:+;$PROMPT_COMMAND}\" ;; esac");
+        lines.Add("__royalterminal_install_prompt_command() {");
+        lines.Add("  local prompt_command_decl prompt_command_entry");
+        lines.Add("  prompt_command_decl=\"$(declare -p PROMPT_COMMAND 2>/dev/null || true)\"");
+        lines.Add("  case \"$prompt_command_decl\" in");
+        lines.Add("    declare\\ -a\\ PROMPT_COMMAND=*|declare\\ -ax\\ PROMPT_COMMAND=*)");
+        lines.Add("      for prompt_command_entry in \"${PROMPT_COMMAND[@]}\"; do");
+        lines.Add("        case \"$prompt_command_entry\" in *__royalterminal_prompt_command*) return ;; esac");
+        lines.Add("      done");
+        lines.Add("      PROMPT_COMMAND=(__royalterminal_prompt_command \"${PROMPT_COMMAND[@]}\")");
+        lines.Add("      ;;");
+        lines.Add("    *)");
+        lines.Add("      case \";${PROMPT_COMMAND:-};\" in *__royalterminal_prompt_command*) ;; *) PROMPT_COMMAND=\"__royalterminal_prompt_command${PROMPT_COMMAND:+;$PROMPT_COMMAND}\" ;; esac");
+        lines.Add("      ;;");
+        lines.Add("  esac");
+        lines.Add("}");
+        lines.Add("__royalterminal_install_prompt_command");
         return string.Join('\n', lines);
     }
 
