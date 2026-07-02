@@ -118,6 +118,7 @@ internal sealed class MainWindowController
     private readonly ITerminalSessionProfileStore _settingsProfileStore;
     private readonly ITerminalCommandHistoryStore _commandHistoryStore;
     private readonly ITerminalWorkspaceStore _workspaceStore;
+    private readonly ISshSecretStore _sshSecretStore;
     private readonly ITerminalPaneSplitPolicy _paneSplitPolicy;
     private readonly TerminalCommandSuggestionService _commandSuggestionService = new();
     private readonly SemaphoreSlim _commandHistorySync = new(1, 1);
@@ -154,7 +155,8 @@ internal sealed class MainWindowController
         ITerminalCommandHistoryStore? commandHistoryStore = null,
         ITerminalWorkspaceStore? workspaceStore = null,
         Control? visualRoot = null,
-        ITerminalPaneSplitPolicy? paneSplitPolicy = null)
+        ITerminalPaneSplitPolicy? paneSplitPolicy = null,
+        ISshSecretStore? sshSecretStore = null)
     {
         _window = window ?? throw new ArgumentNullException(nameof(window));
         _viewModel = viewModel;
@@ -164,6 +166,7 @@ internal sealed class MainWindowController
         _settingsProfileStore = settingsProfileStore ?? TerminalSessionProfileStoreFactory.CreateDefault();
         _commandHistoryStore = commandHistoryStore ?? TerminalCommandHistoryStoreFactory.CreateDefault();
         _workspaceStore = workspaceStore ?? TerminalWorkspaceStoreFactory.CreateDefault();
+        _sshSecretStore = sshSecretStore ?? SshSecretProtectionFactory.CreateDefaultSecretStore();
         _paneSplitPolicy = paneSplitPolicy ?? TerminalPaneSplitPolicies.AllowAll;
         Control controlRoot = visualRoot ?? (Control?)_window.FindControl<MainView>("MainView") ?? _window;
         _terminalHost = controlRoot.FindControl<Grid>("TerminalHost")
@@ -1383,6 +1386,7 @@ internal sealed class MainWindowController
     private TerminalSessionProfile BuildLaunchProfileFromViewModel(string profileId, string displayName)
     {
         string transportId = _viewModel.SelectedTransportMode.Id;
+        string sshSecretScopeId = CreateRuntimeSshSecretScope(profileId);
         TerminalSessionTransportProfile transport = new()
         {
             TransportId = transportId,
@@ -1402,7 +1406,7 @@ internal sealed class MainWindowController
                 ? BuildLaunchSerialSettings()
                 : new TerminalSessionSerialSettings(),
             Ssh = string.Equals(transportId, TerminalTransportIds.Ssh, StringComparison.Ordinal)
-                ? BuildLaunchSshSettings()
+                ? BuildLaunchSshSettings(sshSecretScopeId)
                 : new TerminalSessionSshSettings(),
         };
 
@@ -1415,6 +1419,101 @@ internal sealed class MainWindowController
             Logging = _viewModel.GetSessionLoggingSettings(),
             Transport = transport,
         };
+    }
+
+    private TerminalLaunchConfiguration BuildLaunchConfigurationFromViewModel(string profileId, string displayName)
+    {
+        TerminalSessionProfile profile = BuildLaunchProfileFromViewModel(profileId, displayName);
+        return new TerminalLaunchConfiguration(
+            profile,
+            CaptureSshCredentialsFromViewModel(profile.Transport));
+    }
+
+    private static string CreateRuntimeSshSecretScope(string profileId)
+    {
+        return string.Concat(
+            "royalterminal-runtime/",
+            NormalizeSecretSegment(profileId),
+            "/",
+            Guid.NewGuid().ToString("N"));
+    }
+
+    private static string BuildRuntimeSshSecretId(string secretScopeId, string secretName)
+    {
+        return string.Concat(secretScopeId, "/", secretName);
+    }
+
+    private static List<string> BuildRuntimePrivateKeySecretIds(
+        string secretScopeId,
+        string? rawPrivateKeys)
+    {
+        IReadOnlyList<string> privateKeys = SplitPrivateKeys(rawPrivateKeys);
+        int count = Math.Max(1, privateKeys.Count);
+        List<string> secretIds = new(count);
+        for (int i = 0; i < count; i++)
+        {
+            secretIds.Add(BuildRuntimeSshSecretId(
+                secretScopeId,
+                string.Concat("private-key-", (i + 1).ToString(CultureInfo.InvariantCulture))));
+        }
+
+        return secretIds;
+    }
+
+    private static string NormalizeSecretSegment(string? value)
+    {
+        string normalized = NormalizeOptional(value) ?? "default";
+        StringBuilder builder = new(normalized.Length);
+        for (int i = 0; i < normalized.Length; i++)
+        {
+            char ch = normalized[i];
+            builder.Append(char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.'
+                ? ch
+                : '-');
+        }
+
+        return builder.Length == 0 ? "default" : builder.ToString();
+    }
+
+    private static IReadOnlyList<string> SplitPrivateKeys(string? rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return Array.Empty<string>();
+        }
+
+        string[] parts = rawValue.Split([',', ';', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        List<string> values = new(parts.Length);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string entry = parts[i].Trim();
+            if (!string.IsNullOrWhiteSpace(entry))
+            {
+                values.Add(entry);
+            }
+        }
+
+        return values;
+    }
+
+    private TerminalSshCredentialSnapshot? CaptureSshCredentialsFromViewModel(TerminalSessionTransportProfile transport)
+    {
+        if (!string.Equals(transport.TransportId, TerminalTransportIds.Ssh, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        TerminalSessionSshAuthenticationSettings authentication = transport.Ssh.Authentication;
+        string? password = authentication.UsePassword
+            ? NormalizeOptional(_viewModel.SshPassword)
+            : null;
+        IReadOnlyList<string> privateKeys = authentication.PrivateKeySecretIds.Count > 0
+            ? SplitPrivateKeys(_viewModel.SshPrivateKeyPath)
+            : Array.Empty<string>();
+
+        return password is null && privateKeys.Count == 0
+            ? null
+            : new TerminalSshCredentialSnapshot(password, privateKeys);
     }
 
     private TerminalSessionAppearanceSettings BuildLaunchAppearanceFromViewModel(
@@ -1513,7 +1612,7 @@ internal sealed class MainWindowController
         };
     }
 
-    private TerminalSessionSshSettings BuildLaunchSshSettings()
+    private TerminalSessionSshSettings BuildLaunchSshSettings(string secretScopeId)
     {
         return new TerminalSessionSshSettings
         {
@@ -1524,7 +1623,7 @@ internal sealed class MainWindowController
             TerminalType = NormalizeOptional(_viewModel.SshTerminalType) ?? "xterm-256color",
             InitialCommand = NormalizeOptional(_viewModel.SshInitialCommand),
             ExpectedHostKeyFingerprintSha256 = NormalizeOptional(_viewModel.SshExpectedHostKeyFingerprintSha256),
-            Authentication = BuildLaunchSshAuthenticationSettings(),
+            Authentication = BuildLaunchSshAuthenticationSettings(secretScopeId),
             Proxy = BuildSshProxyOptions(),
             PortForwardings = new List<SshPortForwardOptions>(BuildSshPortForwardings()),
             X11 = BuildSshX11Options(),
@@ -1532,7 +1631,7 @@ internal sealed class MainWindowController
         };
     }
 
-    private TerminalSessionSshAuthenticationSettings BuildLaunchSshAuthenticationSettings()
+    private TerminalSessionSshAuthenticationSettings BuildLaunchSshAuthenticationSettings(string secretScopeId)
     {
         string authModeId = _viewModel.SelectedSshAuthMode.Id;
         bool usePassword = string.Equals(authModeId, SshAuthModeOption.PasswordModeId, StringComparison.Ordinal)
@@ -1540,12 +1639,15 @@ internal sealed class MainWindowController
         bool usePrivateKey = string.Equals(authModeId, SshAuthModeOption.PrivateKeyModeId, StringComparison.Ordinal)
                              || string.Equals(authModeId, SshAuthModeOption.PasswordAndKeyModeId, StringComparison.Ordinal);
         bool useAgent = string.Equals(authModeId, SshAuthModeOption.AgentModeId, StringComparison.Ordinal);
+        List<string> privateKeySecretIds = usePrivateKey
+            ? BuildRuntimePrivateKeySecretIds(secretScopeId, _viewModel.SshPrivateKeyPath)
+            : [];
 
         return new TerminalSessionSshAuthenticationSettings
         {
             UsePassword = usePassword,
-            PasswordSecretId = usePassword ? ShellSshCredentialProvider.PasswordSecretId : null,
-            PrivateKeySecretIds = usePrivateKey ? [ShellSshCredentialProvider.PrivateKeySecretId] : [],
+            PasswordSecretId = usePassword ? BuildRuntimeSshSecretId(secretScopeId, "password") : null,
+            PrivateKeySecretIds = privateKeySecretIds,
             UseAgent = useAgent,
         };
     }
@@ -1830,14 +1932,14 @@ internal sealed class MainWindowController
 
         string profileId = NormalizeOptional(pane.ProfileId) ?? tab.ProfileId;
         string title = NormalizeOptional(pane.Title) ?? NormalizeOptional(tab.Title) ?? profileId;
-        TerminalSessionProfile launchProfile = BuildWorkspacePaneLaunchProfile(
+        TerminalLaunchConfiguration launchConfiguration = BuildWorkspacePaneLaunchConfiguration(
             pane,
             tab,
             profileId,
             title,
             savedProfile);
-        _launchConfigurations[terminal] = new TerminalLaunchConfiguration(
-            launchProfile);
+        TerminalSessionProfile launchProfile = launchConfiguration.Profile;
+        _launchConfigurations[terminal] = launchConfiguration;
         ApplyLaunchLayoutSettings(terminal, launchProfile.Layout);
         ApplyLaunchAppearanceSettings(terminal, launchProfile.Appearance);
         ApplyLaunchBehaviorSettings(terminal, launchProfile.Behavior);
@@ -2008,29 +2110,36 @@ internal sealed class MainWindowController
         return profile;
     }
 
-    private TerminalSessionProfile BuildWorkspacePaneLaunchProfile(
+    private TerminalLaunchConfiguration BuildWorkspacePaneLaunchConfiguration(
         TerminalWorkspacePane pane,
         TerminalWorkspaceTab tab,
         string profileId,
         string title,
         TerminalSessionProfile? savedProfile)
     {
-        TerminalSessionProfile launchProfile = savedProfile is null
-            ? BuildLaunchProfileFromViewModel(profileId, title)
-            : savedProfile with
+        TerminalLaunchConfiguration launchConfiguration = savedProfile is null
+            ? BuildLaunchConfigurationFromViewModel(profileId, title)
+            : new TerminalLaunchConfiguration(savedProfile with
             {
                 Id = profileId,
                 DisplayName = title,
-            };
+            });
         string? workingDirectory = NormalizeOptional(pane.WorkingDirectory) ?? NormalizeOptional(tab.WorkingDirectory);
+        TerminalSessionProfile launchProfile = launchConfiguration.Profile;
         if (workingDirectory is not null)
         {
-            return ApplyLaunchWorkingDirectory(launchProfile, workingDirectory);
+            return launchConfiguration with
+            {
+                Profile = ApplyLaunchWorkingDirectory(launchProfile, workingDirectory),
+            };
         }
 
         return savedProfile is null
-            ? ApplyLaunchWorkingDirectory(launchProfile, null)
-            : launchProfile;
+            ? launchConfiguration with
+            {
+                Profile = ApplyLaunchWorkingDirectory(launchProfile, null),
+            }
+            : launchConfiguration;
     }
 
     private static TerminalSessionProfile ApplyLaunchWorkingDirectory(
@@ -2161,16 +2270,16 @@ internal sealed class MainWindowController
         TabVisualMode tabMode = ResolveTabMode(terminal, finalizedModeSelection.ResolvedMode);
         Button headerButton = CreateTabHeader(tabName, tabMode);
         string profileId = NormalizeOptional(profileIdOverride) ?? _viewModel.SelectedShellProfile?.Id ?? "default";
-        TerminalSessionProfile launchProfile = launchProfileOverride is null
-            ? BuildLaunchProfileFromViewModel(profileId, tabName)
-            : launchProfileOverride with
+        TerminalLaunchConfiguration launchConfiguration = launchProfileOverride is null
+            ? BuildLaunchConfigurationFromViewModel(profileId, tabName)
+            : new TerminalLaunchConfiguration(launchProfileOverride with
             {
                 Id = profileId,
                 DisplayName = tabName,
-            };
+            });
+        TerminalSessionProfile launchProfile = launchConfiguration.Profile;
         string transportId = launchProfile.Transport.TransportId;
         string? workingDirectory = GetProfileWorkingDirectory(launchProfile);
-        TerminalLaunchConfiguration launchConfiguration = new(launchProfile);
         _launchConfigurations[terminal] = launchConfiguration;
         ApplyLaunchLayoutSettings(terminal, launchProfile.Layout);
         ApplyLaunchAppearanceSettings(terminal, launchProfile.Appearance);
@@ -2658,7 +2767,7 @@ internal sealed class MainWindowController
     {
         INativeVtProcessorProvider[] nativeProviders = [new GhosttyVtProcessorProvider()];
         DefaultPtyFactory ptyFactory = new();
-        ShellSshCredentialProvider credentialProvider = new(_viewModel);
+        ShellSshCredentialProvider credentialProvider = new(_sshSecretStore);
         PromptingSshHostKeyValidator hostKeyValidator = new(
             new KnownHostsSshHostKeyValidator(),
             PromptForSshHostKeyTrust);
@@ -2774,6 +2883,9 @@ internal sealed class MainWindowController
         if (transportOptions is SshTransportOptions sshOptions)
         {
             AppendEventLog($"[{tabName}] Starting SSH session {sshOptions.Endpoint.Username}@{sshOptions.Endpoint.Host}:{sshOptions.Endpoint.Port}.");
+            await SaveLaunchSshCredentialsAsync(
+                sshOptions.Authentication,
+                launchConfiguration.SshCredentials);
             await standaloneControl.StartSshAsync(sshOptions, preserveScrollback);
             UpdateSessionStartedStatus(
                 standaloneControl,
@@ -2793,7 +2905,7 @@ internal sealed class MainWindowController
         }
 
         string profileId = _viewModel.SelectedShellProfile?.Id ?? "default";
-        return new TerminalLaunchConfiguration(BuildLaunchProfileFromViewModel(profileId, GetTabDisplayName(control)));
+        return BuildLaunchConfigurationFromViewModel(profileId, GetTabDisplayName(control));
     }
 
     private static TerminalSessionProfile ApplyLaunchDimensions(
@@ -2855,6 +2967,40 @@ internal sealed class MainWindowController
         }
 
         return options;
+    }
+
+    private async ValueTask SaveLaunchSshCredentialsAsync(
+        SshAuthenticationOptions authentication,
+        TerminalSshCredentialSnapshot? credentials,
+        CancellationToken cancellationToken = default)
+    {
+        if (credentials is null)
+        {
+            return;
+        }
+
+        if (authentication.UsePassword &&
+            !string.IsNullOrWhiteSpace(authentication.PasswordSecretId) &&
+            !string.IsNullOrWhiteSpace(credentials.Password))
+        {
+            await _sshSecretStore.SaveSecretAsync(
+                authentication.PasswordSecretId,
+                credentials.Password,
+                cancellationToken);
+        }
+
+        int count = Math.Min(authentication.PrivateKeySecretIds.Count, credentials.PrivateKeys.Count);
+        for (int i = 0; i < count; i++)
+        {
+            string secretId = authentication.PrivateKeySecretIds[i];
+            string privateKey = credentials.PrivateKeys[i];
+            if (string.IsNullOrWhiteSpace(secretId) || string.IsNullOrWhiteSpace(privateKey))
+            {
+                continue;
+            }
+
+            await _sshSecretStore.SaveSecretAsync(secretId, privateKey, cancellationToken);
+        }
     }
 
     private RawTcpTransportOptions BuildRawTcpOptions(TerminalSessionDimensions dimensions)
@@ -3415,11 +3561,14 @@ internal sealed class MainWindowController
 
         bool usesDefaultSplitProfile = splitDecision.LaunchProfile is null;
         TerminalSessionProfile splitLaunchProfile = splitDecision.LaunchProfile ?? defaultSplitLaunchProfile;
+        TerminalSshCredentialSnapshot? splitSshCredentials = usesDefaultSplitProfile
+            ? activeLaunchConfiguration.SshCredentials
+            : null;
         TerminalModeSelection modeSelection = ResolveModeSelectionForNewTab();
         TerminalControl newControl = CreateTerminalControlWithRuntimeFallback(
             modeSelection,
             out TerminalModeSelection finalizedModeSelection);
-        TerminalLaunchConfiguration newLaunchConfiguration = new(splitLaunchProfile);
+        TerminalLaunchConfiguration newLaunchConfiguration = new(splitLaunchProfile, splitSshCredentials);
         _launchConfigurations[newControl] = newLaunchConfiguration;
         ApplyLaunchLayoutSettings(newControl, newLaunchConfiguration.Profile.Layout);
         ApplyLaunchAppearanceSettings(newControl, newLaunchConfiguration.Profile.Appearance);
@@ -5041,12 +5190,15 @@ internal sealed class MainWindowController
         foreach (TerminalControl control in EnumerateTerminalControls())
         {
             TerminalLaunchConfiguration configuration = GetLaunchConfiguration(control);
-            _launchConfigurations[control] = new TerminalLaunchConfiguration(configuration.Profile with
+            _launchConfigurations[control] = configuration with
             {
-                Appearance = BuildAppearanceSettingsFromControl(control),
-                Behavior = behavior,
-                Logging = logging,
-            });
+                Profile = configuration.Profile with
+                {
+                    Appearance = BuildAppearanceSettingsFromControl(control),
+                    Behavior = behavior,
+                    Logging = logging,
+                },
+            };
         }
     }
 
@@ -5566,10 +5718,13 @@ internal sealed class MainWindowController
             return;
         }
 
-        _launchConfigurations[control] = new TerminalLaunchConfiguration(launchConfiguration.Profile with
+        _launchConfigurations[control] = launchConfiguration with
         {
-            Behavior = behavior,
-        });
+            Profile = launchConfiguration.Profile with
+            {
+                Behavior = behavior,
+            },
+        };
     }
 
     private void ApplyTerminalBehaviorSettings(TerminalControl control)
@@ -6213,65 +6368,22 @@ internal sealed class MainWindowController
         }
     }
 
-    private sealed class ShellSshCredentialProvider : ISshCredentialProvider
+    internal sealed class ShellSshCredentialProvider : ISshCredentialProvider
     {
         public const string PasswordSecretId = "royalterminal-runtime-password";
         public const string PrivateKeySecretId = "royalterminal-runtime-private-key";
 
-        private readonly MainWindowViewModel _viewModel;
+        private readonly SecretStoreSshCredentialProvider _credentialProvider;
 
-        public ShellSshCredentialProvider(MainWindowViewModel viewModel)
+        public ShellSshCredentialProvider(ISshSecretStore secretStore)
         {
-            _viewModel = viewModel;
+            _credentialProvider = new SecretStoreSshCredentialProvider(secretStore);
         }
 
         public ValueTask<SshResolvedCredentials> ResolveAsync(
             SshCredentialRequest request,
             CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            string? password = request.Authentication.UsePassword
-                ? NullIfWhiteSpace(_viewModel.SshPassword)
-                : null;
-
-            IReadOnlyList<string> privateKeys = request.Authentication.PrivateKeySecretIds.Count > 0
-                ? SplitPrivateKeys(_viewModel.SshPrivateKeyPath)
-                : Array.Empty<string>();
-
-            return ValueTask.FromResult(new SshResolvedCredentials(
-                Password: password,
-                PrivateKeyPemOrPath: privateKeys,
-                UseAgent: request.Authentication.UseAgent));
-        }
-
-        private static string? NullIfWhiteSpace(string? value)
-        {
-            return string.IsNullOrWhiteSpace(value)
-                ? null
-                : value.Trim();
-        }
-
-        private static IReadOnlyList<string> SplitPrivateKeys(string? rawValue)
-        {
-            if (string.IsNullOrWhiteSpace(rawValue))
-            {
-                return Array.Empty<string>();
-            }
-
-            string[] parts = rawValue.Split([',', ';', '\n'], StringSplitOptions.RemoveEmptyEntries);
-            List<string> values = new(parts.Length);
-            for (int i = 0; i < parts.Length; i++)
-            {
-                string entry = parts[i].Trim();
-                if (!string.IsNullOrWhiteSpace(entry))
-                {
-                    values.Add(entry);
-                }
-            }
-
-            return values;
-        }
+            => _credentialProvider.ResolveAsync(request, cancellationToken);
     }
 
     private sealed class TerminalTab
@@ -6373,7 +6485,13 @@ internal sealed class MainWindowController
         bool FallbackApplied,
         string? FallbackReason);
 
-    private readonly record struct TerminalLaunchConfiguration(TerminalSessionProfile Profile);
+    private sealed record TerminalSshCredentialSnapshot(
+        string? Password,
+        IReadOnlyList<string> PrivateKeys);
+
+    private readonly record struct TerminalLaunchConfiguration(
+        TerminalSessionProfile Profile,
+        TerminalSshCredentialSnapshot? SshCredentials = null);
 
     private readonly record struct RuntimeAppearanceFlags(
         bool AutoScroll,

@@ -69,6 +69,29 @@ public sealed class MainWindowControllerModeStartupTests
         Assert.Equal(["-lc", "echo ok"], command.Arguments);
     }
 
+    [Fact]
+    public async Task ShellSshCredentialProvider_ResolvesCredentialsFromRequestedSecretIds()
+    {
+        InMemorySshSecretStore store = new();
+        await store.SaveSecretAsync("profiles/first/password", "first-password");
+        await store.SaveSecretAsync("profiles/second/password", "second-password");
+        await store.SaveSecretAsync("profiles/second/key", "/keys/second");
+        MainWindowController.ShellSshCredentialProvider provider = new(store);
+
+        SshResolvedCredentials credentials = await provider.ResolveAsync(
+            new SshCredentialRequest(
+                new SshEndpointOptions("example.com", 22, "demo"),
+                new SshAuthenticationOptions(
+                    UsePassword: true,
+                    PasswordSecretId: "profiles/second/password",
+                    PrivateKeySecretIds: ["profiles/second/key"],
+                    UseAgent: false)));
+
+        Assert.Equal("second-password", credentials.Password);
+        Assert.Equal(["/keys/second"], credentials.PrivateKeyPemOrPath);
+        Assert.False(credentials.UseAgent);
+    }
+
     [AvaloniaFact]
     public async Task Controller_Startup_CreatesSingleRenderedTabByDefault()
     {
