@@ -52,6 +52,18 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
 
         if (HasFallbackByteInputPath(sessionService))
         {
+            int kittyKeyboardFlags = ResolveKittyKeyboardFlags(sessionService, vtProcessor);
+            if (ShouldPreferNativeKittyEncoder(kittyKeyboardFlags) &&
+                TrySendNativeKeySequence(
+                    e,
+                    sessionService,
+                    vtProcessor,
+                    TerminalInputAction.Press,
+                    e.KeySymbol))
+            {
+                return true;
+            }
+
             if (ShouldUseWin32InputMode(modeState) &&
                 TerminalWin32InputSequenceEncoder.TryEncode(
                     e.Key,
@@ -64,18 +76,14 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
                 return true;
             }
 
-            int kittyKeyboardFlags = ResolveKittyKeyboardFlags(sessionService, vtProcessor);
             if (!ShouldPreferTextInputForKeyDown(e, modeState, kittyKeyboardFlags) &&
-                ResolveKeySequenceEncoderSource(sessionService, vtProcessor) is ITerminalKeySequenceEncoderSource nativeEncoder &&
-                nativeEncoder.TryEncodeKey(
-                    new TerminalKeyEncodingRequest(
-                        e.Key.ToString(),
-                        TerminalInputAction.Press,
-                        e.KeySymbol,
-                        ConvertTerminalModifiers(e.KeyModifiers)),
-                    out byte[] nativeSequence))
+                TrySendNativeKeySequence(
+                    e,
+                    sessionService,
+                    vtProcessor,
+                    TerminalInputAction.Press,
+                    e.KeySymbol))
             {
-                sessionService.SendInput(nativeSequence);
                 return true;
             }
 
@@ -103,6 +111,18 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         {
             if (HasFallbackByteInputPath(sessionService))
             {
+                int kittyKeyboardFlags = ResolveKittyKeyboardFlags(sessionService, vtProcessor: null);
+                if (ShouldPreferNativeKittyEncoder(kittyKeyboardFlags) &&
+                    TrySendNativeKeySequence(
+                        e,
+                        sessionService,
+                        vtProcessor: null,
+                        TerminalInputAction.Release,
+                        text: null))
+                {
+                    return true;
+                }
+
                 if (ShouldUseWin32InputMode(modeState) &&
                     TerminalWin32InputSequenceEncoder.TryEncode(
                         e.Key,
@@ -115,16 +135,13 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
                     return true;
                 }
 
-                if (ResolveKeySequenceEncoderSource(sessionService, vtProcessor: null) is ITerminalKeySequenceEncoderSource nativeEncoder &&
-                    nativeEncoder.TryEncodeKey(
-                        new TerminalKeyEncodingRequest(
-                            e.Key.ToString(),
-                            TerminalInputAction.Release,
-                            null,
-                            ConvertTerminalModifiers(e.KeyModifiers)),
-                        out byte[] nativeSequence))
+                if (TrySendNativeKeySequence(
+                        e,
+                        sessionService,
+                        vtProcessor: null,
+                        TerminalInputAction.Release,
+                        text: null))
                 {
-                    sessionService.SendInput(nativeSequence);
                     return true;
                 }
             }
@@ -233,6 +250,32 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
 
         return sessionService.ModeSource as ITerminalKeySequenceEncoderSource;
     }
+
+    private static bool TrySendNativeKeySequence(
+        KeyEventArgs e,
+        ITerminalSessionService sessionService,
+        IVtProcessor? vtProcessor,
+        TerminalInputAction action,
+        string? text)
+    {
+        if (ResolveKeySequenceEncoderSource(sessionService, vtProcessor) is not ITerminalKeySequenceEncoderSource nativeEncoder ||
+            !nativeEncoder.TryEncodeKey(
+                new TerminalKeyEncodingRequest(
+                    e.Key.ToString(),
+                    action,
+                    text,
+                    ConvertTerminalModifiers(e.KeyModifiers)),
+                out byte[] nativeSequence))
+        {
+            return false;
+        }
+
+        _ = action;
+        sessionService.SendInput(nativeSequence);
+        return true;
+    }
+
+    private static bool ShouldPreferNativeKittyEncoder(int kittyKeyboardFlags) => kittyKeyboardFlags != 0;
 
     private static bool ShouldUseWin32InputMode(in TerminalModeState modeState)
     {

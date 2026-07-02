@@ -38,7 +38,13 @@ internal static partial class TerminalWin32InputSequenceEncoder
         }
 
         ushort virtualKey = GetVirtualKey(key);
-        ushort scanCode = virtualKey == 0 ? (ushort)0 : GetScanCode(virtualKey);
+        if (virtualKey == 0)
+        {
+            sequence = string.Empty;
+            return false;
+        }
+
+        ushort scanCode = GetScanCode(virtualKey);
         int unicodeChar = keyDown ? ResolveUnicodeChar(key, modifiers, keySymbol) : 0;
         uint controlState = GetControlKeyState(key, modifiers, virtualKey);
 
@@ -72,6 +78,7 @@ internal static partial class TerminalWin32InputSequenceEncoder
             Key.Space => 0x20,
             Key.Pause => 0x13,
             Key.CapsLock => 0x14,
+            Key.NumLock => 0x90,
             Key.Insert => 0x2D,
             Key.Delete => 0x2E,
             Key.Home => 0x24,

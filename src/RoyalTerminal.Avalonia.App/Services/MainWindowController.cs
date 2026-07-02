@@ -196,6 +196,7 @@ internal sealed class MainWindowController
         CompositeDisposable lifetime = new();
         RegisterInteractionHandlers(lifetime);
         RegisterShellLayoutHandlers(lifetime);
+        RegisterWindowInputStateResetHandlers(lifetime);
 
         _terminalCapabilities = _modeCapabilityResolver.Resolve(GhosttyVtProcessor.IsAvailable());
         _viewModel.SetTerminalCapabilities(_terminalCapabilities);
@@ -224,6 +225,19 @@ internal sealed class MainWindowController
 
         lifetime.Add(Disposable.Create(DisposeResources));
         return lifetime;
+    }
+
+    private void RegisterWindowInputStateResetHandlers(CompositeDisposable disposables)
+    {
+        void DeactivatedHandler(object? sender, EventArgs args)
+        {
+            _ = sender;
+            _ = args;
+            ResetAllTerminalInputState();
+        }
+
+        _window.Deactivated += DeactivatedHandler;
+        disposables.Add(Disposable.Create(() => _window.Deactivated -= DeactivatedHandler));
     }
 
     private void RegisterInteractionHandlers(CompositeDisposable disposables)
@@ -1993,6 +2007,7 @@ internal sealed class MainWindowController
         _paneRuntimeNodes[control] = node;
         RegisterCommandHistoryCapture(control);
         control.GotFocus += (_, _) => _activePaneControl = control;
+        control.LostFocus += (_, _) => ResetTerminalInputState(control);
         control.PointerPressed += (_, _) => _activePaneControl = control;
     }
 
@@ -2790,7 +2805,7 @@ internal sealed class MainWindowController
 
         return new TerminalControl(
             new TerminalSessionService(),
-            new DefaultTerminalInputAdapter(),
+            new HandledInputSuppressingTerminalInputAdapter(new DefaultTerminalInputAdapter()),
             new DefaultTerminalSelectionService(),
             new DefaultTerminalScrollService(),
             new DefaultVtProcessorFactory(nativeProviders),
@@ -2817,6 +2832,7 @@ internal sealed class MainWindowController
         TerminalControl standaloneControl,
         bool preserveScrollback = false)
     {
+        ResetTerminalInputState(standaloneControl);
         string tabName = GetTabDisplayName(standaloneControl);
         TerminalSessionDimensions dimensions = BuildSessionDimensions(standaloneControl);
         TerminalLaunchConfiguration launchConfiguration = GetLaunchConfiguration(standaloneControl);
@@ -5393,6 +5409,22 @@ internal sealed class MainWindowController
         return _launchConfigurations.TryGetValue(control, out TerminalLaunchConfiguration launchConfiguration)
             ? launchConfiguration.Profile.Logging
             : _viewModel.GetSessionLoggingSettings();
+    }
+
+    private static void ResetTerminalInputState(TerminalControl control)
+    {
+        if (control.TerminalInputAdapter is IResettableTerminalInputAdapter resettableAdapter)
+        {
+            resettableAdapter.ResetInputState();
+        }
+    }
+
+    private void ResetAllTerminalInputState()
+    {
+        foreach (TerminalControl control in EnumerateTerminalControls())
+        {
+            ResetTerminalInputState(control);
+        }
     }
 
     private void RegisterCommandHistoryCapture(TerminalControl control)
