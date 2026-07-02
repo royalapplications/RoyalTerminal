@@ -1800,6 +1800,7 @@ internal sealed class MainWindowController
             savedProfile);
         _launchConfigurations[terminal] = new TerminalLaunchConfiguration(
             launchProfile);
+        ApplyLaunchLayoutSettings(terminal, launchProfile.Layout);
         ApplyLaunchAppearanceSettings(terminal, launchProfile.Appearance);
         ApplyLaunchBehaviorSettings(terminal, launchProfile.Behavior);
         UpdateSessionLoggingSubscription(terminal);
@@ -2133,6 +2134,7 @@ internal sealed class MainWindowController
         string? workingDirectory = GetProfileWorkingDirectory(launchProfile);
         TerminalLaunchConfiguration launchConfiguration = new(launchProfile);
         _launchConfigurations[terminal] = launchConfiguration;
+        ApplyLaunchLayoutSettings(terminal, launchProfile.Layout);
         ApplyLaunchAppearanceSettings(terminal, launchProfile.Appearance);
         ApplyLaunchBehaviorSettings(terminal, launchProfile.Behavior);
         UpdateSessionLoggingSubscription(terminal);
@@ -2762,7 +2764,7 @@ internal sealed class MainWindowController
     {
         return profile with
         {
-            Layout = new TerminalSessionLayoutSettings
+            Layout = profile.Layout with
             {
                 Columns = dimensions.Columns,
                 Rows = dimensions.Rows,
@@ -3406,6 +3408,7 @@ internal sealed class MainWindowController
             out TerminalModeSelection finalizedModeSelection);
         TerminalLaunchConfiguration newLaunchConfiguration = new(splitLaunchProfile);
         _launchConfigurations[newControl] = newLaunchConfiguration;
+        ApplyLaunchLayoutSettings(newControl, newLaunchConfiguration.Profile.Layout);
         ApplyLaunchAppearanceSettings(newControl, newLaunchConfiguration.Profile.Appearance);
         ApplyLaunchBehaviorSettings(newControl, newLaunchConfiguration.Profile.Behavior);
         UpdateSessionLoggingSubscription(newControl);
@@ -5530,6 +5533,13 @@ internal sealed class MainWindowController
         return _launchConfigurations.TryGetValue(control, out TerminalLaunchConfiguration launchConfiguration)
             ? launchConfiguration.Profile.Behavior
             : BuildLaunchBehaviorFromViewModel();
+    }
+
+    private static void ApplyLaunchLayoutSettings(
+        TerminalControl control,
+        TerminalSessionLayoutSettings layout)
+    {
+        control.ScrollbackLimit = Math.Max(0, layout.ScrollbackLimit);
     }
 
     private void UpdateLaunchConfigurationBehavior(

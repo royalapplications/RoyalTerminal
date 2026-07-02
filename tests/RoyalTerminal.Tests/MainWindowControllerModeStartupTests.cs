@@ -432,6 +432,90 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_WorkspaceRestore_AppliesProfileScrollbackLimit()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryWorkspaceStore workspaceStore = new(new TerminalWorkspaceDocument
+        {
+            SelectedWindowId = "main",
+            Windows =
+            [
+                new TerminalWorkspaceWindow
+                {
+                    Id = "main",
+                    SelectedTabId = "tab-layout",
+                    Tabs =
+                    [
+                        new TerminalWorkspaceTab
+                        {
+                            Id = "tab-layout",
+                            ProfileId = "profile-layout",
+                            Title = "Layout",
+                            TransportId = TerminalTransportIds.Pipe,
+                            RenderMode = TerminalWorkspaceRenderModes.Skia,
+                            RootPane = new TerminalWorkspacePane
+                            {
+                                Id = "pane-layout",
+                                ProfileId = "profile-layout",
+                                TransportId = TerminalTransportIds.Pipe,
+                            },
+                        },
+                    ],
+                },
+            ],
+        });
+        InMemoryProfileStore profileStore = new(new TerminalSessionProfilesDocument
+        {
+            DefaultProfileId = "profile-layout",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "profile-layout",
+                    DisplayName = "Profile Layout",
+                    Transport = CreatePipeTransportProfile("restored-layout"),
+                    Layout = new TerminalSessionLayoutSettings
+                    {
+                        ScrollbackLimit = 1_234,
+                    },
+                },
+            ],
+        });
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo restored-layout";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            settingsProfileStore: profileStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool restoredPane = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(restoredPane);
+
+            TerminalControl control = Assert.Single(GetStandaloneControls(terminalHost));
+            Assert.Equal(1_234, control.ScrollbackLimit);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Controller_Shutdown_AssignsUniqueIdsAfterRestoringNumberedTabIds()
     {
         using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
@@ -1147,6 +1231,10 @@ public sealed class MainWindowControllerModeStartupTests
             {
                 Id = "rebex-mfa-clone",
                 DisplayName = "Rebex MFA Clone",
+                Layout = context.DefaultLaunchProfile.Layout with
+                {
+                    ScrollbackLimit = 1_234,
+                },
                 Transport = context.DefaultLaunchProfile.Transport with
                 {
                     TransportId = TerminalTransportIds.Pipe,
@@ -1189,6 +1277,9 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(splitCreated);
             Assert.True(policyInvoked);
+            Assert.Contains(
+                GetStandaloneControls(terminalHost),
+                control => control.ScrollbackLimit == 1_234);
         }
         finally
         {
@@ -1626,6 +1717,68 @@ public sealed class MainWindowControllerModeStartupTests
             TerminalControl launched = GetVisibleStandaloneControl(terminalHost);
             Assert.False(launched.AutoScroll);
             Assert.True(launched.BackgroundOpacityEnabled);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_ProfileLaunch_AppliesLayoutScrollbackLimit()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        TerminalSessionProfilesDocument document = new()
+        {
+            DefaultProfileId = "profile-layout",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "profile-layout",
+                    DisplayName = "Profile Layout",
+                    Transport = CreatePipeTransportProfile("profile-layout"),
+                    Layout = new TerminalSessionLayoutSettings
+                    {
+                        ScrollbackLimit = 50_000,
+                    },
+                },
+            ],
+        };
+        InMemoryProfileStore profileStore = new(document);
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo startup";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: profileStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-layout").Wait();
+            bool profileTabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(profileTabCreated);
+
+            TerminalControl launched = GetVisibleStandaloneControl(terminalHost);
+            Assert.Equal(50_000, launched.ScrollbackLimit);
         }
         finally
         {
