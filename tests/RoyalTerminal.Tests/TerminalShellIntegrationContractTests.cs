@@ -265,11 +265,19 @@ public sealed class TerminalShellIntegrationContractTests
         Assert.Contains("__ROYALTERMINAL_PREVIOUS_DEBUG_TRAP", script, StringComparison.Ordinal);
         Assert.Contains("__royalterminal_install_debug_trap", script, StringComparison.Ordinal);
         Assert.Contains(
-            "trap \"__royalterminal_preexec \\\"${BASH_COMMAND:-}\\\"; $__ROYALTERMINAL_PREVIOUS_DEBUG_TRAP\" DEBUG",
+            "printf -v trap_command '%s; %s' '__royalterminal_preexec \"${BASH_COMMAND:-}\"' \"$__ROYALTERMINAL_PREVIOUS_DEBUG_TRAP\"",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "trap -- \"$trap_command\" DEBUG",
             script,
             StringComparison.Ordinal);
         Assert.Contains(
             "trap '__royalterminal_preexec \"${BASH_COMMAND:-}\"' DEBUG",
+            script,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "trap \"__royalterminal_preexec \\\"${BASH_COMMAND:-}\\\"; $__ROYALTERMINAL_PREVIOUS_DEBUG_TRAP\" DEBUG",
             script,
             StringComparison.Ordinal);
     }
