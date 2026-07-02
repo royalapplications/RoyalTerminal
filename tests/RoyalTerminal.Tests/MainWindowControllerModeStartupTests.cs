@@ -1780,6 +1780,9 @@ public sealed class MainWindowControllerModeStartupTests
         };
         InMemoryProfileStore profileStore = new(document);
         MainWindowViewModel viewModel = new();
+        ShellProfileOption shellProfile = new("cmd", "Command shell", "cmd.exe");
+        viewModel.SetShellProfiles([shellProfile]);
+        viewModel.SelectedShellProfile = shellProfile;
         viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
         viewModel.PipeCommandText = "echo startup";
 
@@ -1812,6 +1815,79 @@ public sealed class MainWindowControllerModeStartupTests
                 ? "\"/tmp/a&b\" \"$HOME\" \"has space\" \"it's\""
                 : "'/tmp/a&b' '$HOME' 'has space' 'it'\"'\"'s'";
             Assert.Equal(expected, viewModel.PipeCommandText);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_ProfileLaunch_QuotesPipeProfileArgumentsAsPowerShellLiterals()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        TerminalSessionProfilesDocument document = new()
+        {
+            DefaultProfileId = "powershell-pipe",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "powershell-pipe",
+                    DisplayName = "PowerShell Pipe",
+                    Transport = new TerminalSessionTransportProfile
+                    {
+                        TransportId = TerminalTransportIds.Pipe,
+                        Pipe = new TerminalSessionPipeSettings
+                        {
+                            FileName = "/tmp/a&b",
+                            Arguments = ["$HOME", "$(Get-Date)", "has space", "it's"],
+                        },
+                    },
+                },
+            ],
+        };
+        InMemoryProfileStore profileStore = new(document);
+        MainWindowViewModel viewModel = new();
+        ShellProfileOption shellProfile = new(
+            "pwsh",
+            "PowerShell",
+            @"C:\Program Files\PowerShell\7\pwsh.exe");
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "Write-Output startup";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: profileStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabsCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabsCreated);
+
+            viewModel.SetShellProfiles([shellProfile]);
+            viewModel.SelectedShellProfile = shellProfile;
+            viewModel.LaunchSessionProfileCommand.Execute("profile:powershell-pipe").Wait();
+            bool profileTabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(profileTabCreated);
+
+            Assert.Equal(
+                "'/tmp/a&b' '$HOME' '$(Get-Date)' 'has space' 'it''s'",
+                viewModel.PipeCommandText);
         }
         finally
         {

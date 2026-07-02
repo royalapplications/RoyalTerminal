@@ -1054,8 +1054,9 @@ internal sealed class MainWindowController
         if (string.Equals(transportId, TerminalTransportIds.Pipe, StringComparison.Ordinal))
         {
             TerminalSessionPipeSettings pipe = profile.Transport.Pipe;
+            ShellProfileOption? pipeShellProfile = _viewModel.SelectedShellProfile;
             _viewModel.WorkingDirectory = NormalizeOptional(pipe.WorkingDirectory) ?? string.Empty;
-            _viewModel.PipeCommandText = BuildPipeCommandText(pipe);
+            _viewModel.PipeCommandText = BuildPipeCommandText(pipe, pipeShellProfile);
             _viewModel.PipeMergeStdErrIntoStdOut = pipe.MergeStdErrIntoStdOut;
             SelectOrAddRuntimeShellProfile(profile.Id, profile.DisplayName, null);
             return;
@@ -1184,7 +1185,9 @@ internal sealed class MainWindowController
         _viewModel.SelectedShellProfile = launcherProfile;
     }
 
-    private static string BuildPipeCommandText(TerminalSessionPipeSettings pipe)
+    private static string BuildPipeCommandText(
+        TerminalSessionPipeSettings pipe,
+        ShellProfileOption? shellProfile)
     {
         if (string.IsNullOrWhiteSpace(pipe.FileName))
         {
@@ -1193,25 +1196,34 @@ internal sealed class MainWindowController
 
         if (pipe.Arguments.Count == 0)
         {
-            return QuoteShellArgument(pipe.FileName.Trim());
+            return QuoteShellArgument(pipe.FileName.Trim(), shellProfile);
         }
 
         StringBuilder builder = new(pipe.FileName.Length + pipe.Arguments.Count * 8);
-        builder.Append(QuoteShellArgument(pipe.FileName.Trim()));
+        builder.Append(QuoteShellArgument(pipe.FileName.Trim(), shellProfile));
         for (int i = 0; i < pipe.Arguments.Count; i++)
         {
             builder.Append(' ');
-            builder.Append(QuoteShellArgument(pipe.Arguments[i]));
+            builder.Append(QuoteShellArgument(pipe.Arguments[i], shellProfile));
         }
 
         return builder.ToString();
     }
 
-    private static string QuoteShellArgument(string value)
+    private static string QuoteShellArgument(
+        string value,
+        ShellProfileOption? shellProfile)
     {
         if (value.Length == 0)
         {
-            return OperatingSystem.IsWindows() ? "\"\"" : "''";
+            return IsPowerShellProfile(shellProfile) || !OperatingSystem.IsWindows()
+                ? "''"
+                : "\"\"";
+        }
+
+        if (IsPowerShellProfile(shellProfile))
+        {
+            return QuotePowerShellLiteralArgument(value);
         }
 
         if (OperatingSystem.IsWindows())
@@ -1230,6 +1242,16 @@ internal sealed class MainWindowController
         }
 
         return "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
+    }
+
+    private static string QuotePowerShellLiteralArgument(string value)
+    {
+        if (IsPowerShellLiteralSafe(value))
+        {
+            return value;
+        }
+
+        return "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
     }
 
     private static string QuoteWindowsShellArgument(string value)
@@ -1259,6 +1281,20 @@ internal sealed class MainWindowController
         return true;
     }
 
+    private static bool IsPowerShellLiteralSafe(string value)
+    {
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (!(char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.' or '/' or '\\' or ':' or ',' or '+'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool IsWindowsShellSafe(string value)
     {
         for (int i = 0; i < value.Length; i++)
@@ -1271,6 +1307,19 @@ internal sealed class MainWindowController
         }
 
         return true;
+    }
+
+    private static bool IsPowerShellProfile(ShellProfileOption? shellProfile)
+    {
+        string? commandPath = NormalizeOptional(shellProfile?.CommandPath);
+        if (commandPath is null)
+        {
+            return false;
+        }
+
+        string fileName = Path.GetFileNameWithoutExtension(commandPath.Replace('\\', '/'));
+        return fileName.Contains("pwsh", StringComparison.OrdinalIgnoreCase) ||
+               fileName.Contains("powershell", StringComparison.OrdinalIgnoreCase);
     }
 
     private SshAuthModeOption ResolveSshAuthMode(TerminalSessionSshAuthenticationSettings authentication)
