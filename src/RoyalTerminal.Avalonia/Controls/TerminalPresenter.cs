@@ -50,6 +50,12 @@ public class TerminalPresenter : Control
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        if (_compositionVisual is not null)
+        {
+            _compositionVisual.SendHandlerMessage(new TerminalDrawHandler.DisposeMessage());
+            ElementComposition.SetElementChildVisual(this, null);
+        }
+
         _compositionVisual = null;
         _compositionCommitPending = false;
         _compositionCommitQueued = false;
@@ -57,6 +63,11 @@ public class TerminalPresenter : Control
 
     private void InitializeComposition()
     {
+        if (_compositionVisual is not null)
+        {
+            return;
+        }
+
         var compositionVisual = ElementComposition.GetElementVisual(this);
         if (compositionVisual is null) return;
 

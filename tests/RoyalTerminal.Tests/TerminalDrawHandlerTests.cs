@@ -16,6 +16,20 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalDrawHandlerTests
 {
     [Fact]
+    public void DisposeMessage_CanBeSentRepeatedly()
+    {
+        var handler = new TerminalDrawHandler();
+
+        Exception? exception = Record.Exception(() =>
+        {
+            handler.OnMessage(new TerminalDrawHandler.DisposeMessage());
+            handler.OnMessage(new TerminalDrawHandler.DisposeMessage());
+        });
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
     public void RenderTargetPixelSize_UsesRenderBounds_WhenClipIsPartial()
     {
         Rect renderBounds = new(0, 0, 960, 600);
