@@ -5219,6 +5219,8 @@ internal sealed class MainWindowController
         {
             control.DataReceived -= existingHandler;
         }
+
+        CloseSessionLogWriter(control);
     }
 
     private TerminalSessionLoggingSettings GetSessionLoggingSettings(TerminalControl control)
@@ -5613,6 +5615,14 @@ internal sealed class MainWindowController
         return writer;
     }
 
+    private void CloseSessionLogWriter(TerminalControl control)
+    {
+        if (_sessionLogWriters.Remove(control, out SessionLogWriter? writer))
+        {
+            writer.Dispose();
+        }
+    }
+
     private void WriteSessionLogOutput(TerminalControl control, ReadOnlyMemory<byte> data)
     {
         TerminalSessionLoggingSettings settings = GetSessionLoggingSettings(control);
@@ -5980,10 +5990,7 @@ internal sealed class MainWindowController
             {
                 _activePaneControl = null;
             }
-            if (_sessionLogWriters.Remove(standaloneControl, out SessionLogWriter? sessionLogWriter))
-            {
-                sessionLogWriter.Dispose();
-            }
+            CloseSessionLogWriter(standaloneControl);
 
             standaloneControl.StopPty();
             standaloneControl.DetachEndpoint();

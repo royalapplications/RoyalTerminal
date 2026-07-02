@@ -2159,6 +2159,68 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_SettingsApply_DisposesSessionLogWriterWhenLoggingDisabled()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        string directory = Path.Combine(Path.GetTempPath(), "royalterminal-tests", Guid.NewGuid().ToString("N"));
+        string logPath = Path.Combine(directory, "disable-logging.log");
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo disable-logging";
+        viewModel.SessionLoggingEnabled = true;
+        viewModel.SessionLogFilePath = logPath;
+        viewModel.SelectedSessionLogFormat = TerminalSessionLogFormat.PlainText;
+        viewModel.SessionLogFlushFrequently = false;
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            commandHistoryStore: new InMemoryCommandHistoryStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool tabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(tabCreated);
+
+            TerminalControl control = Assert.Single(GetStandaloneControls(terminalHost));
+            control.WriteOutput(Encoding.UTF8.GetBytes("buffered-before-disable\n"));
+            Dispatcher.UIThread.RunJobs();
+
+            viewModel.SettingsPanelState.SessionLoggingEnabled = false;
+            viewModel.SettingsPanelState.SessionLogFilePath = logPath;
+            viewModel.SettingsPanelState.SelectedSessionLogFormat = TerminalSessionLogFormat.PlainText;
+            viewModel.SettingsPanelState.SessionLogFlushFrequently = false;
+            viewModel.SettingsPanelState.ApplyCommand.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+
+            bool logFlushed = await WaitUntilAsync(
+                () => File.Exists(logPath) &&
+                      File.ReadAllText(logPath).Contains("buffered-before-disable", StringComparison.Ordinal),
+                TimeSpan.FromSeconds(2));
+            Assert.True(logFlushed);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Controller_SplitPaneFromProfile_ClonesActiveAppearanceAfterOtherProfileLaunch()
     {
         using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
