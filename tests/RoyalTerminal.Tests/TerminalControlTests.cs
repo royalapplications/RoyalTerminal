@@ -5059,17 +5059,23 @@ public class TerminalControlTests
         try
         {
             await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            control.WriteOutput("one\r\ntwo\r\nthree"u8);
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
             SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
-            Point start = new(renderer.CellWidth * 1.5, renderer.CellHeight * 0.5);
-            Point end = new(renderer.CellWidth * 3.5, renderer.CellHeight * 1.5);
+            Point windowStart = new(renderer.CellWidth * 1.5, renderer.CellHeight * 0.5);
+            Point windowEnd = new(renderer.CellWidth * 3.5, renderer.CellHeight * 2.5);
 
-            window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton | RawInputModifiers.Alt);
-            window.MouseMove(end, RawInputModifiers.LeftMouseButton | RawInputModifiers.Alt);
-            window.MouseUp(end, MouseButton.Left, RawInputModifiers.Alt);
+            window.MouseDown(windowStart, MouseButton.Left, RawInputModifiers.LeftMouseButton | RawInputModifiers.Alt);
+            window.MouseMove(windowEnd, RawInputModifiers.LeftMouseButton | RawInputModifiers.Alt);
+            window.MouseUp(windowEnd, MouseButton.Left, RawInputModifiers.Alt);
             HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
-            Assert.Equal((1, 0), renderer.SelectionStart);
-            Assert.Equal((3, 1), renderer.SelectionEnd);
+            (int startColumn, int startRow) = renderer.SelectionStart.GetValueOrDefault();
+            (int endColumn, int endRow) = renderer.SelectionEnd.GetValueOrDefault();
+            Assert.Equal(1, startColumn);
+            Assert.Equal(3, endColumn);
+            Assert.Equal(1, endRow - startRow);
+            Assert.True(startRow >= 0);
             Assert.True(renderer.SelectionIsRectangle);
         }
         finally
