@@ -5,9 +5,12 @@ title: Split Panes
 # Split Panes
 
 RoyalTerminal models panes as durable workspace data and materializes them as
-ordinary `TerminalControl` instances in the host UI. This keeps pane layout out
-of the terminal emulator while allowing each pane to keep normal terminal
-features such as search, capture, themes, shaders, and shell integration.
+ordinary `TerminalControl` instances in the host UI. The reusable pane layout
+helpers live in `RoyalApps.RoyalTerminal.Avalonia`, next to `TerminalControl`,
+while session clone policy, workspace startup, and product commands stay in the
+host or app shell. This keeps pane layout out of the terminal emulator while
+allowing each pane to keep normal terminal features such as search, capture,
+themes, shaders, and shell integration.
 
 ## Pane Model
 
@@ -55,11 +58,57 @@ TerminalWorkspacePane root = new()
 is the first pane's share of the available space and is normalized to `0.05`
 through `0.95`.
 
-## Runtime Behavior
+## Reusable Runtime Layout
 
-The reusable app shell builds a runtime pane tree from the workspace pane tree. Each leaf
-creates a `TerminalControl` wrapped in a `ScrollViewer`. Each split creates an
-Avalonia `Grid` with a `GridSplitter` between its children.
+Use the lower-level `RoyalApps.RoyalTerminal.Avalonia` package when you want to
+compose split panes in your own application without referencing the product app
+shell. The reusable types are:
+
+- `TerminalPaneNode` for runtime pane trees;
+- `TerminalPaneLayout` for scroll viewer creation, split grids, leaf collection,
+  directional focus lookup, sequential focus fallback, and split ratio updates;
+- `TerminalPaneSplitRequest`, `TerminalPaneDirection`, and
+  `TerminalPaneSplitOrientation` for command and layout contracts.
+
+See [Terminal Pane Layout API](/articles/terminal-pane-layout-api) for the
+full lower-level API guide, focus and resize helper details, and host-owned
+responsibilities.
+
+```csharp
+TerminalControl leftControl = new();
+TerminalControl rightControl = new();
+
+TerminalPaneNode left = new("left");
+TerminalPaneNode right = new("right");
+left.SetLeaf(leftControl, TerminalPaneLayout.CreatePaneScrollViewer(leftControl));
+right.SetLeaf(rightControl, TerminalPaneLayout.CreatePaneScrollViewer(rightControl));
+
+Grid grid = TerminalPaneLayout.CreateSplitGrid(
+    TerminalPaneSplitOrientation.Horizontal,
+    ratio: 0.5,
+    left.Visual,
+    right.Visual);
+
+TerminalPaneNode root = new("root");
+root.SetSplit(TerminalPaneSplitOrientation.Horizontal, 0.5, left, right, grid);
+```
+
+Hosts own the session lifecycle for every leaf. A split pane is normally a new
+independent `TerminalControl` session. Apps can allow PTY splits, deny SSH
+splits, or provide a custom clone strategy for transports such as Rebex SSH with
+MFA. The reusable app shell exposes that policy through
+`ITerminalPaneSplitPolicy`, but apps that only use `TerminalControl` can apply
+the same decision before creating the new leaf.
+
+See [Pane Split Policy](/articles/split-pane-policy) for the reusable app-shell
+policy API and transport-specific examples.
+
+## App Shell Runtime Behavior
+
+The reusable app shell builds a runtime pane tree from the workspace pane tree.
+Each leaf creates a `TerminalControl` wrapped in a `ScrollViewer`. Each split
+uses `TerminalPaneLayout.CreateSplitGrid(...)` to create an Avalonia `Grid` with
+a `GridSplitter` between its children.
 
 Interactive pane commands:
 
@@ -113,6 +162,7 @@ creating a separate, reduced pane surface.
 Focused coverage:
 
 - `TerminalWorkspaceSerializerTests` for pane tree normalization;
+- `TerminalPaneLayoutTests` for reusable pane tree and split layout helpers;
 - `MainWindowViewModelFlowTests` for pane command routing;
 - `MainWindowControllerModeStartupTests` for split restore, interactive split
   creation, focus command wiring, resize commands, and live ratio persistence.

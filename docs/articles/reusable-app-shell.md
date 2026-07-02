@@ -11,6 +11,19 @@ Use this package when you want a ready-to-run terminal application surface rathe
 than assembling `TerminalControl`, profiles, settings, native menus, capture,
 replay, command history, split panes, and titlebar chrome yourself.
 
+## Dedicated API Guides
+
+The shell package is split across focused public surfaces:
+
+| Topic | Article |
+| --- | --- |
+| Window/view hosting, required resources, and executable boundaries | [App Shell Hosting](/articles/app-shell-hosting) |
+| `MainWindowViewModel` commands, interactions, and option records | [App Shell Command Surface](/articles/app-shell-command-surface) |
+| macOS application menu and native menu binding | [Native Menu Integration](/articles/app-shell-native-menus) |
+| Reusable settings controls and state objects | [Settings Panel API](/articles/settings-panel-api) |
+| Control-package pane layout helpers | [Terminal Pane Layout API](/articles/terminal-pane-layout-api) |
+| App-owned split permission and clone policy | [Pane Split Policy](/articles/split-pane-policy) |
+
 ## What It Provides
 
 - `MainWindow`, a reusable terminal window with native menu declarations,

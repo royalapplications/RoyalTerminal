@@ -14,10 +14,22 @@ const guideSidebarItems = [
     ]
   },
   {
-    text: "Embedding and Sessions",
+    text: "Reusable UI APIs",
     collapsed: false,
     items: [
       { text: "Embedding in Avalonia", link: "/articles/avalonia-control" },
+      { text: "App Shell Hosting", link: "/articles/app-shell-hosting" },
+      { text: "App Shell Commands", link: "/articles/app-shell-command-surface" },
+      { text: "Native Menu Integration", link: "/articles/app-shell-native-menus" },
+      { text: "Settings Panel API", link: "/articles/settings-panel-api" },
+      { text: "Terminal Pane Layout API", link: "/articles/terminal-pane-layout-api" },
+      { text: "Pane Split Policy", link: "/articles/split-pane-policy" }
+    ]
+  },
+  {
+    text: "Embedding and Sessions",
+    collapsed: false,
+    items: [
       { text: "Reusable App Shell", link: "/articles/reusable-app-shell" },
       { text: "Sessions, Profiles, and Settings", link: "/articles/sessions-profiles-and-settings" },
       { text: "Workspace Restore", link: "/articles/workspace-restore" },

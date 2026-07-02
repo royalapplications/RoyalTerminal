@@ -70,6 +70,19 @@ features:
     </ul>
   </section>
   <section class="home-docs-group">
+    <p class="home-docs-eyebrow">Reusable UI APIs</p>
+    <h3>Build on the packaged shell</h3>
+    <p>Use the ready-made shell, native menu helpers, settings panel, and pane composition APIs from your own app.</p>
+    <ul>
+      <li><a href="articles/app-shell-hosting">App Shell Hosting</a></li>
+      <li><a href="articles/app-shell-command-surface">App Shell Command Surface</a></li>
+      <li><a href="articles/app-shell-native-menus">Native Menu Integration</a></li>
+      <li><a href="articles/settings-panel-api">Settings Panel API</a></li>
+      <li><a href="articles/terminal-pane-layout-api">Terminal Pane Layout API</a></li>
+      <li><a href="articles/split-pane-policy">Pane Split Policy</a></li>
+    </ul>
+  </section>
+  <section class="home-docs-group">
     <p class="home-docs-eyebrow">Runtime</p>
     <h3>Terminal behavior</h3>
     <p>Review transports, screen state, highlighting, Ghostty interop, and native compatibility notes.</p>

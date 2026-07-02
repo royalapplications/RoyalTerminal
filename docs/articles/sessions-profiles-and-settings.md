@@ -83,6 +83,9 @@ The Avalonia settings package is built around those profile records. The control
 
 The point of the package is not just "draw a settings dialog". It is to give hosts a reusable editor for the same document model the runtime understands.
 
+See [Settings Panel API](/articles/settings-panel-api) for a dedicated guide to
+the public controls, state slices, option records, and host integration pattern.
+
 ## Serializing and mapping profiles
 
 The public serializer and store abstractions are how profile documents move between disk, UI, and runtime options.

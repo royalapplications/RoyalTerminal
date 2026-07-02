@@ -25,9 +25,15 @@ RoyalTerminal is published as a family of packages so you can compose the exact 
 | --- | --- |
 | Hosting the control, input, selection, capture, and Avalonia GPU interop | [Embedding In Avalonia](/articles/avalonia-control) |
 | Ready-made window, main view, native menus, titlebar shell, and demo launcher | [Reusable App Shell](/articles/reusable-app-shell) |
+| Public shell window, main view, resources, and executable-host boundaries | [App Shell Hosting](/articles/app-shell-hosting) |
+| Public app-shell commands, interactions, and option records | [App Shell Command Surface](/articles/app-shell-command-surface) |
+| macOS application menu and cross-platform native menu binding | [Native Menu Integration](/articles/app-shell-native-menus) |
+| Reusable settings controls and settings state objects | [Settings Panel API](/articles/settings-panel-api) |
 | Session documents, settings panels, themes, capture files, and profile stores | [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings) |
 | Workspace documents, stores, serializer normalization, and sample startup restore | [Workspace Restore](/articles/workspace-restore) |
 | Pane document trees, split ratios, runtime focus/resize behavior, and active-pane features | [Split Panes](/articles/split-panes) |
+| Lower-level `TerminalControl` split-pane composition helpers | [Terminal Pane Layout API](/articles/terminal-pane-layout-api) |
+| App-owned split pane policy for PTY, SSH, MFA, and custom transports | [Pane Split Policy](/articles/split-pane-policy) |
 | OSC 7/OSC 133 event parsing and control-level shell metadata relay | [Shell Integration](/articles/shell-integration) |
 | Command history persistence, capture, retention, and suggestions | [Command History And Suggestions](/articles/command-history-and-suggestions) |
 | Reusable app shell titlebar, native menus, settings overlay, and product startup behavior | [Demo Product Shell](/articles/demo-product-shell) |
