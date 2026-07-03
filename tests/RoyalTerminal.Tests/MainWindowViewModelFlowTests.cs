@@ -397,7 +397,7 @@ public class MainWindowViewModelFlowTests
             Assert.Equal(viewModel.IsShellMenuBarVisible, mainMenuBarHost.IsVisible);
             Assert.Equal(viewModel.IsManagedShellMenuBarVisible, mainMenuBar.IsVisible);
             Assert.Equal(viewModel.IsNativeShellMenuBarVisible, mainNativeMenuBar.IsVisible);
-            Assert.Equal(viewModel.IsShellMenuBarVisible, mainMenuLogo.IsVisible);
+            Assert.Equal(viewModel.IsShellMenuLogoVisible, mainMenuLogo.IsVisible);
             Assert.False(mainMenuLogo.IsHitTestVisible);
             Assert.Contains("railIcon", mainMenuLogoIcon.Classes);
             Assert.DoesNotContain("commandIcon", mainMenuLogoIcon.Classes);
@@ -417,6 +417,7 @@ public class MainWindowViewModelFlowTests
             Assert.False(viewModel.IsShellMenuBarVisible);
             Assert.False(viewModel.IsManagedShellMenuBarVisible);
             Assert.False(viewModel.IsNativeShellMenuBarVisible);
+            Assert.False(viewModel.IsShellMenuLogoVisible);
             Assert.Equal(!OperatingSystem.IsMacOS(), viewModel.IsShellMenuButtonVisible);
             Assert.False(mainMenuBarHost.IsVisible);
             Assert.False(mainMenuLogo.IsVisible);
@@ -517,6 +518,52 @@ public class MainWindowViewModelFlowTests
             Assert.Equal(expectedTitle, window.Title);
             Assert.Equal(OperatingSystem.IsMacOS() && !viewModel.IsTabsInTitleBar, viewModel.IsTitleBarLogoVisible);
             Assert.Equal(viewModel.IsTitleBarLogoVisible, titleBarBrandIcon.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void MainWindow_MacTitleBarLogoOption_HidesOnlyMacOsTitleBarLogos()
+    {
+        MainWindow window = new(new MainWindowShellOptions
+        {
+            ShowMacOsTitleBarLogos = false,
+        });
+
+        try
+        {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+            Border mainMenuBarHost = FindShellControl<Border>(window, "MainMenuBarHost")
+                ?? throw new InvalidOperationException("MainMenuBarHost was not found.");
+            NativeMenuBar mainNativeMenuBar = FindShellControl<NativeMenuBar>(window, "MainNativeMenuBar")
+                ?? throw new InvalidOperationException("MainNativeMenuBar was not found.");
+            Border mainMenuLogo = FindShellControl<Border>(window, "MainMenuLogo")
+                ?? throw new InvalidOperationException("MainMenuLogo was not found.");
+            Border titleBarBrandIcon = FindShellControl<Border>(window, "TitleBarBrandIcon")
+                ?? throw new InvalidOperationException("TitleBarBrandIcon was not found.");
+
+            Assert.True(viewModel.IsShellMenuBarVisible);
+            Assert.Equal(viewModel.IsShellMenuBarVisible, mainMenuBarHost.IsVisible);
+            Assert.Equal(viewModel.IsNativeShellMenuBarVisible, mainNativeMenuBar.IsVisible);
+
+            if (OperatingSystem.IsMacOS())
+            {
+                Assert.False(viewModel.IsTitleBarLogoVisible);
+                Assert.False(viewModel.IsShellMenuLogoVisible);
+                Assert.False(titleBarBrandIcon.IsVisible);
+                Assert.False(mainMenuLogo.IsVisible);
+            }
+            else
+            {
+                Assert.False(viewModel.IsTitleBarLogoVisible);
+                Assert.True(viewModel.IsShellMenuLogoVisible);
+                Assert.False(titleBarBrandIcon.IsVisible);
+                Assert.True(mainMenuLogo.IsVisible);
+            }
         }
         finally
         {
@@ -1108,6 +1155,70 @@ public class MainWindowViewModelFlowTests
     }
 
     [AvaloniaFact]
+    public void MainWindow_TabsInTitleBar_ReservesNativeButtonSpaceAndKeepsTabCommandsInteractive()
+    {
+        MainWindow window = new()
+        {
+            Width = 720,
+            Height = 460,
+        };
+
+        try
+        {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+            Grid titleBarLayout = FindShellControl<Grid>(window, "TitleBarLayout")
+                ?? throw new InvalidOperationException("TitleBarLayout was not found.");
+            Border macTrafficLightReserve = FindShellControl<Border>(window, "MacTrafficLightReserve")
+                ?? throw new InvalidOperationException("MacTrafficLightReserve was not found.");
+            ContentControl titleBarTabStripHost = FindShellControl<ContentControl>(window, "TitleBarTabStripHost")
+                ?? throw new InvalidOperationException("TitleBarTabStripHost was not found.");
+            Grid titleBarRightDecorationReserve = FindShellControl<Grid>(window, "TitleBarRightDecorationReserve")
+                ?? throw new InvalidOperationException("TitleBarRightDecorationReserve was not found.");
+            StackPanel windowsCaptionButtonStrip = FindShellControl<StackPanel>(window, "WindowsCaptionButtonStrip")
+                ?? throw new InvalidOperationException("WindowsCaptionButtonStrip was not found.");
+            Button tabStripNewTabButton = FindShellControl<Button>(window, "TabStripNewTabButton")
+                ?? throw new InvalidOperationException("TabStripNewTabButton was not found.");
+            RepeatButton tabStripScrollLeftButton = FindShellControl<RepeatButton>(window, "TabStripScrollLeftButton")
+                ?? throw new InvalidOperationException("TabStripScrollLeftButton was not found.");
+            RepeatButton tabStripScrollRightButton = FindShellControl<RepeatButton>(window, "TabStripScrollRightButton")
+                ?? throw new InvalidOperationException("TabStripScrollRightButton was not found.");
+
+            viewModel.IsTabsInTitleBar = true;
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+
+            Point titleBarTabStripHostOrigin = titleBarTabStripHost.TranslatePoint(new Point(0, 0), titleBarLayout)
+                ?? throw new InvalidOperationException("Title bar tab strip host is not attached to the title bar layout.");
+            double expectedLeftReserveWidth = OperatingSystem.IsMacOS() ? 88d : 48d;
+
+            Assert.True(viewModel.IsTabsInTitleBar);
+            Assert.True(titleBarTabStripHost.IsVisible);
+            Assert.True(
+                macTrafficLightReserve.Bounds.Width >= expectedLeftReserveWidth - 0.5,
+                $"Expected titlebar to reserve native button space. Reserve={macTrafficLightReserve.Bounds}.");
+            if (OperatingSystem.IsMacOS())
+            {
+                Assert.True(
+                    titleBarTabStripHostOrigin.X >= macTrafficLightReserve.Bounds.Width - 0.5,
+                    $"Expected titlebar tabs to start after macOS traffic-light space. Tabs={titleBarTabStripHostOrigin}, Reserve={macTrafficLightReserve.Bounds}.");
+            }
+
+            Assert.True(
+                titleBarRightDecorationReserve.Bounds.Width >= viewModel.TitleBarRightDecorationReserveWidth - 0.5,
+                $"Expected titlebar right reserve to preserve platform caption space. Reserve={titleBarRightDecorationReserve.Bounds}.");
+            Assert.Equal(viewModel.IsWindowsCaptionButtonStripVisible, windowsCaptionButtonStrip.IsVisible);
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(tabStripNewTabButton));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(tabStripScrollLeftButton));
+            Assert.Equal(WindowDecorationsElementRole.User, WindowDecorationProperties.GetElementRole(tabStripScrollRightButton));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void MainWindow_UsesExtendedClientTitleBarLayout()
     {
         MainWindow window = new()
@@ -1185,7 +1296,9 @@ public class MainWindowViewModelFlowTests
                 ?? throw new InvalidOperationException("Title bar right decoration reserve is not attached to the title bar layout.");
 
             Assert.True(window.ExtendClientAreaToDecorationsHint);
-            Assert.Equal(WindowDecorations.BorderOnly, window.WindowDecorations);
+            Assert.Equal(
+                OperatingSystem.IsMacOS() ? WindowDecorations.Full : WindowDecorations.BorderOnly,
+                window.WindowDecorations);
             Assert.Equal(-1d, window.ExtendClientAreaTitleBarHeightHint);
             Assert.Contains("titleBarArea", titleBar.Classes);
             Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(titleBar));

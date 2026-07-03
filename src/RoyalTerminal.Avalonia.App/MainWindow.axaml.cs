@@ -3,6 +3,7 @@
 // RoyalTerminal.Avalonia.App - Reusable terminal shell window activation.
 
 using System;
+using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using RoyalTerminal.Avalonia.App.Services;
 using RoyalTerminal.Avalonia.App.ViewModels;
@@ -31,21 +32,35 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
     /// Initializes a new instance of the <see cref="MainWindow"/> class.
     /// </summary>
     public MainWindow()
+        : this(new MainWindowShellOptions())
     {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MainWindow"/> class.
+    /// </summary>
+    /// <param name="shellOptions">The host-specific shell presentation options.</param>
+    public MainWindow(MainWindowShellOptions shellOptions)
+    {
+        ArgumentNullException.ThrowIfNull(shellOptions);
+
         InitializeComponent();
+        ConfigurePlatformWindowDecorations();
 
         MainWindowBackdropCoordinator.ConfigureTransparencyHint(this);
         Icon = RoyalTerminalWindowIconHelper.CreateWindowIcon();
 
-        ViewModel = new MainWindowViewModel();
+        ViewModel = new MainWindowViewModel(shellOptions);
 
         this.WhenActivated(disposables =>
         {
             var backdropCoordinator = new MainWindowBackdropCoordinator(this, ViewModel!);
             var borderAccentCoordinator = new WindowsWindowBorderAccentCoordinator(this);
+            var trafficLightPositionCoordinator = new MacOsTrafficLightPositionCoordinator(this);
             var controller = new MainWindowController(this, ViewModel!, PaneSplitPolicy);
             disposables.Add(backdropCoordinator.Activate());
             disposables.Add(borderAccentCoordinator.Activate());
+            disposables.Add(trafficLightPositionCoordinator.Activate());
             disposables.Add(controller.Activate());
         });
     }
@@ -53,6 +68,13 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
     private void InitializeComponent()
     {
         AvaloniaXamlLoader.Load(this);
+    }
+
+    private void ConfigurePlatformWindowDecorations()
+    {
+        WindowDecorations = OperatingSystem.IsMacOS()
+            ? WindowDecorations.Full
+            : WindowDecorations.BorderOnly;
     }
 
 }

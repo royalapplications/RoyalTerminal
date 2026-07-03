@@ -10,6 +10,7 @@ using System.IO;
 using System.Reactive;
 using System.Reactive.Linq;
 using System.Runtime.InteropServices;
+using RoyalTerminal.Avalonia.App;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
@@ -56,6 +57,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private readonly ITerminalModeResolver _modeResolver;
     private readonly ITerminalThemeCatalog _themeCatalog;
     private readonly IReadOnlyList<TerminalThemePreset> _themePresets;
+    private readonly bool _showMacOsTitleBarLogos;
     private readonly Dictionary<TerminalRenderMode, ModeThemeState> _modeThemes = [];
     private TerminalSettingsPanelState? _settingsPanelState;
     private bool _isSettingsPanelOpen;
@@ -181,14 +183,34 @@ public sealed class MainWindowViewModel : ReactiveObject
     private TerminalShaderSampleOption _selectedShaderSample;
 
     public MainWindowViewModel()
-        : this(TerminalModeResolver.Default, new TerminalThemeCatalog())
+        : this(new MainWindowShellOptions())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MainWindowViewModel"/> class.
+    /// </summary>
+    /// <param name="shellOptions">The host-specific shell presentation options.</param>
+    public MainWindowViewModel(MainWindowShellOptions shellOptions)
+        : this(TerminalModeResolver.Default, new TerminalThemeCatalog(), shellOptions)
     {
     }
 
     internal MainWindowViewModel(ITerminalModeResolver modeResolver, ITerminalThemeCatalog themeCatalog)
+        : this(modeResolver, themeCatalog, new MainWindowShellOptions())
+    {
+    }
+
+    internal MainWindowViewModel(
+        ITerminalModeResolver modeResolver,
+        ITerminalThemeCatalog themeCatalog,
+        MainWindowShellOptions shellOptions)
     {
         _modeResolver = modeResolver ?? throw new ArgumentNullException(nameof(modeResolver));
         _themeCatalog = themeCatalog ?? throw new ArgumentNullException(nameof(themeCatalog));
+        ArgumentNullException.ThrowIfNull(shellOptions);
+
+        _showMacOsTitleBarLogos = shellOptions.ShowMacOsTitleBarLogos;
         _themePresets = _themeCatalog.Presets;
         InitializeModeThemes();
         _shaderSamples = TerminalShaderSampleCatalog.Options;
@@ -517,6 +539,7 @@ public sealed class MainWindowViewModel : ReactiveObject
             this.RaisePropertyChanged(nameof(IsBodyTabStripVisible));
             this.RaisePropertyChanged(nameof(IsTitleBarLogoVisible));
             this.RaisePropertyChanged(nameof(IsShellMenuBarVisible));
+            this.RaisePropertyChanged(nameof(IsShellMenuLogoVisible));
             this.RaisePropertyChanged(nameof(IsManagedShellMenuBarVisible));
             this.RaisePropertyChanged(nameof(IsNativeShellMenuBarVisible));
             this.RaisePropertyChanged(nameof(IsShellMenuButtonVisible));
@@ -528,9 +551,11 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public string ShellWindowTitle => OperatingSystem.IsMacOS() ? "RoyalTerminal" : string.Empty;
 
-    public bool IsTitleBarLogoVisible => OperatingSystem.IsMacOS() && !IsTabsInTitleBar;
+    public bool IsTitleBarLogoVisible => OperatingSystem.IsMacOS() && _showMacOsTitleBarLogos && !IsTabsInTitleBar;
 
     public bool IsShellMenuBarVisible => !IsTabsInTitleBar;
+
+    public bool IsShellMenuLogoVisible => IsShellMenuBarVisible && (!OperatingSystem.IsMacOS() || _showMacOsTitleBarLogos);
 
     public bool IsManagedShellMenuBarVisible => !OperatingSystem.IsMacOS() && !IsTabsInTitleBar;
 

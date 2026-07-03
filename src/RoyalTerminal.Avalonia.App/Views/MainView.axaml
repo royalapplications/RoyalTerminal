@@ -370,7 +370,7 @@
                       HorizontalAlignment="Left"
                       VerticalAlignment="Center"
                       IsHitTestVisible="False"
-                      IsVisible="{Binding IsShellMenuBarVisible}">
+                      IsVisible="{Binding IsShellMenuLogoVisible}">
                 <PathIcon Classes="railIcon"
                           Data="{StaticResource Icon.RoyalTerminalLogo}" />
               </Border>

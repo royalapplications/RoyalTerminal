@@ -22,7 +22,10 @@ public class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            MainWindow mainWindow = new();
+            MainWindow mainWindow = new(new MainWindowShellOptions
+            {
+                ShowMacOsTitleBarLogos = false,
+            });
             desktop.MainWindow = mainWindow;
 
             if (mainWindow.ViewModel is not null)
