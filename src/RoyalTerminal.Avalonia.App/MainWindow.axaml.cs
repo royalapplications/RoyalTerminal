@@ -56,10 +56,12 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
         {
             var backdropCoordinator = new MainWindowBackdropCoordinator(this, ViewModel!);
             var borderAccentCoordinator = new WindowsWindowBorderAccentCoordinator(this);
+            var snapLayoutCoordinator = new WindowsCaptionButtonSnapLayoutCoordinator(this);
             var trafficLightPositionCoordinator = new MacOsTrafficLightPositionCoordinator(this);
             var controller = new MainWindowController(this, ViewModel!, PaneSplitPolicy);
             disposables.Add(backdropCoordinator.Activate());
             disposables.Add(borderAccentCoordinator.Activate());
+            disposables.Add(snapLayoutCoordinator.Activate());
             disposables.Add(trafficLightPositionCoordinator.Activate());
             disposables.Add(controller.Activate());
         });

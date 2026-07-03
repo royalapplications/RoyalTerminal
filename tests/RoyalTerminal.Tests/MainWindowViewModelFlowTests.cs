@@ -64,6 +64,177 @@ public class MainWindowViewModelFlowTests
         }
     }
 
+    [Fact]
+    public void WindowsCaptionButtonSnapLayoutCoordinator_ReportsMaximizeButtonHitWhenWindowIsNormal()
+    {
+        bool handled = WindowsCaptionButtonSnapLayoutCoordinator.TryResolveSnapLayoutHitTest(
+            WindowState.Normal,
+            canMaximize: true,
+            maximizeButtonVisible: true,
+            maximizeButtonBounds: new Rect(100, 0, 46, 44),
+            restoreButtonVisible: false,
+            restoreButtonBounds: default,
+            windowPoint: new Point(123, 20),
+            out IntPtr result);
+
+        Assert.True(handled);
+        Assert.Equal(new IntPtr(WindowsCaptionButtonSnapLayoutCoordinator.HitTestMaxButton), result);
+    }
+
+    [Fact]
+    public void WindowsCaptionButtonSnapLayoutCoordinator_ReportsRestoreButtonHitWhenWindowIsMaximized()
+    {
+        bool handled = WindowsCaptionButtonSnapLayoutCoordinator.TryResolveSnapLayoutHitTest(
+            WindowState.Maximized,
+            canMaximize: true,
+            maximizeButtonVisible: false,
+            maximizeButtonBounds: default,
+            restoreButtonVisible: true,
+            restoreButtonBounds: new Rect(100, 0, 46, 44),
+            windowPoint: new Point(123, 20),
+            out IntPtr result);
+
+        Assert.True(handled);
+        Assert.Equal(new IntPtr(WindowsCaptionButtonSnapLayoutCoordinator.HitTestMaxButton), result);
+    }
+
+    [Fact]
+    public void WindowsCaptionButtonSnapLayoutCoordinator_IgnoresPointsOutsideCaptionButtons()
+    {
+        bool handled = WindowsCaptionButtonSnapLayoutCoordinator.TryResolveSnapLayoutHitTest(
+            WindowState.Normal,
+            canMaximize: true,
+            maximizeButtonVisible: true,
+            maximizeButtonBounds: new Rect(100, 0, 46, 44),
+            restoreButtonVisible: false,
+            restoreButtonBounds: default,
+            windowPoint: new Point(99, 20),
+            out IntPtr result);
+
+        Assert.False(handled);
+        Assert.Equal(IntPtr.Zero, result);
+    }
+
+    [Fact]
+    public void WindowsCaptionButtonSnapLayoutCoordinator_IgnoresHiddenOrUnarrangedCaptionButtons()
+    {
+        bool hiddenHandled = WindowsCaptionButtonSnapLayoutCoordinator.TryResolveSnapLayoutHitTest(
+            WindowState.Normal,
+            canMaximize: true,
+            maximizeButtonVisible: false,
+            maximizeButtonBounds: new Rect(100, 0, 46, 44),
+            restoreButtonVisible: false,
+            restoreButtonBounds: default,
+            windowPoint: new Point(123, 20),
+            out IntPtr hiddenResult);
+        bool unarrangedHandled = WindowsCaptionButtonSnapLayoutCoordinator.TryResolveSnapLayoutHitTest(
+            WindowState.Normal,
+            canMaximize: true,
+            maximizeButtonVisible: true,
+            maximizeButtonBounds: new Rect(100, 0, 0, 44),
+            restoreButtonVisible: false,
+            restoreButtonBounds: default,
+            windowPoint: new Point(100, 20),
+            out IntPtr unarrangedResult);
+
+        Assert.False(hiddenHandled);
+        Assert.Equal(IntPtr.Zero, hiddenResult);
+        Assert.False(unarrangedHandled);
+        Assert.Equal(IntPtr.Zero, unarrangedResult);
+    }
+
+    [Fact]
+    public void WindowsCaptionButtonSnapLayoutCoordinator_IgnoresFullscreenAndNonMaximizableWindows()
+    {
+        bool fullscreenHandled = WindowsCaptionButtonSnapLayoutCoordinator.TryResolveSnapLayoutHitTest(
+            WindowState.FullScreen,
+            canMaximize: true,
+            maximizeButtonVisible: true,
+            maximizeButtonBounds: new Rect(100, 0, 46, 44),
+            restoreButtonVisible: false,
+            restoreButtonBounds: default,
+            windowPoint: new Point(123, 20),
+            out IntPtr fullscreenResult);
+        bool nonMaximizableHandled = WindowsCaptionButtonSnapLayoutCoordinator.TryResolveSnapLayoutHitTest(
+            WindowState.Normal,
+            canMaximize: false,
+            maximizeButtonVisible: true,
+            maximizeButtonBounds: new Rect(100, 0, 46, 44),
+            restoreButtonVisible: false,
+            restoreButtonBounds: default,
+            windowPoint: new Point(123, 20),
+            out IntPtr nonMaximizableResult);
+
+        Assert.False(fullscreenHandled);
+        Assert.Equal(IntPtr.Zero, fullscreenResult);
+        Assert.False(nonMaximizableHandled);
+        Assert.Equal(IntPtr.Zero, nonMaximizableResult);
+    }
+
+    [Fact]
+    public void WindowsCaptionButtonSnapLayoutCoordinator_ConvertsScreenPixelPointToScaledWindowPoint()
+    {
+        Point windowPoint = WindowsCaptionButtonSnapLayoutCoordinator.ConvertScreenPixelPointToWindowPoint(
+            new Point(250, 140),
+            new PixelPoint(100, 80),
+            renderScaling: 2d);
+
+        Assert.Equal(new Point(75, 30), windowPoint);
+    }
+
+    [Fact]
+    public void WindowsCaptionButtonSnapLayoutCoordinator_ConvertsButtonBoundsToScreenPixelRect()
+    {
+        PixelRect screenRect = WindowsCaptionButtonSnapLayoutCoordinator.ConvertWindowRectToScreenPixelRect(
+            new Rect(50, 4, 46, 44),
+            new PixelPoint(100, 80),
+            renderScaling: 2d);
+
+        Assert.Equal(new PixelRect(200, 88, 92, 88), screenRect);
+    }
+
+    [AvaloniaFact]
+    public void MainWindow_WindowsSnapLayoutCoordinator_ActivatesWithoutChangingCaptionButtons()
+    {
+        MainWindow window = new()
+        {
+            Width = 720,
+            Height = 460,
+        };
+
+        try
+        {
+            Button captionMaximizeButton = FindShellControl<Button>(window, "CaptionMaximizeButton")
+                ?? throw new InvalidOperationException("CaptionMaximizeButton was not found.");
+            Button captionRestoreButton = FindShellControl<Button>(window, "CaptionRestoreButton")
+                ?? throw new InvalidOperationException("CaptionRestoreButton was not found.");
+            Button captionFullscreenButton = FindShellControl<Button>(window, "CaptionFullscreenButton")
+                ?? throw new InvalidOperationException("CaptionFullscreenButton was not found.");
+
+            window.Measure(new Size(window.Width, window.Height));
+            window.Arrange(new Rect(0, 0, window.Width, window.Height));
+
+            ReactiveCommand<Unit, Unit> maximizeCommand = ReactiveCommand.Create(() => { });
+            ReactiveCommand<Unit, Unit> restoreCommand = ReactiveCommand.Create(() => { });
+            ReactiveCommand<Unit, Unit> fullscreenCommand = ReactiveCommand.Create(() => { });
+            captionMaximizeButton.Command = maximizeCommand;
+            captionRestoreButton.Command = restoreCommand;
+            captionFullscreenButton.Command = fullscreenCommand;
+
+            using IDisposable activation = new WindowsCaptionButtonSnapLayoutCoordinator(window).Activate();
+
+            Assert.True(captionMaximizeButton.IsVisible);
+            Assert.False(captionRestoreButton.IsVisible);
+            Assert.Same(maximizeCommand, captionMaximizeButton.Command);
+            Assert.Same(restoreCommand, captionRestoreButton.Command);
+            Assert.Same(fullscreenCommand, captionFullscreenButton.Command);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     [AvaloniaFact]
     public void SharedShellTheme_ProvidesRoyalTerminalLogoGeometry()
     {

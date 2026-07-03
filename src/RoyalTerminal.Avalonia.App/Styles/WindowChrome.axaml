@@ -109,6 +109,10 @@
     <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
   </Style>
 
+  <Style Selector="Button.captionButton.snapLayoutHover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+  </Style>
+
   <Style Selector="Button.captionButton:pressed">
     <Setter Property="Background" Value="{DynamicResource ShellSurfacePressedBrush}" />
   </Style>
