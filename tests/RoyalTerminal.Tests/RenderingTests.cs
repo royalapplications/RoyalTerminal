@@ -1650,7 +1650,7 @@ public class RenderingTests
         {
             EnableTextRenderDiagnostics = true,
         };
-        renderer.SetCellSize(renderer.CellWidth * 1.02f, renderer.CellHeight);
+        renderer.SetCellSize(renderer.CellWidth * 1.10f, renderer.CellHeight);
 
         using var surface = CreateRenderSurface(renderer, columns: 80, rows: 1);
         var screen = CreateAsciiScreen(

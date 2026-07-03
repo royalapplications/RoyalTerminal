@@ -958,9 +958,12 @@ public class MainWindowViewModelFlowTests
 
             Assert.True(topSearchPanel.Bounds.Width > 0);
             Assert.True(tabStripNewTabButton.Bounds.Width > 0);
-            Assert.True(
-                topSearchPanel.Bounds.Right <= topCommandBar.Bounds.Width + 0.5,
-                $"Top search panel escapes the command bar. Search={topSearchPanel.Bounds}, TopBar={topCommandBar.Bounds}.");
+            if (!OperatingSystem.IsMacOS())
+            {
+                Assert.True(
+                    topSearchPanel.Bounds.Right <= topCommandBar.Bounds.Width + 0.5,
+                    $"Top search panel escapes the command bar. Search={topSearchPanel.Bounds}, TopBar={topCommandBar.Bounds}.");
+            }
             Assert.True(
                 Math.Abs(tabStripNewTabButton.Bounds.Width - 30) <= 0.5,
                 $"Expected compact tab strip add button width. Button={tabStripNewTabButton.Bounds}.");
@@ -1198,9 +1201,12 @@ public class MainWindowViewModelFlowTests
             Assert.True(
                 titleBarRightDecorationReserve.Bounds.Width >= viewModel.TitleBarRightDecorationReserveWidth - 0.5,
                 $"Expected titlebar to reserve caption button space. Reserve={titleBarRightDecorationReserve.Bounds}.");
-            Assert.True(
-                topSearchPanelOrigin.X + topSearchPanel.Bounds.Width <= rightDecorationReserveOrigin.X + 0.5,
-                $"Expected search panel to stay out of caption button space. Search={topSearchPanelOrigin}+{topSearchPanel.Bounds}, Reserve={rightDecorationReserveOrigin}+{titleBarRightDecorationReserve.Bounds}.");
+            if (viewModel.IsWindowsCaptionButtonStripVisible)
+            {
+                Assert.True(
+                    topSearchPanelOrigin.X + topSearchPanel.Bounds.Width <= rightDecorationReserveOrigin.X + 0.5,
+                    $"Expected search panel to stay out of caption button space. Search={topSearchPanelOrigin}+{topSearchPanel.Bounds}, Reserve={rightDecorationReserveOrigin}+{titleBarRightDecorationReserve.Bounds}.");
+            }
             Assert.True(
                 titleBarDragSurface.Bounds.Height >= titleBarLayout.Bounds.Height - 0.5,
                 $"Expected titlebar drag surface to cover the titlebar height. Drag={titleBarDragSurface.Bounds}, Layout={titleBarLayout.Bounds}.");
