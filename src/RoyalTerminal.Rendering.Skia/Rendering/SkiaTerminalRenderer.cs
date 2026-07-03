@@ -3870,7 +3870,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     : (rentedGridOffsets = ArrayPool<float>.Shared.Rent(charCount + 1)).AsSpan(0, charCount + 1);
                 PopulateTextGridOffsets(cells, startCol, endCol, runGridOffsets);
                 ReadOnlySpan<float> textGridOffsets = runGridOffsets[..(charCount + 1)];
-                placement = CanUseClusterGridFitting(cachedRun, textGridOffsets) &&
+                placement = !HasMultiClusterGraphemeCell(cells, startCol, endCol, cachedRun.ClusterIndexes) &&
+                    CanUseClusterGridFitting(cachedRun, textGridOffsets) &&
                     ShouldUseClusterGridFitting(cachedRun, textGridOffsets, runWidth)
                         ? GridPlacementMode.ClusterGridFit
                         : DetermineGridPlacement(cachedRun, runWidth, out xScale);
@@ -4638,6 +4639,67 @@ public sealed class SkiaTerminalRenderer : IDisposable
         {
             gridOffsets[offsetIndex] = gridX;
         }
+    }
+
+    internal static bool HasMultiClusterGraphemeCell(
+        ReadOnlySpan<TerminalCell> cells,
+        int startCol,
+        int endCol,
+        ReadOnlySpan<int> clusterIndexes)
+    {
+        int textOffset = 0;
+        for (int col = startCol; col < endCol; col++)
+        {
+            ref readonly TerminalCell cell = ref cells[col];
+            int utf16Length = GetCellUtf16Length(in cell);
+            if (!string.IsNullOrEmpty(cell.Grapheme) &&
+                utf16Length > 1 &&
+                HasMultipleClustersInRange(clusterIndexes, textOffset, textOffset + utf16Length))
+            {
+                return true;
+            }
+
+            textOffset += utf16Length;
+        }
+
+        return false;
+    }
+
+    private static bool HasMultipleClustersInRange(ReadOnlySpan<int> clusterIndexes, int start, int end)
+    {
+        int firstCluster = -1;
+        for (int i = 0; i < clusterIndexes.Length; i++)
+        {
+            int clusterIndex = clusterIndexes[i];
+            if (clusterIndex < start || clusterIndex >= end)
+            {
+                continue;
+            }
+
+            if (firstCluster < 0)
+            {
+                firstCluster = clusterIndex;
+                continue;
+            }
+
+            if (clusterIndex != firstCluster)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static int GetCellUtf16Length(ref readonly TerminalCell cell)
+    {
+        if (!string.IsNullOrEmpty(cell.Grapheme))
+        {
+            return cell.Grapheme.Length;
+        }
+
+        Rune rune = new(cell.Codepoint);
+        return rune.Utf16SequenceLength;
     }
 
     private bool CanUseClusterGridFitting(CachedShapedRun run, ReadOnlySpan<float> textGridOffsets)

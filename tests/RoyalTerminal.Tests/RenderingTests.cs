@@ -1789,6 +1789,19 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_MultiClusterGraphemeCell_DisablesClusterGridFit()
+    {
+        var screen = new TerminalScreen(2, 1);
+        TerminalRow row = screen.GetViewportRow(0);
+        SetTestCell(row, 0, 'a', "ab");
+        SetTestCell(row, 1, 'c');
+
+        Assert.True(SkiaTerminalRenderer.HasMultiClusterGraphemeCell(row.Cells, 0, 2, [0, 1, 2]));
+        Assert.False(SkiaTerminalRenderer.HasMultiClusterGraphemeCell(row.Cells, 0, 2, [0, 0, 2]));
+        Assert.False(SkiaTerminalRenderer.HasMultiClusterGraphemeCell(row.Cells, 1, 2, [0]));
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_CascadiaCodeLigatureRun_UsesNaturalPlacement()
     {
         const string cascadiaCodePath = @"C:\Windows\Fonts\CascadiaCode.ttf";
