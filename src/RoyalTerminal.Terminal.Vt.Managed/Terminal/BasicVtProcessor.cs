@@ -37,7 +37,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseReportingStateSource,
     ITerminalSixelOptionsSink,
-    ITerminalEraseDisplayOptionsSink
+    ITerminalEraseDisplayOptionsSink,
+    ITerminalShellIntegrationEventSource
 {
     private const int MaxOscBufferBytes = 4096;
     private const int MaxDcsBufferBytes = 4096;
@@ -105,6 +106,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private readonly List<byte> _dcsBuffer = [];
     private readonly SixelDecoder _sixelDecoder;
     private readonly BasicVtProcessorOptions _options;
+    private readonly TerminalShellIntegrationParser _shellIntegrationParser = new();
     private bool _isDiscardingOscPayload;
     private bool _isDiscardingDcsPayload;
     private bool _sixelGraphicsEnabled;
@@ -249,6 +251,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public event EventHandler<TerminalModeState>? ModeChanged;
+
+    /// <inheritdoc />
+    public event EventHandler<TerminalShellIntegrationEventArgs>? ShellIntegrationEventReceived
+    {
+        add => _shellIntegrationParser.EventReceived += value;
+        remove => _shellIntegrationParser.EventReceived -= value;
+    }
 
     /// <inheritdoc />
     public Action<byte[]>? ResponseCallback { get; set; }
@@ -2338,6 +2347,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             return;
         }
+
+        _shellIntegrationParser.TryHandleOsc(selectorCode, value);
 
         switch (selectorCode)
         {

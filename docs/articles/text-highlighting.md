@@ -226,11 +226,11 @@ In the built-in panel, open `Appearance`, then use `Text Highlighting` to:
 
 The color checkboxes control whether a color is persisted. A disabled color field means the corresponding persisted value is `null`.
 
-## Demo application behavior
+## Shared shell behavior
 
-The Avalonia demo maps persisted settings into runtime `TerminalTextHighlightRule` instances when settings are applied. Existing standalone terminal tabs receive the updated `TextHighlightingMode` and `TextHighlightRules`, and newly created standalone tabs inherit the current runtime highlighting settings.
+The reusable app shell maps persisted settings into runtime `TerminalTextHighlightRule` instances when settings are applied. Existing standalone terminal tabs receive the updated `TextHighlightingMode` and `TextHighlightRules`, and newly created standalone tabs inherit the current runtime highlighting settings.
 
-This mirrors how the demo already applies font, opacity, terminal behavior, logging, and transport profile settings.
+This mirrors how the shared shell already applies font, opacity, terminal behavior, logging, and transport profile settings.
 
 ## Limitations
 

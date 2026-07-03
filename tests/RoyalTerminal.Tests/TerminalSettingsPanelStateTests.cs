@@ -90,15 +90,17 @@ public sealed class TerminalSettingsPanelStateTests
     }
 
     [AvaloniaFact]
-    public void DefaultProfile_EnablesSixelGraphics()
+    public void DefaultProfile_EnablesSixelGraphicsAndLigatures()
     {
         TerminalSettingsPanelState state = new();
 
         Assert.True(state.SixelGraphicsEnabled);
+        Assert.True(state.EnableLigatures);
 
         TerminalSessionProfilesDocument document = state.BuildDocument();
         TerminalSessionProfile profile = Assert.Single(document.Profiles);
         Assert.True(profile.Behavior.SixelGraphicsEnabled);
+        Assert.True(profile.Behavior.EnableLigatures);
     }
 
     [AvaloniaFact]
@@ -123,6 +125,18 @@ public sealed class TerminalSettingsPanelStateTests
         Assert.Equal(TerminalFontSource.File, profile.Appearance.FontSource);
         Assert.Equal(fontPath, profile.Appearance.FontFilePath);
         Assert.Equal("RoyalTerminal.CustomFont", profile.Appearance.FontFamilyName);
+    }
+
+    [AvaloniaFact]
+    public void FontSettings_FontSize_NormalizesToHalfPoint()
+    {
+        TerminalSettingsPanelState state = new();
+
+        state.Appearance.FontSize = 13.37;
+
+        Assert.Equal(13.5, state.Appearance.FontSize);
+        TerminalSessionProfile profile = Assert.Single(state.BuildDocument().Profiles);
+        Assert.Equal(13.5, profile.Appearance.FontSize);
     }
 
     [AvaloniaFact]

@@ -148,6 +148,7 @@ public static class TerminalSessionProfileSerializer
             TerminalSessionTransportProfile transport = NormalizeTransport(source.Transport, i);
             TerminalSessionLoggingSettings logging = NormalizeLogging(source.Logging);
             TerminalSessionProxySettings proxy = NormalizeProxy(source.Proxy);
+            List<TerminalCommandSnippet> commandSnippets = NormalizeCommandSnippets(source.CommandSnippets);
 
             normalizedProfiles.Add(source with
             {
@@ -159,6 +160,7 @@ public static class TerminalSessionProfileSerializer
                 Transport = transport,
                 Logging = logging,
                 Proxy = proxy,
+                CommandSnippets = commandSnippets,
             });
         }
 
@@ -255,6 +257,47 @@ public static class TerminalSessionProfileSerializer
                 BackgroundColor = NormalizeColor(rule.BackgroundColor),
                 DarkForegroundColor = NormalizeColor(rule.DarkForegroundColor),
                 DarkBackgroundColor = NormalizeColor(rule.DarkBackgroundColor),
+            });
+        }
+
+        return normalized;
+    }
+
+    private static List<TerminalCommandSnippet> NormalizeCommandSnippets(List<TerminalCommandSnippet>? snippets)
+    {
+        if (snippets is null || snippets.Count == 0)
+        {
+            return [];
+        }
+
+        List<TerminalCommandSnippet> normalized = new(snippets.Count);
+        HashSet<string> keys = new(StringComparer.Ordinal);
+        for (int i = 0; i < snippets.Count; i++)
+        {
+            TerminalCommandSnippet? snippet = snippets[i];
+            if (snippet is null)
+            {
+                continue;
+            }
+
+            string? trigger = NormalizeOptional(snippet.Trigger);
+            string? commandLine = NormalizeOptional(snippet.CommandLine);
+            if (trigger is null || commandLine is null)
+            {
+                continue;
+            }
+
+            string key = trigger + "\u001f" + commandLine;
+            if (!keys.Add(key))
+            {
+                continue;
+            }
+
+            normalized.Add(snippet with
+            {
+                Trigger = trigger,
+                CommandLine = commandLine,
+                Description = NormalizeOptional(snippet.Description),
             });
         }
 

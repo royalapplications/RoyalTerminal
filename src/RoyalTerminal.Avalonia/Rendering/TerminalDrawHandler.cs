@@ -52,6 +52,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     public record UpdateMessage(SkiaTerminalRenderer Renderer, TerminalScreen Screen);
     public readonly record struct InvalidateMessage(bool FullRedraw = false, bool DirtyRowsOnly = false);
     public readonly record struct ResizeMessage();
+    public readonly record struct DisposeMessage();
     public readonly record struct ShaderStateMessage(
         IReadOnlyList<TerminalShaderSource>? Sources,
         bool AnimationEnabled);
@@ -82,6 +83,10 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                     shaderState.Sources,
                     shaderState.AnimationEnabled);
                 RequestRender();
+                break;
+
+            case DisposeMessage:
+                DisposeRenderResources();
                 break;
         }
     }
@@ -255,11 +260,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
     private void ResetCachedFrame()
     {
-        _terminalSurface?.Dispose();
-        _terminalSurface = null;
+        ReleaseTerminalSurface();
         _terminalSurfaceInfo = default;
-        _terminalSurfaceGrContext = null;
-        _terminalSurfaceGpuBacked = false;
         _terminalSurfaceScaleX = 1f;
         _terminalSurfaceScaleY = 1f;
         _cachedFrameValid = false;
@@ -287,7 +289,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             return true;
         }
 
-        _terminalSurface?.Dispose();
+        ReleaseTerminalSurface();
         _terminalSurfaceInfo = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
         _terminalSurface = TerminalShaderPostProcessor.CreateRenderSurface(
             _terminalSurfaceInfo,
@@ -302,6 +304,22 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         _forceFullRedrawRequested = true;
         _invalidateViewportRequested = true;
         return _terminalSurface is not null;
+    }
+
+    private void ReleaseTerminalSurface()
+    {
+        SKSurface? terminalSurface = _terminalSurface;
+        _terminalSurface = null;
+        _terminalSurfaceGrContext = null;
+        _terminalSurfaceGpuBacked = false;
+
+        if (terminalSurface is null)
+        {
+            return;
+        }
+
+        terminalSurface.Canvas.Flush();
+        terminalSurface.Dispose();
     }
 
     internal static (int Width, int Height) GetRenderTargetPixelSize(
@@ -474,6 +492,17 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         _shaderStartTimestamp = 0;
         _lastShaderTimestamp = 0;
         _shaderFrame = 0;
+    }
+
+    private void DisposeRenderResources()
+    {
+        _renderer = null;
+        _screen = null;
+        _pendingRender = false;
+        _shaderAnimationEnabled = false;
+        _shaderPostProcessor?.Dispose();
+        _shaderPostProcessor = null;
+        ResetCachedFrame();
     }
 
     private bool ShouldContinueShaderAnimation()

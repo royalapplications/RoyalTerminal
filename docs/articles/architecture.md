@@ -11,7 +11,7 @@ RoyalTerminal is organized as layered packages that keep UI concerns, terminal c
 | Layer | Responsibility | Representative packages |
 | --- | --- | --- |
 | UI | Avalonia control surface, input adaptation, scrolling, selection, capture/replay | `RoyalApps.RoyalTerminal.Avalonia`, `RoyalApps.RoyalTerminal.Avalonia.Settings` |
-| Presentation and orchestration | Sample app view model/controller coordination | `samples/RoyalTerminal.Demo` |
+| Presentation and orchestration | Reusable terminal app shell, native menus, window/view composition, settings overlay, tabs, panes, capture/replay, workspace startup | `RoyalApps.RoyalTerminal.Avalonia.App` |
 | Domain contracts | Terminal model, transport abstractions, profiles, themes, snapshot/capture contracts | `RoyalApps.RoyalTerminal.Terminal`, `RoyalApps.RoyalTerminal.Terminal.Services.Contracts` |
 | Runtime implementations | Session service, PTY, transports, VT engines, rendering, SSH adapters | `RoyalApps.RoyalTerminal.Terminal.Services`, `RoyalApps.RoyalTerminal.Terminal.Transport.*`, `RoyalApps.RoyalTerminal.Terminal.Vt.*`, `RoyalApps.RoyalTerminal.Rendering.*` |
 | Native interop and assets | Ghostty VT bindings, renderer interop, OS-specific runtime binaries | `RoyalApps.RoyalTerminal.GhosttySharp`, `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty*`, `RoyalApps.RoyalTerminal.GhosttySharp.Native.*` |
@@ -36,11 +36,14 @@ The repository guardrails are consistent across code and tests:
 - UI packages do not own transport policy.
 - Domain packages do not depend on Avalonia types.
 - Native interop stays isolated to explicit Ghostty and renderer packages.
-- Demo-specific orchestration stays in `samples/`, not in reusable packages.
+- Reusable product-shell orchestration lives in `RoyalApps.RoyalTerminal.Avalonia.App`.
+- `samples/RoyalTerminal.Demo` stays a thin executable launcher over the shared shell.
 
 Important anchor types:
 
 - `TerminalControl`
+- `MainWindow`
+- `MainView`
 - `TerminalSessionService`
 - `CompositeTerminalTransportFactory`
 - `DefaultVtProcessorFactory`

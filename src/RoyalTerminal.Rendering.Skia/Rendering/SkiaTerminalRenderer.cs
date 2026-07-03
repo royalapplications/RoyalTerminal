@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using RoyalTerminal.Terminal;
 using SkiaSharp;
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
@@ -37,7 +38,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const float GridScaleFallbackMin = 0.5f;
     private const float GridScaleFallbackMax = 1.6f;
     private const float GridClampToleranceRatio = 0.04f;
-    private const float GridClampTolerancePx = 0.25f;
+    private const float GridClampTolerancePx = 0.5f;
     private const float SymbolGlyphClipPaddingCells = 0.5f;
     private const float DefaultBackgroundOpacity = 0.82f;
     private const long DefaultImageBitmapCacheBudgetBytes = 256L * 1024L * 1024L;
@@ -86,7 +87,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private TerminalFontRenderingSettings _fontRenderingSettings;
     private TextDirectionMode _textDirectionMode = TextDirectionMode.Auto;
     private TerminalTextRenderPipeline _textRenderPipeline = TerminalTextRenderPipeline.HarfBuzz;
-    private bool _enableLigatures;
+    private bool _enableLigatures = true;
+    private bool _enableTextShaping = true;
     private bool _disposed;
     private long _diagnosticShapedRuns;
     private long _diagnosticFallbackRuns;
@@ -272,7 +274,20 @@ public sealed class SkiaTerminalRenderer : IDisposable
     /// Enables or disables HarfBuzz shaping for terminal text rendering.
     /// When disabled, renderer falls back to cell-anchored text drawing.
     /// </summary>
-    public bool EnableTextShaping { get; set; } = true;
+    public bool EnableTextShaping
+    {
+        get => _enableTextShaping;
+        set
+        {
+            if (_enableTextShaping == value)
+            {
+                return;
+            }
+
+            _enableTextShaping = value;
+            ClearTextRenderCaches();
+        }
+    }
 
     /// <summary>
     /// Gets whether the optional Pretext text render pipeline is compiled into this build.
@@ -828,6 +843,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         int cursorSplitColumn = CursorColumn;
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
         bool usePretextPipeline = EnableTextShaping &&
+            !_enableLigatures &&
             _textRenderPipeline == TerminalTextRenderPipeline.Pretext &&
             PretextPipelineInitializer.TryEnsureInitialized();
         if (usePretextPipeline &&
@@ -929,7 +945,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 rowOverlays[col],
                 GetTextHighlightOverride(rowTextHighlights, col));
             SKTypeface runTypeface = ResolveTypefaceForCell(primaryTypeface, in firstCell);
-            bool firstIsSymbolGlyph = IsSymbolGlyphClipCandidate(in firstCell);
+            bool firstIsSymbolGlyph = IsSymbolGlyphClipCandidate(in firstCell) &&
+                !(_enableLigatures && IsProgrammingLigatureCharCell(in firstCell));
 
             int runEnd = col + 1;
             while (runEnd < cells.Length)
@@ -939,7 +956,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     break;
                 }
 
-                if (splitRunsAroundCursor && ShouldSplitRunAroundCursor(col, runEnd, cursorSplitColumn))
+                if (splitRunsAroundCursor &&
+                    ShouldSplitTextRunAroundCursor(cells, col, runEnd, cursorSplitColumn))
                 {
                     break;
                 }
@@ -955,14 +973,18 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     break;
                 }
 
-                if (IsSymbolGlyphClipCandidate(in nextCell))
+                if (IsSymbolGlyphClipCandidate(in nextCell) &&
+                    !(_enableLigatures && IsProgrammingLigatureCharCell(in nextCell)))
                 {
                     break;
                 }
 
+                bool preserveLigatureCandidate = _enableLigatures &&
+                    WouldSplitProgrammingLigatureCandidate(cells, runEnd);
+
                 bool nextBold = (nextCell.Attributes & CellAttributes.Bold) != 0;
                 bool nextItalic = (nextCell.Attributes & CellAttributes.Italic) != 0;
-                if (nextBold != bold || nextItalic != italic)
+                if ((nextBold != bold || nextItalic != italic) && !preserveLigatureCandidate)
                 {
                     break;
                 }
@@ -971,14 +993,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     in nextCell,
                     rowOverlays[runEnd],
                     GetTextHighlightOverride(rowTextHighlights, runEnd));
-                if (nextColor != runColor)
+                if (nextColor != runColor && !preserveLigatureCandidate)
                 {
                     break;
                 }
 
                 SKTypeface nextTypeface = ResolveTypefaceForCell(primaryTypeface, in nextCell);
 
-                if (nextTypeface.Handle != runTypeface.Handle)
+                if (nextTypeface.Handle != runTypeface.Handle && !preserveLigatureCandidate)
                 {
                     break;
                 }
@@ -2964,6 +2986,56 @@ public sealed class SkiaTerminalRenderer : IDisposable
                (runStartColumn == cursorColumn && runEndCandidate == cursorColumn + 1);
     }
 
+    private bool ShouldSplitTextRunAroundCursor(
+        ReadOnlySpan<TerminalCell> cells,
+        int runStartColumn,
+        int runEndCandidate,
+        int cursorColumn)
+    {
+        if (!ShouldSplitRunAroundCursor(runStartColumn, runEndCandidate, cursorColumn))
+        {
+            return false;
+        }
+
+        if (!_enableLigatures)
+        {
+            return true;
+        }
+
+        int splitColumn = runEndCandidate;
+        if (runStartColumn == cursorColumn && runEndCandidate == cursorColumn + 1)
+        {
+            splitColumn = cursorColumn + 1;
+        }
+
+        return !WouldSplitProgrammingLigatureCandidate(cells, splitColumn);
+    }
+
+    private static bool WouldSplitProgrammingLigatureCandidate(
+        ReadOnlySpan<TerminalCell> cells,
+        int splitColumn)
+    {
+        if (splitColumn <= 0 || splitColumn >= cells.Length)
+        {
+            return false;
+        }
+
+        return IsProgrammingLigatureCharCell(in cells[splitColumn - 1]) &&
+               IsProgrammingLigatureCharCell(in cells[splitColumn]);
+    }
+
+    private static bool IsProgrammingLigatureCharCell(ref readonly TerminalCell cell)
+    {
+        if (!string.IsNullOrEmpty(cell.Grapheme))
+        {
+            ReadOnlySpan<char> grapheme = cell.Grapheme.AsSpan();
+            return grapheme.Length == 1 && IsProgrammingLigatureChar(grapheme[0]);
+        }
+
+        return cell.Codepoint is >= char.MinValue and <= char.MaxValue &&
+               IsProgrammingLigatureChar((char)cell.Codepoint);
+    }
+
     private bool TryDrawPretextTextRun(
         SKCanvas canvas,
         ReadOnlySpan<TerminalCell> cells,
@@ -3848,6 +3920,22 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return;
         }
 
+        if (_enableLigatures && ContainsProgrammingLigatureCandidate(run.Text.AsSpan()))
+        {
+            DrawCachedShapedRunPath(
+                canvas,
+                run,
+                typeface,
+                originX,
+                rowY,
+                baselineY,
+                runWidth,
+                xScale,
+                clampToRunWidth,
+                clipPadding);
+            return;
+        }
+
         int runWidthBits = BitConverter.SingleToInt32Bits(runWidth);
         if (!run.TryGetGridTextBlob(runWidthBits, out SKTextBlob? blob))
         {
@@ -3863,6 +3951,77 @@ public sealed class SkiaTerminalRenderer : IDisposable
         canvas.Save();
         ClipTextRun(canvas, originX, rowY, runWidth, clipPadding);
         canvas.DrawText(blob, originX, baselineY, _fgPaint);
+        canvas.Restore();
+    }
+
+    private static bool ContainsProgrammingLigatureCandidate(ReadOnlySpan<char> text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (IsProgrammingLigatureChar(text[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsProgrammingLigatureCandidate(
+        ReadOnlySpan<TerminalCell> cells,
+        int startCol,
+        int endCol)
+    {
+        for (int col = startCol; col < endCol; col++)
+        {
+            ref readonly TerminalCell cell = ref cells[col];
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                if (ContainsProgrammingLigatureCandidate(cell.Grapheme.AsSpan()))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (cell.Codepoint is >= char.MinValue and <= char.MaxValue &&
+                IsProgrammingLigatureChar((char)cell.Codepoint))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsProgrammingLigatureChar(char value)
+    {
+        return value is '=' or '!' or '<' or '>' or '-' or ':' or '|' or '&' or '/' or '*' or '.';
+    }
+
+    private void DrawCachedShapedRunPath(
+        SKCanvas canvas,
+        CachedShapedRun run,
+        SKTypeface typeface,
+        float originX,
+        float rowY,
+        float baselineY,
+        float runWidth,
+        float xScale,
+        bool clampToRunWidth,
+        float clipPadding)
+    {
+        using SKPath? path = CreateShapedRunPath(typeface, run, runWidth, xScale, clampToRunWidth);
+        if (path is null)
+        {
+            return;
+        }
+
+        canvas.Save();
+        ClipTextRun(canvas, originX, rowY, runWidth, clipPadding);
+        canvas.Translate(originX, baselineY);
+        canvas.DrawPath(path, _fgPaint);
         canvas.Restore();
     }
 
@@ -3898,8 +4057,53 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
             SKFont font = _textRowFontCache.GetOrCreate(typeface, _fontSize, _fontRenderingSettings);
             using SKTextBlobBuilder builder = new();
-            builder.AddPositionedRun(run.GlyphIds.AsSpan(), font, points);
+            SKPositionedRunBuffer runBuffer = builder.AllocatePositionedRun(font, run.GlyphCount);
+            run.GlyphIds.AsSpan().CopyTo(runBuffer.Glyphs);
+            points.CopyTo(runBuffer.Positions);
             return builder.Build();
+        }
+        finally
+        {
+            if (rentedPoints is not null)
+            {
+                ArrayPool<SKPoint>.Shared.Return(rentedPoints);
+            }
+        }
+    }
+
+    private SKPath? CreateShapedRunPath(
+        SKTypeface typeface,
+        CachedShapedRun run,
+        float runWidth,
+        float xScale,
+        bool clampToRunWidth)
+    {
+        SKPoint[]? rentedPoints = null;
+        Span<SKPoint> points = run.GlyphCount <= MaxStackallocGlyphPoints
+            ? stackalloc SKPoint[run.GlyphCount]
+            : (rentedPoints = ArrayPool<SKPoint>.Shared.Rent(run.GlyphCount)).AsSpan(0, run.GlyphCount);
+        try
+        {
+            float clipPadding = run.ClipPadding;
+            for (int i = 0; i < run.GlyphCount; i++)
+            {
+                float x = run.XOffsets[i];
+                if (xScale != 1f)
+                {
+                    x *= xScale;
+                }
+
+                if (clampToRunWidth)
+                {
+                    x = Math.Clamp(x, -clipPadding, runWidth + clipPadding);
+                }
+
+                points[i] = new SKPoint(x, run.YOffsets[i]);
+            }
+
+            SKFont font = _textRowFontCache.GetOrCreate(typeface, _fontSize, _fontRenderingSettings);
+            ReadOnlySpan<byte> glyphBytes = MemoryMarshal.AsBytes(run.GlyphIds.AsSpan());
+            return font.GetTextPath(glyphBytes, SKTextEncoding.GlyphId, points);
         }
         finally
         {
@@ -3942,7 +4146,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
             SKFont font = _textRowFontCache.GetOrCreate(typeface, _fontSize, _fontRenderingSettings);
             using SKTextBlobBuilder builder = new();
-            builder.AddPositionedRun(glyphIds, font, points);
+            SKPositionedRunBuffer runBuffer = builder.AllocatePositionedRun(font, glyphIds.Length);
+            glyphIds.CopyTo(runBuffer.Glyphs);
+            points.CopyTo(runBuffer.Positions);
             return builder.Build();
         }
         finally

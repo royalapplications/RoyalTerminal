@@ -152,7 +152,7 @@ RoyalTerminal separates credential lookup, secret persistence, and secret protec
 | `DpapiSshSecretProtector` | Windows DPAPI protector. |
 | `AesGcmSshSecretProtector` | Cross-platform AES-GCM file-key protector. |
 | `SshSecretProtectionFactory` | Factory for default protectors and stores. |
-| `SshShellBootstrapCommandBuilder` | Safe bootstrap command builder for environment variables and startup commands. |
+| `SshShellBootstrapCommandBuilder` | Safe bootstrap command builder for environment variables, optional shell-integration bootstrap scripts, and startup commands. |
 
 ## How the articles map to the code
 

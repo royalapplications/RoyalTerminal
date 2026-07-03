@@ -14,11 +14,27 @@ const guideSidebarItems = [
     ]
   },
   {
-    text: "Embedding and Sessions",
+    text: "Reusable UI APIs",
     collapsed: false,
     items: [
       { text: "Embedding in Avalonia", link: "/articles/avalonia-control" },
+      { text: "App Shell Hosting", link: "/articles/app-shell-hosting" },
+      { text: "App Shell Commands", link: "/articles/app-shell-command-surface" },
+      { text: "Native Menu Integration", link: "/articles/app-shell-native-menus" },
+      { text: "Settings Panel API", link: "/articles/settings-panel-api" },
+      { text: "Terminal Pane Layout API", link: "/articles/terminal-pane-layout-api" },
+      { text: "Pane Split Policy", link: "/articles/split-pane-policy" }
+    ]
+  },
+  {
+    text: "Embedding and Sessions",
+    collapsed: false,
+    items: [
+      { text: "Reusable App Shell", link: "/articles/reusable-app-shell" },
       { text: "Sessions, Profiles, and Settings", link: "/articles/sessions-profiles-and-settings" },
+      { text: "Workspace Restore", link: "/articles/workspace-restore" },
+      { text: "Split Panes", link: "/articles/split-panes" },
+      { text: "Command History and Suggestions", link: "/articles/command-history-and-suggestions" },
       { text: "Session History and Scrollback", link: "/articles/session-history" },
       { text: "Session Restart Semantics", link: "/articles/session-restart-semantics" },
       { text: "Session Restart Reference Analysis", link: "/articles/session-restart-reference-analysis" },
@@ -31,6 +47,7 @@ const guideSidebarItems = [
     items: [
       { text: "Transports and Remote Access", link: "/articles/transports" },
       { text: "Terminal Engine and Screen State", link: "/articles/vt-modes" },
+      { text: "Shell Integration", link: "/articles/shell-integration" },
       { text: "Regex Text Highlighting", link: "/articles/text-highlighting" },
       { text: "Ghostty Integration", link: "/articles/ghostty-integration" },
       { text: "Windows x64 Native Compatibility", link: "/articles/windows-x64-native-compatibility" }
@@ -53,6 +70,7 @@ const guideSidebarItems = [
     collapsed: false,
     items: [
       { text: "Samples and Tooling", link: "/articles/samples-tooling" },
+      { text: "Demo Product Shell", link: "/articles/demo-product-shell" },
       { text: "Build, Test, and Release", link: "/articles/build-test-release" },
       { text: "Troubleshooting", link: "/articles/troubleshooting" }
     ]

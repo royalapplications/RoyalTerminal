@@ -7,12 +7,67 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Layout;
 using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Settings;
+using RoyalTerminal.Terminal;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
 
 public sealed class TerminalSettingsPanelLayoutTests
 {
+    [AvaloniaFact]
+    public async Task CommandButtons_AreBoundToSettingsPanelStateCommands()
+    {
+        TerminalSettingsPanelState state = new()
+        {
+            SelectedFontSource = TerminalFontSource.File,
+        };
+        state.AddTextHighlightRuleCommand.Execute(null);
+        TerminalSettingsHighlightRuleState rule = Assert.Single(state.TextHighlightRules);
+
+        TerminalSettingsPanel panel = new()
+        {
+            DataContext = state,
+        };
+
+        Window window = new()
+        {
+            Width = 760,
+            Height = 740,
+            Content = panel,
+        };
+
+        try
+        {
+            window.Show();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            Assert.Same(state.NewProfileCommand, FindButtonByContent(panel, "New").Command);
+            Assert.Same(state.DuplicateProfileCommand, FindButtonByContent(panel, "Duplicate").Command);
+            Assert.Same(state.DeleteProfileCommand, FindButtonByContent(panel, "Delete").Command);
+            Assert.Same(state.SetDefaultProfileCommand, FindButtonByContent(panel, "Set Default").Command);
+            Assert.Same(state.ApplyCommand, FindButtonByContent(panel, "Apply").Command);
+            Assert.Same(state.SaveCommand, FindButtonByContent(panel, "Save").Command);
+
+            TabControl tabControl = Assert.Single(panel.GetVisualDescendants().OfType<TabControl>());
+            tabControl.SelectedIndex = 3;
+
+            bool appearanceReady = await HeadlessTerminalTestCleanup.WaitUntilAsync(
+                () => ContainsButtonWithContent(panel, "Add Rule")
+                    && ContainsButtonWithContent(panel, "Browse")
+                    && ContainsButtonWithContent(panel, "Remove"),
+                TimeSpan.FromSeconds(2));
+
+            Assert.True(appearanceReady, "The selected Appearance tab did not produce command buttons.");
+            Assert.Same(state.BrowseFontFileCommand, FindButtonByContent(panel, "Browse").Command);
+            Assert.Same(state.AddTextHighlightRuleCommand, FindButtonByContent(panel, "Add Rule").Command);
+            Assert.Same(rule.RemoveCommand, FindButtonByContent(panel, "Remove").Command);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window);
+        }
+    }
+
     [AvaloniaFact]
     public async Task AppearanceTab_ShowsSingleHighlightRuleAboveFooter()
     {
@@ -165,6 +220,124 @@ public sealed class TerminalSettingsPanelLayoutTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task PanelRoot_StretchesInsideShortHost()
+    {
+        TerminalSettingsPanelState state = new();
+        for (int i = 0; i < 4; i++)
+        {
+            state.Appearance.AddTextHighlightRuleCommand.Execute(null);
+        }
+
+        TerminalSettingsPanel panel = new()
+        {
+            DataContext = state,
+        };
+
+        Window window = new()
+        {
+            Width = 760,
+            Height = 520,
+            Content = panel,
+        };
+
+        try
+        {
+            window.Show();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            TabControl tabControl = Assert.Single(panel.GetVisualDescendants().OfType<TabControl>());
+            tabControl.SelectedIndex = 3;
+
+            bool layoutReady = await HeadlessTerminalTestCleanup.WaitUntilAsync(
+                () => TryGetVisualWithClass(panel, "settings-panel-root", out Border root)
+                    && root.Bounds.Height > 0
+                    && TryGetVisibleSettingsScrollViewer(panel, out ScrollViewer? scrollViewer)
+                    && scrollViewer.Viewport.Height > 0,
+                TimeSpan.FromSeconds(2));
+
+            Assert.True(layoutReady, "The settings panel did not produce a measured root and scroll viewport.");
+            Assert.True(TryGetVisualWithClass(panel, "settings-panel-root", out Border selectedRoot));
+            Assert.True(TryGetVisibleSettingsScrollViewer(panel, out ScrollViewer? selectedScrollViewer));
+            Assert.True(
+                selectedRoot.Bounds.Height <= panel.Bounds.Height + 0.5,
+                $"Expected settings root to fit the host height. Root={selectedRoot.Bounds.Height}, Panel={panel.Bounds.Height}.");
+            Assert.True(
+                selectedScrollViewer.Extent.Height > selectedScrollViewer.Viewport.Height,
+                $"Expected Appearance content to scroll inside a short host. Extent={selectedScrollViewer.Extent.Height}, Viewport={selectedScrollViewer.Viewport.Height}.");
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task EveryTab_CanScrollBottomContentAboveFooter()
+    {
+        TerminalSettingsPanelState state = new()
+        {
+            SelectedFontSource = TerminalFontSource.File,
+        };
+        for (int i = 0; i < 3; i++)
+        {
+            state.AddTextHighlightRuleCommand.Execute(null);
+        }
+
+        TerminalSettingsPanel panel = new()
+        {
+            DataContext = state,
+        };
+
+        Window window = new()
+        {
+            Width = 760,
+            Height = 520,
+            Content = panel,
+        };
+
+        try
+        {
+            window.Show();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            TabControl tabControl = Assert.Single(panel.GetVisualDescendants().OfType<TabControl>());
+            Assert.True(TryGetVisualWithClass(panel, "settings-footer", out Border footer));
+            double footerTop = GetTopRelativeToPanel(footer, panel);
+
+            for (int tabIndex = 0; tabIndex < tabControl.ItemCount; tabIndex++)
+            {
+                tabControl.SelectedIndex = tabIndex;
+                await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+                bool selectedReady = await HeadlessTerminalTestCleanup.WaitUntilAsync(
+                    () => TryGetVisibleSettingsScrollViewer(panel, out ScrollViewer? scrollViewer)
+                        && scrollViewer.Viewport.Height > 0,
+                    TimeSpan.FromSeconds(2));
+
+                Assert.True(selectedReady, $"Settings tab {tabIndex} did not produce a measured scroll viewport.");
+                Assert.True(TryGetVisibleSettingsScrollViewer(panel, out ScrollViewer? selectedScrollViewer));
+
+                selectedScrollViewer.ScrollToEnd();
+                await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+                Control content = selectedScrollViewer.Content as Control
+                    ?? throw new InvalidOperationException($"Settings tab {tabIndex} scroll content was not a control.");
+                double contentBottom = GetBottomRelativeToPanel(content, panel);
+                double scrollViewerBottom = GetBottomRelativeToPanel(selectedScrollViewer, panel);
+                double visibleBottom = Math.Min(scrollViewerBottom, footerTop);
+
+                Assert.True(
+                    contentBottom <= visibleBottom + 0.5,
+                    $"Expected settings tab {tabIndex} bottom content to be scrollable above the footer. ContentBottom={contentBottom}, VisibleBottom={visibleBottom}, Offset={selectedScrollViewer.Offset}, Extent={selectedScrollViewer.Extent}, Viewport={selectedScrollViewer.Viewport}.");
+            }
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupWindowAsync(window);
+        }
+    }
+
     private static bool TryGetVisibleSettingsScrollViewer(
         TerminalSettingsPanel panel,
         out ScrollViewer scrollViewer)
@@ -182,6 +355,26 @@ public sealed class TerminalSettingsPanelLayoutTests
 
         scrollViewer = null!;
         return false;
+    }
+
+    private static bool ContainsButtonWithContent(TerminalSettingsPanel panel, string content)
+    {
+        return panel.GetVisualDescendants()
+            .OfType<Button>()
+            .Any(button => string.Equals(button.Content as string, content, StringComparison.Ordinal));
+    }
+
+    private static Button FindButtonByContent(TerminalSettingsPanel panel, string content)
+    {
+        foreach (Button button in panel.GetVisualDescendants().OfType<Button>())
+        {
+            if (string.Equals(button.Content as string, content, StringComparison.Ordinal))
+            {
+                return button;
+            }
+        }
+
+        throw new InvalidOperationException($"Button '{content}' was not found.");
     }
 
     private static bool TryGetVisualWithClass<T>(

@@ -1923,7 +1923,8 @@ public class TerminalControlTests
 
         Assert.NotNull(control.Renderer);
         Assert.NotSame(originalRenderer, control.Renderer);
-        Assert.Equal(18f, control.Renderer!.FontSize);
+        Assert.Equal(18.0, control.TerminalFontSize);
+        Assert.Equal(24f, control.Renderer!.FontSize);
     }
 
     [AvaloniaFact]
@@ -4443,19 +4444,85 @@ public class TerminalControlTests
 
         Assert.Equal("needle", control.SearchNeedle);
         Assert.Equal(3, control.SearchTotal);
-        Assert.Equal(0, control.SearchSelected);
+        Assert.Equal(2, control.SearchSelected);
+        Assert.Equal(0, control.SearchSelectedDisplayIndex);
 
         Assert.True(control.SelectNextSearchMatch());
         Assert.Equal(1, control.SearchSelected);
+        Assert.Equal(1, control.SearchSelectedDisplayIndex);
 
         Assert.True(control.SelectPreviousSearchMatch());
-        Assert.Equal(0, control.SearchSelected);
+        Assert.Equal(2, control.SearchSelected);
+        Assert.Equal(0, control.SearchSelectedDisplayIndex);
 
         control.EndSearch();
 
         Assert.Null(control.SearchNeedle);
         Assert.Equal(0, control.SearchTotal);
         Assert.Equal(-1, control.SearchSelected);
+    }
+
+    [AvaloniaFact]
+    public void Control_SearchSelectionMove_InvalidatesViewportRowsWithoutScrolling()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            Columns = 32,
+            Rows = 5,
+        };
+
+        control.WriteOutput("needle alpha needle\nbeta needle"u8);
+        control.StartSearch("needle");
+
+        TerminalScreen screen = control.Screen
+            ?? throw new InvalidOperationException("Terminal screen was not initialized.");
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            screen.GetViewportRow(row).IsDirty = false;
+        }
+
+        Assert.False(screen.HasDirtyRows());
+        Assert.Equal(2, control.SearchSelected);
+
+        Assert.True(control.SelectNextSearchMatch());
+
+        Assert.Equal(1, control.SearchSelected);
+        Assert.True(screen.HasDirtyRows());
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            Assert.True(screen.GetViewportRow(row).IsDirty);
+        }
+    }
+
+    [AvaloniaFact]
+    public void Control_SearchLifecycle_AlternateScreen_StartsAtTopMatch()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 20, OffsetRows: 0, VisibleRows: 4),
+            [
+                new TerminalSearchMatch(2, 0, 6),
+                new TerminalSearchMatch(6, 0, 6),
+                new TerminalSearchMatch(10, 0, 6),
+            ],
+            alternateScreen: true);
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new SingleProcessorFactory(processor),
+            VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+
+        control.StartSearch("needle");
+
+        Assert.Equal("needle", control.SearchNeedle);
+        Assert.Equal(3, control.SearchTotal);
+        Assert.Equal(0, control.SearchSelected);
+        Assert.Equal(0, control.SearchSelectedDisplayIndex);
+
+        Assert.True(control.SelectPreviousSearchMatch());
+        Assert.Equal(2, control.SearchSelected);
+        Assert.Equal(2, control.SearchSelectedDisplayIndex);
     }
 
     [AvaloniaFact]
@@ -4992,17 +5059,23 @@ public class TerminalControlTests
         try
         {
             await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            control.WriteOutput("one\r\ntwo\r\nthree"u8);
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
             SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
-            Point start = new(renderer.CellWidth * 1.5, renderer.CellHeight * 0.5);
-            Point end = new(renderer.CellWidth * 3.5, renderer.CellHeight * 1.5);
+            Point windowStart = new(renderer.CellWidth * 1.5, renderer.CellHeight * 0.5);
+            Point windowEnd = new(renderer.CellWidth * 3.5, renderer.CellHeight * 2.5);
 
-            window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton | RawInputModifiers.Alt);
-            window.MouseMove(end, RawInputModifiers.LeftMouseButton | RawInputModifiers.Alt);
-            window.MouseUp(end, MouseButton.Left, RawInputModifiers.Alt);
+            window.MouseDown(windowStart, MouseButton.Left, RawInputModifiers.LeftMouseButton | RawInputModifiers.Alt);
+            window.MouseMove(windowEnd, RawInputModifiers.LeftMouseButton | RawInputModifiers.Alt);
+            window.MouseUp(windowEnd, MouseButton.Left, RawInputModifiers.Alt);
             HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
-            Assert.Equal((1, 0), renderer.SelectionStart);
-            Assert.Equal((3, 1), renderer.SelectionEnd);
+            (int startColumn, int startRow) = renderer.SelectionStart.GetValueOrDefault();
+            (int endColumn, int endRow) = renderer.SelectionEnd.GetValueOrDefault();
+            Assert.Equal(1, startColumn);
+            Assert.Equal(3, endColumn);
+            Assert.Equal(1, endRow - startRow);
+            Assert.True(startRow >= 0);
             Assert.True(renderer.SelectionIsRectangle);
         }
         finally
@@ -7353,7 +7426,8 @@ public class TerminalControlTests
 
     private sealed class FakeSearchViewportVtProcessor(
         TerminalViewportScrollState viewportScrollState,
-        IReadOnlyList<TerminalSearchMatch> matches) :
+        IReadOnlyList<TerminalSearchMatch> matches,
+        bool alternateScreen = false) :
         IVtProcessor,
         ITerminalViewportScrollSource,
         ITerminalSearchSource,
@@ -7367,7 +7441,7 @@ public class TerminalControlTests
         public bool CursorVisible => true;
         public bool ApplicationCursorKeys => false;
         public bool ApplicationKeypad => false;
-        public bool AlternateScreen => false;
+        public bool AlternateScreen => alternateScreen;
         public bool BracketedPaste => false;
         public bool Win32InputMode => false;
         public TerminalModeState ModeState => new(

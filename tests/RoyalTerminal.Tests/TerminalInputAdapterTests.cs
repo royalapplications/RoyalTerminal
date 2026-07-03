@@ -403,6 +403,116 @@ public sealed class TerminalInputAdapterTests
     }
 
     [Fact]
+    public async Task HandleKeyDown_WithWindowsWin32InputMode_NumLock_EncodesMappedWin32InputRecord()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetModeState(vtProcessor.ModeState with { Win32InputMode = true });
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.NumLock,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.NotNull(transport.LastInput);
+        string[] fields = ParseWin32InputFields(transport.LastInput!);
+        Assert.Equal("144", fields[0]); // VK_NUMLOCK
+        Assert.NotEqual("0", fields[1]); // scan code
+        Assert.Equal("0", fields[2]); // no UnicodeChar
+        Assert.Equal("1", fields[3]); // key down
+        Assert.Equal("1", fields[5]); // repeat count
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
+    public void Win32InputSequenceEncoder_UnmappedKey_DoesNotEmitZeroVirtualKeyRecord()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        bool encoded = TerminalWin32InputSequenceEncoder.TryEncode(
+            Key.None,
+            KeyModifiers.None,
+            keySymbol: null,
+            keyDown: true,
+            out string sequence);
+
+        Assert.False(encoded);
+        Assert.Empty(sequence);
+    }
+
+    [Fact]
+    public async Task HandleKeyDown_WithKittyKeyboardAndWin32InputMode_PrefersNativeKittyEncoder()
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService sessionService = new();
+        FakeTransport transport = new();
+        StaticTransportFactory factory = new(transport);
+        FakeVtProcessor vtProcessor = new()
+        {
+            EncodedKeySequence = "\u001b[57360u"u8.ToArray(),
+        };
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+
+        await sessionService.StartSessionAsync(
+            factory,
+            new FakeTransportOptions(TerminalTransportIds.Pipe),
+            vtProcessor,
+            onData,
+            onExit,
+            _ => { },
+            () => { },
+            _ => { });
+
+        vtProcessor.SetModeState(vtProcessor.ModeState with { Win32InputMode = true });
+        vtProcessor.SetKittyKeyboardFlags(1);
+
+        KeyEventArgs keyEventArgs = new()
+        {
+            Key = Key.NumLock,
+            KeyModifiers = KeyModifiers.None,
+        };
+
+        bool handled = adapter.HandleKeyDown(keyEventArgs, sessionService, vtProcessor: null);
+
+        Assert.True(handled);
+        Assert.Equal("\u001b[57360u", Encoding.UTF8.GetString(transport.LastInput!));
+        Assert.Single(vtProcessor.EncodedKeyRequests);
+        Assert.Equal("NumLock", vtProcessor.EncodedKeyRequests[0].KeyId);
+
+        await sessionService.StopSessionAsync(vtProcessor, onData, onExit);
+    }
+
+    [Fact]
     public async Task HandleKeyDown_UsesSessionModeSourceForApplicationCursorMode()
     {
         DefaultTerminalInputAdapter adapter = new();

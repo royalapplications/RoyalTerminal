@@ -85,6 +85,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Sixel", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.WinFormsHost", "samples\RoyalTerminal.WinFormsHost\RoyalTerminal.WinFormsHost.csproj", "{901DE37F-414D-431D-A2E2-E6C3F533C695}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Avalonia.App", "src\RoyalTerminal.Avalonia.App\RoyalTerminal.Avalonia.App.csproj", "{37EE5670-3466-4072-B0F5-57CC4FD62A6B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -551,6 +553,18 @@ Global
 		{901DE37F-414D-431D-A2E2-E6C3F533C695}.Release|x64.Build.0 = Release|Any CPU
 		{901DE37F-414D-431D-A2E2-E6C3F533C695}.Release|x86.ActiveCfg = Release|Any CPU
 		{901DE37F-414D-431D-A2E2-E6C3F533C695}.Release|x86.Build.0 = Release|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Debug|x64.Build.0 = Debug|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Debug|x86.Build.0 = Debug|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Release|x64.ActiveCfg = Release|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Release|x64.Build.0 = Release|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Release|x86.ActiveCfg = Release|Any CPU
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -592,5 +606,6 @@ Global
 		{0E285AF9-82AB-4FF8-9208-CF794A2DACFF} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{97841A38-87F5-4045-B2CE-F8BF273F97E2} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{901DE37F-414D-431D-A2E2-E6C3F533C695} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
+		{37EE5670-3466-4072-B0F5-57CC4FD62A6B} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

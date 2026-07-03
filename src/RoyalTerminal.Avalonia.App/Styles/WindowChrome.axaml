@@ -1,0 +1,145 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:RoyalTerminal.Avalonia.App.Views">
+  <Style Selector="Window.royalTerminalMainWindow">
+    <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+  </Style>
+
+  <Style Selector="Window.royalTerminalMainWindow[ActualTransparencyLevel=Mica]">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Border.shellRail">
+    <Setter Property="Background" Value="{DynamicResource ToolbarBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,1,0" />
+  </Style>
+
+  <Style Selector="Border.topBar">
+    <Setter Property="MinHeight" Value="{DynamicResource Shell.CommandHeight}" />
+    <Setter Property="Padding" Value="{DynamicResource Shell.CommandPadding}" />
+    <Setter Property="Background" Value="{DynamicResource ToolbarBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+
+  <Style Selector="Border.titleBarArea">
+    <Setter Property="Height" Value="{DynamicResource Shell.CommandHeight}" />
+    <Setter Property="MinHeight" Value="{DynamicResource Shell.CommandHeight}" />
+  </Style>
+
+  <Style Selector="Border.statusBar">
+    <Setter Property="Height" Value="{DynamicResource Shell.StatusHeight}" />
+    <Setter Property="Padding" Value="8,3" />
+    <Setter Property="Background" Value="{DynamicResource StatusBarBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+  </Style>
+
+  <Style Selector="Window.royalTerminalMainWindow[ActualTransparencyLevel=Mica] views|MainView Border.topBar">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Window.royalTerminalMainWindow[ActualTransparencyLevel=Mica] views|MainView Border.tabStripSurface">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Window.royalTerminalMainWindow[ActualTransparencyLevel=Mica] views|MainView Border.shellRail">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Window.royalTerminalMainWindow[ActualTransparencyLevel=Mica] views|MainView Border.statusBar">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Window.royalTerminalMainWindow[ActualTransparencyLevel=Mica] views|MainView Border#MainMenuBarHost">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Window.royalTerminalMainWindow[ActualTransparencyLevel=Mica] views|MainView Menu#MainMenuBar">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Window.royalTerminalMainWindow[ActualTransparencyLevel=Mica] views|MainView NativeMenuBar#MainNativeMenuBar">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Window.royalTerminalMainWindow[ActualTransparencyLevel=Mica] views|MainView Menu#MainMenuBar > MenuItem">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Window.royalTerminalMainWindow[ActualTransparencyLevel=Mica] views|MainView NativeMenuBar#MainNativeMenuBar MenuItem">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Border.titleBrandIcon">
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="Padding" Value="5" />
+    <Setter Property="CornerRadius" Value="{DynamicResource Shell.Radius.Small}" />
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceRaisedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ToolbarDividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <Style Selector="PathIcon.titleBrandIconGlyph">
+    <Setter Property="Width" Value="18" />
+    <Setter Property="Height" Value="18" />
+    <Setter Property="Foreground" Value="{DynamicResource ShellAccentBrush}" />
+  </Style>
+
+  <Style Selector="Button.captionButton">
+    <Setter Property="Width" Value="46" />
+    <Setter Property="Height" Value="{DynamicResource Shell.CommandHeight}" />
+    <Setter Property="MinWidth" Value="46" />
+    <Setter Property="MinHeight" Value="{DynamicResource Shell.CommandHeight}" />
+    <Setter Property="MaxWidth" Value="46" />
+    <Setter Property="MaxHeight" Value="{DynamicResource Shell.CommandHeight}" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource ToolbarForegroundBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.captionButton:pointerover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+  </Style>
+
+  <Style Selector="Button.captionButton.snapLayoutHover">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfaceHoverBrush}" />
+  </Style>
+
+  <Style Selector="Button.captionButton:pressed">
+    <Setter Property="Background" Value="{DynamicResource ShellSurfacePressedBrush}" />
+  </Style>
+
+  <Style Selector="Button.captionButton.closeCaptionButton:pointerover">
+    <Setter Property="Background" Value="#C42B1C" />
+    <Setter Property="Foreground" Value="White" />
+  </Style>
+
+  <Style Selector="Button.captionButton.closeCaptionButton:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#C42B1C" />
+    <Setter Property="TextElement.Foreground" Value="White" />
+  </Style>
+
+  <Style Selector="Button.captionButton.closeCaptionButton:pressed">
+    <Setter Property="Background" Value="#A4261A" />
+    <Setter Property="Foreground" Value="White" />
+  </Style>
+
+  <Style Selector="Button.captionButton.closeCaptionButton:pressed /template/ ContentPresenter">
+    <Setter Property="Background" Value="#A4261A" />
+    <Setter Property="TextElement.Foreground" Value="White" />
+  </Style>
+
+  <Style Selector="PathIcon.captionButtonIcon">
+    <Setter Property="Width" Value="14" />
+    <Setter Property="Height" Value="14" />
+    <Setter Property="Foreground" Value="{Binding $parent[Button].Foreground}" />
+  </Style>
+</Styles>

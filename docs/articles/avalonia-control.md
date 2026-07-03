@@ -168,6 +168,17 @@ Capture and replay are designed like Ghostty's higher-level feature docs: the pu
 
 If you are building a debugging, support, or teaching workflow, this is the feature to start with. The recorder types are covered in [Sessions, Profiles, And Settings](/articles/sessions-profiles-and-settings), and the RoyalTerminal JSON/asciicast v3 persistence layer is covered in [Capture Formats](/articles/capture-formats).
 
+## Composing split panes without the app shell
+
+`RoyalApps.RoyalTerminal.Avalonia` also includes `TerminalPaneNode`,
+`TerminalPaneLayout`, `TerminalPaneSplitRequest`, `TerminalPaneDirection`, and
+`TerminalPaneSplitOrientation` for hosts that want split panes around
+`TerminalControl` without adopting `RoyalApps.RoyalTerminal.Avalonia.App`.
+
+See [Terminal Pane Layout API](/articles/terminal-pane-layout-api) for the
+control-package API and [Pane Split Policy](/articles/split-pane-policy) for the
+app-shell policy extension point.
+
 ## Adding a settings surface
 
 The `RoyalApps.RoyalTerminal.Avalonia.Settings` package is not just a demo convenience. It is the reusable configuration UI for editing the same session document model used by the runtime.

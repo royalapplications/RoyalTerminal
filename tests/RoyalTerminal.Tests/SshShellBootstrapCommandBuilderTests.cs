@@ -122,6 +122,23 @@ public sealed class SshShellBootstrapCommandBuilderTests
         Assert.Equal("export LANG='en_US.UTF-8'; echo ready", command);
     }
 
+    [Fact]
+    public void Build_WithShellIntegration_OrdersBootstrapBeforeInitialCommand()
+    {
+        string? command = SshShellBootstrapCommandBuilder.Build(
+            "echo ready",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["LANG"] = "en_US.UTF-8",
+            },
+            new TerminalShellIntegrationBootstrapOptions(TerminalShellIntegrationBootstrapShell.Zsh));
+
+        Assert.NotNull(command);
+        Assert.StartsWith("export LANG='en_US.UTF-8'; __royalterminal_urlencode()", command, StringComparison.Ordinal);
+        Assert.Contains("add-zsh-hook preexec __royalterminal_preexec", command, StringComparison.Ordinal);
+        Assert.EndsWith("echo ready", command, StringComparison.Ordinal);
+    }
+
     private static SshTransportOptions CreateOptions(string? initialCommand)
     {
         return new SshTransportOptions(

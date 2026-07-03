@@ -1,15 +1,19 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Templates;
 using Avalonia.Headless.XUnit;
+using Avalonia.Layout;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
-using RoyalTerminal.Demo.Services;
-using RoyalTerminal.Demo.ViewModels;
+using RoyalTerminal.Avalonia.App.Services;
+using RoyalTerminal.Avalonia.App.ViewModels;
 using RoyalTerminal.Terminal;
 using Xunit;
 
@@ -18,9 +22,12 @@ namespace RoyalTerminal.Tests;
 [Collection("MainWindowControllerHeadlessTests")]
 public sealed class MainWindowControllerSettingsPanelTests
 {
+    private const string DisableSessionAutostartEnvVar = "ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART";
+
     [AvaloniaFact]
-    public void Controller_PrepareSettingsPanel_LoadsStoredProfile_AndApplyUpdatesViewModel()
+    public async Task Controller_PrepareSettingsPanel_LoadsStoredProfile_AndApplyUpdatesViewModel()
     {
+        using IDisposable autostart = SetProcessEnvironmentVariable(DisableSessionAutostartEnvVar, "1");
         InMemoryProfileStore store = new(CreateStoredDocument());
         MainWindowViewModel viewModel = new();
         Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
@@ -29,14 +36,15 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            settingsProfileStore: store);
+            settingsProfileStore: store,
+            workspaceStore: new InMemoryWorkspaceStore());
 
         IDisposable? lifetime = null;
         try
         {
             lifetime = controller.Activate();
 
-            viewModel.PrepareSettingsPanelCommand.Execute().Wait();
+            await viewModel.PrepareSettingsPanelCommand.Execute();
             Dispatcher.UIThread.RunJobs();
 
             Assert.NotNull(viewModel.SettingsPanelState.SelectedProfile);
@@ -116,6 +124,9 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.False(control.FontLinearMetrics);
             Assert.True(control.ReflowOnResize);
             Assert.False(control.SixelGraphicsEnabled);
+            Assert.NotNull(control.Renderer);
+            Assert.True(control.Renderer!.EnableTextShaping);
+            Assert.True(control.Renderer.EnableLigatures);
             Assert.Equal(TerminalTextHighlightingMode.Realtime, control.TextHighlightingMode);
             Assert.Single(control.TextHighlightRules!);
         }
@@ -129,6 +140,7 @@ public sealed class MainWindowControllerSettingsPanelTests
     [AvaloniaFact]
     public async Task Controller_SaveSettingsPanel_PersistsEditedDocument()
     {
+        using IDisposable autostart = SetProcessEnvironmentVariable(DisableSessionAutostartEnvVar, "1");
         InMemoryProfileStore store = new(CreateStoredDocument());
         MainWindowViewModel viewModel = new();
         Window window = CreateControllerHostWindow(viewModel, out _);
@@ -137,14 +149,15 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            settingsProfileStore: store);
+            settingsProfileStore: store,
+            workspaceStore: new InMemoryWorkspaceStore());
 
         IDisposable? lifetime = null;
         try
         {
             lifetime = controller.Activate();
 
-            viewModel.PrepareSettingsPanelCommand.Execute().Wait();
+            await viewModel.PrepareSettingsPanelCommand.Execute();
             Dispatcher.UIThread.RunJobs();
 
             viewModel.SettingsPanelState.SessionName = "Renamed Stored Profile";
@@ -191,11 +204,189 @@ public sealed class MainWindowControllerSettingsPanelTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task Controller_PrepareSettingsPanel_CleanReopenDoesNotMutateSelectedProfileFromRuntime()
+    {
+        using IDisposable autostart = SetProcessEnvironmentVariable(DisableSessionAutostartEnvVar, "1");
+        InMemoryProfileStore store = new(CreateTwoProfileDocument());
+        MainWindowViewModel viewModel = new();
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            settingsProfileStore: store,
+            workspaceStore: new InMemoryWorkspaceStore());
+
+        IDisposable? lifetime = null;
+        try
+        {
+            lifetime = controller.Activate();
+
+            await viewModel.PrepareSettingsPanelCommand.Execute();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.NotNull(viewModel.SettingsPanelState.SelectedProfile);
+            Assert.Equal("profile-a", viewModel.SettingsPanelState.SelectedProfile!.Id);
+            Assert.Equal("Profile A", viewModel.SettingsPanelState.SessionName);
+
+            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-b").Wait();
+            bool profileTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children
+                    .OfType<ScrollViewer>()
+                    .Select(viewer => viewer.Content)
+                    .OfType<TerminalControl>()
+                    .Count() == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(profileTabCreated);
+            Assert.Equal("Profile B", viewModel.SessionName);
+
+            await viewModel.PrepareSettingsPanelCommand.Execute();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal("profile-a", viewModel.SettingsPanelState.SelectedProfile!.Id);
+            Assert.Equal("Profile A", viewModel.SettingsPanelState.SessionName);
+            Assert.False(viewModel.SettingsPanelState.AutoScroll);
+            Assert.True(viewModel.SettingsPanelState.BackgroundOpacityEnabled);
+
+            TerminalSessionProfilesDocument document = viewModel.SettingsPanelState.BuildDocument();
+            TerminalSessionProfile profileA = FindProfile(document, "profile-a");
+            TerminalSessionProfile profileB = FindProfile(document, "profile-b");
+            Assert.Equal("Profile A", profileA.DisplayName);
+            Assert.Equal("echo profile-a", profileA.Transport.Pipe.FileName);
+            Assert.False(profileA.Appearance.AutoScroll);
+            Assert.True(profileA.Appearance.BackgroundOpacityEnabled);
+            Assert.Equal("Profile B", profileB.DisplayName);
+            Assert.Equal("echo profile-b", profileB.Transport.Pipe.FileName);
+            Assert.True(profileB.Appearance.AutoScroll);
+            Assert.False(profileB.Appearance.BackgroundOpacityEnabled);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_PrepareSettingsPanel_InitializesEmptyDocumentWithActiveControlAppearanceFlags()
+    {
+        using IDisposable autostart = SetProcessEnvironmentVariable(DisableSessionAutostartEnvVar, "1");
+        InMemoryProfileStore store = new(new TerminalSessionProfilesDocument());
+        MainWindowViewModel viewModel = new();
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            settingsProfileStore: store,
+            workspaceStore: new InMemoryWorkspaceStore());
+
+        IDisposable? lifetime = null;
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count > 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabCreated);
+
+            TerminalControl control = terminalHost.Children
+                .OfType<ScrollViewer>()
+                .Select(viewer => viewer.Content)
+                .OfType<TerminalControl>()
+                .First();
+            control.AutoScroll = false;
+            control.BackgroundOpacityEnabled = true;
+
+            await viewModel.PrepareSettingsPanelCommand.Execute();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.False(viewModel.SettingsPanelState.AutoScroll);
+            Assert.True(viewModel.SettingsPanelState.BackgroundOpacityEnabled);
+
+            TerminalSessionProfile profile = Assert.Single(viewModel.SettingsPanelState.BuildDocument().Profiles);
+            Assert.False(profile.Appearance.AutoScroll);
+            Assert.True(profile.Appearance.BackgroundOpacityEnabled);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
     private static Window CreateControllerHostWindow(MainWindowViewModel viewModel, out Grid terminalHost)
     {
-        StackPanel tabStrip = new()
+        ContentControl titleBarTabStripHost = new()
+        {
+            Name = "TitleBarTabStripHost",
+        };
+
+        ItemsControl tabStrip = new()
         {
             Name = "TabStrip",
+            ItemsPanel = new FuncTemplate<Panel?>(() => new StackPanel { Orientation = Orientation.Horizontal }),
+        };
+        RepeatButton tabStripScrollLeftButton = new()
+        {
+            Name = "TabStripScrollLeftButton",
+            IsVisible = false,
+        };
+        ScrollViewer tabStripScrollViewer = new()
+        {
+            Name = "TabStripScrollViewer",
+            Content = tabStrip,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        RepeatButton tabStripScrollRightButton = new()
+        {
+            Name = "TabStripScrollRightButton",
+            IsVisible = false,
+        };
+        Button tabStripNewTabButton = new()
+        {
+            Name = "TabStripNewTabButton",
+            Command = viewModel.NewTabCommand,
+        };
+        StackPanel windowsCaptionButtonStrip = CreateWindowsCaptionButtonStrip(
+            out Button captionMinimizeButton,
+            out Button captionMaximizeButton,
+            out Button captionRestoreButton,
+            out Button captionFullscreenButton,
+            out Button captionCloseButton);
+        Grid tabStripLayout = new()
+        {
+            Name = "TabStripLayout",
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Auto),
+            },
+        };
+        tabStripLayout.Children.Add(tabStripScrollLeftButton);
+        tabStripLayout.Children.Add(tabStripScrollViewer);
+        tabStripLayout.Children.Add(tabStripScrollRightButton);
+        tabStripLayout.Children.Add(tabStripNewTabButton);
+        Grid.SetColumn(tabStripScrollViewer, 1);
+        Grid.SetColumn(tabStripScrollRightButton, 2);
+        Grid.SetColumn(tabStripNewTabButton, 3);
+
+        Border tabStripSurface = new()
+        {
+            Name = "TabStripSurface",
+            Child = tabStripLayout,
+        };
+        ContentControl bodyTabStripHost = new()
+        {
+            Name = "BodyTabStripHost",
+            Content = tabStripSurface,
         };
 
         terminalHost = new Grid
@@ -205,11 +396,25 @@ public sealed class MainWindowControllerSettingsPanelTests
 
         Grid root = new();
         root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        root.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
         root.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));
-        root.Children.Add(tabStrip);
+        Grid titleBar = new()
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
+                new ColumnDefinition(GridLength.Auto),
+            },
+        };
+        titleBar.Children.Add(titleBarTabStripHost);
+        titleBar.Children.Add(windowsCaptionButtonStrip);
+        Grid.SetColumn(windowsCaptionButtonStrip, 1);
+        root.Children.Add(titleBar);
+        root.Children.Add(bodyTabStripHost);
         root.Children.Add(terminalHost);
-        Grid.SetRow(tabStrip, 0);
-        Grid.SetRow(terminalHost, 1);
+        Grid.SetRow(titleBar, 0);
+        Grid.SetRow(bodyTabStripHost, 1);
+        Grid.SetRow(terminalHost, 2);
 
         Window window = new()
         {
@@ -222,11 +427,108 @@ public sealed class MainWindowControllerSettingsPanelTests
         NameScope nameScope = new();
         NameScope.SetNameScope(window, nameScope);
         nameScope.Register(tabStrip.Name!, tabStrip);
+        nameScope.Register(titleBarTabStripHost.Name!, titleBarTabStripHost);
+        nameScope.Register(bodyTabStripHost.Name!, bodyTabStripHost);
+        nameScope.Register(tabStripSurface.Name!, tabStripSurface);
+        nameScope.Register(tabStripLayout.Name!, tabStripLayout);
+        nameScope.Register(tabStripScrollLeftButton.Name!, tabStripScrollLeftButton);
+        nameScope.Register(tabStripScrollViewer.Name!, tabStripScrollViewer);
+        nameScope.Register(tabStripScrollRightButton.Name!, tabStripScrollRightButton);
+        nameScope.Register(tabStripNewTabButton.Name!, tabStripNewTabButton);
+        nameScope.Register(windowsCaptionButtonStrip.Name!, windowsCaptionButtonStrip);
+        nameScope.Register(captionMinimizeButton.Name!, captionMinimizeButton);
+        nameScope.Register(captionMaximizeButton.Name!, captionMaximizeButton);
+        nameScope.Register(captionRestoreButton.Name!, captionRestoreButton);
+        nameScope.Register(captionFullscreenButton.Name!, captionFullscreenButton);
+        nameScope.Register(captionCloseButton.Name!, captionCloseButton);
         nameScope.Register(terminalHost.Name!, terminalHost);
 
         window.Show();
         window.Focus();
         return window;
+    }
+
+    private static StackPanel CreateWindowsCaptionButtonStrip(
+        out Button minimizeButton,
+        out Button maximizeButton,
+        out Button restoreButton,
+        out Button fullscreenButton,
+        out Button closeButton)
+    {
+        minimizeButton = new Button { Name = "CaptionMinimizeButton" };
+        maximizeButton = new Button { Name = "CaptionMaximizeButton" };
+        restoreButton = new Button { Name = "CaptionRestoreButton" };
+        fullscreenButton = new Button { Name = "CaptionFullscreenButton" };
+        closeButton = new Button { Name = "CaptionCloseButton" };
+
+        StackPanel strip = new()
+        {
+            Name = "WindowsCaptionButtonStrip",
+            Orientation = Orientation.Horizontal,
+        };
+        strip.Children.Add(minimizeButton);
+        strip.Children.Add(maximizeButton);
+        strip.Children.Add(restoreButton);
+        strip.Children.Add(fullscreenButton);
+        strip.Children.Add(closeButton);
+        return strip;
+    }
+
+    private static TerminalSessionProfile FindProfile(
+        TerminalSessionProfilesDocument document,
+        string profileId)
+    {
+        TerminalSessionProfile? profile = document.Profiles.FirstOrDefault(
+            candidate => string.Equals(candidate.Id, profileId, StringComparison.Ordinal));
+        Assert.NotNull(profile);
+        return profile;
+    }
+
+    private static TerminalSessionProfilesDocument CreateTwoProfileDocument()
+    {
+        return new TerminalSessionProfilesDocument
+        {
+            DefaultProfileId = "profile-a",
+            Profiles =
+            [
+                new TerminalSessionProfile
+                {
+                    Id = "profile-a",
+                    DisplayName = "Profile A",
+                    Transport = new TerminalSessionTransportProfile
+                    {
+                        TransportId = TerminalTransportIds.Pipe,
+                        Pipe = new TerminalSessionPipeSettings
+                        {
+                            FileName = "echo profile-a",
+                        },
+                    },
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        AutoScroll = false,
+                        BackgroundOpacityEnabled = true,
+                    },
+                },
+                new TerminalSessionProfile
+                {
+                    Id = "profile-b",
+                    DisplayName = "Profile B",
+                    Transport = new TerminalSessionTransportProfile
+                    {
+                        TransportId = TerminalTransportIds.Pipe,
+                        Pipe = new TerminalSessionPipeSettings
+                        {
+                            FileName = "echo profile-b",
+                        },
+                    },
+                    Appearance = new TerminalSessionAppearanceSettings
+                    {
+                        AutoScroll = true,
+                        BackgroundOpacityEnabled = false,
+                    },
+                },
+            ],
+        };
     }
 
     private static TerminalSessionProfilesDocument CreateStoredDocument()
@@ -306,6 +608,13 @@ public sealed class MainWindowControllerSettingsPanelTests
     private static string GetSavedFontPath()
     {
         return Path.Combine(Path.GetTempPath(), "royalterminal-saved-font.otf");
+    }
+
+    private static IDisposable SetProcessEnvironmentVariable(string variable, string? value)
+    {
+        string? previous = Environment.GetEnvironmentVariable(variable);
+        Environment.SetEnvironmentVariable(variable, value);
+        return Disposable.Create(() => Environment.SetEnvironmentVariable(variable, previous));
     }
 
     private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)

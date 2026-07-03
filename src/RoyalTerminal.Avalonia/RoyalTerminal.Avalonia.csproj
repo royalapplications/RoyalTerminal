@@ -2,10 +2,10 @@
 
   <PropertyGroup>
     <PackageId>RoyalApps.RoyalTerminal.Avalonia</PackageId>
-    <Description>Backend-neutral Avalonia terminal controls and presentation infrastructure with SkiaSharp rendering and virtualized scrolling.</Description>
+    <Description>Backend-neutral Avalonia terminal controls, split-pane composition helpers, and presentation infrastructure with SkiaSharp rendering and virtualized scrolling.</Description>
     <PackageProjectUrl>https://github.com/royalapplications/RoyalTerminal</PackageProjectUrl>
     <RepositoryUrl>https://github.com/royalapplications/RoyalTerminal</RepositoryUrl>
-    <PackageTags>terminal;avalonia;vte;pty;skia</PackageTags>
+    <PackageTags>terminal;avalonia;vte;pty;skia;split-pane</PackageTags>
     <IsPackable>true</IsPackable>
     <NoWarn>$(NoWarn);NU5104</NoWarn>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>

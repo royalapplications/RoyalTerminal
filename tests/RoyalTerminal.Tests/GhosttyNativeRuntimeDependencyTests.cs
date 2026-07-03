@@ -113,6 +113,64 @@ public sealed class GhosttyNativeRuntimeDependencyTests
         Assert.Equal("runtime.json", packageItem.Attribute("PackagePath")?.Value);
     }
 
+    [Fact]
+    public void AvaloniaAppPackage_DoesNotReferencePlatformNativeProjects()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string projectPath = Path.Combine(
+            repoRoot,
+            "src",
+            "RoyalTerminal.Avalonia.App",
+            "RoyalTerminal.Avalonia.App.csproj");
+        XDocument project = XDocument.Load(projectPath);
+        string[] projectReferenceIncludes = project
+            .Descendants()
+            .Where(static element => element.Name.LocalName == "ProjectReference")
+            .Select(static element => element.Attribute("Include")?.Value)
+            .Where(static include => include is not null)
+            .Select(static include => include!)
+            .ToArray();
+        string[] importProjects = project
+            .Descendants()
+            .Where(static element => element.Name.LocalName == "Import")
+            .Select(static element => element.Attribute("Project")?.Value)
+            .Where(static import => import is not null)
+            .Select(static import => import!)
+            .ToArray();
+
+        Assert.Contains(
+            projectReferenceIncludes,
+            include => include.Contains("RoyalTerminal.Terminal.Vt.Ghostty", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            projectReferenceIncludes,
+            include => include.Contains("RoyalTerminal.GhosttySharp.Native", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            importProjects,
+            import => import.Contains("RoyalTerminal.GhosttySharp.Native", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AvaloniaAppPackage_DoesNotOwnDesktopOrFluentThemeBootstrap()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string projectPath = Path.Combine(
+            repoRoot,
+            "src",
+            "RoyalTerminal.Avalonia.App",
+            "RoyalTerminal.Avalonia.App.csproj");
+        XDocument project = XDocument.Load(projectPath);
+        string[] packageReferences = project
+            .Descendants()
+            .Where(static element => element.Name.LocalName == "PackageReference")
+            .Select(static element => element.Attribute("Include")?.Value)
+            .Where(static packageId => packageId is not null)
+            .Select(static packageId => packageId!)
+            .ToArray();
+
+        Assert.DoesNotContain("Avalonia.Desktop", packageReferences);
+        Assert.DoesNotContain("Avalonia.Themes.Fluent", packageReferences);
+    }
+
     [Theory]
     [InlineData("RoyalApps.RoyalTerminal.GhosttySharp")]
     [InlineData("RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty")]

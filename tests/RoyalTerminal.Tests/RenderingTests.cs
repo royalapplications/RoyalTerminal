@@ -368,6 +368,13 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_EnableLigatures_DefaultTrue()
+    {
+        var renderer = new SkiaTerminalRenderer("Consolas", 14f);
+        Assert.True(renderer.EnableLigatures);
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_CursorVisible_CanBeSet()
     {
         var renderer = new SkiaTerminalRenderer("Consolas", 14f);
@@ -1573,6 +1580,30 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_TextRuns_DoNotSplitLigatureCandidateAroundVisibleCursor()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableTextRenderDiagnostics = true,
+            EnableLigatures = true,
+            CursorVisible = true,
+            CursorStyle = CursorStyle.Bar,
+            CursorColumn = 1,
+            CursorRow = 0,
+        };
+
+        using var surface = CreateRenderSurface(renderer, columns: 2, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 2, rows: 1, text: "<=");
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.Equal(1, diagnostics.ShapedRuns);
+        Assert.Equal(0, diagnostics.FallbackRuns);
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_UnsafeGridMapping_UsesFallbackRun()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
@@ -1610,6 +1641,135 @@ public class RenderingTests
         Assert.True(diagnostics.ShapedRuns > 0);
         Assert.True(diagnostics.GridClampedRuns > 0);
         Assert.Equal(0, diagnostics.FallbackRuns);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_ShapedText_GridClampsAccumulatedSubpixelDrift()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableTextRenderDiagnostics = true,
+        };
+        renderer.SetCellSize(renderer.CellWidth * 1.10f, renderer.CellHeight);
+
+        using var surface = CreateRenderSurface(renderer, columns: 80, rows: 1);
+        var screen = CreateAsciiScreen(
+            columns: 80,
+            rows: 1,
+            text: "01234567890123456789012345678901234567890123456789012345678901234567890123456789");
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.True(diagnostics.ShapedRuns > 0);
+        Assert.True(diagnostics.GridClampedRuns > 0);
+        Assert.Equal(0, diagnostics.FallbackRuns);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_CascadiaCodeLigatureRun_UsesNaturalPlacement()
+    {
+        const string cascadiaCodePath = @"C:\Windows\Fonts\CascadiaCode.ttf";
+        if (!File.Exists(cascadiaCodePath))
+        {
+            return;
+        }
+
+        using var renderer = new SkiaTerminalRenderer(
+            "Cascadia Code",
+            14f,
+            TerminalFontSource.File,
+            cascadiaCodePath)
+        {
+            EnableLigatures = true,
+            EnableTextRenderDiagnostics = true,
+        };
+
+        using var surface = CreateRenderSurface(renderer, columns: 3, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 3, rows: 1, text: "===");
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.True(diagnostics.ShapedRuns > 0);
+        Assert.Equal(0, diagnostics.GridClampedRuns);
+        Assert.Equal(0, diagnostics.FallbackRuns);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_CascadiaCodeLigatures_ChangeRenderedPixels()
+    {
+        const string cascadiaCodePath = @"C:\Windows\Fonts\CascadiaCode.ttf";
+        if (!File.Exists(cascadiaCodePath))
+        {
+            return;
+        }
+
+        using var ligatureRenderer = new SkiaTerminalRenderer(
+            "Cascadia Code",
+            18f,
+            TerminalFontSource.File,
+            cascadiaCodePath)
+        {
+            CursorVisible = false,
+            EnableLigatures = true,
+        };
+        using var plainRenderer = new SkiaTerminalRenderer(
+            "Cascadia Code",
+            18f,
+            TerminalFontSource.File,
+            cascadiaCodePath)
+        {
+            CursorVisible = false,
+            EnableLigatures = false,
+        };
+        using var shaper = new HarfBuzzTextShaper();
+        using SKTypeface typeface = SKTypeface.FromFile(cascadiaCodePath);
+        const string sample = "-> <- => <= >= != == ===";
+        ShapedTextRun ligatureShape = shaper.Shape(
+            sample,
+            typeface,
+            new TextShapingOptions(18f, CultureInfo.InvariantCulture, EnableLigatures: true));
+        ShapedTextRun plainShape = shaper.Shape(
+            sample,
+            typeface,
+            new TextShapingOptions(18f, CultureInfo.InvariantCulture, EnableLigatures: false));
+        string ligatureGlyphs = string.Join(",", ligatureShape.Glyphs.ToArray().Select(static glyph => glyph.GlyphId));
+        string plainGlyphs = string.Join(",", plainShape.Glyphs.ToArray().Select(static glyph => glyph.GlyphId));
+        Assert.NotEqual(plainGlyphs, ligatureGlyphs);
+
+        TerminalScreen ligatureScreen = CreateAsciiScreen(columns: sample.Length, rows: 1, text: sample);
+        TerminalScreen plainScreen = CreateAsciiScreen(columns: sample.Length, rows: 1, text: sample);
+        using var ligatureSurface = CreateRenderSurface(ligatureRenderer, columns: sample.Length, rows: 1);
+        using var plainSurface = CreateRenderSurface(plainRenderer, columns: sample.Length, rows: 1);
+        ligatureSurface.Canvas.Clear(SKColors.Black);
+        plainSurface.Canvas.Clear(SKColors.Black);
+
+        ligatureRenderer.RenderFull(ligatureSurface.Canvas, ligatureScreen);
+        plainRenderer.RenderFull(plainSurface.Canvas, plainScreen);
+
+        using SKImage ligatureSnapshot = ligatureSurface.Snapshot();
+        using SKPixmap ligaturePixels = ligatureSnapshot.PeekPixels();
+        using SKImage plainSnapshot = plainSurface.Snapshot();
+        using SKPixmap plainPixels = plainSnapshot.PeekPixels();
+
+        int differentPixels = CountDifferentPixels(ligaturePixels, plainPixels);
+        int ligatureInk = CountNonBackgroundPixelsInRegion(
+            ligaturePixels,
+            startX: 0f,
+            endX: ligatureRenderer.CellWidth * sample.Length,
+            startY: 0f,
+            endY: ligatureRenderer.CellHeight);
+        int plainInk = CountNonBackgroundPixelsInRegion(
+            plainPixels,
+            startX: 0f,
+            endX: plainRenderer.CellWidth * sample.Length,
+            startY: 0f,
+            endY: plainRenderer.CellHeight);
+
+        Assert.True(
+            differentPixels > 0,
+            $"Enabling Cascadia Code ligatures should change rendered operator pixels. ligatureInk={ligatureInk}; plainInk={plainInk}; ligatureGlyphs={ligatureGlyphs}; plainGlyphs={plainGlyphs}");
     }
 
     [Fact]
@@ -1674,6 +1834,7 @@ public class RenderingTests
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
         {
+            EnableLigatures = false,
             EnableTextRenderDiagnostics = true,
             TextRenderPipeline = TerminalTextRenderPipeline.Pretext,
         };
@@ -1698,10 +1859,37 @@ public class RenderingTests
     }
 
     [Fact]
+    public void SkiaTerminalRenderer_PretextPipeline_WithLigatures_UsesHarfBuzzRuns()
+    {
+        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        {
+            EnableLigatures = true,
+            EnableTextRenderDiagnostics = true,
+            TextRenderPipeline = TerminalTextRenderPipeline.Pretext,
+        };
+
+        if (!renderer.IsPretextTextRenderPipelineAvailable)
+        {
+            return;
+        }
+
+        using var surface = CreateRenderSurface(renderer, columns: 8, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: 8, rows: 1, text: "== != =>");
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.True(diagnostics.ShapedRuns > 0);
+        Assert.Equal(0, diagnostics.PretextRuns);
+        Assert.Equal(0, diagnostics.PretextFallbackRuns);
+    }
+
+    [Fact]
     public void SkiaTerminalRenderer_PretextPipeline_WhenClamped_DoesNotUseFallbackRuns()
     {
         using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
         {
+            EnableLigatures = false,
             EnableTextRenderDiagnostics = true,
             TextRenderPipeline = TerminalTextRenderPipeline.Pretext,
         };
@@ -2934,6 +3122,26 @@ public class RenderingTests
                 if (Math.Abs(pixel.Red - expectedColor.Red) > tolerance ||
                     Math.Abs(pixel.Green - expectedColor.Green) > tolerance ||
                     Math.Abs(pixel.Blue - expectedColor.Blue) > tolerance)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static int CountDifferentPixels(SKPixmap first, SKPixmap second)
+    {
+        int width = Math.Min(first.Width, second.Width);
+        int height = Math.Min(first.Height, second.Height);
+        int count = 0;
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                if (first.GetPixelColor(x, y) != second.GetPixelColor(x, y))
                 {
                     count++;
                 }

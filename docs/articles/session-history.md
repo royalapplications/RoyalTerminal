@@ -70,15 +70,15 @@ RoyalTerminal follows `CSI 3 J` for explicit scrollback clear. For primary-scree
 
 See [Session Restart Semantics](/articles/session-restart-semantics) for the detailed Ghostty, xterm.js, Windows Terminal, and RoyalTerminal comparison, including alternate-screen app restart behavior and process-visible mode reset state.
 
-## Demo App
+## Shared Shell
 
-The sample demo exposes the feature in the toolbar:
+The reusable app shell exposes the feature in the Session menu:
 
 - `Preserve History` toggles `TerminalControl.PreserveScrollbackOnSessionStart`.
 - `Restart Session` restarts the active standalone tab and uses the toggle value.
 - `Clear History` calls `TerminalControl.ClearHistory()`, scrolls to the live bottom, and then calls `RequestPromptRedraw()` when the tab has an active session so interactive shells repaint their prompt after the host-side clear.
 
-The demo keeps the interaction in the ViewModel through ReactiveUI commands and routes the concrete terminal operation through `MainWindowController`.
+The shared shell keeps the interaction in the ViewModel through ReactiveUI commands and routes the concrete terminal operation through `MainWindowController`.
 
 ## Tests
 
@@ -87,4 +87,4 @@ Focused coverage lives in:
 - `TerminalSessionHistoryTests` for screen primitives and managed VT sequences.
 - `TerminalControlTests` for `StartSessionAsync(..., preserveScrollback)`, `ClearScrollback()`, `ClearHistory()`, and prompt redraw requests.
 - `GhosttyVtProcessorTests` for native scrollback clear and preservation when `libghostty-vt` is available.
-- `MainWindowViewModelFlowTests` and `MainWindowControllerModeStartupTests` for demo command wiring and behavior propagation.
+- `MainWindowViewModelFlowTests` and `MainWindowControllerModeStartupTests` for shared shell command wiring and behavior propagation.
