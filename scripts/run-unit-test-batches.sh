@@ -23,7 +23,7 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
 all_tests="${tmp_dir}/all-tests.txt"
-classes="${tmp_dir}/classes.tsv"
+methods="${tmp_dir}/methods.tsv"
 batches="${tmp_dir}/batches.tsv"
 matched_tests="${tmp_dir}/matched-tests.txt"
 matched_tests_sorted="${tmp_dir}/matched-tests-sorted.txt"
@@ -56,10 +56,9 @@ fi
 
 awk '
   {
-    test = $0
-    sub(/\(.*/, "", test)
-    sub(/\.[^.]+$/, "", test)
-    print test
+    method = $0
+    sub(/\(.*/, "", method)
+    print method
   }
 ' "${all_tests}" |
   sort |
@@ -71,7 +70,7 @@ awk '
       sub(/^[[:space:]]+/, "")
       printf "%d\t%s\n", count, $0
     }
-  ' > "${classes}"
+  ' > "${methods}"
 
 awk -F '\t' -v target="${batch_target}" '
   function flush_batch() {
@@ -90,11 +89,12 @@ awk -F '\t' -v target="${batch_target}" '
   }
 
   {
-    class_count = $1 + 0
-    class_name = $2
-    segment = "(FullyQualifiedName~" class_name ".)"
+    method_count = $1 + 0
+    method_name = $2
+    # Exact method filters keep theory rows together without substring overlap.
+    segment = "(FullyQualifiedName=" method_name ")"
 
-    if (filter != "" && count + class_count > target) {
+    if (filter != "" && count + method_count > target) {
       flush_batch()
     }
 
@@ -104,20 +104,20 @@ awk -F '\t' -v target="${batch_target}" '
       filter = filter "|" segment
     }
 
-    count += class_count
+    count += method_count
   }
 
   END {
     flush_batch()
   }
-' "${classes}" > "${batches}"
+' "${methods}" > "${batches}"
 
 if [ ! -s "${batches}" ]; then
   echo "::error::No unit test batches were generated for ${project}."
   exit 1
 fi
 
-echo "Discovered $(wc -l < "${all_tests}" | tr -d ' ') unit tests across $(wc -l < "${classes}" | tr -d ' ') test classes."
+echo "Discovered $(wc -l < "${all_tests}" | tr -d ' ') unit tests across $(wc -l < "${methods}" | tr -d ' ') test methods."
 echo "Generated $(wc -l < "${batches}" | tr -d ' ') unit test batches with target size ${batch_target}."
 
 if [ "${validate_coverage}" = "true" ]; then
