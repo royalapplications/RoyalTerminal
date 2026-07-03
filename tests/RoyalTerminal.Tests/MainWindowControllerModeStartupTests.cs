@@ -412,7 +412,7 @@ public sealed class MainWindowControllerModeStartupTests
 
             for (int i = 0; i < 9; i++)
             {
-                viewModel.NewTabCommand.Execute().Wait();
+                await viewModel.NewTabCommand.Execute().ToTask();
             }
 
             bool tabsCreated = await WaitUntilAsync(
@@ -509,8 +509,8 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(createdSingleTab);
 
-            viewModel.NewTabCommand.Execute().Wait();
-            viewModel.NewTabCommand.Execute().Wait();
+            await viewModel.NewTabCommand.Execute().ToTask();
+            await viewModel.NewTabCommand.Execute().ToTask();
 
             ItemsControl tabStrip = mainView.FindControl<ItemsControl>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
@@ -590,8 +590,8 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(createdSingleTab);
 
-            viewModel.NewTabCommand.Execute().Wait();
-            viewModel.NewTabCommand.Execute().Wait();
+            await viewModel.NewTabCommand.Execute().ToTask();
+            await viewModel.NewTabCommand.Execute().ToTask();
 
             ItemsControl tabStrip = mainView.FindControl<ItemsControl>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
@@ -950,7 +950,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(restoredTab);
 
-            viewModel.NewTabCommand.Execute().Wait();
+            await viewModel.NewTabCommand.Execute().ToTask();
             bool newTabCreated = await WaitUntilAsync(
                 () => terminalHost.Children.Count == 2,
                 TimeSpan.FromSeconds(2));
@@ -1115,7 +1115,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(restoredPane);
 
-            viewModel.SplitPaneRightCommand.Execute().Wait();
+            await viewModel.SplitPaneRightCommand.Execute().ToTask();
             bool splitCreated = await WaitUntilAsync(
                 () => terminalHost.Children.Count == 1 &&
                       terminalHost.Children[0] is Grid { Children.Count: 3 } &&
@@ -1204,7 +1204,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(restoredPane);
 
-            viewModel.SplitPaneRightCommand.Execute().Wait();
+            await viewModel.SplitPaneRightCommand.Execute().ToTask();
             bool splitCreated = await WaitUntilAsync(
                 () => terminalHost.Children.Count == 1 &&
                       terminalHost.Children[0] is Grid { Children.Count: 3 } &&
@@ -1514,7 +1514,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabCreated);
 
-            viewModel.SplitPaneRightCommand.Execute().Wait();
+            await viewModel.SplitPaneRightCommand.Execute().ToTask();
             bool splitCreated = await WaitUntilAsync(
                 () => terminalHost.Children.Count == 1 &&
                       terminalHost.Children[0] is Grid { Children.Count: 3 } &&
@@ -1525,11 +1525,11 @@ public sealed class MainWindowControllerModeStartupTests
             Grid splitGrid = Assert.IsType<Grid>(terminalHost.Children[0]);
             Assert.Equal(3, splitGrid.ColumnDefinitions.Count);
 
-            viewModel.FocusPaneLeftCommand.Execute().Wait();
+            await viewModel.FocusPaneLeftCommand.Execute().ToTask();
             Dispatcher.UIThread.RunJobs();
             Assert.Contains("Focused pane", viewModel.StatusText, StringComparison.Ordinal);
 
-            viewModel.ResizePaneRightCommand.Execute().Wait();
+            await viewModel.ResizePaneRightCommand.Execute().ToTask();
             Dispatcher.UIThread.RunJobs();
             Assert.Contains("Pane ratio", viewModel.StatusText, StringComparison.Ordinal);
 
@@ -1582,7 +1582,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabCreated);
 
-            viewModel.SplitPaneRightCommand.Execute().Wait();
+            await viewModel.SplitPaneRightCommand.Execute().ToTask();
             Dispatcher.UIThread.RunJobs();
 
             Assert.Single(GetStandaloneControls(terminalHost));
@@ -1655,7 +1655,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabCreated);
 
-            viewModel.SplitPaneRightCommand.Execute().Wait();
+            await viewModel.SplitPaneRightCommand.Execute().ToTask();
             bool splitCreated = await WaitUntilAsync(
                 () => terminalHost.Children.Count == 1 &&
                       terminalHost.Children[0] is Grid { Children.Count: 3 } &&
@@ -1708,7 +1708,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabCreated);
 
-            viewModel.SplitPaneRightCommand.Execute().Wait();
+            await viewModel.SplitPaneRightCommand.Execute().ToTask();
             bool splitCreated = await WaitUntilAsync(
                 () => terminalHost.Children.Count == 1 &&
                       terminalHost.Children[0] is Grid { Children.Count: 3 } &&
@@ -1720,7 +1720,7 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.Equal(0.5, splitGrid.ColumnDefinitions[0].Width.Value, precision: 3);
             Assert.Equal(0.5, splitGrid.ColumnDefinitions[2].Width.Value, precision: 3);
 
-            viewModel.ResizePaneRightCommand.Execute().Wait();
+            await viewModel.ResizePaneRightCommand.Execute().ToTask();
             Dispatcher.UIThread.RunJobs();
 
             Assert.Equal(0.45, splitGrid.ColumnDefinitions[0].Width.Value, precision: 3);
@@ -1856,7 +1856,7 @@ public sealed class MainWindowControllerModeStartupTests
                 SetRequestedMode(viewModel, requestedMode);
 
                 int countBefore = terminalHost.Children.Count;
-                viewModel.NewTabCommand.Execute().Wait();
+                await viewModel.NewTabCommand.Execute().ToTask();
 
                 bool created = await WaitUntilAsync(
                     () => terminalHost.Children.Count > countBefore,
@@ -1907,7 +1907,7 @@ public sealed class MainWindowControllerModeStartupTests
                 useNativeVtControl: false);
 
             int countBefore = terminalHost.Children.Count;
-            viewModel.NewTabCommand.Execute().Wait();
+            await viewModel.NewTabCommand.Execute().ToTask();
 
             bool created = await WaitUntilAsync(
                 () => terminalHost.Children.Count == countBefore + 1,
@@ -1933,7 +1933,7 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
-    public void Controller_RuntimeCapabilities_KeepModeCycleStable()
+    public async Task Controller_RuntimeCapabilities_KeepModeCycleStable()
     {
         MainWindowViewModel viewModel = new();
         viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
@@ -1959,7 +1959,7 @@ public sealed class MainWindowControllerModeStartupTests
             for (int i = 0; i < 10; i++)
             {
                 TerminalRenderMode expected = resolver.ResolveNextMode(currentMode, capabilities);
-                viewModel.CycleRenderModeCommand.Execute().Wait();
+                await viewModel.CycleRenderModeCommand.Execute().ToTask();
 
                 TerminalRenderMode actual = GetActiveMode(viewModel);
                 Assert.Equal(expected, actual);
@@ -2096,7 +2096,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabsCreated);
 
-            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-appearance").Wait();
+            await viewModel.LaunchSessionProfileCommand.Execute("profile:profile-appearance").ToTask();
             bool profileTabCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 2,
                 TimeSpan.FromSeconds(2));
@@ -2159,7 +2159,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabsCreated);
 
-            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-layout").Wait();
+            await viewModel.LaunchSessionProfileCommand.Execute("profile:profile-layout").ToTask();
             bool profileTabCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 2,
                 TimeSpan.FromSeconds(2));
@@ -2245,13 +2245,13 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabsCreated);
 
-            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-a").Wait();
+            await viewModel.LaunchSessionProfileCommand.Execute("profile:profile-a").ToTask();
             bool profileATabCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 2,
                 TimeSpan.FromSeconds(2));
             Assert.True(profileATabCreated);
 
-            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-b").Wait();
+            await viewModel.LaunchSessionProfileCommand.Execute("profile:profile-b").ToTask();
             bool profileBTabCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 3,
                 TimeSpan.FromSeconds(2));
@@ -2346,7 +2346,7 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabsCreated);
 
-            viewModel.LaunchSessionProfileCommand.Execute("profile:quoted-pipe").Wait();
+            await viewModel.LaunchSessionProfileCommand.Execute("profile:quoted-pipe").ToTask();
             bool profileTabCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 2,
                 TimeSpan.FromSeconds(2));
@@ -2420,7 +2420,7 @@ public sealed class MainWindowControllerModeStartupTests
 
             viewModel.SetShellProfiles([shellProfile]);
             viewModel.SelectedShellProfile = shellProfile;
-            viewModel.LaunchSessionProfileCommand.Execute("profile:powershell-pipe").Wait();
+            await viewModel.LaunchSessionProfileCommand.Execute("profile:powershell-pipe").ToTask();
             bool profileTabCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 2,
                 TimeSpan.FromSeconds(2));
@@ -2502,13 +2502,13 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabsCreated);
 
-            viewModel.LaunchSessionProfileCommand.Execute("profile:first").Wait();
+            await viewModel.LaunchSessionProfileCommand.Execute("profile:first").ToTask();
             bool firstProfileTabCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 2,
                 TimeSpan.FromSeconds(2));
             Assert.True(firstProfileTabCreated);
 
-            viewModel.LaunchSessionProfileCommand.Execute("profile:second").Wait();
+            await viewModel.LaunchSessionProfileCommand.Execute("profile:second").ToTask();
             bool secondProfileTabCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 3,
                 TimeSpan.FromSeconds(2));
@@ -2693,28 +2693,28 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabsCreated);
 
-            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-a").Wait();
+            await viewModel.LaunchSessionProfileCommand.Execute("profile:profile-a").ToTask();
             bool profileATabCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 2,
                 TimeSpan.FromSeconds(2));
             Assert.True(profileATabCreated);
             TerminalControl profileAControl = GetVisibleStandaloneControl(terminalHost);
 
-            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-b").Wait();
+            await viewModel.LaunchSessionProfileCommand.Execute("profile:profile-b").ToTask();
             bool profileBTabCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 3,
                 TimeSpan.FromSeconds(2));
             Assert.True(profileBTabCreated);
             Assert.Equal(11.0, GetVisibleStandaloneControl(terminalHost).TerminalFontSize);
 
-            viewModel.ActivateTabCommand.Execute(2).Wait();
+            await viewModel.ActivateTabCommand.Execute(2).ToTask();
             bool profileAReactivated = await WaitUntilAsync(
                 () => ReferenceEquals(GetVisibleStandaloneControl(terminalHost), profileAControl),
                 TimeSpan.FromSeconds(2));
             Assert.True(profileAReactivated);
 
             HashSet<TerminalControl> controlsBeforeSplit = [.. GetStandaloneControls(terminalHost)];
-            viewModel.SplitPaneRightCommand.Execute().Wait();
+            await viewModel.SplitPaneRightCommand.Execute().ToTask();
             bool splitCreated = await WaitUntilAsync(
                 () => GetStandaloneControls(terminalHost).Count == 4,
                 TimeSpan.FromSeconds(2));
@@ -2826,13 +2826,13 @@ public sealed class MainWindowControllerModeStartupTests
                 useNativeVtControl: false,
                 useManagedVtControl: true);
             int managedTabIndex = terminalHost.Children.Count;
-            viewModel.NewTabCommand.Execute().Wait();
+            await viewModel.NewTabCommand.Execute().ToTask();
             bool managedTabCreated = await WaitUntilAsync(
                 () => terminalHost.Children.Count == managedTabIndex + 1,
                 TimeSpan.FromSeconds(2));
             Assert.True(managedTabCreated);
 
-            viewModel.SwitchToTabByIndexCommand.Execute(managedTabIndex).Wait();
+            await viewModel.SwitchToTabByIndexCommand.Execute(managedTabIndex).ToTask();
             Dispatcher.UIThread.RunJobs();
 
             TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
@@ -2889,7 +2889,7 @@ public sealed class MainWindowControllerModeStartupTests
             List<byte[]> sentInputs = [];
             activeControl.TerminalSessionService.InputSent += (_, args) => sentInputs.Add(args.Data.ToArray());
 
-            viewModel.ClearActiveScrollbackCommand.Execute().Wait();
+            await viewModel.ClearActiveScrollbackCommand.Execute().ToTask();
             Dispatcher.UIThread.RunJobs();
 
             lock (screen.SyncRoot)
@@ -2943,7 +2943,7 @@ public sealed class MainWindowControllerModeStartupTests
             Dispatcher.UIThread.RunJobs();
 
             viewModel.SearchQuery = "alpha";
-            viewModel.ApplySearchCommand.Execute().Wait();
+            await viewModel.ApplySearchCommand.Execute().ToTask();
             Dispatcher.UIThread.RunJobs();
 
             Assert.Equal("alpha", activeControl.SearchNeedle);
@@ -2953,13 +2953,13 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.Contains("1/2 matches", viewModel.SearchResultText, StringComparison.Ordinal);
             Assert.Contains("/2 matches", viewModel.SearchResultText, StringComparison.Ordinal);
 
-            viewModel.NextSearchCommand.Execute().Wait();
+            await viewModel.NextSearchCommand.Execute().ToTask();
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(0, activeControl.SearchSelected);
             Assert.Equal(1, activeControl.SearchSelectedDisplayIndex);
             Assert.Contains("2/2 matches", viewModel.SearchResultText, StringComparison.Ordinal);
 
-            viewModel.ClearSearchCommand.Execute().Wait();
+            await viewModel.ClearSearchCommand.Execute().ToTask();
             Dispatcher.UIThread.RunJobs();
 
             Assert.Null(activeControl.SearchNeedle);
@@ -3041,13 +3041,13 @@ public sealed class MainWindowControllerModeStartupTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabsCreated);
 
-            viewModel.ToggleGhosttyDiagnosticsCommand.Execute().Wait();
+            await viewModel.ToggleGhosttyDiagnosticsCommand.Execute().ToTask();
             Dispatcher.UIThread.RunJobs();
 
             Assert.True(viewModel.ShowGhosttyDiagnostics);
             Assert.Contains("libghostty-vt available:", viewModel.GhosttyDiagnosticsText, StringComparison.Ordinal);
 
-            viewModel.ShowHyperlinkSampleCommand.Execute().Wait();
+            await viewModel.ShowHyperlinkSampleCommand.Execute().ToTask();
             TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
             bool hyperlinkApplied = await WaitUntilAsync(
                 () => ViewportContainsHyperlink(activeControl),
@@ -3104,7 +3104,7 @@ public sealed class MainWindowControllerModeStartupTests
                 useManagedVtControl: false);
 
             int countBefore = terminalHost.Children.Count;
-            viewModel.NewTabCommand.Execute().Wait();
+            await viewModel.NewTabCommand.Execute().ToTask();
             bool newTabCreated = await WaitUntilAsync(
                 () => terminalHost.Children.Count == countBefore + 1,
                 TimeSpan.FromSeconds(2));
@@ -3113,7 +3113,7 @@ public sealed class MainWindowControllerModeStartupTests
             TerminalControl activeControl = GetVisibleStandaloneControl(terminalHost);
             Assert.True(activeControl.IsUsingNativeVtProcessor);
 
-            viewModel.ShowKittyGraphicsSampleCommand.Execute().Wait();
+            await viewModel.ShowKittyGraphicsSampleCommand.Execute().ToTask();
             bool kittyApplied = await WaitUntilAsync(
                 () => activeControl.Screen?.HasKittyGraphics == true,
                 TimeSpan.FromSeconds(2));
