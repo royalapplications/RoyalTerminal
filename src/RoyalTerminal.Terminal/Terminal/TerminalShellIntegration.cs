@@ -144,7 +144,7 @@ public sealed class TerminalShellIntegrationParser
             return false;
         }
 
-        string workingDirectory = GetWorkingDirectoryPath(uri);
+        string workingDirectory = GetWorkingDirectoryPath(uri, normalizedValue);
         if (string.IsNullOrWhiteSpace(workingDirectory))
         {
             return false;
@@ -160,11 +160,14 @@ public sealed class TerminalShellIntegrationParser
         return true;
     }
 
-    private static string GetWorkingDirectoryPath(Uri uri)
+    private static string GetWorkingDirectoryPath(Uri uri, string rawValue)
     {
-        string workingDirectory = TryUnescapeDataString(uri.AbsolutePath, out string decodedPath)
-            ? decodedPath
+        string rawPath = TryGetRawUriPath(rawValue, out string parsedRawPath)
+            ? parsedRawPath
             : uri.AbsolutePath;
+        string workingDirectory = TryUnescapeDataString(rawPath, out string decodedPath)
+            ? decodedPath
+            : rawPath;
         if (workingDirectory.Length >= 3 &&
             workingDirectory[0] == '/' &&
             IsAsciiLetter(workingDirectory[1]) &&
@@ -182,6 +185,47 @@ public sealed class TerminalShellIntegrationParser
         }
 
         return workingDirectory;
+    }
+
+    private static bool TryGetRawUriPath(string value, out string path)
+    {
+        int schemeSeparatorIndex = value.IndexOf(':', StringComparison.Ordinal);
+        if (schemeSeparatorIndex < 0)
+        {
+            path = string.Empty;
+            return false;
+        }
+
+        int pathStart = schemeSeparatorIndex + 1;
+        if (value.Length >= pathStart + 2 &&
+            value[pathStart] == '/' &&
+            value[pathStart + 1] == '/')
+        {
+            int authorityStart = pathStart + 2;
+            pathStart = value.IndexOf('/', authorityStart);
+            if (pathStart < 0)
+            {
+                path = string.Empty;
+                return true;
+            }
+        }
+
+        int pathEnd = FindUriPathEnd(value, pathStart);
+        path = value[pathStart..pathEnd];
+        return true;
+    }
+
+    private static int FindUriPathEnd(string value, int startIndex)
+    {
+        for (int i = startIndex; i < value.Length; i++)
+        {
+            if (value[i] == '?' || value[i] == '#')
+            {
+                return i;
+            }
+        }
+
+        return value.Length;
     }
 
     private static bool IsAsciiLetter(char value)

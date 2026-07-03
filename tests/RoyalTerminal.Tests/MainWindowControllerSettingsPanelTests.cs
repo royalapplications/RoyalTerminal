@@ -3,6 +3,7 @@
 
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
+using System.Reactive.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
@@ -231,7 +232,7 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.Equal("profile-a", viewModel.SettingsPanelState.SelectedProfile!.Id);
             Assert.Equal("Profile A", viewModel.SettingsPanelState.SessionName);
 
-            viewModel.LaunchSessionProfileCommand.Execute("profile:profile-b").Wait();
+            await viewModel.LaunchSessionProfileCommand.Execute("profile:profile-b").ToTask();
             bool profileTabCreated = await WaitUntilAsync(
                 () => terminalHost.Children
                     .OfType<ScrollViewer>()
