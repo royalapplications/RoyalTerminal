@@ -25,8 +25,8 @@
     <PackageVersion Include="Pretext.Contracts" Version="0.1.0" />
     <PackageVersion Include="Pretext.SkiaSharp" Version="0.1.0" />
     <PackageVersion Include="ProDiagnostics" Version="12.0.0" />
-    <PackageVersion Include="ReactiveUI" Version="23.2.1" />
-    <PackageVersion Include="ReactiveUI.Avalonia" Version="11.4.12" />
+    <PackageVersion Include="ReactiveUI" Version="23.2.28" />
+    <PackageVersion Include="ReactiveUI.Avalonia" Version="12.0.3" />
     <PackageVersion Include="ReactiveUI.SourceGenerators" Version="2.6.1" />
     <PackageVersion Include="SkiaSharp" Version="3.119.4" />
     <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4" />

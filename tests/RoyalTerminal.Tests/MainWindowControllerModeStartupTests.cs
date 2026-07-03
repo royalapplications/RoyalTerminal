@@ -3,6 +3,7 @@
 // RoyalTerminal.Tests — startup/fallback smoke coverage for shared shell controller mode routing.
 
 using System.Reactive.Linq;
+using System.Reactive.Threading.Tasks;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -3000,7 +3001,7 @@ public sealed class MainWindowControllerModeStartupTests
             activeControl.WriteOutput(Encoding.UTF8.GetBytes("snapshot demo\r\n"));
             Dispatcher.UIThread.RunJobs();
 
-            viewModel.CopyPlainSnapshotCommand.Execute().Wait();
+            await viewModel.CopyPlainSnapshotCommand.Execute().ToTask();
             Dispatcher.UIThread.RunJobs();
 
             string? copied = await window.Clipboard!.TryGetTextAsync();
