@@ -3713,17 +3713,27 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float y)
     {
         int utf16Length = 0;
+        bool singleWidthSingleUtf16Cells = !runTypeface.IsFixedPitch;
         for (int col = startCol; col < endCol; col++)
         {
             ref readonly TerminalCell cell = ref cells[col];
+            int cellUtf16Length;
             if (!string.IsNullOrEmpty(cell.Grapheme))
             {
-                utf16Length += cell.Grapheme.Length;
-                continue;
+                cellUtf16Length = cell.Grapheme.Length;
+            }
+            else
+            {
+                Rune rune = new(cell.Codepoint);
+                cellUtf16Length = rune.Utf16SequenceLength;
             }
 
-            Rune rune = new(cell.Codepoint);
-            utf16Length += rune.Utf16SequenceLength;
+            if (singleWidthSingleUtf16Cells)
+            {
+                singleWidthSingleUtf16Cells = cell.Width == 1 && cellUtf16Length == 1;
+            }
+
+            utf16Length += cellUtf16Length;
         }
 
         if (utf16Length <= 0)
@@ -3738,6 +3748,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         char[]? rentedChars = null;
+        float[]? rentedGridOffsets = null;
         Span<char> runChars = utf16Length <= MaxStackallocTextRunChars
             ? stackalloc char[utf16Length]
             : (rentedChars = ArrayPool<char>.Shared.Rent(utf16Length)).AsSpan(0, utf16Length);
@@ -3814,6 +3825,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
                 ReadOnlySpan<ShapedGlyph> shapedGlyphs = shaped.Glyphs.Span;
                 ushort[] glyphIds = new ushort[shapedGlyphs.Length];
+                int[] clusterIndexes = new int[shapedGlyphs.Length];
                 float[] xOffsets = new float[shapedGlyphs.Length];
                 float[] yOffsets = new float[shapedGlyphs.Length];
                 float advanceX = 0f;
@@ -3822,6 +3834,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 {
                     ShapedGlyph glyph = shapedGlyphs[i];
                     glyphIds[i] = unchecked((ushort)glyph.GlyphId);
+                    clusterIndexes[i] = glyph.Cluster;
                     xOffsets[i] = advanceX + glyph.OffsetX;
                     yOffsets[i] = glyph.OffsetY;
                     advanceX += glyph.AdvanceX;
@@ -3830,15 +3843,56 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 cachedRun = new CachedShapedRun(
                     new string(runText),
                     glyphIds,
+                    clusterIndexes,
                     xOffsets,
                     yOffsets,
                     advanceX,
+                    IsNaturalSingleWidthCellAligned(clusterIndexes, xOffsets, charCount, advanceX),
                     GetGlyphClipPadding(runText),
                     CreateNaturalTextBlob(runTypeface, glyphIds, xOffsets, yOffsets));
                 _shapedRunCache.Store(cacheKey, cachedRun);
             }
 
-            GridPlacementMode placement = DetermineGridPlacement(cachedRun, runWidth, out float xScale);
+            float xScale = 1f;
+            GridPlacementMode placement;
+            if (runTypeface.IsFixedPitch && IsWithinGridPlacementTolerance(cachedRun.TotalAdvanceX, runWidth))
+            {
+                placement = GridPlacementMode.Natural;
+            }
+            else if (singleWidthSingleUtf16Cells && cachedRun.NaturalSingleWidthCellAligned)
+            {
+                placement = GridPlacementMode.Natural;
+            }
+            else
+            {
+                Span<float> runGridOffsets = charCount <= MaxStackallocTextRunChars
+                    ? stackalloc float[charCount + 1]
+                    : (rentedGridOffsets = ArrayPool<float>.Shared.Rent(charCount + 1)).AsSpan(0, charCount + 1);
+                PopulateTextGridOffsets(cells, startCol, endCol, runGridOffsets);
+                ReadOnlySpan<float> textGridOffsets = runGridOffsets[..(charCount + 1)];
+                placement = CanUseClusterGridFitting(cachedRun, textGridOffsets) &&
+                    ShouldUseClusterGridFitting(cachedRun, textGridOffsets, runWidth)
+                        ? GridPlacementMode.ClusterGridFit
+                        : DetermineGridPlacement(cachedRun, runWidth, out xScale);
+
+                if (placement == GridPlacementMode.ClusterGridFit)
+                {
+                    DrawClusterGridFittedShapedRun(
+                        canvas,
+                        cachedRun,
+                        runTypeface,
+                        runColor,
+                        startCol * _cellWidth,
+                        y,
+                        GetTextBaselineY(y),
+                        runWidth,
+                        textGridOffsets);
+
+                    RecordShapedRun();
+                    RecordGridClampedRun();
+                    return;
+                }
+            }
 
             if (placement == GridPlacementMode.UnsafeFallback)
             {
@@ -3866,7 +3920,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 GetTextBaselineY(y),
                 runWidth,
                 xScale,
-                clampToRunWidth);
+                clampToRunWidth,
+                textGridOffsets: default,
+                useClusterGridFit: false,
+                placementHash: 0UL);
 
             RecordShapedRun();
             if (clampToRunWidth)
@@ -3879,6 +3936,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
             if (rentedChars is not null)
             {
                 ArrayPool<char>.Shared.Return(rentedChars);
+            }
+
+            if (rentedGridOffsets is not null)
+            {
+                ArrayPool<float>.Shared.Return(rentedGridOffsets);
             }
         }
     }
@@ -3893,7 +3955,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float baselineY,
         float runWidth,
         float xScale,
-        bool clampToRunWidth)
+        bool clampToRunWidth,
+        ReadOnlySpan<float> textGridOffsets,
+        bool useClusterGridFit,
+        ulong placementHash)
     {
         if (run.GlyphCount <= 0)
         {
@@ -3903,7 +3968,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float clipPadding = run.ClipPadding;
         _fgPaint.Color = color;
 
-        if (!clampToRunWidth &&
+        if (!useClusterGridFit &&
+            !clampToRunWidth &&
             xScale == 1f &&
             run.NaturalTextBlob is { } naturalTextBlob)
         {
@@ -3932,26 +3998,62 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 runWidth,
                 xScale,
                 clampToRunWidth,
+                textGridOffsets,
+                useClusterGridFit,
                 clipPadding);
             return;
         }
 
         int runWidthBits = BitConverter.SingleToInt32Bits(runWidth);
-        if (!run.TryGetGridTextBlob(runWidthBits, out SKTextBlob? blob))
+        if (!run.TryGetGridTextBlob(runWidthBits, placementHash, out SKTextBlob? blob))
         {
-            blob = CreateGridTextBlob(typeface, run, runWidth, xScale, clampToRunWidth);
+            blob = CreateGridTextBlob(
+                typeface,
+                run,
+                runWidth,
+                xScale,
+                clampToRunWidth,
+                textGridOffsets,
+                useClusterGridFit);
             if (blob is null)
             {
                 return;
             }
 
-            run.SetGridTextBlob(runWidthBits, blob);
+            run.SetGridTextBlob(runWidthBits, placementHash, blob);
         }
 
         canvas.Save();
         ClipTextRun(canvas, originX, rowY, runWidth, clipPadding);
         canvas.DrawText(blob, originX, baselineY, _fgPaint);
         canvas.Restore();
+    }
+
+    private void DrawClusterGridFittedShapedRun(
+        SKCanvas canvas,
+        CachedShapedRun run,
+        SKTypeface typeface,
+        SKColor color,
+        float originX,
+        float rowY,
+        float baselineY,
+        float runWidth,
+        ReadOnlySpan<float> textGridOffsets)
+    {
+        DrawCachedShapedRun(
+            canvas,
+            run,
+            typeface,
+            color,
+            originX,
+            rowY,
+            baselineY,
+            runWidth,
+            xScale: 1f,
+            clampToRunWidth: true,
+            textGridOffsets,
+            useClusterGridFit: true,
+            ComputeGridPlacementHash(textGridOffsets));
     }
 
     private static bool ContainsProgrammingLigatureCandidate(ReadOnlySpan<char> text)
@@ -4010,9 +4112,18 @@ public sealed class SkiaTerminalRenderer : IDisposable
         float runWidth,
         float xScale,
         bool clampToRunWidth,
+        ReadOnlySpan<float> textGridOffsets,
+        bool useClusterGridFit,
         float clipPadding)
     {
-        using SKPath? path = CreateShapedRunPath(typeface, run, runWidth, xScale, clampToRunWidth);
+        using SKPath? path = CreateShapedRunPath(
+            typeface,
+            run,
+            runWidth,
+            xScale,
+            clampToRunWidth,
+            textGridOffsets,
+            useClusterGridFit);
         if (path is null)
         {
             return;
@@ -4030,7 +4141,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
         CachedShapedRun run,
         float runWidth,
         float xScale,
-        bool clampToRunWidth)
+        bool clampToRunWidth,
+        ReadOnlySpan<float> textGridOffsets,
+        bool useClusterGridFit)
     {
         SKPoint[]? rentedPoints = null;
         Span<SKPoint> points = run.GlyphCount <= MaxStackallocGlyphPoints
@@ -4038,22 +4151,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             : (rentedPoints = ArrayPool<SKPoint>.Shared.Rent(run.GlyphCount)).AsSpan(0, run.GlyphCount);
         try
         {
-            float clipPadding = run.ClipPadding;
-            for (int i = 0; i < run.GlyphCount; i++)
-            {
-                float x = run.XOffsets[i];
-                if (xScale != 1f)
-                {
-                    x *= xScale;
-                }
-
-                if (clampToRunWidth)
-                {
-                    x = Math.Clamp(x, -clipPadding, runWidth + clipPadding);
-                }
-
-                points[i] = new SKPoint(x, run.YOffsets[i]);
-            }
+            FillShapedRunPoints(run, runWidth, xScale, clampToRunWidth, textGridOffsets, useClusterGridFit, points);
 
             SKFont font = _textRowFontCache.GetOrCreate(typeface, _fontSize, _fontRenderingSettings);
             using SKTextBlobBuilder builder = new();
@@ -4076,7 +4174,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
         CachedShapedRun run,
         float runWidth,
         float xScale,
-        bool clampToRunWidth)
+        bool clampToRunWidth,
+        ReadOnlySpan<float> textGridOffsets,
+        bool useClusterGridFit)
     {
         SKPoint[]? rentedPoints = null;
         Span<SKPoint> points = run.GlyphCount <= MaxStackallocGlyphPoints
@@ -4084,22 +4184,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             : (rentedPoints = ArrayPool<SKPoint>.Shared.Rent(run.GlyphCount)).AsSpan(0, run.GlyphCount);
         try
         {
-            float clipPadding = run.ClipPadding;
-            for (int i = 0; i < run.GlyphCount; i++)
-            {
-                float x = run.XOffsets[i];
-                if (xScale != 1f)
-                {
-                    x *= xScale;
-                }
-
-                if (clampToRunWidth)
-                {
-                    x = Math.Clamp(x, -clipPadding, runWidth + clipPadding);
-                }
-
-                points[i] = new SKPoint(x, run.YOffsets[i]);
-            }
+            FillShapedRunPoints(run, runWidth, xScale, clampToRunWidth, textGridOffsets, useClusterGridFit, points);
 
             SKFont font = _textRowFontCache.GetOrCreate(typeface, _fontSize, _fontRenderingSettings);
             ReadOnlySpan<byte> glyphBytes = MemoryMarshal.AsBytes(run.GlyphIds.AsSpan());
@@ -4111,6 +4196,51 @@ public sealed class SkiaTerminalRenderer : IDisposable
             {
                 ArrayPool<SKPoint>.Shared.Return(rentedPoints);
             }
+        }
+    }
+
+    private static void FillShapedRunPoints(
+        CachedShapedRun run,
+        float runWidth,
+        float xScale,
+        bool clampToRunWidth,
+        ReadOnlySpan<float> textGridOffsets,
+        bool useClusterGridFit,
+        Span<SKPoint> points)
+    {
+        float clipPadding = run.ClipPadding;
+        int textLength = textGridOffsets.Length - 1;
+        int activeCluster = -1;
+        float activeClusterNaturalX = 0f;
+        float activeClusterGridX = 0f;
+
+        for (int i = 0; i < run.GlyphCount; i++)
+        {
+            float x = run.XOffsets[i];
+            if (useClusterGridFit &&
+                i < run.ClusterIndexes.Length &&
+                TryNormalizeClusterIndex(run.ClusterIndexes[i], textLength, out int clusterIndex))
+            {
+                if (clusterIndex != activeCluster)
+                {
+                    activeCluster = clusterIndex;
+                    activeClusterNaturalX = run.XOffsets[i];
+                    activeClusterGridX = textGridOffsets[clusterIndex];
+                }
+
+                x = activeClusterGridX + (run.XOffsets[i] - activeClusterNaturalX);
+            }
+            else if (xScale != 1f)
+            {
+                x *= xScale;
+            }
+
+            if (clampToRunWidth)
+            {
+                x = Math.Clamp(x, -clipPadding, runWidth + clipPadding);
+            }
+
+            points[i] = new SKPoint(x, run.YOffsets[i]);
         }
     }
 
@@ -4472,6 +4602,181 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return runWidth;
     }
 
+    private void PopulateTextGridOffsets(
+        ReadOnlySpan<TerminalCell> cells,
+        int startCol,
+        int endCol,
+        Span<float> gridOffsets)
+    {
+        int offsetIndex = 0;
+        float gridX = 0f;
+        for (int col = startCol; col < endCol; col++)
+        {
+            ref readonly TerminalCell cell = ref cells[col];
+            int utf16Length;
+            if (!string.IsNullOrEmpty(cell.Grapheme))
+            {
+                utf16Length = cell.Grapheme.Length;
+            }
+            else
+            {
+                Rune rune = new(cell.Codepoint);
+                utf16Length = rune.Utf16SequenceLength;
+            }
+
+            for (int i = 0; i < utf16Length; i++)
+            {
+                gridOffsets[offsetIndex + i] = gridX;
+            }
+
+            offsetIndex += utf16Length;
+            int cellWidth = cell.Width <= 0 ? 1 : cell.Width;
+            gridX += cellWidth * _cellWidth;
+        }
+
+        if ((uint)offsetIndex < (uint)gridOffsets.Length)
+        {
+            gridOffsets[offsetIndex] = gridX;
+        }
+    }
+
+    private bool CanUseClusterGridFitting(CachedShapedRun run, ReadOnlySpan<float> textGridOffsets)
+        => CanUseClusterGridFitting(run, textGridOffsets.Length - 1);
+
+    private bool CanUseClusterGridFitting(CachedShapedRun run, int textLength)
+    {
+        if (Math.Abs(_cellWidth - _measuredCellWidth) >= CellMetricEpsilon ||
+            run.GlyphCount <= 0 ||
+            run.ClusterIndexes.Length != run.GlyphCount ||
+            textLength <= 0)
+        {
+            return false;
+        }
+
+        int previousCluster = -1;
+        for (int i = 0; i < run.ClusterIndexes.Length; i++)
+        {
+            if (!TryNormalizeClusterIndex(run.ClusterIndexes[i], textLength, out int clusterIndex) ||
+                clusterIndex < previousCluster)
+            {
+                return false;
+            }
+
+            previousCluster = clusterIndex;
+        }
+
+        return true;
+    }
+
+    private bool IsNaturalSingleWidthCellAligned(
+        ReadOnlySpan<int> clusterIndexes,
+        ReadOnlySpan<float> xOffsets,
+        int textLength,
+        float totalAdvanceX)
+    {
+        if (Math.Abs(_cellWidth - _measuredCellWidth) >= CellMetricEpsilon ||
+            textLength <= 0 ||
+            clusterIndexes.IsEmpty ||
+            clusterIndexes.Length != xOffsets.Length ||
+            !IsWithinGridPlacementTolerance(totalAdvanceX, textLength * _cellWidth))
+        {
+            return false;
+        }
+
+        int previousCluster = -1;
+        for (int i = 0; i < clusterIndexes.Length; i++)
+        {
+            if (!TryNormalizeClusterIndex(clusterIndexes[i], textLength, out int clusterIndex))
+            {
+                return false;
+            }
+
+            if (clusterIndex == previousCluster)
+            {
+                continue;
+            }
+
+            float expectedX = clusterIndex * _cellWidth;
+            if (Math.Abs(xOffsets[i] - expectedX) > GridClampTolerancePx)
+            {
+                return false;
+            }
+
+            previousCluster = clusterIndex;
+        }
+
+        return true;
+    }
+
+    private static bool ShouldUseClusterGridFitting(
+        CachedShapedRun run,
+        ReadOnlySpan<float> textGridOffsets,
+        float runWidth)
+    {
+        if (!IsWithinGridPlacementTolerance(run.TotalAdvanceX, runWidth))
+        {
+            return true;
+        }
+
+        int textLength = textGridOffsets.Length - 1;
+        int previousCluster = -1;
+        for (int i = 0; i < run.ClusterIndexes.Length; i++)
+        {
+            if (!TryNormalizeClusterIndex(run.ClusterIndexes[i], textLength, out int clusterIndex))
+            {
+                return false;
+            }
+
+            if (clusterIndex == previousCluster)
+            {
+                continue;
+            }
+
+            if (Math.Abs(run.XOffsets[i] - textGridOffsets[clusterIndex]) > GridClampTolerancePx)
+            {
+                return true;
+            }
+
+            previousCluster = clusterIndex;
+        }
+
+        return false;
+    }
+
+    private static bool TryNormalizeClusterIndex(int clusterIndex, int textLength, out int normalizedClusterIndex)
+    {
+        if (clusterIndex >= 0 && clusterIndex <= textLength)
+        {
+            normalizedClusterIndex = clusterIndex;
+            return true;
+        }
+
+        normalizedClusterIndex = 0;
+        return false;
+    }
+
+    private static ulong ComputeGridPlacementHash(ReadOnlySpan<float> textGridOffsets)
+    {
+        ulong hash = FnvOffsetBasis;
+        hash ^= unchecked((uint)textGridOffsets.Length);
+        hash *= FnvPrime;
+
+        for (int i = 0; i < textGridOffsets.Length; i++)
+        {
+            uint bits = unchecked((uint)BitConverter.SingleToInt32Bits(textGridOffsets[i]));
+            hash ^= bits;
+            hash *= FnvPrime;
+        }
+
+        return hash;
+    }
+
+    private static bool IsWithinGridPlacementTolerance(float naturalWidth, float runWidth)
+    {
+        float widthTolerance = Math.Max(GridClampTolerancePx, runWidth * GridClampToleranceRatio);
+        return Math.Abs(runWidth - naturalWidth) <= widthTolerance;
+    }
+
     private GridPlacementMode DetermineGridPlacement(CachedShapedRun run, float runWidth, out float xScale)
     {
         xScale = 1f;
@@ -4491,9 +4796,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return GridPlacementMode.UnsafeFallback;
         }
 
-        float delta = Math.Abs(runWidth - run.TotalAdvanceX);
-        float tolerance = Math.Max(GridClampTolerancePx, runWidth * GridClampToleranceRatio);
-        if (delta <= tolerance)
+        if (IsWithinGridPlacementTolerance(run.TotalAdvanceX, runWidth))
         {
             return GridPlacementMode.Natural;
         }
@@ -6210,6 +6513,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     {
         Natural,
         Clamped,
+        ClusterGridFit,
         UnsafeFallback,
     }
 

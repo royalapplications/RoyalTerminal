@@ -21,17 +21,21 @@ internal sealed class CachedShapedRun : IDisposable
     public CachedShapedRun(
         string text,
         ushort[] glyphIds,
+        int[] clusterIndexes,
         float[] xOffsets,
         float[] yOffsets,
         float totalAdvanceX,
+        bool naturalSingleWidthCellAligned,
         float clipPadding = 0f,
         SKTextBlob? naturalTextBlob = null)
     {
         Text = text;
         GlyphIds = glyphIds;
+        ClusterIndexes = clusterIndexes;
         XOffsets = xOffsets;
         YOffsets = yOffsets;
         TotalAdvanceX = totalAdvanceX;
+        NaturalSingleWidthCellAligned = naturalSingleWidthCellAligned;
         ClipPadding = clipPadding;
         NaturalTextBlob = naturalTextBlob;
     }
@@ -40,11 +44,15 @@ internal sealed class CachedShapedRun : IDisposable
 
     public ushort[] GlyphIds { get; }
 
+    public int[] ClusterIndexes { get; }
+
     public float[] XOffsets { get; }
 
     public float[] YOffsets { get; }
 
     public float TotalAdvanceX { get; }
+
+    public bool NaturalSingleWidthCellAligned { get; }
 
     public float ClipPadding { get; }
 
@@ -54,11 +62,15 @@ internal sealed class CachedShapedRun : IDisposable
 
     private int _gridTextBlobRunWidthBits;
 
+    private ulong _gridTextBlobPlacementHash;
+
     private SKTextBlob? _gridTextBlob;
 
-    public bool TryGetGridTextBlob(int runWidthBits, out SKTextBlob textBlob)
+    public bool TryGetGridTextBlob(int runWidthBits, ulong placementHash, out SKTextBlob textBlob)
     {
-        if (_gridTextBlob is { } cachedBlob && _gridTextBlobRunWidthBits == runWidthBits)
+        if (_gridTextBlob is { } cachedBlob &&
+            _gridTextBlobRunWidthBits == runWidthBits &&
+            _gridTextBlobPlacementHash == placementHash)
         {
             textBlob = cachedBlob;
             return true;
@@ -68,7 +80,7 @@ internal sealed class CachedShapedRun : IDisposable
         return false;
     }
 
-    public void SetGridTextBlob(int runWidthBits, SKTextBlob textBlob)
+    public void SetGridTextBlob(int runWidthBits, ulong placementHash, SKTextBlob textBlob)
     {
         if (_gridTextBlob is { } existing && !ReferenceEquals(existing, textBlob))
         {
@@ -76,6 +88,7 @@ internal sealed class CachedShapedRun : IDisposable
         }
 
         _gridTextBlobRunWidthBits = runWidthBits;
+        _gridTextBlobPlacementHash = placementHash;
         _gridTextBlob = textBlob;
     }
 
@@ -119,30 +132,6 @@ internal sealed class ShapedRunCache
 
             run = null!;
             return false;
-        }
-    }
-
-    public void Store(
-        ShapedRunCacheKey key,
-        ReadOnlySpan<char> text,
-        ReadOnlySpan<ushort> glyphIds,
-        ReadOnlySpan<float> xOffsets,
-        ReadOnlySpan<float> yOffsets,
-        float totalAdvanceX)
-    {
-        lock (_sync)
-        {
-            if (_cache.Count >= _maxEntries)
-            {
-                ClearCore();
-            }
-
-            StoreCore(key, new CachedShapedRun(
-                new string(text),
-                glyphIds.ToArray(),
-                xOffsets.ToArray(),
-                yOffsets.ToArray(),
-                totalAdvanceX));
         }
     }
 
