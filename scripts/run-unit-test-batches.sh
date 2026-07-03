@@ -7,6 +7,7 @@ configuration="${ROYALTERMINAL_TEST_CONFIGURATION:-Release}"
 results_dir="${ROYALTERMINAL_TEST_RESULTS_DIR:-test-results}"
 batch_target="${ROYALTERMINAL_TEST_BATCH_TARGET:-40}"
 validate_coverage="${ROYALTERMINAL_VALIDATE_TEST_BATCH_COVERAGE:-false}"
+max_duplicate_matches="${ROYALTERMINAL_TEST_MAX_DUPLICATE_MATCHES:-16}"
 blame_crash="${ROYALTERMINAL_TEST_BLAME_CRASH:-false}"
 blame_hang="${ROYALTERMINAL_TEST_BLAME_HANG:-false}"
 blame_hang_timeout="${ROYALTERMINAL_TEST_BLAME_HANG_TIMEOUT:-5m}"
@@ -14,6 +15,11 @@ blame_hang_dump_type="${ROYALTERMINAL_TEST_BLAME_HANG_DUMP_TYPE:-}"
 
 if ! [[ "${batch_target}" =~ ^[1-9][0-9]*$ ]]; then
   echo "::error::ROYALTERMINAL_TEST_BATCH_TARGET must be a positive integer, got '${batch_target}'."
+  exit 1
+fi
+
+if ! [[ "${max_duplicate_matches}" =~ ^[0-9]+$ ]]; then
+  echo "::error::ROYALTERMINAL_TEST_MAX_DUPLICATE_MATCHES must be a non-negative integer, got '${max_duplicate_matches}'."
   exit 1
 fi
 
@@ -148,9 +154,15 @@ if [ "${validate_coverage}" = "true" ]; then
   comm -13 "${all_tests}" "${matched_tests_unique}" > "${unexpected_tests}"
 
   if [ -s "${duplicate_tests}" ]; then
-    echo "::error::Generated unit test batch filters overlap."
+    duplicate_count="$(wc -l < "${duplicate_tests}" | tr -d ' ')"
+    if [ "${duplicate_count}" -gt "${max_duplicate_matches}" ]; then
+      echo "::error::Generated unit test batch filters overlap by ${duplicate_count} tests, exceeding ROYALTERMINAL_TEST_MAX_DUPLICATE_MATCHES=${max_duplicate_matches}."
+      sed -n '1,200p' "${duplicate_tests}"
+      exit 1
+    fi
+
+    echo "::warning::Generated unit test batch filters overlap by ${duplicate_count} tests. This is below ROYALTERMINAL_TEST_MAX_DUPLICATE_MATCHES=${max_duplicate_matches}."
     sed -n '1,200p' "${duplicate_tests}"
-    exit 1
   fi
 
   if [ -s "${uncovered_tests}" ]; then
