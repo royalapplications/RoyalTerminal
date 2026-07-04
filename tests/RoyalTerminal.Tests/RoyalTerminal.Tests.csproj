@@ -59,6 +59,7 @@
 
   <!-- Import native asset targets for file copying (same mechanism as NuGet package) -->
   <Import Project="..\..\src\RoyalTerminal.GhosttySharp.Native.OSX\build\RoyalTerminal.GhosttySharp.Native.OSX.targets" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
+  <Import Project="..\..\src\RoyalTerminal.Rendering.Interop.Swift.Native.OSX\build\RoyalTerminal.Rendering.Interop.Swift.Native.OSX.targets" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
   <Import Project="..\..\src\RoyalTerminal.GhosttySharp.Native.Win64\build\RoyalTerminal.GhosttySharp.Native.Win64.targets" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
   <Import Project="..\..\src\RoyalTerminal.GhosttySharp.Native.Linux64\build\RoyalTerminal.GhosttySharp.Native.Linux64.targets" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
 
