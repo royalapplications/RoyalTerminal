@@ -4,6 +4,7 @@
     <PackageId>RoyalApps.RoyalTerminal.Rendering.Interop.Swift</PackageId>
     <Description>Managed interop wrappers for the native Swift/Metal rendering engine on macOS.</Description>
     <IsPackable>true</IsPackable>
+    <RoyalTerminalGenerateSwiftNativeRuntimeJson>true</RoyalTerminalGenerateSwiftNativeRuntimeJson>
   </PropertyGroup>
 
   <ItemGroup>

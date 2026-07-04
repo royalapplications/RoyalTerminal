@@ -62,4 +62,48 @@
                               Visible="false" />
     </ItemGroup>
   </Target>
+
+  <PropertyGroup Condition="'$(RoyalTerminalGenerateSwiftNativeRuntimeJson)' == 'true'">
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);GenerateRoyalTerminalSwiftNativeRuntimeJson</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <Target Name="GenerateRoyalTerminalSwiftNativeRuntimeJson"
+          Condition="'$(RoyalTerminalGenerateSwiftNativeRuntimeJson)' == 'true'">
+    <PropertyGroup>
+      <_RoyalTerminalSwiftNativePackageVersion>$(PackageVersion)</_RoyalTerminalSwiftNativePackageVersion>
+      <_RoyalTerminalSwiftNativePackageVersion Condition="'$(_RoyalTerminalSwiftNativePackageVersion)' == ''">$(Version)</_RoyalTerminalSwiftNativePackageVersion>
+      <_RoyalTerminalSwiftRuntimeJsonPath>$(IntermediateOutputPath)runtime.json</_RoyalTerminalSwiftRuntimeJsonPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <_RoyalTerminalSwiftRuntimeJsonLine Remove="@(_RoyalTerminalSwiftRuntimeJsonLine)" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="{" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="  &quot;runtimes&quot;: {" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="    &quot;osx-arm64&quot;: {" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="      &quot;$(PackageId)&quot;: {" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="        &quot;RoyalApps.RoyalTerminal.Rendering.Interop.Swift.Native.OSX&quot;: &quot;$(_RoyalTerminalSwiftNativePackageVersion)&quot;" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="      }" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="    }," />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="    &quot;osx-x64&quot;: {" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="      &quot;$(PackageId)&quot;: {" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="        &quot;RoyalApps.RoyalTerminal.Rendering.Interop.Swift.Native.OSX&quot;: &quot;$(_RoyalTerminalSwiftNativePackageVersion)&quot;" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="      }" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="    }" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="  }" />
+      <_RoyalTerminalSwiftRuntimeJsonLine Include="}" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+
+    <WriteLinesToFile
+      File="$(_RoyalTerminalSwiftRuntimeJsonPath)"
+      Lines="@(_RoyalTerminalSwiftRuntimeJsonLine)"
+      Overwrite="true" />
+
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="$(_RoyalTerminalSwiftRuntimeJsonPath)"
+                              PackagePath="runtime.json"
+                              Visible="false" />
+    </ItemGroup>
+  </Target>
 </Project>

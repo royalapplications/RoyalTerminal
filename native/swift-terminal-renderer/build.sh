@@ -7,7 +7,7 @@ cd "$SCRIPT_DIR"
 echo "Building Swift Terminal Renderer..."
 swift build -c release
 
-OUT_DIR="../../src/RoyalTerminal.GhosttySharp.Native.OSX/runtimes/osx-arm64/native"
+OUT_DIR="../../src/RoyalTerminal.Rendering.Interop.Swift.Native.OSX/runtimes/osx-arm64/native"
 mkdir -p "$OUT_DIR"
 
 echo "Copying library to $OUT_DIR..."

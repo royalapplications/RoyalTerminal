@@ -29,6 +29,7 @@ Read the published documentation at [royalapplications.github.io/RoyalTerminal](
 | **RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX.svg)](https://www.nuget.org/packages/RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX) | Native runtime assets selected for macOS by `runtime.json` (`libghostty-vt`, `libghostty-renderer-capi`) |
 | **RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64** | [![NuGet](https://img.shields.io/nuget/v/RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64.svg)](https://www.nuget.org/packages/RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64) | Native runtime assets selected for Windows x64/arm64 by `runtime.json` (`ghostty-vt.dll`, `ghostty-renderer-capi.dll`) |
 | **RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64** | [![NuGet](https://img.shields.io/nuget/v/RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64.svg)](https://www.nuget.org/packages/RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64) | Native runtime assets selected for Linux by `runtime.json` (`libghostty-vt.so`, `libghostty-renderer-capi.so`) |
+| **RoyalApps.RoyalTerminal.Rendering.Interop.Swift.Native.OSX** | [![NuGet](https://img.shields.io/nuget/v/RoyalApps.RoyalTerminal.Rendering.Interop.Swift.Native.OSX.svg)](https://www.nuget.org/packages/RoyalApps.RoyalTerminal.Rendering.Interop.Swift.Native.OSX) | Native Swift/Metal renderer library selected for macOS by `runtime.json` (`libswift_terminal_renderer.dylib`) |
 
 ### Modular Managed Packages (Packable Composition Units)
 
@@ -61,6 +62,7 @@ Read the published documentation at [royalapplications.github.io/RoyalTerminal](
 | `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty` | Managed wrapper for `ghostty-renderer-capi` |
 | `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty.Skia` | Skia bridge (`SkiaInteropRenderer`) with CPU fallback |
 | `RoyalApps.RoyalTerminal.Avalonia.Rendering.GhosttyInterop` | Avalonia render-target acquisition and texture interop draw handler |
+| `RoyalApps.RoyalTerminal.Rendering.Interop.Swift` | Managed interop wrappers for the native Swift/Metal rendering engine on macOS |
 
 ## Features
 
@@ -916,9 +918,9 @@ dotnet add package RoyalApps.RoyalTerminal.Terminal.Vt.Ghostty
 dotnet publish -r osx-arm64
 ```
 
-`RoyalApps.RoyalTerminal.GhosttySharp` and `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty` ship
+`RoyalApps.RoyalTerminal.GhosttySharp`, `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty`, and `RoyalApps.RoyalTerminal.Rendering.Interop.Swift` ship
 `runtime.json` metadata that maps supported RIDs to the matching
-`RoyalApps.RoyalTerminal.GhosttySharp.Native.*` package. Direct native package references
+`RoyalApps.RoyalTerminal.GhosttySharp.Native.*` and `RoyalApps.RoyalTerminal.Rendering.Interop.Swift.Native.*` packages. Direct native package references
 are only needed when you intentionally want to force a specific native asset
 package.
 

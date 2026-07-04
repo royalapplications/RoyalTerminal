@@ -89,6 +89,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Avalonia.App"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Rendering.Interop.Swift", "src\RoyalTerminal.Rendering.Interop.Swift\RoyalTerminal.Rendering.Interop.Swift.csproj", "{96BA96C9-55DE-4764-A8F6-8FBF3B03472B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RoyalTerminal.Rendering.Interop.Swift.Native.OSX", "src\RoyalTerminal.Rendering.Interop.Swift.Native.OSX\RoyalTerminal.Rendering.Interop.Swift.Native.OSX.csproj", "{11F06DFF-1812-4A31-9911-12D7EC954731}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -579,6 +581,18 @@ Global
 		{96BA96C9-55DE-4764-A8F6-8FBF3B03472B}.Release|x64.Build.0 = Release|Any CPU
 		{96BA96C9-55DE-4764-A8F6-8FBF3B03472B}.Release|x86.ActiveCfg = Release|Any CPU
 		{96BA96C9-55DE-4764-A8F6-8FBF3B03472B}.Release|x86.Build.0 = Release|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Debug|x64.Build.0 = Debug|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Debug|x86.Build.0 = Debug|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Release|Any CPU.Build.0 = Release|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Release|x64.ActiveCfg = Release|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Release|x64.Build.0 = Release|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Release|x86.ActiveCfg = Release|Any CPU
+		{11F06DFF-1812-4A31-9911-12D7EC954731}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -622,5 +636,6 @@ Global
 		{901DE37F-414D-431D-A2E2-E6C3F533C695} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 		{37EE5670-3466-4072-B0F5-57CC4FD62A6B} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{96BA96C9-55DE-4764-A8F6-8FBF3B03472B} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{11F06DFF-1812-4A31-9911-12D7EC954731} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

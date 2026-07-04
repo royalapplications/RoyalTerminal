@@ -105,17 +105,19 @@ The API section is generated from the packable managed libraries under `src/` an
 | `RoyalApps.RoyalTerminal.Rendering.Skia` | CPU Skia terminal renderer, regex text highlighting engine, glyph cache, and framebuffer shader post-processing. |
 | `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty` | Managed interop wrappers for `ghostty-renderer-capi`. Its package-level `runtime.json` selects the matching native asset package for RID-aware restores. |
 | `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty.Skia` | Skia bridge around Ghostty renderer interop with fallback support. |
+| `RoyalApps.RoyalTerminal.Rendering.Interop.Swift` | Managed interop wrappers for the native Swift/Metal rendering engine on macOS. Its package-level `runtime.json` selects the matching native asset package for RID-aware restores. |
 
 ## Native asset packages
 
 | Package | Runtime payload |
 | --- | --- |
 | `RoyalApps.RoyalTerminal.GhosttySharp.Native.OSX` | `libghostty-vt.dylib` and `libghostty-renderer-capi.dylib` for macOS x64 and arm64 |
+| `RoyalApps.RoyalTerminal.Rendering.Interop.Swift.Native.OSX` | `libswift_terminal_renderer.dylib` for macOS x64 and arm64 |
 | `RoyalApps.RoyalTerminal.GhosttySharp.Native.Win64` | `ghostty-vt.dll` and `ghostty-renderer-capi.dll` for Windows x64 and arm64 |
 | `RoyalApps.RoyalTerminal.GhosttySharp.Native.Linux64` | `libghostty-vt.so` and `libghostty-renderer-capi.so` for Linux x64 and arm64 |
 
 These packages are normally selected through the `runtime.json` files in
-`RoyalApps.RoyalTerminal.GhosttySharp` and `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty`.
+`RoyalApps.RoyalTerminal.GhosttySharp`, `RoyalApps.RoyalTerminal.Rendering.Interop.Ghostty`, and `RoyalApps.RoyalTerminal.Rendering.Interop.Swift`.
 Restore or publish with a concrete RID, for example `dotnet publish -r osx-arm64`,
 to let NuGet resolve only the native package for that target.
 
