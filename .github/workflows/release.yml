@@ -73,7 +73,7 @@ jobs:
           if [ -f native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib ]; then
             cp -L native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib artifacts/
           fi
-          find native/swift-terminal-renderer/.build -name "libSwiftTerminalRenderer.dylib" -exec cp -L {} artifacts/libswift_terminal_renderer.dylib \;
+          find native/swift-terminal-renderer/.build -name "libSwiftTerminalRenderer.dylib" ! -path "*.dSYM*" -exec cp -L {} artifacts/libswift_terminal_renderer.dylib \;
           ls -la artifacts/
 
       - name: Verify required native artifacts (macOS)
