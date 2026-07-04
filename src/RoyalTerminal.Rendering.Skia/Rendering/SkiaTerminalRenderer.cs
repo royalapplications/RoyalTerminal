@@ -37,7 +37,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const ulong FnvPrime = 1099511628211UL;
     private const float GridScaleFallbackMin = 0.5f;
     private const float GridScaleFallbackMax = 1.6f;
-    private const float GridClampToleranceRatio = 0.04f;
     private const float GridClampTolerancePx = 0.5f;
     private const float SymbolGlyphClipPaddingCells = 0.5f;
     private const float DefaultBackgroundOpacity = 0.82f;
@@ -3581,8 +3580,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         float delta = Math.Abs(runWidth - naturalWidth);
-        float tolerance = Math.Max(GridClampTolerancePx, runWidth * GridClampToleranceRatio);
-        if (delta <= tolerance)
+        if (delta <= GridClampTolerancePx)
         {
             return GridPlacementMode.Natural;
         }
@@ -3871,7 +3869,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 PopulateTextGridOffsets(cells, startCol, endCol, runGridOffsets);
                 ReadOnlySpan<float> textGridOffsets = runGridOffsets[..(charCount + 1)];
                 placement = !HasMultiClusterGraphemeCell(cells, startCol, endCol, cachedRun.ClusterIndexes) &&
-                    CanUseClusterGridFitting(cachedRun, textGridOffsets) &&
+                    CanUseClusterGridFitting(cachedRun, textGridOffsets, runWidth) &&
                     ShouldUseClusterGridFitting(cachedRun, textGridOffsets, runWidth)
                         ? GridPlacementMode.ClusterGridFit
                         : DetermineGridPlacement(cachedRun, runWidth, out xScale);
@@ -4702,15 +4700,23 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return rune.Utf16SequenceLength;
     }
 
-    private bool CanUseClusterGridFitting(CachedShapedRun run, ReadOnlySpan<float> textGridOffsets)
-        => CanUseClusterGridFitting(run, textGridOffsets.Length - 1);
+    private bool CanUseClusterGridFitting(
+        CachedShapedRun run,
+        ReadOnlySpan<float> textGridOffsets,
+        float runWidth)
+        => CanUseClusterGridFitting(run, textGridOffsets.Length - 1, runWidth);
 
-    private bool CanUseClusterGridFitting(CachedShapedRun run, int textLength)
+    private bool CanUseClusterGridFitting(CachedShapedRun run, int textLength, float runWidth)
     {
-        if (Math.Abs(_cellWidth - _measuredCellWidth) >= CellMetricEpsilon ||
-            run.GlyphCount <= 0 ||
+        if (run.GlyphCount <= 0 ||
             run.ClusterIndexes.Length != run.GlyphCount ||
             textLength <= 0)
+        {
+            return false;
+        }
+
+        if (Math.Abs(_cellWidth - _measuredCellWidth) >= CellMetricEpsilon &&
+            !IsWithinGridScaleEnvelope(run.TotalAdvanceX, runWidth))
         {
             return false;
         }
@@ -4728,6 +4734,19 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         return true;
+    }
+
+    private static bool IsWithinGridScaleEnvelope(float naturalWidth, float runWidth)
+    {
+        if (runWidth <= 0f || naturalWidth <= 0f)
+        {
+            return false;
+        }
+
+        float scale = runWidth / naturalWidth;
+        return float.IsFinite(scale) &&
+            scale >= GridScaleFallbackMin &&
+            scale <= GridScaleFallbackMax;
     }
 
     private bool IsNaturalSingleWidthCellAligned(
@@ -4835,8 +4854,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private static bool IsWithinGridPlacementTolerance(float naturalWidth, float runWidth)
     {
-        float widthTolerance = Math.Max(GridClampTolerancePx, runWidth * GridClampToleranceRatio);
-        return Math.Abs(runWidth - naturalWidth) <= widthTolerance;
+        return Math.Abs(runWidth - naturalWidth) <= GridClampTolerancePx;
     }
 
     private GridPlacementMode DetermineGridPlacement(CachedShapedRun run, float runWidth, out float xScale)
@@ -4853,7 +4871,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return GridPlacementMode.UnsafeFallback;
         }
 
-        if (scale < GridScaleFallbackMin || scale > GridScaleFallbackMax)
+        if (!IsWithinGridScaleEnvelope(run.TotalAdvanceX, runWidth))
         {
             return GridPlacementMode.UnsafeFallback;
         }

@@ -1668,14 +1668,14 @@ public class RenderingTests
     }
 
     [Fact]
-    public void SkiaTerminalRenderer_ShapedText_GridClampsAccumulatedSubpixelDrift()
+    public void SkiaTerminalRenderer_MonospaceShapedText_UsesGridForAccumulatedSubpixelDrift()
     {
         using var renderer = new SkiaTerminalRenderer(GetMonospaceFontFamily(), 14f)
         {
             CursorVisible = false,
             EnableTextRenderDiagnostics = true,
         };
-        renderer.SetCellSize(renderer.CellWidth * 1.10f, renderer.CellHeight);
+        renderer.SetCellSize(renderer.CellWidth * 1.02f, renderer.CellHeight);
 
         using var surface = CreateRenderSurface(renderer, columns: 80, rows: 1);
         var screen = CreateAsciiScreen(
@@ -1802,7 +1802,19 @@ public class RenderingTests
     }
 
     [Fact]
-    public void SkiaTerminalRenderer_CascadiaCodeLigatureRun_UsesNaturalPlacement()
+    public void SkiaTerminalRenderer_SurrogatePairCell_AllowsSingleClusterGridFit()
+    {
+        var screen = new TerminalScreen(2, 1);
+        TerminalRow row = screen.GetViewportRow(0);
+        SetTestCell(row, 0, 0x1F600, "\U0001F600");
+        SetTestCell(row, 1, 'x');
+
+        Assert.False(SkiaTerminalRenderer.HasMultiClusterGraphemeCell(row.Cells, 0, 2, [0, 0, 2]));
+        Assert.True(SkiaTerminalRenderer.HasMultiClusterGraphemeCell(row.Cells, 0, 2, [0, 1, 2]));
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_CascadiaCodeLigatureRun_UsesShapedPlacementWithoutFallback()
     {
         const string cascadiaCodePath = @"C:\Windows\Fonts\CascadiaCode.ttf";
         if (!File.Exists(cascadiaCodePath))
@@ -1827,7 +1839,6 @@ public class RenderingTests
         TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
 
         Assert.True(diagnostics.ShapedRuns > 0);
-        Assert.Equal(0, diagnostics.GridClampedRuns);
         Assert.Equal(0, diagnostics.FallbackRuns);
     }
 
