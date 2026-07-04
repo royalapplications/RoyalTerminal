@@ -2972,7 +2972,7 @@ internal sealed class MainWindowController
                     }),
             });
 
-        return new TerminalControl(
+        var control = new TerminalControl(
             new TerminalSessionService(),
             new HandledInputSuppressingTerminalInputAdapter(new DefaultTerminalInputAdapter()),
             new DefaultTerminalSelectionService(),
@@ -2982,6 +2982,17 @@ internal sealed class MainWindowController
             credentialProvider,
             hostKeyValidator,
             transportFactory);
+
+        control.Bind(
+            TerminalControl.RendererTypeProperty,
+            new global::Avalonia.Data.Binding
+            {
+                Source = _viewModel,
+                Path = nameof(MainWindowViewModel.ActiveRendererType),
+                Mode = global::Avalonia.Data.BindingMode.OneWay
+            });
+
+        return control;
     }
 
     private bool PromptForSshHostKeyTrust(SshHostKeyTrustPromptRequest request)

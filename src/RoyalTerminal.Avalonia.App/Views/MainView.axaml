@@ -188,6 +188,8 @@
                     <Separator />
                     <MenuItem Header="{Binding ModeButtonText}"
                               Command="{Binding CycleRenderModeCommand}" />
+                    <MenuItem Header="{Binding RendererEngineButtonText}"
+                              Command="{Binding CycleRendererEngineCommand}" />
                     <MenuItem Header="{Binding ThemePresetButtonText}"
                               Command="{Binding CycleThemePresetCommand}" />
                     <MenuItem Header="_Toggle Light Theme"
@@ -520,6 +522,8 @@
                     <Separator />
                     <MenuItem Header="{Binding ModeButtonText}"
                               Command="{Binding CycleRenderModeCommand}" />
+                    <MenuItem Header="{Binding RendererEngineButtonText}"
+                              Command="{Binding CycleRendererEngineCommand}" />
                     <MenuItem Header="{Binding ThemePresetButtonText}"
                               Command="{Binding CycleThemePresetCommand}" />
                     <MenuItem Header="_Toggle Light Theme"
@@ -1248,7 +1252,7 @@
                 Classes="statusBar"
                 IsVisible="{Binding IsStatusBarVisible}">
           <Grid x:Name="StatusBarLayout"
-                ColumnDefinitions="Auto,Auto,*,Auto,Auto"
+                ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto"
                 ColumnSpacing="8"
                 ClipToBounds="True">
             <Border x:Name="StatusRenderChip"
@@ -1258,8 +1262,16 @@
                          Classes="statusText statusChipText"
                          VerticalAlignment="Center" />
             </Border>
-            <Border x:Name="StatusSessionChip"
+            <Border x:Name="StatusRendererChip"
                     Grid.Column="1"
+                    Classes="statusChip statusRendererChip"
+                    VerticalAlignment="Center">
+              <TextBlock Text="{Binding RendererEngineButtonText}"
+                         Classes="statusText statusChipText"
+                         VerticalAlignment="Center" />
+            </Border>
+            <Border x:Name="StatusSessionChip"
+                    Grid.Column="2"
                     Classes="statusChip statusSessionChip"
                     ToolTip.Tip="{Binding ActiveSessionDisplay}"
                     VerticalAlignment="Center">
@@ -1270,13 +1282,13 @@
                          TextTrimming="CharacterEllipsis"
                          VerticalAlignment="Center" />
             </Border>
-            <TextBlock Grid.Column="2"
+            <TextBlock Grid.Column="3"
                        Text="{Binding StatusText}"
                        Classes="statusText"
                        TextTrimming="CharacterEllipsis"
                        VerticalAlignment="Center" />
             <Border x:Name="ReplayStatusControls"
-                    Grid.Column="3"
+                    Grid.Column="4"
                     Classes="statusChip replayTransport"
                     Height="24"
                     MaxHeight="24"
@@ -1343,7 +1355,7 @@
               </Grid>
             </Border>
             <Border x:Name="StatusDimensionsChip"
-                    Grid.Column="4"
+                    Grid.Column="5"
                     Classes="statusChip statusDimensionsChip"
                     VerticalAlignment="Center">
               <TextBlock Text="{Binding DimensionsText}"

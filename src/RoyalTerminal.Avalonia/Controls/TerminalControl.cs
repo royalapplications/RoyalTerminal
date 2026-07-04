@@ -95,6 +95,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     #region Styled Properties
 
+    /// <summary>Gets or sets the preferred rendering engine.</summary>
+    public static readonly StyledProperty<TerminalRendererType> RendererTypeProperty =
+        AvaloniaProperty.Register<TerminalControl, TerminalRendererType>(
+            nameof(RendererType),
+            TerminalRendererType.Skia);
+
+    /// <summary>Gets or sets the preferred rendering engine.</summary>
+    public TerminalRendererType RendererType
+    {
+        get => GetValue(RendererTypeProperty);
+        set => SetValue(RendererTypeProperty, value);
+    }
+
     /// <summary>The font family used for terminal text.</summary>
     public static readonly StyledProperty<string> FontFamilyNameProperty =
         AvaloniaProperty.Register<TerminalControl, string>(nameof(FontFamilyName), TerminalDefaults.DefaultMonoFont);
@@ -1033,6 +1046,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         FocusableProperty.OverrideDefaultValue<TerminalControl>(true);
         BackgroundProperty.OverrideDefaultValue<TerminalControl>(Brushes.Transparent);
+        RendererTypeProperty.Changed.AddClassHandler<TerminalControl>((x, e) => x.OnRendererTypeChanged(e));
+    }
+
+    private void OnRendererTypeChanged(AvaloniaPropertyChangedEventArgs e)
+    {
+        if (_presenter is not null)
+        {
+            _presenter.RendererType = (TerminalRendererType)e.NewValue!;
+            _presenter.Invalidate(fullRedraw: true);
+        }
     }
 
     public TerminalControl()
@@ -2067,6 +2090,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (_presenter is not null)
         {
             _presenter.IsHitTestVisible = true;
+            _presenter.RendererType = RendererType;
             if (_renderer is not null && _screen is not null)
             {
                 _presenter.SetRenderState(_renderer, _screen);
@@ -2078,6 +2102,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         _presenter = new TerminalPresenter();
         _presenter.IsHitTestVisible = true;
+        _presenter.RendererType = RendererType;
         ((ISetLogicalParent)_presenter).SetParent(this);
         VisualChildren.Add(_presenter);
 

@@ -12,6 +12,8 @@
     <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Contracts\RoyalTerminal.Rendering.Contracts.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Interop.Ghostty\RoyalTerminal.Rendering.Interop.Ghostty.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Interop.Ghostty.Skia\RoyalTerminal.Rendering.Interop.Ghostty.Skia.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Interop.Swift\RoyalTerminal.Rendering.Interop.Swift.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia.Rendering.GhosttyInterop\RoyalTerminal.Avalonia.Rendering.GhosttyInterop.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp\RoyalTerminal.GhosttySharp.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Unicode\RoyalTerminal.Unicode.csproj" />

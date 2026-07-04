@@ -3,7 +3,7 @@
 // RoyalTerminal.Tests - Skia interop bridge tests.
 
 using RoyalTerminal.Rendering.Contracts;
-using RoyalTerminal.Rendering.Interop.Ghostty.Skia;
+using RoyalTerminal.Avalonia.Interop;
 using SkiaSharp;
 using Xunit;
 
@@ -39,7 +39,7 @@ public sealed class RenderingSkiaInteropTests
         FakeRenderSurface surface = new(RenderFrameResult.Failure("texture wrapping failed"));
         FakeRgbaFallbackRenderer fallback = new(
             RenderFrameResult.Success(),
-            fillColor: new byte[] { 255, 0, 0, 255 });
+            fillColor: new byte[] { 0, 0, 255, 255 });
         SkiaInteropRenderer renderer = new(surface, fallback);
 
         using SKBitmap bitmap = new(4, 4, SKColorType.Rgba8888, SKAlphaType.Unpremul);

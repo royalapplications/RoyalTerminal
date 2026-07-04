@@ -134,6 +134,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
     /// <summary>The current font size.</summary>
     public float FontSize => _fontSize;
 
+    /// <summary>The baseline offset in pixels.</summary>
+    public float Baseline => _baseline;
+
+    /// <summary>The current font family name.</summary>
+    public string FontFamily => _glyphCache.RegularTypeface.FamilyName;
+
     /// <summary>Cursor column position.</summary>
     public int CursorColumn { get; set; }
 

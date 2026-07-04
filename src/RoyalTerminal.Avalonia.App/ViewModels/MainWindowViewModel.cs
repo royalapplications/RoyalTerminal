@@ -54,6 +54,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     private string _modeButtonText = "Rendered";
     private TerminalModeCapabilities _terminalCapabilities = TerminalModeCapabilities.Create(nativeVtAvailable: false);
     private TerminalRenderMode _activeRenderMode = TerminalRenderMode.RenderedAuto;
+    private string _rendererEngineButtonText = "Renderer: Swift Metal";
+    private TerminalRendererType _activeRendererType = TerminalRendererType.SwiftMetal;
     private readonly ITerminalModeResolver _modeResolver;
     private readonly ITerminalThemeCatalog _themeCatalog;
     private readonly IReadOnlyList<TerminalThemePreset> _themePresets;
@@ -309,6 +311,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         CycleThemePresetCommand = ReactiveCommand.CreateFromObservable(CycleThemePreset);
         GenerateThemeCommand = ReactiveCommand.CreateFromObservable(GenerateTheme);
         CycleRenderModeCommand = ReactiveCommand.Create(CycleRenderMode);
+        CycleRendererEngineCommand = ReactiveCommand.Create(CycleRendererEngine);
         ToggleLeftPanelCommand = ReactiveCommand.Create(ToggleLeftPanel);
         ToggleSearchPanelCommand = ReactiveCommand.Create(ToggleSearchPanel);
         ToggleStatusBarCommand = ReactiveCommand.Create(ToggleStatusBar);
@@ -451,6 +454,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> CycleThemePresetCommand { get; }
     public ReactiveCommand<Unit, Unit> GenerateThemeCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleRenderModeCommand { get; }
+    public ReactiveCommand<Unit, Unit> CycleRendererEngineCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleLeftPanelCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleSearchPanelCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleStatusBarCommand { get; }
@@ -807,6 +811,18 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _modeButtonText;
         private set => this.RaiseAndSetIfChanged(ref _modeButtonText, value);
+    }
+
+    public string RendererEngineButtonText
+    {
+        get => _rendererEngineButtonText;
+        private set => this.RaiseAndSetIfChanged(ref _rendererEngineButtonText, value);
+    }
+
+    public TerminalRendererType ActiveRendererType
+    {
+        get => _activeRendererType;
+        private set => this.RaiseAndSetIfChanged(ref _activeRendererType, value);
     }
 
     /// <summary>
@@ -2412,6 +2428,37 @@ public sealed class MainWindowViewModel : ReactiveObject
         ApplyRenderMode(nextMode);
 
         SetStatus($"New tabs will use: {GetNewTabModeName()}");
+    }
+
+    private void CycleRendererEngine()
+    {
+        TerminalRendererType nextRenderer = _activeRendererType switch
+        {
+            TerminalRendererType.Skia => TerminalRendererType.SwiftMetal,
+            TerminalRendererType.SwiftMetal => TerminalRendererType.Ghostty,
+            _ => TerminalRendererType.Skia
+        };
+
+        // Enforce macOS only fallback checks
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            nextRenderer = TerminalRendererType.Skia;
+        }
+
+        ActiveRendererType = nextRenderer;
+        UpdateRendererEngineButtonText();
+        SetStatus($"Renderer engine set to: {ActiveRendererType}");
+    }
+
+    private void UpdateRendererEngineButtonText()
+    {
+        RendererEngineButtonText = _activeRendererType switch
+        {
+            TerminalRendererType.Skia => "Renderer: Skia",
+            TerminalRendererType.SwiftMetal => "Renderer: Swift Metal",
+            TerminalRendererType.Ghostty => "Renderer: Ghostty",
+            _ => "Renderer: Skia",
+        };
     }
 
     private void UpdateModeButtonText()

@@ -154,6 +154,8 @@
             <NativeMenuItemSeparator />
             <NativeMenuItem Header="{Binding ModeButtonText}"
                             Command="{Binding CycleRenderModeCommand}" />
+            <NativeMenuItem Header="{Binding RendererEngineButtonText}"
+                            Command="{Binding CycleRendererEngineCommand}" />
             <NativeMenuItem Header="{Binding ThemePresetButtonText}"
                             Command="{Binding CycleThemePresetCommand}" />
             <NativeMenuItem Header="_Toggle Light Theme"
