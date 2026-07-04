@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RoyalApps.RoyalTerminal.Rendering.Interop.Swift</PackageId>
+    <Description>Managed interop wrappers for the native Swift/Metal rendering engine on macOS.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Rendering.Contracts\RoyalTerminal.Rendering.Contracts.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -430,3 +430,4 @@ FodyWeavers.xsd
 /src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/osx-x64
 /src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/osx-arm64
 /test-results
+/native/swift-terminal-renderer/.build
