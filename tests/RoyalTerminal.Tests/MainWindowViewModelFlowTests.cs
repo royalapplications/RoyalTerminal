@@ -5,6 +5,7 @@
 using System.Reactive;
 using System.Reactive.Linq;
 using System.Reactive.Threading.Tasks;
+using System.Threading;
 using System.Globalization;
 using System.Reflection;
 using Avalonia;
@@ -17,6 +18,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using Avalonia.Platform;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -353,6 +355,78 @@ public class MainWindowViewModelFlowTests
     }
 
     [AvaloniaFact]
+    public void RoyalTerminalWindowIconHelper_UsesThemeAwareLogoForeground()
+    {
+        Color lightThemeForeground = RoyalTerminalWindowIconHelper.GetForegroundColor(ThemeVariant.Light);
+        Color darkThemeForeground = RoyalTerminalWindowIconHelper.GetForegroundColor(ThemeVariant.Dark);
+
+        Assert.Equal(Color.FromRgb(0x1F, 0x29, 0x37), lightThemeForeground);
+        Assert.Equal(Colors.White, darkThemeForeground);
+        Assert.Contains(
+            "fill=\"#1F2937\"",
+            RoyalTerminalWindowIconHelper.CreateLogoSvg(lightThemeForeground),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "fill=\"#FFFFFF\"",
+            RoyalTerminalWindowIconHelper.CreateLogoSvg(darkThemeForeground),
+            StringComparison.Ordinal);
+        Assert.NotEqual(
+            RoyalTerminalWindowIconHelper.CreateIcoBytes(lightThemeForeground),
+            RoyalTerminalWindowIconHelper.CreateIcoBytes(darkThemeForeground));
+    }
+
+    [AvaloniaFact]
+    public void MainWindowIconThemeCoordinator_UsesSystemThemeForIconForeground()
+    {
+        Application app = Application.Current
+            ?? throw new InvalidOperationException("Avalonia application was not initialized.");
+        ThemeVariant? previousRequestedThemeVariant = app.RequestedThemeVariant;
+
+        try
+        {
+            app.RequestedThemeVariant = ThemeVariant.Dark;
+            Assert.Equal(
+                ThemeVariant.Light,
+                MainWindowIconThemeCoordinator.ToIconThemeVariant(PlatformThemeVariant.Light));
+
+            app.RequestedThemeVariant = ThemeVariant.Light;
+            Assert.Equal(
+                ThemeVariant.Dark,
+                MainWindowIconThemeCoordinator.ToIconThemeVariant(PlatformThemeVariant.Dark));
+        }
+        finally
+        {
+            app.RequestedThemeVariant = previousRequestedThemeVariant;
+        }
+    }
+
+    [Fact]
+    public void AppPreferencesSerializer_RoundTripsAppThemeMode()
+    {
+        AppPreferencesDocument document = new()
+        {
+            AppThemeMode = AppThemeMode.Dark,
+            WindowPlacement = new AppWindowPlacement(
+                X: 120,
+                Y: 96,
+                Width: 1024,
+                Height: 720,
+                State: AppWindowState.FullScreen),
+        };
+
+        AppPreferencesDocument restored = AppPreferencesSerializer.FromJson(
+            AppPreferencesSerializer.ToJson(document));
+
+        Assert.Equal(AppThemeMode.Dark, restored.AppThemeMode);
+        Assert.NotNull(restored.WindowPlacement);
+        Assert.Equal(120, restored.WindowPlacement.X);
+        Assert.Equal(96, restored.WindowPlacement.Y);
+        Assert.Equal(1024, restored.WindowPlacement.Width);
+        Assert.Equal(720, restored.WindowPlacement.Height);
+        Assert.Equal(AppWindowState.FullScreen, restored.WindowPlacement.State);
+    }
+
+    [AvaloniaFact]
     public void MainWindow_UsesGeneratedRoyalTerminalWindowIcon()
     {
         MainWindow window = new();
@@ -360,6 +434,103 @@ public class MainWindowViewModelFlowTests
         try
         {
             Assert.NotNull(window.Icon);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task MainWindowController_AppPreferences_LoadsAndSavesAppThemeMode()
+    {
+        InMemoryAppPreferencesStore appPreferencesStore = new(new AppPreferencesDocument
+        {
+            AppThemeMode = AppThemeMode.Light,
+        });
+        MainWindow window = new();
+
+        try
+        {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+            MainWindowController controller = new(
+                window,
+                viewModel,
+                new TerminalModeCapabilityResolver(),
+                TerminalModeResolver.Default,
+                appPreferencesStore: appPreferencesStore);
+
+            controller.LoadAppPreferences();
+
+            Assert.Equal(AppThemeMode.Light, viewModel.SelectedAppThemeMode);
+            Assert.True(viewModel.IsLightAppThemeSelected);
+            Assert.Equal(ThemeVariant.Light, Application.Current?.RequestedThemeVariant);
+
+            await controller.SaveAppPreferencesAsync(AppThemeMode.Dark);
+
+            Assert.Equal(AppThemeMode.Dark, appPreferencesStore.Document.AppThemeMode);
+        }
+        finally
+        {
+            window.Close();
+            if (Application.Current is { } app)
+            {
+                app.RequestedThemeVariant = ThemeVariant.Default;
+            }
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task MainWindowController_AppPreferences_RestoresAndSavesWindowPlacement()
+    {
+        AppWindowPlacement persistedPlacement = new(
+            X: 32,
+            Y: 48,
+            Width: 980,
+            Height: 640,
+            State: AppWindowState.Maximized);
+        InMemoryAppPreferencesStore appPreferencesStore = new(new AppPreferencesDocument
+        {
+            WindowPlacement = persistedPlacement,
+        });
+        MainWindow window = new();
+
+        try
+        {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+            MainWindowController controller = new(
+                window,
+                viewModel,
+                new TerminalModeCapabilityResolver(),
+                TerminalModeResolver.Default,
+                appPreferencesStore: appPreferencesStore);
+
+            controller.LoadAppPreferences();
+
+            Assert.Equal(new PixelPoint(32, 48), window.Position);
+            Assert.Equal(980, window.Width);
+            Assert.Equal(640, window.Height);
+            Assert.Equal(WindowState.Maximized, window.WindowState);
+
+            AppWindowPlacement captured = controller.CaptureWindowPlacement();
+
+            Assert.Equal(AppWindowState.Maximized, captured.State);
+            Assert.Equal(980, captured.Width);
+            Assert.Equal(640, captured.Height);
+
+            await controller.SaveAppPreferencesAsync(new AppWindowPlacement(
+                X: 40,
+                Y: 56,
+                Width: 1100,
+                Height: 700,
+                State: AppWindowState.FullScreen));
+
+            Assert.NotNull(appPreferencesStore.Document.WindowPlacement);
+            Assert.Equal(AppWindowState.FullScreen, appPreferencesStore.Document.WindowPlacement.State);
+            Assert.Equal(1100, appPreferencesStore.Document.WindowPlacement.Width);
+            Assert.Equal(700, appPreferencesStore.Document.WindowPlacement.Height);
         }
         finally
         {
@@ -485,7 +656,7 @@ public class MainWindowViewModelFlowTests
 
             NativeMenuItem shellItem = FindNativeMenuItem(menu, "_Shell");
 
-            Assert.Same(viewModel.NewTabCommand, FindNativeMenuItem(shellItem.Menu!, "_New Tab").Command);
+            Assert.Same(viewModel.NewTabCommand, FindNativeMenuItem(shellItem.Menu!, "_New Tab (Default Profile)").Command);
             Assert.False(ContainsNativeMenuItem(menu, "_RoyalTerminal"));
             Assert.False(ContainsNativeMenuItem(menu, "_About RoyalTerminal"));
             Assert.False(ContainsNativeMenuItem(menu, "_Quit RoyalTerminal"));
@@ -504,6 +675,8 @@ public class MainWindowViewModelFlowTests
 
         try
         {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
             NativeMenu menu = NativeMenu.GetMenu(window)
                 ?? throw new InvalidOperationException("MainWindow native menu was not found.");
 
@@ -512,6 +685,11 @@ public class MainWindowViewModelFlowTests
             foreach (KeyBinding keyBinding in window.KeyBindings)
             {
                 Assert.NotNull(keyBinding.Command);
+                if (ReferenceEquals(keyBinding.Command, viewModel.AcceptCommandSuggestionCommand))
+                {
+                    continue;
+                }
+
                 Assert.True(
                     ContainsNativeMenuCommand(menu, keyBinding.Command),
                     $"Expected key binding '{keyBinding.Gesture}' command to be mirrored in the native menu.");
@@ -579,9 +757,38 @@ public class MainWindowViewModelFlowTests
             MenuItem shellMenuItem = Assert.IsType<MenuItem>(mainMenuBar.Items[0]);
             Assert.NotNull(shellMenuItem.Theme);
             Assert.Equal(popupItemTheme.TargetType, shellMenuItem.Theme!.TargetType);
-            AssertMenuCommand(mainMenuBar, viewModel.NewTabCommand, "_New Tab");
+            AssertMenuCommand(mainMenuBar, viewModel.NewTabCommand, "_New Tab (Default Profile)");
             AssertMenuCommand(mainMenuBar, viewModel.CopySelectionCommand, "_Copy");
             AssertMenuCommand(mainMenuBar, viewModel.ToggleLeftPanelCommand, "Show _Left Panel");
+            AssertMenuCommand(mainMenuBar, viewModel.SelectAppThemeCommand, "_System");
+            AssertMenuCommand(mainMenuBar, viewModel.SelectAppThemeCommand, "_Light");
+            AssertMenuCommand(mainMenuBar, viewModel.SelectAppThemeCommand, "_Dark");
+            AssertMenuCommand(mainMenuBar, viewModel.CloseCurrentPaneCommand, "Close Current Pane");
+            MenuItem managedThemeItem = FindMenuItem(mainMenuBar, "_Theme");
+            Assert.NotNull(managedThemeItem.Icon);
+            MenuItem managedProfileMenuItem = FindMenuItem(mainMenuBar, "New Tab from _Profile");
+            Assert.Equal(viewModel.HasMultipleNonDefaultShellProfiles, managedProfileMenuItem.IsEnabled);
+            MenuItem managedShellItem = FindMenuItem(mainMenuBar, "_Shell");
+            AssertDirectMenuItemOrder(managedShellItem, "_New Tab (Default Profile)", "New Tab from _Profile");
+            AssertDirectMenuItemOrder(managedShellItem, "_Theme", "_Preferences...");
+            AssertDirectMenuItemOrder(managedShellItem, "_Preferences...", "E_xit");
+            MenuItem managedViewItem = FindMenuItem(mainMenuBar, "_View");
+            AssertDirectMenuItemOrder(managedViewItem, "_Reset Font Size", "_Command History");
+            MenuItem managedWindowItem = FindMenuItem(mainMenuBar, "_Window");
+            AssertDirectMenuItemOrder(managedWindowItem, "Split Pane _Down", "Close Current Pane");
+            AssertDirectMenuItemOrder(managedWindowItem, "Close Current Pane", "Focus Pane _Left");
+            MenuItem managedSystemThemeItem = FindMenuItem(mainMenuBar, "_System");
+            MenuItem managedLightThemeItem = FindMenuItem(mainMenuBar, "_Light");
+            MenuItem managedDarkThemeItem = FindMenuItem(mainMenuBar, "_Dark");
+            Assert.Equal(MenuItemToggleType.Radio, managedSystemThemeItem.ToggleType);
+            Assert.Equal(MenuItemToggleType.Radio, managedLightThemeItem.ToggleType);
+            Assert.Equal(MenuItemToggleType.Radio, managedDarkThemeItem.ToggleType);
+            Assert.True(managedSystemThemeItem.IsChecked);
+            Assert.False(managedLightThemeItem.IsChecked);
+            Assert.False(managedDarkThemeItem.IsChecked);
+            Assert.Equal("system", managedSystemThemeItem.CommandParameter);
+            Assert.Equal("light", managedLightThemeItem.CommandParameter);
+            Assert.Equal("dark", managedDarkThemeItem.CommandParameter);
 
             viewModel.IsTabsInTitleBar = true;
 
@@ -603,20 +810,50 @@ public class MainWindowViewModelFlowTests
                 NativeTopLevelHeaders(nativeMenu),
                 MenuFlyoutTopLevelHeaders(flyout));
 
-            AssertMenuFlyoutCommand(flyout, viewModel.NewTabCommand, "_New Tab");
+            AssertMenuFlyoutCommand(flyout, viewModel.NewTabCommand, "_New Tab (Default Profile)");
             AssertMenuFlyoutCommand(flyout, viewModel.CopySelectionCommand, "_Copy");
             AssertMenuFlyoutCommand(flyout, viewModel.ToggleLeftPanelCommand, "Show _Left Panel");
+            AssertMenuFlyoutCommand(flyout, viewModel.SelectAppThemeCommand, "_System");
+            AssertMenuFlyoutCommand(flyout, viewModel.SelectAppThemeCommand, "_Light");
+            AssertMenuFlyoutCommand(flyout, viewModel.SelectAppThemeCommand, "_Dark");
             AssertMenuFlyoutCommand(flyout, viewModel.SelectCaptureFormatCommand, "RoyalTerminal JSON");
             AssertMenuFlyoutCommand(flyout, viewModel.SelectCaptureFormatCommand, "Asciicast v3");
             AssertMenuFlyoutCommand(flyout, viewModel.CycleTabForwardCommand, "_Next Tab");
+            AssertMenuFlyoutCommand(flyout, viewModel.CloseCurrentPaneCommand, "Close Current Pane");
             AssertMenuFlyoutCommand(flyout, viewModel.ShowHyperlinkSampleCommand, "_Hyperlink Sample");
 
+            MenuItem flyoutShellItem = FindMenuFlyoutItem(flyout, "_Shell");
+            AssertDirectMenuItemOrder(flyoutShellItem, "_New Tab (Default Profile)", "New Tab from _Profile");
+            AssertDirectMenuItemOrder(flyoutShellItem, "_Theme", "_Preferences...");
+            AssertDirectMenuItemOrder(flyoutShellItem, "_Preferences...", "E_xit");
+            MenuItem flyoutViewItem = FindMenuFlyoutItem(flyout, "_View");
+            AssertDirectMenuItemOrder(flyoutViewItem, "_Reset Font Size", "_Command History");
+            MenuItem flyoutWindowItem = FindMenuFlyoutItem(flyout, "_Window");
+            AssertDirectMenuItemOrder(flyoutWindowItem, "Split Pane _Down", "Close Current Pane");
+            AssertDirectMenuItemOrder(flyoutWindowItem, "Close Current Pane", "Focus Pane _Left");
+            MenuItem flyoutProfileMenuItem = FindMenuFlyoutItem(flyout, "New Tab from _Profile");
+            Assert.Equal(viewModel.HasMultipleNonDefaultShellProfiles, flyoutProfileMenuItem.IsEnabled);
             MenuItem leftPanelItem = FindMenuFlyoutItem(flyout, "Show _Left Panel");
+            MenuItem systemThemeItem = FindMenuFlyoutItem(flyout, "_System");
+            MenuItem lightThemeItem = FindMenuFlyoutItem(flyout, "_Light");
+            MenuItem darkThemeItem = FindMenuFlyoutItem(flyout, "_Dark");
             MenuItem jsonCaptureItem = FindMenuFlyoutItem(flyout, "RoyalTerminal JSON");
             MenuItem asciicastCaptureItem = FindMenuFlyoutItem(flyout, "Asciicast v3");
 
             Assert.Equal(MenuItemToggleType.CheckBox, leftPanelItem.ToggleType);
             Assert.Equal(viewModel.IsLeftPanelVisible, leftPanelItem.IsChecked);
+            Assert.Equal(MenuItemToggleType.Radio, systemThemeItem.ToggleType);
+            Assert.Equal(MenuItemToggleType.Radio, lightThemeItem.ToggleType);
+            Assert.Equal(MenuItemToggleType.Radio, darkThemeItem.ToggleType);
+            Assert.Equal(viewModel.IsSystemAppThemeSelected, systemThemeItem.IsChecked);
+            Assert.Equal(viewModel.IsLightAppThemeSelected, lightThemeItem.IsChecked);
+            Assert.Equal(viewModel.IsDarkAppThemeSelected, darkThemeItem.IsChecked);
+            Assert.Equal("system", systemThemeItem.CommandParameter);
+            Assert.Equal("light", lightThemeItem.CommandParameter);
+            Assert.Equal("dark", darkThemeItem.CommandParameter);
+            Assert.NotNull(systemThemeItem.Icon);
+            Assert.NotNull(lightThemeItem.Icon);
+            Assert.NotNull(darkThemeItem.Icon);
             Assert.Equal(MenuItemToggleType.Radio, jsonCaptureItem.ToggleType);
             Assert.Equal(MenuItemToggleType.Radio, asciicastCaptureItem.ToggleType);
             Assert.Equal(viewModel.IsRoyalTerminalJsonCaptureFormatSelected, jsonCaptureItem.IsChecked);
@@ -625,8 +862,8 @@ public class MainWindowViewModelFlowTests
             Assert.Equal(TerminalCaptureSessionFormats.AsciicastV3Id, asciicastCaptureItem.CommandParameter);
 
             Assert.Same(
-                FindNativeMenuItem(nativeMenu, "_New Tab").Command,
-                FindMenuFlyoutItem(flyout, "_New Tab").Command);
+                FindNativeMenuItem(nativeMenu, "_New Tab (Default Profile)").Command,
+                FindMenuFlyoutItem(flyout, "_New Tab (Default Profile)").Command);
             Assert.Same(
                 FindNativeMenuItem(nativeMenu, "_Copy").Command,
                 FindMenuFlyoutItem(flyout, "_Copy").Command);
@@ -754,47 +991,54 @@ public class MainWindowViewModelFlowTests
             NativeMenu menu = NativeMenu.GetMenu(window)
                 ?? throw new InvalidOperationException("MainWindow native menu was not found.");
 
-            AssertNativeMenuCommand(menu, viewModel.NewTabCommand, "_New Tab");
+            AssertNativeMenuCommand(menu, viewModel.NewTabCommand, "_New Tab (Default Profile)");
             AssertNativeMenuCommand(menu, viewModel.CloseCurrentTabCommand, "_Close Tab");
             AssertNativeMenuCommand(menu, viewModel.OpenCommandHistoryOverlayCommand, "_Command History");
-            AssertNativeMenuCommand(menu, viewModel.RefreshCommandSuggestionsCommand, "_Refresh Command Suggestions");
-            AssertNativeMenuCommand(menu, viewModel.AcceptCommandSuggestionCommand, "_Insert Selected Suggestion");
-            AssertNativeMenuCommand(menu, viewModel.CloseCommandHistoryOverlayCommand, "Close Command _History");
             AssertNativeMenuCommand(menu, viewModel.SplitPaneRightCommand, "Split Pane _Right");
             AssertNativeMenuCommand(menu, viewModel.SplitPaneDownCommand, "Split Pane _Down");
-            AssertNativeMenuCommand(menu, viewModel.RefreshSessionLauncherCommand, "_Refresh Profiles");
-            AssertNativeMenuCommand(menu, viewModel.LaunchSelectedSessionProfileCommand, "_Launch Selected Profile");
             AssertNativeMenuCommand(menu, viewModel.RestartActiveSessionCommand, "_Restart Session");
             AssertNativeMenuCommand(menu, viewModel.ClearActiveScrollbackCommand, "_Clear Scrollback");
             AssertNativeMenuCommand(menu, viewModel.CopySelectionCommand, "_Copy");
             AssertNativeMenuCommand(menu, viewModel.PasteClipboardCommand, "_Paste");
             AssertNativeMenuCommand(menu, viewModel.SelectAllCommand, "Select _All");
-            AssertNativeMenuCommand(menu, viewModel.ApplySearchCommand, "_Find");
-            AssertNativeMenuCommand(menu, viewModel.NextSearchCommand, "Find _Next");
-            AssertNativeMenuCommand(menu, viewModel.PreviousSearchCommand, "Find _Previous");
-            AssertNativeMenuCommand(menu, viewModel.ClearSearchCommand, "_Clear Search");
+            Assert.False(ContainsNativeMenuItem(menu, "_Find"));
+            Assert.False(ContainsNativeMenuItem(menu, "Find _Next"));
+            Assert.False(ContainsNativeMenuItem(menu, "Find _Previous"));
+            Assert.False(ContainsNativeMenuItem(menu, "_Clear Search"));
             AssertNativeMenuCommand(menu, viewModel.IncreaseFontSizeCommand, "_Increase Font Size");
             AssertNativeMenuCommand(menu, viewModel.DecreaseFontSizeCommand, "_Decrease Font Size");
             AssertNativeMenuCommand(menu, viewModel.ResetFontSizeCommand, "_Reset Font Size");
             AssertNativeMenuCommand(menu, viewModel.ToggleLeftPanelCommand, "Show _Left Panel");
-            AssertNativeMenuCommand(menu, viewModel.ToggleSearchPanelCommand, "Show _Search Panel");
+            AssertNativeMenuCommand(menu, viewModel.ToggleSearchPanelCommand, "Show _Search");
             AssertNativeMenuCommand(menu, viewModel.ToggleStatusBarCommand, "Show Status _Bar");
             AssertNativeMenuCommand(menu, viewModel.ToggleTabsInTitleBarCommand, "Move _Tabs to Title Bar");
-            AssertNativeMenuCommand(menu, viewModel.ToggleThemeCommand, "_Toggle Light Theme");
+            NativeMenuItem appThemeItem = FindNativeMenuItem(menu, "_Theme");
+            Assert.NotNull(appThemeItem.Menu);
+            NativeMenuItem shellMenuItem = FindNativeMenuItem(menu, "_Shell");
+            Assert.NotNull(shellMenuItem.Menu);
+            AssertDirectNativeMenuItemOrder(shellMenuItem.Menu, "_New Tab (Default Profile)", "New Tab from _Profile");
+            AssertDirectNativeMenuItemOrder(shellMenuItem.Menu, "_Theme", "_Preferences...");
+            AssertDirectNativeMenuItemOrder(shellMenuItem.Menu, "_Preferences...", "E_xit");
+            AssertNativeMenuCommand(menu, viewModel.QuitApplicationCommand, "E_xit");
+            NativeMenuItem profileMenuItem = FindNativeMenuItem(menu, "New Tab from _Profile");
+            Assert.Equal(viewModel.HasMultipleNonDefaultShellProfiles, profileMenuItem.IsEnabled);
+            NativeMenuItem viewMenuItem = FindNativeMenuItem(menu, "_View");
+            Assert.NotNull(viewMenuItem.Menu);
+            AssertDirectNativeMenuItemOrder(viewMenuItem.Menu, "_Reset Font Size", "_Command History");
+            AssertNativeMenuCommand(menu, viewModel.SelectAppThemeCommand, "_System");
+            AssertNativeMenuCommand(menu, viewModel.SelectAppThemeCommand, "_Light");
+            AssertNativeMenuCommand(menu, viewModel.SelectAppThemeCommand, "_Dark");
             AssertNativeMenuCommand(menu, viewModel.GenerateThemeCommand, "_Generate Theme");
             AssertNativeMenuCommand(menu, viewModel.PrepareSettingsPanelCommand, "_Preferences...");
-            AssertNativeMenuCommand(menu, viewModel.CloseSettingsPanelCommand, "Close Preferences");
-            Assert.Equal(viewModel.IsSettingsPanelOpen, FindNativeMenuItem(menu, "Preferences _Actions").IsEnabled);
-            AssertNativeMenuCommand(menu, viewModel.SettingsPanelState.NewProfileCommand, "_New Profile");
-            AssertNativeMenuCommand(menu, viewModel.SettingsPanelState.DuplicateProfileCommand, "_Duplicate Profile");
-            AssertNativeMenuCommand(menu, viewModel.SettingsPanelState.DeleteProfileCommand, "_Delete Profile");
-            AssertNativeMenuCommand(menu, viewModel.SettingsPanelState.SetDefaultProfileCommand, "Set _Default Profile");
-            AssertNativeMenuCommand(menu, viewModel.SettingsPanelState.ApplyCommand, "_Apply Settings");
-            AssertNativeMenuCommand(menu, viewModel.SettingsPanelState.SaveCommand, "_Save Settings");
-            AssertNativeMenuCommand(menu, viewModel.SettingsPanelState.BrowseFontFileCommand, "_Browse Font File");
-            AssertNativeMenuCommand(menu, viewModel.SettingsPanelState.AddTextHighlightRuleCommand, "Add Text Highlight _Rule");
             AssertNativeMenuCommand(menu, viewModel.ToggleGhosttyDiagnosticsCommand, "_Diagnostics");
             AssertNativeMenuCommand(menu, viewModel.ClearEventLogCommand, "_Clear Event Log");
+            Assert.False(ContainsNativeMenuItem(menu, "_Refresh Command Suggestions"));
+            Assert.False(ContainsNativeMenuItem(menu, "_Insert Selected Suggestion"));
+            Assert.False(ContainsNativeMenuItem(menu, "Close Command _History"));
+            Assert.False(ContainsNativeMenuItem(menu, "_Refresh Profiles"));
+            Assert.False(ContainsNativeMenuItem(menu, "_Launch Selected Profile"));
+            Assert.False(ContainsNativeMenuItem(menu, "Close Preferences"));
+            Assert.False(ContainsNativeMenuItem(menu, "Preferences _Actions"));
             AssertNativeMenuCommand(menu, viewModel.TogglePreserveScrollbackOnRestartCommand, "_Preserve Scrollback on Restart");
             AssertNativeMenuCommand(menu, viewModel.ToggleSixelGraphicsCommand, "_Sixel Graphics");
             AssertNativeMenuCommand(menu, viewModel.SelectCaptureFormatCommand, "RoyalTerminal JSON");
@@ -809,10 +1053,16 @@ public class MainWindowViewModelFlowTests
             Assert.Equal(
                 TerminalCaptureSessionFormats.AsciicastV3Id,
                 FindNativeMenuItem(menu, "Asciicast v3").CommandParameter);
+            Assert.Equal("system", FindNativeMenuItem(menu, "_System").CommandParameter);
+            Assert.Equal("light", FindNativeMenuItem(menu, "_Light").CommandParameter);
+            Assert.Equal("dark", FindNativeMenuItem(menu, "_Dark").CommandParameter);
+            Assert.Equal(MenuItemToggleType.Radio, FindNativeMenuItem(menu, "_System").ToggleType);
+            Assert.Equal(MenuItemToggleType.Radio, FindNativeMenuItem(menu, "_Light").ToggleType);
+            Assert.Equal(MenuItemToggleType.Radio, FindNativeMenuItem(menu, "_Dark").ToggleType);
             Assert.Equal(MenuItemToggleType.Radio, FindNativeMenuItem(menu, "RoyalTerminal JSON").ToggleType);
             Assert.Equal(MenuItemToggleType.Radio, FindNativeMenuItem(menu, "Asciicast v3").ToggleType);
             Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show _Left Panel").ToggleType);
-            Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show _Search Panel").ToggleType);
+            Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show _Search").ToggleType);
             Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Show Status _Bar").ToggleType);
             Assert.Equal(MenuItemToggleType.CheckBox, FindNativeMenuItem(menu, "Move _Tabs to Title Bar").ToggleType);
             Assert.Equal(
@@ -820,13 +1070,22 @@ public class MainWindowViewModelFlowTests
                 FindNativeMenuItem(menu, "Show _Left Panel").IsChecked);
             Assert.Equal(
                 viewModel.IsSearchPanelVisible,
-                FindNativeMenuItem(menu, "Show _Search Panel").IsChecked);
+                FindNativeMenuItem(menu, "Show _Search").IsChecked);
             Assert.Equal(
                 viewModel.IsStatusBarVisible,
                 FindNativeMenuItem(menu, "Show Status _Bar").IsChecked);
             Assert.Equal(
                 viewModel.IsTabsInTitleBar,
                 FindNativeMenuItem(menu, "Move _Tabs to Title Bar").IsChecked);
+            Assert.Equal(
+                viewModel.IsSystemAppThemeSelected,
+                FindNativeMenuItem(menu, "_System").IsChecked);
+            Assert.Equal(
+                viewModel.IsLightAppThemeSelected,
+                FindNativeMenuItem(menu, "_Light").IsChecked);
+            Assert.Equal(
+                viewModel.IsDarkAppThemeSelected,
+                FindNativeMenuItem(menu, "_Dark").IsChecked);
             Assert.Equal(
                 viewModel.PreserveScrollbackOnRestart,
                 FindNativeMenuItem(menu, "_Preserve Scrollback on Restart").IsChecked);
@@ -841,6 +1100,8 @@ public class MainWindowViewModelFlowTests
                 FindNativeMenuItem(menu, "Asciicast v3").IsChecked);
             AssertNativeMenuCommand(menu, viewModel.CycleTabForwardCommand, "_Next Tab");
             AssertNativeMenuCommand(menu, viewModel.CycleTabBackwardCommand, "_Previous Tab");
+            AssertNativeMenuCommand(menu, viewModel.CloseCurrentPaneCommand, "Close Current Pane");
+            AssertCannotExecuteNativeMenuCommand(menu, "Close Current Pane");
             AssertNativeMenuCommand(menu, viewModel.FocusPaneLeftCommand, "Focus Pane _Left");
             AssertNativeMenuCommand(menu, viewModel.FocusPaneRightCommand, "Focus Pane _Right");
             AssertNativeMenuCommand(menu, viewModel.FocusPaneUpCommand, "Focus Pane _Up");
@@ -1267,7 +1528,7 @@ public class MainWindowViewModelFlowTests
             Border titleBarBrandIcon = FindShellControl<Border>(window, "TitleBarBrandIcon")
                 ?? throw new InvalidOperationException("TitleBarBrandIcon was not found.");
             NativeMenuItem showLeftPanelItem = FindNativeMenuItem(menu, "Show _Left Panel");
-            NativeMenuItem showSearchPanelItem = FindNativeMenuItem(menu, "Show _Search Panel");
+            NativeMenuItem showSearchPanelItem = FindNativeMenuItem(menu, "Show _Search");
             NativeMenuItem showStatusBarItem = FindNativeMenuItem(menu, "Show Status _Bar");
             NativeMenuItem moveTabsItem = FindNativeMenuItem(menu, "Move _Tabs to Title Bar");
 
@@ -1584,6 +1845,63 @@ public class MainWindowViewModelFlowTests
         Assert.NotEqual(activeColor, inactiveColor);
     }
 
+    [Fact]
+    public void WindowPlacementPlatform_CreatePlacement_UsesNativePositionAndClampsSize()
+    {
+        AppWindowPlacement placement = WindowPlacementPlatform.CreatePlacement(
+            new PixelPoint(320, 180),
+            width: 400,
+            height: 300,
+            minWidth: 720,
+            minHeight: 460,
+            AppWindowState.Normal);
+
+        Assert.Equal(320, placement.X);
+        Assert.Equal(180, placement.Y);
+        Assert.Equal(720, placement.Width);
+        Assert.Equal(460, placement.Height);
+        Assert.Equal(AppWindowState.Normal, placement.State);
+    }
+
+    [AvaloniaFact]
+    public void SystemAccentResourceCoordinator_UpdatesTerminalPaneActiveBorderBrush()
+    {
+        MainWindow window = new();
+
+        try
+        {
+            SystemAccentResourceCoordinator coordinator = new(window);
+            Color accentColor = Color.FromRgb(0x22, 0x88, 0xCC);
+
+            coordinator.ApplyAccentResources(accentColor, ThemeVariant.Light);
+
+            SolidColorBrush brush = Assert.IsType<SolidColorBrush>(
+                window.Resources[SystemAccentResourceCoordinator.TerminalPaneActiveBorderBrushKey]);
+            Assert.Equal(SystemAccentResourceCoordinator.GetPaneIndicatorColor(accentColor, ThemeVariant.Light), brush.Color);
+            Assert.Equal(SystemAccentResourceCoordinator.TerminalPaneActiveBorderBrushOpacity, brush.Opacity);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [Fact]
+    public void SystemAccentResourceCoordinator_AdjustsPaneIndicatorColorForAppTheme()
+    {
+        Color accentColor = Color.FromRgb(0x22, 0x88, 0xCC);
+
+        Color lightThemeIndicator = SystemAccentResourceCoordinator.GetPaneIndicatorColor(accentColor, ThemeVariant.Light);
+        Color darkThemeIndicator = SystemAccentResourceCoordinator.GetPaneIndicatorColor(accentColor, ThemeVariant.Dark);
+
+        Assert.True(lightThemeIndicator.R < accentColor.R);
+        Assert.True(lightThemeIndicator.G < accentColor.G);
+        Assert.True(lightThemeIndicator.B < accentColor.B);
+        Assert.True(darkThemeIndicator.R > accentColor.R);
+        Assert.True(darkThemeIndicator.G > accentColor.G);
+        Assert.True(darkThemeIndicator.B > accentColor.B);
+    }
+
     [AvaloniaFact]
     public void MainWindowBackdropCoordinator_MirrorsActualMicaState()
     {
@@ -1606,6 +1924,49 @@ public class MainWindowViewModelFlowTests
             coordinator.UpdateBackdropState(WindowTransparencyLevel.Blur);
 
             Assert.False(viewModel.IsMicaBackdropEnabled);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void MainWindowBackdropCoordinator_DisablesMicaTransparencyWhileWindowIsInactive()
+    {
+        MainWindow window = new()
+        {
+            Width = 720,
+            Height = 460,
+        };
+
+        try
+        {
+            MainWindowViewModel viewModel = window.ViewModel
+                ?? throw new InvalidOperationException("MainWindow view model was not initialized.");
+            MainWindowBackdropCoordinator coordinator = new(window, viewModel);
+
+            coordinator.UpdateBackdropState(WindowTransparencyLevel.Mica);
+
+            Assert.True(viewModel.IsMicaBackdropEnabled);
+
+            coordinator.ApplyWindowActivationState(false);
+
+            Assert.False(viewModel.IsMicaBackdropEnabled);
+            if (MainWindowBackdropCoordinator.IsMicaSupportedByCurrentPlatform)
+            {
+                Assert.Equal([WindowTransparencyLevel.None], window.TransparencyLevelHint);
+            }
+
+            coordinator.ApplyWindowActivationState(true);
+
+            if (MainWindowBackdropCoordinator.IsMicaSupportedByCurrentPlatform)
+            {
+                Assert.Contains(WindowTransparencyLevel.Mica, window.TransparencyLevelHint);
+                Assert.Contains(WindowTransparencyLevel.AcrylicBlur, window.TransparencyLevelHint);
+                Assert.Contains(WindowTransparencyLevel.Blur, window.TransparencyLevelHint);
+                Assert.DoesNotContain(WindowTransparencyLevel.None, window.TransparencyLevelHint);
+            }
         }
         finally
         {
@@ -1778,6 +2139,7 @@ public class MainWindowViewModelFlowTests
         List<TerminalPaneSplitRequest> splitRequests = [];
         List<TerminalPaneDirection> focusRequests = [];
         List<TerminalPaneDirection> resizeRequests = [];
+        int closeRequests = 0;
         using IDisposable splitRegistration = viewModel.SplitPaneInteraction.RegisterHandler(context =>
         {
             splitRequests.Add(context.Input);
@@ -1793,6 +2155,13 @@ public class MainWindowViewModelFlowTests
             resizeRequests.Add(context.Input);
             context.SetOutput(Unit.Default);
         });
+        using IDisposable closeRegistration = viewModel.CloseCurrentPaneInteraction.RegisterHandler(context =>
+        {
+            closeRequests++;
+            context.SetOutput(Unit.Default);
+        });
+
+        AssertCannotExecuteNativeMenuCommand(viewModel.CloseCurrentPaneCommand);
 
         viewModel.SplitPaneRightCommand.Execute().Wait();
         viewModel.SplitPaneDownCommand.Execute().Wait();
@@ -1804,6 +2173,8 @@ public class MainWindowViewModelFlowTests
         viewModel.ResizePaneRightCommand.Execute().Wait();
         viewModel.ResizePaneUpCommand.Execute().Wait();
         viewModel.ResizePaneDownCommand.Execute().Wait();
+        viewModel.SetCanCloseCurrentPane(true);
+        viewModel.CloseCurrentPaneCommand.Execute().Wait();
 
         Assert.Equal([TerminalPaneSplitRequest.Right, TerminalPaneSplitRequest.Down], splitRequests);
         Assert.Equal(
@@ -1812,6 +2183,7 @@ public class MainWindowViewModelFlowTests
         Assert.Equal(
             [TerminalPaneDirection.Left, TerminalPaneDirection.Right, TerminalPaneDirection.Up, TerminalPaneDirection.Down],
             resizeRequests);
+        Assert.Equal(1, closeRequests);
     }
 
     [Fact]
@@ -2212,6 +2584,48 @@ public class MainWindowViewModelFlowTests
     }
 
     [Fact]
+    public void AppThemeSelection_SelectAppThemeCommand_UpdatesSelectedModeAndRaisesInteraction()
+    {
+        MainWindowViewModel viewModel = new();
+        List<AppThemeMode> appliedModes = [];
+
+        using var registration = viewModel.ApplyAppThemeInteraction.RegisterHandler(context =>
+        {
+            appliedModes.Add(context.Input);
+            context.SetOutput(Unit.Default);
+        });
+
+        Assert.Equal(AppThemeMode.System, viewModel.SelectedAppThemeMode);
+        Assert.True(viewModel.IsSystemAppThemeSelected);
+        Assert.False(viewModel.IsLightAppThemeSelected);
+        Assert.False(viewModel.IsDarkAppThemeSelected);
+
+        viewModel.SelectAppThemeCommand.Execute("light").Wait();
+
+        Assert.Equal(AppThemeMode.Light, viewModel.SelectedAppThemeMode);
+        Assert.False(viewModel.IsSystemAppThemeSelected);
+        Assert.True(viewModel.IsLightAppThemeSelected);
+        Assert.False(viewModel.IsDarkAppThemeSelected);
+
+        viewModel.SelectAppThemeCommand.Execute("dark").Wait();
+
+        Assert.Equal(AppThemeMode.Dark, viewModel.SelectedAppThemeMode);
+        Assert.False(viewModel.IsSystemAppThemeSelected);
+        Assert.False(viewModel.IsLightAppThemeSelected);
+        Assert.True(viewModel.IsDarkAppThemeSelected);
+
+        viewModel.SelectAppThemeCommand.Execute("system").Wait();
+
+        Assert.Equal(AppThemeMode.System, viewModel.SelectedAppThemeMode);
+        Assert.True(viewModel.IsSystemAppThemeSelected);
+        Assert.False(viewModel.IsLightAppThemeSelected);
+        Assert.False(viewModel.IsDarkAppThemeSelected);
+        Assert.Equal(
+            [AppThemeMode.Light, AppThemeMode.Dark, AppThemeMode.System],
+            appliedModes);
+    }
+
+    [Fact]
     public void SessionTransport_DefaultsToPtyAndShowsLocalConfig()
     {
         MainWindowViewModel viewModel = new();
@@ -2431,13 +2845,41 @@ public class MainWindowViewModelFlowTests
         MainWindowViewModel viewModel = new();
         viewModel.SetShellProfiles(
         [
+            new ShellProfileOption("default", "Default shell", string.Empty),
             new ShellProfileOption("zsh", "Zsh", "/bin/zsh"),
             new ShellProfileOption("bash", "Bash", "/bin/bash"),
         ]);
 
         Assert.NotNull(viewModel.SelectedShellProfile);
-        Assert.Equal("zsh", viewModel.SelectedShellProfile!.Id);
-        Assert.Equal(2, viewModel.ShellProfiles.Count);
+        Assert.Equal("default", viewModel.SelectedShellProfile!.Id);
+        Assert.Equal(3, viewModel.ShellProfiles.Count);
+        Assert.Equal(["zsh", "bash"], viewModel.NonDefaultShellProfiles.Select(static profile => profile.Id));
+        Assert.True(viewModel.HasMultipleNonDefaultShellProfiles);
+    }
+
+    [Fact]
+    public void CreateNewTabFromProfileCommand_RoutesParameterizedShellProfile()
+    {
+        MainWindowViewModel viewModel = new();
+        List<string> createdProfileIds = [];
+        viewModel.SetShellProfiles(
+        [
+            new ShellProfileOption("default", "Default shell", string.Empty),
+            new ShellProfileOption("zsh", "Zsh", "/bin/zsh"),
+            new ShellProfileOption("bash", "Bash", "/bin/bash"),
+        ]);
+
+        using IDisposable registration = viewModel.CreateNewTabFromProfileInteraction.RegisterHandler(context =>
+        {
+            createdProfileIds.Add(context.Input);
+            context.SetOutput(Unit.Default);
+        });
+
+        viewModel.CreateNewTabFromProfileCommand.Execute(viewModel.NonDefaultShellProfiles[0]).Wait();
+        viewModel.CreateNewTabFromProfileCommand.Execute("bash").Wait();
+        viewModel.CreateNewTabFromProfileCommand.Execute("missing").Wait();
+
+        Assert.Equal(["zsh", "bash"], createdProfileIds);
     }
 
     [Fact]
@@ -3029,6 +3471,22 @@ public class MainWindowViewModelFlowTests
         return false;
     }
 
+    private static void AssertDirectMenuItemOrder(MenuItem parent, string earlierHeader, string laterHeader)
+    {
+        string[] headers = parent.Items
+            .OfType<MenuItem>()
+            .Select(static item => Convert.ToString(item.Header, CultureInfo.InvariantCulture) ?? string.Empty)
+            .ToArray();
+
+        int earlierIndex = Array.IndexOf(headers, earlierHeader);
+        int laterIndex = Array.IndexOf(headers, laterHeader);
+        Assert.True(earlierIndex >= 0, $"Expected direct menu item '{earlierHeader}' under '{parent.Header}'.");
+        Assert.True(laterIndex >= 0, $"Expected direct menu item '{laterHeader}' under '{parent.Header}'.");
+        Assert.True(
+            earlierIndex < laterIndex,
+            $"Expected '{earlierHeader}' to appear before '{laterHeader}' under '{parent.Header}'.");
+    }
+
     private static NativeMenuItem FindNativeMenuItem(NativeMenu menu, string header)
     {
         foreach (NativeMenuItemBase itemBase in menu.Items)
@@ -3057,6 +3515,22 @@ public class MainWindowViewModelFlowTests
         }
 
         throw new InvalidOperationException($"Native menu item '{header}' was not found.");
+    }
+
+    private static void AssertDirectNativeMenuItemOrder(NativeMenu menu, string earlierHeader, string laterHeader)
+    {
+        string[] headers = menu.Items
+            .OfType<NativeMenuItem>()
+            .Select(static item => Convert.ToString(item.Header, CultureInfo.InvariantCulture) ?? string.Empty)
+            .ToArray();
+
+        int earlierIndex = Array.IndexOf(headers, earlierHeader);
+        int laterIndex = Array.IndexOf(headers, laterHeader);
+        Assert.True(earlierIndex >= 0, $"Expected direct native menu item '{earlierHeader}'.");
+        Assert.True(laterIndex >= 0, $"Expected direct native menu item '{laterHeader}'.");
+        Assert.True(
+            earlierIndex < laterIndex,
+            $"Expected '{earlierHeader}' to appear before '{laterHeader}' in the native menu.");
     }
 
     private static void AssertNativeMenuCommand(NativeMenu menu, object command, string header)
@@ -3198,5 +3672,23 @@ public class MainWindowViewModelFlowTests
         window.Show();
         window.Focus();
         return window;
+    }
+
+    private sealed class InMemoryAppPreferencesStore(AppPreferencesDocument document) : IAppPreferencesStore
+    {
+        public AppPreferencesDocument Document { get; private set; } = document;
+
+        public ValueTask<AppPreferencesDocument> LoadAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(Document);
+        }
+
+        public ValueTask SaveAsync(AppPreferencesDocument document, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Document = document;
+            return ValueTask.CompletedTask;
+        }
     }
 }

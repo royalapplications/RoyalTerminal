@@ -9,11 +9,15 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Styling;
 
 namespace RoyalTerminal.Avalonia.App.Services;
 
 internal static class RoyalTerminalWindowIconHelper
 {
+    private static readonly Color LightThemeForeground = Color.FromRgb(0x1F, 0x29, 0x37);
+    private static readonly Color DarkThemeForeground = Colors.White;
+
     private const string RoyalTerminalLogoPathData = """
         M5.522 19.586c-1.176 0 -2.128 -0.953 -2.128 -2.128V6.579c0 -1.176 0.953 -2.128 2.128 -2.128h11.824c1.176 0 2.128 0.953 2.128 2.128v8.122c0.534 -0.358 1.013 -0.679 1.419 -0.951v-7.171c0 -1.959 -1.588 -3.547 -3.547 -3.547H5.522c-1.959 0 -3.547 1.588 -3.547 3.547v10.878c0 1.959 1.588 3.547 3.547 3.547h2.49c-0.124 -0.329 -0.291 -0.785 -0.52 -1.419h-1.969Z
         M5.091 11.827c0.139 0.148 0.327 0.222 0.516 0.222 0.175 0 0.35 -0.064 0.487 -0.194l2.306 -2.201c0.142 -0.134 0.222 -0.321 0.222 -0.516s-0.08 -0.382 -0.222 -0.516l-2.306 -2.201c-0.285 -0.27 -0.734 -0.256 -1.003 0.028 -0.27 0.285 -0.256 0.734 0.028 1.004l1.759 1.686 -1.759 1.686c-0.285 0.269 -0.298 0.718 -0.028 1.003Z
@@ -27,16 +31,31 @@ internal static class RoyalTerminalWindowIconHelper
 
     public static WindowIcon CreateWindowIcon()
     {
-        return new WindowIcon(new MemoryStream(CreateIcoBytes(), writable: false));
+        return CreateWindowIcon(LightThemeForeground);
+    }
+
+    public static WindowIcon CreateThemedWindowIcon(ThemeVariant themeVariant)
+    {
+        return CreateWindowIcon(GetForegroundColor(themeVariant));
+    }
+
+    public static WindowIcon CreateWindowIcon(Color foregroundColor)
+    {
+        return new WindowIcon(new MemoryStream(CreateIcoBytes(foregroundColor), writable: false));
     }
 
     public static byte[] CreateIcoBytes()
+    {
+        return CreateIcoBytes(DarkThemeForeground);
+    }
+
+    public static byte[] CreateIcoBytes(Color foregroundColor)
     {
         var frames = new List<byte[]>(IconSizes.Length);
 
         foreach (int size in IconSizes)
         {
-            frames.Add(RenderLogoPngFrame(size));
+            frames.Add(RenderLogoPngFrame(size, foregroundColor));
         }
 
         using var stream = new MemoryStream();
@@ -74,14 +93,27 @@ internal static class RoyalTerminalWindowIconHelper
 
     public static string CreateLogoSvg()
     {
+        return CreateLogoSvg(DarkThemeForeground);
+    }
+
+    public static string CreateLogoSvg(Color foregroundColor)
+    {
+        string fill = $"#{foregroundColor.R:X2}{foregroundColor.G:X2}{foregroundColor.B:X2}";
         return $"""
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-              <path fill="#ffffff" d="{RoyalTerminalLogoPathData}" />
+              <path fill="{fill}" d="{RoyalTerminalLogoPathData}" />
             </svg>
             """;
     }
 
-    private static byte[] RenderLogoPngFrame(int size)
+    internal static Color GetForegroundColor(ThemeVariant? themeVariant)
+    {
+        return themeVariant == ThemeVariant.Dark
+            ? DarkThemeForeground
+            : LightThemeForeground;
+    }
+
+    private static byte[] RenderLogoPngFrame(int size, Color foregroundColor)
     {
         StreamGeometry geometry = StreamGeometry.Parse(RoyalTerminalLogoPathData);
         Rect bounds = geometry.Bounds;
@@ -97,7 +129,8 @@ internal static class RoyalTerminalWindowIconHelper
         using (DrawingContext context = bitmap.CreateDrawingContext())
         using (context.PushTransform(transform))
         {
-            context.DrawGeometry(Brushes.White, null, geometry);
+            var brush = new SolidColorBrush(foregroundColor);
+            context.DrawGeometry(brush, null, geometry);
         }
 
         using var stream = new MemoryStream();

@@ -48,6 +48,23 @@ public static class TerminalPaneLayout
     }
 
     /// <summary>
+    /// Creates the default visual container used to host a terminal pane leaf.
+    /// </summary>
+    /// <param name="terminal">Terminal control hosted by the pane container.</param>
+    /// <returns>A pane container wrapping the terminal scroll viewer.</returns>
+    public static Border CreatePaneContainer(TerminalControl terminal)
+    {
+        ArgumentNullException.ThrowIfNull(terminal);
+
+        Border container = new()
+        {
+            Child = CreatePaneScrollViewer(terminal),
+        };
+        container.Classes.Add("terminalPane");
+        return container;
+    }
+
+    /// <summary>
     /// Creates a split grid with two child visuals and a splitter between them.
     /// </summary>
     /// <param name="orientation">Split orientation.</param>

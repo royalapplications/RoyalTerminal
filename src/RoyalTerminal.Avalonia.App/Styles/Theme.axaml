@@ -10,40 +10,80 @@
   <CornerRadius x:Key="Shell.Radius.Small">4</CornerRadius>
   <CornerRadius x:Key="Shell.Radius.Medium">6</CornerRadius>
   <CornerRadius x:Key="Shell.Radius.Large">8</CornerRadius>
+  <SolidColorBrush x:Key="TerminalPaneActiveBorderBrush" Color="#0078D4" Opacity="0.5" />
 
-  <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#111317" />
-  <SolidColorBrush x:Key="ToolbarBackgroundBrush" Color="#1B1E24" />
-  <SolidColorBrush x:Key="ToolbarDividerBrush" Color="#343A46" />
-  <SolidColorBrush x:Key="ToolbarForegroundBrush" Color="#D8DEE9" />
-  <SolidColorBrush x:Key="TabStripBackgroundBrush" Color="#16191E" />
-  <SolidColorBrush x:Key="StatusBarBackgroundBrush" Color="#1B1E24" />
-  <SolidColorBrush x:Key="StatusBarForegroundBrush" Color="#F4F8FB" />
+  <ResourceDictionary.ThemeDictionaries>
+    <ResourceDictionary x:Key="Light">
+      <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F5F7FB" />
+      <SolidColorBrush x:Key="ToolbarBackgroundBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="ToolbarDividerBrush" Color="#D6DAE2" />
+      <SolidColorBrush x:Key="ToolbarForegroundBrush" Color="#1F2937" />
+      <SolidColorBrush x:Key="TabStripBackgroundBrush" Color="#EEF2F7" />
+      <SolidColorBrush x:Key="StatusBarBackgroundBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="StatusBarForegroundBrush" Color="#1F2937" />
 
-  <SolidColorBrush x:Key="ShellSurfaceRaisedBrush" Color="#242832" />
-  <SolidColorBrush x:Key="ShellSurfaceSubtleBrush" Color="#1F232B" />
-  <SolidColorBrush x:Key="ShellSurfaceHoverBrush" Color="#2C3340" />
-  <SolidColorBrush x:Key="ShellSurfacePressedBrush" Color="#384252" />
-  <SolidColorBrush x:Key="ShellTextMutedBrush" Color="#96A0AE" />
-  <SolidColorBrush x:Key="ShellTextSubtleBrush" Color="#6F7A89" />
-  <SolidColorBrush x:Key="ShellAccentBrush" Color="#4FB7FF" />
-  <SolidColorBrush x:Key="ShellSuccessBrush" Color="#68D391" />
-  <SolidColorBrush x:Key="ShellWarningBrush" Color="#F2C94C" />
-  <SolidColorBrush x:Key="ShellDangerBrush" Color="#FF6B6B" />
-  <SolidColorBrush x:Key="ShellScrimBrush" Color="#CC06080C" />
+      <SolidColorBrush x:Key="ShellSurfaceRaisedBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="ShellSurfaceSubtleBrush" Color="#EDF1F7" />
+      <SolidColorBrush x:Key="ShellSurfaceHoverBrush" Color="#E3E9F2" />
+      <SolidColorBrush x:Key="ShellSurfacePressedBrush" Color="#D6DEEA" />
+      <SolidColorBrush x:Key="ShellTextMutedBrush" Color="#5D6675" />
+      <SolidColorBrush x:Key="ShellTextSubtleBrush" Color="#7A8494" />
+      <SolidColorBrush x:Key="ShellAccentBrush" Color="#0078D4" />
+      <SolidColorBrush x:Key="ShellSuccessBrush" Color="#107C41" />
+      <SolidColorBrush x:Key="ShellWarningBrush" Color="#986F0B" />
+      <SolidColorBrush x:Key="ShellDangerBrush" Color="#C50F1F" />
+      <SolidColorBrush x:Key="ShellScrimBrush" Color="#66000000" />
 
-  <SolidColorBrush x:Key="SettingsOverlayBackgroundBrush" Color="#202631" />
-  <SolidColorBrush x:Key="TerminalSettings.Panel.BackgroundBrush" Color="#00000000" />
-  <SolidColorBrush x:Key="TerminalSettings.Panel.ContentBackgroundBrush" Color="#00000000" />
-  <SolidColorBrush x:Key="TerminalSettings.Panel.BorderBrush" Color="#00000000" />
-  <SolidColorBrush x:Key="TerminalSettings.Panel.DividerBrush" Color="#394250" />
-  <SolidColorBrush x:Key="TerminalSettings.Panel.SecondaryTextBrush" Color="#AEB7C5" />
-  <SolidColorBrush x:Key="TerminalSettings.Panel.SubtleTextBrush" Color="#8490A1" />
-  <SolidColorBrush x:Key="TerminalSettings.Panel.CardBorderBrush" Color="#3C4654" />
+      <SolidColorBrush x:Key="SettingsOverlayBackgroundBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.BackgroundBrush" Color="#00000000" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.ContentBackgroundBrush" Color="#00000000" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.BorderBrush" Color="#00000000" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.DividerBrush" Color="#D6DAE2" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.SecondaryTextBrush" Color="#4B5563" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.SubtleTextBrush" Color="#6B7280" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.CardBorderBrush" Color="#CBD5E1" />
 
-  <SolidColorBrush x:Key="TabHeaderBackgroundBrush" Color="#2D2D2D" />
-  <SolidColorBrush x:Key="TabHeaderForegroundBrush" Color="#969696" />
-  <SolidColorBrush x:Key="TabHeaderActiveBackgroundBrush" Color="#222936" />
-  <SolidColorBrush x:Key="TabHeaderActiveForegroundBrush" Color="#F4F8FB" />
+      <SolidColorBrush x:Key="TabHeaderBackgroundBrush" Color="#E7ECF4" />
+      <SolidColorBrush x:Key="TabHeaderForegroundBrush" Color="#4B5563" />
+      <SolidColorBrush x:Key="TabHeaderActiveBackgroundBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="TabHeaderActiveForegroundBrush" Color="#111827" />
+    </ResourceDictionary>
+    <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#111317" />
+      <SolidColorBrush x:Key="ToolbarBackgroundBrush" Color="#1B1E24" />
+      <SolidColorBrush x:Key="ToolbarDividerBrush" Color="#343A46" />
+      <SolidColorBrush x:Key="ToolbarForegroundBrush" Color="#D8DEE9" />
+      <SolidColorBrush x:Key="TabStripBackgroundBrush" Color="#16191E" />
+      <SolidColorBrush x:Key="StatusBarBackgroundBrush" Color="#1B1E24" />
+      <SolidColorBrush x:Key="StatusBarForegroundBrush" Color="#F4F8FB" />
+
+      <SolidColorBrush x:Key="ShellSurfaceRaisedBrush" Color="#242832" />
+      <SolidColorBrush x:Key="ShellSurfaceSubtleBrush" Color="#1F232B" />
+      <SolidColorBrush x:Key="ShellSurfaceHoverBrush" Color="#2C3340" />
+      <SolidColorBrush x:Key="ShellSurfacePressedBrush" Color="#384252" />
+      <SolidColorBrush x:Key="ShellTextMutedBrush" Color="#96A0AE" />
+      <SolidColorBrush x:Key="ShellTextSubtleBrush" Color="#6F7A89" />
+      <SolidColorBrush x:Key="ShellAccentBrush" Color="#4FB7FF" />
+      <SolidColorBrush x:Key="ShellSuccessBrush" Color="#68D391" />
+      <SolidColorBrush x:Key="ShellWarningBrush" Color="#F2C94C" />
+      <SolidColorBrush x:Key="ShellDangerBrush" Color="#FF6B6B" />
+      <SolidColorBrush x:Key="ShellScrimBrush" Color="#CC06080C" />
+
+      <SolidColorBrush x:Key="SettingsOverlayBackgroundBrush" Color="#202631" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.BackgroundBrush" Color="#00000000" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.ContentBackgroundBrush" Color="#00000000" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.BorderBrush" Color="#00000000" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.DividerBrush" Color="#394250" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.SecondaryTextBrush" Color="#AEB7C5" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.SubtleTextBrush" Color="#8490A1" />
+      <SolidColorBrush x:Key="TerminalSettings.Panel.CardBorderBrush" Color="#3C4654" />
+
+      <SolidColorBrush x:Key="TabHeaderBackgroundBrush" Color="#2D2D2D" />
+      <SolidColorBrush x:Key="TabHeaderForegroundBrush" Color="#969696" />
+      <SolidColorBrush x:Key="TabHeaderActiveBackgroundBrush" Color="#222936" />
+      <SolidColorBrush x:Key="TabHeaderActiveForegroundBrush" Color="#F4F8FB" />
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
 
   <!-- RoyalTerminal logo plus Fluent UI System Icons, 24 regular paths. -->
   <StreamGeometry x:Key="Icon.RoyalTerminalLogo">
@@ -54,6 +94,9 @@
     M11.975 17.215c0 -0.118 -0.214 -0.257 -0.214 -0.257l-0.394 -0.265 -3.429 -2.302s-0.125 -0.105 -0.206 -0.105c-0.089 0 -0.162 0.073 -0.162 0.163h0c0 0.036 0.012 0.069 0.027 0.1 0 0 0.009 0.025 0.026 0.071 0.033 0.092 0.097 0.271 0.183 0.511 0.086 0.24 0.194 0.541 0.315 0.88 0.121 0.339 0.256 0.714 0.395 1.102 0.209 0.582 0.429 1.193 0.629 1.749 0.093 0.258 0.179 0.497 0.261 0.724 0.036 0.099 0.073 0.202 0.106 0.292 0.053 0.147 0.102 0.282 0.146 0.403 0.045 0.124 0.085 0.233 0.118 0.322 0.065 0.177 0.105 0.281 0.11 0.287 0.017 0.05 0.066 0.068 0.117 0.073 0.006 0 0.007 0.008 0.013 0.008 0.028 0 0.057 -0.006 0.083 -0.018 0.019 -0.009 0.034 -0.015 0.052 -0.029s0.04 -0.037 0.072 -0.077l0.615 -1.26 1.042 -2.135s0.093 -0.149 0.093 -0.236Z
     M9.211 12.019h4.257c0.071 0 0.135 -0.021 0.2 -0.04 0.292 -0.088 0.51 -0.348 0.51 -0.669 0 -0.014 -0.007 -0.026 -0.008 -0.041 -0.022 -0.372 -0.324 -0.669 -0.701 -0.669h-4.257c-0.392 0 -0.709 0.318 -0.709 0.709s0.318 0.709 0.709 0.709Z
   </StreamGeometry>
+  <StreamGeometry x:Key="Icon.DarkThemeRegular">M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM12 20.5V3.5C16.6944 3.5 20.5 7.30558 20.5 12C20.5 16.6944 16.6944 20.5 12 20.5Z</StreamGeometry>
+  <StreamGeometry x:Key="Icon.WeatherSunnyRegular">M12 2C12.4142 2 12.75 2.33579 12.75 2.75V4.25C12.75 4.66421 12.4142 5 12 5C11.5858 5 11.25 4.66421 11.25 4.25V2.75C11.25 2.33579 11.5858 2 12 2ZM12 17C14.7614 17 17 14.7614 17 12C17 9.23858 14.7614 7 12 7C9.23858 7 7 9.23858 7 12C7 14.7614 9.23858 17 12 17ZM12 15.5C10.067 15.5 8.5 13.933 8.5 12C8.5 10.067 10.067 8.5 12 8.5C13.933 8.5 15.5 10.067 15.5 12C15.5 13.933 13.933 15.5 12 15.5ZM21.25 12.75C21.6642 12.75 22 12.4142 22 12C22 11.5858 21.6642 11.25 21.25 11.25H19.75C19.3358 11.25 19 11.5858 19 12C19 12.4142 19.3358 12.75 19.75 12.75H21.25ZM12 19C12.4142 19 12.75 19.3358 12.75 19.75V21.25C12.75 21.6642 12.4142 22 12 22C11.5858 22 11.25 21.6642 11.25 21.25V19.75C11.25 19.3358 11.5858 19 12 19ZM4.25 12.75C4.66421 12.75 5 12.4142 5 12C5 11.5858 4.66421 11.25 4.25 11.25H2.75C2.33579 11.25 2 11.5858 2 12C2 12.4142 2.33579 12.75 2.75 12.75H4.25ZM4.21967 4.22004C4.51256 3.92715 4.98744 3.92715 5.28033 4.22004L6.78033 5.72004C7.07322 6.01294 7.07322 6.48781 6.78033 6.7807C6.48744 7.0736 6.01256 7.0736 5.71967 6.7807L4.21967 5.2807C3.92678 4.98781 3.92678 4.51294 4.21967 4.22004ZM5.28033 19.7807C4.98744 20.0736 4.51256 20.0736 4.21967 19.7807C3.92678 19.4878 3.92678 19.0129 4.21967 18.72L5.71967 17.22C6.01256 16.9271 6.48744 16.9271 6.78033 17.22C7.07322 17.5129 7.07322 17.9878 6.78033 18.2807L5.28033 19.7807ZM19.7803 4.22004C19.4874 3.92715 19.0126 3.92715 18.7197 4.22004L17.2197 5.72004C16.9268 6.01294 16.9268 6.48781 17.2197 6.7807C17.5126 7.0736 17.9874 7.0736 18.2803 6.7807L19.7803 5.2807C20.0732 4.98781 20.0732 4.51294 19.7803 4.22004ZM18.7197 19.7807C19.0126 20.0736 19.4874 20.0736 19.7803 19.7807C20.0732 19.4878 20.0732 19.0129 19.7803 18.72L18.2803 17.22C17.9874 16.9271 17.5126 16.9271 17.2197 17.22C16.9268 17.5129 16.9268 17.9878 17.2197 18.2807L18.7197 19.7807Z</StreamGeometry>
+  <StreamGeometry x:Key="Icon.WeatherMoonFilled">M20.0258 17.0014C17.2639 21.7851 11.1471 23.4241 6.3634 20.6622C5.06068 19.9101 3.964 18.8926 3.12872 17.6797C2.84945 17.2741 3.0301 16.7141 3.49369 16.5482C7.26112 15.1997 9.27892 13.6372 10.4498 11.4021C11.6825 9.04908 12.001 6.47162 11.1387 2.93862C11.0195 2.45008 11.4053 1.98492 11.9075 2.01186C13.4645 2.09539 14.9856 2.54263 16.3649 3.33903C21.1486 6.10088 22.7876 12.2177 20.0258 17.0014Z</StreamGeometry>
   <StreamGeometry x:Key="Icon.NavigationRegular">M3.75 6.5C3.33579 6.5 3 6.16421 3 5.75C3 5.33579 3.33579 5 3.75 5H20.25C20.6642 5 21 5.33579 21 5.75C21 6.16421 20.6642 6.5 20.25 6.5H3.75ZM3.75 12.75C3.33579 12.75 3 12.4142 3 12C3 11.5858 3.33579 11.25 3.75 11.25H20.25C20.6642 11.25 21 11.5858 21 12C21 12.4142 20.6642 12.75 20.25 12.75H3.75ZM3 18.25C3 18.6642 3.33579 19 3.75 19H20.25C20.6642 19 21 18.6642 21 18.25C21 17.8358 20.6642 17.5 20.25 17.5H3.75C3.33579 17.5 3 17.8358 3 18.25Z</StreamGeometry>
   <StreamGeometry x:Key="Icon.AddRegular">M12 3.25C12.4142 3.25 12.75 3.58579 12.75 4V11.25H20C20.4142 11.25 20.75 11.5858 20.75 12C20.75 12.4142 20.4142 12.75 20 12.75H12.75V20C12.75 20.4142 12.4142 20.75 12 20.75C11.5858 20.75 11.25 20.4142 11.25 20V12.75H4C3.58579 12.75 3.25 12.4142 3.25 12C3.25 11.5858 3.58579 11.25 4 11.25H11.25V4C11.25 3.58579 11.5858 3.25 12 3.25Z</StreamGeometry>
   <StreamGeometry x:Key="Icon.AddSquareMultipleRegular">M5.25 3C4.00736 3 3 4.00736 3 5.25V16.25C3 17.4926 4.00736 18.5 5.25 18.5H16.25C17.4926 18.5 18.5 17.4926 18.5 16.25V5.25C18.5 4.00736 17.4926 3 16.25 3H5.25ZM4.5 5.25C4.5 4.83579 4.83579 4.5 5.25 4.5H16.25C16.6642 4.5 17 4.83579 17 5.25V16.25C17 16.6642 16.6642 17 16.25 17H5.25C4.83579 17 4.5 16.6642 4.5 16.25V5.25ZM7.75002 20.9999C6.77036 20.9999 5.93693 20.3738 5.62805 19.4999H16.25C18.0449 19.4999 19.5 18.0448 19.5 16.2499V5.62793C20.3739 5.93681 21 6.77024 21 7.7499V16.2499C21 18.8733 18.8734 20.9999 16.25 20.9999H7.75002ZM10.75 6.5C11.1642 6.5 11.5 6.83579 11.5 7.25V10H14.25C14.6642 10 15 10.3358 15 10.75C15 11.1642 14.6642 11.5 14.25 11.5H11.5V14.25C11.5 14.6642 11.1642 15 10.75 15C10.3358 15 10 14.6642 10 14.25V11.5H7.25C6.83579 11.5 6.5 11.1642 6.5 10.75C6.5 10.3358 6.83579 10 7.25 10H10V7.25C10 6.83579 10.3358 6.5 10.75 6.5Z</StreamGeometry>

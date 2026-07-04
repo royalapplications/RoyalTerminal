@@ -34,6 +34,16 @@
     <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
   </Style>
 
+  <Style Selector="Border.terminalPane">
+    <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+
+  <Style Selector="Border.terminalPane.activePane">
+    <Setter Property="BorderBrush" Value="{DynamicResource TerminalPaneActiveBorderBrush}" />
+  </Style>
+
   <Style Selector="Border.flyoutPanel">
     <Setter Property="Padding" Value="{DynamicResource Shell.FlyoutPadding}" />
     <Setter Property="Background" Value="{DynamicResource ShellSurfaceRaisedBrush}" />

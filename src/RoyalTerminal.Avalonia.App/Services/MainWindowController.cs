@@ -7,11 +7,13 @@ using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reactive;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -26,6 +28,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using RoyalTerminal.Avalonia.Capture;
@@ -122,11 +125,15 @@ internal sealed class MainWindowController
     private readonly Dictionary<TerminalControl, TerminalPaneNode> _paneRuntimeNodes = [];
     private readonly HashSet<Task> _commandHistoryWriteTasks = [];
     private readonly object _commandHistoryWriteTaskSync = new();
+    private AppPreferencesDocument _appPreferences = new();
+    private AppWindowPlacement? _lastNormalWindowPlacement;
+    private bool _isRestoringWindowPlacement;
     private readonly ITerminalModeCapabilityResolver _modeCapabilityResolver;
     private readonly ITerminalModeResolver _modeResolver;
     private readonly ITerminalSessionProfileStore _settingsProfileStore;
     private readonly ITerminalCommandHistoryStore _commandHistoryStore;
     private readonly ITerminalWorkspaceStore _workspaceStore;
+    private readonly IAppPreferencesStore _appPreferencesStore;
     private readonly ISshSecretStore _sshSecretStore;
     private readonly ITerminalPaneSplitPolicy _paneSplitPolicy;
     private readonly TerminalCommandSuggestionService _commandSuggestionService = new();
@@ -146,13 +153,15 @@ internal sealed class MainWindowController
     public MainWindowController(
         Window window,
         MainWindowViewModel viewModel,
-        ITerminalPaneSplitPolicy? paneSplitPolicy = null)
+        ITerminalPaneSplitPolicy? paneSplitPolicy = null,
+        IAppPreferencesStore? appPreferencesStore = null)
         : this(
             window,
             viewModel,
             new TerminalModeCapabilityResolver(),
             TerminalModeResolver.Default,
-            paneSplitPolicy: paneSplitPolicy)
+            paneSplitPolicy: paneSplitPolicy,
+            appPreferencesStore: appPreferencesStore)
     {
     }
 
@@ -166,7 +175,8 @@ internal sealed class MainWindowController
         ITerminalWorkspaceStore? workspaceStore = null,
         Control? visualRoot = null,
         ITerminalPaneSplitPolicy? paneSplitPolicy = null,
-        ISshSecretStore? sshSecretStore = null)
+        ISshSecretStore? sshSecretStore = null,
+        IAppPreferencesStore? appPreferencesStore = null)
     {
         _window = window ?? throw new ArgumentNullException(nameof(window));
         _viewModel = viewModel;
@@ -176,6 +186,7 @@ internal sealed class MainWindowController
         _settingsProfileStore = settingsProfileStore ?? TerminalSessionProfileStoreFactory.CreateDefault();
         _commandHistoryStore = commandHistoryStore ?? TerminalCommandHistoryStoreFactory.CreateDefault();
         _workspaceStore = workspaceStore ?? TerminalWorkspaceStoreFactory.CreateDefault();
+        _appPreferencesStore = appPreferencesStore ?? AppPreferencesStoreFactory.CreateDefault();
         _sshSecretStore = sshSecretStore ?? SshSecretProtectionFactory.CreateDefaultSecretStore();
         _paneSplitPolicy = paneSplitPolicy ?? TerminalPaneSplitPolicies.AllowAll;
         Control controlRoot = visualRoot ?? (Control?)_window.FindControl<MainView>("MainView") ?? _window;
@@ -225,6 +236,8 @@ internal sealed class MainWindowController
         RegisterInteractionHandlers(lifetime);
         RegisterShellLayoutHandlers(lifetime);
         RegisterWindowInputStateResetHandlers(lifetime);
+        LoadAppPreferences();
+        RegisterWindowPreferencePersistenceHandlers(lifetime);
 
         _terminalCapabilities = _modeCapabilityResolver.Resolve(GhosttyVtProcessor.IsAvailable());
         _viewModel.SetTerminalCapabilities(_terminalCapabilities);
@@ -232,8 +245,8 @@ internal sealed class MainWindowController
         TerminalRenderMode startupMode = TerminalRenderMode.RenderedAuto;
         _viewModel.SetRenderMode(startupMode);
 
-        ApplyThemeResources(CreateChromePalette(_viewModel.ActiveTheme));
         InitializeShellProfiles();
+        SyncNativeShellProfileMenu();
         RefreshSessionLauncherForActivation();
 
         CreateInitialTabs();
@@ -266,6 +279,40 @@ internal sealed class MainWindowController
 
         UpdateCaptionButtonState(_window.WindowState);
         disposables.Add(_window.GetObservable(Window.WindowStateProperty).Subscribe(UpdateCaptionButtonState));
+    }
+
+    private void RegisterWindowPreferencePersistenceHandlers(CompositeDisposable disposables)
+    {
+        disposables.Add(_window.GetObservable(Window.WindowStateProperty)
+            .Skip(1)
+            .Subscribe(_ => SaveCurrentAppPreferences()));
+        void SizeChangedHandler(object? sender, SizeChangedEventArgs args)
+        {
+            _ = sender;
+            _ = args;
+            SaveCurrentAppPreferences();
+        }
+
+        void PositionChangedHandler(object? sender, PixelPointEventArgs args)
+        {
+            _ = sender;
+            _ = args;
+            SaveCurrentAppPreferences();
+        }
+
+        _window.SizeChanged += SizeChangedHandler;
+        disposables.Add(Disposable.Create(() => _window.SizeChanged -= SizeChangedHandler));
+        _window.PositionChanged += PositionChangedHandler;
+        disposables.Add(Disposable.Create(() => _window.PositionChanged -= PositionChangedHandler));
+        void ClosingHandler(object? sender, WindowClosingEventArgs args)
+        {
+            _ = sender;
+            _ = args;
+            SaveCurrentAppPreferences();
+        }
+
+        _window.Closing += ClosingHandler;
+        disposables.Add(Disposable.Create(() => _window.Closing -= ClosingHandler));
     }
 
     private void RegisterWindowInputStateResetHandlers(CompositeDisposable disposables)
@@ -302,6 +349,12 @@ internal sealed class MainWindowController
         disposables.Add(_viewModel.CreateNewTabInteraction.RegisterHandler(context =>
         {
             CreateNewTab();
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.CreateNewTabFromProfileInteraction.RegisterHandler(context =>
+        {
+            CreateNewTabFromProfile(context.Input);
             context.SetOutput(Unit.Default);
         }));
 
@@ -362,6 +415,13 @@ internal sealed class MainWindowController
         disposables.Add(_viewModel.ApplyThemeInteraction.RegisterHandler(context =>
         {
             ApplyTheme(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.ApplyAppThemeInteraction.RegisterHandler(async context =>
+        {
+            ApplyAppTheme(context.Input);
+            await SaveAppPreferencesAsync(context.Input);
             context.SetOutput(Unit.Default);
         }));
 
@@ -524,6 +584,12 @@ internal sealed class MainWindowController
         disposables.Add(_viewModel.ResizePaneInteraction.RegisterHandler(context =>
         {
             ResizePane(context.Input);
+            context.SetOutput(Unit.Default);
+        }));
+
+        disposables.Add(_viewModel.CloseCurrentPaneInteraction.RegisterHandler(context =>
+        {
+            CloseCurrentPane();
             context.SetOutput(Unit.Default);
         }));
 
@@ -856,12 +922,74 @@ internal sealed class MainWindowController
             }
 
             _viewModel.SetShellProfiles(options);
+            SyncNativeShellProfileMenu();
         }
         catch (Exception ex)
         {
             _viewModel.SetShellProfiles(Array.Empty<ShellProfileOption>());
+            SyncNativeShellProfileMenu();
             UpdateStatus($"Shell profile discovery failed: {ex.Message}");
         }
+    }
+
+    private void SyncNativeShellProfileMenu()
+    {
+        NativeMenu? nativeMenu = NativeMenu.GetMenu(_window);
+        if (nativeMenu is null || !TryFindNativeMenuItem(nativeMenu, "New Tab from _Profile", out NativeMenuItem profileMenuItem))
+        {
+            return;
+        }
+
+        profileMenuItem.IsEnabled = _viewModel.HasMultipleNonDefaultShellProfiles;
+
+        NativeMenu profileMenu = new();
+        for (int i = 0; i < _viewModel.NonDefaultShellProfiles.Count; i++)
+        {
+            ShellProfileOption profile = _viewModel.NonDefaultShellProfiles[i];
+            profileMenu.Items.Add(new NativeMenuItem(profile.DisplayName)
+            {
+                Command = _viewModel.CreateNewTabFromProfileCommand,
+                CommandParameter = profile.Id,
+            });
+        }
+
+        profileMenuItem.Menu = profileMenu;
+    }
+
+    private void CreateNewTabFromProfile(string profileId)
+    {
+        ShellProfileOption? profile = FindShellProfile(profileId);
+        if (profile is null)
+        {
+            return;
+        }
+
+        CreateNewTab(profile.Id, profile.DisplayName);
+    }
+
+    private static bool TryFindNativeMenuItem(NativeMenu menu, string header, out NativeMenuItem result)
+    {
+        for (int i = 0; i < menu.Items.Count; i++)
+        {
+            if (menu.Items[i] is not NativeMenuItem item)
+            {
+                continue;
+            }
+
+            if (string.Equals(Convert.ToString(item.Header, CultureInfo.InvariantCulture), header, StringComparison.Ordinal))
+            {
+                result = item;
+                return true;
+            }
+
+            if (item.Menu is { } submenu && TryFindNativeMenuItem(submenu, header, out result))
+            {
+                return true;
+            }
+        }
+
+        result = null!;
+        return false;
     }
 
     private async Task ShowAboutAsync()
@@ -1338,6 +1466,7 @@ internal sealed class MainWindowController
         profiles.Add(launcherProfile);
         _viewModel.SetShellProfiles(profiles);
         _viewModel.SelectedShellProfile = launcherProfile;
+        SyncNativeShellProfileMenu();
     }
 
     private static string BuildPipeCommandText(
@@ -2102,7 +2231,7 @@ internal sealed class MainWindowController
         leafControls.Add(terminal);
         resolvedModes.Add(finalizedModeSelection.ResolvedMode);
 
-        ScrollViewer container = TerminalPaneLayout.CreatePaneScrollViewer(terminal);
+        Border container = TerminalPaneLayout.CreatePaneContainer(terminal);
         TerminalPaneNode node = new(
             NormalizeOptional(pane.Id) ?? CreatePaneId(),
             NormalizeOptional(pane.Title),
@@ -2147,9 +2276,13 @@ internal sealed class MainWindowController
     {
         _paneRuntimeNodes[control] = node;
         RegisterCommandHistoryCapture(control);
-        control.GotFocus += (_, _) => _activePaneControl = control;
-        control.LostFocus += (_, _) => ResetTerminalInputState(control);
-        control.PointerPressed += (_, _) => _activePaneControl = control;
+        control.GotFocus += (_, _) => SetActivePane(control, focus: false);
+        control.LostFocus += (_, _) =>
+        {
+            ResetTerminalInputState(control);
+            SyncPaneCommandAndVisualState();
+        };
+        control.PointerPressed += (_, _) => SetActivePane(control, focus: false);
     }
 
     private IEnumerable<TerminalControl> EnumerateTerminalControls()
@@ -2472,7 +2605,7 @@ internal sealed class MainWindowController
         ApplyLaunchBehaviorSettings(terminal, launchProfile.Behavior);
         UpdateSessionLoggingSubscription(terminal);
 
-        ScrollViewer container = TerminalPaneLayout.CreatePaneScrollViewer(terminal);
+        Border container = TerminalPaneLayout.CreatePaneContainer(terminal);
         TerminalPaneNode rootPaneNode = new(
             CreatePaneId(),
             tabName,
@@ -3662,6 +3795,7 @@ internal sealed class MainWindowController
                 : target.Control as TerminalControl;
         }
         UpdateTextRenderPipelineIndicator(_activePaneControl);
+        SyncPaneCommandAndVisualState();
 
         if (target.AutoStartSession)
         {
@@ -3685,6 +3819,7 @@ internal sealed class MainWindowController
 
         SyncCaptureReplayState();
         SyncActiveTerminalSurface();
+        SyncPaneCommandAndVisualState();
         QueueTabStripScrollStateUpdate();
     }
 
@@ -3791,7 +3926,7 @@ internal sealed class MainWindowController
             ? activeNode.TransportProfileId
             : null;
         string? newWorkingDirectory = GetProfileWorkingDirectory(splitLaunchProfile) ?? splitWorkingDirectory;
-        ScrollViewer newContainer = TerminalPaneLayout.CreatePaneScrollViewer(newControl);
+        Border newContainer = TerminalPaneLayout.CreatePaneContainer(newControl);
         TerminalPaneNode newNode = new(
             CreatePaneId(),
             $"{tab.Title} Pane",
@@ -3896,6 +4031,99 @@ internal sealed class MainWindowController
         UpdateStatus($"Focused pane {GetPaneOrdinal(tab, target)} of {tab.LeafControls.Count.ToString(CultureInfo.InvariantCulture)}.");
     }
 
+    private void CloseCurrentPane()
+    {
+        TerminalTab? tab = GetActiveTab();
+        TerminalControl? activeControl = GetActiveStandaloneControl();
+        if (tab is null || activeControl is null || tab.LeafControls.Count <= 1)
+        {
+            SyncPaneCommandAndVisualState();
+            return;
+        }
+
+        if (!_paneRuntimeNodes.TryGetValue(activeControl, out TerminalPaneNode? activeNode) ||
+            activeNode.Parent is not { } parentNode)
+        {
+            SyncPaneCommandAndVisualState();
+            return;
+        }
+
+        TerminalPaneNode? siblingNode = ReferenceEquals(parentNode.First, activeNode)
+            ? parentNode.Second
+            : parentNode.First;
+        if (siblingNode is null)
+        {
+            SyncPaneCommandAndVisualState();
+            return;
+        }
+
+        int previousPaneCount = tab.LeafControls.Count;
+        string closedPaneOrdinal = GetPaneOrdinal(tab, activeControl);
+        TerminalControl? nextActiveControl = TerminalPaneLayout.CollectLeafControls(siblingNode).FirstOrDefault();
+        if (nextActiveControl is null)
+        {
+            SyncPaneCommandAndVisualState();
+            return;
+        }
+
+        TerminalPaneNode? grandparentNode = parentNode.Parent;
+        int hostIndex = -1;
+        bool wasVisible = tab.Container.IsVisible;
+        int parentChildIndex = -1;
+        int parentChildRow = 0;
+        int parentChildColumn = 0;
+
+        if (grandparentNode is null)
+        {
+            hostIndex = _terminalHost.Children.IndexOf(tab.Container);
+            if (hostIndex >= 0)
+            {
+                _terminalHost.Children.RemoveAt(hostIndex);
+            }
+        }
+        else if (grandparentNode.SplitGrid is not null)
+        {
+            parentChildIndex = grandparentNode.SplitGrid.Children.IndexOf(parentNode.Visual);
+            if (parentChildIndex >= 0)
+            {
+                parentChildRow = Grid.GetRow(parentNode.Visual);
+                parentChildColumn = Grid.GetColumn(parentNode.Visual);
+                grandparentNode.SplitGrid.Children.RemoveAt(parentChildIndex);
+            }
+        }
+
+        if (parentNode.SplitGrid is not null)
+        {
+            parentNode.SplitGrid.Children.Remove(activeNode.Visual);
+            parentNode.SplitGrid.Children.Remove(siblingNode.Visual);
+        }
+
+        activeNode.Parent = null;
+        siblingNode.Parent = grandparentNode;
+
+        if (grandparentNode is null)
+        {
+            ReplaceTabRootVisual(tab, siblingNode.Visual, siblingNode, hostIndex, wasVisible);
+            siblingNode.Parent = null;
+        }
+        else
+        {
+            TerminalPaneLayout.ReplaceChildPane(
+                grandparentNode,
+                parentNode,
+                siblingNode,
+                parentChildIndex,
+                parentChildRow,
+                parentChildColumn);
+            tab.SetLeafControls(TerminalPaneLayout.CollectLeafControls(tab.RootPaneNode));
+        }
+
+        DisposeTerminal(activeControl);
+        SetActivePane(nextActiveControl, focus: true);
+        UpdateStatus($"Closed pane {closedPaneOrdinal} of {previousPaneCount.ToString(CultureInfo.InvariantCulture)}.");
+        AppendEventLog($"[{tab.Title}] Closed pane {closedPaneOrdinal}.");
+    }
+
     private void ResizePane(TerminalPaneDirection direction)
     {
         TerminalTab? tab = GetActiveTab();
@@ -3966,6 +4194,30 @@ internal sealed class MainWindowController
 
         SyncActiveTerminalSurface();
         SyncCaptureReplayState();
+        SyncPaneCommandAndVisualState();
+    }
+
+    private void SyncPaneCommandAndVisualState()
+    {
+        foreach (TerminalPaneNode node in _paneRuntimeNodes.Values)
+        {
+            node.LeafContainer?.Classes.Remove("activePane");
+        }
+
+        bool canCloseCurrentPane = _activeTab is not null &&
+                                   _activeTab.LeafControls.Count > 1 &&
+                                   _activePaneControl is not null &&
+                                   ContainsControl(_activeTab.LeafControls, _activePaneControl);
+        bool shouldShowActivePaneIndicator = canCloseCurrentPane &&
+            _activePaneControl?.IsKeyboardFocusWithin == true;
+        if (shouldShowActivePaneIndicator &&
+            _activePaneControl is not null &&
+            _paneRuntimeNodes.TryGetValue(_activePaneControl, out TerminalPaneNode? activeNode))
+        {
+            activeNode.LeafContainer?.Classes.Add("activePane");
+        }
+
+        _viewModel.SetCanCloseCurrentPane(canCloseCurrentPane);
     }
 
     private TerminalControl? FindDirectionalPane(
@@ -4971,6 +5223,173 @@ internal sealed class MainWindowController
         ApplyTheme(isDarkTheme ? TerminalTheme.Dark : TerminalTheme.Light);
     }
 
+    internal void LoadAppPreferences()
+    {
+        try
+        {
+            AppPreferencesDocument preferences = _appPreferencesStore
+                .LoadAsync()
+                .AsTask()
+                .GetAwaiter()
+                .GetResult();
+            _appPreferences = preferences;
+            _viewModel.RestoreAppThemeMode(preferences.AppThemeMode);
+            ApplyAppTheme(preferences.AppThemeMode);
+            ApplyWindowPlacement(preferences.WindowPlacement);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            AppendEventLog($"App preferences could not be loaded: {ex.Message}");
+        }
+    }
+
+    internal ValueTask SaveAppPreferencesAsync(AppThemeMode appThemeMode)
+    {
+        _appPreferences = _appPreferences with
+        {
+            AppThemeMode = appThemeMode,
+        };
+        return _appPreferencesStore.SaveAsync(_appPreferences);
+    }
+
+    internal ValueTask SaveAppPreferencesAsync(AppWindowPlacement windowPlacement)
+    {
+        _appPreferences = _appPreferences with
+        {
+            WindowPlacement = windowPlacement,
+        };
+        return _appPreferencesStore.SaveAsync(_appPreferences);
+    }
+
+    internal void ApplyWindowPlacement(AppWindowPlacement? placement)
+    {
+        if (placement is null || !IsUsableWindowPlacement(placement))
+        {
+            RememberCurrentNormalWindowPlacement();
+            return;
+        }
+
+        _isRestoringWindowPlacement = true;
+        try
+        {
+            _window.WindowStartupLocation = WindowStartupLocation.Manual;
+            _window.Width = Math.Max(_window.MinWidth, placement.Width);
+            _window.Height = Math.Max(_window.MinHeight, placement.Height);
+            WindowPlacementPlatform.SetWindowPosition(_window, new PixelPoint(placement.X, placement.Y));
+            _lastNormalWindowPlacement = placement with { State = AppWindowState.Normal };
+            _window.WindowState = placement.State switch
+            {
+                AppWindowState.Maximized => WindowState.Maximized,
+                AppWindowState.FullScreen => WindowState.FullScreen,
+                _ => WindowState.Normal,
+            };
+        }
+        finally
+        {
+            _isRestoringWindowPlacement = false;
+        }
+    }
+
+    internal AppWindowPlacement CaptureWindowPlacement()
+    {
+        AppWindowState state = ToAppWindowState(_window.WindowState);
+        if (state != AppWindowState.Normal && _lastNormalWindowPlacement is { } lastNormalPlacement)
+        {
+            return lastNormalPlacement with { State = state };
+        }
+
+        return CreateWindowPlacement(state);
+    }
+
+    private void SaveCurrentAppPreferences()
+    {
+        if (_isRestoringWindowPlacement || _window.WindowState == WindowState.Minimized)
+        {
+            return;
+        }
+
+        if (_window.WindowState == WindowState.Normal)
+        {
+            RememberCurrentNormalWindowPlacement();
+        }
+
+        try
+        {
+            SaveAppPreferencesAsync(CaptureWindowPlacement())
+                .AsTask()
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            AppendEventLog($"App preferences could not be saved: {ex.Message}");
+        }
+    }
+
+    private void RememberCurrentNormalWindowPlacement()
+    {
+        if (_window.WindowState != WindowState.Normal)
+        {
+            return;
+        }
+
+        _lastNormalWindowPlacement = CreateWindowPlacement(AppWindowState.Normal);
+    }
+
+    private AppWindowPlacement CreateWindowPlacement(AppWindowState state)
+    {
+        double width = _window.Width > 0 && !double.IsNaN(_window.Width)
+            ? _window.Width
+            : Math.Max(_window.MinWidth, _window.Bounds.Width);
+        double height = _window.Height > 0 && !double.IsNaN(_window.Height)
+            ? _window.Height
+            : Math.Max(_window.MinHeight, _window.Bounds.Height);
+        PixelPoint position = WindowPlacementPlatform.GetWindowPosition(_window);
+
+        return new AppWindowPlacement(
+            X: position.X,
+            Y: position.Y,
+            Width: Math.Max(_window.MinWidth, width),
+            Height: Math.Max(_window.MinHeight, height),
+            State: state);
+    }
+
+    private static bool IsUsableWindowPlacement(AppWindowPlacement placement)
+    {
+        return placement.Width > 0 &&
+            placement.Height > 0 &&
+            !double.IsNaN(placement.Width) &&
+            !double.IsNaN(placement.Height) &&
+            !double.IsInfinity(placement.Width) &&
+            !double.IsInfinity(placement.Height);
+    }
+
+    private static AppWindowState ToAppWindowState(WindowState windowState)
+    {
+        return windowState switch
+        {
+            WindowState.Maximized => AppWindowState.Maximized,
+            WindowState.FullScreen => AppWindowState.FullScreen,
+            _ => AppWindowState.Normal,
+        };
+    }
+
+    private static void ApplyAppTheme(AppThemeMode mode)
+    {
+        Application? app = Application.Current;
+        if (app is null)
+        {
+            return;
+        }
+
+        app.RequestedThemeVariant = mode switch
+        {
+            AppThemeMode.Light => ThemeVariant.Light,
+            AppThemeMode.Dark => ThemeVariant.Dark,
+            _ => ThemeVariant.Default,
+        };
+    }
+
     private void ApplyTheme(TerminalTheme theme)
     {
         foreach (TerminalTab tab in _tabs)
@@ -4988,7 +5407,6 @@ internal sealed class MainWindowController
             }
         }
 
-        ApplyThemeResources(CreateChromePalette(theme));
     }
 
     private void ApplyShaderSample(string shaderId)
@@ -5036,76 +5454,6 @@ internal sealed class MainWindowController
             modeIndicator.Text = tabMode.Glyph;
             modeIndicator.Foreground = tabMode.GlyphBrush;
         }
-    }
-
-    private static void ApplyThemeResources(ThemePalette palette)
-    {
-        UpdateBrushResource("WindowBackgroundBrush", palette.WindowBackground);
-        UpdateBrushResource("ToolbarBackgroundBrush", palette.ToolbarBackground);
-        UpdateBrushResource("ToolbarDividerBrush", palette.ToolbarDivider);
-        UpdateBrushResource("ToolbarForegroundBrush", palette.ToolbarForeground);
-        UpdateBrushResource("TabStripBackgroundBrush", palette.TabStripBackground);
-        UpdateBrushResource("StatusBarBackgroundBrush", palette.StatusBarBackground);
-        UpdateBrushResource("StatusBarForegroundBrush", palette.StatusBarForeground);
-        UpdateBrushResource("TabHeaderBackgroundBrush", palette.TabHeaderBackground);
-        UpdateBrushResource("TabHeaderForegroundBrush", palette.TabHeaderForeground);
-        UpdateBrushResource("TabHeaderActiveBackgroundBrush", palette.TabHeaderActiveBackground);
-        UpdateBrushResource("TabHeaderActiveForegroundBrush", palette.TabHeaderActiveForeground);
-    }
-
-    private static void UpdateBrushResource(string key, Color color)
-    {
-        if (Application.Current is null)
-        {
-            return;
-        }
-
-        Application.Current.Resources[key] = new SolidColorBrush(color);
-    }
-
-    private static ThemePalette CreateChromePalette(TerminalTheme theme)
-    {
-        Color background = ToAvaloniaColor(theme.DefaultBackground);
-        Color foreground = ToAvaloniaColor(theme.DefaultForeground);
-        Color accent = ToAvaloniaColor(theme.Palette[4]);
-        Color divider = BlendColor(background, foreground, 0.24);
-        Color toolbarBackground = BlendColor(background, foreground, 0.06);
-        Color tabHeaderBackground = BlendColor(background, foreground, 0.10);
-        Color tabHeaderActiveBackground = BlendColor(background, accent, 0.10);
-
-        return new ThemePalette(
-            WindowBackground: background,
-            ToolbarBackground: toolbarBackground,
-            ToolbarDivider: divider,
-            ToolbarForeground: foreground,
-            TabStripBackground: BlendColor(background, foreground, 0.04),
-            StatusBarBackground: toolbarBackground,
-            StatusBarForeground: foreground,
-            TabHeaderBackground: tabHeaderBackground,
-            TabHeaderForeground: foreground,
-            TabHeaderActiveBackground: tabHeaderActiveBackground,
-            TabHeaderActiveForeground: foreground,
-            TerminalForeground: foreground,
-            TerminalBackground: background);
-    }
-
-    private static Color ToAvaloniaColor(uint argb)
-    {
-        return Color.FromArgb(
-            (byte)((argb >> 24) & 0xFF),
-            (byte)((argb >> 16) & 0xFF),
-            (byte)((argb >> 8) & 0xFF),
-            (byte)(argb & 0xFF));
-    }
-
-    private static Color BlendColor(Color from, Color to, double amount)
-    {
-        double t = Math.Clamp(amount, 0.0, 1.0);
-        byte a = (byte)Math.Clamp((int)Math.Round(from.A + ((to.A - from.A) * t), MidpointRounding.AwayFromZero), 0, 255);
-        byte r = (byte)Math.Clamp((int)Math.Round(from.R + ((to.R - from.R) * t), MidpointRounding.AwayFromZero), 0, 255);
-        byte g = (byte)Math.Clamp((int)Math.Round(from.G + ((to.G - from.G) * t), MidpointRounding.AwayFromZero), 0, 255);
-        byte b = (byte)Math.Clamp((int)Math.Round(from.B + ((to.B - from.B) * t), MidpointRounding.AwayFromZero), 0, 255);
-        return Color.FromArgb(a, r, g, b);
     }
 
     #endregion
@@ -6762,19 +7110,4 @@ internal sealed class MainWindowController
     }
 
     private readonly record struct TabVisualMode(string Name, string Glyph, IBrush GlyphBrush);
-
-    private readonly record struct ThemePalette(
-        Color WindowBackground,
-        Color ToolbarBackground,
-        Color ToolbarDivider,
-        Color ToolbarForeground,
-        Color TabStripBackground,
-        Color StatusBarBackground,
-        Color StatusBarForeground,
-        Color TabHeaderBackground,
-        Color TabHeaderForeground,
-        Color TabHeaderActiveBackground,
-        Color TabHeaderActiveForeground,
-        Color TerminalForeground,
-        Color TerminalBackground);
 }

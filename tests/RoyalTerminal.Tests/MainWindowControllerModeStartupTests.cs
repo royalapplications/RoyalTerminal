@@ -468,6 +468,109 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_AppPreferences_PersistsMovedNormalPlacementBeforeMaximize()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        AppWindowPlacement startupPlacement = new(
+            X: 32,
+            Y: 48,
+            Width: 980,
+            Height: 640,
+            State: AppWindowState.Normal);
+        InMemoryAppPreferencesStore appPreferencesStore = new(new AppPreferencesDocument
+        {
+            WindowPlacement = startupPlacement,
+        });
+        MainWindowViewModel viewModel = new();
+        Window window = CreateControllerHostWindow(viewModel, out _);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: CreateEmptyProfileStore(),
+            appPreferencesStore: appPreferencesStore);
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            window.Position = new PixelPoint(220, 180);
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            window.WindowState = WindowState.Maximized;
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            AppWindowPlacement placement = appPreferencesStore.Document.WindowPlacement
+                ?? throw new InvalidOperationException("Window placement was not persisted.");
+            Assert.Equal(AppWindowState.Maximized, placement.State);
+            Assert.Equal(220, placement.X);
+            Assert.Equal(180, placement.Y);
+            Assert.Equal(980, placement.Width);
+            Assert.Equal(640, placement.Height);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_AppPreferences_SavesWindowPlacementWhenWindowIsClosing()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryAppPreferencesStore appPreferencesStore = new(new AppPreferencesDocument());
+        MainWindowViewModel viewModel = new();
+        Window window = CreateControllerHostWindow(viewModel, out _);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: CreateEmptyProfileStore(),
+            appPreferencesStore: appPreferencesStore);
+        IDisposable? lifetime = null;
+        bool closed = false;
+
+        try
+        {
+            lifetime = controller.Activate();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            window.Position = new PixelPoint(260, 210);
+            window.Width = 1120;
+            window.Height = 720;
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            window.Close();
+            closed = true;
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+
+            AppWindowPlacement placement = appPreferencesStore.Document.WindowPlacement
+                ?? throw new InvalidOperationException("Window placement was not persisted.");
+            Assert.Equal(AppWindowState.Normal, placement.State);
+            Assert.Equal(260, placement.X);
+            Assert.Equal(210, placement.Y);
+            Assert.Equal(1120, placement.Width);
+            Assert.Equal(720, placement.Height);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            if (!closed)
+            {
+                window.Close();
+            }
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Controller_TabStripItemDragBehavior_ReordersTabsAndPersistsWorkspaceOrder()
     {
         using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
@@ -1552,6 +1655,142 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_CloseCurrentPane_CollapsesSplitAndClearsCommandState()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryWorkspaceStore workspaceStore = new();
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo close-pane";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            commandHistoryStore: new InMemoryCommandHistoryStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabCreated);
+            Assert.False(viewModel.CanCloseCurrentPane);
+
+            await viewModel.SplitPaneRightCommand.Execute().ToTask();
+            bool splitCreated = await WaitUntilAsync(
+                () => terminalHost.Children.Count == 1 &&
+                      terminalHost.Children[0] is Grid { Children.Count: 3 } &&
+                      GetStandaloneControls(terminalHost).Count == 2,
+                TimeSpan.FromSeconds(2));
+            Assert.True(splitCreated);
+            Assert.True(viewModel.CanCloseCurrentPane);
+            bool activePaneShown = await WaitUntilAsync(
+                () => CountActivePaneContainers(terminalHost) == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(activePaneShown);
+
+            Button tabStripNewTabButton = window.FindControl<Button>("TabStripNewTabButton")
+                ?? throw new InvalidOperationException("TabStripNewTabButton was not found.");
+            tabStripNewTabButton.Focus();
+            bool activePaneHidden = await WaitUntilAsync(
+                () => CountActivePaneContainers(terminalHost) == 0,
+                TimeSpan.FromSeconds(2));
+            Assert.True(activePaneHidden);
+            Assert.True(viewModel.CanCloseCurrentPane);
+
+            await viewModel.FocusPaneLeftCommand.Execute().ToTask();
+            bool activePaneMoved = await WaitUntilAsync(
+                () => CountActivePaneContainers(terminalHost) == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(activePaneMoved);
+
+            await viewModel.CloseCurrentPaneCommand.Execute().ToTask();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Single(GetStandaloneControls(terminalHost));
+            Border remainingPane = Assert.Single(GetPaneContainers(terminalHost));
+            Assert.DoesNotContain("activePane", remainingPane.Classes);
+            Assert.False(viewModel.CanCloseCurrentPane);
+            Assert.Contains("Closed pane", viewModel.StatusText, StringComparison.Ordinal);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        TerminalWorkspaceTab savedTab = Assert.Single(workspaceStore.Document.Windows[0].Tabs);
+        Assert.Null(savedTab.RootPane.Split);
+    }
+
+    [AvaloniaFact]
+    public async Task Controller_CloseCurrentPane_PromotesNestedSiblingSplit()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        InMemoryWorkspaceStore workspaceStore = new();
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        viewModel.PipeCommandText = "echo close-nested-pane";
+
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window,
+            viewModel,
+            new TerminalModeCapabilityResolver(),
+            TerminalModeResolver.Default,
+            workspaceStore: workspaceStore,
+            commandHistoryStore: new InMemoryCommandHistoryStore());
+        IDisposable? lifetime = null;
+
+        try
+        {
+            lifetime = controller.Activate();
+
+            bool startupTabCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(startupTabCreated);
+
+            await viewModel.SplitPaneRightCommand.Execute().ToTask();
+            await viewModel.SplitPaneDownCommand.Execute().ToTask();
+            bool nestedSplitCreated = await WaitUntilAsync(
+                () => GetStandaloneControls(terminalHost).Count == 3,
+                TimeSpan.FromSeconds(2));
+            Assert.True(nestedSplitCreated);
+
+            await viewModel.CloseCurrentPaneCommand.Execute().ToTask();
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(2, GetStandaloneControls(terminalHost).Count);
+            Assert.True(viewModel.CanCloseCurrentPane);
+            bool activePaneShown = await WaitUntilAsync(
+                () => CountActivePaneContainers(terminalHost) == 1,
+                TimeSpan.FromSeconds(2));
+            Assert.True(activePaneShown);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+
+        TerminalWorkspaceTab savedTab = Assert.Single(workspaceStore.Document.Windows[0].Tabs);
+        TerminalWorkspacePaneSplit savedSplit = savedTab.RootPane.Split
+            ?? throw new InvalidOperationException("Saved promoted split was not found.");
+        Assert.Null(savedSplit.FirstPane.Split);
+        Assert.Null(savedSplit.SecondPane.Split);
+    }
+
+    [AvaloniaFact]
     public async Task Controller_SplitPanePolicy_DeniesSshTransport()
     {
         using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
@@ -1915,7 +2154,9 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.True(created);
 
             Control newContainer = terminalHost.Children[^1];
-            ScrollViewer scrollViewer = Assert.IsType<ScrollViewer>(newContainer);
+            Border paneContainer = Assert.IsType<Border>(newContainer);
+            Assert.Contains("terminalPane", paneContainer.Classes);
+            ScrollViewer scrollViewer = Assert.IsType<ScrollViewer>(paneContainer.Child);
             TerminalControl standalone = Assert.IsType<TerminalControl>(scrollViewer.Content);
             Assert.Equal(VtProcessorPreference.Auto, standalone.VtProcessorPreference);
 
@@ -3369,6 +3610,11 @@ public sealed class MainWindowControllerModeStartupTests
             };
         }
 
+        if (container is Border { Child: Control child })
+        {
+            return ResolveModeFromContainer(child, headerButton);
+        }
+
         throw new InvalidOperationException(
             $"Unsupported terminal host container type '{container.GetType().FullName}'.");
     }
@@ -3378,6 +3624,19 @@ public sealed class MainWindowControllerModeStartupTests
         List<TerminalControl> controls = [];
         AddStandaloneControls(terminalHost, controls);
         return controls;
+    }
+
+    private static List<Border> GetPaneContainers(Grid terminalHost)
+    {
+        return terminalHost.GetVisualDescendants()
+            .OfType<Border>()
+            .Where(border => border.Classes.Contains("terminalPane"))
+            .ToList();
+    }
+
+    private static int CountActivePaneContainers(Grid terminalHost)
+    {
+        return GetPaneContainers(terminalHost).Count(static pane => pane.Classes.Contains("activePane"));
     }
 
     private static TerminalControl GetVisibleStandaloneControl(Grid terminalHost)
@@ -3395,6 +3654,12 @@ public sealed class MainWindowControllerModeStartupTests
         if (control is ScrollViewer { Content: TerminalControl wrapped })
         {
             controls.Add(wrapped);
+            return;
+        }
+
+        if (control is Border { Child: Control child })
+        {
+            AddStandaloneControls(child, controls);
             return;
         }
 
@@ -3419,6 +3684,11 @@ public sealed class MainWindowControllerModeStartupTests
         {
             terminal = wrapped;
             return true;
+        }
+
+        if (control is Border { Child: Control child })
+        {
+            return TryGetVisibleStandaloneControl(child, out terminal);
         }
 
         if (control is Panel panel)
@@ -3807,6 +4077,24 @@ public sealed class MainWindowControllerModeStartupTests
             TerminalSessionProfilesDocument document,
             CancellationToken cancellationToken = default)
         {
+            Document = document;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class InMemoryAppPreferencesStore(AppPreferencesDocument document) : IAppPreferencesStore
+    {
+        public AppPreferencesDocument Document { get; private set; } = document;
+
+        public ValueTask<AppPreferencesDocument> LoadAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(Document);
+        }
+
+        public ValueTask SaveAsync(AppPreferencesDocument document, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             Document = document;
             return ValueTask.CompletedTask;
         }

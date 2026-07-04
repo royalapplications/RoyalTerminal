@@ -58,41 +58,45 @@
       <NativeMenuItem Header="_Shell">
         <NativeMenuItem.Menu>
           <NativeMenu>
-            <NativeMenuItem Header="_New Tab"
+            <NativeMenuItem Header="_New Tab (Default Profile)"
                             Command="{Binding NewTabCommand}"
                             Gesture="Ctrl+T" />
+            <NativeMenuItem Header="New Tab from _Profile"
+                            IsEnabled="{Binding HasMultipleNonDefaultShellProfiles}">
+              <NativeMenuItem.Menu>
+                <NativeMenu />
+              </NativeMenuItem.Menu>
+            </NativeMenuItem>
             <NativeMenuItem Header="_Close Tab"
                             Command="{Binding CloseCurrentTabCommand}"
                             Gesture="Ctrl+W" />
             <NativeMenuItemSeparator />
-            <NativeMenuItem Header="_Command History"
-                            Command="{Binding OpenCommandHistoryOverlayCommand}"
-                            Gesture="Ctrl+Space" />
-            <NativeMenuItem Header="_Refresh Command Suggestions"
-                            Command="{Binding RefreshCommandSuggestionsCommand}" />
-            <NativeMenuItem Header="_Insert Selected Suggestion"
-                            Command="{Binding AcceptCommandSuggestionCommand}"
-                            Gesture="Ctrl+Enter"
-                            IsEnabled="{Binding CanAcceptCommandSuggestion}" />
-            <NativeMenuItem Header="Close Command _History"
-                            Command="{Binding CloseCommandHistoryOverlayCommand}" />
+            <NativeMenuItem Header="_Theme">
+              <NativeMenuItem.Menu>
+                <NativeMenu>
+                  <NativeMenuItem Header="_System"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding IsSystemAppThemeSelected}"
+                                  Command="{Binding SelectAppThemeCommand}"
+                                  CommandParameter="system" />
+                  <NativeMenuItem Header="_Light"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding IsLightAppThemeSelected}"
+                                  Command="{Binding SelectAppThemeCommand}"
+                                  CommandParameter="light" />
+                  <NativeMenuItem Header="_Dark"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding IsDarkAppThemeSelected}"
+                                  Command="{Binding SelectAppThemeCommand}"
+                                  CommandParameter="dark" />
+                </NativeMenu>
+              </NativeMenuItem.Menu>
+            </NativeMenuItem>
+            <NativeMenuItem Header="_Preferences..."
+                            Command="{Binding PrepareSettingsPanelCommand}" />
             <NativeMenuItemSeparator />
-            <NativeMenuItem Header="Split Pane _Right"
-                            Command="{Binding SplitPaneRightCommand}"
-                            Gesture="Alt+Shift+OemPlus" />
-            <NativeMenuItem Header="Split Pane _Down"
-                            Command="{Binding SplitPaneDownCommand}"
-                            Gesture="Alt+Shift+OemMinus" />
-            <NativeMenuItemSeparator />
-            <NativeMenuItem Header="_Refresh Profiles"
-                            Command="{Binding RefreshSessionLauncherCommand}" />
-            <NativeMenuItem Header="_Launch Selected Profile"
-                            Command="{Binding LaunchSelectedSessionProfileCommand}"
-                            IsEnabled="{Binding CanLaunchSelectedSessionProfile}" />
-            <NativeMenuItem Header="_Restart Session"
-                            Command="{Binding RestartActiveSessionCommand}" />
-            <NativeMenuItem Header="_Clear Scrollback"
-                            Command="{Binding ClearActiveScrollbackCommand}" />
+            <NativeMenuItem Header="E_xit"
+                            Command="{Binding QuitApplicationCommand}" />
           </NativeMenu>
         </NativeMenuItem.Menu>
       </NativeMenuItem>
@@ -109,15 +113,6 @@
             <NativeMenuItem Header="Select _All"
                             Command="{Binding SelectAllCommand}"
                             Gesture="Ctrl+Shift+A" />
-            <NativeMenuItemSeparator />
-            <NativeMenuItem Header="_Find"
-                            Command="{Binding ApplySearchCommand}" />
-            <NativeMenuItem Header="Find _Next"
-                            Command="{Binding NextSearchCommand}" />
-            <NativeMenuItem Header="Find _Previous"
-                            Command="{Binding PreviousSearchCommand}" />
-            <NativeMenuItem Header="_Clear Search"
-                            Command="{Binding ClearSearchCommand}" />
           </NativeMenu>
         </NativeMenuItem.Menu>
       </NativeMenuItem>
@@ -129,7 +124,7 @@
                             ToggleType="CheckBox"
                             IsChecked="{Binding IsLeftPanelVisible}"
                             Command="{Binding ToggleLeftPanelCommand}" />
-            <NativeMenuItem Header="Show _Search Panel"
+            <NativeMenuItem Header="Show _Search"
                             ToggleType="CheckBox"
                             IsChecked="{Binding IsSearchPanelVisible}"
                             Command="{Binding ToggleSearchPanelCommand}" />
@@ -152,52 +147,18 @@
                             Command="{Binding ResetFontSizeCommand}"
                             Gesture="Ctrl+D0" />
             <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Command History"
+                            Command="{Binding OpenCommandHistoryOverlayCommand}"
+                            Gesture="Ctrl+Space" />
+            <NativeMenuItemSeparator />
             <NativeMenuItem Header="{Binding ModeButtonText}"
                             Command="{Binding CycleRenderModeCommand}" />
             <NativeMenuItem Header="{Binding ThemePresetButtonText}"
                             Command="{Binding CycleThemePresetCommand}" />
-            <NativeMenuItem Header="_Toggle Light Theme"
-                            Command="{Binding ToggleThemeCommand}" />
             <NativeMenuItem Header="_Generate Theme"
                             Command="{Binding GenerateThemeCommand}" />
             <NativeMenuItem Header="{Binding ShaderSampleButtonText}"
                             Command="{Binding CycleShaderSampleCommand}" />
-            <NativeMenuItemSeparator />
-            <NativeMenuItem Header="_Preferences..."
-                            Command="{Binding PrepareSettingsPanelCommand}" />
-            <NativeMenuItem Header="Close Preferences"
-                            Command="{Binding CloseSettingsPanelCommand}" />
-            <NativeMenuItem Header="Preferences _Actions"
-                            IsEnabled="{Binding IsSettingsPanelOpen}">
-              <NativeMenuItem.Menu>
-                <NativeMenu>
-                  <NativeMenuItem Header="_New Profile"
-                                  Command="{Binding SettingsPanelState.NewProfileCommand}" />
-                  <NativeMenuItem Header="_Duplicate Profile"
-                                  Command="{Binding SettingsPanelState.DuplicateProfileCommand}" />
-                  <NativeMenuItem Header="_Delete Profile"
-                                  Command="{Binding SettingsPanelState.DeleteProfileCommand}" />
-                  <NativeMenuItem Header="Set _Default Profile"
-                                  Command="{Binding SettingsPanelState.SetDefaultProfileCommand}" />
-                  <NativeMenuItemSeparator />
-                  <NativeMenuItem Header="_Apply Settings"
-                                  Command="{Binding SettingsPanelState.ApplyCommand}" />
-                  <NativeMenuItem Header="_Save Settings"
-                                  Command="{Binding SettingsPanelState.SaveCommand}" />
-                  <NativeMenuItemSeparator />
-                  <NativeMenuItem Header="_Browse Font File"
-                                  Command="{Binding SettingsPanelState.BrowseFontFileCommand}" />
-                  <NativeMenuItem Header="Add Text Highlight _Rule"
-                                  Command="{Binding SettingsPanelState.AddTextHighlightRuleCommand}" />
-                </NativeMenu>
-              </NativeMenuItem.Menu>
-            </NativeMenuItem>
-            <NativeMenuItemSeparator />
-            <NativeMenuItem Header="_Diagnostics"
-                            Command="{Binding ToggleGhosttyDiagnosticsCommand}" />
-            <NativeMenuItem Header="_Clear Event Log"
-                            Command="{Binding ClearEventLogCommand}"
-                            IsEnabled="{Binding HasEventLogEntries}" />
           </NativeMenu>
         </NativeMenuItem.Menu>
       </NativeMenuItem>
@@ -241,6 +202,11 @@
                             Command="{Binding ToggleReplayPlaybackCommand}" />
             <NativeMenuItem Header="_Stop Replay"
                             Command="{Binding StopReplayCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Clear Scrollback"
+                            Command="{Binding ClearActiveScrollbackCommand}" />
+            <NativeMenuItem Header="_Restart Session"
+                            Command="{Binding RestartActiveSessionCommand}" />
           </NativeMenu>
         </NativeMenuItem.Menu>
       </NativeMenuItem>
@@ -254,6 +220,16 @@
             <NativeMenuItem Header="_Previous Tab"
                             Command="{Binding CycleTabBackwardCommand}"
                             Gesture="Ctrl+Shift+Tab" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Split Pane _Right"
+                            Command="{Binding SplitPaneRightCommand}"
+                            Gesture="Alt+Shift+OemPlus" />
+            <NativeMenuItem Header="Split Pane _Down"
+                            Command="{Binding SplitPaneDownCommand}"
+                            Gesture="Alt+Shift+OemMinus" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Close Current Pane"
+                            Command="{Binding CloseCurrentPaneCommand}" />
             <NativeMenuItemSeparator />
             <NativeMenuItem Header="Focus Pane _Left"
                             Command="{Binding FocusPaneLeftCommand}"
@@ -307,6 +283,12 @@
                             Command="{Binding CopyStyledVtSnapshotCommand}" />
             <NativeMenuItem Header="Copy _HTML Snapshot"
                             Command="{Binding CopyHtmlSnapshotCommand}" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="_Diagnostics"
+                            Command="{Binding ToggleGhosttyDiagnosticsCommand}" />
+            <NativeMenuItem Header="_Clear Event Log"
+                            Command="{Binding ClearEventLogCommand}"
+                            IsEnabled="{Binding HasEventLogEntries}" />
           </NativeMenu>
         </NativeMenuItem.Menu>
       </NativeMenuItem>

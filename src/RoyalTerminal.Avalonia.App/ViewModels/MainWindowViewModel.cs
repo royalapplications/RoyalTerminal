@@ -43,6 +43,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private TerminalTextHighlightingMode _textHighlightingMode = TerminalTextHighlightingMode.Static;
     private IReadOnlyList<TerminalTextHighlightRule> _textHighlightRules = [];
     private bool _isDarkTheme = true;
+    private AppThemeMode _selectedAppThemeMode = AppThemeMode.System;
     private string _themePresetButtonText = "Theme: Default";
     private bool _nativeVtAvailable;
     private bool _useRenderedControl;
@@ -66,11 +67,13 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _isStatusBarVisible = true;
     private bool _isTabsInTitleBar;
     private bool _isMicaBackdropEnabled;
+    private bool _canCloseCurrentPane;
 
     private IReadOnlyList<ShellProfileOption> _shellProfiles =
     [
         new ShellProfileOption("default", "Default shell", string.Empty),
     ];
+    private IReadOnlyList<ShellProfileOption> _nonDefaultShellProfiles = [];
     private ShellProfileOption? _selectedShellProfile;
     private IReadOnlyList<SessionLaunchOption> _sessionLaunchOptions = [];
     private IReadOnlyList<SessionLaunchOption> _filteredSessionLaunchOptions = [];
@@ -252,6 +255,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         _selectedShellProfile = _shellProfiles[0];
 
         CreateNewTabInteraction = new Interaction<Unit, Unit>();
+        CreateNewTabFromProfileInteraction = new Interaction<string, Unit>();
         CloseCurrentTabInteraction = new Interaction<Unit, Unit>();
         ActivateTabInteraction = new Interaction<int, Unit>();
         CloseTabInteraction = new Interaction<int, Unit>();
@@ -262,6 +266,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         SelectAllInteraction = new Interaction<Unit, Unit>();
         ApplyFontSizeInteraction = new Interaction<double, Unit>();
         ApplyThemeInteraction = new Interaction<bool, Unit>();
+        ApplyAppThemeInteraction = new Interaction<AppThemeMode, Unit>();
         ApplyThemeModelInteraction = new Interaction<TerminalThemeApplyRequest, Unit>();
         ToggleCaptureInteraction = new Interaction<bool, Unit>();
         SaveCaptureInteraction = new Interaction<Unit, Unit>();
@@ -289,10 +294,12 @@ public sealed class MainWindowViewModel : ReactiveObject
         SplitPaneInteraction = new Interaction<TerminalPaneSplitRequest, Unit>();
         FocusPaneInteraction = new Interaction<TerminalPaneDirection, Unit>();
         ResizePaneInteraction = new Interaction<TerminalPaneDirection, Unit>();
+        CloseCurrentPaneInteraction = new Interaction<Unit, Unit>();
         AcceptSshHostKeyCommand = ReactiveCommand.Create(AcceptSshHostKeyPrompt);
         DeclineSshHostKeyCommand = ReactiveCommand.Create(DeclineSshHostKeyPrompt);
 
         NewTabCommand = ReactiveCommand.CreateFromObservable(() => CreateNewTabInteraction.Handle(Unit.Default));
+        CreateNewTabFromProfileCommand = ReactiveCommand.CreateFromObservable<object?, Unit>(CreateNewTabFromProfile);
         CloseCurrentTabCommand = ReactiveCommand.CreateFromObservable(() => CloseCurrentTabInteraction.Handle(Unit.Default));
         ActivateTabCommand = ReactiveCommand.CreateFromObservable<object?, Unit>(ActivateTab);
         CloseTabCommand = ReactiveCommand.CreateFromObservable<object?, Unit>(CloseTab);
@@ -306,6 +313,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         DecreaseFontSizeCommand = ReactiveCommand.CreateFromObservable(() => ChangeFontSize(-1));
         ResetFontSizeCommand = ReactiveCommand.CreateFromObservable(ResetFontSize);
         ToggleThemeCommand = ReactiveCommand.CreateFromObservable(ToggleTheme);
+        SelectAppThemeCommand = ReactiveCommand.CreateFromObservable<object?, Unit>(SelectAppTheme);
         CycleThemePresetCommand = ReactiveCommand.CreateFromObservable(CycleThemePreset);
         GenerateThemeCommand = ReactiveCommand.CreateFromObservable(GenerateTheme);
         CycleRenderModeCommand = ReactiveCommand.Create(CycleRenderMode);
@@ -329,6 +337,9 @@ public sealed class MainWindowViewModel : ReactiveObject
             nameof(CanAcceptCommandSuggestion),
             () => CanAcceptCommandSuggestion);
         IObservable<bool> canClearEventLog = ObserveCanExecuteProperty(nameof(HasEventLogEntries), () => HasEventLogEntries);
+        IObservable<bool> canCloseCurrentPane = ObserveCanExecuteProperty(
+            nameof(CanCloseCurrentPane),
+            () => CanCloseCurrentPane);
 
         ToggleCaptureCommand = ReactiveCommand.CreateFromObservable(ToggleCapture);
         SelectCaptureFormatCommand = ReactiveCommand.Create<object?>(SelectCaptureFormat);
@@ -389,11 +400,15 @@ public sealed class MainWindowViewModel : ReactiveObject
             () => ResizePaneInteraction.Handle(TerminalPaneDirection.Up));
         ResizePaneDownCommand = ReactiveCommand.CreateFromObservable(
             () => ResizePaneInteraction.Handle(TerminalPaneDirection.Down));
+        CloseCurrentPaneCommand = ReactiveCommand.CreateFromObservable(
+            () => CloseCurrentPaneInteraction.Handle(Unit.Default),
+            canCloseCurrentPane);
 
         UpdateThemePresetButtonText();
     }
 
     public Interaction<Unit, Unit> CreateNewTabInteraction { get; }
+    public Interaction<string, Unit> CreateNewTabFromProfileInteraction { get; }
     public Interaction<Unit, Unit> CloseCurrentTabInteraction { get; }
     public Interaction<int, Unit> ActivateTabInteraction { get; }
     public Interaction<int, Unit> CloseTabInteraction { get; }
@@ -404,6 +419,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<Unit, Unit> SelectAllInteraction { get; }
     public Interaction<double, Unit> ApplyFontSizeInteraction { get; }
     public Interaction<bool, Unit> ApplyThemeInteraction { get; }
+    public Interaction<AppThemeMode, Unit> ApplyAppThemeInteraction { get; }
     public Interaction<TerminalThemeApplyRequest, Unit> ApplyThemeModelInteraction { get; }
     public Interaction<bool, Unit> ToggleCaptureInteraction { get; }
     public Interaction<Unit, Unit> SaveCaptureInteraction { get; }
@@ -431,10 +447,12 @@ public sealed class MainWindowViewModel : ReactiveObject
     public Interaction<TerminalPaneSplitRequest, Unit> SplitPaneInteraction { get; }
     public Interaction<TerminalPaneDirection, Unit> FocusPaneInteraction { get; }
     public Interaction<TerminalPaneDirection, Unit> ResizePaneInteraction { get; }
+    public Interaction<Unit, Unit> CloseCurrentPaneInteraction { get; }
 
     public ReactiveCommand<Unit, Unit> AcceptSshHostKeyCommand { get; }
     public ReactiveCommand<Unit, Unit> DeclineSshHostKeyCommand { get; }
     public ReactiveCommand<Unit, Unit> NewTabCommand { get; }
+    public ReactiveCommand<object?, Unit> CreateNewTabFromProfileCommand { get; }
     public ReactiveCommand<Unit, Unit> CloseCurrentTabCommand { get; }
     public ReactiveCommand<object?, Unit> ActivateTabCommand { get; }
     public ReactiveCommand<object?, Unit> CloseTabCommand { get; }
@@ -448,6 +466,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> DecreaseFontSizeCommand { get; }
     public ReactiveCommand<Unit, Unit> ResetFontSizeCommand { get; }
     public ReactiveCommand<Unit, Unit> ToggleThemeCommand { get; }
+    public ReactiveCommand<object?, Unit> SelectAppThemeCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleThemePresetCommand { get; }
     public ReactiveCommand<Unit, Unit> GenerateThemeCommand { get; }
     public ReactiveCommand<Unit, Unit> CycleRenderModeCommand { get; }
@@ -498,6 +517,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     public ReactiveCommand<Unit, Unit> ResizePaneRightCommand { get; }
     public ReactiveCommand<Unit, Unit> ResizePaneUpCommand { get; }
     public ReactiveCommand<Unit, Unit> ResizePaneDownCommand { get; }
+    public ReactiveCommand<Unit, Unit> CloseCurrentPaneCommand { get; }
 
     public TerminalSettingsPanelState SettingsPanelState => _settingsPanelState ??= new TerminalSettingsPanelState();
 
@@ -572,6 +592,12 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _isMicaBackdropEnabled;
         internal set => this.RaiseAndSetIfChanged(ref _isMicaBackdropEnabled, value);
+    }
+
+    public bool CanCloseCurrentPane
+    {
+        get => _canCloseCurrentPane;
+        private set => this.RaiseAndSetIfChanged(ref _canCloseCurrentPane, value);
     }
 
     /// <summary>
@@ -743,6 +769,32 @@ public sealed class MainWindowViewModel : ReactiveObject
     }
 
     public string ThemeToggleContent => IsDarkTheme ? "\u2600" : "\U0001F319";
+
+    internal void RestoreAppThemeMode(AppThemeMode mode)
+    {
+        SelectedAppThemeMode = mode;
+    }
+
+    public AppThemeMode SelectedAppThemeMode
+    {
+        get => _selectedAppThemeMode;
+        private set
+        {
+            if (_selectedAppThemeMode == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _selectedAppThemeMode, value);
+            RaiseAppThemeSelectionChanged();
+        }
+    }
+
+    public bool IsSystemAppThemeSelected => SelectedAppThemeMode == AppThemeMode.System;
+
+    public bool IsLightAppThemeSelected => SelectedAppThemeMode == AppThemeMode.Light;
+
+    public bool IsDarkAppThemeSelected => SelectedAppThemeMode == AppThemeMode.Dark;
 
     public string ThemePresetButtonText
     {
@@ -1276,6 +1328,10 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public IReadOnlyList<ShellProfileOption> ShellProfiles => _shellProfiles;
 
+    public IReadOnlyList<ShellProfileOption> NonDefaultShellProfiles => _nonDefaultShellProfiles;
+
+    public bool HasMultipleNonDefaultShellProfiles => _nonDefaultShellProfiles.Count > 1;
+
     public ShellProfileOption? SelectedShellProfile
     {
         get => _selectedShellProfile;
@@ -1793,7 +1849,10 @@ public sealed class MainWindowViewModel : ReactiveObject
             ];
 
         _shellProfiles = normalizedProfiles;
+        _nonDefaultShellProfiles = CreateNonDefaultShellProfiles(normalizedProfiles);
         this.RaisePropertyChanged(nameof(ShellProfiles));
+        this.RaisePropertyChanged(nameof(NonDefaultShellProfiles));
+        this.RaisePropertyChanged(nameof(HasMultipleNonDefaultShellProfiles));
 
         if (_selectedShellProfile is null || !ContainsShellProfile(normalizedProfiles, _selectedShellProfile.Id))
         {
@@ -1896,6 +1955,11 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         IsCaptureActive = isCaptureActive;
         HasCapture = hasCapture;
+    }
+
+    public void SetCanCloseCurrentPane(bool canCloseCurrentPane)
+    {
+        CanCloseCurrentPane = canCloseCurrentPane;
     }
 
     private IObservable<bool> ObserveCanSaveCapture()
@@ -2136,6 +2200,19 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private static string FormatFontSize(double fontSize) =>
         fontSize.ToString("0.#", CultureInfo.InvariantCulture);
+
+    private IObservable<Unit> SelectAppTheme(object? parameter)
+    {
+        if (!TryParseAppThemeMode(parameter, out AppThemeMode mode))
+        {
+            return Observable.Return(Unit.Default);
+        }
+
+        SelectedAppThemeMode = mode;
+        return ApplyAppThemeInteraction
+            .Handle(mode)
+            .Do(_ => SetStatus($"App theme: {GetAppThemeDisplayName(mode)}"));
+    }
 
     private IObservable<Unit> ToggleTheme()
     {
@@ -2622,6 +2699,68 @@ public sealed class MainWindowViewModel : ReactiveObject
         return string.Equals(SelectedCaptureFormat.FormatId, formatId, StringComparison.Ordinal);
     }
 
+    private IObservable<Unit> CreateNewTabFromProfile(object? parameter)
+    {
+        string? profileId = parameter switch
+        {
+            ShellProfileOption option => option.Id,
+            string text => text,
+            _ => null,
+        };
+
+        if (string.IsNullOrWhiteSpace(profileId) || !ContainsShellProfile(_shellProfiles, profileId.Trim()))
+        {
+            return Observable.Return(Unit.Default);
+        }
+
+        return CreateNewTabFromProfileInteraction
+            .Handle(profileId.Trim())
+            .Do(_ => SetStatus("Opened shell profile"));
+    }
+
+    private void RaiseAppThemeSelectionChanged()
+    {
+        this.RaisePropertyChanged(nameof(IsSystemAppThemeSelected));
+        this.RaisePropertyChanged(nameof(IsLightAppThemeSelected));
+        this.RaisePropertyChanged(nameof(IsDarkAppThemeSelected));
+    }
+
+    private static bool TryParseAppThemeMode(object? value, out AppThemeMode mode)
+    {
+        string? text = Convert.ToString(value, CultureInfo.InvariantCulture);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            mode = AppThemeMode.System;
+            return false;
+        }
+
+        switch (text.Trim().ToLowerInvariant())
+        {
+            case "system":
+                mode = AppThemeMode.System;
+                return true;
+            case "light":
+                mode = AppThemeMode.Light;
+                return true;
+            case "dark":
+                mode = AppThemeMode.Dark;
+                return true;
+            default:
+                mode = AppThemeMode.System;
+                return false;
+        }
+    }
+
+    private static string GetAppThemeDisplayName(AppThemeMode mode)
+    {
+        return mode switch
+        {
+            AppThemeMode.Light => "Light",
+            AppThemeMode.Dark => "Dark",
+            _ => "System",
+        };
+    }
+
     private void RaiseCaptureFormatSelectionChanged()
     {
         this.RaisePropertyChanged(nameof(IsRoyalTerminalJsonCaptureFormatSelected));
@@ -2639,6 +2778,28 @@ public sealed class MainWindowViewModel : ReactiveObject
         }
 
         return false;
+    }
+
+    private static IReadOnlyList<ShellProfileOption> CreateNonDefaultShellProfiles(
+        IReadOnlyList<ShellProfileOption> profiles)
+    {
+        if (profiles.Count <= 1)
+        {
+            return [];
+        }
+
+        ShellProfileOption defaultProfile = profiles[0];
+        List<ShellProfileOption> nonDefaultProfiles = new(profiles.Count - 1);
+        for (int i = 1; i < profiles.Count; i++)
+        {
+            ShellProfileOption profile = profiles[i];
+            if (!string.Equals(profile.Id, defaultProfile.Id, StringComparison.Ordinal))
+            {
+                nonDefaultProfiles.Add(profile);
+            }
+        }
+
+        return nonDefaultProfiles;
     }
 
     private static bool TryParseInt(object? value, out int result)
@@ -2758,6 +2919,27 @@ public sealed class MainWindowViewModel : ReactiveObject
 
         public int Generation { get; set; }
     }
+}
+
+/// <summary>
+/// Describes the Avalonia application theme preference selected by the shell.
+/// </summary>
+public enum AppThemeMode
+{
+    /// <summary>
+    /// Follow the current platform light or dark theme.
+    /// </summary>
+    System,
+
+    /// <summary>
+    /// Force the application light theme.
+    /// </summary>
+    Light,
+
+    /// <summary>
+    /// Force the application dark theme.
+    /// </summary>
+    Dark,
 }
 
 /// <summary>
