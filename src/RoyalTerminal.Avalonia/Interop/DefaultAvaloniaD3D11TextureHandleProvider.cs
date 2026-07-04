@@ -1,23 +1,23 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Avalonia.Rendering.GhosttyInterop - Default D3D12 texture handle resolver.
+// RoyalTerminal.Avalonia.Rendering.GhosttyInterop - Default D3D11 texture handle resolver.
 
 using Avalonia.Platform;
 using Avalonia.Skia;
 
-namespace RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
-/// Default resolver that attempts to extract active D3D12 handles from Avalonia's live Skia lease.
+/// Default resolver that attempts to extract active D3D11 handles from Avalonia's live Skia lease.
 /// </summary>
-public sealed class DefaultAvaloniaD3D12TextureHandleProvider : IAvaloniaD3D12TextureHandleProvider
+public sealed class DefaultAvaloniaD3D11TextureHandleProvider : IAvaloniaD3D11TextureHandleProvider
 {
     /// <summary>
     /// Shared singleton instance.
     /// </summary>
-    public static DefaultAvaloniaD3D12TextureHandleProvider Instance { get; } = new();
+    public static DefaultAvaloniaD3D11TextureHandleProvider Instance { get; } = new();
 
-    private DefaultAvaloniaD3D12TextureHandleProvider()
+    private DefaultAvaloniaD3D11TextureHandleProvider()
     {
     }
 
@@ -26,8 +26,6 @@ public sealed class DefaultAvaloniaD3D12TextureHandleProvider : IAvaloniaD3D12Te
         ISkiaSharpApiLease lease,
         IPlatformGraphicsContext context,
         out nint deviceHandle,
-        out nint commandQueueHandle,
-        out nint commandListHandle,
         out nint textureHandle,
         out nint targetViewHandle)
     {
@@ -39,46 +37,21 @@ public sealed class DefaultAvaloniaD3D12TextureHandleProvider : IAvaloniaD3D12Te
                 out deviceHandle,
                 "Device",
                 "NativeDevice",
-                "D3D12Device"))
+                "D3D11Device"))
         {
-            commandQueueHandle = nint.Zero;
-            commandListHandle = nint.Zero;
-            return false;
-        }
-
-        if (!AvaloniaInteropHandleExtraction.TryGetHandle(
-                context,
-                out commandQueueHandle,
-                "CommandQueue",
-                "Queue",
-                "D3D12CommandQueue"))
-        {
-            commandListHandle = nint.Zero;
             return false;
         }
 
         if (!AvaloniaInteropHandleExtraction.TryGetCurrentSkiaSession(lease, out object? skiaSession) || skiaSession is null)
         {
-            commandListHandle = nint.Zero;
             return false;
         }
 
         object sessionSource = ResolveInnerSession(skiaSession);
         if (!AvaloniaInteropHandleExtraction.TryGetHandle(
                 sessionSource,
-                out commandListHandle,
-                "CommandList",
-                "CommandBuffer",
-                "CommandListHandle",
-                "D3D12CommandList"))
-        {
-            return false;
-        }
-
-        if (!AvaloniaInteropHandleExtraction.TryGetHandle(
-                sessionSource,
                 out textureHandle,
-                "D3D12Texture",
+                "D3D11Texture2D",
                 "Texture",
                 "TextureHandle",
                 "TargetHandle"))
@@ -89,7 +62,7 @@ public sealed class DefaultAvaloniaD3D12TextureHandleProvider : IAvaloniaD3D12Te
         return AvaloniaInteropHandleExtraction.TryGetHandle(
             sessionSource,
             out targetViewHandle,
-            "D3D12RenderTargetView",
+            "D3D11RenderTargetView",
             "RenderTargetView",
             "TargetView",
             "TargetViewHandle");

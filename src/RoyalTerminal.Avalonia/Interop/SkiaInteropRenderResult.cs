@@ -4,7 +4,7 @@
 
 using RoyalTerminal.Rendering.Contracts;
 
-namespace RoyalTerminal.Rendering.Interop.Ghostty.Skia;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
 /// Represents one Skia interop render pass outcome.

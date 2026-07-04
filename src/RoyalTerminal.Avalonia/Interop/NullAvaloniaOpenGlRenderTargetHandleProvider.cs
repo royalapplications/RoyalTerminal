@@ -5,7 +5,7 @@
 using Avalonia.Platform;
 using Avalonia.Skia;
 
-namespace RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
 /// Default resolver that reports no available OpenGL render-target handles.

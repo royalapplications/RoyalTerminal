@@ -1,23 +1,23 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
-// RoyalTerminal.Avalonia.Rendering.GhosttyInterop - Default no-op Vulkan texture handle resolver.
+// RoyalTerminal.Avalonia.Rendering.GhosttyInterop - Default no-op Metal texture handle resolver.
 
 using Avalonia.Platform;
 using Avalonia.Skia;
 
-namespace RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
-/// Default resolver that reports no available Vulkan texture handles.
+/// Default resolver that reports no available Metal texture handle.
 /// </summary>
-public sealed class NullAvaloniaVulkanTextureHandleProvider : IAvaloniaVulkanTextureHandleProvider
+public sealed class NullAvaloniaMetalTextureHandleProvider : IAvaloniaMetalTextureHandleProvider
 {
     /// <summary>
     /// Shared singleton instance.
     /// </summary>
-    public static NullAvaloniaVulkanTextureHandleProvider Instance { get; } = new();
+    public static NullAvaloniaMetalTextureHandleProvider Instance { get; } = new();
 
-    private NullAvaloniaVulkanTextureHandleProvider()
+    private NullAvaloniaMetalTextureHandleProvider()
     {
     }
 
@@ -27,14 +27,11 @@ public sealed class NullAvaloniaVulkanTextureHandleProvider : IAvaloniaVulkanTex
         IPlatformGraphicsContext context,
         out nint deviceHandle,
         out nint commandQueueHandle,
-        out nint textureHandle,
-        out nint textureViewHandle)
+        out nint textureHandle)
     {
         deviceHandle = nint.Zero;
         commandQueueHandle = nint.Zero;
         textureHandle = nint.Zero;
-        textureViewHandle = nint.Zero;
         return false;
     }
 }
-

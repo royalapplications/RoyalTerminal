@@ -6,7 +6,7 @@ using Avalonia.Platform;
 using Avalonia.Skia;
 using Avalonia.Vulkan;
 
-namespace RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
 /// Default resolver that attempts to extract active Vulkan image handles from Avalonia's live Skia lease.

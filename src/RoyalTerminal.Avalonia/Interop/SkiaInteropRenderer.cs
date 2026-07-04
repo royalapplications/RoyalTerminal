@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 using RoyalTerminal.Rendering.Contracts;
 using SkiaSharp;
 
-namespace RoyalTerminal.Rendering.Interop.Ghostty.Skia;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
 /// Bridges renderer interop surfaces to Skia rendering targets.
@@ -19,6 +19,11 @@ public sealed class SkiaInteropRenderer
     private readonly ISkiaRgbaFallbackRenderer? _rgbaFallbackRenderer;
     private ulong _nextExplicitSyncFrameId = 1;
     private RenderBackendKind _explicitSyncBackendKind = RenderBackendKind.Unknown;
+
+    /// <summary>
+    /// Gets the underlying render surface.
+    /// </summary>
+    public IRenderSurface RenderSurface => _renderSurface;
 
     /// <summary>
     /// Initializes a new Skia interop bridge.
@@ -37,6 +42,18 @@ public sealed class SkiaInteropRenderer
     /// <returns>Render result including whether fallback was used.</returns>
     public SkiaInteropRenderResult Render(SKCanvas canvas, in SkiaInteropRenderRequest request)
     {
+        return Render(canvas, null, in request);
+    }
+
+    /// <summary>
+    /// Executes one render pass.
+    /// </summary>
+    /// <param name="canvas">Destination Skia canvas.</param>
+    /// <param name="grContext">GRContext from active Skia lease.</param>
+    /// <param name="request">Render request.</param>
+    /// <returns>Render result including whether fallback was used.</returns>
+    public SkiaInteropRenderResult Render(SKCanvas canvas, GRContext? grContext, in SkiaInteropRenderRequest request)
+    {
         ArgumentNullException.ThrowIfNull(canvas);
 
         RenderValidationResult descriptorValidation = RenderTargetDescriptorValidator.Validate(request.TargetDescriptor);
@@ -53,6 +70,10 @@ public sealed class SkiaInteropRenderer
         bool supportsDirectInterop = backendSupportsDirectInterop && SkiaInteropSupport.CanUseDirectInterop(
             request.TargetDescriptor,
             _renderSurface.BackendKind);
+        if (!supportsDirectInterop)
+        {
+            Console.WriteLine($"[Renderer Info] Direct interop check failed. BackendSupportsDirect={backendSupportsDirectInterop}, Features={_renderSurface.Capabilities.FeatureFlags}, TargetKind={request.TargetDescriptor.TargetKind}, DescriptorBackend={request.TargetDescriptor.BackendKind}, SurfaceBackend={_renderSurface.BackendKind}, DeviceHandle=0x{request.TargetDescriptor.DeviceHandle:X}, TargetHandle=0x{request.TargetDescriptor.TargetHandle:X}");
+        }
         if (supportsDirectInterop)
         {
             RenderTargetDescriptor synchronizedDescriptor = PrepareSynchronizedDescriptor(request.TargetDescriptor, out bool explicitSyncEnabled);
@@ -80,7 +101,34 @@ public sealed class SkiaInteropRenderer
 
             RenderFrameResult directResult = _renderSurface.Render(synchronizedDescriptor);
             AdvanceSynchronizationState(explicitSyncEnabled, synchronizedDescriptor.FrameId, directResult);
-            if (directResult.Succeeded || !allowCpuFallback)
+            if (directResult.Succeeded)
+            {
+                if (synchronizedDescriptor.DebugName == "avalonia-skiacanvas-metal-shared" && grContext is not null)
+                {
+                    var mtlInfo = new GRMtlTextureInfo
+                    {
+                        TextureHandle = synchronizedDescriptor.TargetHandle
+                    };
+                    using var backendTexture = new GRBackendTexture(
+                        synchronizedDescriptor.Width,
+                        synchronizedDescriptor.Height,
+                        false,
+                        mtlInfo);
+                    using var image = SKImage.FromTexture(
+                        grContext,
+                        backendTexture,
+                        GRSurfaceOrigin.TopLeft,
+                        SKColorType.Bgra8888);
+                    if (image is not null)
+                    {
+                        canvas.DrawImage(image, request.DestinationRect ?? new SKRect(0, 0, synchronizedDescriptor.Width, synchronizedDescriptor.Height));
+                    }
+                }
+
+                return new SkiaInteropRenderResult(directResult, usedCpuFallback: false);
+            }
+
+            if (!allowCpuFallback)
             {
                 return new SkiaInteropRenderResult(directResult, usedCpuFallback: false);
             }
@@ -100,7 +148,7 @@ public sealed class SkiaInteropRenderer
 
         if (!allowCpuFallback)
         {
-            string message = "Direct Skia interop is unavailable for this render target/backend and CPU fallback is disabled.";
+            string message = $"Direct Skia interop is unavailable. Descriptor: Backend={request.TargetDescriptor.BackendKind}, Target={request.TargetDescriptor.TargetKind}, Width={request.TargetDescriptor.Width}, Height={request.TargetDescriptor.Height}, Device=0x{request.TargetDescriptor.DeviceHandle:X}, Queue=0x{request.TargetDescriptor.CommandQueueHandle:X}, TargetHandle=0x{request.TargetDescriptor.TargetHandle:X}. Surface: Backend={_renderSurface.BackendKind}, Features={_renderSurface.Capabilities.FeatureFlags}";
             return new SkiaInteropRenderResult(RenderFrameResult.Failure(message), usedCpuFallback: false);
         }
 
@@ -203,7 +251,7 @@ public sealed class SkiaInteropRenderer
             SKImageInfo info = new(
                 descriptor.Width,
                 descriptor.Height,
-                SKColorType.Rgba8888,
+                SKColorType.Bgra8888,
                 SKAlphaType.Unpremul);
 
             GCHandle pinnedBuffer = GCHandle.Alloc(buffer, GCHandleType.Pinned);

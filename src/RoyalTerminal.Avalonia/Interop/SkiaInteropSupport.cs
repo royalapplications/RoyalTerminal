@@ -4,7 +4,7 @@
 
 using RoyalTerminal.Rendering.Contracts;
 
-namespace RoyalTerminal.Rendering.Interop.Ghostty.Skia;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
 /// Determines whether a render target can use direct interop for a given backend/target kind.

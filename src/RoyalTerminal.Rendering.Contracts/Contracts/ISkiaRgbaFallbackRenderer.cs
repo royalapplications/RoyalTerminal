@@ -4,7 +4,7 @@
 
 using RoyalTerminal.Rendering.Contracts;
 
-namespace RoyalTerminal.Rendering.Interop.Ghostty.Skia;
+namespace RoyalTerminal.Rendering.Contracts;
 
 /// <summary>
 /// Provides CPU RGBA fallback rendering for Skia interop adapters.

@@ -8,10 +8,10 @@ using Avalonia.Platform;
 using Avalonia.Rendering.Composition;
 using Avalonia.Skia;
 using RoyalTerminal.Avalonia.Rendering;
-using RoyalTerminal.Rendering.Interop.Ghostty.Skia;
+using RoyalTerminal.Avalonia.Interop;
 using SkiaSharp;
 
-namespace RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
 /// Composition draw handler that renders frames via <see cref="SkiaInteropRenderer"/>.
@@ -24,6 +24,7 @@ public sealed class TerminalTextureInteropDrawHandler : CompositionCustomVisualH
     private TerminalScreen? _overlayScreen;
     private PixelSize _pixelSize;
     private bool _pendingRender;
+    private bool? _lastUsedCpuFallback;
 
     /// <summary>
     /// Message sent when render dependencies or target size change.
@@ -114,7 +115,19 @@ public sealed class TerminalTextureInteropDrawHandler : CompositionCustomVisualH
             }
 
             SkiaInteropRenderRequest request = renderTargetProvider.CreateRenderRequest(lease, targetPixelSize);
-            SkiaInteropRenderResult renderResult = renderer.Render(canvas, request);
+            SkiaInteropRenderResult renderResult = renderer.Render(canvas, lease.GrContext, request);
+            if (renderResult.FrameResult.Succeeded)
+            {
+                if (_lastUsedCpuFallback != renderResult.UsedCpuFallback)
+                {
+                    _lastUsedCpuFallback = renderResult.UsedCpuFallback;
+                    Console.WriteLine($"[Renderer Info] Active Render Mode: {(renderResult.UsedCpuFallback ? "CPU Fallback (Software)" : "Direct GPU Interop (Metal)")}");
+                }
+            }
+            else
+            {
+                Console.Error.WriteLine($"[Renderer Error] {renderResult.FrameResult.ErrorMessage} (Diagnostic: {renderTargetProvider.LastDiagnostic})");
+            }
             requiresRedraw = renderResult.FrameResult.RequiresRedraw;
 
             SkiaTerminalRenderer? overlayRenderer = _overlayRenderer;

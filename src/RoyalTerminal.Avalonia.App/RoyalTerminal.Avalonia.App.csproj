@@ -24,6 +24,8 @@
     <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Raw\RoyalTerminal.Terminal.Transport.Raw.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Telnet\RoyalTerminal.Terminal.Transport.Telnet.csproj" />
     <ProjectReference Include="..\RoyalTerminal.Terminal.Transport.Serial\RoyalTerminal.Terminal.Transport.Serial.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Avalonia.Rendering.GhosttyInterop\RoyalTerminal.Avalonia.Rendering.GhosttyInterop.csproj" />
+    <ProjectReference Include="..\RoyalTerminal.Rendering.Interop.Ghostty.Skia\RoyalTerminal.Rendering.Interop.Ghostty.Skia.csproj" />
   </ItemGroup>
 
   <ItemGroup>

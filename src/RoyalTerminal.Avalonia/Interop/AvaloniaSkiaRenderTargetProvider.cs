@@ -10,10 +10,10 @@ using Avalonia.Platform;
 using Avalonia.Skia;
 using Avalonia.Vulkan;
 using RoyalTerminal.Rendering.Contracts;
-using RoyalTerminal.Rendering.Interop.Ghostty.Skia;
+using RoyalTerminal.Avalonia.Interop;
 using SkiaSharp;
 
-namespace RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
 /// Creates <see cref="RenderTargetDescriptor"/> values from Avalonia Skia render leases.
@@ -26,6 +26,72 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
     private readonly IAvaloniaD3D12TextureHandleProvider _d3d12TextureHandleProvider;
     private readonly IAvaloniaOpenGlRenderTargetHandleProvider _openGlRenderTargetHandleProvider;
     private string? _lastDiagnostic;
+
+    private nint _sharedTextureHandle = nint.Zero;
+    private nint _sharedTextureDevice = nint.Zero;
+    private int _sharedTextureWidth = 0;
+    private int _sharedTextureHeight = 0;
+
+    [DllImport("libswift_terminal_renderer", EntryPoint = "swift_render_create_texture")]
+    private static extern nint CreateSharedTextureNative(nint deviceHandle, int width, int height);
+
+    [DllImport("libswift_terminal_renderer", EntryPoint = "swift_render_free_texture")]
+    private static extern void FreeSharedTextureNative(nint textureHandle);
+
+    private nint GetOrCreateSharedTexture(nint deviceHandle, int width, int height)
+    {
+        if (_sharedTextureHandle != nint.Zero &&
+            _sharedTextureDevice == deviceHandle &&
+            _sharedTextureWidth == width &&
+            _sharedTextureHeight == height)
+        {
+            return _sharedTextureHandle;
+        }
+
+        CleanupSharedTexture();
+
+        try
+        {
+            nint newTex = CreateSharedTextureNative(deviceHandle, width, height);
+            if (newTex != nint.Zero)
+            {
+                _sharedTextureHandle = newTex;
+                _sharedTextureDevice = deviceHandle;
+                _sharedTextureWidth = width;
+                _sharedTextureHeight = height;
+            }
+            return newTex;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Renderer Error] Failed to allocate shared Metal texture: {ex.Message}");
+            return nint.Zero;
+        }
+    }
+
+    private void CleanupSharedTexture()
+    {
+        if (_sharedTextureHandle != nint.Zero)
+        {
+            try
+            {
+                FreeSharedTextureNative(_sharedTextureHandle);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Renderer Error] Failed to free shared Metal texture: {ex.Message}");
+            }
+            _sharedTextureHandle = nint.Zero;
+            _sharedTextureDevice = nint.Zero;
+            _sharedTextureWidth = 0;
+            _sharedTextureHeight = 0;
+        }
+    }
+
+    ~AvaloniaSkiaRenderTargetProvider()
+    {
+        CleanupSharedTexture();
+    }
 
     private static readonly RenderBackendKind[] MacBackendCandidates = [RenderBackendKind.Metal];
     private static readonly RenderBackendKind[] LinuxBackendCandidates = [RenderBackendKind.Vulkan];
@@ -85,21 +151,30 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
         int width = Math.Max(1, pixelSize.Width);
         int height = Math.Max(1, pixelSize.Height);
 
+        var scale = RoyalTerminal.Avalonia.Rendering.TerminalDrawHandler.GetCanvasScale(lease.SkCanvas.TotalMatrix);
+        float destWidth = width / scale.X;
+        float destHeight = height / scale.Y;
+
         using ISkiaSharpPlatformGraphicsApiLease? platformLease = lease.TryLeasePlatformGraphicsApi();
         if (platformLease?.Context is null)
         {
             ReportDiagnostic(
                 "Avalonia platform graphics context is unavailable for texture interop. Falling back to software RGBA rendering.");
-            return CreateSoftwareFallbackRequest(width, height, "avalonia-skiacanvas-cpu-fallback-no-context");
+            return CreateSoftwareFallbackRequest(width, height, destWidth, destHeight, "avalonia-skiacanvas-cpu-fallback-no-context");
         }
 
-        IPlatformGraphicsContext context = platformLease.Context;
+        if (platformLease is not null)
+        {
+            AvaloniaInteropHandleExtraction.DumpObjectMembers(platformLease, "PlatformLease");
+        }
+
+        IPlatformGraphicsContext context = platformLease!.Context;
         RenderBackendKind[] backendCandidates = GetBackendCandidates(BackendPreference, context, out string? noCandidateReason);
         if (backendCandidates.Length == 0)
         {
             ReportDiagnostic(
                 $"{noCandidateReason ?? "No GPU interop backend candidate is selected."} Falling back to software RGBA rendering.");
-            return CreateSoftwareFallbackRequest(width, height, "avalonia-skiacanvas-cpu-fallback");
+            return CreateSoftwareFallbackRequest(width, height, destWidth, destHeight, "avalonia-skiacanvas-cpu-fallback");
         }
 
         string? firstFailureReason = null;
@@ -131,7 +206,7 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
             {
                 TargetDescriptor = descriptor,
                 AllowCpuFallback = true,
-                DestinationRect = new SKRect(0, 0, width, height),
+                DestinationRect = new SKRect(0, 0, destWidth, destHeight),
             };
         }
 
@@ -139,12 +214,14 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
             ? $"{firstFailureReason} Falling back to software RGBA rendering."
             : $"No compatible interop render target resolved for backend preference '{BackendPreference}'. Falling back to software RGBA rendering.";
         ReportDiagnostic(finalDiagnostic);
-        return CreateSoftwareFallbackRequest(width, height, "avalonia-skiacanvas-cpu-fallback-no-compatible-backend");
+        return CreateSoftwareFallbackRequest(width, height, destWidth, destHeight, "avalonia-skiacanvas-cpu-fallback-no-compatible-backend");
     }
 
     private static SkiaInteropRenderRequest CreateSoftwareFallbackRequest(
         int width,
         int height,
+        float destWidth,
+        float destHeight,
         string debugName)
     {
         RenderTargetDescriptor fallbackDescriptor = new()
@@ -163,7 +240,7 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
         {
             TargetDescriptor = fallbackDescriptor,
             AllowCpuFallback = true,
-            DestinationRect = new SKRect(0, 0, width, height),
+            DestinationRect = new SKRect(0, 0, destWidth, destHeight),
         };
     }
 
@@ -194,34 +271,54 @@ public sealed class AvaloniaSkiaRenderTargetProvider : IAvaloniaSkiaRenderTarget
         out RenderTargetDescriptor descriptor)
     {
         descriptor = default;
-        if (!_metalTextureHandleProvider.TryGetHandles(
-                lease,
-                context,
-                out nint deviceHandle,
-                out nint commandQueueHandle,
-                out nint textureHandle) ||
-            deviceHandle == nint.Zero ||
-            commandQueueHandle == nint.Zero ||
-            textureHandle == nint.Zero)
+        bool hasHandles = _metalTextureHandleProvider.TryGetHandles(
+            lease,
+            context,
+            out nint deviceHandle,
+            out nint commandQueueHandle,
+            out nint textureHandle);
+
+        if (hasHandles && deviceHandle != nint.Zero && commandQueueHandle != nint.Zero && textureHandle != nint.Zero)
         {
-            return false;
+            descriptor = new()
+            {
+                BackendKind = RenderBackendKind.Metal,
+                TargetKind = RenderTargetKind.Texture2D,
+                PixelFormat = RenderPixelFormat.Bgra8Unorm,
+                Width = width,
+                Height = height,
+                SampleCount = 1,
+                DeviceHandle = deviceHandle,
+                CommandQueueHandle = commandQueueHandle,
+                TargetHandle = textureHandle,
+                DebugName = "avalonia-skiacanvas-metal",
+            };
+            return true;
         }
 
-        descriptor = new()
+        if (deviceHandle != nint.Zero && commandQueueHandle != nint.Zero)
         {
-            BackendKind = RenderBackendKind.Metal,
-            TargetKind = RenderTargetKind.Texture2D,
-            PixelFormat = RenderPixelFormat.Bgra8Unorm,
-            Width = width,
-            Height = height,
-            SampleCount = 1,
-            DeviceHandle = deviceHandle,
-            CommandQueueHandle = commandQueueHandle,
-            TargetHandle = textureHandle,
-            DebugName = "avalonia-skiacanvas-metal",
-        };
+            nint sharedTexture = GetOrCreateSharedTexture(deviceHandle, width, height);
+            if (sharedTexture != nint.Zero)
+            {
+                descriptor = new()
+                {
+                    BackendKind = RenderBackendKind.Metal,
+                    TargetKind = RenderTargetKind.Texture2D,
+                    PixelFormat = RenderPixelFormat.Bgra8Unorm,
+                    Width = width,
+                    Height = height,
+                    SampleCount = 1,
+                    DeviceHandle = deviceHandle,
+                    CommandQueueHandle = commandQueueHandle,
+                    TargetHandle = sharedTexture,
+                    DebugName = "avalonia-skiacanvas-metal-shared",
+                };
+                return true;
+            }
+        }
 
-        return true;
+        return false;
     }
 
     private bool TryCreateVulkanTextureDescriptor(

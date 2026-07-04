@@ -5,7 +5,7 @@
 using RoyalTerminal.Rendering.Contracts;
 using SkiaSharp;
 
-namespace RoyalTerminal.Rendering.Interop.Ghostty.Skia;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
 /// Describes one Skia bridge render request.

@@ -4,9 +4,9 @@
 
 using Avalonia;
 using Avalonia.Skia;
-using RoyalTerminal.Rendering.Interop.Ghostty.Skia;
+using RoyalTerminal.Avalonia.Interop;
 
-namespace RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
 /// Produces interop render requests from the current Avalonia Skia render state.

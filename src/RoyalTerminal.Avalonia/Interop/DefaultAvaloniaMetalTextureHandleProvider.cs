@@ -4,8 +4,9 @@
 
 using Avalonia.Platform;
 using Avalonia.Skia;
+using SkiaSharp;
 
-namespace RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
 /// Default resolver that attempts to extract active Metal handles from Avalonia's live Skia lease.
@@ -32,6 +33,8 @@ public sealed class DefaultAvaloniaMetalTextureHandleProvider : IAvaloniaMetalTe
         deviceHandle = nint.Zero;
         commandQueueHandle = nint.Zero;
         textureHandle = nint.Zero;
+
+        AvaloniaInteropHandleExtraction.DumpObjectMembers(context, "PlatformGraphicsContext");
 
         if (!AvaloniaInteropHandleExtraction.TryGetHandle(context, out deviceHandle, "Device"))
         {

@@ -5,7 +5,7 @@
 using Avalonia.Platform;
 using Avalonia.Skia;
 
-namespace RoyalTerminal.Avalonia.Rendering.GhosttyInterop.Interop;
+namespace RoyalTerminal.Avalonia.Interop;
 
 /// <summary>
 /// Resolves active OpenGL interop handles for the current Avalonia Skia lease.
