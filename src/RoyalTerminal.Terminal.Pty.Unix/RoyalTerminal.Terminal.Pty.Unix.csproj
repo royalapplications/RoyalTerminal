@@ -4,6 +4,7 @@
     <PackageId>RoyalApps.RoyalTerminal.Terminal.Pty.Unix</PackageId>
     <Description>Unix PTY implementation for RoyalTerminal terminal contracts.</Description>
     <IsPackable>true</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
