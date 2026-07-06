@@ -73,10 +73,20 @@ The existing benchmark runner now supports Ghostty-style IO fixture generation:
 dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- \
   --skip-render \
   --io \
+  --io-mode managed-vt \
+  --io-repeats 3 \
   --fixture-size-mb 150 \
   --fixtures /tmp/royalterminal-io-fixtures \
   --output /tmp/royalterminal-io.md
 ```
+
+PTY IO modes:
+
+- `--io-mode raw`: measures PTY delivery and marker scanning only.
+- `--io-mode managed-vt`: feeds each delivered PTY batch through `BasicVtProcessor`.
+- `--io-mode both`: runs both rows for each fixture.
+
+The report includes terminal-side elapsed throughput and child-process wall time parsed from `/usr/bin/time -p cat`. The child columns show whether the writer process is stalling behind PTY read/dispatch behavior.
 
 Generated fixtures:
 
@@ -84,15 +94,15 @@ Generated fixtures:
 - `{N}MB_unicode.txt`
 - `{N}MB_csi.txt`
 
-Latest smoke result on this machine with 1 MiB fixtures:
+Latest managed-VT validation result on this machine with 32 MiB fixtures and three repeats:
 
-| Scenario | MiB/s | Largest batch |
-|---|---:|---:|
-| ASCII | 44.37 | 65536 |
-| Unicode | 32.937 | 65536 |
-| CSI | 49.848 | 65536 |
+| Scenario | Terminal MiB/s | Child MiB/s | Batches | Largest batch |
+|---|---:|---:|---:|---:|
+| ASCII | 11.661 | 11.808 | 795 | 65536 |
+| Unicode | 18.391 | 18.713 | 762 | 65536 |
+| CSI | 12.568 | 12.648 | 805 | 65536 |
 
-The largest-batch result confirms saturated PTY output is now delivered as 64 KiB batches instead of serial 1 KiB read/dispatch cycles.
+The largest-batch and batch-count results confirm saturated PTY output is now delivered as 64 KiB batches while the managed VT parser runs, instead of serial 1 KiB read/dispatch cycles.
 
 ## Validation Log
 
@@ -107,6 +117,8 @@ dotnet publish tests/RoyalTerminal.PtyIoAotSmoke/RoyalTerminal.PtyIoAotSmoke.csp
 /tmp/royalterminal-pty-aot-smoke-clean/RoyalTerminal.PtyIoAotSmoke
 dotnet publish samples/RoyalTerminal.Demo/RoyalTerminal.Demo.csproj -c Release -r osx-arm64 -p:PublishAot=true --self-contained true -o /tmp/royalterminal-demo-aot
 dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --io --fixture-size-mb 1 --fixtures /tmp/royalterminal-io-fixtures-smoke --output /tmp/royalterminal-io-smoke.md
+dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --io --io-mode both --io-repeats 2 --fixture-size-mb 1 --fixtures /tmp/royalterminal-io-fixtures-better-smoke --output /tmp/royalterminal-io-better-smoke.md
+dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --io --io-mode managed-vt --io-repeats 3 --fixture-size-mb 32 --fixtures /tmp/royalterminal-io-compare-fixtures --output /tmp/royalterminal-io-managed-vt-optimized.md
 ```
 
 Results:
@@ -118,6 +130,8 @@ Results:
 - PTY NativeAOT smoke publish and binary run: passed.
 - Demo NativeAOT publish for `osx-arm64`: passed. The macOS linker emitted debug-info module-cache warnings only.
 - IO benchmark smoke: passed, report written to `/tmp/royalterminal-io-smoke.md`.
+- IO benchmark both-mode smoke: passed, report written to `/tmp/royalterminal-io-better-smoke.md`.
+- IO benchmark managed-VT 32 MiB run: passed, report written to `/tmp/royalterminal-io-managed-vt-optimized.md`.
 
 ## Follow-Up Work
 

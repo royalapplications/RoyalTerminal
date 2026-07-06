@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
@@ -135,7 +136,7 @@ if (options.IncludePtyIo || options.GeneratePtyIoFixturesOnly)
     ptyIoFixtures = PtyIoFixtureGenerator.EnsureFixtures(options.FixtureDirectory, options.FixtureSizeMiB);
     if (!options.GeneratePtyIoFixturesOnly)
     {
-        ptyIoResults = PtyIoBenchmark.Run(ptyIoFixtures.Value);
+        ptyIoResults = PtyIoBenchmark.Run(ptyIoFixtures.Value, options.PtyIoOptions);
     }
 }
 
@@ -247,7 +248,8 @@ internal readonly record struct BenchmarkOptions(
     bool IncludePtyIo,
     bool GeneratePtyIoFixturesOnly,
     string? FixtureDirectory,
-    int FixtureSizeMiB)
+    int FixtureSizeMiB,
+    PtyIoBenchmarkOptions PtyIoOptions)
 {
     public static BenchmarkOptions Parse(string[] args)
     {
@@ -257,6 +259,8 @@ internal readonly record struct BenchmarkOptions(
         bool generatePtyIoFixturesOnly = false;
         string? fixtureDirectory = null;
         int fixtureSizeMiB = 150;
+        PtyIoBenchmarkMode ptyIoMode = PtyIoBenchmarkMode.Raw;
+        int ptyIoRepeats = 1;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -310,6 +314,29 @@ internal readonly record struct BenchmarkOptions(
                     fixtureSizeMiB = Math.Clamp(sizeMiB, 1, 4096);
                     i++;
                 }
+
+                continue;
+            }
+
+            if (string.Equals(arg, "--io-mode", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < args.Length)
+                {
+                    ptyIoMode = ParsePtyIoMode(args[i + 1]);
+                    i++;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(arg, "--io-repeats", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < args.Length &&
+                    int.TryParse(args[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int repeats))
+                {
+                    ptyIoRepeats = Math.Clamp(repeats, 1, 25);
+                    i++;
+                }
             }
         }
 
@@ -319,8 +346,41 @@ internal readonly record struct BenchmarkOptions(
             includePtyIo,
             generatePtyIoFixturesOnly,
             fixtureDirectory,
-            fixtureSizeMiB);
+            fixtureSizeMiB,
+            new PtyIoBenchmarkOptions(ptyIoMode, ptyIoRepeats));
     }
+
+    private static PtyIoBenchmarkMode ParsePtyIoMode(string value)
+    {
+        if (string.Equals(value, "managed-vt", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "vt", StringComparison.OrdinalIgnoreCase))
+        {
+            return PtyIoBenchmarkMode.ManagedVt;
+        }
+
+        if (string.Equals(value, "both", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            return PtyIoBenchmarkMode.Both;
+        }
+
+        return PtyIoBenchmarkMode.Raw;
+    }
+}
+
+internal readonly record struct PtyIoBenchmarkOptions(PtyIoBenchmarkMode Mode, int Repeats);
+
+internal enum PtyIoBenchmarkMode
+{
+    Raw,
+    ManagedVt,
+    Both,
+}
+
+internal enum PtyIoProcessingMode
+{
+    Raw,
+    ManagedVt,
 }
 
 internal readonly record struct PtyIoFixtureSet(
@@ -332,12 +392,16 @@ internal readonly record struct PtyIoFixtureSet(
 
 internal readonly record struct PtyIoBenchmarkResult(
     string Name,
+    string Mode,
     string FilePath,
     long Bytes,
+    int Repeats,
     int Batches,
     int LargestBatchBytes,
     double TotalTimeMs,
     double MiBPerSecond,
+    double ChildRealTimeMs,
+    double ChildMiBPerSecond,
     bool TimedOut,
     string? SkippedReason);
 
@@ -414,34 +478,52 @@ internal static class PtyIoFixtureGenerator
 internal static class PtyIoBenchmark
 {
     private static readonly TimeSpan ScenarioTimeout = TimeSpan.FromSeconds(120);
+    private static readonly Regex RealTimeRegex = new(
+        @"real\s+(?<seconds>[0-9]+(?:\.[0-9]+)?)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    public static PtyIoBenchmarkResult[] Run(PtyIoFixtureSet fixtures)
+    public static PtyIoBenchmarkResult[] Run(PtyIoFixtureSet fixtures, PtyIoBenchmarkOptions options)
     {
-        PtyIoBenchmarkScenario[] scenarios =
+        PtyIoBenchmarkScenario[] fixtureScenarios =
         [
             new("pty-cat-ascii", fixtures.AsciiPath),
             new("pty-cat-unicode", fixtures.UnicodePath),
             new("pty-cat-csi", fixtures.CsiPath),
         ];
-
-        PtyIoBenchmarkResult[] results = new PtyIoBenchmarkResult[scenarios.Length];
-        for (int i = 0; i < scenarios.Length; i++)
+        PtyIoProcessingMode[] modes = options.Mode switch
         {
-            results[i] = RunScenario(scenarios[i]);
+            PtyIoBenchmarkMode.ManagedVt => [PtyIoProcessingMode.ManagedVt],
+            PtyIoBenchmarkMode.Both => [PtyIoProcessingMode.Raw, PtyIoProcessingMode.ManagedVt],
+            _ => [PtyIoProcessingMode.Raw],
+        };
+
+        PtyIoBenchmarkResult[] results = new PtyIoBenchmarkResult[fixtureScenarios.Length * modes.Length];
+        int index = 0;
+        for (int i = 0; i < fixtureScenarios.Length; i++)
+        {
+            for (int j = 0; j < modes.Length; j++)
+            {
+                results[index] = RunScenario(fixtureScenarios[i], modes[j], options.Repeats);
+                index++;
+            }
         }
 
         return results;
     }
 
-    private static PtyIoBenchmarkResult RunScenario(PtyIoBenchmarkScenario scenario)
+    private static PtyIoBenchmarkResult RunScenario(PtyIoBenchmarkScenario scenario, PtyIoProcessingMode mode, int repeats)
     {
         FileInfo fileInfo = new(scenario.FilePath);
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return new PtyIoBenchmarkResult(
                 scenario.Name,
+                FormatMode(mode),
                 scenario.FilePath,
                 fileInfo.Length,
+                repeats,
+                0,
+                0,
                 0,
                 0,
                 0,
@@ -450,11 +532,32 @@ internal static class PtyIoBenchmark
                 SkippedReason: "PTY IO throughput benchmark currently targets the Unix PTY read pipeline.");
         }
 
+        PtyIoBenchmarkResult[] results = new PtyIoBenchmarkResult[repeats];
+        for (int i = 0; i < repeats; i++)
+        {
+            results[i] = RunScenarioOnce(scenario, mode, repeats, fileInfo);
+        }
+
+        return results
+            .OrderBy(static result => result.MiBPerSecond)
+            .ElementAt(results.Length / 2);
+    }
+
+    private static PtyIoBenchmarkResult RunScenarioOnce(
+        PtyIoBenchmarkScenario scenario,
+        PtyIoProcessingMode mode,
+        int repeats,
+        FileInfo fileInfo)
+    {
         using IPty pty = new DefaultPtyFactory().Create();
+        using IVtProcessor? processor = CreateProcessor(mode);
         using ManualResetEventSlim completed = new(false);
-        string marker = "__ROYALTERMINAL_IO_BENCH_DONE_" + Guid.NewGuid().ToString("N") + "__";
+        string markerText = "__ROYALTERMINAL_IO_BENCH_DONE_" + Guid.NewGuid().ToString("N") + "__";
+        byte[] marker = Encoding.ASCII.GetBytes(markerText);
+        byte[] markerTail = new byte[Math.Max(marker.Length - 1, 0)];
+        byte[] parseTail = new byte[16 * 1024];
+        int parseTailLength = 0;
         object sync = new();
-        StringBuilder tail = new();
         long startTimestamp = 0;
         long endTimestamp = 0;
         int batches = 0;
@@ -469,17 +572,15 @@ internal static class PtyIoBenchmark
 
             Interlocked.Increment(ref batches);
             UpdateLargestBatch(ref largestBatch, length);
+            processor?.Process(data.AsSpan(0, length));
 
-            string text = Encoding.ASCII.GetString(data, 0, length);
+            ReadOnlySpan<byte> received = data.AsSpan(0, length);
             lock (sync)
             {
-                tail.Append(text);
-                if (tail.Length > 4096)
-                {
-                    tail.Remove(0, tail.Length - 4096);
-                }
-
-                if (tail.ToString().Contains(marker, StringComparison.Ordinal))
+                bool hasMarker = ContainsMarker(received, marker, markerTail);
+                UpdateTail(markerTail, received);
+                AppendTail(parseTail, ref parseTailLength, received);
+                if (hasMarker)
                 {
                     Interlocked.CompareExchange(ref endTimestamp, Stopwatch.GetTimestamp(), 0);
                     completed.Set();
@@ -492,8 +593,8 @@ internal static class PtyIoBenchmark
         Thread.Sleep(200);
         long start = Stopwatch.GetTimestamp();
         Volatile.Write(ref startTimestamp, start);
-        pty.Write("cat " + ShellQuote(scenario.FilePath) + "\n");
-        pty.Write("printf '\\n" + marker + "\\n'\n");
+        pty.Write("/usr/bin/time -p cat " + ShellQuote(scenario.FilePath) + "\n");
+        pty.Write("printf '\\n" + markerText + "\\n'\n");
 
         bool finished = completed.Wait(ScenarioTimeout);
         long end = Volatile.Read(ref endTimestamp);
@@ -507,17 +608,132 @@ internal static class PtyIoBenchmark
         double totalMs = (end - start) * 1000.0 / Stopwatch.Frequency;
         double seconds = Math.Max(totalMs / 1000.0, 1e-9);
         double mibPerSecond = (fileInfo.Length / (1024.0 * 1024.0)) / seconds;
+        double childRealTimeMs = ExtractChildRealMilliseconds(parseTail.AsSpan(0, parseTailLength));
+        double childMiBPerSecond = childRealTimeMs > 0
+            ? (fileInfo.Length / (1024.0 * 1024.0)) / (childRealTimeMs / 1000.0)
+            : double.NaN;
 
         return new PtyIoBenchmarkResult(
             scenario.Name,
+            FormatMode(mode),
             scenario.FilePath,
             fileInfo.Length,
+            repeats,
             Volatile.Read(ref batches),
             Volatile.Read(ref largestBatch),
             totalMs,
             mibPerSecond,
+            childRealTimeMs,
+            childMiBPerSecond,
             TimedOut: !finished,
             SkippedReason: null);
+    }
+
+    private static IVtProcessor? CreateProcessor(PtyIoProcessingMode mode)
+    {
+        if (mode != PtyIoProcessingMode.ManagedVt)
+        {
+            return null;
+        }
+
+        return new BasicVtProcessor(new TerminalScreen(120, 40));
+    }
+
+    private static bool ContainsMarker(ReadOnlySpan<byte> received, ReadOnlySpan<byte> marker, byte[] tail)
+    {
+        if (received.IndexOf(marker) >= 0)
+        {
+            return true;
+        }
+
+        if (tail.Length == 0)
+        {
+            return false;
+        }
+
+        int maxPrefix = Math.Min(tail.Length, marker.Length - 1);
+        for (int prefixLength = 1; prefixLength <= maxPrefix; prefixLength++)
+        {
+            int tailOffset = tail.Length - prefixLength;
+            ReadOnlySpan<byte> tailPrefix = tail.AsSpan(tailOffset, prefixLength);
+            ReadOnlySpan<byte> markerPrefix = marker[..prefixLength];
+            if (!tailPrefix.SequenceEqual(markerPrefix))
+            {
+                continue;
+            }
+
+            int suffixLength = marker.Length - prefixLength;
+            if (received.Length >= suffixLength &&
+                received[..suffixLength].SequenceEqual(marker[prefixLength..]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void UpdateTail(byte[] tail, ReadOnlySpan<byte> received)
+    {
+        if (tail.Length == 0 || received.IsEmpty)
+        {
+            return;
+        }
+
+        if (received.Length >= tail.Length)
+        {
+            received[^tail.Length..].CopyTo(tail);
+            return;
+        }
+
+        tail.AsSpan(received.Length).CopyTo(tail);
+        received.CopyTo(tail.AsSpan(tail.Length - received.Length));
+    }
+
+    private static void AppendTail(byte[] tail, ref int length, ReadOnlySpan<byte> received)
+    {
+        if (tail.Length == 0 || received.IsEmpty)
+        {
+            return;
+        }
+
+        if (received.Length >= tail.Length)
+        {
+            received[^tail.Length..].CopyTo(tail);
+            length = tail.Length;
+            return;
+        }
+
+        int overflow = Math.Max(0, length + received.Length - tail.Length);
+        if (overflow > 0)
+        {
+            tail.AsSpan(overflow, length - overflow).CopyTo(tail);
+            length -= overflow;
+        }
+
+        received.CopyTo(tail.AsSpan(length));
+        length += received.Length;
+    }
+
+    private static double ExtractChildRealMilliseconds(ReadOnlySpan<byte> tail)
+    {
+        string text = Encoding.UTF8.GetString(tail);
+        MatchCollection matches = RealTimeRegex.Matches(text);
+        if (matches.Count == 0)
+        {
+            return double.NaN;
+        }
+
+        Match match = matches[^1];
+        string value = match.Groups["seconds"].Value;
+        return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds)
+            ? seconds * 1000.0
+            : double.NaN;
+    }
+
+    private static string FormatMode(PtyIoProcessingMode mode)
+    {
+        return mode == PtyIoProcessingMode.ManagedVt ? "managed-vt" : "raw";
     }
 
     private static void UpdateLargestBatch(ref int largestBatch, int candidate)
@@ -1406,8 +1622,10 @@ internal static class BenchmarkReportWriter
             return;
         }
 
-        sb.AppendLine("| Scenario | File | Bytes | Batches | Largest batch (B) | MiB/s | Total time (ms) | Status |");
-        sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---|");
+        sb.AppendLine("Child columns come from `/usr/bin/time -p cat` output captured through the PTY.");
+        sb.AppendLine();
+        sb.AppendLine("| Scenario | Mode | File | Bytes | Repeats | Batches | Largest batch (B) | Terminal MiB/s | Terminal time (ms) | Child MiB/s | Child real (ms) | Status |");
+        sb.AppendLine("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|");
 
         for (int i = 0; i < results.Length; i++)
         {
@@ -1419,15 +1637,26 @@ internal static class BenchmarkReportWriter
                     : "ok";
 
             sb.Append("| ").Append(result.Name)
+                .Append(" | ").Append(result.Mode)
                 .Append(" | `").Append(result.FilePath).Append('`')
                 .Append(" | ").Append(result.Bytes)
+                .Append(" | ").Append(result.Repeats)
                 .Append(" | ").Append(result.Batches)
                 .Append(" | ").Append(result.LargestBatchBytes)
                 .Append(" | ").Append(Format(result.MiBPerSecond))
                 .Append(" | ").Append(Format(result.TotalTimeMs))
+                .Append(" | ").Append(FormatPositiveOptional(result.ChildMiBPerSecond))
+                .Append(" | ").Append(FormatPositiveOptional(result.ChildRealTimeMs))
                 .Append(" | ").Append(status)
                 .AppendLine(" |");
         }
+    }
+
+    private static string FormatPositiveOptional(double value)
+    {
+        return double.IsFinite(value) && value > 0
+            ? Format(value)
+            : "n/a";
     }
 
     private static string Format(double value)

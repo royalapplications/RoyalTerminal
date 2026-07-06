@@ -9,6 +9,7 @@
     <ProjectReference Include="..\..\src\RoyalTerminal.Unicode\RoyalTerminal.Unicode.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Rendering.Skia\RoyalTerminal.Rendering.Skia.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Pty.Platform\RoyalTerminal.Terminal.Pty.Platform.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Vt.Managed\RoyalTerminal.Terminal.Vt.Managed.csproj" />
   </ItemGroup>
 
 </Project>
