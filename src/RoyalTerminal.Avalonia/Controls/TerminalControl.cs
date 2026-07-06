@@ -1843,13 +1843,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
             else if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
             {
-                if (preserveNativeViewportBottom)
-                {
-                    viewportScrollSource.ScrollViewportToBottom();
-                }
-
                 lock (_screen!.SyncRoot)
                 {
+                    if (preserveNativeViewportBottom)
+                    {
+                        viewportScrollSource.ScrollViewportToBottom();
+                    }
+
                     SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
                     ApplyNativeSelectionResizeContextLocked(nativeSelectionResizeContext);
                 }
@@ -4467,9 +4467,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             if (deltaRows != 0)
             {
                 CaptureRendererSelectionForCurrentViewport();
-                viewportScrollSource.ScrollViewportByRows(deltaRows);
                 lock (_screen!.SyncRoot)
                 {
+                    viewportScrollSource.ScrollViewportByRows(deltaRows);
                     SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
                     UpdateRendererCursorForViewportLocked();
                     ApplyAnchoredSelectionToRendererLocked();
@@ -4791,14 +4791,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         CaptureRendererSelectionForCurrentViewport();
         if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
         {
-            viewportScrollSource.ScrollViewportByRows(rows);
             if (_screen is not null)
             {
                 lock (_screen.SyncRoot)
                 {
+                    viewportScrollSource.ScrollViewportByRows(rows);
                     SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
                     ApplyAnchoredSelectionToRendererLocked();
                 }
+            }
+            else
+            {
+                viewportScrollSource.ScrollViewportByRows(rows);
             }
 
             _presenter?.Invalidate();
@@ -4828,14 +4832,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         CaptureRendererSelectionForCurrentViewport();
         if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
         {
-            viewportScrollSource.ScrollViewportToBottom();
             if (_screen is not null)
             {
                 lock (_screen.SyncRoot)
                 {
+                    viewportScrollSource.ScrollViewportToBottom();
                     SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
                     ApplyAnchoredSelectionToRendererLocked();
                 }
+            }
+            else
+            {
+                viewportScrollSource.ScrollViewportToBottom();
             }
 
             _presenter?.Invalidate();
@@ -7562,6 +7570,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                     : selectedAbsoluteRow - _screen.ViewportRows + 1;
                 nextTopAbsoluteRow = Math.Clamp(nextTopAbsoluteRow, 0, maxTopAbsoluteRow);
                 changed = (ulong)nextTopAbsoluteRow != GetViewportTopAbsoluteRowUlong(viewportScrollSource.ViewportScrollState);
+                if (changed)
+                {
+                    viewportScrollSource.SetViewportOffsetRows((ulong)nextTopAbsoluteRow);
+                    SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+                }
             }
             else
             {
@@ -7584,11 +7597,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (!changed)
         {
             return false;
-        }
-
-        if (viewportScrollSource is not null)
-        {
-            viewportScrollSource.SetViewportOffsetRows((ulong)nextTopAbsoluteRow);
         }
 
         SyncScrollDataFromScreenOffset();
