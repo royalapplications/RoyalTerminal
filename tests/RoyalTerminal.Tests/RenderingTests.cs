@@ -2244,6 +2244,90 @@ public class RenderingTests
         }
     }
 
+    [Fact]
+    public void SkiaTerminalRenderer_ReportedNerdFontFiles_DoNotClipWidePrivateUseGlyphs()
+    {
+        string[] fontPaths = GetReportedNerdFontFixturePaths();
+        if (fontPaths.Length == 0)
+        {
+            return;
+        }
+
+        foreach (string fontPath in fontPaths)
+        {
+            using var renderer = new SkiaTerminalRenderer(
+                System.IO.Path.GetFileNameWithoutExtension(fontPath),
+                14f,
+                TerminalFontSource.File,
+                fontPath)
+            {
+                CursorVisible = false,
+                EnableTextShaping = true,
+            };
+
+            int verifiedCodepoints = 0;
+            int[] reportedCodepoints =
+            [
+                0xE0C6,
+                0xE0BC,
+                0xED35,
+                0xF017,
+                0xF32B,
+                0xF489,
+                0xF00ED,
+                0xF0826,
+                0xF0E1E,
+            ];
+
+            foreach (int codepoint in reportedCodepoints)
+            {
+                using var unclippedSurface = CreateRenderSurface(renderer, columns: 3, rows: 1);
+                TerminalScreen unclippedScreen = CreateAsciiScreen(columns: 3, rows: 1, text: $"{char.ConvertFromUtf32(codepoint)}  ");
+                unclippedSurface.Canvas.Clear(SKColors.Black);
+                renderer.RenderFull(unclippedSurface.Canvas, unclippedScreen);
+
+                using SKImage unclippedSnapshot = unclippedSurface.Snapshot();
+                using SKPixmap unclippedPixels = unclippedSnapshot.PeekPixels();
+                int unclippedOverflowInk = CountBrightPixelsInRegion(
+                    unclippedPixels,
+                    renderer.CellWidth * 1.05f,
+                    renderer.CellWidth * 2.2f,
+                    0f,
+                    renderer.CellHeight,
+                    threshold: 16);
+                if (unclippedOverflowInk <= 0)
+                {
+                    continue;
+                }
+
+                using var surface = CreateRenderSurface(renderer, columns: 3, rows: 1);
+                TerminalScreen screen = CreateAsciiScreen(columns: 3, rows: 1, text: $"{char.ConvertFromUtf32(codepoint)}  ");
+                TerminalRow row = screen.GetViewportRow(0);
+                row[1].Foreground = 0xFF00FF00;
+                surface.Canvas.Clear(SKColors.Black);
+
+                renderer.RenderFull(surface.Canvas, screen);
+
+                using SKImage snapshot = surface.Snapshot();
+                using SKPixmap pixels = snapshot.PeekPixels();
+                int overflowInk = CountBrightPixelsInRegion(
+                    pixels,
+                    renderer.CellWidth * 1.05f,
+                    renderer.CellWidth * 2.2f,
+                    0f,
+                    renderer.CellHeight,
+                    threshold: 16);
+
+                Assert.True(
+                    overflowInk > 0,
+                    $"{fontPath} should render U+{codepoint:X} Nerd Font glyph ink beyond the first cell without clipping.");
+                verifiedCodepoints++;
+            }
+
+            Assert.True(verifiedCodepoints > 0, $"{fontPath} should include at least one reported wide Nerd Font glyph.");
+        }
+    }
+
     private static void SaveReportedNerdFontFixture(SKImage snapshot, string fontPath)
     {
         string? outputDir = Environment.GetEnvironmentVariable("ROYALTERMINAL_RENDER_FIXTURE_OUTPUT_DIR");
@@ -3265,13 +3349,25 @@ public class RenderingTests
 
         string[] paths =
         [
+            System.IO.Path.Combine(directory, "IosevkaTermNerdFont-Regular.ttf"),
             System.IO.Path.Combine(directory, "IosevkaTermNerdFontMono-Regular.ttf"),
             System.IO.Path.Combine(directory, "FiraCodeNerdFontMono-Regular.ttf"),
         ];
 
-        return paths.All(System.IO.File.Exists)
-            ? paths
-            : [];
+        return paths.Where(System.IO.File.Exists).ToArray();
+    }
+
+    private static bool HasGlyphInkBeyondCells(string fontPath, int codepoint, float cellWidth, float cells)
+    {
+        using SKTypeface? typeface = SKTypeface.FromFile(fontPath);
+        if (typeface is null)
+        {
+            return false;
+        }
+
+        using SKFont font = GlyphCache.CreateFont(typeface, 14f);
+        _ = font.MeasureText(char.ConvertFromUtf32(codepoint), out SKRect bounds);
+        return bounds.Right > cellWidth * cells;
     }
 
     private static SKSurface CreateRenderSurface(SkiaTerminalRenderer renderer, int columns, int rows)

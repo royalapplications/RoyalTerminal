@@ -38,7 +38,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private const float GridScaleFallbackMin = 0.5f;
     private const float GridScaleFallbackMax = 1.6f;
     private const float GridClampTolerancePx = 0.5f;
-    private const float SymbolGlyphClipPaddingCells = 0.5f;
+    // xterm.js and WezTerm both special-case Nerd Font / Powerline-style glyphs
+    // that visually overflow their nominal cell; allow enough adjacent-cell ink
+    // to avoid clipping reported IosevkaTerm NF private-use symbols.
+    private const float SymbolGlyphClipPaddingCells = 1.25f;
     private const float DefaultBackgroundOpacity = 0.82f;
     private const long DefaultImageBitmapCacheBudgetBytes = 256L * 1024L * 1024L;
     private const int MaxTextHighlightRowCacheEntries = 32_768;
@@ -4433,7 +4436,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         UnicodeCategory category = Rune.GetUnicodeCategory(new Rune(codepoint));
-        return category is UnicodeCategory.MathSymbol or UnicodeCategory.OtherSymbol;
+        return category is UnicodeCategory.MathSymbol or UnicodeCategory.OtherSymbol or UnicodeCategory.PrivateUse;
     }
 
     private void DrawRunDecorations(
