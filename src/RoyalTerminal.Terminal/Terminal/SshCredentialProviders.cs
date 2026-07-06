@@ -155,7 +155,10 @@ public sealed class JsonFileSshSecretStore : ISshSecretStore
             return new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
-        Dictionary<string, string>? data = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+        Dictionary<string, string>? data = (Dictionary<string, string>?)JsonSerializer.Deserialize(
+            json,
+            typeof(Dictionary<string, string>),
+            SshSecretJsonSerializerContext.Default);
         return data is null
             ? new Dictionary<string, string>(StringComparer.Ordinal)
             : new Dictionary<string, string>(data, StringComparer.Ordinal);
@@ -163,7 +166,10 @@ public sealed class JsonFileSshSecretStore : ISshSecretStore
 
     private void WriteAllSecrets(Dictionary<string, string> payload)
     {
-        string json = JsonSerializer.Serialize(payload);
+        string json = JsonSerializer.Serialize(
+            payload,
+            typeof(Dictionary<string, string>),
+            SshSecretJsonSerializerContext.Default);
         SshSecretFileIo.WriteJsonAtomically(_filePath, json);
     }
 }
@@ -380,7 +386,10 @@ public sealed class ProtectedJsonFileSshSecretStore : ISshSecretStore
         }
 
         Dictionary<string, ProtectedSecretRecord>? data =
-            JsonSerializer.Deserialize<Dictionary<string, ProtectedSecretRecord>>(json);
+            (Dictionary<string, ProtectedSecretRecord>?)JsonSerializer.Deserialize(
+                json,
+                typeof(Dictionary<string, ProtectedSecretRecord>),
+                SshSecretJsonSerializerContext.Default);
         return data is null
             ? new Dictionary<string, ProtectedSecretRecord>(StringComparer.Ordinal)
             : new Dictionary<string, ProtectedSecretRecord>(data, StringComparer.Ordinal);
@@ -388,11 +397,14 @@ public sealed class ProtectedJsonFileSshSecretStore : ISshSecretStore
 
     private void WriteAllSecrets(Dictionary<string, ProtectedSecretRecord> payload)
     {
-        string json = JsonSerializer.Serialize(payload);
+        string json = JsonSerializer.Serialize(
+            payload,
+            typeof(Dictionary<string, ProtectedSecretRecord>),
+            SshSecretJsonSerializerContext.Default);
         SshSecretFileIo.WriteJsonAtomically(_filePath, json);
     }
 
-    private sealed class ProtectedSecretRecord
+    internal sealed class ProtectedSecretRecord
     {
         public string ProtectorId { get; set; } = string.Empty;
 

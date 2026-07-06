@@ -11,12 +11,6 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 public static class TerminalWorkspaceSerializer
 {
-    private static readonly JsonSerializerOptions s_jsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true,
-    };
-
     /// <summary>
     /// Saves a workspace document to a stream.
     /// </summary>
@@ -30,7 +24,12 @@ public static class TerminalWorkspaceSerializer
         cancellationToken.ThrowIfCancellationRequested();
 
         TerminalWorkspaceDocument normalized = NormalizeAndValidate(document);
-        return new ValueTask(JsonSerializer.SerializeAsync(stream, normalized, s_jsonOptions, cancellationToken));
+        return new ValueTask(
+            JsonSerializer.SerializeAsync(
+                stream,
+                normalized,
+                TerminalIndentedJsonSerializerContext.Default.TerminalWorkspaceDocument,
+                cancellationToken));
     }
 
     /// <summary>
@@ -44,7 +43,10 @@ public static class TerminalWorkspaceSerializer
         cancellationToken.ThrowIfCancellationRequested();
 
         TerminalWorkspaceDocument? document = await JsonSerializer
-            .DeserializeAsync<TerminalWorkspaceDocument>(stream, s_jsonOptions, cancellationToken)
+            .DeserializeAsync(
+                stream,
+                TerminalIndentedJsonSerializerContext.Default.TerminalWorkspaceDocument,
+                cancellationToken)
             .ConfigureAwait(false);
         if (document is null)
         {
@@ -92,7 +94,9 @@ public static class TerminalWorkspaceSerializer
     {
         ArgumentNullException.ThrowIfNull(document);
         TerminalWorkspaceDocument normalized = NormalizeAndValidate(document);
-        return JsonSerializer.Serialize(normalized, s_jsonOptions);
+        return JsonSerializer.Serialize(
+            normalized,
+            TerminalIndentedJsonSerializerContext.Default.TerminalWorkspaceDocument);
     }
 
     /// <summary>
@@ -101,7 +105,9 @@ public static class TerminalWorkspaceSerializer
     public static TerminalWorkspaceDocument FromJson(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        TerminalWorkspaceDocument? document = JsonSerializer.Deserialize<TerminalWorkspaceDocument>(json, s_jsonOptions);
+        TerminalWorkspaceDocument? document = JsonSerializer.Deserialize(
+            json,
+            TerminalIndentedJsonSerializerContext.Default.TerminalWorkspaceDocument);
         if (document is null)
         {
             throw new InvalidDataException("Workspace JSON is empty or malformed.");

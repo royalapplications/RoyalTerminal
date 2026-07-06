@@ -6,7 +6,6 @@ using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace RoyalTerminal.Terminal;
 
@@ -18,11 +17,6 @@ public sealed class AsciicastV3CaptureSessionFormat : ITerminalCaptureSessionFor
     private const int FormatVersion = 3;
     private static readonly byte[] s_newLine = [(byte)'\n'];
     private static readonly UTF8Encoding s_strictUtf8 = new(false, throwOnInvalidBytes: true);
-    private static readonly JsonSerializerOptions s_headerJsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
 
     /// <inheritdoc />
     public TerminalCaptureFileFormatDescriptor Descriptor { get; } = new(
@@ -44,20 +38,7 @@ public sealed class AsciicastV3CaptureSessionFormat : ITerminalCaptureSessionFor
 
         TerminalCaptureSession normalizedSession =
             TerminalCaptureSessionValidator.NormalizeAndValidate(session);
-        AsciicastHeader header = new()
-        {
-            Version = FormatVersion,
-            Term = new AsciicastTerminal
-            {
-                Columns = normalizedSession.InitialColumns,
-                Rows = normalizedSession.InitialRows,
-            },
-            Timestamp = normalizedSession.CreatedUtc.ToUnixTimeSeconds(),
-        };
-
-        await JsonSerializer
-            .SerializeAsync(stream, header, s_headerJsonOptions, cancellationToken)
-            .ConfigureAwait(false);
+        await WriteHeaderAsync(stream, normalizedSession, cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(s_newLine, cancellationToken).ConfigureAwait(false);
 
         Utf8EventDecoder outputDecoder = new("output");
@@ -85,6 +66,27 @@ public sealed class AsciicastV3CaptureSessionFormat : ITerminalCaptureSessionFor
 
         outputDecoder.Complete();
         inputDecoder.Complete();
+    }
+
+    private static async ValueTask WriteHeaderAsync(
+        Stream stream,
+        TerminalCaptureSession session,
+        CancellationToken cancellationToken)
+    {
+        ArrayBufferWriter<byte> buffer = new();
+        using (Utf8JsonWriter writer = new(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("version", FormatVersion);
+            writer.WriteStartObject("term");
+            writer.WriteNumber("cols", session.InitialColumns);
+            writer.WriteNumber("rows", session.InitialRows);
+            writer.WriteEndObject();
+            writer.WriteNumber("timestamp", session.CreatedUtc.ToUnixTimeSeconds());
+            writer.WriteEndObject();
+        }
+
+        await stream.WriteAsync(buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -489,27 +491,6 @@ public sealed class AsciicastV3CaptureSessionFormat : ITerminalCaptureSessionFor
                 ArrayPool<char>.Shared.Return(rented, clearArray: true);
             }
         }
-    }
-
-    private sealed record AsciicastHeader
-    {
-        [JsonPropertyName("version")]
-        public int Version { get; init; }
-
-        [JsonPropertyName("term")]
-        public AsciicastTerminal Term { get; init; } = new();
-
-        [JsonPropertyName("timestamp")]
-        public long? Timestamp { get; init; }
-    }
-
-    private sealed record AsciicastTerminal
-    {
-        [JsonPropertyName("cols")]
-        public int Columns { get; init; }
-
-        [JsonPropertyName("rows")]
-        public int Rows { get; init; }
     }
 
     private readonly record struct AsciicastHeaderData(

@@ -4,6 +4,7 @@
     <PackageId>RoyalApps.RoyalTerminal.Terminal.Pty.Platform</PackageId>
     <Description>Platform-selecting PTY factory over Unix/Windows implementations.</Description>
     <IsPackable>true</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
