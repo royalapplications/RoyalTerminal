@@ -132,7 +132,11 @@ if (options.IncludeRender)
 PtyIoFixtureSet? ptyIoFixtures = null;
 PtyIoBenchmarkResult[] ptyIoResults = [];
 VtParseBenchmarkResult[] vtParseResults = [];
-if (options.IncludePtyIo || options.IncludeVtParse || options.GeneratePtyIoFixturesOnly)
+GhosttyBenchmarkResult[] ghosttyResults = [];
+if (options.IncludePtyIo ||
+    options.IncludeVtParse ||
+    options.IncludeGhosttyComparison ||
+    options.GeneratePtyIoFixturesOnly)
 {
     ptyIoFixtures = PtyIoFixtureGenerator.EnsureFixtures(options.FixtureDirectory, options.FixtureSizeMiB);
     if (!options.GeneratePtyIoFixturesOnly)
@@ -146,10 +150,21 @@ if (options.IncludePtyIo || options.IncludeVtParse || options.GeneratePtyIoFixtu
         {
             vtParseResults = VtParseBenchmark.Run(ptyIoFixtures.Value, options.PtyIoOptions.Repeats);
         }
+
+        if (options.IncludeGhosttyComparison)
+        {
+            ghosttyResults = GhosttyBenchmark.Run(ptyIoFixtures.Value, options.GhosttyOptions);
+        }
     }
 }
 
-string report = BenchmarkReportWriter.CreateReport(renderResults, textHighlightResults, ptyIoResults, vtParseResults, ptyIoFixtures);
+string report = BenchmarkReportWriter.CreateReport(
+    renderResults,
+    textHighlightResults,
+    ptyIoResults,
+    vtParseResults,
+    ghosttyResults,
+    ptyIoFixtures);
 Console.WriteLine(report);
 
 if (!string.IsNullOrWhiteSpace(options.OutputPath))
@@ -256,10 +271,12 @@ internal readonly record struct BenchmarkOptions(
     bool IncludeRender,
     bool IncludePtyIo,
     bool IncludeVtParse,
+    bool IncludeGhosttyComparison,
     bool GeneratePtyIoFixturesOnly,
     string? FixtureDirectory,
     int FixtureSizeMiB,
-    PtyIoBenchmarkOptions PtyIoOptions)
+    PtyIoBenchmarkOptions PtyIoOptions,
+    GhosttyBenchmarkOptions GhosttyOptions)
 {
     public static BenchmarkOptions Parse(string[] args)
     {
@@ -267,8 +284,11 @@ internal readonly record struct BenchmarkOptions(
         bool includeRender = true;
         bool includePtyIo = false;
         bool includeVtParse = false;
+        bool includeGhosttyComparison = false;
         bool generatePtyIoFixturesOnly = false;
         string? fixtureDirectory = null;
+        string? ghosttyAppPath = null;
+        string? ghosttyBinaryPath = null;
         int fixtureSizeMiB = 150;
         PtyIoBenchmarkMode ptyIoMode = PtyIoBenchmarkMode.Raw;
         int ptyIoRepeats = 1;
@@ -299,6 +319,13 @@ internal readonly record struct BenchmarkOptions(
                 continue;
             }
 
+            if (string.Equals(arg, "--ghostty", StringComparison.OrdinalIgnoreCase))
+            {
+                includeGhosttyComparison = true;
+                includePtyIo = true;
+                continue;
+            }
+
             if (string.Equals(arg, "--vt-parse", StringComparison.OrdinalIgnoreCase))
             {
                 includeVtParse = true;
@@ -317,6 +344,33 @@ internal readonly record struct BenchmarkOptions(
                 if (i + 1 < args.Length)
                 {
                     fixtureDirectory = args[i + 1];
+                    i++;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(arg, "--ghostty-app", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < args.Length)
+                {
+                    includeGhosttyComparison = true;
+                    includePtyIo = true;
+                    ghosttyAppPath = args[i + 1];
+                    i++;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(arg, "--ghostty-path", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(arg, "--ghostty-bin", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < args.Length)
+                {
+                    includeGhosttyComparison = true;
+                    includePtyIo = true;
+                    ghosttyBinaryPath = args[i + 1];
                     i++;
                 }
 
@@ -362,10 +416,12 @@ internal readonly record struct BenchmarkOptions(
             includeRender,
             includePtyIo,
             includeVtParse,
+            includeGhosttyComparison,
             generatePtyIoFixturesOnly,
             fixtureDirectory,
             fixtureSizeMiB,
-            new PtyIoBenchmarkOptions(ptyIoMode, ptyIoRepeats));
+            new PtyIoBenchmarkOptions(ptyIoMode, ptyIoRepeats),
+            new GhosttyBenchmarkOptions(ghosttyAppPath, ghosttyBinaryPath, ptyIoRepeats));
     }
 
     private static PtyIoBenchmarkMode ParsePtyIoMode(string value)
@@ -387,6 +443,8 @@ internal readonly record struct BenchmarkOptions(
 }
 
 internal readonly record struct PtyIoBenchmarkOptions(PtyIoBenchmarkMode Mode, int Repeats);
+
+internal readonly record struct GhosttyBenchmarkOptions(string? AppPath, string? BinaryPath, int Repeats);
 
 internal enum PtyIoBenchmarkMode
 {
@@ -442,6 +500,19 @@ internal readonly record struct VtParseBenchmarkResult(
     double TotalTimeMs,
     double MiBPerSecond,
     long AllocatedBytes);
+
+internal readonly record struct GhosttyBenchmarkResult(
+    string Name,
+    string Terminal,
+    string Version,
+    string AppPath,
+    string FilePath,
+    long Bytes,
+    int Repeats,
+    double ChildRealTimeMs,
+    double ChildMiBPerSecond,
+    bool TimedOut,
+    string? SkippedReason);
 
 internal static class PtyIoFixtureGenerator
 {
@@ -915,6 +986,505 @@ internal static class VtParseBenchmark
         return total > 0
             ? value * 100.0 / total
             : 0;
+    }
+}
+
+internal static class GhosttyBenchmark
+{
+    private static readonly TimeSpan ScenarioTimeout = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan ProcessTimeout = TimeSpan.FromSeconds(10);
+    private static readonly Regex RealTimeRegex = new(
+        @"real\s+(?<seconds>[0-9]+(?:\.[0-9]+)?)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    public static GhosttyBenchmarkResult[] Run(PtyIoFixtureSet fixtures, GhosttyBenchmarkOptions options)
+    {
+        PtyIoBenchmarkScenario[] scenarios =
+        [
+            new("ghostty-cat-ascii", fixtures.AsciiPath),
+            new("ghostty-cat-unicode", fixtures.UnicodePath),
+            new("ghostty-cat-csi", fixtures.CsiPath),
+        ];
+
+        GhosttyInstall install = ResolveInstall(options);
+        GhosttyBenchmarkResult[] results = new GhosttyBenchmarkResult[scenarios.Length];
+        for (int i = 0; i < scenarios.Length; i++)
+        {
+            FileInfo fileInfo = new(scenarios[i].FilePath);
+            results[i] = install.IsAvailable
+                ? RunScenario(scenarios[i], fileInfo, install, options.Repeats)
+                : CreateSkipped(scenarios[i], fileInfo, install);
+        }
+
+        return results;
+    }
+
+    private static GhosttyBenchmarkResult RunScenario(
+        PtyIoBenchmarkScenario scenario,
+        FileInfo fileInfo,
+        GhosttyInstall install,
+        int repeats)
+    {
+        GhosttyBenchmarkResult[] results = new GhosttyBenchmarkResult[repeats];
+        for (int i = 0; i < repeats; i++)
+        {
+            results[i] = RunScenarioOnce(scenario, fileInfo, install, repeats);
+        }
+
+        return results
+            .OrderBy(static result => result.ChildMiBPerSecond)
+            .ElementAt(results.Length / 2);
+    }
+
+    private static GhosttyBenchmarkResult RunScenarioOnce(
+        PtyIoBenchmarkScenario scenario,
+        FileInfo fileInfo,
+        GhosttyInstall install,
+        int repeats)
+    {
+        string tempDirectory = Path.Combine(Path.GetTempPath(), "royalterminal-ghostty-bench");
+        Directory.CreateDirectory(tempDirectory);
+
+        string runId = Guid.NewGuid().ToString("N");
+        string scriptPath = Path.Combine(tempDirectory, runId + ".sh");
+        string resultPath = Path.Combine(tempDirectory, runId + ".time");
+
+        try
+        {
+            File.WriteAllText(
+                scriptPath,
+                "#!/bin/sh\nexec /usr/bin/time -p cat \"$1\" 2>\"$2\"\n",
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.Delete(resultPath);
+
+            bool launched = LaunchGhostty(install.AppPath!, scriptPath, scenario.FilePath, resultPath);
+            if (!launched)
+            {
+                return CreateSkipped(scenario, fileInfo, install, "Ghostty launch failed.");
+            }
+
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            while (stopwatch.Elapsed < ScenarioTimeout)
+            {
+                if (TryReadRealMilliseconds(resultPath, out double realMs))
+                {
+                    CleanupGhosttyProcesses(resultPath);
+                    double childMiBPerSecond = realMs > 0
+                        ? (fileInfo.Length / (1024.0 * 1024.0)) / (realMs / 1000.0)
+                        : double.NaN;
+
+                    return new GhosttyBenchmarkResult(
+                        scenario.Name,
+                        "Ghostty",
+                        install.Version,
+                        install.AppPath!,
+                        scenario.FilePath,
+                        fileInfo.Length,
+                        repeats,
+                        realMs,
+                        childMiBPerSecond,
+                        TimedOut: false,
+                        SkippedReason: null);
+                }
+
+                Thread.Sleep(100);
+            }
+
+            CleanupGhosttyProcesses(resultPath);
+            return new GhosttyBenchmarkResult(
+                scenario.Name,
+                "Ghostty",
+                install.Version,
+                install.AppPath!,
+                scenario.FilePath,
+                fileInfo.Length,
+                repeats,
+                double.NaN,
+                double.NaN,
+                TimedOut: true,
+                SkippedReason: null);
+        }
+        finally
+        {
+            TryDelete(scriptPath);
+            TryDelete(resultPath);
+        }
+    }
+
+    private static bool LaunchGhostty(
+        string appPath,
+        string scriptPath,
+        string fixturePath,
+        string resultPath)
+    {
+        ProcessStartInfo startInfo = new("/usr/bin/open")
+        {
+            UseShellExecute = false,
+        };
+
+        startInfo.ArgumentList.Add("-na");
+        startInfo.ArgumentList.Add(appPath);
+        startInfo.ArgumentList.Add("--args");
+        startInfo.ArgumentList.Add("--wait-after-command=false");
+        startInfo.ArgumentList.Add("--abnormal-command-exit-runtime=0");
+        startInfo.ArgumentList.Add("--quit-after-last-window-closed=true");
+        startInfo.ArgumentList.Add("-e");
+        startInfo.ArgumentList.Add("/bin/sh");
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.ArgumentList.Add(fixturePath);
+        startInfo.ArgumentList.Add(resultPath);
+
+        try
+        {
+            using Process? process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return false;
+            }
+
+            if (!process.WaitForExit((int)ProcessTimeout.TotalMilliseconds))
+            {
+                TryKill(process);
+                return false;
+            }
+
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static GhosttyInstall ResolveInstall(GhosttyBenchmarkOptions options)
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return new GhosttyInstall(
+                AppPath: null,
+                BinaryPath: null,
+                Version: "Ghostty",
+                Error: "Ghostty comparison currently uses macOS Ghostty.app launches.");
+        }
+
+        string? appPath = NormalizeAppPath(options.AppPath);
+        string? binaryPath = NormalizeBinaryPath(options.BinaryPath);
+
+        if (appPath is null && binaryPath is not null)
+        {
+            appPath = TryGetAppPathFromBinary(binaryPath);
+        }
+
+        appPath ??= LocateGhosttyApp();
+
+        if (binaryPath is null && appPath is not null)
+        {
+            string candidate = Path.Combine(appPath, "Contents", "MacOS", "ghostty");
+            if (File.Exists(candidate))
+            {
+                binaryPath = candidate;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(appPath) || !Directory.Exists(appPath))
+        {
+            return new GhosttyInstall(
+                AppPath: appPath,
+                BinaryPath: binaryPath,
+                Version: "Ghostty",
+                Error: "Ghostty.app was not found. Pass --ghostty-app /path/to/Ghostty.app.");
+        }
+
+        if (string.IsNullOrWhiteSpace(binaryPath) || !File.Exists(binaryPath))
+        {
+            return new GhosttyInstall(
+                AppPath: appPath,
+                BinaryPath: binaryPath,
+                Version: "Ghostty",
+                Error: "Ghostty executable was not found. Pass --ghostty-path /path/to/ghostty.");
+        }
+
+        string version = ReadGhosttyVersion(binaryPath);
+        return new GhosttyInstall(appPath, binaryPath, version, Error: null);
+    }
+
+    private static string? LocateGhosttyApp()
+    {
+        string? fromEnvironment = NormalizeAppPath(Environment.GetEnvironmentVariable("ROYALTERMINAL_BENCH_GHOSTTY_APP"));
+        if (fromEnvironment is not null && Directory.Exists(fromEnvironment))
+        {
+            return fromEnvironment;
+        }
+
+        string[] candidates =
+        [
+            "/Applications/Ghostty.app",
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Applications",
+                "Ghostty.app"),
+        ];
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            if (Directory.Exists(candidates[i]))
+            {
+                return candidates[i];
+            }
+        }
+
+        string? pathBinary = FindCommandOnPath("ghostty");
+        if (pathBinary is not null)
+        {
+            string? appPath = TryGetAppPathFromBinary(pathBinary);
+            if (appPath is not null && Directory.Exists(appPath))
+            {
+                return appPath;
+            }
+        }
+
+        string spotlightOutput = RunProcessCapture(
+            "/usr/bin/mdfind",
+            ["kMDItemFSName == 'Ghostty.app'"],
+            TimeSpan.FromSeconds(3));
+        foreach (string line in spotlightOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (Directory.Exists(line) &&
+                string.Equals(Path.GetFileName(line), "Ghostty.app", StringComparison.OrdinalIgnoreCase))
+            {
+                return line;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? NormalizeAppPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        string fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path));
+        if (File.Exists(fullPath))
+        {
+            return TryGetAppPathFromBinary(fullPath);
+        }
+
+        return fullPath;
+    }
+
+    private static string? NormalizeBinaryPath(string? path)
+    {
+        path ??= Environment.GetEnvironmentVariable("ROYALTERMINAL_BENCH_GHOSTTY_BIN");
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        string fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path));
+        if (Directory.Exists(fullPath))
+        {
+            string candidate = Path.Combine(fullPath, "Contents", "MacOS", "ghostty");
+            return File.Exists(candidate) ? candidate : null;
+        }
+
+        return fullPath;
+    }
+
+    private static string? TryGetAppPathFromBinary(string binaryPath)
+    {
+        DirectoryInfo? directory = new FileInfo(binaryPath).Directory;
+        while (directory is not null)
+        {
+            if (directory.Name.EndsWith(".app", StringComparison.OrdinalIgnoreCase))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
+    }
+
+    private static string ReadGhosttyVersion(string binaryPath)
+    {
+        string output = RunProcessCapture(binaryPath, ["+version"], TimeSpan.FromSeconds(5));
+        foreach (string line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            return line;
+        }
+
+        return "Ghostty";
+    }
+
+    private static bool TryReadRealMilliseconds(string resultPath, out double realMs)
+    {
+        realMs = double.NaN;
+        if (!File.Exists(resultPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            byte[] bytes = File.ReadAllBytes(resultPath);
+            string text = Encoding.UTF8.GetString(bytes);
+            MatchCollection matches = RealTimeRegex.Matches(text);
+            if (matches.Count == 0)
+            {
+                return false;
+            }
+
+            string value = matches[^1].Groups["seconds"].Value;
+            if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds))
+            {
+                return false;
+            }
+
+            realMs = seconds * 1000.0;
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static void CleanupGhosttyProcesses(string resultPath)
+    {
+        string output = RunProcessCapture("/usr/bin/pgrep", ["-f", resultPath], TimeSpan.FromSeconds(2));
+        foreach (string line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!int.TryParse(line, NumberStyles.Integer, CultureInfo.InvariantCulture, out int pid) ||
+                pid == Environment.ProcessId)
+            {
+                continue;
+            }
+
+            try
+            {
+                using Process process = Process.GetProcessById(pid);
+                process.Kill(entireProcessTree: false);
+            }
+            catch
+            {
+                // Best-effort cleanup for benchmark-launched Ghostty windows.
+            }
+        }
+    }
+
+    private static string? FindCommandOnPath(string command)
+    {
+        string? path = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        foreach (string directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string candidate = Path.Combine(directory, command);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static string RunProcessCapture(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout)
+    {
+        try
+        {
+            ProcessStartInfo startInfo = new(fileName)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+
+            for (int i = 0; i < arguments.Count; i++)
+            {
+                startInfo.ArgumentList.Add(arguments[i]);
+            }
+
+            using Process? process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return string.Empty;
+            }
+
+            if (!process.WaitForExit((int)timeout.TotalMilliseconds))
+            {
+                TryKill(process);
+                return string.Empty;
+            }
+
+            return process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static GhosttyBenchmarkResult CreateSkipped(
+        PtyIoBenchmarkScenario scenario,
+        FileInfo fileInfo,
+        GhosttyInstall install,
+        string? reason = null)
+    {
+        return new GhosttyBenchmarkResult(
+            scenario.Name,
+            "Ghostty",
+            install.Version,
+            install.AppPath ?? string.Empty,
+            scenario.FilePath,
+            fileInfo.Length,
+            Repeats: 0,
+            ChildRealTimeMs: double.NaN,
+            ChildMiBPerSecond: double.NaN,
+            TimedOut: false,
+            SkippedReason: reason ?? install.Error);
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
+        }
+    }
+
+    private readonly record struct GhosttyInstall(
+        string? AppPath,
+        string? BinaryPath,
+        string Version,
+        string? Error)
+    {
+        public bool IsAvailable => Error is null && AppPath is not null && BinaryPath is not null;
     }
 }
 
@@ -1668,6 +2238,7 @@ internal static class BenchmarkReportWriter
         ReadOnlySpan<TextHighlightBenchmarkResult> textHighlightResults,
         ReadOnlySpan<PtyIoBenchmarkResult> ptyIoResults,
         ReadOnlySpan<VtParseBenchmarkResult> vtParseResults,
+        ReadOnlySpan<GhosttyBenchmarkResult> ghosttyResults,
         PtyIoFixtureSet? ptyIoFixtures)
     {
         StringBuilder sb = new();
@@ -1686,6 +2257,10 @@ internal static class BenchmarkReportWriter
         AppendPtyIoTable(sb, ptyIoResults, ptyIoFixtures);
         sb.AppendLine();
         AppendVtParseTable(sb, vtParseResults, ptyIoFixtures);
+        sb.AppendLine();
+        AppendGhosttyTable(sb, ghosttyResults, ptyIoFixtures);
+        sb.AppendLine();
+        AppendRoyalTerminalGhosttyComparisonTable(sb, ptyIoResults, ghosttyResults);
         return sb.ToString();
     }
 
@@ -1857,16 +2432,170 @@ internal static class BenchmarkReportWriter
         }
     }
 
+    private static void AppendGhosttyTable(
+        StringBuilder sb,
+        ReadOnlySpan<GhosttyBenchmarkResult> results,
+        PtyIoFixtureSet? fixtures)
+    {
+        sb.AppendLine("## Ghostty Terminal Throughput");
+        sb.AppendLine();
+        if (fixtures is not null)
+        {
+            PtyIoFixtureSet value = fixtures.Value;
+            sb.AppendLine($"Fixture directory: `{value.Directory}`");
+            sb.AppendLine($"Fixture size: {value.SizeMiB} MiB each");
+            sb.AppendLine();
+        }
+
+        if (results.IsEmpty)
+        {
+            sb.AppendLine("_Skipped. Pass `--ghostty` to run the installed Ghostty comparison._");
+            return;
+        }
+
+        sb.AppendLine("Ghostty columns come from `/usr/bin/time -p cat` running inside Ghostty; `cat` writes fixture bytes to the Ghostty PTY while timing output is redirected to a sidecar file.");
+        sb.AppendLine();
+        sb.AppendLine("| Scenario | Terminal | Version | App | File | Bytes | Repeats | Child MiB/s | Child real (ms) | Status |");
+        sb.AppendLine("|---|---|---|---|---|---:|---:|---:|---:|---|");
+
+        for (int i = 0; i < results.Length; i++)
+        {
+            GhosttyBenchmarkResult result = results[i];
+            string status = result.SkippedReason is not null
+                ? "skipped: " + result.SkippedReason
+                : result.TimedOut
+                    ? "timed out"
+                    : "ok";
+
+            sb.Append("| ").Append(result.Name)
+                .Append(" | ").Append(result.Terminal)
+                .Append(" | ").Append(result.Version)
+                .Append(" | `").Append(result.AppPath).Append('`')
+                .Append(" | `").Append(result.FilePath).Append('`')
+                .Append(" | ").Append(result.Bytes)
+                .Append(" | ").Append(result.Repeats)
+                .Append(" | ").Append(FormatPositiveOptional(result.ChildMiBPerSecond))
+                .Append(" | ").Append(FormatPositiveOptional(result.ChildRealTimeMs))
+                .Append(" | ").Append(status)
+                .AppendLine(" |");
+        }
+    }
+
+    private static void AppendRoyalTerminalGhosttyComparisonTable(
+        StringBuilder sb,
+        ReadOnlySpan<PtyIoBenchmarkResult> ptyIoResults,
+        ReadOnlySpan<GhosttyBenchmarkResult> ghosttyResults)
+    {
+        sb.AppendLine("## RoyalTerminal vs Ghostty");
+        sb.AppendLine();
+        if (ptyIoResults.IsEmpty || ghosttyResults.IsEmpty)
+        {
+            sb.AppendLine("_Skipped. Run `--io --io-mode managed-vt --ghostty` to compare writer-side throughput._");
+            return;
+        }
+
+        bool wroteHeader = false;
+        string[] scenarioKeys = ["ascii", "unicode", "csi"];
+        for (int i = 0; i < scenarioKeys.Length; i++)
+        {
+            PtyIoBenchmarkResult? royalTerminal = FindRoyalTerminalResult(ptyIoResults, scenarioKeys[i]);
+            GhosttyBenchmarkResult? ghostty = FindGhosttyResult(ghosttyResults, scenarioKeys[i]);
+            if (royalTerminal is null || ghostty is null)
+            {
+                continue;
+            }
+
+            PtyIoBenchmarkResult royalValue = royalTerminal.Value;
+            GhosttyBenchmarkResult ghosttyValue = ghostty.Value;
+            if (royalValue.SkippedReason is not null ||
+                royalValue.TimedOut ||
+                ghosttyValue.SkippedReason is not null ||
+                ghosttyValue.TimedOut)
+            {
+                continue;
+            }
+
+            if (!wroteHeader)
+            {
+                sb.AppendLine("Both columns use writer-side `/usr/bin/time -p cat` wall time, so this compares how quickly the child process can write the fixture into each terminal.");
+                sb.AppendLine();
+                sb.AppendLine("| Scenario | RoyalTerminal mode | RoyalTerminal MiB/s | Ghostty MiB/s | Royal/Ghostty | Royal real (ms) | Ghostty real (ms) |");
+                sb.AppendLine("|---|---|---:|---:|---:|---:|---:|");
+                wroteHeader = true;
+            }
+
+            sb.Append("| ").Append(scenarioKeys[i])
+                .Append(" | ").Append(royalValue.Mode)
+                .Append(" | ").Append(FormatPositiveOptional(royalValue.ChildMiBPerSecond))
+                .Append(" | ").Append(FormatPositiveOptional(ghosttyValue.ChildMiBPerSecond))
+                .Append(" | ").Append(FormatRatio(royalValue.ChildMiBPerSecond, ghosttyValue.ChildMiBPerSecond))
+                .Append(" | ").Append(FormatPositiveOptional(royalValue.ChildRealTimeMs))
+                .Append(" | ").Append(FormatPositiveOptional(ghosttyValue.ChildRealTimeMs))
+                .AppendLine(" |");
+        }
+
+        if (!wroteHeader)
+        {
+            sb.AppendLine("_Skipped. No successful overlapping RoyalTerminal/Ghostty scenarios were recorded._");
+        }
+    }
+
     private static double BytesPerMiB(long bytes, long payloadBytes)
     {
         double mib = payloadBytes / (1024.0 * 1024.0);
         return mib > 0 ? bytes / mib : 0;
     }
 
+    private static PtyIoBenchmarkResult? FindRoyalTerminalResult(
+        ReadOnlySpan<PtyIoBenchmarkResult> results,
+        string scenarioKey)
+    {
+        PtyIoBenchmarkResult? fallback = null;
+        for (int i = 0; i < results.Length; i++)
+        {
+            PtyIoBenchmarkResult result = results[i];
+            if (result.Name.IndexOf(scenarioKey, StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                continue;
+            }
+
+            fallback ??= result;
+            if (string.Equals(result.Mode, "managed-vt", StringComparison.OrdinalIgnoreCase))
+            {
+                return result;
+            }
+        }
+
+        return fallback;
+    }
+
+    private static GhosttyBenchmarkResult? FindGhosttyResult(
+        ReadOnlySpan<GhosttyBenchmarkResult> results,
+        string scenarioKey)
+    {
+        for (int i = 0; i < results.Length; i++)
+        {
+            GhosttyBenchmarkResult result = results[i];
+            if (result.Name.IndexOf(scenarioKey, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return result;
+            }
+        }
+
+        return null;
+    }
+
     private static string FormatPositiveOptional(double value)
     {
         return double.IsFinite(value) && value > 0
             ? Format(value)
+            : "n/a";
+    }
+
+    private static string FormatRatio(double numerator, double denominator)
+    {
+        return double.IsFinite(numerator) && numerator > 0 && double.IsFinite(denominator) && denominator > 0
+            ? Format(numerator / denominator) + "x"
             : "n/a";
     }
 

@@ -91,6 +91,8 @@ The report includes terminal-side elapsed throughput and child-process wall time
 
 `--vt-parse` adds a parser-only section that excludes file IO and PTY kernel behavior, reports fixture byte shape, and measures `BasicVtProcessor.Process` directly. This is important because PTY throughput and VT parse/screen mutation are separate bottlenecks.
 
+`--ghostty` adds an installed Ghostty comparison on macOS. It launches `Ghostty.app` with `-e /bin/sh <script> <fixture> <result>`, runs `/usr/bin/time -p cat <fixture>` inside Ghostty, lets `cat` write to the Ghostty PTY, and redirects only the timing output to a sidecar file. Use `--ghostty-app /path/to/Ghostty.app` or `--ghostty-path /path/to/ghostty` when auto-discovery does not find the desired build. The report joins Ghostty's writer-side child time with RoyalTerminal's child time from the PTY IO table.
+
 Generated fixtures:
 
 - `{N}MB_ascii.txt`
@@ -131,6 +133,28 @@ Compared `origin/main` (`97d4c4d`) against this branch on macOS arm64 with the s
 
 The optimized branch now improves both sides of the original problem: saturated PTY output is delivered as 64 KiB batches instead of serial 1 KiB dispatches, and the managed parser no longer spends most of its time allocating rows for steady-state scrolling.
 
+### Installed Ghostty Comparison
+
+Compared this branch against installed Ghostty `Ghostty 1.3.2-HEAD+28972454c` from `/Users/wieslawsoltes/GitHub/RoyalTerminal/external/ghostty/macos/build/ReleaseLocal/Ghostty.app`. Both columns use writer-side `/usr/bin/time -p cat` wall time, so this compares how quickly the child process can write the same fixture into each terminal path. RoyalTerminal used `--io-mode managed-vt`.
+
+16 MiB fixtures, five repeats:
+
+| Scenario | RoyalTerminal MiB/s | Ghostty MiB/s | Royal/Ghostty | Royal real (ms) | Ghostty real (ms) |
+|---|---:|---:|---:|---:|---:|
+| ASCII | 61.538 | 53.333 | 1.154x | 260 | 300 |
+| Unicode | 47.059 | 45.714 | 1.029x | 340 | 350 |
+| CSI | 80.000 | 39.024 | 2.050x | 200 | 410 |
+
+150 MiB fixtures, three repeats:
+
+| Scenario | RoyalTerminal MiB/s | Ghostty MiB/s | Royal/Ghostty | Royal real (ms) | Ghostty real (ms) |
+|---|---:|---:|---:|---:|---:|
+| ASCII | 68.807 | 78.534 | 0.876x | 2180 | 1910 |
+| Unicode | 56.180 | 70.093 | 0.801x | 2670 | 2140 |
+| CSI | 86.705 | 62.241 | 1.393x | 1730 | 2410 |
+
+Interpretation: this RoyalTerminal branch is competitive with the installed Ghostty build on writer-side throughput. Ghostty is ahead on larger ASCII and Unicode fixtures, while RoyalTerminal is ahead on the CSI-heavy fixture. This is not a renderer frame benchmark and does not compare GPU presentation latency.
+
 ## Validation Log
 
 Commands run:
@@ -148,6 +172,8 @@ dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csp
 dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --io --io-mode managed-vt --io-repeats 3 --fixture-size-mb 32 --fixtures /tmp/royalterminal-io-compare-fixtures --output /tmp/royalterminal-io-managed-vt-optimized.md
 dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --vt-parse --io-repeats 5 --fixture-size-mb 16 --fixtures /tmp/royalterminal-io-profile-fixtures --output /tmp/royalterminal-vt-parse-after.md
 dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --io --io-mode both --io-repeats 5 --fixture-size-mb 16 --fixtures /tmp/royalterminal-io-profile-fixtures --output /tmp/royalterminal-io-profile-after.md
+dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --io --io-mode managed-vt --io-repeats 5 --fixture-size-mb 16 --fixtures /tmp/royalterminal-io-profile-fixtures --ghostty --ghostty-app /Users/wieslawsoltes/GitHub/RoyalTerminal/external/ghostty/macos/build/ReleaseLocal/Ghostty.app --output /tmp/royalterminal-ghostty-compare-16mb.md
+dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --io --io-mode managed-vt --io-repeats 3 --fixture-size-mb 150 --fixtures /tmp/royalterminal-ghostty-150mb-fixtures --ghostty --ghostty-app /Users/wieslawsoltes/GitHub/RoyalTerminal/external/ghostty/macos/build/ReleaseLocal/Ghostty.app --output /tmp/royalterminal-ghostty-compare-150mb.md
 dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "FullyQualifiedName~UnicodeWidthTests|FullyQualifiedName~TerminalScreenTests"
 ```
 
@@ -164,11 +190,13 @@ Results:
 - IO benchmark managed-VT 32 MiB run: passed, report written to `/tmp/royalterminal-io-managed-vt-optimized.md`.
 - Managed VT parser profile: passed, report written to `/tmp/royalterminal-vt-parse-after.md`.
 - PTY IO profile after parser/scroll optimization: passed, report written to `/tmp/royalterminal-io-profile-after.md`.
+- Installed Ghostty 16 MiB comparison: passed, report written to `/tmp/royalterminal-ghostty-compare-16mb.md`.
+- Installed Ghostty 150 MiB comparison: passed, report written to `/tmp/royalterminal-ghostty-compare-150mb.md`.
 - Focused terminal screen and Unicode width tests: passed, 87 tests.
 
 ## Follow-Up Work
 
-- Run full 150 MiB benchmark fixtures on target machines and compare against Ghostty/Alacritty/Kitty with identical shell, font/render settings, and hardware.
+- Extend the external-terminal comparison to Alacritty, Kitty, and other terminals with identical shell/render settings and hardware.
 - Continue profiling deeper VT parser paths after the read-side and steady-state scroll allocation bottlenecks.
 - Consider SIMD only in measured byte-processing paths such as UTF-8 classification, ASCII fast paths, CSI scanning, or marker/search helpers.
 - Add CI jobs for PTY NativeAOT smoke and demo NativeAOT publish on each supported RID.
