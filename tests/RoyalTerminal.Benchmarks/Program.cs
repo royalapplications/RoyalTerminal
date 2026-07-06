@@ -131,16 +131,25 @@ if (options.IncludeRender)
 
 PtyIoFixtureSet? ptyIoFixtures = null;
 PtyIoBenchmarkResult[] ptyIoResults = [];
-if (options.IncludePtyIo || options.GeneratePtyIoFixturesOnly)
+VtParseBenchmarkResult[] vtParseResults = [];
+if (options.IncludePtyIo || options.IncludeVtParse || options.GeneratePtyIoFixturesOnly)
 {
     ptyIoFixtures = PtyIoFixtureGenerator.EnsureFixtures(options.FixtureDirectory, options.FixtureSizeMiB);
     if (!options.GeneratePtyIoFixturesOnly)
     {
-        ptyIoResults = PtyIoBenchmark.Run(ptyIoFixtures.Value, options.PtyIoOptions);
+        if (options.IncludePtyIo)
+        {
+            ptyIoResults = PtyIoBenchmark.Run(ptyIoFixtures.Value, options.PtyIoOptions);
+        }
+
+        if (options.IncludeVtParse)
+        {
+            vtParseResults = VtParseBenchmark.Run(ptyIoFixtures.Value, options.PtyIoOptions.Repeats);
+        }
     }
 }
 
-string report = BenchmarkReportWriter.CreateReport(renderResults, textHighlightResults, ptyIoResults, ptyIoFixtures);
+string report = BenchmarkReportWriter.CreateReport(renderResults, textHighlightResults, ptyIoResults, vtParseResults, ptyIoFixtures);
 Console.WriteLine(report);
 
 if (!string.IsNullOrWhiteSpace(options.OutputPath))
@@ -246,6 +255,7 @@ internal readonly record struct BenchmarkOptions(
     string? OutputPath,
     bool IncludeRender,
     bool IncludePtyIo,
+    bool IncludeVtParse,
     bool GeneratePtyIoFixturesOnly,
     string? FixtureDirectory,
     int FixtureSizeMiB,
@@ -256,6 +266,7 @@ internal readonly record struct BenchmarkOptions(
         string? outputPath = null;
         bool includeRender = true;
         bool includePtyIo = false;
+        bool includeVtParse = false;
         bool generatePtyIoFixturesOnly = false;
         string? fixtureDirectory = null;
         int fixtureSizeMiB = 150;
@@ -285,6 +296,12 @@ internal readonly record struct BenchmarkOptions(
             if (string.Equals(arg, "--io", StringComparison.OrdinalIgnoreCase))
             {
                 includePtyIo = true;
+                continue;
+            }
+
+            if (string.Equals(arg, "--vt-parse", StringComparison.OrdinalIgnoreCase))
+            {
+                includeVtParse = true;
                 continue;
             }
 
@@ -344,6 +361,7 @@ internal readonly record struct BenchmarkOptions(
             outputPath,
             includeRender,
             includePtyIo,
+            includeVtParse,
             generatePtyIoFixturesOnly,
             fixtureDirectory,
             fixtureSizeMiB,
@@ -402,8 +420,28 @@ internal readonly record struct PtyIoBenchmarkResult(
     double MiBPerSecond,
     double ChildRealTimeMs,
     double ChildMiBPerSecond,
+    double CallbackTimeMs,
+    long CallbackAllocatedBytes,
     bool TimedOut,
     string? SkippedReason);
+
+internal readonly record struct VtPayloadProfile(
+    long Bytes,
+    long PrintableAsciiBytes,
+    long ControlOrEscapeBytes,
+    long NonAsciiBytes);
+
+internal readonly record struct VtParseBenchmarkResult(
+    string Name,
+    string FilePath,
+    long Bytes,
+    int Repeats,
+    double PrintableAsciiPercent,
+    double ControlOrEscapePercent,
+    double NonAsciiPercent,
+    double TotalTimeMs,
+    double MiBPerSecond,
+    long AllocatedBytes);
 
 internal static class PtyIoFixtureGenerator
 {
@@ -528,6 +566,8 @@ internal static class PtyIoBenchmark
                 0,
                 0,
                 0,
+                0,
+                0,
                 TimedOut: false,
                 SkippedReason: "PTY IO throughput benchmark currently targets the Unix PTY read pipeline.");
         }
@@ -560,6 +600,8 @@ internal static class PtyIoBenchmark
         object sync = new();
         long startTimestamp = 0;
         long endTimestamp = 0;
+        long callbackTicks = 0;
+        long callbackAllocatedBytes = 0;
         int batches = 0;
         int largestBatch = 0;
 
@@ -570,6 +612,8 @@ internal static class PtyIoBenchmark
                 return;
             }
 
+            long callbackStart = Stopwatch.GetTimestamp();
+            long callbackAllocationStart = GC.GetAllocatedBytesForCurrentThread();
             Interlocked.Increment(ref batches);
             UpdateLargestBatch(ref largestBatch, length);
             processor?.Process(data.AsSpan(0, length));
@@ -586,6 +630,11 @@ internal static class PtyIoBenchmark
                     completed.Set();
                 }
             }
+
+            long callbackAllocationEnd = GC.GetAllocatedBytesForCurrentThread();
+            long callbackEnd = Stopwatch.GetTimestamp();
+            Interlocked.Add(ref callbackTicks, callbackEnd - callbackStart);
+            Interlocked.Add(ref callbackAllocatedBytes, Math.Max(0, callbackAllocationEnd - callbackAllocationStart));
         };
 
         pty.Start(shell: "/bin/sh", columns: 120, rows: 40, workingDirectory: Environment.CurrentDirectory);
@@ -612,6 +661,7 @@ internal static class PtyIoBenchmark
         double childMiBPerSecond = childRealTimeMs > 0
             ? (fileInfo.Length / (1024.0 * 1024.0)) / (childRealTimeMs / 1000.0)
             : double.NaN;
+        double callbackTimeMs = Volatile.Read(ref callbackTicks) * 1000.0 / Stopwatch.Frequency;
 
         return new PtyIoBenchmarkResult(
             scenario.Name,
@@ -625,6 +675,8 @@ internal static class PtyIoBenchmark
             mibPerSecond,
             childRealTimeMs,
             childMiBPerSecond,
+            callbackTimeMs,
+            Volatile.Read(ref callbackAllocatedBytes),
             TimedOut: !finished,
             SkippedReason: null);
     }
@@ -760,6 +812,111 @@ internal static class PtyIoBenchmark
 }
 
 internal readonly record struct PtyIoBenchmarkScenario(string Name, string FilePath);
+
+internal static class VtParseBenchmark
+{
+    public static VtParseBenchmarkResult[] Run(PtyIoFixtureSet fixtures, int repeats)
+    {
+        PtyIoBenchmarkScenario[] scenarios =
+        [
+            new("vt-parse-ascii", fixtures.AsciiPath),
+            new("vt-parse-unicode", fixtures.UnicodePath),
+            new("vt-parse-csi", fixtures.CsiPath),
+        ];
+
+        VtParseBenchmarkResult[] results = new VtParseBenchmarkResult[scenarios.Length];
+        for (int i = 0; i < scenarios.Length; i++)
+        {
+            results[i] = RunScenario(scenarios[i], repeats);
+        }
+
+        return results;
+    }
+
+    private static VtParseBenchmarkResult RunScenario(PtyIoBenchmarkScenario scenario, int repeats)
+    {
+        byte[] payload = File.ReadAllBytes(scenario.FilePath);
+        VtPayloadProfile profile = AnalyzePayload(payload);
+        VtParseBenchmarkResult[] results = new VtParseBenchmarkResult[repeats];
+        for (int i = 0; i < repeats; i++)
+        {
+            results[i] = RunScenarioOnce(scenario, payload, profile, repeats);
+        }
+
+        return results
+            .OrderBy(static result => result.MiBPerSecond)
+            .ElementAt(results.Length / 2);
+    }
+
+    private static VtParseBenchmarkResult RunScenarioOnce(
+        PtyIoBenchmarkScenario scenario,
+        byte[] payload,
+        VtPayloadProfile profile,
+        int repeats)
+    {
+        TerminalScreen screen = new(120, 40);
+        using BasicVtProcessor processor = new(screen);
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+        long start = Stopwatch.GetTimestamp();
+        processor.Process(payload);
+        long end = Stopwatch.GetTimestamp();
+        long allocatedAfter = GC.GetTotalAllocatedBytes(precise: false);
+
+        double totalMs = (end - start) * 1000.0 / Stopwatch.Frequency;
+        double seconds = Math.Max(totalMs / 1000.0, 1e-9);
+        double mibPerSecond = (payload.Length / (1024.0 * 1024.0)) / seconds;
+
+        return new VtParseBenchmarkResult(
+            scenario.Name,
+            scenario.FilePath,
+            payload.Length,
+            repeats,
+            Percent(profile.PrintableAsciiBytes, profile.Bytes),
+            Percent(profile.ControlOrEscapeBytes, profile.Bytes),
+            Percent(profile.NonAsciiBytes, profile.Bytes),
+            totalMs,
+            mibPerSecond,
+            Math.Max(0, allocatedAfter - allocatedBefore));
+    }
+
+    private static VtPayloadProfile AnalyzePayload(ReadOnlySpan<byte> payload)
+    {
+        long printableAscii = 0;
+        long controlOrEscape = 0;
+        long nonAscii = 0;
+
+        for (int i = 0; i < payload.Length; i++)
+        {
+            byte value = payload[i];
+            if (value >= 0x20 && value < 0x7F)
+            {
+                printableAscii++;
+            }
+            else if (value < 0x20 || value == 0x7F)
+            {
+                controlOrEscape++;
+            }
+            else
+            {
+                nonAscii++;
+            }
+        }
+
+        return new VtPayloadProfile(payload.Length, printableAscii, controlOrEscape, nonAscii);
+    }
+
+    private static double Percent(long value, long total)
+    {
+        return total > 0
+            ? value * 100.0 / total
+            : 0;
+    }
+}
 
 internal static class RenderHotPathBenchmark
 {
@@ -1510,6 +1667,7 @@ internal static class BenchmarkReportWriter
         ReadOnlySpan<BenchmarkResult> renderResults,
         ReadOnlySpan<TextHighlightBenchmarkResult> textHighlightResults,
         ReadOnlySpan<PtyIoBenchmarkResult> ptyIoResults,
+        ReadOnlySpan<VtParseBenchmarkResult> vtParseResults,
         PtyIoFixtureSet? ptyIoFixtures)
     {
         StringBuilder sb = new();
@@ -1526,6 +1684,8 @@ internal static class BenchmarkReportWriter
         AppendTextHighlightTable(sb, textHighlightResults);
         sb.AppendLine();
         AppendPtyIoTable(sb, ptyIoResults, ptyIoFixtures);
+        sb.AppendLine();
+        AppendVtParseTable(sb, vtParseResults, ptyIoFixtures);
         return sb.ToString();
     }
 
@@ -1624,8 +1784,8 @@ internal static class BenchmarkReportWriter
 
         sb.AppendLine("Child columns come from `/usr/bin/time -p cat` output captured through the PTY.");
         sb.AppendLine();
-        sb.AppendLine("| Scenario | Mode | File | Bytes | Repeats | Batches | Largest batch (B) | Terminal MiB/s | Terminal time (ms) | Child MiB/s | Child real (ms) | Status |");
-        sb.AppendLine("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|");
+        sb.AppendLine("| Scenario | Mode | File | Bytes | Repeats | Batches | Largest batch (B) | Terminal MiB/s | Terminal time (ms) | Child MiB/s | Child real (ms) | Callback time (ms) | Callback alloc/MiB | Status |");
+        sb.AppendLine("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|");
 
         for (int i = 0; i < results.Length; i++)
         {
@@ -1647,9 +1807,60 @@ internal static class BenchmarkReportWriter
                 .Append(" | ").Append(Format(result.TotalTimeMs))
                 .Append(" | ").Append(FormatPositiveOptional(result.ChildMiBPerSecond))
                 .Append(" | ").Append(FormatPositiveOptional(result.ChildRealTimeMs))
+                .Append(" | ").Append(Format(result.CallbackTimeMs))
+                .Append(" | ").Append(Format(BytesPerMiB(result.CallbackAllocatedBytes, result.Bytes)))
                 .Append(" | ").Append(status)
                 .AppendLine(" |");
         }
+    }
+
+    private static void AppendVtParseTable(
+        StringBuilder sb,
+        ReadOnlySpan<VtParseBenchmarkResult> results,
+        PtyIoFixtureSet? fixtures)
+    {
+        sb.AppendLine("## Managed VT Parse Throughput");
+        sb.AppendLine();
+        if (fixtures is not null)
+        {
+            PtyIoFixtureSet value = fixtures.Value;
+            sb.AppendLine($"Fixture directory: `{value.Directory}`");
+            sb.AppendLine($"Fixture size: {value.SizeMiB} MiB each");
+            sb.AppendLine();
+        }
+
+        if (results.IsEmpty)
+        {
+            sb.AppendLine("_Skipped. Pass `--vt-parse` to run managed VT parser throughput scenarios._");
+            return;
+        }
+
+        sb.AppendLine("This section excludes file IO and PTY kernel behavior; it measures `BasicVtProcessor.Process` directly.");
+        sb.AppendLine();
+        sb.AppendLine("| Scenario | File | Bytes | Repeats | Printable ASCII | Control/ESC | Non-ASCII | MiB/s | Total time (ms) | Alloc/MiB |");
+        sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
+
+        for (int i = 0; i < results.Length; i++)
+        {
+            VtParseBenchmarkResult result = results[i];
+            sb.Append("| ").Append(result.Name)
+                .Append(" | `").Append(result.FilePath).Append('`')
+                .Append(" | ").Append(result.Bytes)
+                .Append(" | ").Append(result.Repeats)
+                .Append(" | ").Append(Format(result.PrintableAsciiPercent)).Append('%')
+                .Append(" | ").Append(Format(result.ControlOrEscapePercent)).Append('%')
+                .Append(" | ").Append(Format(result.NonAsciiPercent)).Append('%')
+                .Append(" | ").Append(Format(result.MiBPerSecond))
+                .Append(" | ").Append(Format(result.TotalTimeMs))
+                .Append(" | ").Append(Format(BytesPerMiB(result.AllocatedBytes, result.Bytes)))
+                .AppendLine(" |");
+        }
+    }
+
+    private static double BytesPerMiB(long bytes, long payloadBytes)
+    {
+        double mib = payloadBytes / (1024.0 * 1024.0);
+        return mib > 0 ? bytes / mib : 0;
     }
 
     private static string FormatPositiveOptional(double value)

@@ -73,8 +73,9 @@ The existing benchmark runner now supports Ghostty-style IO fixture generation:
 dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- \
   --skip-render \
   --io \
+  --vt-parse \
   --io-mode managed-vt \
-  --io-repeats 3 \
+  --io-repeats 5 \
   --fixture-size-mb 150 \
   --fixtures /tmp/royalterminal-io-fixtures \
   --output /tmp/royalterminal-io.md
@@ -88,21 +89,47 @@ PTY IO modes:
 
 The report includes terminal-side elapsed throughput and child-process wall time parsed from `/usr/bin/time -p cat`. The child columns show whether the writer process is stalling behind PTY read/dispatch behavior.
 
+`--vt-parse` adds a parser-only section that excludes file IO and PTY kernel behavior, reports fixture byte shape, and measures `BasicVtProcessor.Process` directly. This is important because PTY throughput and VT parse/screen mutation are separate bottlenecks.
+
 Generated fixtures:
 
 - `{N}MB_ascii.txt`
 - `{N}MB_unicode.txt`
 - `{N}MB_csi.txt`
 
-Latest managed-VT validation result on this machine with 32 MiB fixtures and three repeats:
+### Profiling Result
 
-| Scenario | Terminal MiB/s | Child MiB/s | Batches | Largest batch |
-|---|---:|---:|---:|---:|
-| ASCII | 11.661 | 11.808 | 795 | 65536 |
-| Unicode | 18.391 | 18.713 | 762 | 65536 |
-| CSI | 12.568 | 12.648 | 805 | 65536 |
+The initial managed-VT numbers looked suspicious because the benchmark was mixing PTY dispatch shape with VT parser/screen allocation cost. Parser-only profiling on 16 MiB fixtures showed the actual bottleneck:
 
-The largest-batch and batch-count results confirm saturated PTY output is now delivered as 64 KiB batches while the managed VT parser runs, instead of serial 1 KiB read/dispatch cycles.
+| Scenario | Before MiB/s | After MiB/s | Speedup | Before alloc/MiB | After alloc/MiB | Allocation reduction |
+|---|---:|---:|---:|---:|---:|---:|
+| ASCII | 15.359 | 76.998 | 5.01x | 49,923,344 B | 3,045,861 B | 16.4x |
+| Unicode | 19.117 | 60.862 | 3.18x | 37,642,356 B | 5,801,346 B | 6.5x |
+| CSI | 81.661 | 114.322 | 1.40x | 1,025 B | 1,025 B | 1.0x |
+
+Root cause:
+
+- Whole-screen scrolling allocated a fresh `TerminalRow` for every new line even after scrollback was already full.
+- Printable ASCII took the full Unicode grapheme/category and width path per codepoint.
+- CSI-heavy fixtures perform less printable cell mutation, so they were already much faster and allocated almost nothing.
+
+Fixes:
+
+- Recycle the trimmed top `TerminalRow` as the new bottom row once scrollback is at capacity.
+- Add printable ASCII fast paths for grapheme-append checks and codepoint width calculation.
+- Extend the benchmark report with callback timing/allocation and parser-only profiling.
+
+### Main vs Optimized
+
+Compared `origin/main` (`97d4c4d`) against this branch on macOS arm64 with the same 16 MiB fixtures and five repeats. Each run used a real PTY, `/usr/bin/time -p cat`, and managed VT parsing through `BasicVtProcessor`; the table reports median runs.
+
+| Scenario | Main terminal MiB/s | Optimized terminal MiB/s | Terminal speedup | Main child MiB/s | Optimized child MiB/s | Child speedup | Main batches | Optimized batches | Batch reduction |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| ASCII | 13.778 | 64.584 | 4.69x | 13.913 | 66.667 | 4.79x | 16,590 | 445 | 37.3x |
+| Unicode | 17.609 | 50.040 | 2.84x | 17.778 | 51.613 | 2.90x | 16,567 | 408 | 40.6x |
+| CSI | 60.073 | 89.657 | 1.49x | 61.538 | 94.118 | 1.53x | 16,627 | 511 | 32.5x |
+
+The optimized branch now improves both sides of the original problem: saturated PTY output is delivered as 64 KiB batches instead of serial 1 KiB dispatches, and the managed parser no longer spends most of its time allocating rows for steady-state scrolling.
 
 ## Validation Log
 
@@ -119,6 +146,9 @@ dotnet publish samples/RoyalTerminal.Demo/RoyalTerminal.Demo.csproj -c Release -
 dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --io --fixture-size-mb 1 --fixtures /tmp/royalterminal-io-fixtures-smoke --output /tmp/royalterminal-io-smoke.md
 dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --io --io-mode both --io-repeats 2 --fixture-size-mb 1 --fixtures /tmp/royalterminal-io-fixtures-better-smoke --output /tmp/royalterminal-io-better-smoke.md
 dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --io --io-mode managed-vt --io-repeats 3 --fixture-size-mb 32 --fixtures /tmp/royalterminal-io-compare-fixtures --output /tmp/royalterminal-io-managed-vt-optimized.md
+dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --vt-parse --io-repeats 5 --fixture-size-mb 16 --fixtures /tmp/royalterminal-io-profile-fixtures --output /tmp/royalterminal-vt-parse-after.md
+dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --skip-render --io --io-mode both --io-repeats 5 --fixture-size-mb 16 --fixtures /tmp/royalterminal-io-profile-fixtures --output /tmp/royalterminal-io-profile-after.md
+dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "FullyQualifiedName~UnicodeWidthTests|FullyQualifiedName~TerminalScreenTests"
 ```
 
 Results:
@@ -126,17 +156,20 @@ Results:
 - Unix PTY package build: passed.
 - Benchmark project build: passed.
 - Demo app build: passed.
-- Full test suite: 1232 passed, 16 skipped.
+- Full test suite: 1238 passed, 16 skipped.
 - PTY NativeAOT smoke publish and binary run: passed.
 - Demo NativeAOT publish for `osx-arm64`: passed. The macOS linker emitted debug-info module-cache warnings only.
 - IO benchmark smoke: passed, report written to `/tmp/royalterminal-io-smoke.md`.
 - IO benchmark both-mode smoke: passed, report written to `/tmp/royalterminal-io-better-smoke.md`.
 - IO benchmark managed-VT 32 MiB run: passed, report written to `/tmp/royalterminal-io-managed-vt-optimized.md`.
+- Managed VT parser profile: passed, report written to `/tmp/royalterminal-vt-parse-after.md`.
+- PTY IO profile after parser/scroll optimization: passed, report written to `/tmp/royalterminal-io-profile-after.md`.
+- Focused terminal screen and Unicode width tests: passed, 87 tests.
 
 ## Follow-Up Work
 
 - Run full 150 MiB benchmark fixtures on target machines and compare against Ghostty/Alacritty/Kitty with identical shell, font/render settings, and hardware.
-- Profile VT processing after the read-side stall is removed; the bottleneck should move to VT parse/screen update.
+- Continue profiling deeper VT parser paths after the read-side and steady-state scroll allocation bottlenecks.
 - Consider SIMD only in measured byte-processing paths such as UTF-8 classification, ASCII fast paths, CSI scanning, or marker/search helpers.
 - Add CI jobs for PTY NativeAOT smoke and demo NativeAOT publish on each supported RID.
 - Audit the optional Pretext pipeline again when the package exposes trim/AOT-safe metadata.
