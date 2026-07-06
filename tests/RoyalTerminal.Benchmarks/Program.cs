@@ -111,19 +111,35 @@ TextHighlightBenchmarkScenario[] textHighlightScenarios =
         MutateRows: true),
 ];
 
-BenchmarkResult[] renderResults = new BenchmarkResult[renderScenarios.Length];
-for (int i = 0; i < renderScenarios.Length; i++)
+BenchmarkResult[] renderResults = [];
+TextHighlightBenchmarkResult[] textHighlightResults = [];
+if (options.IncludeRender)
 {
-    renderResults[i] = RenderHotPathBenchmark.Run(renderScenarios[i]);
+    renderResults = new BenchmarkResult[renderScenarios.Length];
+    for (int i = 0; i < renderScenarios.Length; i++)
+    {
+        renderResults[i] = RenderHotPathBenchmark.Run(renderScenarios[i]);
+    }
+
+    textHighlightResults = new TextHighlightBenchmarkResult[textHighlightScenarios.Length];
+    for (int i = 0; i < textHighlightScenarios.Length; i++)
+    {
+        textHighlightResults[i] = TextHighlightBenchmark.Run(textHighlightScenarios[i]);
+    }
 }
 
-TextHighlightBenchmarkResult[] textHighlightResults = new TextHighlightBenchmarkResult[textHighlightScenarios.Length];
-for (int i = 0; i < textHighlightScenarios.Length; i++)
+PtyIoFixtureSet? ptyIoFixtures = null;
+PtyIoBenchmarkResult[] ptyIoResults = [];
+if (options.IncludePtyIo || options.GeneratePtyIoFixturesOnly)
 {
-    textHighlightResults[i] = TextHighlightBenchmark.Run(textHighlightScenarios[i]);
+    ptyIoFixtures = PtyIoFixtureGenerator.EnsureFixtures(options.FixtureDirectory, options.FixtureSizeMiB);
+    if (!options.GeneratePtyIoFixturesOnly)
+    {
+        ptyIoResults = PtyIoBenchmark.Run(ptyIoFixtures.Value);
+    }
 }
 
-string report = BenchmarkReportWriter.CreateReport(renderResults, textHighlightResults);
+string report = BenchmarkReportWriter.CreateReport(renderResults, textHighlightResults, ptyIoResults, ptyIoFixtures);
 Console.WriteLine(report);
 
 if (!string.IsNullOrWhiteSpace(options.OutputPath))
@@ -225,28 +241,309 @@ internal readonly record struct TextHighlightBenchmarkResult(
     double P95FrameMs,
     double TotalTimeMs);
 
-internal readonly record struct BenchmarkOptions(string? OutputPath)
+internal readonly record struct BenchmarkOptions(
+    string? OutputPath,
+    bool IncludeRender,
+    bool IncludePtyIo,
+    bool GeneratePtyIoFixturesOnly,
+    string? FixtureDirectory,
+    int FixtureSizeMiB)
 {
     public static BenchmarkOptions Parse(string[] args)
     {
         string? outputPath = null;
+        bool includeRender = true;
+        bool includePtyIo = false;
+        bool generatePtyIoFixturesOnly = false;
+        string? fixtureDirectory = null;
+        int fixtureSizeMiB = 150;
+
         for (int i = 0; i < args.Length; i++)
         {
-            if (!string.Equals(args[i], "--output", StringComparison.OrdinalIgnoreCase))
+            string arg = args[i];
+            if (string.Equals(arg, "--output", StringComparison.OrdinalIgnoreCase))
             {
+                if (i + 1 < args.Length)
+                {
+                    outputPath = args[i + 1];
+                    i++;
+                }
+
                 continue;
             }
 
-            if (i + 1 < args.Length)
+            if (string.Equals(arg, "--skip-render", StringComparison.OrdinalIgnoreCase))
             {
-                outputPath = args[i + 1];
-                i++;
+                includeRender = false;
+                continue;
+            }
+
+            if (string.Equals(arg, "--io", StringComparison.OrdinalIgnoreCase))
+            {
+                includePtyIo = true;
+                continue;
+            }
+
+            if (string.Equals(arg, "--generate-io-fixtures", StringComparison.OrdinalIgnoreCase))
+            {
+                includePtyIo = true;
+                generatePtyIoFixturesOnly = true;
+                continue;
+            }
+
+            if (string.Equals(arg, "--fixtures", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < args.Length)
+                {
+                    fixtureDirectory = args[i + 1];
+                    i++;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(arg, "--fixture-size-mb", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < args.Length &&
+                    int.TryParse(args[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int sizeMiB))
+                {
+                    fixtureSizeMiB = Math.Clamp(sizeMiB, 1, 4096);
+                    i++;
+                }
             }
         }
 
-        return new BenchmarkOptions(outputPath);
+        return new BenchmarkOptions(
+            outputPath,
+            includeRender,
+            includePtyIo,
+            generatePtyIoFixturesOnly,
+            fixtureDirectory,
+            fixtureSizeMiB);
     }
 }
+
+internal readonly record struct PtyIoFixtureSet(
+    string Directory,
+    int SizeMiB,
+    string AsciiPath,
+    string UnicodePath,
+    string CsiPath);
+
+internal readonly record struct PtyIoBenchmarkResult(
+    string Name,
+    string FilePath,
+    long Bytes,
+    int Batches,
+    int LargestBatchBytes,
+    double TotalTimeMs,
+    double MiBPerSecond,
+    bool TimedOut,
+    string? SkippedReason);
+
+internal static class PtyIoFixtureGenerator
+{
+    private const int BufferSize = 128 * 1024;
+
+    public static PtyIoFixtureSet EnsureFixtures(string? directory, int sizeMiB)
+    {
+        string fixtureDirectory = string.IsNullOrWhiteSpace(directory)
+            ? Path.Combine(Path.GetTempPath(), "royalterminal-io-fixtures")
+            : Path.GetFullPath(directory);
+        Directory.CreateDirectory(fixtureDirectory);
+
+        long targetBytes = sizeMiB * 1024L * 1024L;
+        string asciiPath = Path.Combine(fixtureDirectory, $"{sizeMiB}MB_ascii.txt");
+        string unicodePath = Path.Combine(fixtureDirectory, $"{sizeMiB}MB_unicode.txt");
+        string csiPath = Path.Combine(fixtureDirectory, $"{sizeMiB}MB_csi.txt");
+
+        EnsureFixture(
+            asciiPath,
+            targetBytes,
+            "RoyalTerminal ASCII throughput line 0123456789 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n"u8);
+        EnsureFixture(
+            unicodePath,
+            targetBytes,
+            "RoyalTerminal Unicode throughput 日本語ログ Ελληνικά кириллица العربية עברית हिंदी emoji ✅🚀 row\r\n"u8);
+        EnsureFixture(
+            csiPath,
+            targetBytes,
+            "\x1b[31mRED\x1b[0m \x1b[32mGREEN\x1b[0m \x1b[1;34mBOLD_BLUE\x1b[0m \x1b[2K\x1b[12;24HCSI throughput row\r\n"u8);
+
+        return new PtyIoFixtureSet(fixtureDirectory, sizeMiB, asciiPath, unicodePath, csiPath);
+    }
+
+    private static void EnsureFixture(string path, long targetBytes, ReadOnlySpan<byte> pattern)
+    {
+        FileInfo fileInfo = new(path);
+        if (fileInfo.Exists && fileInfo.Length == targetBytes)
+        {
+            return;
+        }
+
+        byte[] buffer = GC.AllocateUninitializedArray<byte>(BufferSize);
+        int offset = 0;
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            buffer[i] = pattern[offset];
+            offset++;
+            if (offset == pattern.Length)
+            {
+                offset = 0;
+            }
+        }
+
+        using FileStream stream = new(
+            path,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.Read,
+            BufferSize,
+            FileOptions.SequentialScan);
+
+        long remaining = targetBytes;
+        while (remaining > 0)
+        {
+            int writeLength = (int)Math.Min(buffer.Length, remaining);
+            stream.Write(buffer.AsSpan(0, writeLength));
+            remaining -= writeLength;
+        }
+    }
+}
+
+internal static class PtyIoBenchmark
+{
+    private static readonly TimeSpan ScenarioTimeout = TimeSpan.FromSeconds(120);
+
+    public static PtyIoBenchmarkResult[] Run(PtyIoFixtureSet fixtures)
+    {
+        PtyIoBenchmarkScenario[] scenarios =
+        [
+            new("pty-cat-ascii", fixtures.AsciiPath),
+            new("pty-cat-unicode", fixtures.UnicodePath),
+            new("pty-cat-csi", fixtures.CsiPath),
+        ];
+
+        PtyIoBenchmarkResult[] results = new PtyIoBenchmarkResult[scenarios.Length];
+        for (int i = 0; i < scenarios.Length; i++)
+        {
+            results[i] = RunScenario(scenarios[i]);
+        }
+
+        return results;
+    }
+
+    private static PtyIoBenchmarkResult RunScenario(PtyIoBenchmarkScenario scenario)
+    {
+        FileInfo fileInfo = new(scenario.FilePath);
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return new PtyIoBenchmarkResult(
+                scenario.Name,
+                scenario.FilePath,
+                fileInfo.Length,
+                0,
+                0,
+                0,
+                0,
+                TimedOut: false,
+                SkippedReason: "PTY IO throughput benchmark currently targets the Unix PTY read pipeline.");
+        }
+
+        using IPty pty = new DefaultPtyFactory().Create();
+        using ManualResetEventSlim completed = new(false);
+        string marker = "__ROYALTERMINAL_IO_BENCH_DONE_" + Guid.NewGuid().ToString("N") + "__";
+        object sync = new();
+        StringBuilder tail = new();
+        long startTimestamp = 0;
+        long endTimestamp = 0;
+        int batches = 0;
+        int largestBatch = 0;
+
+        pty.DataReceived += (data, length) =>
+        {
+            if (length <= 0 || Volatile.Read(ref startTimestamp) == 0)
+            {
+                return;
+            }
+
+            Interlocked.Increment(ref batches);
+            UpdateLargestBatch(ref largestBatch, length);
+
+            string text = Encoding.ASCII.GetString(data, 0, length);
+            lock (sync)
+            {
+                tail.Append(text);
+                if (tail.Length > 4096)
+                {
+                    tail.Remove(0, tail.Length - 4096);
+                }
+
+                if (tail.ToString().Contains(marker, StringComparison.Ordinal))
+                {
+                    Interlocked.CompareExchange(ref endTimestamp, Stopwatch.GetTimestamp(), 0);
+                    completed.Set();
+                }
+            }
+        };
+
+        pty.Start(shell: "/bin/sh", columns: 120, rows: 40, workingDirectory: Environment.CurrentDirectory);
+        pty.Write("stty -echo\n");
+        Thread.Sleep(200);
+        long start = Stopwatch.GetTimestamp();
+        Volatile.Write(ref startTimestamp, start);
+        pty.Write("cat " + ShellQuote(scenario.FilePath) + "\n");
+        pty.Write("printf '\\n" + marker + "\\n'\n");
+
+        bool finished = completed.Wait(ScenarioTimeout);
+        long end = Volatile.Read(ref endTimestamp);
+        if (end == 0)
+        {
+            end = Stopwatch.GetTimestamp();
+        }
+
+        pty.Stop();
+
+        double totalMs = (end - start) * 1000.0 / Stopwatch.Frequency;
+        double seconds = Math.Max(totalMs / 1000.0, 1e-9);
+        double mibPerSecond = (fileInfo.Length / (1024.0 * 1024.0)) / seconds;
+
+        return new PtyIoBenchmarkResult(
+            scenario.Name,
+            scenario.FilePath,
+            fileInfo.Length,
+            Volatile.Read(ref batches),
+            Volatile.Read(ref largestBatch),
+            totalMs,
+            mibPerSecond,
+            TimedOut: !finished,
+            SkippedReason: null);
+    }
+
+    private static void UpdateLargestBatch(ref int largestBatch, int candidate)
+    {
+        while (true)
+        {
+            int current = Volatile.Read(ref largestBatch);
+            if (candidate <= current)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref largestBatch, candidate, current) == current)
+            {
+                return;
+            }
+        }
+    }
+
+    private static string ShellQuote(string value)
+    {
+        return "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
+    }
+}
+
+internal readonly record struct PtyIoBenchmarkScenario(string Name, string FilePath);
 
 internal static class RenderHotPathBenchmark
 {
@@ -995,10 +1292,12 @@ internal static class BenchmarkReportWriter
 {
     public static string CreateReport(
         ReadOnlySpan<BenchmarkResult> renderResults,
-        ReadOnlySpan<TextHighlightBenchmarkResult> textHighlightResults)
+        ReadOnlySpan<TextHighlightBenchmarkResult> textHighlightResults,
+        ReadOnlySpan<PtyIoBenchmarkResult> ptyIoResults,
+        PtyIoFixtureSet? ptyIoFixtures)
     {
         StringBuilder sb = new();
-        sb.AppendLine("# RoyalTerminal Render And Regex Highlighting Benchmarks");
+        sb.AppendLine("# RoyalTerminal Benchmarks");
         sb.AppendLine();
         sb.AppendLine($"Date: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
         sb.AppendLine($"Runtime: {RuntimeInformation.FrameworkDescription}");
@@ -1009,6 +1308,8 @@ internal static class BenchmarkReportWriter
         AppendRenderTable(sb, renderResults);
         sb.AppendLine();
         AppendTextHighlightTable(sb, textHighlightResults);
+        sb.AppendLine();
+        AppendPtyIoTable(sb, ptyIoResults, ptyIoFixtures);
         return sb.ToString();
     }
 
@@ -1016,6 +1317,12 @@ internal static class BenchmarkReportWriter
     {
         sb.AppendLine("## Render Baseline");
         sb.AppendLine();
+        if (results.IsEmpty)
+        {
+            sb.AppendLine("_Skipped._");
+            return;
+        }
+
         sb.AppendLine("| Scenario | Grid | Mode | Text pipeline | Iterations | Rows/frame | Rows/sec | Alloc/frame (B) | Render alloc/frame (B) | Mean frame (ms) | p95 frame (ms) | Total time (ms) |");
         sb.AppendLine("|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
 
@@ -1046,6 +1353,12 @@ internal static class BenchmarkReportWriter
     {
         sb.AppendLine("## Regex Text Highlighting");
         sb.AppendLine();
+        if (results.IsEmpty)
+        {
+            sb.AppendLine("_Skipped._");
+            return;
+        }
+
         sb.AppendLine("| Scenario | Grid | Render | Highlight mode | Rules | Workload | Mutates | Iterations | Rows/frame | Rows/sec | Alloc/frame (B) | Mean frame (ms) | p95 frame (ms) | Total time (ms) |");
         sb.AppendLine("|---|---:|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
 
@@ -1068,6 +1381,51 @@ internal static class BenchmarkReportWriter
                 .Append(" | ").Append(Format(result.MeanFrameMs))
                 .Append(" | ").Append(Format(result.P95FrameMs))
                 .Append(" | ").Append(Format(result.TotalTimeMs))
+                .AppendLine(" |");
+        }
+    }
+
+    private static void AppendPtyIoTable(
+        StringBuilder sb,
+        ReadOnlySpan<PtyIoBenchmarkResult> results,
+        PtyIoFixtureSet? fixtures)
+    {
+        sb.AppendLine("## PTY IO Throughput");
+        sb.AppendLine();
+        if (fixtures is not null)
+        {
+            PtyIoFixtureSet value = fixtures.Value;
+            sb.AppendLine($"Fixture directory: `{value.Directory}`");
+            sb.AppendLine($"Fixture size: {value.SizeMiB} MiB each");
+            sb.AppendLine();
+        }
+
+        if (results.IsEmpty)
+        {
+            sb.AppendLine("_Skipped. Pass `--io` to generate fixtures and run PTY IO throughput scenarios._");
+            return;
+        }
+
+        sb.AppendLine("| Scenario | File | Bytes | Batches | Largest batch (B) | MiB/s | Total time (ms) | Status |");
+        sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---|");
+
+        for (int i = 0; i < results.Length; i++)
+        {
+            PtyIoBenchmarkResult result = results[i];
+            string status = result.SkippedReason is not null
+                ? "skipped: " + result.SkippedReason
+                : result.TimedOut
+                    ? "timed out"
+                    : "ok";
+
+            sb.Append("| ").Append(result.Name)
+                .Append(" | `").Append(result.FilePath).Append('`')
+                .Append(" | ").Append(result.Bytes)
+                .Append(" | ").Append(result.Batches)
+                .Append(" | ").Append(result.LargestBatchBytes)
+                .Append(" | ").Append(Format(result.MiBPerSecond))
+                .Append(" | ").Append(Format(result.TotalTimeMs))
+                .Append(" | ").Append(status)
                 .AppendLine(" |");
         }
     }
