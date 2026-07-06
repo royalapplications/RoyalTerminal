@@ -3,7 +3,9 @@
 // RoyalTerminal.Demo — Sample multi-tab terminal application.
 
 using Avalonia;
+#if !ROYALTERMINAL_PUBLISH_AOT
 using ReactiveUI.Avalonia;
+#endif
 
 namespace RoyalTerminal.Demo;
 
@@ -27,7 +29,9 @@ public static class Program
             {
                 DisableDefaultApplicationMenuItems = true,
             })
+#if !ROYALTERMINAL_PUBLISH_AOT
             .UseReactiveUI(_ => { })
+#endif
             .WithInterFont()
             .LogToTrace();
 }

@@ -5,6 +5,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Reactive;
@@ -540,19 +541,21 @@ internal sealed class MainWindowController
             _viewModel.SettingsPanelState.BrowseFontFileRequested -= browseFontFileHandler;
         }));
 
-        disposables.Add(_viewModel
-            .WhenAnyValue(model => model.ReplayTimelineValue)
+        disposables.Add(ObserveProperty(
+                _viewModel,
+                nameof(MainWindowViewModel.ReplayTimelineValue),
+                static viewModel => viewModel.ReplayTimelineValue)
             .Skip(1)
             .Subscribe(SeekReplayFromViewModel));
 
-        disposables.Add(_viewModel
-            .WhenAnyValue(
-                model => model.SelectedPasteSafetyPolicy,
-                model => model.EnableTextShaping,
-                model => model.ReflowOnResize,
-                model => model.PreserveScrollbackOnRestart,
-                model => model.SixelGraphicsEnabled,
-                model => model.EnableLigatures)
+        disposables.Add(ObserveAnyProperty(
+                _viewModel,
+                nameof(MainWindowViewModel.SelectedPasteSafetyPolicy),
+                nameof(MainWindowViewModel.EnableTextShaping),
+                nameof(MainWindowViewModel.ReflowOnResize),
+                nameof(MainWindowViewModel.PreserveScrollbackOnRestart),
+                nameof(MainWindowViewModel.SixelGraphicsEnabled),
+                nameof(MainWindowViewModel.EnableLigatures))
             .Subscribe(_ =>
             {
                 if (!_suppressRuntimeSettingPropagation)
@@ -561,13 +564,17 @@ internal sealed class MainWindowController
                 }
             }));
 
-        disposables.Add(_viewModel
-            .WhenAnyValue(model => model.SixelGraphicsEnabled)
+        disposables.Add(ObserveProperty(
+                _viewModel,
+                nameof(MainWindowViewModel.SixelGraphicsEnabled),
+                static viewModel => viewModel.SixelGraphicsEnabled)
             .Skip(1)
             .Subscribe(ReportSixelGraphicsSettingChanged));
 
-        disposables.Add(_viewModel
-            .WhenAnyValue(model => model.SessionLoggingEnabled)
+        disposables.Add(ObserveProperty(
+                _viewModel,
+                nameof(MainWindowViewModel.SessionLoggingEnabled),
+                static viewModel => viewModel.SessionLoggingEnabled)
             .Subscribe(_ =>
             {
                 if (!_suppressRuntimeSettingPropagation)
@@ -579,8 +586,10 @@ internal sealed class MainWindowController
 
     private void RegisterShellLayoutHandlers(CompositeDisposable disposables)
     {
-        disposables.Add(_viewModel
-            .WhenAnyValue(static viewModel => viewModel.IsTabsInTitleBar)
+        disposables.Add(ObserveProperty(
+                _viewModel,
+                nameof(MainWindowViewModel.IsTabsInTitleBar),
+                static viewModel => viewModel.IsTabsInTitleBar)
             .Subscribe(ApplyTabsInTitleBarLayout));
 
         _tabStripScrollLeftButton.Click += OnTabStripScrollLeftClicked;
@@ -611,6 +620,54 @@ internal sealed class MainWindowController
         }));
 
         QueueTabStripScrollStateUpdate();
+    }
+
+    private static IObservable<TValue> ObserveProperty<TValue>(
+        MainWindowViewModel viewModel,
+        string propertyName,
+        Func<MainWindowViewModel, TValue> selector)
+    {
+        return ObservePropertyChanges(viewModel, propertyName)
+            .Select(_ => selector(viewModel))
+            .StartWith(selector(viewModel));
+    }
+
+    private static IObservable<Unit> ObserveAnyProperty(
+        MainWindowViewModel viewModel,
+        params string[] propertyNames)
+    {
+        HashSet<string> propertyNameSet = new(propertyNames, StringComparer.Ordinal);
+        return Observable
+            .FromEventPattern<PropertyChangedEventHandler, PropertyChangedEventArgs>(
+                handler => viewModel.PropertyChanged += handler,
+                handler => viewModel.PropertyChanged -= handler)
+            .Where(args => ShouldObserveProperty(args.EventArgs.PropertyName, propertyNameSet))
+            .Select(_ => Unit.Default)
+            .StartWith(Unit.Default);
+    }
+
+    private static IObservable<Unit> ObservePropertyChanges(
+        MainWindowViewModel viewModel,
+        string propertyName)
+    {
+        return Observable
+            .FromEventPattern<PropertyChangedEventHandler, PropertyChangedEventArgs>(
+                handler => viewModel.PropertyChanged += handler,
+                handler => viewModel.PropertyChanged -= handler)
+            .Where(args => ShouldObserveProperty(args.EventArgs.PropertyName, propertyName))
+            .Select(_ => Unit.Default);
+    }
+
+    private static bool ShouldObserveProperty(string? changedPropertyName, string propertyName)
+    {
+        return string.IsNullOrEmpty(changedPropertyName) ||
+               string.Equals(changedPropertyName, propertyName, StringComparison.Ordinal);
+    }
+
+    private static bool ShouldObserveProperty(string? changedPropertyName, ISet<string> propertyNames)
+    {
+        return string.IsNullOrEmpty(changedPropertyName) ||
+               propertyNames.Contains(changedPropertyName);
     }
 
     private void OnTopSearchBoxKeyDown(object? sender, KeyEventArgs e)

@@ -3,21 +3,21 @@
 // RoyalTerminal.Avalonia.App - Reusable terminal shell window activation.
 
 using System;
+using System.Reactive.Disposables;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using RoyalTerminal.Avalonia.App.Services;
 using RoyalTerminal.Avalonia.App.ViewModels;
-using ReactiveUI;
-using ReactiveUI.Avalonia;
 
 namespace RoyalTerminal.Avalonia.App;
 
 /// <summary>
 /// Hosts the reusable RoyalTerminal main view, window shortcuts, and native window menu.
 /// </summary>
-public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
+public partial class MainWindow : Window
 {
     private ITerminalPaneSplitPolicy _paneSplitPolicy = TerminalPaneSplitPolicies.AllowAll;
+    private CompositeDisposable? _activationDisposables;
 
     /// <summary>
     /// Gets or sets the app-owned split pane policy used by the reusable shell.
@@ -27,6 +27,11 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
         get => _paneSplitPolicy;
         set => _paneSplitPolicy = value ?? throw new ArgumentNullException(nameof(value));
     }
+
+    /// <summary>
+    /// Gets the window view model.
+    /// </summary>
+    public MainWindowViewModel? ViewModel { get; private set; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MainWindow"/> class.
@@ -51,8 +56,21 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
         Icon = RoyalTerminalWindowIconHelper.CreateWindowIcon();
 
         ViewModel = new MainWindowViewModel(shellOptions);
+        DataContext = ViewModel;
+    }
 
-        this.WhenActivated(disposables =>
+    /// <inheritdoc />
+    protected override void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+
+        if (_activationDisposables is not null)
+        {
+            return;
+        }
+
+        CompositeDisposable disposables = new();
+        try
         {
             var backdropCoordinator = new MainWindowBackdropCoordinator(this, ViewModel!);
             var borderAccentCoordinator = new WindowsWindowBorderAccentCoordinator(this);
@@ -64,7 +82,22 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
             disposables.Add(snapLayoutCoordinator.Activate());
             disposables.Add(trafficLightPositionCoordinator.Activate());
             disposables.Add(controller.Activate());
-        });
+            _activationDisposables = disposables;
+        }
+        catch
+        {
+            disposables.Dispose();
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    protected override void OnClosed(EventArgs e)
+    {
+        _activationDisposables?.Dispose();
+        _activationDisposables = null;
+
+        base.OnClosed(e);
     }
 
     private void InitializeComponent()
@@ -78,5 +111,4 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
             ? WindowDecorations.Full
             : WindowDecorations.BorderOnly;
     }
-
 }

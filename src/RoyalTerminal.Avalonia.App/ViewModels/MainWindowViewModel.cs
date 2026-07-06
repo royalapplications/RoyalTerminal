@@ -10,6 +10,8 @@ using System.IO;
 using System.Reactive;
 using System.Reactive.Linq;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using Avalonia.Threading;
 using RoyalTerminal.Avalonia.App;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
@@ -19,7 +21,6 @@ using RoyalTerminal.Avalonia.App.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using ReactiveUI;
-using ReactiveUI.Avalonia;
 
 namespace RoyalTerminal.Avalonia.App.ViewModels;
 
@@ -2256,8 +2257,22 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         return PrepareSettingsPanelInteraction
             .Handle(Unit.Default)
-            .ObserveOn(AvaloniaScheduler.Instance)
-            .Do(_ => IsSettingsPanelOpen = true);
+            .SelectMany(_ => OpenSettingsPanelOnUiThreadAsync());
+    }
+
+    private async Task<Unit> OpenSettingsPanelOnUiThreadAsync()
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            IsSettingsPanelOpen = true;
+            return Unit.Default;
+        }
+
+        await Dispatcher.UIThread
+            .InvokeAsync(() => IsSettingsPanelOpen = true)
+            .GetTask()
+            .ConfigureAwait(false);
+        return Unit.Default;
     }
 
     private void CloseSettingsPanel()

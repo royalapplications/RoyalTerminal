@@ -10,8 +10,10 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <VersionPrefix>0.3.0</VersionPrefix>
     <VersionSuffix></VersionSuffix>
+    <RoyalTerminalEnablePretextTextPipeline Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == '' And '$(PublishAot)' == 'true'">false</RoyalTerminalEnablePretextTextPipeline>
     <RoyalTerminalEnablePretextTextPipeline Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == ''">true</RoyalTerminalEnablePretextTextPipeline>
     <DefineConstants Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == 'true'">$(DefineConstants);ROYALTERMINAL_PRETEXT_TEXT_PIPELINE</DefineConstants>
+    <DefineConstants Condition="'$(PublishAot)' == 'true'">$(DefineConstants);ROYALTERMINAL_PUBLISH_AOT</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup>
