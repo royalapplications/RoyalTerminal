@@ -547,8 +547,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         _terminalWidthPx = Math.Max(0, widthPx);
         _terminalHeightPx = Math.Max(0, heightPx);
-        _nativeCellWidthPx = CalculateCeilingCellSizePx(widthPx, columns);
-        _nativeCellHeightPx = CalculateCeilingCellSizePx(heightPx, rows);
+        _nativeCellWidthPx = CalculateCellSizePx(widthPx, columns);
+        _nativeCellHeightPx = CalculateCellSizePx(heightPx, rows);
         _sizeReportCellWidthPx = CalculateSizeReportCellSizePx(widthPx, columns);
         _sizeReportCellHeightPx = CalculateSizeReportCellSizePx(heightPx, rows);
 
@@ -1804,14 +1804,14 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         };
     }
 
-    private static int CalculateCeilingCellSizePx(int totalPixels, int cells)
+    private static int CalculateCellSizePx(int totalPixels, int cells)
     {
         if (totalPixels <= 0 || cells <= 0)
         {
             return 0;
         }
 
-        return Math.Max(1, (int)Math.Ceiling(totalPixels / (double)cells));
+        return Math.Max(1, totalPixels / cells);
     }
 
     private static int CalculateSizeReportCellSizePx(int totalPixels, int cells)
