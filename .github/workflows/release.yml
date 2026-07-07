@@ -136,20 +136,14 @@ jobs:
         run: |
           # Keep Linux native packages on a portable CPU baseline. A runner-native
           # Ghostty build can SIGILL during terminal/PageList startup on another
-          # machine with the same RID.
+          # machine with the same RID. Do not force -fsys dependencies here:
+          # explicit targets make Zig use cross-target system-library discovery.
           build_args=(
             build
             -Doptimize=ReleaseFast
             -Dapp-runtime=none
             -Dtarget=${{ matrix.zig-target }}
             -Dsimd=false
-            -fsys=freetype
-            -fsys=fontconfig
-            -fsys=libpng
-            -fsys=zlib
-            -fsys=oniguruma
-            -fsys=glslang
-            -fsys=spirv-cross
           )
           zig "${build_args[@]}"
 

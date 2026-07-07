@@ -139,13 +139,6 @@ mkdir -p \
     -Demit-xcframework=false
     "-Dtarget=${ROYALTERMINAL_ZIG_TARGET}"
     -Dsimd=false
-    -fsys=freetype
-    -fsys=fontconfig
-    -fsys=libpng
-    -fsys=zlib
-    -fsys=oniguruma
-    -fsys=glslang
-    -fsys=spirv-cross
   )
   zig "${build_args[@]}"
 )
