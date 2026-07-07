@@ -216,8 +216,12 @@ jobs:
         include:
           - arch: x64
             runner: ubuntu-latest
+            zig-target: x86_64-linux-gnu
+            zig-cpu: x86_64-vzeroupper
           - arch: arm64
             runner: ubuntu-24.04-arm
+            zig-target: aarch64-linux-gnu
+            zig-cpu: baseline
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -255,18 +259,36 @@ jobs:
       - name: Build libghostty-vt
         working-directory: external/ghostty
         run: |
-          zig build -Doptimize=ReleaseFast -Dapp-runtime=none \
-            -fsys=freetype \
-            -fsys=fontconfig \
-            -fsys=libpng \
-            -fsys=zlib \
-            -fsys=oniguruma \
-            -fsys=glslang \
+          # Keep Linux native packages on a portable CPU baseline. A runner-native
+          # Ghostty build can SIGILL during terminal/PageList startup on another
+          # machine with the same RID.
+          build_args=(
+            build
+            -Doptimize=ReleaseFast
+            -Dapp-runtime=none
+            -Dtarget=${{ matrix.zig-target }}
+            -Dsimd=false
+            -fsys=freetype
+            -fsys=fontconfig
+            -fsys=libpng
+            -fsys=zlib
+            -fsys=oniguruma
+            -fsys=glslang
             -fsys=spirv-cross
+          )
+          if [ -n "${{ matrix.zig-cpu }}" ]; then
+            build_args+=("-Dcpu=${{ matrix.zig-cpu }}")
+          fi
+          zig "${build_args[@]}"
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
-        run: zig build -Doptimize=ReleaseFast
+        run: |
+          build_args=(build -Doptimize=ReleaseFast -Dtarget=${{ matrix.zig-target }})
+          if [ -n "${{ matrix.zig-cpu }}" ]; then
+            build_args+=("-Dcpu=${{ matrix.zig-cpu }}")
+          fi
+          zig "${build_args[@]}"
 
       - name: Collect artifacts
         run: |
