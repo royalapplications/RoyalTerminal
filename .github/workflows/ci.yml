@@ -217,11 +217,9 @@ jobs:
           - arch: x64
             runner: ubuntu-latest
             zig-target: x86_64-linux-gnu
-            zig-cpu: x86_64-vzeroupper
           - arch: arm64
             runner: ubuntu-24.04-arm
             zig-target: aarch64-linux-gnu
-            zig-cpu: baseline
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -276,18 +274,12 @@ jobs:
             -fsys=glslang
             -fsys=spirv-cross
           )
-          if [ -n "${{ matrix.zig-cpu }}" ]; then
-            build_args+=("-Dcpu=${{ matrix.zig-cpu }}")
-          fi
           zig "${build_args[@]}"
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
         run: |
           build_args=(build -Doptimize=ReleaseFast -Dtarget=${{ matrix.zig-target }})
-          if [ -n "${{ matrix.zig-cpu }}" ]; then
-            build_args+=("-Dcpu=${{ matrix.zig-cpu }}")
-          fi
           zig "${build_args[@]}"
 
       - name: Collect artifacts

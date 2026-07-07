@@ -68,13 +68,11 @@ case "$PLATFORM" in
         BUILD_ARCH="amd64"
         BUILD_RID="linux-x64"
         ZIG_TARGET="x86_64-linux-gnu"
-        ZIG_CPU="x86_64-vzeroupper"
         ;;
     linux/arm64)
         BUILD_ARCH="arm64"
         BUILD_RID="linux-arm64"
         ZIG_TARGET="aarch64-linux-gnu"
-        ZIG_CPU="baseline"
         ;;
     *)
         echo "Unsupported platform: $PLATFORM" >&2
@@ -149,18 +147,12 @@ mkdir -p \
     -fsys=glslang
     -fsys=spirv-cross
   )
-  if [ -n "${ROYALTERMINAL_ZIG_CPU}" ]; then
-    build_args+=("-Dcpu=${ROYALTERMINAL_ZIG_CPU}")
-  fi
   zig "${build_args[@]}"
 )
 
 (
   cd native/ghostty-renderer-capi
   build_args=(build -Doptimize=ReleaseFast "-Dtarget=${ROYALTERMINAL_ZIG_TARGET}")
-  if [ -n "${ROYALTERMINAL_ZIG_CPU}" ]; then
-    build_args+=("-Dcpu=${ROYALTERMINAL_ZIG_CPU}")
-  fi
   zig "${build_args[@]}"
 )
 
@@ -224,7 +216,6 @@ docker run \
     -e ROYALTERMINAL_SHELL_ONLY="$([ "$SHELL_ONLY" = true ] && echo 1 || echo 0)" \
     -e ROYALTERMINAL_BUILD_RID="$BUILD_RID" \
     -e ROYALTERMINAL_ZIG_TARGET="$ZIG_TARGET" \
-    -e ROYALTERMINAL_ZIG_CPU="$ZIG_CPU" \
     -v "$ROOT_DIR:/work" \
     -w /work \
     "$IMAGE_TAG" \

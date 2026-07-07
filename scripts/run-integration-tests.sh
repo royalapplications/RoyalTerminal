@@ -65,12 +65,10 @@ case "$OS" in
             x86_64|amd64)
                 RID="linux-x64"
                 ZIG_TARGET="x86_64-linux-gnu"
-                ZIG_CPU="x86_64-vzeroupper"
                 ;;
             aarch64|arm64)
                 RID="linux-arm64"
                 ZIG_TARGET="aarch64-linux-gnu"
-                ZIG_CPU="baseline"
                 ;;
             *)
                 error "Unsupported Linux architecture: $ARCH"
@@ -116,9 +114,6 @@ if [ "$SKIP_BUILD" = false ]; then
         ZIG_BUILD_ARGS+=("-Dtarget=$ZIG_TARGET")
     else
         ZIG_BUILD_ARGS+=("-Dtarget=native")
-    fi
-    if [ -n "${ZIG_CPU:-}" ]; then
-        ZIG_BUILD_ARGS+=("-Dcpu=$ZIG_CPU")
     fi
     if [ "$OS" = "Linux" ]; then
         ZIG_BUILD_ARGS+=("-Dsimd=false")

@@ -107,12 +107,10 @@ case "$OS" in
             x86_64|amd64)
                 RID="linux-x64"
                 ZIG_TARGET="x86_64-linux-gnu"
-                ZIG_CPU="x86_64-vzeroupper"
                 ;;
             aarch64|arm64)
                 RID="linux-arm64"
                 ZIG_TARGET="aarch64-linux-gnu"
-                ZIG_CPU="baseline"
                 ;;
             *)
                 error "Unsupported Linux architecture: $ARCH"
@@ -135,9 +133,6 @@ info "Platform: $PLATFORM ($RID)"
 info "Library: $LIB_NAME"
 if [ -n "${ZIG_TARGET:-}" ]; then
     info "Target: $ZIG_TARGET"
-fi
-if [ -n "${ZIG_CPU:-}" ]; then
-    info "CPU: $ZIG_CPU"
 fi
 
 # Enter Ghostty source directory
@@ -162,9 +157,6 @@ if [ -n "${ZIG_TARGET:-}" ]; then
     ZIG_BUILD_ARGS+=("-Dtarget=$ZIG_TARGET")
 else
     ZIG_BUILD_ARGS+=("-Dtarget=native")
-fi
-if [ -n "${ZIG_CPU:-}" ]; then
-    ZIG_BUILD_ARGS+=("-Dcpu=$ZIG_CPU")
 fi
 if [ "${GHOSTTY_SIMD:-true}" = false ]; then
     ZIG_BUILD_ARGS+=("-Dsimd=false")
@@ -262,10 +254,6 @@ if [ -f "$RENDERER_DIR/build.zig" ]; then
     if [ -n "${ZIG_TARGET:-}" ]; then
         RENDERER_BUILD_ARGS+=("-Dtarget=$ZIG_TARGET")
     fi
-    if [ -n "${ZIG_CPU:-}" ]; then
-        RENDERER_BUILD_ARGS+=("-Dcpu=$ZIG_CPU")
-    fi
-
     "$ZIG_COMPAT" "${RENDERER_BUILD_ARGS[@]}" 2>&1 || {
         warn "libghostty-renderer-capi build failed — skipping."
         warn "Texture interop managed APIs will require manual native library setup."
