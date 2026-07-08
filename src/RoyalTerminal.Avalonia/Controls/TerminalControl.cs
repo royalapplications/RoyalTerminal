@@ -5,6 +5,7 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -5867,7 +5868,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             while (TryDequeuePendingTransportOutputBatch(flushAll, out List<byte[]>? chunks, out int totalBytes))
             {
-                PendingTransportUiBatch pendingBatch = ProcessPendingTransportOutputBatch(chunks!, totalBytes);
+                PendingTransportUiBatch pendingBatch;
+                try
+                {
+                    pendingBatch = ProcessPendingTransportOutputBatch(chunks!, totalBytes);
+                }
+                catch (Exception exception)
+                {
+                    ResetPendingTransportOutputQueue();
+                    RethrowOnUiThread(exception);
+                    return;
+                }
+
                 EnqueuePendingTransportUiBatch(pendingBatch);
 
                 if (!flushAll)
@@ -5877,6 +5889,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 }
             }
         }
+    }
+
+    private static void RethrowOnUiThread(Exception exception)
+    {
+        ExceptionDispatchInfo exceptionDispatchInfo = ExceptionDispatchInfo.Capture(exception);
+        Dispatcher.UIThread.Post(exceptionDispatchInfo.Throw);
     }
 
     private bool TryDequeuePendingTransportOutputBatch(
