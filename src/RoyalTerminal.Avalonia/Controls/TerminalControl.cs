@@ -80,6 +80,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         SearchValues.Create([0x07, 0x1B, 0x9C]);
     private const double SelectionAutoScrollMargin = 60d;
     private const int SelectionAutoScrollSpeed = 50;
+    private const string DefaultWordSelectionDelimiters = " \t\r\n/\\()\"'-.,:;<>~!@#$%^&*|+=[]{}";
     private const ulong ComparableRowFnvOffsetBasis = 14695981039346656037UL;
     private const ulong ComparableRowFnvPrime = 1099511628211UL;
     private const int ComparableRowStackCharLimit = 256;
@@ -615,6 +616,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _selectionActiveColumn;
     private int _selectionActiveAbsoluteRow;
     private bool _hasAnchoredSelection;
+    private MouseSelectionGranularity _mouseSelectionGranularity;
+    private SelectionExtent _mouseSelectionPivotExtent;
     private TerminalHighlightSpan[] _selectionAnchorSpans = Array.Empty<TerminalHighlightSpan>();
     private TerminalHighlightSpan[]? _selectionViewportSpansSource;
     private SkiaTerminalRenderer? _selectionViewportSpansRenderer;
@@ -689,6 +692,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         Absolute,
         NativeViewport,
     }
+
+    private enum MouseSelectionGranularity
+    {
+        Character,
+        Word,
+        Line,
+    }
+
+    private readonly record struct SelectionExtent(
+        int StartColumn,
+        int StartAbsoluteRow,
+        int EndColumnExclusive,
+        int EndAbsoluteRow);
 
     private sealed class NativeSelectionResizeContext
     {
@@ -835,6 +851,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
          ((_renderer.SelectionStart is not null &&
            _renderer.SelectionEnd is not null) ||
           !_renderer.GetSelectionSpans().IsEmpty));
+
+    /// <summary>
+    /// Raised when a local terminal selection has been finalized by user action.
+    /// </summary>
+    public event EventHandler? SelectionFinalized;
 
     #region ILogicalScrollable
 
@@ -3291,7 +3312,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _isMouseSelecting = true;
             e.Pointer.Capture(this);
 
-            UpdateMouseSelectionFromPointer(point, e.KeyModifiers, resetAnchor: true);
+            MouseSelectionGranularity granularity = ResolveMouseSelectionGranularity(e.ClickCount, e.KeyModifiers);
+            bool extendSelection = e.KeyModifiers.HasFlag(KeyModifiers.Shift) && HasSelection;
+            if (extendSelection)
+            {
+                CaptureRendererSelectionForCurrentViewport();
+            }
+
+            UpdateMouseSelectionFromPointer(point, e.KeyModifiers, !extendSelection, granularity);
             _renderer.SelectionIsRectangle = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
             StopSelectionAutoScroll();
         }
@@ -3342,7 +3370,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (_isMouseSelecting && _renderer is not null && _screen is not null)
         {
-            UpdateMouseSelectionFromPointer(point, e.KeyModifiers, resetAnchor: false);
+            UpdateMouseSelectionFromPointer(point, e.KeyModifiers, resetAnchor: false, _mouseSelectionGranularity);
             _renderer.SelectionIsRectangle = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
             UpdateSelectionAutoScroll(point);
         }
@@ -3420,7 +3448,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             StopSelectionAutoScroll();
             if (_renderer is not null && _screen is not null)
             {
-                UpdateMouseSelectionFromPointer(point, e.KeyModifiers, resetAnchor: false);
+                UpdateMouseSelectionFromPointer(point, e.KeyModifiers, resetAnchor: false, _mouseSelectionGranularity);
                 _renderer.SelectionIsRectangle = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
             }
         }
@@ -3430,11 +3458,31 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         if (wasMouseSelecting)
         {
             e.Pointer.Capture(null);
+            RaiseSelectionFinalizedIfNonEmpty();
         }
         e.Handled = true;
     }
 
-    private void UpdateMouseSelectionFromPointer(Point point, KeyModifiers keyModifiers, bool resetAnchor)
+    private static MouseSelectionGranularity ResolveMouseSelectionGranularity(int clickCount, KeyModifiers keyModifiers)
+    {
+        if (keyModifiers.HasFlag(KeyModifiers.Alt))
+        {
+            return MouseSelectionGranularity.Character;
+        }
+
+        return clickCount switch
+        {
+            >= 3 => MouseSelectionGranularity.Line,
+            2 => MouseSelectionGranularity.Word,
+            _ => MouseSelectionGranularity.Character,
+        };
+    }
+
+    private void UpdateMouseSelectionFromPointer(
+        Point point,
+        KeyModifiers keyModifiers,
+        bool resetAnchor,
+        MouseSelectionGranularity granularity)
     {
         if (_renderer is null || _screen is null)
         {
@@ -3455,10 +3503,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             absoluteRow = (int)Math.Clamp(unclampedAbsoluteRow, 0, maxAbsoluteRow);
         }
 
+        bool granularityChanged = _mouseSelectionGranularity != granularity;
+        _mouseSelectionGranularity = granularity;
+        if (granularity != MouseSelectionGranularity.Character)
+        {
+            UpdateExpandedMouseSelection(column, absoluteRow, topRow, resetAnchor, granularity, granularityChanged);
+            return;
+        }
+
         if (resetAnchor)
         {
             _selectionAnchorColumn = column;
             _selectionAnchorAbsoluteRow = absoluteRow;
+            _mouseSelectionPivotExtent = default;
         }
 
         _selectionActiveColumn = column;
@@ -3466,6 +3523,295 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _hasAnchoredSelection = true;
         SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
         ApplyMouseSelectionToRenderer(topRow);
+    }
+
+    private void UpdateExpandedMouseSelection(
+        int column,
+        int absoluteRow,
+        int topRow,
+        bool resetAnchor,
+        MouseSelectionGranularity granularity,
+        bool granularityChanged)
+    {
+        if (_screen is null)
+        {
+            return;
+        }
+
+        SelectionExtent activeExtent;
+        lock (_screen.SyncRoot)
+        {
+            activeExtent = granularity == MouseSelectionGranularity.Line
+                ? ResolveLogicalLineExtentLocked(absoluteRow, topRow)
+                : ResolveWordExtentLocked(column, absoluteRow, topRow);
+        }
+
+        if (resetAnchor)
+        {
+            _selectionAnchorColumn = activeExtent.StartColumn;
+            _selectionAnchorAbsoluteRow = activeExtent.StartAbsoluteRow;
+            _mouseSelectionPivotExtent = activeExtent;
+        }
+        else if (granularityChanged)
+        {
+            _mouseSelectionPivotExtent = new SelectionExtent(
+                _selectionAnchorColumn,
+                _selectionAnchorAbsoluteRow,
+                _selectionAnchorColumn,
+                _selectionAnchorAbsoluteRow);
+        }
+
+        SelectionExtent anchorExtent = resetAnchor
+            ? _mouseSelectionPivotExtent
+            : _mouseSelectionPivotExtent == default
+                ? new SelectionExtent(
+                    _selectionAnchorColumn,
+                    _selectionAnchorAbsoluteRow,
+                    _selectionAnchorColumn,
+                    _selectionAnchorAbsoluteRow)
+                : _mouseSelectionPivotExtent;
+
+        TerminalHighlightSpan[] spans = CreateSelectionSpansBetweenExtents(anchorExtent, activeExtent);
+        if (spans.Length > 0)
+        {
+            SetSelectionAnchorSpans(spans);
+            UpdateSelectionEndpointsFromSpans();
+        }
+        else
+        {
+            SetSelectionAnchorSpans(Array.Empty<TerminalHighlightSpan>());
+            _selectionActiveColumn = activeExtent.EndColumnExclusive;
+            _selectionActiveAbsoluteRow = activeExtent.EndAbsoluteRow;
+        }
+
+        _hasAnchoredSelection = true;
+        ApplyMouseSelectionToRenderer(topRow);
+    }
+
+    private SelectionExtent ResolveWordExtentLocked(int column, int absoluteRow, int topRow)
+    {
+        if (_screen is null)
+        {
+            return new SelectionExtent(column, absoluteRow, column + 1, absoluteRow);
+        }
+
+        int viewportRow = absoluteRow - topRow;
+        if ((uint)viewportRow >= (uint)_screen.ViewportRows)
+        {
+            return new SelectionExtent(column, absoluteRow, column + 1, absoluteRow);
+        }
+
+        TerminalRow row = _screen.GetViewportRow(viewportRow);
+        if (!TryBuildRowTextColumnMap(row, out int rowTextLength))
+        {
+            return new SelectionExtent(column, absoluteRow, Math.Min(column + 1, Math.Max(1, _screen.Columns)), absoluteRow);
+        }
+
+        int textIndex = FindRowTextIndexForColumn(row, column, rowTextLength);
+        if (textIndex < 0)
+        {
+            int clampedColumn = Math.Clamp(column, 0, Math.Max(0, _screen.Columns - 1));
+            return new SelectionExtent(clampedColumn, absoluteRow, Math.Min(clampedColumn + 1, _screen.Columns), absoluteRow);
+        }
+
+        ReadOnlySpan<char> rowText = _rowTextScratch.AsSpan(0, rowTextLength);
+        if (IsWordSelectionDelimiter(rowText[textIndex]))
+        {
+            int delimiterColumn = _rowColumnMapScratch[textIndex];
+            return new SelectionExtent(delimiterColumn, absoluteRow, delimiterColumn + 1, absoluteRow);
+        }
+
+        int startTextIndex = textIndex;
+        while (startTextIndex > 0 && !IsWordSelectionDelimiter(rowText[startTextIndex - 1]))
+        {
+            startTextIndex--;
+        }
+
+        int endTextIndexExclusive = textIndex + 1;
+        while (endTextIndexExclusive < rowTextLength &&
+               !IsWordSelectionDelimiter(rowText[endTextIndexExclusive]))
+        {
+            endTextIndexExclusive++;
+        }
+
+        int startColumn = _rowColumnMapScratch[startTextIndex];
+        int endColumnExclusive = _rowColumnMapScratch[endTextIndexExclusive - 1] + 1;
+        return new SelectionExtent(startColumn, absoluteRow, endColumnExclusive, absoluteRow);
+    }
+
+    private SelectionExtent ResolveLogicalLineExtentLocked(int absoluteRow, int topRow)
+    {
+        if (_screen is null)
+        {
+            return new SelectionExtent(0, absoluteRow, 1, absoluteRow);
+        }
+
+        int startAbsoluteRow = absoluteRow;
+        while (startAbsoluteRow > topRow)
+        {
+            int previousViewportRow = startAbsoluteRow - topRow - 1;
+            if ((uint)previousViewportRow >= (uint)_screen.ViewportRows ||
+                !_screen.GetViewportRow(previousViewportRow).WrapsToNext)
+            {
+                break;
+            }
+
+            startAbsoluteRow--;
+        }
+
+        int endAbsoluteRow = absoluteRow;
+        while (endAbsoluteRow - topRow + 1 < _screen.ViewportRows)
+        {
+            int viewportRow = endAbsoluteRow - topRow;
+            if ((uint)viewportRow >= (uint)_screen.ViewportRows ||
+                !_screen.GetViewportRow(viewportRow).WrapsToNext)
+            {
+                break;
+            }
+
+            endAbsoluteRow++;
+        }
+
+        int endColumnExclusive = GetLineSelectionEndColumnExclusiveLocked(endAbsoluteRow - topRow);
+        return new SelectionExtent(0, startAbsoluteRow, endColumnExclusive, endAbsoluteRow);
+    }
+
+    private int GetLineSelectionEndColumnExclusiveLocked(int viewportRow)
+    {
+        if (_screen is null || (uint)viewportRow >= (uint)_screen.ViewportRows)
+        {
+            return 1;
+        }
+
+        TerminalRow row = _screen.GetViewportRow(viewportRow);
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        for (int column = cells.Length - 1; column >= 0; column--)
+        {
+            ref readonly TerminalCell cell = ref cells[column];
+            if (cell.Width == 0 || (cell.Attributes & CellAttributes.Hidden) != 0)
+            {
+                continue;
+            }
+
+            if (cell.HasContent)
+            {
+                return Math.Min(cells.Length, column + Math.Max(1, (int)cell.Width));
+            }
+        }
+
+        return Math.Min(1, cells.Length);
+    }
+
+    private int FindRowTextIndexForColumn(TerminalRow row, int column, int rowTextLength)
+    {
+        for (int i = 0; i < rowTextLength; i++)
+        {
+            if (_rowColumnMapScratch[i] == column)
+            {
+                return i;
+            }
+        }
+
+        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
+        if ((uint)column >= (uint)cells.Length ||
+            cells[column].Width != 0)
+        {
+            return -1;
+        }
+
+        for (int previousColumn = column - 1; previousColumn >= 0; previousColumn--)
+        {
+            ref readonly TerminalCell cell = ref cells[previousColumn];
+            if (cell.Width == 0)
+            {
+                continue;
+            }
+
+            if ((cell.Attributes & CellAttributes.Hidden) != 0 ||
+                !cell.HasContent ||
+                previousColumn + Math.Max(1, (int)cell.Width) <= column)
+            {
+                return -1;
+            }
+
+            for (int i = rowTextLength - 1; i >= 0; i--)
+            {
+                if (_rowColumnMapScratch[i] == previousColumn)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        return -1;
+    }
+
+    private static bool IsWordSelectionDelimiter(char value)
+    {
+        return char.IsWhiteSpace(value) ||
+            DefaultWordSelectionDelimiters.AsSpan().IndexOf(value) >= 0;
+    }
+
+    private TerminalHighlightSpan[] CreateSelectionSpansBetweenExtents(
+        SelectionExtent anchorExtent,
+        SelectionExtent activeExtent)
+    {
+        if (_screen is null)
+        {
+            return Array.Empty<TerminalHighlightSpan>();
+        }
+
+        SelectionExtent startExtent;
+        SelectionExtent endExtent;
+        if (CompareSelectionExtents(activeExtent, anchorExtent) < 0)
+        {
+            startExtent = activeExtent;
+            endExtent = anchorExtent;
+        }
+        else
+        {
+            startExtent = anchorExtent;
+            endExtent = activeExtent;
+        }
+
+        int rowCount = checked(endExtent.EndAbsoluteRow - startExtent.StartAbsoluteRow + 1);
+        if (rowCount <= 0)
+        {
+            return Array.Empty<TerminalHighlightSpan>();
+        }
+
+        List<TerminalHighlightSpan> spans = new(rowCount);
+        for (int absoluteRow = startExtent.StartAbsoluteRow; absoluteRow <= endExtent.EndAbsoluteRow; absoluteRow++)
+        {
+            int startColumn = absoluteRow == startExtent.StartAbsoluteRow ? startExtent.StartColumn : 0;
+            int endColumnExclusive = absoluteRow == endExtent.EndAbsoluteRow
+                ? endExtent.EndColumnExclusive
+                : _screen.Columns;
+            startColumn = Math.Clamp(startColumn, 0, _screen.Columns);
+            endColumnExclusive = Math.Clamp(endColumnExclusive, 0, _screen.Columns);
+            if (endColumnExclusive <= startColumn)
+            {
+                continue;
+            }
+
+            spans.Add(new TerminalHighlightSpan(
+                absoluteRow,
+                startColumn,
+                endColumnExclusive - 1,
+                TerminalHighlightKind.Selection));
+        }
+
+        return spans.ToArray();
+    }
+
+    private static int CompareSelectionExtents(SelectionExtent left, SelectionExtent right)
+    {
+        int rowComparison = left.StartAbsoluteRow.CompareTo(right.StartAbsoluteRow);
+        return rowComparison != 0
+            ? rowComparison
+            : left.StartColumn.CompareTo(right.StartColumn);
     }
 
     private int GetClampedSelectionViewportRow(Point point)
@@ -4307,7 +4653,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        UpdateMouseSelectionFromPointer(_lastSelectionPointerPoint, _lastSelectionKeyModifiers, resetAnchor: false);
+        UpdateMouseSelectionFromPointer(
+            _lastSelectionPointerPoint,
+            _lastSelectionKeyModifiers,
+            resetAnchor: false,
+            _mouseSelectionGranularity);
     }
 
     private bool TryScrollSelectionViewportByRows(int rows)
@@ -4639,6 +4989,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _renderer.SetSelectionSpans(ReadOnlySpan<TerminalHighlightSpan>.Empty);
         InvalidateScreen();
         _presenter?.Invalidate();
+        RaiseSelectionFinalizedIfNonEmpty();
     }
 
     /// <summary>
@@ -4654,6 +5005,41 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _renderer is not null &&
         ((_renderer.SelectionStart is not null && _renderer.SelectionEnd is not null) ||
          !_renderer.GetSelectionSpans().IsEmpty);
+
+    private bool HasNonEmptyRendererSelection()
+    {
+        if (_renderer is null)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<TerminalHighlightSpan> spans = _renderer.GetSelectionSpans();
+        if (!spans.IsEmpty)
+        {
+            foreach (TerminalHighlightSpan span in spans)
+            {
+                if (span.Kind == TerminalHighlightKind.Selection &&
+                    span.EndColumn >= span.StartColumn)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return _renderer.SelectionStart is { } start &&
+               _renderer.SelectionEnd is { } end &&
+               start != end;
+    }
+
+    private void RaiseSelectionFinalizedIfNonEmpty()
+    {
+        if (HasNonEmptyRendererSelection())
+        {
+            SelectionFinalized?.Invoke(this, EventArgs.Empty);
+        }
+    }
 
     /// <summary>
     /// Updates the hovered hyperlink URL used for hyperlink-hover underline styling.
