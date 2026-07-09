@@ -165,7 +165,8 @@ for package in "${packages[@]}"; do
   set +e
   dotnet nuget push "$package" \
     --api-key "$api_key" \
-    --source "$source" 2>&1 | tee "$output_file"
+    --source "$source" \
+    --skip-duplicate 2>&1 | tee "$output_file"
   push_status=${PIPESTATUS[0]}
   set -e
 

@@ -624,8 +624,8 @@ public class GhosttyVtProcessorTests
 
         TerminalKittyImagePlacement[] placements = screen.GetKittyPlacements().ToArray();
         Assert.Single(placements);
-        Assert.Equal(9, placements[0].CellWidthPx);
-        Assert.Equal(17, placements[0].CellHeightPx);
+        Assert.Equal(8, placements[0].CellWidthPx);
+        Assert.Equal(16, placements[0].CellHeightPx);
         Assert.Equal(TerminalKittyImagePlacementScaleMode.ColumnsAndRows, placements[0].ScaleMode);
     }
 
@@ -708,6 +708,38 @@ public class GhosttyVtProcessorTests
         Assert.StartsWith("prompt$ ", ReadAsciiPrefix(screen, row: 2, columns: 8), StringComparison.Ordinal);
         Assert.Equal(8, processor.CursorCol);
         Assert.Equal(2, processor.CursorRow);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_KittyGraphicsPlacement_FractionalMetricsMovePromptBelowNaturalImage_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 80, viewportRows: 24, scrollbackLimit: 0);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns: 80, rows: 24, widthPx: 641, heightPx: 385);
+
+        string rgbPayload = new('/', 132);
+        processor.Process(Encoding.ASCII.GetBytes($"\u001b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=33;{rgbPayload}\u001b\\"));
+
+        Assert.Equal(1, processor.CursorCol);
+        Assert.Equal(2, processor.CursorRow);
+
+        processor.Process("\r\nprompt$ "u8);
+
+        Assert.DoesNotContain("prompt", ReadAsciiPrefix(screen, row: 2, columns: 80), StringComparison.Ordinal);
+        Assert.StartsWith("prompt$ ", ReadAsciiPrefix(screen, row: 3, columns: 8), StringComparison.Ordinal);
+        Assert.Equal(8, processor.CursorCol);
+        Assert.Equal(3, processor.CursorRow);
     }
 
     [Fact]

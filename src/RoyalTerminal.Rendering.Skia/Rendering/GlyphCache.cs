@@ -15,6 +15,9 @@ namespace RoyalTerminal.Avalonia.Rendering;
 /// </summary>
 public sealed class GlyphCache : IDisposable
 {
+    private const int PrintableAsciiStart = 0x20;
+    private const int PrintableAsciiEnd = 0x7E;
+
     private readonly record struct GlyphKey(ushort GlyphId, float Size, SKColor Color, bool Bold, bool Italic);
 
     private readonly ConcurrentDictionary<GlyphKey, SKImage> _cache = new();
@@ -151,7 +154,7 @@ public sealed class GlyphCache : IDisposable
 
     /// <summary>
     /// Measures the cell size for the current font at the given size.
-    /// Returns (cellWidth, cellHeight) suitable for a monospace grid.
+    /// Returns (cellWidth, cellHeight) suitable for a terminal grid.
     /// </summary>
     public (float Width, float Height) MeasureCellSize(float fontSize)
     {
@@ -160,14 +163,36 @@ public sealed class GlyphCache : IDisposable
         var height = MathF.Max(
             1f,
             MathF.Round(metrics.Descent - metrics.Ascent + metrics.Leading, MidpointRounding.AwayFromZero));
-        var width = font.MeasureText("0");
+        float width = MeasureTerminalCellWidth(font);
+        width = MathF.Max(1f, MathF.Round(width, MidpointRounding.AwayFromZero));
+        return (width, height);
+    }
+
+    private static float MeasureTerminalCellWidth(SKFont font)
+    {
+        float width = 0f;
+        Span<char> text = stackalloc char[1];
+        for (int codepoint = PrintableAsciiStart; codepoint <= PrintableAsciiEnd; codepoint++)
+        {
+            text[0] = (char)codepoint;
+            float measured = font.MeasureText(text, paint: null);
+            if (float.IsFinite(measured) && measured > width)
+            {
+                width = measured;
+            }
+        }
+
+        if (width <= 0f)
+        {
+            width = font.MeasureText("0");
+        }
+
         if (width <= 0f)
         {
             width = font.MeasureText("M");
         }
 
-        width = MathF.Max(1f, MathF.Round(width, MidpointRounding.AwayFromZero));
-        return (width, height);
+        return width;
     }
 
     /// <summary>

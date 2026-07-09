@@ -120,7 +120,10 @@ function Invoke-ZigBuildWithCacheRecovery {
             return $true
         }
 
-        $missingCachePaths = Get-ZigCacheFileNotFoundPaths -OutputLines $outputLines
+        $missingCachePaths = @()
+        if ($outputLines.Count -gt 0) {
+            $missingCachePaths = @(Get-ZigCacheFileNotFoundPaths -OutputLines $outputLines)
+        }
         if ($missingCachePaths.Count -gt 0) {
             if ($attempt -lt $maxAttempts) {
                 Write-Warn "Detected Zig cache FileNotFound inconsistency. Resetting caches and retrying."
