@@ -3050,7 +3050,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         FlushPendingTransportResize();
         if (TerminalInputAdapter.HandleKeyDown(e, TerminalSessionService, _vtProcessor))
         {
-            ScrollToBottomForAcceptedKeyboardInput();
+            CompleteAcceptedKeyboardInput(e.Key);
             e.Handled = true;
         }
     }
@@ -3075,7 +3075,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
-        ScrollToBottomForAcceptedKeyboardInput();
+        CompleteAcceptedKeyboardInput(e.Key);
         e.Handled = true;
         return true;
     }
@@ -3161,10 +3161,28 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         FlushPendingTransportResize();
         if (TerminalInputAdapter.HandleTextInput(e, TerminalSessionService))
         {
-            ScrollToBottomForAcceptedKeyboardInput();
+            CompleteAcceptedKeyboardInput();
             e.Handled = true;
         }
     }
+
+    private void CompleteAcceptedKeyboardInput(Key? key = null)
+    {
+        if ((key is null || IsSelectionClearingInputKey(key.Value)) && HasRendererSelection())
+        {
+            ClearSelection();
+        }
+
+        ScrollToBottomForAcceptedKeyboardInput();
+    }
+
+    private static bool IsSelectionClearingInputKey(Key key) =>
+        key is not (Key.None or
+            Key.LeftShift or Key.RightShift or
+            Key.LeftCtrl or Key.RightCtrl or
+            Key.LeftAlt or Key.RightAlt or
+            Key.LWin or Key.RWin or
+            Key.PrintScreen);
 
     private void ScrollToBottomForAcceptedKeyboardInput()
     {

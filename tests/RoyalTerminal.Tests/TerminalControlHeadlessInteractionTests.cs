@@ -566,6 +566,9 @@ public sealed class TerminalControlHeadlessInteractionTests
                 () => transport.Inputs.Any(static input => input.Length == 1 && input[0] == 0x03),
                 TimeSpan.FromSeconds(2));
             Assert.True(ctrlCSent);
+            Assert.False(control.HasSelection);
+            Assert.Null(control.Renderer.SelectionStart);
+            Assert.Null(control.Renderer.SelectionEnd);
         }
         finally
         {
@@ -1068,6 +1071,107 @@ public sealed class TerminalControlHeadlessInteractionTests
         finally
         {
             await CleanupWindowAsync(window, control.StopPty);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_MouseSelection_TypingClearsSelectionAndReachesTransport()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            preference: VtProcessorPreference.Managed);
+        control.Width = 640;
+        control.Height = 400;
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("alpha beta gamma"u8);
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            Point pressPoint = await GetCellInteractionPointAsync(control, window, column: 1, row: 0);
+            Point releasePoint = await GetCellInteractionPointAsync(control, window, column: 5, row: 0);
+            RaiseMouseDragReleaseSequence(control, window, pressPoint, releasePoint);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(control.HasSelection);
+            Assert.NotNull(control.Renderer!.SelectionStart);
+            Assert.NotNull(control.Renderer.SelectionEnd);
+            transport.ClearInputs();
+
+            window.KeyTextInput("x");
+
+            bool textSent = await WaitUntilAsync(
+                () => transport.Inputs.Any(static input => input.Length == 1 && input[0] == (byte)'x'),
+                TimeSpan.FromSeconds(2));
+            Assert.True(textSent);
+            Assert.False(control.HasSelection);
+            Assert.Null(control.Renderer.SelectionStart);
+            Assert.Null(control.Renderer.SelectionEnd);
+            Assert.True(control.Renderer.GetSelectionSpans().IsEmpty);
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.StopPty);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_ModifierAndPrintScreenInput_PreserveSelection()
+    {
+        RecordingEndpoint endpoint = new();
+        TerminalControl control = new();
+        Window window = new()
+        {
+            Width = 640,
+            Height = 400,
+            Content = control,
+        };
+        window.Show();
+
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            control.AttachEndpoint(endpoint);
+            control.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            (PhysicalKey PhysicalKey, RawInputModifiers Modifiers)[] inputs =
+            [
+                (PhysicalKey.ShiftLeft, RawInputModifiers.Shift),
+                (PhysicalKey.ControlLeft, RawInputModifiers.Control),
+                (PhysicalKey.AltLeft, RawInputModifiers.Alt),
+                (PhysicalKey.MetaLeft, RawInputModifiers.Meta),
+                (PhysicalKey.PrintScreen, RawInputModifiers.None),
+            ];
+
+            foreach ((PhysicalKey physicalKey, RawInputModifiers modifiers) in inputs)
+            {
+                control.Renderer!.SelectionStart = (1, 0);
+                control.Renderer.SelectionEnd = (4, 0);
+                endpoint.KeyEvents.Clear();
+
+                window.KeyPressQwerty(physicalKey, modifiers);
+
+                Assert.NotEmpty(endpoint.KeyEvents);
+                Assert.True(control.HasSelection);
+                Assert.Equal((1, 0), control.Renderer.SelectionStart);
+                Assert.Equal((4, 0), control.Renderer.SelectionEnd);
+            }
+        }
+        finally
+        {
+            await CleanupWindowAsync(window, control.DetachEndpoint);
         }
     }
 
