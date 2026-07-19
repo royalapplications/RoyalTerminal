@@ -1466,10 +1466,18 @@ public class MainWindowViewModelFlowTests
             Point rightDecorationReserveOrigin = titleBarRightDecorationReserve.TranslatePoint(new Point(0, 0), titleBarLayout)
                 ?? throw new InvalidOperationException("Title bar right decoration reserve is not attached to the title bar layout.");
 
-            Assert.True(window.ExtendClientAreaToDecorationsHint);
-            Assert.Equal(
-                OperatingSystem.IsMacOS() ? WindowDecorations.Full : WindowDecorations.BorderOnly,
-                window.WindowDecorations);
+            if (OperatingSystem.IsLinux())
+            {
+                Assert.False(window.ExtendClientAreaToDecorationsHint);
+                Assert.Equal(WindowDecorations.Full, window.WindowDecorations);
+            }
+            else
+            {
+                Assert.True(window.ExtendClientAreaToDecorationsHint);
+                Assert.Equal(
+                    OperatingSystem.IsMacOS() ? WindowDecorations.Full : WindowDecorations.BorderOnly,
+                    window.WindowDecorations);
+            }
             Assert.Equal(-1d, window.ExtendClientAreaTitleBarHeightHint);
             Assert.Contains("titleBarArea", titleBar.Classes);
             Assert.Equal(WindowDecorationsElementRole.TitleBar, WindowDecorationProperties.GetElementRole(titleBar));

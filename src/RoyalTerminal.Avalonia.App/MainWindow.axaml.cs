@@ -74,9 +74,18 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
 
     private void ConfigurePlatformWindowDecorations()
     {
-        WindowDecorations = OperatingSystem.IsMacOS()
-            ? WindowDecorations.Full
-            : WindowDecorations.BorderOnly;
+        if (OperatingSystem.IsLinux())
+        {
+            ExtendClientAreaToDecorationsHint = false;
+            WindowDecorations = WindowDecorations.Full;
+        }
+        else
+        {
+            ExtendClientAreaToDecorationsHint = true;
+            WindowDecorations = OperatingSystem.IsMacOS()
+                ? WindowDecorations.Full
+                : WindowDecorations.BorderOnly;
+        }
     }
 
 }
