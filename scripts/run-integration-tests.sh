@@ -60,8 +60,21 @@ case "$OS" in
         LIB_NAME="libghostty-vt.dylib"
         ;;
     Linux)
-        RID="linux-x64"
         LIB_NAME="libghostty-vt.so"
+        case "$ARCH" in
+            x86_64|amd64)
+                RID="linux-x64"
+                ZIG_TARGET="x86_64-linux-gnu"
+                ;;
+            aarch64|arm64)
+                RID="linux-arm64"
+                ZIG_TARGET="aarch64-linux-gnu"
+                ;;
+            *)
+                error "Unsupported Linux architecture: $ARCH"
+                exit 1
+                ;;
+        esac
         ;;
     *)
         error "Unsupported platform: $OS"
@@ -90,7 +103,22 @@ if [ "$SKIP_BUILD" = false ]; then
 
     cd "$GHOSTTY_DIR"
     info "Building libghostty-vt with ReleaseFast..."
-    "$ZIG_COMPAT" build -Doptimize=ReleaseFast -Dtarget=native -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false 2>&1
+    ZIG_BUILD_ARGS=(
+        build
+        -Doptimize=ReleaseFast
+        -Dapp-runtime=none
+        -Demit-lib-vt=true
+        -Demit-xcframework=false
+    )
+    if [ -n "${ZIG_TARGET:-}" ]; then
+        ZIG_BUILD_ARGS+=("-Dtarget=$ZIG_TARGET")
+    else
+        ZIG_BUILD_ARGS+=("-Dtarget=native")
+    fi
+    if [ "$OS" = "Linux" ]; then
+        ZIG_BUILD_ARGS+=("-Dsimd=false")
+    fi
+    "$ZIG_COMPAT" "${ZIG_BUILD_ARGS[@]}" 2>&1
 
     # Find the built library
     BUILT_LIB=$(find zig-out -name "libghostty-vt*" -type f \( -name "*.dylib" -o -name "*.so" \) | head -1)

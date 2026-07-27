@@ -954,6 +954,113 @@ dotnet add package RoyalApps.RoyalTerminal.Avalonia.Rendering.GhosttyInterop
 
 For source builds or internal feeds, create the same package set with `bash scripts/pack-nuget.sh --configuration Release --output artifacts --version <version>`.
 
+## Release Publishing
+
+NuGet publishing is handled by the `Release` GitHub Actions workflow in
+[`.github/workflows/release.yml`](.github/workflows/release.yml). The workflow
+does not publish from ordinary branch pushes. It runs only when a `v*` tag is
+pushed, builds native artifacts for all supported platforms, packs every
+packable project, pushes packages to NuGet.org, and then creates the GitHub
+release. The repository must have the `NUGET_API_KEY` secret configured.
+
+Release tags must use one of these forms:
+
+```text
+vMAJOR.MINOR.PATCH
+vMAJOR.MINOR.PATCH-prerelease
+```
+
+The package version comes from the tag without the leading `v`. For example,
+`v0.4.0` publishes `0.4.0`, and `v0.4.0-preview.0` publishes
+`0.4.0-preview.0`. Prerelease tags are marked as GitHub prereleases because the
+workflow treats any tag containing `-` as prerelease.
+
+### Full Stable Release From `main`
+
+Use this path for public stable packages.
+
+1. Merge the release-ready PRs to `main`.
+2. Make sure the local `main` matches `origin/main`.
+3. Optionally keep `Directory.Build.props` aligned with the stable version by
+   setting `VersionPrefix` to `MAJOR.MINOR.PATCH` and `VersionSuffix` to empty.
+   The tag is still the source of truth for published package versions.
+4. Create and push a stable tag from `main`.
+
+```bash
+git switch main
+git pull --ff-only origin main
+
+# Optional repository metadata alignment before tagging:
+# <VersionPrefix>0.4.0</VersionPrefix>
+# <VersionSuffix></VersionSuffix>
+
+git tag -a v0.4.0 -m "v0.4.0"
+git push origin v0.4.0
+```
+
+Monitor the workflow:
+
+```bash
+gh run list --workflow release.yml --limit 5
+gh run watch
+```
+
+### Preview Release From Branch Or `main`
+
+Use this path when a preview package should be published before a branch is
+merged, or when a preview should be cut directly from `main`. A branch push
+alone will not publish packages; the preview release is started by tagging the
+exact commit to release.
+
+1. Checkout the branch or `main` commit that contains the preview changes.
+2. Merge or rebase latest `origin/main` if the preview should include current
+   mainline fixes.
+3. Optionally set `Directory.Build.props` to the preview version for
+   local/default metadata. This is recommended for preview branches. For
+   `0.4.0-preview.0`:
+
+```xml
+<VersionPrefix>0.4.0</VersionPrefix>
+<VersionSuffix>preview.0</VersionSuffix>
+```
+
+4. Commit and push the metadata change if one was made.
+5. Tag the selected HEAD with the matching prerelease tag and push the tag.
+
+```bash
+git switch feature/my-preview
+git fetch origin
+git merge origin/main
+
+git add Directory.Build.props
+git commit -m "Bump version to 0.4.0 preview"
+git push
+
+git tag -a v0.4.0-preview.0 -m "v0.4.0-preview.0"
+git push origin v0.4.0-preview.0
+```
+
+For a preview from `main`, replace the branch checkout/merge commands with:
+
+```bash
+git switch main
+git pull --ff-only origin main
+```
+
+The release workflow checks out the tag ref, so the tag can point at either a
+branch commit or a `main` commit. NuGet packages and the GitHub prerelease will
+use the tag version.
+
+### Release Safety
+
+- Do not reuse a version that has already been published to NuGet.org.
+- Do not move or retag a version after packages have been published.
+- Stable releases should normally be tagged from `main`.
+- Preview releases may be tagged from a branch or `main`, as long as the tag
+  points at the exact commit intended for the preview.
+- If a release job fails after some packages are already published, rerun the
+  same workflow/tag after confirming the existing packages are the same version.
+
 ## Codex SKILL
 
 This repository includes a Codex skill:

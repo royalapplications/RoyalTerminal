@@ -66,9 +66,13 @@ done
 case "$PLATFORM" in
     linux/amd64)
         BUILD_ARCH="amd64"
+        BUILD_RID="linux-x64"
+        ZIG_TARGET="x86_64-linux-gnu"
         ;;
     linux/arm64)
         BUILD_ARCH="arm64"
+        BUILD_RID="linux-arm64"
+        ZIG_TARGET="aarch64-linux-gnu"
         ;;
     *)
         echo "Unsupported platform: $PLATFORM" >&2
@@ -119,44 +123,47 @@ if [ "${ROYALTERMINAL_SHELL_ONLY:-0}" = "1" ]; then
 fi
 
 mkdir -p \
-  artifacts/linux-x64/native \
-  native/linux-x64 \
-  src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-x64/native \
-  src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/linux-x64/native \
+  "artifacts/${ROYALTERMINAL_BUILD_RID}/native" \
+  "native/${ROYALTERMINAL_BUILD_RID}" \
+  "src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/${ROYALTERMINAL_BUILD_RID}/native" \
+  "src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/${ROYALTERMINAL_BUILD_RID}/native" \
   test-results
 
 (
   cd external/ghostty
-  zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false \
-    -fsys=freetype \
-    -fsys=fontconfig \
-    -fsys=libpng \
-    -fsys=zlib \
-    -fsys=oniguruma \
-    -fsys=glslang \
-    -fsys=spirv-cross
+  build_args=(
+    build
+    -Doptimize=ReleaseFast
+    -Dapp-runtime=none
+    -Demit-lib-vt=true
+    -Demit-xcframework=false
+    "-Dtarget=${ROYALTERMINAL_ZIG_TARGET}"
+    -Dsimd=false
+  )
+  zig "${build_args[@]}"
 )
 
 (
   cd native/ghostty-renderer-capi
-  zig build -Doptimize=ReleaseFast
+  build_args=(build -Doptimize=ReleaseFast "-Dtarget=${ROYALTERMINAL_ZIG_TARGET}")
+  zig "${build_args[@]}"
 )
 
-find external/ghostty/zig-out -name "libghostty-vt.so*" -exec cp -L {} artifacts/linux-x64/native/ \;
-find native/ghostty-renderer-capi/zig-out -name "libghostty-renderer-capi.so*" -exec cp -L {} artifacts/linux-x64/native/ \; || true
+find external/ghostty/zig-out -name "libghostty-vt.so*" -exec cp -L {} "artifacts/${ROYALTERMINAL_BUILD_RID}/native/" \;
+find native/ghostty-renderer-capi/zig-out -name "libghostty-renderer-capi.so*" -exec cp -L {} "artifacts/${ROYALTERMINAL_BUILD_RID}/native/" \; || true
 
 for base in libghostty-vt libghostty-renderer-capi; do
-  if [ ! -f "artifacts/linux-x64/native/${base}.so" ]; then
-    candidate="$(find artifacts/linux-x64/native -maxdepth 1 -type f -name "${base}.so*" | head -n1 || true)"
+  if [ ! -f "artifacts/${ROYALTERMINAL_BUILD_RID}/native/${base}.so" ]; then
+    candidate="$(find "artifacts/${ROYALTERMINAL_BUILD_RID}/native" -maxdepth 1 -type f -name "${base}.so*" | head -n1 || true)"
     if [ -n "${candidate}" ]; then
-      cp -f "${candidate}" "artifacts/linux-x64/native/${base}.so"
+      cp -f "${candidate}" "artifacts/${ROYALTERMINAL_BUILD_RID}/native/${base}.so"
     fi
   fi
 done
 
-cp -f artifacts/linux-x64/native/* native/linux-x64/
-cp -f artifacts/linux-x64/native/* src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/linux-x64/native/
-cp -f artifacts/linux-x64/native/* src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/linux-x64/native/
+cp -f "artifacts/${ROYALTERMINAL_BUILD_RID}/native/"* "native/${ROYALTERMINAL_BUILD_RID}/"
+cp -f "artifacts/${ROYALTERMINAL_BUILD_RID}/native/"* "src/RoyalTerminal.GhosttySharp.Native.Linux64/runtimes/${ROYALTERMINAL_BUILD_RID}/native/"
+cp -f "artifacts/${ROYALTERMINAL_BUILD_RID}/native/"* "src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/${ROYALTERMINAL_BUILD_RID}/native/"
 
 dotnet restore
 dotnet build -c Release --no-restore
@@ -200,6 +207,8 @@ docker run \
     --user "${HOST_UID}:${HOST_GID}" \
     -e HOME=/tmp \
     -e ROYALTERMINAL_SHELL_ONLY="$([ "$SHELL_ONLY" = true ] && echo 1 || echo 0)" \
+    -e ROYALTERMINAL_BUILD_RID="$BUILD_RID" \
+    -e ROYALTERMINAL_ZIG_TARGET="$ZIG_TARGET" \
     -v "$ROOT_DIR:/work" \
     -w /work \
     "$IMAGE_TAG" \

@@ -50,13 +50,15 @@ public class RenderingTests
     }
 
     [Fact]
-    public void GlyphCache_MeasureCellSize_UsesRoundedDigitZeroAdvance()
+    public void GlyphCache_MeasureCellSize_UsesPrintableAsciiEnvelope()
     {
         using var cache = new GlyphCache("Consolas");
         using SKFont font = cache.CreateFont(14f);
 
         (float width, float height) = cache.MeasureCellSize(14f);
-        float expectedWidth = MathF.Max(1f, MathF.Round(font.MeasureText("0"), MidpointRounding.AwayFromZero));
+        float expectedWidth = MathF.Max(
+            1f,
+            MathF.Round(MeasurePrintableAsciiEnvelope(font), MidpointRounding.AwayFromZero));
         float expectedHeight = MathF.Max(
             1f,
             MathF.Round(
@@ -65,6 +67,27 @@ public class RenderingTests
 
         Assert.Equal(expectedWidth, width);
         Assert.Equal(expectedHeight, height);
+    }
+
+    [Fact]
+    public void GlyphCache_MeasureCellSize_ProportionalFont_UsesPrintableAsciiEnvelope()
+    {
+        if (!TryGetProportionalFontFamily(out string fontFamily))
+        {
+            return;
+        }
+
+        using var cache = new GlyphCache(fontFamily);
+        using SKFont font = cache.CreateFont(18f);
+
+        (float width, _) = cache.MeasureCellSize(18f);
+        float expectedWidth = MathF.Max(
+            1f,
+            MathF.Round(MeasurePrintableAsciiEnvelope(font), MidpointRounding.AwayFromZero));
+        float zeroWidth = MathF.Round(font.MeasureText("0"), MidpointRounding.AwayFromZero);
+
+        Assert.Equal(expectedWidth, width);
+        Assert.True(width >= zeroWidth);
     }
 
     [Fact]
@@ -1606,7 +1629,7 @@ public class RenderingTests
     [Fact]
     public void SkiaTerminalRenderer_UnsafeGridMapping_UsesFallbackRun()
     {
-        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        using var renderer = new SkiaTerminalRenderer(GetMonospaceFontFamily(), 14f)
         {
             CursorVisible = false,
             EnableTextRenderDiagnostics = true,
@@ -1626,8 +1649,9 @@ public class RenderingTests
     [Fact]
     public void SkiaTerminalRenderer_ModerateGridMismatch_UsesClampedPlacement()
     {
-        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        using var renderer = new SkiaTerminalRenderer(GetMonospaceFontFamily(), 14f)
         {
+            CursorVisible = false,
             EnableTextRenderDiagnostics = true,
         };
         renderer.SetCellSize(renderer.CellWidth * 0.75f, renderer.CellHeight);
@@ -1638,19 +1662,20 @@ public class RenderingTests
         renderer.RenderFull(surface.Canvas, screen);
         TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
 
-        Assert.True(diagnostics.ShapedRuns > 0);
-        Assert.True(diagnostics.GridClampedRuns > 0);
+        Assert.True(diagnostics.ShapedRuns > 0, diagnostics.ToString());
+        Assert.True(diagnostics.GridClampedRuns > 0, diagnostics.ToString());
         Assert.Equal(0, diagnostics.FallbackRuns);
     }
 
     [Fact]
-    public void SkiaTerminalRenderer_ShapedText_GridClampsAccumulatedSubpixelDrift()
+    public void SkiaTerminalRenderer_MonospaceShapedText_UsesGridForAccumulatedSubpixelDrift()
     {
-        using var renderer = new SkiaTerminalRenderer("Consolas", 14f)
+        using var renderer = new SkiaTerminalRenderer(GetMonospaceFontFamily(), 14f)
         {
+            CursorVisible = false,
             EnableTextRenderDiagnostics = true,
         };
-        renderer.SetCellSize(renderer.CellWidth * 1.10f, renderer.CellHeight);
+        renderer.SetCellSize(renderer.CellWidth * 1.02f, renderer.CellHeight);
 
         using var surface = CreateRenderSurface(renderer, columns: 80, rows: 1);
         var screen = CreateAsciiScreen(
@@ -1661,13 +1686,135 @@ public class RenderingTests
         renderer.RenderFull(surface.Canvas, screen);
         TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
 
+        Assert.True(diagnostics.ShapedRuns > 0, diagnostics.ToString());
+        Assert.True(diagnostics.GridClampedRuns > 0, diagnostics.ToString());
+        Assert.Equal(0, diagnostics.FallbackRuns);
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_ProportionalFont_RepeatedNarrowGlyphsStayOnCellGridWithoutFallback()
+    {
+        if (!TryGetProportionalFontFamily(out string fontFamily))
+        {
+            return;
+        }
+
+        const string text = "iiiiiiiiiiii";
+        using var renderer = new SkiaTerminalRenderer(fontFamily, 18f)
+        {
+            CursorVisible = false,
+            EnableLigatures = true,
+            EnableTextRenderDiagnostics = true,
+        };
+        using var surface = CreateRenderSurface(renderer, columns: text.Length, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: text.Length, rows: 1, text: text);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.True(diagnostics.ShapedRuns > 0);
+        Assert.True(diagnostics.GridClampedRuns > 0);
+        Assert.Equal(0, diagnostics.FallbackRuns);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        for (int col = 0; col < text.Length; col++)
+        {
+            long ink = SumPixelIntensityInCell(pixels, renderer, col);
+            Assert.True(ink > 0, $"Expected proportional glyph ink in cell {col}.");
+        }
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_ProportionalFont_MixedWideAndNarrowGlyphsStayOnCellGridWithoutFallback()
+    {
+        if (!TryGetProportionalFontFamily(out string fontFamily))
+        {
+            return;
+        }
+
+        const string text = "WiWiWiWiWiWi";
+        using var renderer = new SkiaTerminalRenderer(fontFamily, 18f)
+        {
+            CursorVisible = false,
+            EnableLigatures = true,
+            EnableTextRenderDiagnostics = true,
+        };
+        using var surface = CreateRenderSurface(renderer, columns: text.Length, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: text.Length, rows: 1, text: text);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
+        Assert.True(diagnostics.ShapedRuns > 0);
+        Assert.True(diagnostics.GridClampedRuns > 0);
+        Assert.Equal(0, diagnostics.FallbackRuns);
+
+        using SKImage snapshot = surface.Snapshot();
+        using SKPixmap pixels = snapshot.PeekPixels();
+        for (int col = 0; col < text.Length; col++)
+        {
+            long ink = SumPixelIntensityInCell(pixels, renderer, col);
+            Assert.True(ink > 0, $"Expected proportional glyph ink in cell {col}.");
+        }
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_ProportionalFont_LigatureCandidatesUseShapedGridFitWithoutFallback()
+    {
+        if (!TryGetProportionalFontFamily(out string fontFamily))
+        {
+            return;
+        }
+
+        const string text = "== != => <= >= ->";
+        using var renderer = new SkiaTerminalRenderer(fontFamily, 18f)
+        {
+            CursorVisible = false,
+            EnableLigatures = true,
+            EnableTextRenderDiagnostics = true,
+        };
+        using var surface = CreateRenderSurface(renderer, columns: text.Length, rows: 1);
+        TerminalScreen screen = CreateAsciiScreen(columns: text.Length, rows: 1, text: text);
+        surface.Canvas.Clear(SKColors.Black);
+
+        renderer.RenderFull(surface.Canvas, screen);
+        TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+
         Assert.True(diagnostics.ShapedRuns > 0);
         Assert.True(diagnostics.GridClampedRuns > 0);
         Assert.Equal(0, diagnostics.FallbackRuns);
     }
 
     [Fact]
-    public void SkiaTerminalRenderer_CascadiaCodeLigatureRun_UsesNaturalPlacement()
+    public void SkiaTerminalRenderer_MultiClusterGraphemeCell_DisablesClusterGridFit()
+    {
+        var screen = new TerminalScreen(2, 1);
+        TerminalRow row = screen.GetViewportRow(0);
+        SetTestCell(row, 0, 'a', "ab");
+        SetTestCell(row, 1, 'c');
+
+        Assert.True(SkiaTerminalRenderer.HasMultiClusterGraphemeCell(row.Cells, 0, 2, [0, 1, 2]));
+        Assert.False(SkiaTerminalRenderer.HasMultiClusterGraphemeCell(row.Cells, 0, 2, [0, 0, 2]));
+        Assert.False(SkiaTerminalRenderer.HasMultiClusterGraphemeCell(row.Cells, 1, 2, [0]));
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_SurrogatePairCell_AllowsSingleClusterGridFit()
+    {
+        var screen = new TerminalScreen(2, 1);
+        TerminalRow row = screen.GetViewportRow(0);
+        SetTestCell(row, 0, 0x1F600, "\U0001F600");
+        SetTestCell(row, 1, 'x');
+
+        Assert.False(SkiaTerminalRenderer.HasMultiClusterGraphemeCell(row.Cells, 0, 2, [0, 0, 2]));
+        Assert.True(SkiaTerminalRenderer.HasMultiClusterGraphemeCell(row.Cells, 0, 2, [0, 1, 2]));
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_CascadiaCodeLigatureRun_UsesShapedPlacementWithoutFallback()
     {
         const string cascadiaCodePath = @"C:\Windows\Fonts\CascadiaCode.ttf";
         if (!File.Exists(cascadiaCodePath))
@@ -1692,7 +1839,6 @@ public class RenderingTests
         TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
 
         Assert.True(diagnostics.ShapedRuns > 0);
-        Assert.Equal(0, diagnostics.GridClampedRuns);
         Assert.Equal(0, diagnostics.FallbackRuns);
     }
 
@@ -2095,6 +2241,90 @@ public class RenderingTests
                     renderer.CellHeight,
                     threshold: 64) >= 34,
                 fontPath);
+        }
+    }
+
+    [Fact]
+    public void SkiaTerminalRenderer_ReportedNerdFontFiles_DoNotClipWidePrivateUseGlyphs()
+    {
+        string[] fontPaths = GetReportedNerdFontFixturePaths();
+        if (fontPaths.Length == 0)
+        {
+            return;
+        }
+
+        foreach (string fontPath in fontPaths)
+        {
+            using var renderer = new SkiaTerminalRenderer(
+                System.IO.Path.GetFileNameWithoutExtension(fontPath),
+                14f,
+                TerminalFontSource.File,
+                fontPath)
+            {
+                CursorVisible = false,
+                EnableTextShaping = true,
+            };
+
+            int verifiedCodepoints = 0;
+            int[] reportedCodepoints =
+            [
+                0xE0C6,
+                0xE0BC,
+                0xED35,
+                0xF017,
+                0xF32B,
+                0xF489,
+                0xF00ED,
+                0xF0826,
+                0xF0E1E,
+            ];
+
+            foreach (int codepoint in reportedCodepoints)
+            {
+                using var unclippedSurface = CreateRenderSurface(renderer, columns: 3, rows: 1);
+                TerminalScreen unclippedScreen = CreateAsciiScreen(columns: 3, rows: 1, text: $"{char.ConvertFromUtf32(codepoint)}  ");
+                unclippedSurface.Canvas.Clear(SKColors.Black);
+                renderer.RenderFull(unclippedSurface.Canvas, unclippedScreen);
+
+                using SKImage unclippedSnapshot = unclippedSurface.Snapshot();
+                using SKPixmap unclippedPixels = unclippedSnapshot.PeekPixels();
+                int unclippedOverflowInk = CountBrightPixelsInRegion(
+                    unclippedPixels,
+                    renderer.CellWidth * 1.05f,
+                    renderer.CellWidth * 2.2f,
+                    0f,
+                    renderer.CellHeight,
+                    threshold: 16);
+                if (unclippedOverflowInk <= 0)
+                {
+                    continue;
+                }
+
+                using var surface = CreateRenderSurface(renderer, columns: 3, rows: 1);
+                TerminalScreen screen = CreateAsciiScreen(columns: 3, rows: 1, text: $"{char.ConvertFromUtf32(codepoint)}  ");
+                TerminalRow row = screen.GetViewportRow(0);
+                row[1].Foreground = 0xFF00FF00;
+                surface.Canvas.Clear(SKColors.Black);
+
+                renderer.RenderFull(surface.Canvas, screen);
+
+                using SKImage snapshot = surface.Snapshot();
+                using SKPixmap pixels = snapshot.PeekPixels();
+                int overflowInk = CountBrightPixelsInRegion(
+                    pixels,
+                    renderer.CellWidth * 1.05f,
+                    renderer.CellWidth * 2.2f,
+                    0f,
+                    renderer.CellHeight,
+                    threshold: 16);
+
+                Assert.True(
+                    overflowInk > 0,
+                    $"{fontPath} should render U+{codepoint:X} Nerd Font glyph ink beyond the first cell without clipping.");
+                verifiedCodepoints++;
+            }
+
+            Assert.True(verifiedCodepoints > 0, $"{fontPath} should include at least one reported wide Nerd Font glyph.");
         }
     }
 
@@ -3006,15 +3236,108 @@ public class RenderingTests
         foreach (string family in candidates)
         {
             SKTypeface? candidate = SKTypeface.FromFamilyName(family, SKFontStyle.Normal);
-            if (candidate is not null)
+            if (candidate is not null && candidate.IsFixedPitch)
             {
                 return candidate;
             }
+
+            candidate?.Dispose();
         }
 
         return SKTypeface.FromFamilyName("Monospace", SKFontStyle.Normal)
             ?? SKTypeface.FromFamilyName(null, SKFontStyle.Normal)
             ?? throw new InvalidOperationException("Unable to create monospace typeface.");
+    }
+
+    private static string GetMonospaceFontFamily()
+    {
+        using SKTypeface typeface = CreateMonospaceTypeface();
+        return string.IsNullOrWhiteSpace(typeface.FamilyName)
+            ? "Monospace"
+            : typeface.FamilyName;
+    }
+
+    private static bool TryGetProportionalFontFamily(out string fontFamily)
+    {
+        string[] preferredFamilies =
+        [
+            "Arial",
+            "Helvetica",
+            "Times New Roman",
+            "Times",
+            "Georgia",
+            "Verdana",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "Noto Sans",
+            ".AppleSystemUIFont",
+        ];
+
+        foreach (string family in preferredFamilies)
+        {
+            if (TryResolveProportionalFontFamily(family, out fontFamily))
+            {
+                return true;
+            }
+        }
+
+        using SKFontManager fontManager = SKFontManager.CreateDefault();
+        foreach (string family in fontManager.GetFontFamilies())
+        {
+            if (TryResolveProportionalFontFamily(family, out fontFamily))
+            {
+                return true;
+            }
+        }
+
+        fontFamily = string.Empty;
+        return false;
+    }
+
+    private static bool TryResolveProportionalFontFamily(string family, out string fontFamily)
+    {
+        using SKTypeface? typeface = SKTypeface.FromFamilyName(family, SKFontStyle.Normal);
+        if (typeface is null || typeface.IsFixedPitch)
+        {
+            fontFamily = string.Empty;
+            return false;
+        }
+
+        using SKFont font = GlyphCache.CreateFont(typeface, 18f);
+        float narrowWidth = font.MeasureText("i");
+        float wideWidth = font.MeasureText("W");
+        float envelopeWidth = MeasurePrintableAsciiEnvelope(font);
+        if (!float.IsFinite(narrowWidth) ||
+            !float.IsFinite(wideWidth) ||
+            !float.IsFinite(envelopeWidth) ||
+            envelopeWidth <= 0f ||
+            Math.Abs(wideWidth - narrowWidth) < 1f)
+        {
+            fontFamily = string.Empty;
+            return false;
+        }
+
+        fontFamily = string.IsNullOrWhiteSpace(typeface.FamilyName)
+            ? family
+            : typeface.FamilyName;
+        return true;
+    }
+
+    private static float MeasurePrintableAsciiEnvelope(SKFont font)
+    {
+        float width = 0f;
+        Span<char> text = stackalloc char[1];
+        for (int codepoint = 0x20; codepoint <= 0x7E; codepoint++)
+        {
+            text[0] = (char)codepoint;
+            float measured = font.MeasureText(text, paint: null);
+            if (float.IsFinite(measured) && measured > width)
+            {
+                width = measured;
+            }
+        }
+
+        return width;
     }
 
     private static string[] GetReportedNerdFontFixturePaths()
@@ -3026,13 +3349,25 @@ public class RenderingTests
 
         string[] paths =
         [
+            System.IO.Path.Combine(directory, "IosevkaTermNerdFont-Regular.ttf"),
             System.IO.Path.Combine(directory, "IosevkaTermNerdFontMono-Regular.ttf"),
             System.IO.Path.Combine(directory, "FiraCodeNerdFontMono-Regular.ttf"),
         ];
 
-        return paths.All(System.IO.File.Exists)
-            ? paths
-            : [];
+        return paths.Where(System.IO.File.Exists).ToArray();
+    }
+
+    private static bool HasGlyphInkBeyondCells(string fontPath, int codepoint, float cellWidth, float cells)
+    {
+        using SKTypeface? typeface = SKTypeface.FromFile(fontPath);
+        if (typeface is null)
+        {
+            return false;
+        }
+
+        using SKFont font = GlyphCache.CreateFont(typeface, 14f);
+        _ = font.MeasureText(char.ConvertFromUtf32(codepoint), out SKRect bounds);
+        return bounds.Right > cellWidth * cells;
     }
 
     private static SKSurface CreateRenderSurface(SkiaTerminalRenderer renderer, int columns, int rows)

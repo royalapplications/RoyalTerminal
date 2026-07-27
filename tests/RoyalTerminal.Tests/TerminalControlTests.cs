@@ -1294,6 +1294,7 @@ public class TerminalControlTests
         bool liveViewportPinned = await WaitUntilAsync(
             () => processor.ProcessCallCount > 0 &&
                   processor.ViewportScrollState.OffsetRows == processor.ViewportScrollState.MaxOffsetRows &&
+                  processor.LastSetViewportOffsetRows == processor.ViewportScrollState.MaxOffsetRows &&
                   control.ScrollData is { IsAtBottom: true },
             TimeSpan.FromSeconds(5));
         Assert.True(liveViewportPinned, "Expected native-style viewport source to stay at the live bottom after ED 2.");

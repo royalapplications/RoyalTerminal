@@ -103,7 +103,24 @@ case "$OS" in
     Linux)
         PLATFORM="linux"
         LIB_NAME="libghostty-vt.so"
-        RID="linux-x64"
+        case "$ARCH" in
+            x86_64|amd64)
+                RID="linux-x64"
+                ZIG_TARGET="x86_64-linux-gnu"
+                ;;
+            aarch64|arm64)
+                RID="linux-arm64"
+                ZIG_TARGET="aarch64-linux-gnu"
+                ;;
+            *)
+                error "Unsupported Linux architecture: $ARCH"
+                exit 1
+                ;;
+        esac
+        # Ghostty reaches PageList initialization during terminal creation.
+        # Build Linux packages for a portable CPU baseline so startup code does
+        # not SIGILL on a different machine in the same RID.
+        GHOSTTY_SIMD=false
         ;;
     *)
         error "Unsupported platform: $OS"
@@ -114,6 +131,9 @@ esac
 
 info "Platform: $PLATFORM ($RID)"
 info "Library: $LIB_NAME"
+if [ -n "${ZIG_TARGET:-}" ]; then
+    info "Target: $ZIG_TARGET"
+fi
 
 # Enter Ghostty source directory
 cd "$GHOSTTY_DIR"
@@ -126,9 +146,25 @@ fi
 
 # Build shared libraries
 info "Building libghostty-vt..."
-info "Command: zig build $OPTIMIZE -Dtarget=native -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false"
+ZIG_BUILD_ARGS=(
+    build
+    $OPTIMIZE
+    -Dapp-runtime=none
+    -Demit-lib-vt=true
+    -Demit-xcframework=false
+)
+if [ -n "${ZIG_TARGET:-}" ]; then
+    ZIG_BUILD_ARGS+=("-Dtarget=$ZIG_TARGET")
+else
+    ZIG_BUILD_ARGS+=("-Dtarget=native")
+fi
+if [ "${GHOSTTY_SIMD:-true}" = false ]; then
+    ZIG_BUILD_ARGS+=("-Dsimd=false")
+fi
 
-"$ZIG_COMPAT" build $OPTIMIZE -Dtarget=native -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false 2>&1 || {
+info "Command: zig ${ZIG_BUILD_ARGS[*]}"
+
+"$ZIG_COMPAT" "${ZIG_BUILD_ARGS[@]}" 2>&1 || {
     error "Zig build failed."
     warn "This may be expected if platform-specific dependencies are missing."
     warn "On macOS, ensure Xcode command line tools are installed: xcode-select --install"
@@ -214,7 +250,11 @@ if [ -f "$RENDERER_DIR/build.zig" ]; then
         linux) RENDERER_LIB_NAME="libghostty-renderer-capi.so" ;;
     esac
 
-    "$ZIG_COMPAT" build $OPTIMIZE 2>&1 || {
+    RENDERER_BUILD_ARGS=(build $OPTIMIZE)
+    if [ -n "${ZIG_TARGET:-}" ]; then
+        RENDERER_BUILD_ARGS+=("-Dtarget=$ZIG_TARGET")
+    fi
+    "$ZIG_COMPAT" "${RENDERER_BUILD_ARGS[@]}" 2>&1 || {
         warn "libghostty-renderer-capi build failed — skipping."
         warn "Texture interop managed APIs will require manual native library setup."
         RENDERER_LIB_NAME=""

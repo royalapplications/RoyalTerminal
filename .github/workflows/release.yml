@@ -94,8 +94,10 @@ jobs:
         include:
           - arch: x64
             runner: ubuntu-latest
+            zig-target: x86_64-linux-gnu
           - arch: arm64
             runner: ubuntu-24.04-arm
+            zig-target: aarch64-linux-gnu
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -132,18 +134,24 @@ jobs:
       - name: Build libghostty-vt
         working-directory: external/ghostty
         run: |
-          zig build -Doptimize=ReleaseFast -Dapp-runtime=none \
-            -fsys=freetype \
-            -fsys=fontconfig \
-            -fsys=libpng \
-            -fsys=zlib \
-            -fsys=oniguruma \
-            -fsys=glslang \
-            -fsys=spirv-cross
+          # Keep Linux native packages on a portable CPU baseline. A runner-native
+          # Ghostty build can SIGILL during terminal/PageList startup on another
+          # machine with the same RID. Do not force -fsys dependencies here:
+          # explicit targets make Zig use cross-target system-library discovery.
+          build_args=(
+            build
+            -Doptimize=ReleaseFast
+            -Dapp-runtime=none
+            -Dtarget=${{ matrix.zig-target }}
+            -Dsimd=false
+          )
+          zig "${build_args[@]}"
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
-        run: zig build -Doptimize=ReleaseFast
+        run: |
+          build_args=(build -Doptimize=ReleaseFast -Dtarget=${{ matrix.zig-target }})
+          zig "${build_args[@]}"
 
       - name: Collect artifacts
         run: |
@@ -454,13 +462,29 @@ jobs:
           NUGET_SOURCE: https://api.nuget.org/v3/index.json
         run: bash scripts/push-nuget.sh --directory artifacts
 
-      # Create GitHub Release
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
-          files: artifacts/*.nupkg
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          release_args=()
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            release_args+=(--prerelease)
+          fi
+
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --draft=false \
+              "${release_args[@]}"
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes \
+              --verify-tag \
+              "${release_args[@]}"
+          fi
+
+          gh release upload "${GITHUB_REF_NAME}" artifacts/*.nupkg --clobber
