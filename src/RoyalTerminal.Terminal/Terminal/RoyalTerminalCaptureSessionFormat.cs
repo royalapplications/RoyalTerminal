@@ -3,7 +3,6 @@
 // RoyalTerminal.Terminal - Native RoyalTerminal capture session format.
 
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace RoyalTerminal.Terminal;
 
@@ -12,16 +11,6 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 public sealed class RoyalTerminalCaptureSessionFormat : ITerminalCaptureSessionFormat
 {
-    internal static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true,
-        Converters =
-        {
-            new JsonStringEnumConverter(),
-        },
-    };
-
     /// <inheritdoc />
     public TerminalCaptureFileFormatDescriptor Descriptor { get; } = new(
         TerminalCaptureSessionFormats.RoyalTerminalJsonId,
@@ -41,7 +30,11 @@ public sealed class RoyalTerminalCaptureSessionFormat : ITerminalCaptureSessionF
         cancellationToken.ThrowIfCancellationRequested();
 
         return new ValueTask(
-            JsonSerializer.SerializeAsync(stream, session, JsonOptions, cancellationToken));
+            JsonSerializer.SerializeAsync(
+                stream,
+                session,
+                TerminalIndentedJsonSerializerContext.Default.TerminalCaptureSession,
+                cancellationToken));
     }
 
     /// <inheritdoc />
@@ -61,7 +54,8 @@ public sealed class RoyalTerminalCaptureSessionFormat : ITerminalCaptureSessionF
             throw new InvalidDataException("Capture file is an asciicast recording, not a RoyalTerminal JSON capture.");
         }
 
-        TerminalCaptureSession? session = root.Deserialize<TerminalCaptureSession>(JsonOptions);
+        TerminalCaptureSession? session = root.Deserialize(
+            TerminalIndentedJsonSerializerContext.Default.TerminalCaptureSession);
         if (session is null)
         {
             throw new InvalidDataException("Capture file is empty or malformed.");

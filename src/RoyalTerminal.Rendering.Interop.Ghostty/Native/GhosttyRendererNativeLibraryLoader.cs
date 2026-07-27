@@ -47,7 +47,7 @@ public static class GhosttyRendererNativeLibraryLoader
             return nint.Zero;
         }
 
-        foreach (string candidatePath in GetCandidatePaths(assembly))
+        foreach (string candidatePath in GetCandidatePaths())
         {
             if (NativeLibrary.TryLoad(candidatePath, out nint handle))
             {
@@ -68,13 +68,12 @@ public static class GhosttyRendererNativeLibraryLoader
         return nint.Zero;
     }
 
-    private static IReadOnlyList<string> GetCandidatePaths(Assembly assembly)
+    private static IReadOnlyList<string> GetCandidatePaths()
     {
         List<string> candidates = [];
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
         string libraryFileName = GetLibraryFileName();
         string runtimeIdentifier = GetRuntimeIdentifier();
-        string assemblyDirectory = Path.GetDirectoryName(assembly.Location) ?? string.Empty;
 
         AddPath(candidates, seen, Environment.GetEnvironmentVariable(LibraryPathEnv));
 
@@ -86,8 +85,6 @@ public static class GhosttyRendererNativeLibraryLoader
 
         AddPath(candidates, seen, Path.Combine(AppContext.BaseDirectory, "runtimes", runtimeIdentifier, "native", libraryFileName));
         AddPath(candidates, seen, Path.Combine(AppContext.BaseDirectory, libraryFileName));
-        AddPath(candidates, seen, Path.Combine(assemblyDirectory, "runtimes", runtimeIdentifier, "native", libraryFileName));
-        AddPath(candidates, seen, Path.Combine(assemblyDirectory, libraryFileName));
 
         return candidates;
     }

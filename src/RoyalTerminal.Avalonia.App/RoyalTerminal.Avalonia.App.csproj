@@ -30,7 +30,7 @@
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Skia" />
     <PackageReference Include="ReactiveUI" />
-    <PackageReference Include="ReactiveUI.Avalonia" />
+    <PackageReference Include="ReactiveUI.Avalonia" Condition="'$(PublishAot)' != 'true'" />
     <PackageReference Include="SkiaSharp" />
     <PackageReference Include="Xaml.Behaviors.Avalonia" />
   </ItemGroup>

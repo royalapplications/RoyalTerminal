@@ -1117,14 +1117,25 @@ public sealed class TerminalScreen
     /// </summary>
     public TerminalRow AddRow()
     {
-        var row = new TerminalRow(Columns, DefaultForeground, DefaultBackground);
+        int maxRows = ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit);
+        int overflowRows = _rows.Count - maxRows;
+        if (maxRows > 0 && overflowRows >= 0)
+        {
+            TerminalRow recycled = _rows[0];
+            _rows.RemoveFirst();
+            ShiftRasterGraphicsAfterTopRowsRemoved(1);
+            recycled.Clear(DefaultForeground, DefaultBackground);
+            _rows.Add(recycled);
+            return recycled;
+        }
+
+        TerminalRow row = new(Columns, DefaultForeground, DefaultBackground);
         _rows.Add(row);
 
         // Trim scrollback if exceeding limit
-        int maxRows = ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit);
         int removedRows = 0;
-        int overflowRows = _rows.Count - maxRows;
-        if (overflowRows > 0)
+        overflowRows = _rows.Count - maxRows;
+        if (maxRows >= 0 && overflowRows > 0)
         {
             _rows.RemoveFirst(overflowRows);
             removedRows = overflowRows;

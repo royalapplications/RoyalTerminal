@@ -29,7 +29,9 @@ public sealed class UnixPty : IPty
     private readonly Queue<PendingWrite> _priorityWrites = new();
     private readonly Queue<PendingWrite> _pendingWrites = new();
     private Thread? _readThread;
+    private Thread? _gatherThread;
     private Thread? _writeThread;
+    private ReadPipeline? _readPipeline;
 
     /// <summary>Raised when data is received from the PTY.</summary>
     public event Action<byte[], int>? DataReceived;
@@ -42,6 +44,8 @@ public sealed class UnixPty : IPty
 
     /// <summary>The child process ID.</summary>
     public int ChildPid => _childPid;
+
+    internal string? SlavePtyPath => _slavePtyPath;
 
     /// <summary>
     /// Spawns a shell process with a PTY.
@@ -192,13 +196,25 @@ public sealed class UnixPty : IPty
         };
         _writeThread.Start();
 
-        // Start reading from the master FD
-        _readThread = new Thread(ReadLoop)
+        ReadPipeline readPipeline = new();
+        _readPipeline = readPipeline;
+
+        // Start dispatching PTY output to subscribers on a dedicated stage.
+        _readThread = new Thread(() => DispatchReadLoop(readPipeline))
         {
             IsBackground = true,
-            Name = "PTY-Reader",
+            Name = "PTY-Dispatcher",
         };
         _readThread.Start();
+
+        // Start draining the master FD into preallocated batches. This keeps
+        // kernel PTY output draining while subscribers perform VT processing.
+        _gatherThread = new Thread(() => GatherReadLoop(readPipeline))
+        {
+            IsBackground = true,
+            Name = "PTY-Gather",
+        };
+        _gatherThread.Start();
     }
 
     /// <summary>
@@ -295,64 +311,182 @@ public sealed class UnixPty : IPty
         }
     }
 
-    private void ReadLoop()
+    private void GatherReadLoop(ReadPipeline pipeline)
     {
-        var buffer = new byte[8192];
-
         try
         {
+            int fd = _masterFd;
+            if (fd < 0 || !TrySetNonBlocking(fd))
+            {
+                return;
+            }
+
             while (!_disposed)
             {
-                int bytesRead;
-                unsafe
+                if (!pipeline.TryClaimWriteBuffer(out byte[] buffer))
                 {
-                    fixed (byte* ptr = buffer)
+                    return;
+                }
+
+                int total = 0;
+                int bridgeSpins = 0;
+                long bridgeStartTimestamp = 0;
+                bool fatal = false;
+
+                while (!_disposed && total < UnixPtyReadBatchPolicy.BufferCapacity)
+                {
+                    int bytesRead;
+                    unsafe
                     {
-                        bytesRead = (int)PosixRead(_masterFd, ptr, (nuint)buffer.Length);
+                        fixed (byte* ptr = buffer)
+                        {
+                            bytesRead = (int)PosixRead(
+                                fd,
+                                ptr + total,
+                                (nuint)(UnixPtyReadBatchPolicy.BufferCapacity - total));
+                        }
                     }
-                }
 
-                if (_disposed)
-                {
-                    break;
-                }
-
-                if (bytesRead < 0)
-                {
-                    int error = Marshal.GetLastPInvokeError();
-                    if (error == ErrnoInterrupted || error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
+                    if (bytesRead > 0)
                     {
-                        Thread.Yield();
+                        total += bytesRead;
+                        bridgeSpins = 0;
+                        if (UnixPtyReadBatchPolicy.ShouldDispatchAfterRead(bytesRead))
+                        {
+                            break;
+                        }
+
                         continue;
                     }
 
+                    if (bytesRead == 0)
+                    {
+                        fatal = true;
+                        break;
+                    }
+
+                    int error = Marshal.GetLastPInvokeError();
+                    if (error == ErrnoInterrupted)
+                    {
+                        continue;
+                    }
+
+                    if (error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
+                    {
+                        if (!UnixPtyReadBatchPolicy.ShouldBridgeAfterWouldBlock(total))
+                        {
+                            break;
+                        }
+
+                        if (bridgeSpins < UnixPtyReadBatchPolicy.BridgeSpinMax)
+                        {
+                            bridgeSpins++;
+                            continue;
+                        }
+
+                        long now = Stopwatch.GetTimestamp();
+                        if (bridgeStartTimestamp == 0)
+                        {
+                            bridgeStartTimestamp = now;
+                        }
+                        else if (UnixPtyReadBatchPolicy.IsGatherBudgetExpired(bridgeStartTimestamp, now))
+                        {
+                            break;
+                        }
+
+                        int pollResult = PollForData(fd, UnixPtyReadBatchPolicy.BridgePollTimeoutMilliseconds, out short revents);
+                        if (pollResult < 0)
+                        {
+                            int pollError = Marshal.GetLastPInvokeError();
+                            if (pollError == ErrnoInterrupted)
+                            {
+                                continue;
+                            }
+
+                            fatal = true;
+                            break;
+                        }
+
+                        if (pollResult == 0)
+                        {
+                            break;
+                        }
+
+                        if ((revents & PollIn) == 0)
+                        {
+                            fatal = (revents & (PollErr | PollHup | PollNval)) != 0;
+                            break;
+                        }
+
+                        continue;
+                    }
+
+                    fatal = true;
                     break;
                 }
 
-                if (bytesRead == 0)
+                if (!_disposed && total > 0)
                 {
-                    // EOF — child process likely exited or PTY was closed.
-                    break;
+                    pipeline.Publish(total);
                 }
 
-                try
+                if (fatal)
                 {
-                    DataReceived?.Invoke(buffer, bytesRead);
+                    return;
                 }
-                catch
+
+                if (_disposed || total == UnixPtyReadBatchPolicy.BufferCapacity)
                 {
-                    // Don't let subscriber exceptions kill the read loop
+                    continue;
+                }
+
+                if (!WaitForReadableData(fd))
+                {
+                    return;
                 }
             }
         }
         catch
         {
-            // Reader thread must never crash the process on unexpected runtime/PInvoke errors.
+            // Gather thread must never crash the process on unexpected runtime/PInvoke errors.
+        }
+        finally
+        {
+            pipeline.Complete();
+        }
+    }
+
+    private void DispatchReadLoop(ReadPipeline pipeline)
+    {
+        try
+        {
+            while (!_disposed && pipeline.TryTake(out byte[] buffer, out int length))
+            {
+                try
+                {
+                    if (!_disposed)
+                    {
+                        DataReceived?.Invoke(buffer, length);
+                    }
+                }
+                catch
+                {
+                    // Don't let subscriber exceptions kill the read dispatcher.
+                }
+                finally
+                {
+                    pipeline.Release();
+                }
+            }
+        }
+        catch
+        {
+            // Dispatcher thread must never crash the process on unexpected runtime errors.
         }
 
         if (_disposed) return;
 
-        // Check child exit status
+        // Check child exit status after all published data has been delivered.
         var exitCode = WaitForChild();
         try
         {
@@ -362,6 +496,41 @@ public sealed class UnixPty : IPty
         {
             // Ignore
         }
+    }
+
+    private bool WaitForReadableData(int fd)
+    {
+        while (!_disposed)
+        {
+            int pollResult = PollForData(fd, UnixPtyReadBatchPolicy.IdlePollTimeoutMilliseconds, out short revents);
+            if (pollResult < 0)
+            {
+                int error = Marshal.GetLastPInvokeError();
+                if (error == ErrnoInterrupted)
+                {
+                    continue;
+                }
+
+                return false;
+            }
+
+            if (pollResult == 0)
+            {
+                continue;
+            }
+
+            if ((revents & PollIn) != 0)
+            {
+                return true;
+            }
+
+            if ((revents & (PollErr | PollHup | PollNval)) != 0)
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     private int WaitForChild()
@@ -479,6 +648,7 @@ public sealed class UnixPty : IPty
             _pendingWrites.Clear();
             Monitor.PulseAll(_pendingWritesSync);
         }
+        _readPipeline?.Complete();
 
         // Signal child to terminate first
         var pid = _childPid;
@@ -497,8 +667,13 @@ public sealed class UnixPty : IPty
         _slavePtyPath = null;
 
         // Wait for read thread (don't block too long)
+        _gatherThread?.Join(TimeSpan.FromMilliseconds(500));
         _readThread?.Join(TimeSpan.FromMilliseconds(500));
         _writeThread?.Join(TimeSpan.FromMilliseconds(500));
+        _gatherThread = null;
+        _readThread = null;
+        _writeThread = null;
+        _readPipeline = null;
 
         // Reap child process (non-blocking to avoid hanging the UI thread)
         if (pid > 0)
@@ -697,11 +872,21 @@ public sealed class UnixPty : IPty
         ? 0x80087467UL
         : 0x5414UL;
 
+    private const int FGetFl = 3;
+    private const int FSetFl = 4;
+    private static readonly int ONonBlock = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+        ? 0x0004
+        : 0x0800;
+
     private const int WNOHANG = 1;
     private const int SIGWINCH = 28;
     private const int ErrnoInterrupted = 4;
     private const int ErrnoWouldBlockLinux = 11;
     private const int ErrnoWouldBlockBsd = 35;
+    private const short PollIn = 0x0001;
+    private const short PollErr = 0x0008;
+    private const short PollHup = 0x0010;
+    private const short PollNval = 0x0020;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WinSize
@@ -722,6 +907,143 @@ public sealed class UnixPty : IPty
 
         public byte[] Buffer;
         public int Offset;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PollFd
+    {
+        public int fd;
+        public short events;
+        public short revents;
+    }
+
+    private sealed class ReadPipeline
+    {
+        private readonly object _sync = new();
+        private readonly byte[][] _buffers = CreateBuffers();
+        private readonly int[] _lengths = new int[UnixPtyReadBatchPolicy.BufferCount];
+        private int _head;
+        private int _tail;
+        private int _count;
+        private bool _done;
+
+        public bool TryClaimWriteBuffer(out byte[] buffer)
+        {
+            lock (_sync)
+            {
+                while (!_done && _count == UnixPtyReadBatchPolicy.BufferCount)
+                {
+                    Monitor.Wait(_sync);
+                }
+
+                if (_done)
+                {
+                    buffer = Array.Empty<byte>();
+                    return false;
+                }
+
+                buffer = _buffers[_head];
+                return true;
+            }
+        }
+
+        public void Publish(int length)
+        {
+            lock (_sync)
+            {
+                if (_done)
+                {
+                    return;
+                }
+
+                _lengths[_head] = length;
+                _head = (_head + 1) % UnixPtyReadBatchPolicy.BufferCount;
+                _count++;
+                Monitor.PulseAll(_sync);
+            }
+        }
+
+        public bool TryTake(out byte[] buffer, out int length)
+        {
+            lock (_sync)
+            {
+                while (!_done && _count == 0)
+                {
+                    Monitor.Wait(_sync);
+                }
+
+                if (_count == 0)
+                {
+                    buffer = Array.Empty<byte>();
+                    length = 0;
+                    return false;
+                }
+
+                buffer = _buffers[_tail];
+                length = _lengths[_tail];
+                return true;
+            }
+        }
+
+        public void Release()
+        {
+            lock (_sync)
+            {
+                if (_count > 0)
+                {
+                    _lengths[_tail] = 0;
+                    _tail = (_tail + 1) % UnixPtyReadBatchPolicy.BufferCount;
+                    _count--;
+                }
+
+                Monitor.PulseAll(_sync);
+            }
+        }
+
+        public void Complete()
+        {
+            lock (_sync)
+            {
+                _done = true;
+                Monitor.PulseAll(_sync);
+            }
+        }
+
+        private static byte[][] CreateBuffers()
+        {
+            byte[][] buffers = new byte[UnixPtyReadBatchPolicy.BufferCount][];
+            for (int i = 0; i < buffers.Length; i++)
+            {
+                buffers[i] = GC.AllocateUninitializedArray<byte>(UnixPtyReadBatchPolicy.BufferCapacity);
+            }
+
+            return buffers;
+        }
+    }
+
+    private static bool TrySetNonBlocking(int fd)
+    {
+        int flags = Fcntl(fd, FGetFl, 0);
+        if (flags < 0)
+        {
+            return false;
+        }
+
+        return Fcntl(fd, FSetFl, flags | ONonBlock) == 0;
+    }
+
+    private static unsafe int PollForData(int fd, int timeoutMilliseconds, out short revents)
+    {
+        PollFd pollFd = new()
+        {
+            fd = fd,
+            events = PollIn,
+            revents = 0,
+        };
+
+        int result = PosixPoll(&pollFd, (nuint)1, timeoutMilliseconds);
+        revents = pollFd.revents;
+        return result;
     }
 
     private static int ForkPty(out int masterFd, ref WinSize winSize)
@@ -754,6 +1076,12 @@ public sealed class UnixPty : IPty
 
     [DllImport("libc", EntryPoint = "write", SetLastError = true)]
     private static extern unsafe nint PosixWrite(int fd, byte* buf, nuint count);
+
+    [DllImport("libc", EntryPoint = "poll", SetLastError = true)]
+    private static extern unsafe int PosixPoll(PollFd* fds, nuint nfds, int timeout);
+
+    [DllImport("libc", EntryPoint = "fcntl", SetLastError = true)]
+    private static extern int Fcntl(int fd, int cmd, int arg);
 
     [DllImport("libc", EntryPoint = "close")]
     private static extern int PosixClose(int fd);

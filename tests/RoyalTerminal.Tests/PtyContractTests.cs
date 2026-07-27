@@ -5,7 +5,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Diagnostics;
-using System.Reflection;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
 using Xunit;
@@ -276,6 +275,83 @@ public class PtyContractTests
     }
 
     [Fact]
+    public void UnixPty_LargeOutput_CombinesSaturatedReadsIntoBatches()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        const int payloadBytes = 2 * 1024 * 1024;
+        const string marker = "__ROYALTERMINAL_UNIX_IO_BATCH_DONE__";
+        using UnixPty pty = new();
+        using ManualResetEventSlim sawMarker = new(false);
+        object sync = new();
+        StringBuilder tail = new();
+        long totalBytes = 0;
+        int largestChunk = 0;
+        bool measureOutput = false;
+
+        pty.DataReceived += (data, length) =>
+        {
+            if (length <= 0 || !Volatile.Read(ref measureOutput))
+            {
+                return;
+            }
+
+            Interlocked.Add(ref totalBytes, length);
+            UpdateLargestChunk(ref largestChunk, length);
+
+            string text = Encoding.ASCII.GetString(data, 0, length);
+            lock (sync)
+            {
+                tail.Append(text);
+                if (tail.Length > 4096)
+                {
+                    tail.Remove(0, tail.Length - 4096);
+                }
+
+                if (tail.ToString().Contains(marker, StringComparison.Ordinal))
+                {
+                    sawMarker.Set();
+                }
+            }
+        };
+
+        try
+        {
+            pty.Start(shell: "/bin/sh", columns: 120, rows: 40, workingDirectory: Environment.CurrentDirectory);
+            pty.Write("stty -echo\n");
+            Thread.Sleep(200);
+            Volatile.Write(ref measureOutput, true);
+            pty.Write(
+                $"""
+                 yes A | head -c {payloadBytes}
+                 printf '\n{marker}\n'
+                 """);
+            pty.Write("\n");
+
+            Assert.True(
+                sawMarker.Wait(TimeSpan.FromSeconds(20)),
+                $"Did not observe large-output completion marker. Tail: {tail}");
+
+            long observedBytes = Volatile.Read(ref totalBytes);
+            int observedLargestChunk = Volatile.Read(ref largestChunk);
+
+            Assert.True(
+                observedBytes >= payloadBytes,
+                $"Expected at least {payloadBytes} bytes, observed {observedBytes}.");
+            Assert.True(
+                observedLargestChunk > UnixPtyReadBatchPolicy.BridgeThreshold,
+                $"Expected saturated reads to be batched beyond {UnixPtyReadBatchPolicy.BridgeThreshold} bytes, largest chunk was {observedLargestChunk}.");
+        }
+        finally
+        {
+            pty.Stop();
+        }
+    }
+
+    [Fact]
     public void UnixPty_Write_DoesNotBlockCaller_WhenChildNotReadingInput()
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
@@ -331,6 +407,23 @@ public class PtyContractTests
         finally
         {
             pty.Stop();
+        }
+    }
+
+    private static void UpdateLargestChunk(ref int largestChunk, int candidate)
+    {
+        while (true)
+        {
+            int current = Volatile.Read(ref largestChunk);
+            if (candidate <= current)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref largestChunk, candidate, current) == current)
+            {
+                return;
+            }
         }
     }
 
@@ -891,9 +984,7 @@ public class PtyContractTests
         using UnixPty pty = new();
         pty.Start(shell: "/bin/sh", columns: 80, rows: 24, workingDirectory: Environment.CurrentDirectory);
 
-        string? slavePath = (string?)typeof(UnixPty)
-            .GetField("_slavePtyPath", BindingFlags.Instance | BindingFlags.NonPublic)
-            ?.GetValue(pty);
+        string? slavePath = pty.SlavePtyPath;
         Assert.False(string.IsNullOrWhiteSpace(slavePath));
 
         static bool TryParseSize(string text, out (int Rows, int Cols) size)

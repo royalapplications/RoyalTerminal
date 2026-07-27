@@ -316,6 +316,24 @@ public class TerminalScreenTests
     }
 
     [Fact]
+    public void TerminalScreen_AddRow_RecyclesTrimmedRowAtScrollbackCapacity()
+    {
+        TerminalScreen screen = new(4, 2, scrollbackLimit: 1);
+        screen.AddRow();
+        TerminalRow trimmed = screen.GetRow(0);
+        trimmed[0].Codepoint = 'X';
+        trimmed.WrapsToNext = true;
+
+        TerminalRow added = screen.AddRow();
+
+        Assert.Same(trimmed, added);
+        Assert.Equal(3, screen.TotalRows);
+        Assert.Same(added, screen.GetRow(2));
+        Assert.False(added[0].HasContent);
+        Assert.False(added.WrapsToNext);
+    }
+
+    [Fact]
     public void TerminalScreen_ScrollbackLimitSetter_TrimsExistingRows()
     {
         TerminalScreen screen = new(80, 4, scrollbackLimit: 10);

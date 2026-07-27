@@ -1702,6 +1702,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private static bool ShouldAttemptGraphemeAppend(int codepoint)
     {
+        if ((uint)(codepoint - 0x20) <= 0x5E)
+        {
+            return false;
+        }
+
         if (!Rune.IsValid(codepoint))
         {
             return false;

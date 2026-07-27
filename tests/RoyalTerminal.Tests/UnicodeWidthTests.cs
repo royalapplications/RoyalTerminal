@@ -36,6 +36,18 @@ public class UnicodeWidthTests
         Assert.Equal(expectedWidth, width);
     }
 
+    [Theory]
+    [InlineData(0x41, 1)]
+    [InlineData(0x20, 1)]
+    [InlineData(0x7E, 1)]
+    [InlineData(0x1B, 0)]
+    [InlineData(0x4E2D, 2)]
+    public void CellWidthCalculator_CodepointOverload_ReturnsExpectedWidths(int codepoint, int expectedWidth)
+    {
+        int width = TerminalCellWidthCalculator.GetCellWidth(codepoint);
+        Assert.Equal(expectedWidth, width);
+    }
+
     [Fact]
     public void CellWidthCalculator_IsSingleGrapheme_RecognizesRegionalIndicatorPair()
     {

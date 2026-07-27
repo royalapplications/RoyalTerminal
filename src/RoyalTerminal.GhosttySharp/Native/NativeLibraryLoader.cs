@@ -46,30 +46,31 @@ public static class NativeLibraryLoader
         if (NativeLibrary.TryLoad(libraryName, assembly, searchPath, out var handle))
             return handle;
 
-        // Try platform-specific paths
-        var rid = GetRuntimeIdentifier();
+        // Try platform-specific paths.
+        string rid = GetRuntimeIdentifier();
 
-        // Search paths in priority order
+        // Search paths in priority order. NativeAOT/single-file apps expose
+        // assemblies without stable file locations, so AppContext.BaseDirectory
+        // is the only package-relative root used here.
         string[] searchPaths =
         [
-            // NuGet runtime package layout
             Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", libraryFileName),
-            // Direct in base directory
             Path.Combine(AppContext.BaseDirectory, libraryFileName),
-            // Relative to assembly
-            Path.Combine(Path.GetDirectoryName(assembly.Location) ?? string.Empty, "runtimes", rid, "native", libraryFileName),
-            Path.Combine(Path.GetDirectoryName(assembly.Location) ?? string.Empty, libraryFileName),
         ];
 
-        foreach (var path in searchPaths)
+        foreach (string path in searchPaths)
         {
             if (NativeLibrary.TryLoad(path, out handle))
+            {
                 return handle;
+            }
         }
 
-        // Try without extension as fallback
+        // Try without extension as fallback.
         if (NativeLibrary.TryLoad(libraryName, out handle))
+        {
             return handle;
+        }
 
         return nint.Zero;
     }

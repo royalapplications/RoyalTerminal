@@ -4,7 +4,6 @@
 
 using System.Globalization;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace RoyalTerminal.Terminal;
 
@@ -13,16 +12,6 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 public static class TerminalSessionProfileSerializer
 {
-    private static readonly JsonSerializerOptions s_jsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true,
-        Converters =
-        {
-            new JsonStringEnumConverter(),
-        },
-    };
-
     /// <summary>
     /// Saves a profile document to a stream.
     /// </summary>
@@ -36,7 +25,12 @@ public static class TerminalSessionProfileSerializer
         cancellationToken.ThrowIfCancellationRequested();
 
         TerminalSessionProfilesDocument normalized = NormalizeAndValidate(document);
-        return new ValueTask(JsonSerializer.SerializeAsync(stream, normalized, s_jsonOptions, cancellationToken));
+        return new ValueTask(
+            JsonSerializer.SerializeAsync(
+                stream,
+                normalized,
+                TerminalIndentedJsonSerializerContext.Default.TerminalSessionProfilesDocument,
+                cancellationToken));
     }
 
     /// <summary>
@@ -50,7 +44,10 @@ public static class TerminalSessionProfileSerializer
         cancellationToken.ThrowIfCancellationRequested();
 
         TerminalSessionProfilesDocument? document = await JsonSerializer
-            .DeserializeAsync<TerminalSessionProfilesDocument>(stream, s_jsonOptions, cancellationToken)
+            .DeserializeAsync(
+                stream,
+                TerminalIndentedJsonSerializerContext.Default.TerminalSessionProfilesDocument,
+                cancellationToken)
             .ConfigureAwait(false);
         if (document is null)
         {
@@ -103,7 +100,9 @@ public static class TerminalSessionProfileSerializer
     {
         ArgumentNullException.ThrowIfNull(document);
         TerminalSessionProfilesDocument normalized = NormalizeAndValidate(document);
-        return JsonSerializer.Serialize(normalized, s_jsonOptions);
+        return JsonSerializer.Serialize(
+            normalized,
+            TerminalIndentedJsonSerializerContext.Default.TerminalSessionProfilesDocument);
     }
 
     /// <summary>
@@ -112,7 +111,9 @@ public static class TerminalSessionProfileSerializer
     public static TerminalSessionProfilesDocument FromJson(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        TerminalSessionProfilesDocument? document = JsonSerializer.Deserialize<TerminalSessionProfilesDocument>(json, s_jsonOptions);
+        TerminalSessionProfilesDocument? document = JsonSerializer.Deserialize(
+            json,
+            TerminalIndentedJsonSerializerContext.Default.TerminalSessionProfilesDocument);
         if (document is null)
         {
             throw new InvalidDataException("Profile JSON is empty or malformed.");
@@ -130,11 +131,19 @@ public static class TerminalSessionProfileSerializer
                 $"Unsupported profile format version '{document.FormatVersion}'.");
         }
 
-        List<TerminalSessionProfile> normalizedProfiles = new(document.Profiles.Count);
+        List<TerminalSessionProfile>? sourceProfiles = document.Profiles;
+        List<TerminalSessionProfile> normalizedProfiles = sourceProfiles is null
+            ? []
+            : new List<TerminalSessionProfile>(sourceProfiles.Count);
         HashSet<string> profileIds = new(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < document.Profiles.Count; i++)
+        for (int i = 0; sourceProfiles is not null && i < sourceProfiles.Count; i++)
         {
-            TerminalSessionProfile source = document.Profiles[i];
+            TerminalSessionProfile? source = sourceProfiles[i];
+            if (source is null)
+            {
+                continue;
+            }
+
             string id = NormalizeRequired(source.Id, $"Profile at index {i} is missing a valid id.");
             if (!profileIds.Add(id))
             {
@@ -183,8 +192,9 @@ public static class TerminalSessionProfileSerializer
         };
     }
 
-    private static TerminalSessionLayoutSettings NormalizeLayout(TerminalSessionLayoutSettings layout)
+    private static TerminalSessionLayoutSettings NormalizeLayout(TerminalSessionLayoutSettings? settings)
     {
+        TerminalSessionLayoutSettings layout = settings ?? new TerminalSessionLayoutSettings();
         return layout with
         {
             Columns = Math.Max(1, layout.Columns),
@@ -195,8 +205,9 @@ public static class TerminalSessionProfileSerializer
         };
     }
 
-    private static TerminalSessionAppearanceSettings NormalizeAppearance(TerminalSessionAppearanceSettings appearance)
+    private static TerminalSessionAppearanceSettings NormalizeAppearance(TerminalSessionAppearanceSettings? settings)
     {
+        TerminalSessionAppearanceSettings appearance = settings ?? new TerminalSessionAppearanceSettings();
         string? fontFilePath = NormalizeOptional(appearance.FontFilePath);
         TerminalFontSource fontSource = appearance.FontSource == TerminalFontSource.File && fontFilePath is not null
             ? TerminalFontSource.File
@@ -304,8 +315,9 @@ public static class TerminalSessionProfileSerializer
         return normalized;
     }
 
-    private static TerminalSessionBehaviorSettings NormalizeBehavior(TerminalSessionBehaviorSettings behavior)
+    private static TerminalSessionBehaviorSettings NormalizeBehavior(TerminalSessionBehaviorSettings? settings)
     {
+        TerminalSessionBehaviorSettings behavior = settings ?? new TerminalSessionBehaviorSettings();
         return behavior with
         {
             PasteSafetyPolicy = NormalizePasteSafetyPolicy(behavior.PasteSafetyPolicy),
@@ -313,9 +325,10 @@ public static class TerminalSessionProfileSerializer
     }
 
     private static TerminalSessionTransportProfile NormalizeTransport(
-        TerminalSessionTransportProfile transport,
+        TerminalSessionTransportProfile? settings,
         int profileIndex)
     {
+        TerminalSessionTransportProfile transport = settings ?? new TerminalSessionTransportProfile();
         string transportId = NormalizeTransportId(transport.TransportId);
         TerminalSessionPtySettings pty = NormalizePtySettings(transport.Pty);
         TerminalSessionPipeSettings pipe = NormalizePipeSettings(transport.Pipe);
@@ -449,8 +462,9 @@ public static class TerminalSessionProfileSerializer
         };
     }
 
-    private static TerminalSessionPtySettings NormalizePtySettings(TerminalSessionPtySettings settings)
+    private static TerminalSessionPtySettings NormalizePtySettings(TerminalSessionPtySettings? source)
     {
+        TerminalSessionPtySettings settings = source ?? new TerminalSessionPtySettings();
         return settings with
         {
             ShellPath = NormalizeOptional(settings.ShellPath),
@@ -460,8 +474,9 @@ public static class TerminalSessionProfileSerializer
         };
     }
 
-    private static TerminalSessionPipeSettings NormalizePipeSettings(TerminalSessionPipeSettings settings)
+    private static TerminalSessionPipeSettings NormalizePipeSettings(TerminalSessionPipeSettings? source)
     {
+        TerminalSessionPipeSettings settings = source ?? new TerminalSessionPipeSettings();
         return settings with
         {
             FileName = NormalizeOptional(settings.FileName) ?? string.Empty,
@@ -471,8 +486,9 @@ public static class TerminalSessionProfileSerializer
         };
     }
 
-    private static TerminalSessionSshSettings NormalizeSshSettings(TerminalSessionSshSettings settings)
+    private static TerminalSessionSshSettings NormalizeSshSettings(TerminalSessionSshSettings? source)
     {
+        TerminalSessionSshSettings settings = source ?? new TerminalSessionSshSettings();
         TerminalSessionSshAuthenticationSettings authentication = NormalizeSshAuthentication(settings.Authentication);
         SshProxyOptions? proxy = NormalizeSshProxy(settings.Proxy);
         List<SshPortForwardOptions> portForwardings = NormalizeSshPortForwardings(settings.PortForwardings);
@@ -496,8 +512,10 @@ public static class TerminalSessionProfileSerializer
     }
 
     private static TerminalSessionSshAuthenticationSettings NormalizeSshAuthentication(
-        TerminalSessionSshAuthenticationSettings authentication)
+        TerminalSessionSshAuthenticationSettings? source)
     {
+        TerminalSessionSshAuthenticationSettings authentication =
+            source ?? new TerminalSessionSshAuthenticationSettings();
         string? passwordSecretId = NormalizeOptional(authentication.PasswordSecretId);
         List<string> privateKeys = NormalizeList(authentication.PrivateKeySecretIds, trimEntries: true, skipEmpty: true);
 
@@ -529,9 +547,9 @@ public static class TerminalSessionProfileSerializer
         };
     }
 
-    private static List<SshPortForwardOptions> NormalizeSshPortForwardings(List<SshPortForwardOptions> forwardings)
+    private static List<SshPortForwardOptions> NormalizeSshPortForwardings(List<SshPortForwardOptions>? forwardings)
     {
-        if (forwardings.Count == 0)
+        if (forwardings is null || forwardings.Count == 0)
         {
             return [];
         }
@@ -539,7 +557,12 @@ public static class TerminalSessionProfileSerializer
         List<SshPortForwardOptions> normalized = new(forwardings.Count);
         for (int i = 0; i < forwardings.Count; i++)
         {
-            SshPortForwardOptions next = forwardings[i];
+            SshPortForwardOptions? next = forwardings[i];
+            if (next is null)
+            {
+                continue;
+            }
+
             normalized.Add(next with
             {
                 BindAddress = NormalizeOptional(next.BindAddress) ?? "127.0.0.1",
@@ -578,8 +601,9 @@ public static class TerminalSessionProfileSerializer
         };
     }
 
-    private static TerminalSessionRawTcpSettings NormalizeRawTcpSettings(TerminalSessionRawTcpSettings settings)
+    private static TerminalSessionRawTcpSettings NormalizeRawTcpSettings(TerminalSessionRawTcpSettings? source)
     {
+        TerminalSessionRawTcpSettings settings = source ?? new TerminalSessionRawTcpSettings();
         return settings with
         {
             Host = NormalizeOptional(settings.Host) ?? string.Empty,
@@ -587,8 +611,9 @@ public static class TerminalSessionProfileSerializer
         };
     }
 
-    private static TerminalSessionTelnetSettings NormalizeTelnetSettings(TerminalSessionTelnetSettings settings)
+    private static TerminalSessionTelnetSettings NormalizeTelnetSettings(TerminalSessionTelnetSettings? source)
     {
+        TerminalSessionTelnetSettings settings = source ?? new TerminalSessionTelnetSettings();
         return settings with
         {
             Host = NormalizeOptional(settings.Host) ?? string.Empty,
@@ -598,8 +623,9 @@ public static class TerminalSessionProfileSerializer
         };
     }
 
-    private static TerminalSessionSerialSettings NormalizeSerialSettings(TerminalSessionSerialSettings settings)
+    private static TerminalSessionSerialSettings NormalizeSerialSettings(TerminalSessionSerialSettings? source)
     {
+        TerminalSessionSerialSettings settings = source ?? new TerminalSessionSerialSettings();
         return settings with
         {
             PortName = NormalizeOptional(settings.PortName) ?? string.Empty,
@@ -609,16 +635,18 @@ public static class TerminalSessionProfileSerializer
         };
     }
 
-    private static TerminalSessionLoggingSettings NormalizeLogging(TerminalSessionLoggingSettings logging)
+    private static TerminalSessionLoggingSettings NormalizeLogging(TerminalSessionLoggingSettings? source)
     {
+        TerminalSessionLoggingSettings logging = source ?? new TerminalSessionLoggingSettings();
         return logging with
         {
             FilePath = NormalizeOptional(logging.FilePath),
         };
     }
 
-    private static TerminalSessionProxySettings NormalizeProxy(TerminalSessionProxySettings proxy)
+    private static TerminalSessionProxySettings NormalizeProxy(TerminalSessionProxySettings? source)
     {
+        TerminalSessionProxySettings proxy = source ?? new TerminalSessionProxySettings();
         string? host = NormalizeOptional(proxy.Host);
         if (proxy.Enabled && host is null)
         {
@@ -640,9 +668,9 @@ public static class TerminalSessionProfileSerializer
         };
     }
 
-    private static Dictionary<string, string> NormalizeDictionary(Dictionary<string, string> source)
+    private static Dictionary<string, string> NormalizeDictionary(Dictionary<string, string>? source)
     {
-        if (source.Count == 0)
+        if (source is null || source.Count == 0)
         {
             return new Dictionary<string, string>(StringComparer.Ordinal);
         }
@@ -662,11 +690,11 @@ public static class TerminalSessionProfileSerializer
     }
 
     private static List<string> NormalizeList(
-        List<string> source,
+        List<string>? source,
         bool trimEntries = false,
         bool skipEmpty = false)
     {
-        if (source.Count == 0)
+        if (source is null || source.Count == 0)
         {
             return [];
         }
@@ -674,7 +702,12 @@ public static class TerminalSessionProfileSerializer
         List<string> normalized = new(source.Count);
         for (int i = 0; i < source.Count; i++)
         {
-            string value = source[i];
+            string? value = source[i];
+            if (value is null)
+            {
+                continue;
+            }
+
             string next = trimEntries ? value.Trim() : value;
             if (skipEmpty && string.IsNullOrWhiteSpace(next))
             {

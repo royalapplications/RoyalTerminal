@@ -20,6 +20,11 @@ public static class TerminalCellWidthCalculator
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetCellWidth(int codepoint)
     {
+        if ((uint)(codepoint - 0x20) <= 0x5E)
+        {
+            return 1;
+        }
+
         if (!Rune.IsValid(codepoint))
         {
             return 1;

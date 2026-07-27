@@ -11,12 +11,6 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 public static class TerminalCommandHistorySerializer
 {
-    private static readonly JsonSerializerOptions s_jsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true,
-    };
-
     /// <summary>
     /// Saves a command history document to a stream.
     /// </summary>
@@ -30,7 +24,12 @@ public static class TerminalCommandHistorySerializer
         cancellationToken.ThrowIfCancellationRequested();
 
         TerminalCommandHistoryDocument normalized = NormalizeAndValidate(document);
-        return new ValueTask(JsonSerializer.SerializeAsync(stream, normalized, s_jsonOptions, cancellationToken));
+        return new ValueTask(
+            JsonSerializer.SerializeAsync(
+                stream,
+                normalized,
+                TerminalIndentedJsonSerializerContext.Default.TerminalCommandHistoryDocument,
+                cancellationToken));
     }
 
     /// <summary>
@@ -44,7 +43,10 @@ public static class TerminalCommandHistorySerializer
         cancellationToken.ThrowIfCancellationRequested();
 
         TerminalCommandHistoryDocument? document = await JsonSerializer
-            .DeserializeAsync<TerminalCommandHistoryDocument>(stream, s_jsonOptions, cancellationToken)
+            .DeserializeAsync(
+                stream,
+                TerminalIndentedJsonSerializerContext.Default.TerminalCommandHistoryDocument,
+                cancellationToken)
             .ConfigureAwait(false);
         if (document is null)
         {
@@ -92,7 +94,9 @@ public static class TerminalCommandHistorySerializer
     {
         ArgumentNullException.ThrowIfNull(document);
         TerminalCommandHistoryDocument normalized = NormalizeAndValidate(document);
-        return JsonSerializer.Serialize(normalized, s_jsonOptions);
+        return JsonSerializer.Serialize(
+            normalized,
+            TerminalIndentedJsonSerializerContext.Default.TerminalCommandHistoryDocument);
     }
 
     /// <summary>
@@ -111,7 +115,9 @@ public static class TerminalCommandHistorySerializer
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         TerminalCommandHistoryDocument? document = JsonSerializer
-            .Deserialize<TerminalCommandHistoryDocument>(json, s_jsonOptions);
+            .Deserialize(
+                json,
+                TerminalIndentedJsonSerializerContext.Default.TerminalCommandHistoryDocument);
         if (document is null)
         {
             throw new InvalidDataException("Command history JSON is empty or malformed.");
