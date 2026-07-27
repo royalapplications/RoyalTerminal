@@ -115,7 +115,7 @@ echo ""
 
 step "4/7 — Building full solution..."
 
-dotnet build RoyalTerminal.sln 2>&1
+dotnet build RoyalTerminal.slnx 2>&1
 if [ $? -eq 0 ]; then
     pass "Solution build succeeded"
 else

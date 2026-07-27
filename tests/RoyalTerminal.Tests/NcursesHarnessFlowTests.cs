@@ -790,7 +790,7 @@ public sealed class NcursesHarnessFlowTests
         DirectoryInfo? current = new(AppContext.BaseDirectory);
         while (current is not null)
         {
-            if (File.Exists(Path.Combine(current.FullName, "RoyalTerminal.sln")))
+            if (File.Exists(Path.Combine(current.FullName, "RoyalTerminal.slnx")))
             {
                 return current.FullName;
             }

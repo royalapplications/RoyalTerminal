@@ -1227,7 +1227,7 @@ RID-aware restore/publish resolves them from the `runtime.json` files in
 RoyalTerminal/
 ├── Directory.Build.props
 ├── Directory.Packages.props
-├── RoyalTerminal.sln
+├── RoyalTerminal.slnx
 ├── native/
 │   └── ghostty-renderer-capi/
 ├── src/
@@ -1303,7 +1303,7 @@ bash scripts/build-native.sh --release
 pwsh scripts/build-native.ps1 -Release
 
 # Managed build
-dotnet build RoyalTerminal.sln -c Release
+dotnet build RoyalTerminal.slnx -c Release
 ```
 
 ### Run Demo
@@ -1336,7 +1336,7 @@ swift run --package-path samples/RoyalTerminal.MacNativeTabbed
 
 ```bash
 # Full test pass
-dotnet test RoyalTerminal.sln -c Release
+dotnet test RoyalTerminal.slnx -c Release
 
 # Rendering-focused tests
 dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|RenderingSkiaInteropTests|RenderingAvaloniaAdapterTests|RenderingContractsTests"

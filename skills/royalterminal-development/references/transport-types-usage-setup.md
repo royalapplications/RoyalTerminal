@@ -68,7 +68,7 @@ Use this quick guide to pick files fast:
 Always run:
 - targeted transport tests in `tests/RoyalTerminal.Tests`
 - SSH/security tests if SSH code changed
-- full `dotnet test RoyalTerminal.sln -c Release` for shared contracts
+- full `dotnet test RoyalTerminal.slnx -c Release` for shared contracts
 
 Command set and scope are documented in:
 - [`transport-entrypoints-and-validation.md`](transport-entrypoints-and-validation.md)

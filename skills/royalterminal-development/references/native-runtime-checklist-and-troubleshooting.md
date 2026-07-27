@@ -20,7 +20,7 @@
    - macOS validation suite: `bash scripts/validate-macos.sh`
 4. Verify runtime files exist for current RID under package runtime folders.
 5. Build managed solution:
-   - `dotnet build RoyalTerminal.sln -c Release`
+   - `dotnet build RoyalTerminal.slnx -c Release`
 6. Run availability probes in runtime flow:
    - `GhosttyVtProcessor.IsAvailable()` for native VT usage
 7. Run demo/tests for the changed feature path.
@@ -62,8 +62,8 @@ If one feature fails while others work, focus on that feature-specific native li
 
 Baseline validation:
 ```bash
-dotnet build RoyalTerminal.sln -c Release
-dotnet test RoyalTerminal.sln -c Release
+dotnet build RoyalTerminal.slnx -c Release
+dotnet test RoyalTerminal.slnx -c Release
 ```
 
 Renderer/native focused subset:
@@ -88,7 +88,7 @@ set -euo pipefail
 
 bash scripts/build-native.sh --release
 bash scripts/run-integration-tests.sh
-dotnet build RoyalTerminal.sln -c Release
+dotnet build RoyalTerminal.slnx -c Release
 dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "GhosttyComponentTests|RenderingInteropTests|PackageBoundaryTests"
 ```
 

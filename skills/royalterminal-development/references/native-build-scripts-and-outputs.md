@@ -103,7 +103,7 @@ After script completion:
 2. Verify same libraries are present in package runtime folders.
 3. If VT utility APIs/tests are required, verify `libghostty-vt` in `native/<rid>/`.
 4. Run managed build:
-   - `dotnet build RoyalTerminal.sln -c Release`
+   - `dotnet build RoyalTerminal.slnx -c Release`
 5. Run smoke execution:
    - `dotnet run --project samples/RoyalTerminal.Demo`
 6. Run tests (at minimum transport/native/render focused suites).
