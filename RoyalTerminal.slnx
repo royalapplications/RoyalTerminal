@@ -1,0 +1,53 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/samples/">
+    <Project Path="samples/RoyalTerminal.ControlCatalog/RoyalTerminal.ControlCatalog.csproj" />
+    <Project Path="samples/RoyalTerminal.Demo/RoyalTerminal.Demo.csproj" />
+    <Project Path="samples/RoyalTerminal.WinFormsHost/RoyalTerminal.WinFormsHost.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/RoyalTerminal.Avalonia.App/RoyalTerminal.Avalonia.App.csproj" />
+    <Project Path="src/RoyalTerminal.Avalonia.Rendering.GhosttyInterop/RoyalTerminal.Avalonia.Rendering.GhosttyInterop.csproj" />
+    <Project Path="src/RoyalTerminal.Avalonia.Settings/RoyalTerminal.Avalonia.Settings.csproj" />
+    <Project Path="src/RoyalTerminal.GhosttySharp.Native.Linux64/RoyalTerminal.GhosttySharp.Native.Linux64.csproj" />
+    <Project Path="src/RoyalTerminal.GhosttySharp.Native.OSX/RoyalTerminal.GhosttySharp.Native.OSX.csproj" />
+    <Project Path="src/RoyalTerminal.GhosttySharp.Native.Win64/RoyalTerminal.GhosttySharp.Native.Win64.csproj" />
+    <Project Path="src/RoyalTerminal.Rendering.Contracts/RoyalTerminal.Rendering.Contracts.csproj" />
+    <Project Path="src/RoyalTerminal.Rendering.Interop.Ghostty.Skia/RoyalTerminal.Rendering.Interop.Ghostty.Skia.csproj" />
+    <Project Path="src/RoyalTerminal.Rendering.Interop.Ghostty/RoyalTerminal.Rendering.Interop.Ghostty.csproj" />
+    <Project Path="src/RoyalTerminal.Rendering.Skia/RoyalTerminal.Rendering.Skia.csproj" />
+    <Project Path="src/RoyalTerminal.Rendering.Text/RoyalTerminal.Rendering.Text.csproj" />
+    <Project Path="src/RoyalTerminal.Shaders/RoyalTerminal.Shaders.csproj" />
+    <Project Path="src/RoyalTerminal.Sixel/RoyalTerminal.Sixel.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Pty.Platform/RoyalTerminal.Terminal.Pty.Platform.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Pty.Unix/RoyalTerminal.Terminal.Pty.Unix.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Pty.Windows/RoyalTerminal.Terminal.Pty.Windows.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Services.Contracts/RoyalTerminal.Terminal.Services.Contracts.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Services/RoyalTerminal.Terminal.Services.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Transport.Pipe/RoyalTerminal.Terminal.Transport.Pipe.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Transport.Pty/RoyalTerminal.Terminal.Transport.Pty.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Transport.Raw/RoyalTerminal.Terminal.Transport.Raw.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Transport.Serial/RoyalTerminal.Terminal.Transport.Serial.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Transport.Ssh.Abstractions/RoyalTerminal.Terminal.Transport.Ssh.Abstractions.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent/RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Transport.Ssh.SshNet/RoyalTerminal.Terminal.Transport.Ssh.SshNet.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Transport.Telnet/RoyalTerminal.Terminal.Transport.Telnet.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Vt.Default/RoyalTerminal.Terminal.Vt.Default.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Vt.Ghostty/RoyalTerminal.Terminal.Vt.Ghostty.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Vt.Managed/RoyalTerminal.Terminal.Vt.Managed.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal/RoyalTerminal.Terminal.csproj" />
+    <Project Path="src/RoyalTerminal.Unicode/RoyalTerminal.Unicode.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj" />
+    <Project Path="tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj" />
+    <Project Path="tests/RoyalTerminal.PtyHarness/RoyalTerminal.PtyHarness.csproj" />
+    <Project Path="tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj" />
+  </Folder>
+  <Project Path="src/RoyalTerminal.Avalonia/RoyalTerminal.Avalonia.csproj" />
+  <Project Path="src/RoyalTerminal.GhosttySharp/RoyalTerminal.GhosttySharp.csproj" />
+</Solution>

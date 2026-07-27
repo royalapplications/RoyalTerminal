@@ -65,7 +65,7 @@ Minimum checks:
 - VT and mode resolver tests in `tests/RoyalTerminal.Tests`
 - terminal control/session integration tests
 - integration tests for native VT behavior where applicable
-- full `dotnet test RoyalTerminal.sln -c Release` for shared contract changes
+- full `dotnet test RoyalTerminal.slnx -c Release` for shared contract changes
 
 Detailed commands:
 - [`vt-demo-mapping-and-validation.md`](vt-demo-mapping-and-validation.md)

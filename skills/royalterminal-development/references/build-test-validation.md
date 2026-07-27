@@ -50,7 +50,7 @@ bash scripts/run-integration-tests.sh               # build libghostty-vt + run 
 bash scripts/run-integration-tests.sh --skip-build  # optional test-only rerun
 
 # Managed solution
-dotnet build RoyalTerminal.sln -c Release
+dotnet build RoyalTerminal.slnx -c Release
 ```
 
 Note:
@@ -72,7 +72,7 @@ dotnet run --project samples/RoyalTerminal.Demo
 
 Full pass:
 ```bash
-dotnet test RoyalTerminal.sln -c Release
+dotnet test RoyalTerminal.slnx -c Release
 ```
 
 Transport + SSH/security subset:
@@ -192,11 +192,11 @@ dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csp
 ### Transport change validation recipe
 
 ```bash
-dotnet build RoyalTerminal.sln -c Release
+dotnet build RoyalTerminal.slnx -c Release
 
 dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "TerminalTransportFactoryTests|PtyTerminalTransportTests|PipeTerminalTransportTests|TerminalSessionServiceTransportTests"
 
-dotnet test RoyalTerminal.sln -c Release
+dotnet test RoyalTerminal.slnx -c Release
 ```
 
 ### VT/mode change validation recipe
@@ -211,7 +211,7 @@ dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.
 
 ```bash
 bash scripts/build-native.sh --clean --release
-dotnet build RoyalTerminal.sln -c Release
+dotnet build RoyalTerminal.slnx -c Release
 
 dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --filter "RenderingInteropTests|PackageBoundaryTests|WindowsNativePackagingTests"
 ```

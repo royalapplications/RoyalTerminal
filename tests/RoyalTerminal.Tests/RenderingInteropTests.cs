@@ -291,7 +291,7 @@ public sealed class RenderingInteropTests
         DirectoryInfo? current = new(AppContext.BaseDirectory);
         while (current is not null)
         {
-            string solutionPath = Path.Combine(current.FullName, "RoyalTerminal.sln");
+            string solutionPath = Path.Combine(current.FullName, "RoyalTerminal.slnx");
             if (File.Exists(solutionPath))
             {
                 return current.FullName;

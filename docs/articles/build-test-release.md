@@ -46,7 +46,7 @@ bash scripts/build-native.sh --release
 pwsh scripts/build-native.ps1 -Release
 
 # Managed solution
-dotnet build RoyalTerminal.sln -c Release
+dotnet build RoyalTerminal.slnx -c Release
 ```
 
 Run the demo:
@@ -68,7 +68,7 @@ dotnet run --project samples/RoyalTerminal.Demo
 Full solution test pass:
 
 ```bash
-dotnet test RoyalTerminal.sln -c Release
+dotnet test RoyalTerminal.slnx -c Release
 ```
 
 Focused transport/session validation:

@@ -55,7 +55,7 @@ The native reference set covers:
 4. Confirm outputs under both:
    - `native/<rid>/`
    - `src/RoyalTerminal.GhosttySharp.Native.*/runtimes/<rid>/native/`
-5. Build managed solution: `dotnet build RoyalTerminal.sln -c Release`
+5. Build managed solution: `dotnet build RoyalTerminal.slnx -c Release`
 6. Run demo or tests with expected RID/architecture.
 
 ## Critical Invariants
@@ -92,7 +92,7 @@ bash scripts/build-native.sh --release
 bash scripts/run-integration-tests.sh
 
 # Build managed solution
-dotnet build RoyalTerminal.sln -c Release
+dotnet build RoyalTerminal.slnx -c Release
 
 # Run demo
 dotnet run --project samples/RoyalTerminal.Demo
@@ -104,7 +104,7 @@ dotnet run --project samples/RoyalTerminal.Demo
 git submodule update --init --recursive
 pwsh scripts/build-native.ps1 -Release
 
-dotnet build RoyalTerminal.sln -c Release
+dotnet build RoyalTerminal.slnx -c Release
 dotnet run --project samples/RoyalTerminal.Demo
 ```
 

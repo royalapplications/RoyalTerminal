@@ -80,7 +80,7 @@ Validate these behavior contracts after transport changes:
 
 Full baseline:
 ```bash
-dotnet test RoyalTerminal.sln -c Release
+dotnet test RoyalTerminal.slnx -c Release
 ```
 
 Transport/security-focused subset:
