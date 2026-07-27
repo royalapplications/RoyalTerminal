@@ -186,6 +186,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     public TerminalViewportScrollState ViewportScrollState =>
         GetViewportScrollMapping().ToScrollState();
 
+    internal ulong NativeScrollbackRows => _scrollbar.Total > _scrollbar.Length
+        ? _scrollbar.Total - _scrollbar.Length
+        : 0;
+
     private readonly record struct ViewportScrollMapping(
         ulong VisibleRows,
         ulong EffectiveBaseOffsetRows,
@@ -312,7 +316,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _terminal = new GhosttyTerminal(
             (ushort)screen.Columns,
             (ushort)screen.ViewportRows,
-            (nuint)screen.ScrollbackLimit);
+            GhosttyScrollbackBudget.FromRows(
+                screen.Columns,
+                screen.ViewportRows,
+                screen.ScrollbackLimit));
         _renderState = new GhosttyRenderState();
         _keyEncoder = new GhosttyKeyEncoder();
         _keyEvent = new GhosttyKeyEvent();

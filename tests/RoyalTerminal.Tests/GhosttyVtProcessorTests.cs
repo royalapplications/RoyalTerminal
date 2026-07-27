@@ -86,6 +86,45 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_WideTerminalRetainsConfiguredNativeScrollback_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        const int columns = 400;
+        const int viewportRows = 24;
+        const int scrollbackLimit = 30_000;
+        ulong rowsPerPage = GhosttyScrollbackBudget.RowsPerPage(columns);
+        int outputRows = checked(scrollbackLimit + viewportRows + (int)(rowsPerPage * 20UL));
+
+        TerminalScreen screen = new(columns, viewportRows, scrollbackLimit);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(columns, viewportRows, widthPx: 4_000, heightPx: 480);
+
+        byte[] output = new byte[outputRows * 3];
+        for (int offset = 0; offset < output.Length; offset += 3)
+        {
+            output[offset] = (byte)'X';
+            output[offset + 1] = (byte)'\r';
+            output[offset + 2] = (byte)'\n';
+        }
+
+        processor.Process(output);
+
+        Assert.Equal((ulong)scrollbackLimit, processor.ViewportScrollState.MaxOffsetRows);
+        // The converter intentionally uses Ghostty's conservative 215x215
+        // grid capacity. Native page alignment can expose a small amount of
+        // additional row storage, but retention must never fall below the
+        // configured row contract.
+        Assert.InRange(
+            processor.NativeScrollbackRows,
+            (ulong)scrollbackLimit,
+            (ulong)scrollbackLimit + rowsPerPage * 5UL);
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_ViewportScrollState_ClampsWhenScreenScrollbackLimitIsReduced_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())

@@ -2163,8 +2163,7 @@ public sealed class MainWindowControllerModeStartupTests
             ItemsControl tabStrip = window.FindControl<ItemsControl>("TabStrip")
                 ?? throw new InvalidOperationException("TabStrip was not found.");
             Button headerButton = GetLastTabHeader(tabStrip);
-            string expectedVtLabel = standalone.IsUsingNativeVtProcessor ? "Ghostty VT" : "Basic VT";
-            Assert.Equal($"Rendered (Pipe - {expectedVtLabel})", ToolTip.GetTip(headerButton) as string);
+            Assert.Equal("Rendered (Pipe - Ghostty VT)", ToolTip.GetTip(headerButton) as string);
         }
         finally
         {
