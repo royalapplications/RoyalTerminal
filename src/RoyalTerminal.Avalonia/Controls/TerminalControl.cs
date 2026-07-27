@@ -653,6 +653,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _lastAppliedRows = -1;
     private int _lastAppliedWidthPx = -1;
     private int _lastAppliedHeightPx = -1;
+    private bool _hasValidLayoutGrid;
+    private bool _vtProcessorHasProcessedOutput;
     private bool _preserveNativeViewportBottomOnNextResize;
     private TerminalSessionDimensions? _pendingTransportResize;
     private double _lastAppliedLayoutWidth = double.NaN;
@@ -1147,19 +1149,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _theme = activeTheme;
         _screen.ApplyTheme(activeTheme);
 
-        _vtProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
-        AttachShellIntegrationEventSource(_vtProcessor);
-        ApplySixelGraphicsSettingToProcessor(_vtProcessor);
-        ApplyEraseDisplayOptionsToProcessor(_vtProcessor, transportId: null);
-        if (_vtProcessor is ITerminalThemeSink themeSink)
-        {
-            lock (_screen.SyncRoot)
-            {
-                themeSink.ApplyTheme(activeTheme);
-            }
-        }
-        _appliedVtProcessorPreference = VtProcessorPreference;
-
         _renderer = CreateRenderer(previous: null);
         ApplyThemeToRenderer(activeTheme, _renderer);
 
@@ -1583,32 +1572,79 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void EnsureVtProcessorPreferenceApplied(bool force = false)
     {
-        if (_screen is null)
+        if (_screen is null || _vtProcessor is null)
         {
             return;
         }
 
-        if (!force && _vtProcessor is not null && _appliedVtProcessorPreference == VtProcessorPreference)
+        if (!force && _appliedVtProcessorPreference == VtProcessorPreference)
         {
             return;
         }
 
-        IVtProcessor nextProcessor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
-        ApplySixelGraphicsSettingToProcessor(nextProcessor);
-        ApplyEraseDisplayOptionsToProcessor(nextProcessor, _activeTransportId);
-        IVtProcessor? previousProcessor = _vtProcessor;
+        IVtProcessor nextProcessor = CreateConfiguredVtProcessor();
+        IVtProcessor previousProcessor = _vtProcessor;
         DetachShellIntegrationEventSource(previousProcessor);
         _vtProcessor = nextProcessor;
-        AttachShellIntegrationEventSource(_vtProcessor);
-        if (_theme is not null && _vtProcessor is ITerminalThemeSink themeSink)
+        _vtProcessorHasProcessedOutput = false;
+        NotifyVtProcessorOfCurrentSize();
+        previousProcessor.Dispose();
+    }
+
+    private IVtProcessor EnsureVtProcessorInitialized()
+    {
+        if (_vtProcessor is not null)
+        {
+            return _vtProcessor;
+        }
+
+        if (_screen is null)
+        {
+            throw new InvalidOperationException("The terminal screen has not been initialized.");
+        }
+
+        _vtProcessor = CreateConfiguredVtProcessor();
+        _vtProcessorHasProcessedOutput = false;
+        NotifyVtProcessorOfCurrentSize();
+
+        return _vtProcessor;
+    }
+
+    private void NotifyVtProcessorOfCurrentSize()
+    {
+        if (_vtProcessor is null || _screen is null || _renderer is null)
+        {
+            return;
+        }
+
+        (int widthPx, int heightPx) = CalculateRenderedGridPixelSize(
+            _screen.Columns,
+            _screen.ViewportRows);
+        ApplyResizeReflowPolicyToProcessor(ShouldUseLocalResizeReflow());
+        _vtProcessor.NotifyResize(
+            _screen.Columns,
+            _screen.ViewportRows,
+            widthPx,
+            heightPx);
+    }
+
+    private IVtProcessor CreateConfiguredVtProcessor()
+    {
+        Debug.Assert(_screen is not null, nameof(_screen) + " != null");
+        IVtProcessor processor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
+        ApplySixelGraphicsSettingToProcessor(processor);
+        ApplyEraseDisplayOptionsToProcessor(processor, _activeTransportId);
+        AttachShellIntegrationEventSource(processor);
+        if (_theme is not null && processor is ITerminalThemeSink themeSink)
         {
             lock (_screen.SyncRoot)
             {
                 themeSink.ApplyTheme(_theme);
             }
         }
+
         _appliedVtProcessorPreference = VtProcessorPreference;
-        previousProcessor?.Dispose();
+        return processor;
     }
 
     private void AttachShellIntegrationEventSource(IVtProcessor? processor)
@@ -1728,7 +1764,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             !AreClose(layoutWidth, _lastAppliedLayoutWidth) ||
             !AreClose(layoutHeight, _lastAppliedLayoutHeight);
 
-        if (!force && !gridChanged && !pixelSizeChanged && !layoutSizeChanged)
+        if (!force &&
+            !gridChanged &&
+            !pixelSizeChanged &&
+            !layoutSizeChanged &&
+            (!_hasValidLayoutGrid || _vtProcessor is not null))
         {
             return;
         }
@@ -1737,6 +1777,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             FlushPendingTransportOutputBeforeResize();
         }
+
+        bool recreateUnusedNativeProcessorAfterResize =
+            gridChanged &&
+            _hasValidLayoutGrid &&
+            _vtProcessor is ITerminalViewportScrollSource &&
+            !TerminalSessionService.HasActiveTransport &&
+            !_vtProcessorHasProcessedOutput;
 
         bool hasActiveSelection = _hasAnchoredSelection || HasRendererSelection();
         bool hasNativeViewportScrollSource = TryGetViewportScrollSource(out _);
@@ -1842,6 +1889,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                     ApplySelectionResizeAnchorsLocked(selectionResizeAnchors, selectionResizeAnchorsAreSpans);
                 }
             }
+        }
+
+        if (_hasValidLayoutGrid && _vtProcessor is null)
+        {
+            EnsureVtProcessorInitialized();
+        }
+        else if (recreateUnusedNativeProcessorAfterResize)
+        {
+            EnsureVtProcessorPreferenceApplied(force: true);
         }
 
         bool alternateScreenActive = _vtProcessor?.AlternateScreen == true;
@@ -2304,6 +2360,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
             int newCols = Math.Max(1, (int)(contentRect.Width / _renderer.CellWidth));
             int newRows = Math.Max(1, (int)(contentRect.Height / _renderer.CellHeight));
+            _hasValidLayoutGrid = true;
 
             if (newCols != Columns || newRows != Rows)
             {
@@ -2539,6 +2596,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return default;
         }
 
+        EnsureVtProcessorInitialized();
+
         bool resetMouseSelection = false;
         bool eraseDisplayClearsLiveViewport = false;
         // Lock screen during VT processing — composition thread reads cells concurrently
@@ -2587,6 +2646,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 eraseDisplayClearsLiveViewport =
                     shouldDetectLiveViewportClear && _eraseDisplaySequenceDetector.Process(data);
                 _vtProcessor?.Process(data);
+                _vtProcessorHasProcessedOutput = true;
             }
             finally
             {
@@ -2616,6 +2676,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             return default;
         }
+
+        EnsureVtProcessorInitialized();
 
         bool resetMouseSelection = false;
         bool eraseDisplayClearsLiveViewport = false;
@@ -2667,6 +2729,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                     }
 
                     _vtProcessor?.Process(chunk);
+                    _vtProcessorHasProcessedOutput = true;
                 }
             }
             finally
@@ -5507,8 +5570,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         ArgumentNullException.ThrowIfNull(options);
         cancellationToken.ThrowIfCancellationRequested();
 
-        EnsureVtProcessorPreferenceApplied();
-        ApplyEraseDisplayOptionsToProcessor(_vtProcessor, options.TransportId);
         if (TerminalSessionService.HasActiveTransport)
         {
             throw new InvalidOperationException("A terminal transport session is already active.");
@@ -5521,11 +5582,18 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             ResetPendingTransportOutputQueue();
             if (Dispatcher.UIThread.CheckAccess())
             {
+                IVtProcessor processor = EnsureVtProcessorInitialized();
+                ApplyEraseDisplayOptionsToProcessor(processor, options.TransportId);
                 PrepareTerminalForSessionStart(preserveScrollback);
             }
             else
             {
-                await Dispatcher.UIThread.InvokeAsync(() => PrepareTerminalForSessionStart(preserveScrollback));
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    IVtProcessor processor = EnsureVtProcessorInitialized();
+                    ApplyEraseDisplayOptionsToProcessor(processor, options.TransportId);
+                    PrepareTerminalForSessionStart(preserveScrollback);
+                });
             }
         }
         catch
@@ -5552,13 +5620,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             OnPtyProcessExited(sessionGeneration, exitCode);
         _activeTransportDataHandler = dataHandler;
         _activeTransportExitHandler = exitHandler;
+        IVtProcessor vtProcessor = _vtProcessor
+            ?? throw new InvalidOperationException("The VT processor was not initialized before starting the session.");
 
         try
         {
             await TerminalSessionService.StartSessionAsync(
                 TerminalTransportFactory,
                 options,
-                _vtProcessor,
+                vtProcessor,
                 dataHandler,
                 exitHandler,
                 OnVtProcessorResponse,

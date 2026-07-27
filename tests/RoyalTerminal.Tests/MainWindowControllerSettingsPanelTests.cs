@@ -107,11 +107,7 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.False(viewModel.FontForceAutoHinting);
             Assert.False(viewModel.FontLinearMetrics);
 
-            TerminalControl control = terminalHost.Children
-                .OfType<ScrollViewer>()
-                .Select(viewer => viewer.Content)
-                .OfType<TerminalControl>()
-                .First();
+            TerminalControl control = Assert.Single(GetStandaloneControls(terminalHost));
             Assert.Equal(TerminalFontSource.System, control.FontSource);
             Assert.Equal("Monaco", control.FontFamilyName);
             Assert.Equal(17, control.TerminalFontSize);
@@ -234,11 +230,7 @@ public sealed class MainWindowControllerSettingsPanelTests
 
             await viewModel.LaunchSessionProfileCommand.Execute("profile:profile-b").ToTask();
             bool profileTabCreated = await WaitUntilAsync(
-                () => terminalHost.Children
-                    .OfType<ScrollViewer>()
-                    .Select(viewer => viewer.Content)
-                    .OfType<TerminalControl>()
-                    .Count() == 2,
+                () => GetStandaloneControls(terminalHost).Count == 2,
                 TimeSpan.FromSeconds(2));
             Assert.True(profileTabCreated);
             Assert.Equal("Profile B", viewModel.SessionName);
@@ -295,11 +287,7 @@ public sealed class MainWindowControllerSettingsPanelTests
                 TimeSpan.FromSeconds(2));
             Assert.True(startupTabCreated);
 
-            TerminalControl control = terminalHost.Children
-                .OfType<ScrollViewer>()
-                .Select(viewer => viewer.Content)
-                .OfType<TerminalControl>()
-                .First();
+            TerminalControl control = Assert.Single(GetStandaloneControls(terminalHost));
             control.AutoScroll = false;
             control.BackgroundOpacityEnabled = true;
 
@@ -447,6 +435,36 @@ public sealed class MainWindowControllerSettingsPanelTests
         window.Show();
         window.Focus();
         return window;
+    }
+
+    private static List<TerminalControl> GetStandaloneControls(Control control)
+    {
+        List<TerminalControl> controls = [];
+        AddStandaloneControls(control, controls);
+        return controls;
+    }
+
+    private static void AddStandaloneControls(Control control, List<TerminalControl> controls)
+    {
+        if (control is ScrollViewer { Content: TerminalControl wrapped })
+        {
+            controls.Add(wrapped);
+            return;
+        }
+
+        if (control is Border { Child: Control child })
+        {
+            AddStandaloneControls(child, controls);
+            return;
+        }
+
+        if (control is Panel panel)
+        {
+            for (int i = 0; i < panel.Children.Count; i++)
+            {
+                AddStandaloneControls(panel.Children[i], controls);
+            }
+        }
     }
 
     private static StackPanel CreateWindowsCaptionButtonStrip(

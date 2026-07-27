@@ -3017,7 +3017,13 @@ internal sealed class MainWindowController
 
     private TabVisualMode ResolveTabMode(TerminalControl terminal, TerminalRenderMode mode)
     {
-        string vtLabel = terminal.IsUsingNativeVtProcessor
+        bool usesNativeVt = terminal.VtProcessorPreference switch
+        {
+            VtProcessorPreference.Native => true,
+            VtProcessorPreference.Managed => false,
+            _ => _terminalCapabilities.NativeVtAvailable,
+        };
+        string vtLabel = usesNativeVt
             ? "Ghostty VT"
             : "Basic VT";
         string prefix = mode switch

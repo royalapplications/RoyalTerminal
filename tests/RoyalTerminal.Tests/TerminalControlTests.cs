@@ -1875,6 +1875,80 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_ConstructionAndPendingConfiguration_DoNotCreateVtProcessor()
+    {
+        TrackingVtProcessorFactory factory = new();
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            factory,
+            new DefaultPtyFactory());
+
+        Assert.Equal(0, factory.CreateCallCount);
+        Assert.Null(control.ActiveVtProcessor);
+
+        control.VtProcessorPreference = VtProcessorPreference.Managed;
+        control.ScrollbackLimit = 10_000;
+        control.Columns = 275;
+        control.Rows = 53;
+
+        Assert.Equal(0, factory.CreateCallCount);
+        Assert.Null(control.ActiveVtProcessor);
+        Assert.Equal(275, control.Screen!.Columns);
+        Assert.Equal(53, control.Screen.ViewportRows);
+        Assert.Equal(10_000, control.Screen.ScrollbackLimit);
+    }
+
+    [AvaloniaFact]
+    public void Control_FirstValidLayout_CreatesProcessorFromResizedScreenExactlyOnce()
+    {
+        TrackingVtProcessorFactory factory = new();
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            factory,
+            new DefaultPtyFactory())
+        {
+            ScrollbackLimit = 10_000,
+        };
+
+        ArrangeControlToGrid(control, columns: 275, rows: 53);
+
+        Assert.Equal(1, factory.CreateCallCount);
+        Assert.Equal(275, factory.Columns[0]);
+        Assert.Equal(53, factory.Rows[0]);
+        Assert.Equal(10_000, factory.ScrollbackLimits[0]);
+        Assert.Equal(275, control.Screen!.Columns);
+        Assert.Equal(53, control.Screen.ViewportRows);
+    }
+
+    [AvaloniaFact]
+    public void Control_SubCellLayout_DoesNotCreateVtProcessor()
+    {
+        TrackingVtProcessorFactory factory = new();
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            factory,
+            new DefaultPtyFactory());
+        SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+        double width = renderer.CellWidth * 0.75;
+        double height = renderer.CellHeight * 0.75;
+
+        control.Measure(new Size(width, height));
+        control.Arrange(new Rect(0, 0, width, height));
+
+        Assert.Equal(0, factory.CreateCallCount);
+        Assert.Null(control.ActiveVtProcessor);
+    }
+
+    [AvaloniaFact]
     public void Control_VtProcessorPreferenceChange_RecreatesProcessor_WhenIdle()
     {
         TrackingVtProcessorFactory factory = new();
@@ -1886,6 +1960,7 @@ public class TerminalControlTests
             factory,
             new DefaultPtyFactory());
 
+        ArrangeControlToGrid(control, columns: 80, rows: 24);
         Assert.Equal(VtProcessorPreference.Auto, factory.Preferences[0]);
 
         control.VtProcessorPreference = VtProcessorPreference.Managed;
@@ -1906,12 +1981,214 @@ public class TerminalControlTests
             factory,
             new DefaultPtyFactory());
 
+        ArrangeControlToGrid(control, columns: 80, rows: 24);
         control.ScrollbackLimit = 12_345;
 
         Assert.NotNull(control.Screen);
         Assert.Equal(12_345, control.Screen!.ScrollbackLimit);
         Assert.True(factory.CreateCallCount >= 2);
         Assert.Equal(12_345, factory.ScrollbackLimits[^1]);
+    }
+
+    [AvaloniaFact]
+    public void Control_DirectOutputBeforeLayout_InitializesFromConfiguredDimensionsAndProcessesData()
+    {
+        TrackingVtProcessorFactory factory = new();
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            factory,
+            new DefaultPtyFactory())
+        {
+            Columns = 132,
+            Rows = 40,
+        };
+
+        control.WriteOutput("before-layout"u8);
+
+        Assert.Equal(1, factory.CreateCallCount);
+        Assert.Equal(132, factory.Columns[0]);
+        Assert.Equal(40, factory.Rows[0]);
+        Assert.Equal(1, factory.Processors[0].ProcessCallCount);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_SessionStartBeforeLayout_InitializesBeforeTransportCanEmitData()
+    {
+        TrackingVtProcessorFactory factory = new();
+        FakeTransport transport = new()
+        {
+            OutputOnStart = "transport-start"u8.ToArray(),
+            Starting = () => Assert.Equal(1, factory.CreateCallCount),
+        };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            factory,
+            VtProcessorPreference.Managed);
+        control.Columns = 132;
+        control.Rows = 40;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+
+            Assert.Equal(1, factory.CreateCallCount);
+            Assert.Equal(132, factory.Columns[0]);
+            Assert.Equal(40, factory.Rows[0]);
+            Assert.True(await WaitUntilAsync(
+                () => factory.Processors[0].ProcessCallCount == 1,
+                TimeSpan.FromSeconds(5)));
+        }
+        finally
+        {
+            control.StopPty();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+        }
+    }
+
+    [AvaloniaFact]
+    public void Control_LaterLayoutResize_NotifiesExistingProcessorWithoutRecreation()
+    {
+        TrackingVtProcessorFactory factory = new();
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            factory,
+            new DefaultPtyFactory());
+
+        ArrangeControlToGrid(control, columns: 275, rows: 53);
+        int notificationsAfterCreation = factory.Processors[0].ResizeNotifications.Count;
+
+        ArrangeControlToGrid(control, columns: 300, rows: 60);
+
+        Assert.Equal(1, factory.CreateCallCount);
+        Assert.True(factory.Processors[0].ResizeNotifications.Count > notificationsAfterCreation);
+        TerminalSessionDimensions lastResize = factory.Processors[0].ResizeNotifications[^1];
+        Assert.Equal(300, lastResize.Columns);
+        Assert.Equal(60, lastResize.Rows);
+    }
+
+    [AvaloniaFact]
+    public void Control_StartupLayoutResize_ReplacesUnusedNativeProcessorAndRetainsConfiguredScrollback()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        const int columns = 275;
+        const int rows = 53;
+        const int scrollbackLimit = 10_000;
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            new DefaultVtProcessorFactory(nativeProviders),
+            new DefaultPtyFactory())
+        {
+            VtProcessorPreference = VtProcessorPreference.Native,
+            ScrollbackLimit = scrollbackLimit,
+        };
+
+        ArrangeControlToGrid(control, columns: 80, rows: 24);
+        GhosttyVtProcessor placeholderProcessor = Assert.IsType<GhosttyVtProcessor>(control.ActiveVtProcessor);
+
+        ArrangeControlToGrid(control, columns, rows);
+
+        GhosttyVtProcessor processor = Assert.IsType<GhosttyVtProcessor>(control.ActiveVtProcessor);
+        Assert.NotSame(placeholderProcessor, processor);
+        ulong rowsPerPage = GhosttyScrollbackBudget.RowsPerPage(columns);
+        int outputRows = checked(scrollbackLimit + rows + (int)(rowsPerPage * 20UL));
+        byte[] output = new byte[outputRows * 3];
+        for (int offset = 0; offset < output.Length; offset += 3)
+        {
+            output[offset] = (byte)'X';
+            output[offset + 1] = (byte)'\r';
+            output[offset + 2] = (byte)'\n';
+        }
+
+        control.WriteOutput(output);
+
+        Assert.Equal((ulong)scrollbackLimit, processor.ViewportScrollState.MaxOffsetRows);
+        Assert.InRange(
+            processor.NativeScrollbackRows,
+            (ulong)scrollbackLimit,
+            (ulong)scrollbackLimit + rowsPerPage * 5UL);
+    }
+
+    [AvaloniaFact]
+    public void Control_LayoutResizeAfterNativeOutput_DoesNotRecreateProcessor()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            new DefaultVtProcessorFactory(nativeProviders),
+            new DefaultPtyFactory())
+        {
+            VtProcessorPreference = VtProcessorPreference.Native,
+        };
+
+        ArrangeControlToGrid(control, columns: 80, rows: 24);
+        GhosttyVtProcessor processor = Assert.IsType<GhosttyVtProcessor>(control.ActiveVtProcessor);
+        control.WriteOutput("used"u8);
+
+        ArrangeControlToGrid(control, columns: 275, rows: 53);
+
+        Assert.Same(processor, control.ActiveVtProcessor);
+    }
+
+    [AvaloniaFact]
+    public async Task Control_LayoutResizeDuringNativeSession_DoesNotRecreateProcessor()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        INativeVtProcessorProvider[] nativeProviders =
+        [
+            new GhosttyVtProcessorProvider(),
+        ];
+        FakeTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            new DefaultVtProcessorFactory(nativeProviders),
+            VtProcessorPreference.Native);
+        ArrangeControlToGrid(control, columns: 80, rows: 24);
+        GhosttyVtProcessor processor = Assert.IsType<GhosttyVtProcessor>(control.ActiveVtProcessor);
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            ArrangeControlToGrid(control, columns: 275, rows: 53);
+
+            Assert.Same(processor, control.ActiveVtProcessor);
+        }
+        finally
+        {
+            control.StopPty();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+        }
     }
 
     [AvaloniaFact]
@@ -2099,6 +2376,9 @@ public class TerminalControlTests
 
         TerminalTheme theme = TerminalTheme.Dark.WithDefaultForeground(0xFFAABBCCu);
         control.ApplyTheme(theme);
+        Assert.Null(factory.LastProcessor);
+
+        ArrangeControlToGrid(control, columns: 80, rows: 24);
 
         Assert.NotNull(factory.LastProcessor);
         Assert.NotNull(factory.LastProcessor!.LastAppliedTheme);
@@ -4058,6 +4338,8 @@ public class TerminalControlTests
             new FakeTransport(),
             new SingleProcessorFactory(processor),
             VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
 
         control.WriteOutput("initial\n"u8);
         control.ScrollByRows(-3);
@@ -4513,6 +4795,7 @@ public class TerminalControlTests
             VtProcessorPreference.Native);
         control.Columns = 8;
         control.Rows = 4;
+        ArrangeControlToGrid(control, columns: 8, rows: 4);
 
         control.StartSearch("needle");
 
@@ -4576,6 +4859,7 @@ public class TerminalControlTests
             VtProcessorPreference.Native);
         control.Columns = 8;
         control.Rows = 4;
+        ArrangeControlToGrid(control, columns: 8, rows: 4);
 
         control.StartSearch("L10");
 
@@ -4597,6 +4881,7 @@ public class TerminalControlTests
             VtProcessorPreference.Native);
         control.Columns = 8;
         control.Rows = 4;
+        ArrangeControlToGrid(control, columns: 8, rows: 4);
 
         Assert.NotNull(control.ScrollData);
         processor.SetViewportState(new TerminalViewportScrollState(TotalRows: 100, OffsetRows: 80, VisibleRows: 4));
@@ -6352,6 +6637,16 @@ public class TerminalControlTests
         HeadlessTerminalTestCleanup.RunDispatcherJobs();
     }
 
+    private static void ArrangeControlToGrid(TerminalControl control, int columns, int rows)
+    {
+        SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+        double width = (columns * renderer.CellWidth) + (renderer.CellWidth * 0.25);
+        double height = (rows * renderer.CellHeight) + (renderer.CellHeight * 0.25);
+        control.Measure(new Size(width, height));
+        control.Arrange(new Rect(0, 0, width, height));
+        HeadlessTerminalTestCleanup.RunDispatcherJobs();
+    }
+
     private static void ArrangeScrollViewerToGrid(
         ScrollViewer scrollViewer,
         Window window,
@@ -7202,13 +7497,20 @@ public class TerminalControlTests
         public int CreateCallCount { get; private set; }
         public List<VtProcessorPreference> Preferences { get; } = [];
         public List<int> ScrollbackLimits { get; } = [];
+        public List<int> Columns { get; } = [];
+        public List<int> Rows { get; } = [];
+        public List<TrackingVtProcessor> Processors { get; } = [];
 
         public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
         {
             CreateCallCount++;
             Preferences.Add(preference);
             ScrollbackLimits.Add(screen.ScrollbackLimit);
-            return new TrackingVtProcessor();
+            Columns.Add(screen.Columns);
+            Rows.Add(screen.ViewportRows);
+            TrackingVtProcessor processor = new();
+            Processors.Add(processor);
+            return processor;
         }
     }
 
@@ -7326,24 +7628,23 @@ public class TerminalControlTests
         public Action? BellCallback { get; set; }
         public Action<string>? TitleCallback { get; set; }
         public string? SelectionExportText { get; init; }
+        public int ProcessCallCount { get; private set; }
+        public List<TerminalSessionDimensions> ResizeNotifications { get; } = [];
 
         public void Process(ReadOnlySpan<byte> data)
         {
             _ = data;
+            ProcessCallCount++;
         }
 
         public void NotifyResize(int columns, int rows)
         {
-            _ = columns;
-            _ = rows;
+            ResizeNotifications.Add(new TerminalSessionDimensions(columns, rows, 0, 0));
         }
 
         public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
         {
-            _ = columns;
-            _ = rows;
-            _ = widthPx;
-            _ = heightPx;
+            ResizeNotifications.Add(new TerminalSessionDimensions(columns, rows, widthPx, heightPx));
         }
 
         public void Reset()
@@ -8170,6 +8471,8 @@ public class TerminalControlTests
         public bool IsRunning { get; private set; }
         public bool StopCalled { get; private set; }
         public bool EchoInput { get; init; } = true;
+        public Action? Starting { get; init; }
+        public byte[]? OutputOnStart { get; init; }
         public List<byte[]> SentInputs { get; } = [];
         public List<TerminalSessionDimensions> Resizes { get; } = [];
 
@@ -8177,7 +8480,13 @@ public class TerminalControlTests
         {
             _ = options;
             cancellationToken.ThrowIfCancellationRequested();
+            Starting?.Invoke();
             IsRunning = true;
+            if (OutputOnStart is not null)
+            {
+                _dataReceived?.Invoke(OutputOnStart, OutputOnStart.Length);
+            }
+
             return ValueTask.CompletedTask;
         }
 
