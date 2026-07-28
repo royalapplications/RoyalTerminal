@@ -70,7 +70,7 @@ Build the Windows x64 native artifacts:
 Direct Ghostty build from `external/ghostty`:
 
 ```powershell
-zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=x86_64-windows-msvc -Dcpu=x86_64-vzeroupper -Dsimd=false
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true -Dtarget=x86_64-windows-msvc -Dcpu=x86_64-vzeroupper -Dsimd=false
 ```
 
 Verify a DLL with disassembly:

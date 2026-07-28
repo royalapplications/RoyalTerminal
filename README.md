@@ -1157,8 +1157,13 @@ Build directly:
 
 ```bash
 cd external/ghostty
-zig build -Doptimize=ReleaseFast -Dapp-runtime=none
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true
 ```
+
+The [July 2026 lib-vt update report](docs/articles/ghostty-lib-vt-2026-07-update.md)
+records the synchronized revisions, complete new-export inventory, Ghostling
+audit, managed/native parity decisions, platform workarounds, and validation
+matrix.
 
 For distributable Windows x64 artifacts, build a scalar compatibility DLL with
 an explicit baseline CPU. This avoids AVX/VEX instructions in startup paths on
@@ -1167,7 +1172,7 @@ older CPUs, constrained VMs, and Windows ARM64 x64 emulation:
 ```powershell
 .\scripts\build-native.ps1 -Arch x64 -Release
 # or, from external/ghostty:
-zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=x86_64-windows-msvc -Dcpu=x86_64-vzeroupper -Dsimd=false
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true -Dtarget=x86_64-windows-msvc -Dcpu=x86_64-vzeroupper -Dsimd=false
 ```
 
 CI verifies the Windows x64 native artifacts with `scripts/verify-windows-x64-no-avx.ps1`.

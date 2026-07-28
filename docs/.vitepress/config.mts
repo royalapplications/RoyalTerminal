@@ -50,6 +50,7 @@ const guideSidebarItems = [
       { text: "Shell Integration", link: "/articles/shell-integration" },
       { text: "Regex Text Highlighting", link: "/articles/text-highlighting" },
       { text: "Ghostty Integration", link: "/articles/ghostty-integration" },
+      { text: "Ghostty lib-vt July 2026 Update", link: "/articles/ghostty-lib-vt-2026-07-update" },
       { text: "Windows x64 Native Compatibility", link: "/articles/windows-x64-native-compatibility" }
     ]
   },
