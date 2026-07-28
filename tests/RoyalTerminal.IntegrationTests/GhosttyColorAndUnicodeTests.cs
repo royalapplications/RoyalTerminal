@@ -40,7 +40,23 @@ public class GhosttyColorAndUnicodeTests
         GhosttyVtNative.GhosttyColorRgb white = new() { R = 255, G = 255, B = 255 };
         Assert.Equal(0, GhosttyColorUtilities.GetLuminance(black), precision: 12);
         Assert.Equal(1, GhosttyColorUtilities.GetLuminance(white), precision: 12);
+        Assert.Equal(0, GhosttyColorUtilities.GetPerceivedLuminance(black), precision: 12);
+        Assert.Equal(1, GhosttyColorUtilities.GetPerceivedLuminance(white), precision: 12);
         Assert.Equal(21, GhosttyColorUtilities.GetContrast(black, white), precision: 12);
+
+        GhosttyVtNative.GhosttyColorRgb preserved = new() { R = 12, G = 34, B = 56 };
+        palette[16] = preserved;
+        GhosttyVtNative.GhosttyColorPaletteMask skip = default;
+        skip.Set(16);
+        GhosttyVtNative.GhosttyColorRgb[] generated =
+            GhosttyColorUtilities.GeneratePalette(
+                palette,
+                in skip,
+                black,
+                white,
+                harmonious: false);
+        Assert.Equal(256, generated.Length);
+        Assert.Equal(preserved, generated[16]);
 
         GhosttyX11Color[] x11Colors = GhosttyColorUtilities.GetX11Colors();
         Assert.Contains(x11Colors, entry => entry.Name == "red" && entry.Color.Equals(red));

@@ -139,19 +139,17 @@ public static class GhosttyColorUtilities
     }
 
     /// <summary>Copies Ghostty's process-lifetime X11 color-name table.</summary>
-    public static GhosttyX11Color[] GetX11Colors()
+    public static unsafe GhosttyX11Color[] GetX11Colors()
     {
         NativeLibraryLoader.Initialize();
         nuint count = GhosttyVtNative.ColorX11NameCount();
-        nint entries = GhosttyVtNative.ColorX11Names();
+        GhosttyVtNative.GhosttyColorX11Entry* entries =
+            (GhosttyVtNative.GhosttyColorX11Entry*)GhosttyVtNative.ColorX11Names();
         GhosttyX11Color[] result = new GhosttyX11Color[checked((int)count)];
-        int stride = Marshal.SizeOf<GhosttyVtNative.GhosttyColorX11Entry>();
 
         for (int index = 0; index < result.Length; index++)
         {
-            nint entryPointer = entries + checked(index * stride);
-            GhosttyVtNative.GhosttyColorX11Entry entry =
-                Marshal.PtrToStructure<GhosttyVtNative.GhosttyColorX11Entry>(entryPointer);
+            GhosttyVtNative.GhosttyColorX11Entry entry = entries[index];
             string name = Marshal.PtrToStringUTF8(entry.Name) ?? string.Empty;
             result[index] = new GhosttyX11Color(name, entry.Color);
         }
