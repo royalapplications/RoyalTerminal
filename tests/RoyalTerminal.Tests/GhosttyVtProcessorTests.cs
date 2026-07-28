@@ -125,6 +125,47 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_WideToNarrowResizeRetainsConfiguredNativeScrollback_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        const int initialColumns = 400;
+        const int resizedColumns = 80;
+        const int viewportRows = 24;
+        const int scrollbackLimit = 2_000;
+        ulong resizedRowsPerPage = GhosttyScrollbackBudget.RowsPerPage(resizedColumns);
+        int outputRows = checked(
+            scrollbackLimit + viewportRows + (int)(resizedRowsPerPage * 20UL));
+
+        TerminalScreen screen = new(initialColumns, viewportRows, scrollbackLimit);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(
+            resizedColumns,
+            viewportRows,
+            widthPx: 800,
+            heightPx: 480);
+
+        byte[] output = new byte[outputRows * 3];
+        for (int offset = 0; offset < output.Length; offset += 3)
+        {
+            output[offset] = (byte)'X';
+            output[offset + 1] = (byte)'\r';
+            output[offset + 2] = (byte)'\n';
+        }
+
+        processor.Process(output);
+
+        Assert.Equal((ulong)scrollbackLimit, processor.ViewportScrollState.MaxOffsetRows);
+        Assert.InRange(
+            processor.NativeScrollbackRows,
+            (ulong)scrollbackLimit,
+            (ulong)scrollbackLimit + resizedRowsPerPage * 5UL);
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_ViewportScrollState_ClampsWhenScreenScrollbackLimitIsReduced_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())

@@ -188,7 +188,9 @@ non-notification ConEmu OSC 9 commands are consumed rather than being
 misreported as desktop notifications. OSC 9 progress states accept only an
 end-of-value or a semicolon-delimited decimal percentage; malformed suffixes
 fall back to OSC 9 notification handling instead of producing a false 0%
-progress report.
+progress report. Payload `12` is recognized as the no-payload ConEmu prompt
+marker only on an exact match, so notification text beginning with `12`
+remains visible.
 
 Some APIs are inherently specific to libghostty's storage:
 
@@ -199,6 +201,11 @@ Some APIs are inherently specific to libghostty's storage:
   to use its existing screen/selection model;
 - Ghostty palette generation is exposed as an opt-in native utility, while the
   managed VT keeps RoyalTerminal's theme and palette model.
+
+The native physical-line pruning slack is recalculated and installed before
+every width resize. Ghostty enforces the configured limit during reflow, so
+this ordering preserves the requested row contract when a wide terminal is
+resized narrower.
 
 ## Terminal behavior decisions
 
@@ -258,6 +265,8 @@ Coverage is split by responsibility:
   plus focused grapheme consumption, Unicode 17 Indic-conjunct, and
   variation-selector edge cases;
 - malformed OSC 9 progress suffix rejection and notification fallback;
+- exact OSC 9 command-12 recognition and notification-prefix fallback;
+- wide-to-narrow native scrollback retention across line-limit recalculation;
 - sized callback ABI layouts and undersized callback rejection;
 - selection-gesture reuse across live terminals and after disposal of the
   previous terminal;

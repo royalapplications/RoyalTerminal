@@ -2620,7 +2620,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
                     value[2] == ';' &&
                     value[3] is >= '0' and <= '3'),
             '1' => value.Length >= 3 && value[2] == ';',
-            '2' => true,
+            '2' => value.Length == 2,
             _ => false,
         };
     }

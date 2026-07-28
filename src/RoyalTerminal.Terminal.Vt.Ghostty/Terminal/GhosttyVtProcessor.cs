@@ -345,10 +345,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 screen.Columns,
                 screen.ViewportRows,
                 screen.ScrollbackLimit));
-        _terminal.SetScrollbackMaxLines(
-            GhosttyScrollbackBudget.LineLimitFromRows(
-                screen.Columns,
-                screen.ScrollbackLimit));
+        ApplyNativeScrollbackLineLimit(screen.Columns);
         _renderState = new GhosttyRenderState();
         _keyEncoder = new GhosttyKeyEncoder();
         _keyEvent = new GhosttyKeyEvent();
@@ -603,28 +600,47 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     private void ResizeNativeTerminal(ushort columns, ushort rows, uint cellWidthPx, uint cellHeightPx)
     {
-        if (_localReflowOnResize)
-        {
-            _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
-            return;
-        }
+        bool hadPreviousLimit = _terminal.TryGetScrollbackMaxLines(out nuint previousLimit);
+        ApplyNativeScrollbackLineLimit(columns);
 
-        bool previousWraparound = _terminal.GetMode(s_wraparoundMode);
-        if (!previousWraparound)
-        {
-            _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
-            return;
-        }
-
-        _terminal.SetMode(s_wraparoundMode, false);
         try
         {
-            _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
+            if (_localReflowOnResize)
+            {
+                _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
+                return;
+            }
+
+            bool previousWraparound = _terminal.GetMode(s_wraparoundMode);
+            if (!previousWraparound)
+            {
+                _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
+                return;
+            }
+
+            _terminal.SetMode(s_wraparoundMode, false);
+            try
+            {
+                _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
+            }
+            finally
+            {
+                _terminal.SetMode(s_wraparoundMode, true);
+            }
         }
-        finally
+        catch
         {
-            _terminal.SetMode(s_wraparoundMode, true);
+            _terminal.SetScrollbackMaxLines(hadPreviousLimit ? previousLimit : null);
+            throw;
         }
+    }
+
+    private void ApplyNativeScrollbackLineLimit(int columns)
+    {
+        _terminal.SetScrollbackMaxLines(
+            GhosttyScrollbackBudget.LineLimitFromRows(
+                columns,
+                _screen.ScrollbackLimit));
     }
 
     /// <inheritdoc />
