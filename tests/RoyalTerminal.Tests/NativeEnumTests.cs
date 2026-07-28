@@ -107,6 +107,18 @@ public class NativeEnumTests
         Assert.Equal(7, (int)GhosttyVtNative.GhosttyKeyEncoderOption.BackarrowKeyMode);
         Assert.Equal(19, (int)GhosttyVtNative.GhosttyTerminalOption.ApcMaxBytes);
         Assert.Equal(20, (int)GhosttyVtNative.GhosttyTerminalOption.ApcMaxBytesKitty);
+        Assert.Equal(21, (int)GhosttyVtNative.GhosttyTerminalOption.Selection);
+        Assert.Equal(22, (int)GhosttyVtNative.GhosttyTerminalOption.DefaultCursorStyle);
+        Assert.Equal(23, (int)GhosttyVtNative.GhosttyTerminalOption.DefaultCursorBlink);
+        Assert.Equal(24, (int)GhosttyVtNative.GhosttyTerminalOption.GlyphProtocol);
+        Assert.Equal(25, (int)GhosttyVtNative.GhosttyTerminalOption.PwdChanged);
+        Assert.Equal(26, (int)GhosttyVtNative.GhosttyTerminalOption.ClipboardWrite);
+        Assert.Equal(27, (int)GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxBytes);
+        Assert.Equal(28, (int)GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxLines);
+        Assert.Equal(29, (int)GhosttyVtNative.GhosttyTerminalOption.DesktopNotification);
+        Assert.Equal(30, (int)GhosttyVtNative.GhosttyTerminalOption.ProgressReport);
+        Assert.Equal(31, (int)GhosttyVtNative.GhosttyTerminalData.Selection);
+        Assert.Equal(35, (int)GhosttyVtNative.GhosttyTerminalData.ScrollbackMaxLines);
         Assert.Equal(2, (int)GhosttyVtNative.GhosttySysOption.Log);
         Assert.Equal(0, (int)GhosttyVtNative.GhosttySysLogLevel.Error);
         Assert.Equal(3, (int)GhosttyVtNative.GhosttySysLogLevel.Debug);
