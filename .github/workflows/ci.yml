@@ -339,7 +339,7 @@ jobs:
           target=""
           simd=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            target="-Dtarget=aarch64-windows"
+            target="-Dtarget=aarch64-windows-gnu"
             # Zig 0.16.0's Windows ARM64 stdlib stack-trace code fails to
             # compile when Ghostty's vendored SIMD archive is enabled.
             simd="-Dsimd=false"
@@ -352,7 +352,7 @@ jobs:
         run: |
           target=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            target="-Dtarget=aarch64-windows"
+            target="-Dtarget=aarch64-windows-gnu"
           fi
           zig build -Doptimize=ReleaseFast ${target}
 
