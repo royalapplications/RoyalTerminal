@@ -13,10 +13,9 @@ internal static class GhosttyScrollbackBudget
     // 572 KiB, with a 215x215 grid capacity. Both a row and a cell occupy
     // 64 bits, so changing the terminal width divides 215 * (215 cells + one
     // row metadata slot) across rows. These are compatibility assumptions for
-    // the current byte-oriented C adapter and must be reviewed whenever the
-    // Ghostty pin changes.
-    // Ghostty PR #13473 is the future line-oriented replacement:
-    // https://github.com/ghostty-org/ghostty/pull/13473
+    // the byte-budget option and must be reviewed whenever the Ghostty pin
+    // changes. The line-oriented option added by Ghostty PR #13473 is applied
+    // alongside this budget by GhosttyVtProcessor.
     internal const ulong StandardPageBytes = 572UL * 1024UL;
     internal const ulong StandardPageGridSlots = 215UL * (215UL + 1UL);
 

@@ -131,6 +131,44 @@ public class NativeEnumTests
     }
 
     [Fact]
+    public void GhosttyTerminalEffectStructs_MatchNativeAbiLayout()
+    {
+        int pointerSize = IntPtr.Size;
+
+        Assert.Equal(
+            pointerSize == 8 ? 32 : 16,
+            Marshal.SizeOf<GhosttyVtNative.GhosttyClipboardWrite>());
+        Assert.Equal(
+            pointerSize == 8 ? 16 : 8,
+            Marshal.OffsetOf<GhosttyVtNative.GhosttyClipboardWrite>(
+                nameof(GhosttyVtNative.GhosttyClipboardWrite.Contents)).ToInt32());
+        Assert.Equal(
+            pointerSize == 8 ? 24 : 12,
+            Marshal.OffsetOf<GhosttyVtNative.GhosttyClipboardWrite>(
+                nameof(GhosttyVtNative.GhosttyClipboardWrite.ContentsLength)).ToInt32());
+
+        Assert.Equal(
+            pointerSize == 8 ? 40 : 20,
+            Marshal.SizeOf<GhosttyVtNative.GhosttyTerminalDesktopNotification>());
+        Assert.Equal(
+            pointerSize,
+            Marshal.OffsetOf<GhosttyVtNative.GhosttyTerminalDesktopNotification>(
+                nameof(GhosttyVtNative.GhosttyTerminalDesktopNotification.Title)).ToInt32());
+
+        Assert.Equal(
+            pointerSize == 8 ? 16 : 12,
+            Marshal.SizeOf<GhosttyVtNative.GhosttyTerminalProgressReport>());
+        Assert.Equal(
+            pointerSize,
+            Marshal.OffsetOf<GhosttyVtNative.GhosttyTerminalProgressReport>(
+                nameof(GhosttyVtNative.GhosttyTerminalProgressReport.State)).ToInt32());
+        Assert.Equal(
+            pointerSize + sizeof(int),
+            Marshal.OffsetOf<GhosttyVtNative.GhosttyTerminalProgressReport>(
+                nameof(GhosttyVtNative.GhosttyTerminalProgressReport.Progress)).ToInt32());
+    }
+
+    [Fact]
     public void GhosttyColorScheme_HasExpectedValues()
     {
         Assert.True(Enum.IsDefined(typeof(GhosttyColorScheme), GhosttyColorScheme.Light));

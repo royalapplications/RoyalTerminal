@@ -95,7 +95,7 @@ dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --fi
 Upstream Ghostty build:
 ```bash
 cd external/ghostty
-zig build -Doptimize=ReleaseFast -Dapp-runtime=none
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true
 ```
 
 Windows x64 release/debugging build from the repository root:
@@ -105,7 +105,7 @@ Windows x64 release/debugging build from the repository root:
 
 Direct Ghostty build from `external/ghostty`:
 ```powershell
-zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Dtarget=x86_64-windows-msvc -Dcpu=x86_64-vzeroupper -Dsimd=false
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true -Dtarget=x86_64-windows-msvc -Dcpu=x86_64-vzeroupper -Dsimd=false
 ```
 
 Verify Windows x64 native artifacts do not contain AVX/VEX instructions:

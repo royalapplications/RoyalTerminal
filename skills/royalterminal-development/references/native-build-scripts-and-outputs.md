@@ -123,7 +123,7 @@ bash scripts/build-native.sh --clean --release
 
 ```bash
 cd external/ghostty
-zig build -Doptimize=ReleaseFast -Dapp-runtime=none
+zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true
 
 cd ../../native/ghostty-renderer-capi
 bash build.sh release

@@ -161,6 +161,100 @@ public class GhosttySelectionTests
     }
 
     [GhosttyNativeFact]
+    public void SelectionGesture_SafelyResetsWhenReusedAcrossTerminals()
+    {
+        using GhosttyTerminal first = new(5, 2);
+        using GhosttyTerminal second = new(5, 2);
+        using GhosttySelectionGesture gesture = new();
+        using GhosttySelectionGestureEvent press =
+            new(GhosttyVtNative.GhosttySelectionGestureEventType.Press);
+
+        first.Write("one"u8);
+        second.Write("two"u8);
+        press.SetBehaviors(
+            new GhosttyVtNative.GhosttySelectionGestureBehaviors
+            {
+                SingleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Word,
+                DoubleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Word,
+                TripleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Line,
+            });
+
+        Assert.True(
+            first.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Active(1, 0),
+                out GhosttyVtNative.GhosttyGridRef firstReference));
+        press.SetReference(firstReference);
+        Assert.True(gesture.TryApply(first, press, out _));
+
+        Assert.True(
+            second.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Active(1, 0),
+                out GhosttyVtNative.GhosttyGridRef secondReference));
+        press.SetReference(secondReference);
+        Assert.True(gesture.TryApply(second, press, out GhosttySelectionSnapshot selection));
+        Assert.Equal((byte)1, gesture.GetClickCount(second));
+        Assert.True(
+            second.TryFormatSelection(
+                GhosttyVtNative.GhosttyFormatterFormat.Plain,
+                selection,
+                unwrap: false,
+                trim: false,
+                out byte[] formatted));
+        Assert.Equal("two", Encoding.UTF8.GetString(formatted));
+    }
+
+    [GhosttyNativeFact]
+    public void SelectionGesture_CanBeReusedAfterPreviousTerminalIsDisposed()
+    {
+        using GhosttySelectionGesture gesture = new();
+        using GhosttySelectionGestureEvent press =
+            new(GhosttyVtNative.GhosttySelectionGestureEventType.Press);
+        press.SetBehaviors(
+            new GhosttyVtNative.GhosttySelectionGestureBehaviors
+            {
+                SingleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Word,
+                DoubleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Word,
+                TripleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Line,
+            });
+
+        GhosttyTerminal first = new(5, 2);
+        first.Write("one"u8);
+        Assert.True(
+            first.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Active(1, 0),
+                out GhosttyVtNative.GhosttyGridRef firstReference));
+        press.SetReference(firstReference);
+        Assert.True(gesture.TryApply(first, press, out _));
+        first.Dispose();
+
+        using GhosttyTerminal second = new(5, 2);
+        second.Write("two"u8);
+        Assert.True(
+            second.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Active(1, 0),
+                out GhosttyVtNative.GhosttyGridRef secondReference));
+        press.SetReference(secondReference);
+        Assert.True(gesture.TryApply(second, press, out GhosttySelectionSnapshot selection));
+        Assert.True(
+            second.TryFormatSelection(
+                GhosttyVtNative.GhosttyFormatterFormat.Plain,
+                selection,
+                unwrap: false,
+                trim: false,
+                out byte[] formatted));
+        Assert.Equal("two", Encoding.UTF8.GetString(formatted));
+    }
+
+    [GhosttyNativeFact]
+    public void SetSelection_AfterTerminalDisposal_Throws()
+    {
+        GhosttyTerminal terminal = new(5, 2);
+        terminal.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => terminal.SetSelection(null));
+    }
+
+    [GhosttyNativeFact]
     public void TrackedGridReference_ResolvesAndMoves()
     {
         using GhosttyTerminal terminal = new(5, 2);

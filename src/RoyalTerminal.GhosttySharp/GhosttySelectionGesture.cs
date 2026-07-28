@@ -144,6 +144,10 @@ public sealed class GhosttySelectionGestureEvent : IDisposable
 }
 
 /// <summary>Owned state machine for Ghostty terminal text-selection gestures.</summary>
+/// <remarks>
+/// Reusing an instance with a different terminal safely resets the previous
+/// terminal-backed gesture state before processing the new terminal.
+/// </remarks>
 public sealed class GhosttySelectionGesture : IDisposable
 {
     private nint _handle;
@@ -168,12 +172,12 @@ public sealed class GhosttySelectionGesture : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(terminal);
         ArgumentNullException.ThrowIfNull(gestureEvent);
-        _lastTerminal = terminal;
+        nint terminalHandle = PrepareTerminal(terminal);
         GhosttyVtNative.GhosttySelectionRange native =
             GhosttyVtNative.GhosttySelectionRange.CreateSized();
         GhosttyVtNative.GhosttyResult result = GhosttyVtNative.SelectionGestureEvent(
             _handle,
-            terminal.Handle,
+            terminalHandle,
             gestureEvent.Handle,
             &native);
         if (result == GhosttyVtNative.GhosttyResult.NoValue)
@@ -193,10 +197,10 @@ public sealed class GhosttySelectionGesture : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(terminal);
         ArgumentNullException.ThrowIfNull(gestureEvent);
-        _lastTerminal = terminal;
+        nint terminalHandle = PrepareTerminal(terminal);
         GhosttyVtNative.GhosttyResult result = GhosttyVtNative.SelectionGestureEvent(
             _handle,
-            terminal.Handle,
+            terminalHandle,
             gestureEvent.Handle,
             null);
         if (result != GhosttyVtNative.GhosttyResult.NoValue)
@@ -210,8 +214,8 @@ public sealed class GhosttySelectionGesture : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(terminal);
-        _lastTerminal = terminal;
-        GhosttyVtNative.SelectionGestureReset(_handle, terminal.Handle);
+        nint terminalHandle = PrepareTerminal(terminal);
+        GhosttyVtNative.SelectionGestureReset(_handle, terminalHandle);
     }
 
     /// <summary>Gets the current click count, where zero means inactive.</summary>
@@ -239,7 +243,7 @@ public sealed class GhosttySelectionGesture : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(terminal);
-        _lastTerminal = terminal;
+        nint terminalHandle = PrepareTerminal(terminal);
 
         byte clickCount = 0;
         bool dragged = false;
@@ -265,7 +269,7 @@ public sealed class GhosttySelectionGesture : IDisposable
         ThrowIfFailed(
             GhosttyVtNative.SelectionGestureGetMulti(
                 _handle,
-                terminal.Handle,
+                terminalHandle,
                 4,
                 keys,
                 values,
@@ -291,11 +295,11 @@ public sealed class GhosttySelectionGesture : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(terminal);
-        _lastTerminal = terminal;
+        nint terminalHandle = PrepareTerminal(terminal);
         GhosttyVtNative.GhosttyGridRef value = GhosttyVtNative.GhosttyGridRef.CreateSized();
         GhosttyVtNative.GhosttyResult result = GhosttyVtNative.SelectionGestureGet(
             _handle,
-            terminal.Handle,
+            terminalHandle,
             GhosttyVtNative.GhosttySelectionGestureData.Anchor,
             &value);
         if (result == GhosttyVtNative.GhosttyResult.NoValue)
@@ -333,12 +337,41 @@ public sealed class GhosttySelectionGesture : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(terminal);
-        _lastTerminal = terminal;
+        nint terminalHandle = PrepareTerminal(terminal);
         T value = default;
         ThrowIfFailed(
-            GhosttyVtNative.SelectionGestureGet(_handle, terminal.Handle, data, &value),
+            GhosttyVtNative.SelectionGestureGet(_handle, terminalHandle, data, &value),
             $"ghostty_selection_gesture_get({data})");
         return value;
+    }
+
+    private nint PrepareTerminal(GhosttyTerminal terminal)
+    {
+        nint terminalHandle = terminal.Handle;
+        if (ReferenceEquals(_lastTerminal, terminal))
+        {
+            return terminalHandle;
+        }
+
+        if (_lastTerminal is { IsValid: true } previous)
+        {
+            GhosttyVtNative.SelectionGestureReset(_handle, previous.Handle);
+        }
+        else if (_lastTerminal is not null)
+        {
+            GhosttyVtNative.SelectionGestureFree(_handle, nint.Zero);
+            _handle = nint.Zero;
+            GhosttyVtNative.GhosttyResult result =
+                GhosttyVtNative.SelectionGestureNew(nint.Zero, out _handle);
+            if (result != GhosttyVtNative.GhosttyResult.Success)
+            {
+                _disposed = true;
+                ThrowIfFailed(result, "ghostty_selection_gesture_new");
+            }
+        }
+
+        _lastTerminal = terminal;
+        return terminalHandle;
     }
 
     private static void ThrowIfFailed(GhosttyVtNative.GhosttyResult result, string operation)

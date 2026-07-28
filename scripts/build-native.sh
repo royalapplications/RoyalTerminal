@@ -52,14 +52,14 @@ usage() {
 
 # Parse arguments
 CLEAN=false
-OPTIMIZE="-Doptimize=ReleaseFast"
+OPTIMIZE_ARGS=("-Doptimize=ReleaseFast")
 BUILD_STATIC=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --clean)   CLEAN=true; shift ;;
-        --release) OPTIMIZE="-Doptimize=ReleaseFast"; shift ;;
-        --debug)   OPTIMIZE=""; shift ;;
+        --release) OPTIMIZE_ARGS=("-Doptimize=ReleaseFast"); shift ;;
+        --debug)   OPTIMIZE_ARGS=(); shift ;;
         --static)  BUILD_STATIC=true; shift ;;
         --help)    usage; exit 0 ;;
         *)         error "Unknown option: $1"; usage; exit 1 ;;
@@ -152,7 +152,7 @@ fi
 info "Building libghostty-vt..."
 ZIG_BUILD_ARGS=(
     build
-    $OPTIMIZE
+    "${OPTIMIZE_ARGS[@]}"
     -Dapp-runtime=none
     -Demit-lib-vt=true
     -Demit-xcframework=false
@@ -254,7 +254,7 @@ if [ -f "$RENDERER_DIR/build.zig" ]; then
         linux) RENDERER_LIB_NAME="libghostty-renderer-capi.so" ;;
     esac
 
-    RENDERER_BUILD_ARGS=(build $OPTIMIZE)
+    RENDERER_BUILD_ARGS=(build "${OPTIMIZE_ARGS[@]}")
     if [ -n "${ZIG_TARGET:-}" ]; then
         RENDERER_BUILD_ARGS+=("-Dtarget=$ZIG_TARGET")
     fi

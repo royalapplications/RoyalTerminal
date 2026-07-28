@@ -64,6 +64,14 @@ artifacts. Other targets retain their normal SIMD configuration.
 The raw `GhosttyVtNative` layer now declares all 44 new non-WASM exports found
 in the updated Ghostty C surface. The additions are grouped below.
 
+An export-by-export audit found 185 exports in the pinned header surface.
+RoyalTerminal binds all 173 host-native exports; the remaining 12 are
+WebAssembly-only allocation helpers. The callback structures used for
+clipboard writes, notifications, and progress reports retain their native
+leading `size` field. Managed callbacks validate that size before reading any
+later field, and ABI tests assert both structure sizes and field offsets on
+32-bit and 64-bit layouts.
+
 ### Color and color-scheme helpers
 
 ```text
@@ -131,6 +139,13 @@ references with deterministic disposal. Selection formatting uses the
 caller-buffer API so the managed layer controls allocation; the raw
 allocator-based export remains available for advanced consumers.
 
+Ghostty selection endpoints are untracked snapshots and are documented as
+valid only until the originating terminal mutates. A gesture object may be
+reused across terminals: RoyalTerminal resets state against a still-live
+previous terminal, or frees and recreates the native gesture with a null
+terminal after the previous terminal has already been disposed. This preserves
+Ghostty's internal page-list pin lifetime and avoids stale native references.
+
 ### Terminal compression and Unicode
 
 ```text
@@ -151,9 +166,9 @@ than by native structs:
 
 | Capability | Ghostty-backed VT | Managed VT |
 | --- | --- | --- |
-| Unicode codepoint width | `ghostty_unicode_codepoint_width` | RoyalTerminal Unicode tables |
+| Unicode codepoint width | `ghostty_unicode_codepoint_width` | RoyalTerminal tables plus the pinned Unicode 17 delta |
 | First-grapheme width | `ghostty_unicode_grapheme_width` | allocation-free stack path with pooled fallback |
-| Clipboard writes | Native normalized callback | OSC 52 decoding |
+| Clipboard writes | Native normalized callback | Strict OSC 52 and OSC 1337 `Copy` decoding |
 | Desktop notifications | Native normalized callback | OSC 9 and OSC 777 |
 | Progress reports | Native normalized callback | OSC 9;4 |
 | Working directory | Native PWD-changed callback | OSC 7, OSC 9;9, and OSC 1337 |
@@ -163,6 +178,14 @@ than by native structs:
 same capability shape with either VT engine. Clipboard payloads remain
 binary-safe and may carry multiple MIME representations on the native path.
 Host policy remains outside both parsers.
+
+The managed clipboard parser follows Ghostty's normalized effect behavior:
+OSC 52 accepts a zero- or one-character selection, treats `?` as a read query,
+and rejects whitespace or malformed Base64. An empty OSC 52 payload requests a
+clear. OSC 1337 keys are ASCII case-insensitive; `Copy=:BASE64` writes the
+standard clipboard but does not treat an empty payload as a clear. Valid
+non-notification ConEmu OSC 9 commands are consumed rather than being
+misreported as desktop notifications.
 
 Some APIs are inherently specific to libghostty's storage:
 
@@ -188,6 +211,14 @@ The managed VT now follows that behavior. xterm.js also emits an initial SGR
 reset but documents that its SGR status report is not a complete style
 round-trip, so it was treated as corroborating rather than normative for the
 full report.
+
+The managed width implementation now also matches the pinned Ghostty Unicode
+17 codepoint table across every value from U+0000 through U+10FFFF. It handles
+surrogates, regional indicators, default ignorables, Hangul continuation
+classes, and two-/three-em dashes with Ghostty's rules. VS15 and VS16 only
+change a grapheme width when they immediately follow a base listed by Unicode
+17's emoji-variation-sequence data; invalid selectors do not force text or
+emoji presentation.
 
 The source comparison used Ghostty's
 [DECRQSS encoding tests](https://github.com/ghostty-org/ghostty/blob/a60cd15bb5a197d8e2596e86442031cbece06bcc/src/terminal/dcs.zig#L465-L506)
@@ -217,7 +248,11 @@ Coverage is split by responsibility:
 - scrollback limits, absolute viewport rows, and compression;
 - native and managed clipboard, notification, progress, and working-directory
   effects;
-- managed Unicode width and grapheme consumption;
+- exhaustive managed/native codepoint-width parity across U+0000–U+10FFFF,
+  plus focused grapheme consumption and variation-selector edge cases;
+- sized callback ABI layouts and undersized callback rejection;
+- selection-gesture reuse across live terminals and after disposal of the
+  previous terminal;
 - existing DECRQSS and OSC parity suites.
 
 The CI matrix builds native libraries for Linux x64/ARM64, macOS x64/ARM64, and

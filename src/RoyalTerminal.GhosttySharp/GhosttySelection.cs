@@ -8,6 +8,10 @@ namespace RoyalTerminal.GhosttySharp;
 /// <summary>
 /// Managed selection range used by Ghostty VT formatter and Kitty graphics helpers.
 /// </summary>
+/// <remarks>
+/// The endpoints are untracked native snapshots. Use the selection immediately;
+/// it is no longer valid after the originating terminal is mutated.
+/// </remarks>
 public readonly struct GhosttySelection
 {
     /// <summary>

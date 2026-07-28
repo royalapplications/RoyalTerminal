@@ -18,6 +18,14 @@ public sealed class GhosttyTerminal : IDisposable
     /// <summary>
     /// Creates a new Ghostty VT terminal.
     /// </summary>
+    /// <param name="columns">Initial terminal grid width in cells.</param>
+    /// <param name="rows">Initial terminal grid height in cells.</param>
+    /// <param name="maxScrollback">
+    /// Maximum native scrollback storage in bytes. This legacy constructor
+    /// parameter is retained for source compatibility; use
+    /// <see cref="SetScrollbackMaxBytes(nuint)"/> and
+    /// <see cref="SetScrollbackMaxLines(nuint)"/> for explicit configuration.
+    /// </param>
     public GhosttyTerminal(ushort columns, ushort rows, nuint maxScrollback = 10_000)
     {
         NativeLibraryLoader.Initialize();
@@ -362,6 +370,7 @@ public sealed class GhosttyTerminal : IDisposable
     /// <summary>Sets the terminal-owned selection, or clears it when null.</summary>
     public unsafe void SetSelection(GhosttySelection? selection)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (selection is null)
         {
             ClearOption(GhosttyVtNative.GhosttyTerminalOption.Selection);

@@ -2254,7 +2254,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         nint userdata,
         GhosttyVtNative.GhosttyClipboardWrite* write)
     {
-        if (ClipboardWriteCallback is null || write is null)
+        if (ClipboardWriteCallback is null ||
+            write is null ||
+            write->Size < (nuint)sizeof(GhosttyVtNative.GhosttyClipboardWrite))
         {
             return GhosttyVtNative.GhosttyClipboardWriteResult.Unsupported;
         }
@@ -2287,7 +2289,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         nint userdata,
         GhosttyVtNative.GhosttyTerminalDesktopNotification* notification)
     {
-        if (notification is null)
+        if (notification is null ||
+            notification->Size <
+            (nuint)sizeof(GhosttyVtNative.GhosttyTerminalDesktopNotification))
         {
             return;
         }
@@ -2310,7 +2314,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         nint userdata,
         GhosttyVtNative.GhosttyTerminalProgressReport* report)
     {
-        if (report is null)
+        if (report is null ||
+            report->Size < (nuint)sizeof(GhosttyVtNative.GhosttyTerminalProgressReport))
         {
             return;
         }

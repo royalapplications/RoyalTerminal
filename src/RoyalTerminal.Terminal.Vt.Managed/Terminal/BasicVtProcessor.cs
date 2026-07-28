@@ -2459,6 +2459,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        if (IsRecognizedConEmuOsc9(value))
+        {
+            return;
+        }
+
         DesktopNotificationCallback?.Invoke(new TerminalDesktopNotification(string.Empty, value));
     }
 
@@ -2485,10 +2490,33 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void HandleOsc1337(string value)
     {
-        const string Prefix = "CurrentDir=";
-        if (value.StartsWith(Prefix, StringComparison.Ordinal))
+        int separator = value.IndexOf('=');
+        if (separator < 0)
         {
-            WorkingDirectoryCallback?.Invoke(value[Prefix.Length..]);
+            return;
+        }
+
+        ReadOnlySpan<char> key = value.AsSpan(0, separator);
+        ReadOnlySpan<char> payload = value.AsSpan(separator + 1);
+        if (AsciiEqualsIgnoreCase(key, "CurrentDir"))
+        {
+            if (!payload.IsEmpty)
+            {
+                WorkingDirectoryCallback?.Invoke(payload.ToString());
+            }
+
+            return;
+        }
+
+        if (AsciiEqualsIgnoreCase(key, "Copy") &&
+            payload.Length > 1 &&
+            payload[0] == ':' &&
+            !(payload.Length == 2 && payload[1] == '?'))
+        {
+            TryWriteClipboard(
+                TerminalClipboardLocation.Standard,
+                payload[1..],
+                allowClear: false);
         }
     }
 
@@ -2501,10 +2529,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
 
         ReadOnlySpan<char> selector = value.AsSpan(0, separator);
-        string payload = separator + 1 < value.Length
-            ? value[(separator + 1)..]
-            : string.Empty;
-        if (payload == "?")
+        if (selector.Length > 1)
+        {
+            return;
+        }
+
+        ReadOnlySpan<char> payload = value.AsSpan(separator + 1);
+        if (payload.SequenceEqual("?"))
         {
             return;
         }
@@ -2518,16 +2549,33 @@ public sealed class BasicVtProcessor : IVtProcessor,
             }
             : TerminalClipboardLocation.Standard;
 
-        if (payload.Length == 0)
+        TryWriteClipboard(location, payload, allowClear: true);
+    }
+
+    private void TryWriteClipboard(
+        TerminalClipboardLocation location,
+        ReadOnlySpan<char> payload,
+        bool allowClear)
+    {
+        if (payload.IsEmpty)
         {
-            ClipboardWriteCallback?.Invoke(new TerminalClipboardWrite(location, []));
+            if (allowClear)
+            {
+                ClipboardWriteCallback?.Invoke(new TerminalClipboardWrite(location, []));
+            }
+
+            return;
+        }
+
+        if (!IsStrictBase64(payload))
+        {
             return;
         }
 
         byte[] decoded;
         try
         {
-            decoded = Convert.FromBase64String(payload);
+            decoded = Convert.FromBase64String(payload.ToString());
         }
         catch (FormatException)
         {
@@ -2538,6 +2586,114 @@ public sealed class BasicVtProcessor : IVtProcessor,
             new TerminalClipboardWrite(
                 location,
                 [new TerminalClipboardContent("text/plain", decoded)]));
+    }
+
+    private static bool IsRecognizedConEmuOsc9(string value)
+    {
+        if (value.Length == 0)
+        {
+            return false;
+        }
+
+        return value[0] switch
+        {
+            '1' => IsRecognizedConEmuOsc9Command1(value),
+            '2' or '3' or '6' or '7' or '8' =>
+                value.Length >= 2 && value[1] == ';',
+            '5' => true,
+            _ => false,
+        };
+    }
+
+    private static bool IsRecognizedConEmuOsc9Command1(string value)
+    {
+        if (value.Length < 2)
+        {
+            return false;
+        }
+
+        return value[1] switch
+        {
+            ';' => true,
+            '0' => value.Length == 2 ||
+                   (value.Length >= 4 &&
+                    value[2] == ';' &&
+                    value[3] is >= '0' and <= '3'),
+            '1' => value.Length >= 3 && value[2] == ';',
+            '2' => true,
+            _ => false,
+        };
+    }
+
+    private static bool IsStrictBase64(ReadOnlySpan<char> value)
+    {
+        if ((value.Length & 3) != 0)
+        {
+            return false;
+        }
+
+        int paddingStart = value.Length;
+        while (paddingStart > 0 && value[paddingStart - 1] == '=')
+        {
+            paddingStart--;
+        }
+
+        int paddingLength = value.Length - paddingStart;
+        if (paddingLength > 2)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < paddingStart; index++)
+        {
+            char character = value[index];
+            if (!((character is >= 'A' and <= 'Z') ||
+                  (character is >= 'a' and <= 'z') ||
+                  (character is >= '0' and <= '9') ||
+                  character is '+' or '/'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool AsciiEqualsIgnoreCase(
+        ReadOnlySpan<char> value,
+        ReadOnlySpan<char> expected)
+    {
+        if (value.Length != expected.Length)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < value.Length; index++)
+        {
+            char actual = value[index];
+            char target = expected[index];
+            if (actual == target)
+            {
+                continue;
+            }
+
+            if (actual is >= 'A' and <= 'Z')
+            {
+                actual = (char)(actual + ('a' - 'A'));
+            }
+
+            if (target is >= 'A' and <= 'Z')
+            {
+                target = (char)(target + ('a' - 'A'));
+            }
+
+            if (actual != target)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool TryParseOsc9Progress(
