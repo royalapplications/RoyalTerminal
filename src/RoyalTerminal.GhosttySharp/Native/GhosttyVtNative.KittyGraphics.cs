@@ -12,6 +12,7 @@ public static partial class GhosttyVtNative
     {
         Invalid = 0,
         PlacementIterator = 1,
+        Generation = 2,
     }
 
     public enum GhosttyKittyGraphicsPlacementData : int
@@ -70,6 +71,7 @@ public static partial class GhosttyVtNative
         Compression = 6,
         DataPtr = 7,
         DataLength = 8,
+        Generation = 9,
     }
 
     [StructLayout(LayoutKind.Sequential)]

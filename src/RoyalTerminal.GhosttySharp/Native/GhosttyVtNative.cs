@@ -693,7 +693,11 @@ public static partial class GhosttyVtNative
     // ────────────────────── Color Functions ─────────────────────────
 
     [LibraryImport(LibName, EntryPoint = "ghostty_color_rgb_get")]
-    public static unsafe partial void ColorRgbGet(GhosttyColorRgb color, byte* r, byte* g, byte* b);
+    public static unsafe partial void ColorRgbGet(
+        in GhosttyColorRgb color,
+        byte* r,
+        byte* g,
+        byte* b);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_type_json")]
     public static partial nint TypeJson();
