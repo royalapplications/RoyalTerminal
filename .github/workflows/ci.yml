@@ -142,7 +142,7 @@ jobs:
 
   native-build-macos:
     name: Native Build (macOS)
-    # Zig 0.15.2 fails to link the build runner on macos-26-arm64.
+    # Pin macOS 15 for reproducible SDK compatibility with the native artifacts.
     runs-on: macos-15
     strategy:
       matrix:
@@ -156,7 +156,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
           cache-key: ${{ matrix.arch }}
 
       - name: Build libghostty-vt
@@ -251,7 +251,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
           cache-key: ${{ matrix.arch }}
 
       - name: Build libghostty-vt
@@ -328,7 +328,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
           cache-key: ${{ matrix.arch }}
 
       - name: Build libghostty-vt

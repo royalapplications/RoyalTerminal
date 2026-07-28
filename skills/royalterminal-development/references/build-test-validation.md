@@ -15,7 +15,7 @@
 
 Required toolchain:
 - .NET 10 SDK
-- Zig 0.15.2+
+- Zig 0.16.0
 - initialized Ghostty submodule
 
 Optional but commonly required:

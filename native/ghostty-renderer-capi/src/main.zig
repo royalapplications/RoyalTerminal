@@ -709,7 +709,7 @@ pub export fn ghostty_render_surface_render_to_rgba(
 }
 
 pub export fn ghostty_render_result_message(result_code: c_int) ?[*:0]const u8 {
-    const code: GhosttyRenderResult = std.meta.intToEnum(GhosttyRenderResult, result_code) catch return "unknown result";
+    const code = std.enums.fromInt(GhosttyRenderResult, result_code) orelse return "unknown result";
 
     return switch (code) {
         .ok => msg_ok,

@@ -8,10 +8,10 @@ const std = @import("std");
 
 fn linkAppleObjc(step: *std.Build.Step.Compile) void {
     // Add common SDK library locations so cross-target macOS builds can resolve libobjc.
-    step.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
-    step.addLibraryPath(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib" });
-    step.addLibraryPath(.{ .cwd_relative = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib" });
-    step.linkSystemLibrary("objc");
+    step.root_module.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+    step.root_module.addLibraryPath(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib" });
+    step.root_module.addLibraryPath(.{ .cwd_relative = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib" });
+    step.root_module.linkSystemLibrary("objc", .{});
 }
 
 pub fn build(b: *std.Build) void {
@@ -30,10 +30,10 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .version = .{ .major = 0, .minor = 1, .patch = 0 },
     });
-    lib.linkLibC();
 
     if (target.result.os.tag == .macos) {
         linkAppleObjc(lib);
@@ -49,9 +49,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
-    static_lib.linkLibC();
 
     if (target.result.os.tag == .macos) {
         linkAppleObjc(static_lib);
@@ -65,9 +65,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
     });
-    tests.linkLibC();
 
     if (target.result.os.tag == .macos) {
         linkAppleObjc(tests);
@@ -82,16 +82,16 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("samples/metal_texture_smoke.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "renderer_capi", .module = renderer_module },
             },
         }),
     });
-    sample.linkLibC();
 
     if (target.result.os.tag == .macos) {
         linkAppleObjc(sample);
-        sample.linkFramework("Metal");
+        sample.root_module.linkFramework("Metal", .{});
     }
 
     const sample_install = b.addInstallArtifact(sample, .{});

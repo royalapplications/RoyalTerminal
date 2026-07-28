@@ -7,7 +7,7 @@
 #   .\scripts\build-native.ps1 -Help        # Show usage
 #
 # Prerequisites:
-#   - Zig 0.15.2+ (https://ziglang.org/download/)
+#   - Zig 0.16.0 (https://ziglang.org/download/)
 #   - Git submodule initialized: git submodule update --init
 #   - Windows symlink support (Developer Mode enabled or elevated shell)
 #
@@ -205,7 +205,7 @@ Options:
   -Help        Show this help message
 
 Prerequisites:
-  - Zig 0.15.2+ must be in PATH
+  - Zig 0.16.0 must be in PATH
   - Git submodule must be initialized:
     git submodule update --init
   - Windows symlink support:
@@ -223,7 +223,7 @@ $zigPath = Get-Command zig -ErrorAction SilentlyContinue
 if (-not $zigPath) {
     Write-Err "Zig not found in PATH."
     Write-Host ""
-    Write-Host "Install Zig 0.15.2+:"
+    Write-Host "Install Zig 0.16.0:"
     Write-Host "  winget install zig.zig"
     Write-Host "  scoop install zig"
     Write-Host "  Manual: https://ziglang.org/download/"
@@ -232,6 +232,10 @@ if (-not $zigPath) {
 
 $zigVersion = & zig version
 Write-Info "Zig version: $zigVersion"
+if ($zigVersion -ne "0.16.0") {
+    Write-Err "Ghostty requires Zig 0.16.0, but found $zigVersion."
+    exit 1
+}
 
 if (-not (Test-Path (Join-Path $GhosttyDir "build.zig"))) {
     Write-Err "Ghostty submodule not found at $GhosttyDir"

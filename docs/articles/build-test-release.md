@@ -11,7 +11,7 @@ RoyalTerminal combines managed .NET packages with native artifacts. A successful
 Minimum toolchain:
 
 - .NET 10 SDK
-- Zig 0.15.2 or newer
+- Zig 0.16.0
 - initialized git submodules for native builds
 
 Common optional requirements:
