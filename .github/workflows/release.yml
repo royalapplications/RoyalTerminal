@@ -214,6 +214,9 @@ jobs:
           simd=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             target="-Dtarget=aarch64-windows-msvc"
+            # Zig 0.16.0's Windows ARM64 stdlib stack-trace code fails to
+            # compile when Ghostty's vendored SIMD archive is enabled.
+            simd="-Dsimd=false"
           else
             # Keep win-x64 release artifacts on a true baseline x64 CPU model.
             # x86_64-windows-msvc alone still allows LLVM/third-party SIMD code

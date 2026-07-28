@@ -337,10 +337,14 @@ jobs:
         shell: bash
         run: |
           target=""
+          simd=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             target="-Dtarget=aarch64-windows"
+            # Zig 0.16.0's Windows ARM64 stdlib stack-trace code fails to
+            # compile when Ghostty's vendored SIMD archive is enabled.
+            simd="-Dsimd=false"
           fi
-          zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true ${target}
+          zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true ${target} ${simd}
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
