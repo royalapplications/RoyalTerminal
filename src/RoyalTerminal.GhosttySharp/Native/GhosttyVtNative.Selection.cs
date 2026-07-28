@@ -1,8 +1,8 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
-using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace RoyalTerminal.GhosttySharp.Native;
 

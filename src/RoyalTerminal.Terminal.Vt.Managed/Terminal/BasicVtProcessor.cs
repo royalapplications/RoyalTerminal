@@ -6,13 +6,13 @@
 // scrolling, scroll regions (DECSTBM), alternate screen buffer, DEC private modes,
 // DEC line-drawing character set, erase, insert/delete lines & characters, and tabs.
 
+using System.Globalization;
+using System.Net;
+using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Sixel;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Unicode;
-using System.Globalization;
-using System.Net;
-using System.Text;
 
 namespace RoyalTerminal.Terminal;
 
@@ -38,7 +38,9 @@ public sealed class BasicVtProcessor : IVtProcessor,
     ITerminalMouseReportingStateSource,
     ITerminalSixelOptionsSink,
     ITerminalEraseDisplayOptionsSink,
-    ITerminalShellIntegrationEventSource
+    ITerminalShellIntegrationEventSource,
+    ITerminalEffectSource,
+    ITerminalUnicodeWidthProvider
 {
     private const int MaxOscBufferBytes = 4096;
     private const int MaxDcsBufferBytes = 4096;
@@ -272,6 +274,33 @@ public sealed class BasicVtProcessor : IVtProcessor,
     {
         add => _shellIntegrationParser.EventReceived += value;
         remove => _shellIntegrationParser.EventReceived -= value;
+    }
+
+    /// <inheritdoc />
+    public Func<TerminalClipboardWrite, TerminalClipboardWriteResult>? ClipboardWriteCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<TerminalDesktopNotification>? DesktopNotificationCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<TerminalProgressReport>? ProgressReportCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<string>? WorkingDirectoryCallback { get; set; }
+
+    /// <inheritdoc />
+    public byte GetCodepointWidth(uint codepoint)
+        => checked((byte)TerminalCellWidthCalculator.GetCodepointWidth(
+            codepoint > int.MaxValue ? -1 : (int)codepoint));
+
+    /// <inheritdoc />
+    public nuint GetGraphemeWidth(ReadOnlySpan<uint> codepoints, out byte width)
+    {
+        int consumed = TerminalCellWidthCalculator.GetFirstGraphemeWidth(
+            codepoints,
+            out int measuredWidth);
+        width = checked((byte)measuredWidth);
+        return checked((nuint)consumed);
     }
 
     /// <inheritdoc />
@@ -2392,7 +2421,160 @@ public sealed class BasicVtProcessor : IVtProcessor,
             case 8:
                 HandleOscHyperlink(value);
                 break;
+
+            case 7:
+                WorkingDirectoryCallback?.Invoke(value);
+                break;
+
+            case 9:
+                HandleOsc9(value);
+                break;
+
+            case 52:
+                HandleOscClipboard(value);
+                break;
+
+            case 777:
+                HandleOsc777(value);
+                break;
+
+            case 1337:
+                HandleOsc1337(value);
+                break;
         }
+    }
+
+    private void HandleOsc9(string value)
+    {
+        if (value.StartsWith("9;", StringComparison.Ordinal))
+        {
+            WorkingDirectoryCallback?.Invoke(value[2..]);
+            return;
+        }
+
+        if (TryParseOsc9Progress(value, out TerminalProgressReport? report) &&
+            report is not null)
+        {
+            ProgressReportCallback?.Invoke(report);
+            return;
+        }
+
+        DesktopNotificationCallback?.Invoke(new TerminalDesktopNotification(string.Empty, value));
+    }
+
+    private void HandleOsc777(string value)
+    {
+        const string Prefix = "notify;";
+        if (!value.StartsWith(Prefix, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        int titleSeparator = value.IndexOf(';', Prefix.Length);
+        if (titleSeparator < 0)
+        {
+            return;
+        }
+
+        string title = value[Prefix.Length..titleSeparator];
+        string body = titleSeparator + 1 < value.Length
+            ? value[(titleSeparator + 1)..]
+            : string.Empty;
+        DesktopNotificationCallback?.Invoke(new TerminalDesktopNotification(title, body));
+    }
+
+    private void HandleOsc1337(string value)
+    {
+        const string Prefix = "CurrentDir=";
+        if (value.StartsWith(Prefix, StringComparison.Ordinal))
+        {
+            WorkingDirectoryCallback?.Invoke(value[Prefix.Length..]);
+        }
+    }
+
+    private void HandleOscClipboard(string value)
+    {
+        int separator = value.IndexOf(';');
+        if (separator < 0)
+        {
+            return;
+        }
+
+        ReadOnlySpan<char> selector = value.AsSpan(0, separator);
+        string payload = separator + 1 < value.Length
+            ? value[(separator + 1)..]
+            : string.Empty;
+        if (payload == "?")
+        {
+            return;
+        }
+
+        TerminalClipboardLocation location = selector.Length > 0
+            ? selector[0] switch
+            {
+                's' => TerminalClipboardLocation.Selection,
+                'p' => TerminalClipboardLocation.Primary,
+                _ => TerminalClipboardLocation.Standard,
+            }
+            : TerminalClipboardLocation.Standard;
+
+        if (payload.Length == 0)
+        {
+            ClipboardWriteCallback?.Invoke(new TerminalClipboardWrite(location, []));
+            return;
+        }
+
+        byte[] decoded;
+        try
+        {
+            decoded = Convert.FromBase64String(payload);
+        }
+        catch (FormatException)
+        {
+            return;
+        }
+
+        ClipboardWriteCallback?.Invoke(
+            new TerminalClipboardWrite(
+                location,
+                [new TerminalClipboardContent("text/plain", decoded)]));
+    }
+
+    private static bool TryParseOsc9Progress(
+        string value,
+        out TerminalProgressReport? report)
+    {
+        report = null;
+        if (!value.StartsWith("4;", StringComparison.Ordinal) || value.Length < 3)
+        {
+            return false;
+        }
+
+        TerminalProgressState state = value[2] switch
+        {
+            '0' => TerminalProgressState.Remove,
+            '1' => TerminalProgressState.Set,
+            '2' => TerminalProgressState.Error,
+            '3' => TerminalProgressState.Indeterminate,
+            '4' => TerminalProgressState.Pause,
+            _ => (TerminalProgressState)(-1),
+        };
+        if ((int)state < 0)
+        {
+            return false;
+        }
+
+        byte? progress = state == TerminalProgressState.Set ? (byte)0 : null;
+        if (state is TerminalProgressState.Set or TerminalProgressState.Error or TerminalProgressState.Pause &&
+            value.Length > 3 &&
+            value[3] == ';' &&
+            int.TryParse(value.AsSpan(4), out int parsed))
+        {
+            progress = checked((byte)Math.Clamp(parsed, 0, 100));
+        }
+
+        report = new TerminalProgressReport(state, progress);
+        return true;
     }
 
     private void HandleOscHyperlink(string value)

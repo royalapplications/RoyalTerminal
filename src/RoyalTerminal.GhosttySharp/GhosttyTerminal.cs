@@ -1,8 +1,8 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
-using RoyalTerminal.GhosttySharp.Native;
 using System.Text;
+using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.GhosttySharp;
 

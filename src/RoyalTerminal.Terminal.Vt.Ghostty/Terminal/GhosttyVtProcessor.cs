@@ -34,7 +34,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     ITerminalSnapshotExportSource,
     ITerminalSearchSource,
     ITerminalSixelOptionsSink,
-    ITerminalResizeReflowPolicySink
+    ITerminalResizeReflowPolicySink,
+    ITerminalEffectSource,
+    ITerminalUnicodeWidthProvider
 {
     private const int MaxShellIntegrationOscBufferBytes = 4096;
 
@@ -171,6 +173,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private GhosttyVtNative.GhosttyTerminalSizeCallback? _sizeDelegate;
     private GhosttyVtNative.GhosttyTerminalColorSchemeCallback? _colorSchemeDelegate;
     private GhosttyVtNative.GhosttyTerminalDeviceAttributesCallback? _deviceAttributesDelegate;
+    private GhosttyVtNative.GhosttyTerminalPwdChangedCallback? _pwdChangedDelegate;
+    private GhosttyVtNative.GhosttyTerminalClipboardWriteCallback? _clipboardWriteDelegate;
+    private GhosttyVtNative.GhosttyTerminalDesktopNotificationCallback? _desktopNotificationDelegate;
+    private GhosttyVtNative.GhosttyTerminalProgressReportCallback? _progressReportDelegate;
     private static readonly byte[] s_answerbackBytes = "RoyalTerminal"u8.ToArray();
     private static readonly GCHandle s_answerbackHandle = GCHandle.Alloc(s_answerbackBytes, GCHandleType.Pinned);
 
@@ -305,6 +311,25 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public Action<string>? TitleCallback { get; set; }
+
+    /// <inheritdoc />
+    public Func<TerminalClipboardWrite, TerminalClipboardWriteResult>? ClipboardWriteCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<TerminalDesktopNotification>? DesktopNotificationCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<TerminalProgressReport>? ProgressReportCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<string>? WorkingDirectoryCallback { get; set; }
+
+    /// <inheritdoc />
+    public byte GetCodepointWidth(uint codepoint) => GhosttyUnicode.GetCodepointWidth(codepoint);
+
+    /// <inheritdoc />
+    public nuint GetGraphemeWidth(ReadOnlySpan<uint> codepoints, out byte width)
+        => GhosttyUnicode.GetGraphemeWidth(codepoints, out width);
 
     /// <summary>
     /// Creates a new Ghostty VT processor backed by the official libghostty-vt C API.
@@ -878,13 +903,14 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         ViewportScrollMapping mapping = GetViewportScrollMapping();
         ulong clampedOffsetRows = Math.Min(offsetRows, mapping.EffectiveMaxOffsetRows);
         ulong targetNativeOffsetRows = mapping.EffectiveBaseOffsetRows + clampedOffsetRows;
-        int delta = CalculateViewportDelta(targetNativeOffsetRows, _scrollbar.Offset);
-        if (delta == 0)
+        if (targetNativeOffsetRows == _scrollbar.Offset)
         {
             return;
         }
 
-        _terminal.ScrollViewport(GhosttyVtNative.GhosttyTerminalScrollViewport.DeltaRows(delta));
+        _terminal.ScrollViewport(
+            GhosttyVtNative.GhosttyTerminalScrollViewport.AbsoluteRow(
+                checked((nuint)targetNativeOffsetRows)));
         RefreshStateAndScreenFromNative();
         SyncSixelOverlayRasterGraphics();
     }
@@ -925,18 +951,6 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private static ulong GetMagnitude(int value)
     {
         return value < 0 ? (ulong)-(long)value : (ulong)value;
-    }
-
-    private static int CalculateViewportDelta(ulong targetOffsetRows, ulong currentOffsetRows)
-    {
-        if (targetOffsetRows >= currentOffsetRows)
-        {
-            ulong delta = targetOffsetRows - currentOffsetRows;
-            return delta > int.MaxValue ? int.MaxValue : (int)delta;
-        }
-
-        ulong negativeDelta = currentOffsetRows - targetOffsetRows;
-        return negativeDelta > int.MaxValue ? int.MinValue : -(int)negativeDelta;
     }
 
     private static bool TryMapNativeAbsoluteRowToEffective(
@@ -1184,6 +1198,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _sizeDelegate ??= OnNativeSize;
         _colorSchemeDelegate ??= OnNativeColorScheme;
         _deviceAttributesDelegate ??= OnNativeDeviceAttributes;
+        _pwdChangedDelegate ??= OnNativePwdChanged;
+        _clipboardWriteDelegate ??= OnNativeClipboardWrite;
+        _desktopNotificationDelegate ??= OnNativeDesktopNotification;
+        _progressReportDelegate ??= OnNativeProgressReport;
 
         _terminal.SetWritePtyCallback(Marshal.GetFunctionPointerForDelegate(_writePtyDelegate));
         _terminal.SetBellCallback(Marshal.GetFunctionPointerForDelegate(_bellDelegate));
@@ -1193,6 +1211,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _terminal.SetSizeCallback(Marshal.GetFunctionPointerForDelegate(_sizeDelegate));
         _terminal.SetColorSchemeCallback(Marshal.GetFunctionPointerForDelegate(_colorSchemeDelegate));
         _terminal.SetDeviceAttributesCallback(Marshal.GetFunctionPointerForDelegate(_deviceAttributesDelegate));
+        _terminal.SetPwdChangedCallback(Marshal.GetFunctionPointerForDelegate(_pwdChangedDelegate));
+        _terminal.SetClipboardWriteCallback(Marshal.GetFunctionPointerForDelegate(_clipboardWriteDelegate));
+        _terminal.SetDesktopNotificationCallback(Marshal.GetFunctionPointerForDelegate(_desktopNotificationDelegate));
+        _terminal.SetProgressReportCallback(Marshal.GetFunctionPointerForDelegate(_progressReportDelegate));
     }
 
     private void ConfigureOptionalNativeFeatures()
@@ -2215,6 +2237,100 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         TitleCallback(_terminal.GetTitle());
     }
 
+    private void OnNativePwdChanged(nint terminal, nint userdata)
+    {
+        try
+        {
+            WorkingDirectoryCallback?.Invoke(_terminal.GetWorkingDirectory());
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
+        }
+    }
+
+    private unsafe GhosttyVtNative.GhosttyClipboardWriteResult OnNativeClipboardWrite(
+        nint terminal,
+        nint userdata,
+        GhosttyVtNative.GhosttyClipboardWrite* write)
+    {
+        if (ClipboardWriteCallback is null || write is null)
+        {
+            return GhosttyVtNative.GhosttyClipboardWriteResult.Unsupported;
+        }
+
+        try
+        {
+            TerminalClipboardContent[] contents =
+                new TerminalClipboardContent[checked((int)write->ContentsLength)];
+            for (int index = 0; index < contents.Length; index++)
+            {
+                GhosttyVtNative.GhosttyClipboardContent native = write->Contents[index];
+                contents[index] = new TerminalClipboardContent(
+                    native.Mime.ToUtf8String(),
+                    native.Data.ToArray());
+            }
+
+            TerminalClipboardWrite request = new(
+                ConvertClipboardLocation(write->Location),
+                contents);
+            return ConvertClipboardWriteResult(ClipboardWriteCallback(request));
+        }
+        catch
+        {
+            return GhosttyVtNative.GhosttyClipboardWriteResult.IoError;
+        }
+    }
+
+    private unsafe void OnNativeDesktopNotification(
+        nint terminal,
+        nint userdata,
+        GhosttyVtNative.GhosttyTerminalDesktopNotification* notification)
+    {
+        if (notification is null)
+        {
+            return;
+        }
+
+        try
+        {
+            DesktopNotificationCallback?.Invoke(
+                new TerminalDesktopNotification(
+                    notification->Title.ToUtf8String(),
+                    notification->Body.ToUtf8String()));
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
+        }
+    }
+
+    private unsafe void OnNativeProgressReport(
+        nint terminal,
+        nint userdata,
+        GhosttyVtNative.GhosttyTerminalProgressReport* report)
+    {
+        if (report is null)
+        {
+            return;
+        }
+
+        try
+        {
+            byte? progress = report->Progress < 0
+                ? null
+                : checked((byte)report->Progress);
+            ProgressReportCallback?.Invoke(
+                new TerminalProgressReport(
+                    ConvertProgressState(report->State),
+                    progress));
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
+        }
+    }
+
     private static GhosttyVtNative.GhosttyString OnNativeEnquiry(nint terminal, nint userdata)
     {
         return CreateAnswerbackString();
@@ -2277,6 +2393,44 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         int blue = (int)(argb & 0xFF);
         int luminance = ((red * 299) + (green * 587) + (blue * 114)) / 1000;
         return luminance >= 128;
+    }
+
+    private static TerminalClipboardLocation ConvertClipboardLocation(
+        GhosttyVtNative.GhosttyClipboardLocation location)
+    {
+        return location switch
+        {
+            GhosttyVtNative.GhosttyClipboardLocation.Selection => TerminalClipboardLocation.Selection,
+            GhosttyVtNative.GhosttyClipboardLocation.Primary => TerminalClipboardLocation.Primary,
+            _ => TerminalClipboardLocation.Standard,
+        };
+    }
+
+    private static GhosttyVtNative.GhosttyClipboardWriteResult ConvertClipboardWriteResult(
+        TerminalClipboardWriteResult result)
+    {
+        return result switch
+        {
+            TerminalClipboardWriteResult.Success => GhosttyVtNative.GhosttyClipboardWriteResult.Success,
+            TerminalClipboardWriteResult.Denied => GhosttyVtNative.GhosttyClipboardWriteResult.Denied,
+            TerminalClipboardWriteResult.Busy => GhosttyVtNative.GhosttyClipboardWriteResult.Busy,
+            TerminalClipboardWriteResult.InvalidData => GhosttyVtNative.GhosttyClipboardWriteResult.InvalidData,
+            TerminalClipboardWriteResult.IoError => GhosttyVtNative.GhosttyClipboardWriteResult.IoError,
+            _ => GhosttyVtNative.GhosttyClipboardWriteResult.Unsupported,
+        };
+    }
+
+    private static TerminalProgressState ConvertProgressState(
+        GhosttyVtNative.GhosttyTerminalProgressState state)
+    {
+        return state switch
+        {
+            GhosttyVtNative.GhosttyTerminalProgressState.Set => TerminalProgressState.Set,
+            GhosttyVtNative.GhosttyTerminalProgressState.Error => TerminalProgressState.Error,
+            GhosttyVtNative.GhosttyTerminalProgressState.Indeterminate => TerminalProgressState.Indeterminate,
+            GhosttyVtNative.GhosttyTerminalProgressState.Pause => TerminalProgressState.Pause,
+            _ => TerminalProgressState.Remove,
+        };
     }
 
     private static GhosttyVtNative.GhosttyString CreateAnswerbackString()

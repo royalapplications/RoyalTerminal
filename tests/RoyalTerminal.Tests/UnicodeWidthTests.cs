@@ -36,6 +36,33 @@ public class UnicodeWidthTests
         Assert.Equal(expectedWidth, width);
     }
 
+    [Theory]
+    [InlineData('A', 1)]
+    [InlineData(0x0000, 0)]
+    [InlineData(0x0301, 0)]
+    [InlineData(0x200B, 0)]
+    [InlineData(0x200D, 0)]
+    [InlineData(0xFE0F, 0)]
+    [InlineData(0x4E00, 2)]
+    [InlineData(0x1F600, 2)]
+    public void CodepointWidthCalculator_ReturnsTerminalWidths(int codepoint, int expectedWidth)
+    {
+        Assert.Equal(expectedWidth, TerminalCellWidthCalculator.GetCodepointWidth(codepoint));
+    }
+
+    [Fact]
+    public void FirstGraphemeWidth_ConsumesOneCluster()
+    {
+        uint[] codepoints = [0x1F468, 0x200D, 0x1F469, 0x200D, 0x1F467, (uint)'A'];
+
+        int consumed = TerminalCellWidthCalculator.GetFirstGraphemeWidth(
+            codepoints,
+            out int width);
+
+        Assert.Equal(5, consumed);
+        Assert.Equal(2, width);
+    }
+
     [Fact]
     public void CellWidthCalculator_IsSingleGrapheme_RecognizesRegionalIndicatorPair()
     {
