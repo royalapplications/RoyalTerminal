@@ -4432,6 +4432,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void SetForegroundPalette(int paletteIndex)
     {
+        paletteIndex = Math.Clamp(paletteIndex, 0, 255);
         _currentFg = PaletteColor(paletteIndex);
         _currentFgKind = SgrColorKind.Palette;
         _currentFgPaletteIndex = paletteIndex;
@@ -4439,6 +4440,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void SetBackgroundPalette(int paletteIndex)
     {
+        paletteIndex = Math.Clamp(paletteIndex, 0, 255);
         _currentBg = PaletteColor(paletteIndex);
         _currentBgKind = SgrColorKind.Palette;
         _currentBgPaletteIndex = paletteIndex;

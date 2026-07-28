@@ -644,6 +644,29 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_DcsDecrqss_SgrQuery_ReportsEffectiveClampedPaletteState()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        // RoyalTerminal retains its saturating palette lookup policy for
+        // invalid indices. The tracked SGR state must use that same effective
+        // index so DECRQSS recreates the colors that were actually rendered.
+        processor.Process("\x1b[38;5;999;48;5;1000mA"u8);
+        processor.Process("\x1bP$qm\x1b\\"u8);
+
+        TerminalCell cell = screen.GetViewportRow(0)[0];
+        Assert.Equal(screen.Theme.Palette[255], cell.Foreground);
+        Assert.Equal(screen.Theme.Palette[255], cell.Background);
+        Assert.NotNull(response);
+        Assert.Equal(
+            "\x1bP1$r0;38:5:255;48:5:255m\x1b\\",
+            System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
     public void BasicVtProcessor_DcsDecrqss_SgrQuery_IncludesDoubleUnderlineAndOverline()
     {
         var screen = new TerminalScreen(80, 24, 0);
