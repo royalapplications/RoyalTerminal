@@ -2600,7 +2600,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
             '1' => IsRecognizedConEmuOsc9Command1(value),
             '2' or '3' or '6' or '7' or '8' =>
                 value.Length >= 2 && value[1] == ';',
-            '5' => true,
+            '5' => value.Length == 1,
             _ => false,
         };
     }

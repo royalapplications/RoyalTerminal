@@ -188,9 +188,9 @@ non-notification ConEmu OSC 9 commands are consumed rather than being
 misreported as desktop notifications. OSC 9 progress states accept only an
 end-of-value or a semicolon-delimited decimal percentage; malformed suffixes
 fall back to OSC 9 notification handling instead of producing a false 0%
-progress report. Payload `12` is recognized as the no-payload ConEmu prompt
-marker only on an exact match, so notification text beginning with `12`
-remains visible.
+progress report. Payloads `5` and `12` are recognized as no-payload ConEmu
+commands only on exact matches, so notification text beginning with either
+value remains visible.
 
 Some APIs are inherently specific to libghostty's storage:
 
@@ -231,7 +231,9 @@ change a grapheme width when they immediately follow a base listed by Unicode
 emoji presentation. First-grapheme segmentation also implements Unicode 17
 UAX #29 rule GB9c with the official `Indic_Conjunct_Break` consonant and linker
 sets, so Indic conjuncts are consumed as one cluster consistently with
-Ghostty.
+Ghostty. Prepend sequences are also covered by managed/native parity tests;
+the pinned Ghostty implementation currently consumes `U+0600 U+0041` as one
+width-2 cluster, and the managed provider intentionally preserves that result.
 
 The source comparison used Ghostty's
 [DECRQSS encoding tests](https://github.com/ghostty-org/ghostty/blob/a60cd15bb5a197d8e2596e86442031cbece06bcc/src/terminal/dcs.zig#L465-L506)
@@ -265,7 +267,7 @@ Coverage is split by responsibility:
   plus focused grapheme consumption, Unicode 17 Indic-conjunct, and
   variation-selector edge cases;
 - malformed OSC 9 progress suffix rejection and notification fallback;
-- exact OSC 9 command-12 recognition and notification-prefix fallback;
+- exact OSC 9 no-payload command recognition and notification-prefix fallback;
 - wide-to-narrow native scrollback retention across line-limit recalculation;
 - sized callback ABI layouts and undersized callback rejection;
 - selection-gesture reuse across live terminals and after disposal of the
