@@ -87,6 +87,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private int _cursorRow;
     private uint _currentFg;
     private uint _currentBg;
+    private SgrColorKind _currentFgKind;
+    private SgrColorKind _currentBgKind;
+    private int _currentFgPaletteIndex;
+    private int _currentBgPaletteIndex;
     private CellAttributes _currentAttrs;
     private TerminalUnderlineStyle _currentUnderlineStyle;
     private uint _currentUnderlineColor;
@@ -117,6 +121,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private int _savedCursorRow;
     private uint _savedFg;
     private uint _savedBg;
+    private SgrColorKind _savedFgKind;
+    private SgrColorKind _savedBgKind;
+    private int _savedFgPaletteIndex;
+    private int _savedBgPaletteIndex;
     private CellAttributes _savedAttrs;
     private TerminalUnderlineStyle _savedUnderlineStyle;
     private uint _savedUnderlineColor;
@@ -187,6 +195,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
         OscEscape,
         DcsString,
         DcsEscape,
+    }
+
+    private enum SgrColorKind : byte
+    {
+        Default,
+        Palette,
+        Rgb,
     }
 
     private enum SessionScreenResetMode
@@ -2487,8 +2502,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
         int blue = (int)(argbColor & 0xFF);
 
         return _theme.OscColorReportFormat == TerminalOscColorReportFormat.Bit8
-            ? $"rgb:{red:X2}/{green:X2}/{blue:X2}"
-            : $"rgb:{red * 0x101:X4}/{green * 0x101:X4}/{blue * 0x101:X4}";
+            ? $"rgb:{red:x2}/{green:x2}/{blue:x2}"
+            : $"rgb:{red * 0x101:x4}/{green * 0x101:x4}/{blue * 0x101:x4}";
     }
 
     private void ProcessDcsString(byte b)
@@ -2892,50 +2907,70 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private string BuildCurrentSgrState()
     {
-        List<int> parameters = [];
+        // DEC DECRPSS requires an initial reset parameter. Ghostty and
+        // Windows Terminal both preserve indexed colors in this response.
+        List<string> parameters = ["0"];
 
-        if ((_currentAttrs & CellAttributes.Bold) != 0) parameters.Add(1);
-        if ((_currentAttrs & CellAttributes.Dim) != 0) parameters.Add(2);
-        if ((_currentAttrs & CellAttributes.Italic) != 0) parameters.Add(3);
+        if ((_currentAttrs & CellAttributes.Bold) != 0) parameters.Add("1");
+        if ((_currentAttrs & CellAttributes.Dim) != 0) parameters.Add("2");
+        if ((_currentAttrs & CellAttributes.Italic) != 0) parameters.Add("3");
         if (_currentUnderlineStyle == TerminalUnderlineStyle.Double)
         {
-            parameters.Add(21);
+            parameters.Add("4:2");
         }
         else if (_currentUnderlineStyle != TerminalUnderlineStyle.None ||
                  (_currentAttrs & CellAttributes.Underline) != 0)
         {
-            parameters.Add(4);
+            parameters.Add("4");
         }
-        if ((_currentAttrs & CellAttributes.Blink) != 0) parameters.Add(5);
-        if ((_currentAttrs & CellAttributes.Inverse) != 0) parameters.Add(7);
-        if ((_currentAttrs & CellAttributes.Hidden) != 0) parameters.Add(8);
-        if ((_currentAttrs & CellAttributes.Strikethrough) != 0) parameters.Add(9);
-        if ((_currentDecorations & CellDecorations.Overline) != 0) parameters.Add(53);
+        if ((_currentAttrs & CellAttributes.Blink) != 0) parameters.Add("5");
+        if ((_currentAttrs & CellAttributes.Inverse) != 0) parameters.Add("7");
+        if ((_currentAttrs & CellAttributes.Hidden) != 0) parameters.Add("8");
+        if ((_currentAttrs & CellAttributes.Strikethrough) != 0) parameters.Add("9");
+        if ((_currentDecorations & CellDecorations.Overline) != 0) parameters.Add("53");
 
-        if (_currentFg != _screen.DefaultForeground)
-        {
-            parameters.Add(38);
-            parameters.Add(2);
-            parameters.Add((int)((_currentFg >> 16) & 0xFF));
-            parameters.Add((int)((_currentFg >> 8) & 0xFF));
-            parameters.Add((int)(_currentFg & 0xFF));
-        }
-
-        if (_currentBg != _screen.DefaultBackground)
-        {
-            parameters.Add(48);
-            parameters.Add(2);
-            parameters.Add((int)((_currentBg >> 16) & 0xFF));
-            parameters.Add((int)((_currentBg >> 8) & 0xFF));
-            parameters.Add((int)(_currentBg & 0xFF));
-        }
-
-        if (parameters.Count == 0)
-        {
-            return "0";
-        }
+        AppendSgrColor(
+            parameters,
+            foreground: true,
+            _currentFgKind,
+            _currentFgPaletteIndex,
+            _currentFg);
+        AppendSgrColor(
+            parameters,
+            foreground: false,
+            _currentBgKind,
+            _currentBgPaletteIndex,
+            _currentBg);
 
         return string.Join(';', parameters);
+    }
+
+    private static void AppendSgrColor(
+        ICollection<string> parameters,
+        bool foreground,
+        SgrColorKind kind,
+        int paletteIndex,
+        uint rgb)
+    {
+        int baseIndex = foreground ? 30 : 40;
+        switch (kind)
+        {
+            case SgrColorKind.Default:
+                return;
+            case SgrColorKind.Palette when paletteIndex < 8:
+                parameters.Add((baseIndex + paletteIndex).ToString(CultureInfo.InvariantCulture));
+                return;
+            case SgrColorKind.Palette when paletteIndex < 16:
+                parameters.Add((baseIndex + 60 + paletteIndex - 8).ToString(CultureInfo.InvariantCulture));
+                return;
+            case SgrColorKind.Palette:
+                parameters.Add($"{baseIndex + 8}:5:{paletteIndex}");
+                return;
+            case SgrColorKind.Rgb:
+                parameters.Add(
+                    $"{baseIndex + 8}:2::{(rgb >> 16) & 0xFF}:{(rgb >> 8) & 0xFF}:{rgb & 0xFF}");
+                return;
+        }
     }
 
     private void ExecuteCsi(char finalByte)
@@ -3865,6 +3900,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _savedCursorRow = _cursorRow;
         _savedFg = _currentFg;
         _savedBg = _currentBg;
+        _savedFgKind = _currentFgKind;
+        _savedBgKind = _currentBgKind;
+        _savedFgPaletteIndex = _currentFgPaletteIndex;
+        _savedBgPaletteIndex = _currentBgPaletteIndex;
         _savedAttrs = _currentAttrs;
         _savedUnderlineStyle = _currentUnderlineStyle;
         _savedUnderlineColor = _currentUnderlineColor;
@@ -3882,6 +3921,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _delayedWrap = _savedDelayedWrap;
         _currentFg = _savedFg;
         _currentBg = _savedBg;
+        _currentFgKind = _savedFgKind;
+        _currentBgKind = _savedBgKind;
+        _currentFgPaletteIndex = _savedFgPaletteIndex;
+        _currentBgPaletteIndex = _savedBgPaletteIndex;
         _currentAttrs = _savedAttrs;
         _currentUnderlineStyle = _savedUnderlineStyle;
         _currentUnderlineColor = _savedUnderlineColor;
@@ -3944,28 +3987,30 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
                 // Standard foreground colors
                 case >= 30 and <= 37:
-                    _currentFg = PaletteColor(p - 30);
+                    SetForegroundPalette(p - 30);
                     break;
                 case 39:
                     _currentFg = _screen.DefaultForeground;
+                    _currentFgKind = SgrColorKind.Default;
                     break;
 
                 // Standard background colors
                 case >= 40 and <= 47:
-                    _currentBg = PaletteColor(p - 40);
+                    SetBackgroundPalette(p - 40);
                     break;
                 case 49:
                     _currentBg = _screen.DefaultBackground;
+                    _currentBgKind = SgrColorKind.Default;
                     break;
 
                 // Bright foreground colors
                 case >= 90 and <= 97:
-                    _currentFg = PaletteColor(p - 82);
+                    SetForegroundPalette(p - 82);
                     break;
 
                 // Bright background colors
                 case >= 100 and <= 107:
-                    _currentBg = PaletteColor(p - 92);
+                    SetBackgroundPalette(p - 92);
                     break;
 
                 // 256-color and truecolor
@@ -3974,13 +4019,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
                     {
                         if (_params[i + 1] == 5 && i + 2 < _params.Count)
                         {
-                            _currentFg = PaletteColor(_params[i + 2]);
+                            SetForegroundPalette(_params[i + 2]);
                             i += 2;
                         }
                         else if (_params[i + 1] == 2 && i + 4 < _params.Count)
                         {
                             _currentFg = 0xFF000000 | ((uint)_params[i + 2] << 16) |
                                          ((uint)_params[i + 3] << 8) | (uint)_params[i + 4];
+                            _currentFgKind = SgrColorKind.Rgb;
                             i += 4;
                         }
                     }
@@ -3991,13 +4037,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
                     {
                         if (_params[i + 1] == 5 && i + 2 < _params.Count)
                         {
-                            _currentBg = PaletteColor(_params[i + 2]);
+                            SetBackgroundPalette(_params[i + 2]);
                             i += 2;
                         }
                         else if (_params[i + 1] == 2 && i + 4 < _params.Count)
                         {
                             _currentBg = 0xFF000000 | ((uint)_params[i + 2] << 16) |
                                          ((uint)_params[i + 3] << 8) | (uint)_params[i + 4];
+                            _currentBgKind = SgrColorKind.Rgb;
                             i += 4;
                         }
                     }
@@ -4036,11 +4083,27 @@ public sealed class BasicVtProcessor : IVtProcessor,
     {
         _currentFg = _screen.DefaultForeground;
         _currentBg = _screen.DefaultBackground;
+        _currentFgKind = SgrColorKind.Default;
+        _currentBgKind = SgrColorKind.Default;
         _currentAttrs = CellAttributes.None;
         _currentUnderlineStyle = TerminalUnderlineStyle.None;
         _currentUnderlineColor = 0;
         _currentHasUnderlineColor = false;
         _currentDecorations = CellDecorations.None;
+    }
+
+    private void SetForegroundPalette(int paletteIndex)
+    {
+        _currentFg = PaletteColor(paletteIndex);
+        _currentFgKind = SgrColorKind.Palette;
+        _currentFgPaletteIndex = paletteIndex;
+    }
+
+    private void SetBackgroundPalette(int paletteIndex)
+    {
+        _currentBg = PaletteColor(paletteIndex);
+        _currentBgKind = SgrColorKind.Palette;
+        _currentBgPaletteIndex = paletteIndex;
     }
 
     #endregion
