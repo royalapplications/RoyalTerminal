@@ -8,14 +8,6 @@ namespace RoyalTerminal.GhosttySharp.Native;
 
 public static partial class GhosttyVtNative
 {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct GhosttyTerminalOptions
-    {
-        public ushort Cols;
-        public ushort Rows;
-        public nuint MaxScrollback;
-    }
-
     public enum GhosttyTerminalScrollViewportTag : int
     {
         Top = 0,
@@ -126,6 +118,8 @@ public static partial class GhosttyVtNative
         KittyImageMediumSharedMemory = 18,
         ApcMaxBytes = 19,
         ApcMaxBytesKitty = 20,
+        ScrollbackMaxBytes = 27,
+        ScrollbackMaxLines = 28,
     }
 
     public enum GhosttyTerminalData : int
@@ -168,7 +162,8 @@ public static partial class GhosttyVtNative
     public static partial GhosttyResult TerminalNew(
         nint allocator,
         out nint terminal,
-        GhosttyTerminalOptions options);
+        ushort columns,
+        ushort rows);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_free")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

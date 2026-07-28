@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using RoyalTerminal.GhosttySharp.Native;
+using System.Text;
 
 namespace RoyalTerminal.GhosttySharp;
 
@@ -21,18 +22,21 @@ public sealed class GhosttyTerminal : IDisposable
     {
         NativeLibraryLoader.Initialize();
 
-        GhosttyVtNative.GhosttyTerminalOptions options = new()
-        {
-            Cols = columns,
-            Rows = rows,
-            MaxScrollback = maxScrollback,
-        };
-
         ThrowIfFailed(
-            GhosttyVtNative.TerminalNew(nint.Zero, out _handle, options),
+            GhosttyVtNative.TerminalNew(nint.Zero, out _handle, columns, rows),
             "ghostty_terminal_new");
 
         _ownsHandle = true;
+        try
+        {
+            SetScrollbackMaxBytes(maxScrollback);
+        }
+        catch
+        {
+            GhosttyVtNative.TerminalFree(_handle);
+            _handle = nint.Zero;
+            throw;
+        }
     }
 
     internal GhosttyTerminal(nint handle, bool ownsHandle = false)
@@ -229,13 +233,22 @@ public sealed class GhosttyTerminal : IDisposable
             "ghostty_terminal_set(kitty_image_medium_file)");
     }
 
-    /// <summary>Enables or disables the Kitty temporary-file medium.</summary>
-    public void SetKittyImageMediumTempFile(bool enabled)
+    /// <summary>
+    /// Enables the Kitty temporary-file medium and restricts it to the provided directory.
+    /// </summary>
+    public void SetKittyImageMediumTempFileDirectory(string directory)
     {
-        SetStructOption(
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        SetStringOption(
             GhosttyVtNative.GhosttyTerminalOption.KittyImageMediumTempFile,
-            enabled,
+            directory,
             "ghostty_terminal_set(kitty_image_medium_temp_file)");
+    }
+
+    /// <summary>Disables the Kitty temporary-file medium.</summary>
+    public void DisableKittyImageMediumTempFile()
+    {
+        ClearOption(GhosttyVtNative.GhosttyTerminalOption.KittyImageMediumTempFile);
     }
 
     /// <summary>Enables or disables the Kitty shared-memory medium.</summary>
@@ -263,6 +276,36 @@ public sealed class GhosttyTerminal : IDisposable
             GhosttyVtNative.GhosttyTerminalOption.ApcMaxBytesKitty,
             bytes,
             "ghostty_terminal_set(apc_max_bytes_kitty)");
+    }
+
+    /// <summary>Sets or removes the native scrollback byte limit.</summary>
+    public void SetScrollbackMaxBytes(nuint? bytes)
+    {
+        if (bytes is null)
+        {
+            ClearOption(GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxBytes);
+            return;
+        }
+
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxBytes,
+            bytes.Value,
+            "ghostty_terminal_set(scrollback_max_bytes)");
+    }
+
+    /// <summary>Sets or removes the native scrollback physical-line limit.</summary>
+    public void SetScrollbackMaxLines(nuint? lines)
+    {
+        if (lines is null)
+        {
+            ClearOption(GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxLines);
+            return;
+        }
+
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxLines,
+            lines.Value,
+            "ghostty_terminal_set(scrollback_max_lines)");
     }
 
     /// <summary>Gets the terminal width in cells.</summary>
@@ -315,9 +358,20 @@ public sealed class GhosttyTerminal : IDisposable
     public bool TryGetKittyImageMediumFile(out bool enabled)
         => TryGetValue(GhosttyVtNative.GhosttyTerminalData.KittyImageMediumFile, out enabled);
 
-    /// <summary>Gets whether the Kitty temporary-file medium is enabled.</summary>
-    public bool TryGetKittyImageMediumTempFile(out bool enabled)
-        => TryGetValue(GhosttyVtNative.GhosttyTerminalData.KittyImageMediumTempFile, out enabled);
+    /// <summary>Gets the allowed Kitty temporary-file directory when the medium is available.</summary>
+    public bool TryGetKittyImageMediumTempFileDirectory(out string directory)
+    {
+        if (!TryGetValue(
+                GhosttyVtNative.GhosttyTerminalData.KittyImageMediumTempFile,
+                out GhosttyVtNative.GhosttyString value))
+        {
+            directory = string.Empty;
+            return false;
+        }
+
+        directory = value.ToUtf8String();
+        return !string.IsNullOrEmpty(directory);
+    }
 
     /// <summary>Gets whether the Kitty shared-memory medium is enabled.</summary>
     public bool TryGetKittyImageMediumSharedMemory(out bool enabled)
@@ -511,6 +565,20 @@ public sealed class GhosttyTerminal : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         T copy = value;
         ThrowIfFailed(GhosttyVtNative.TerminalSet(_handle, option, &copy), operation);
+    }
+
+    private unsafe void SetStringOption(
+        GhosttyVtNative.GhosttyTerminalOption option,
+        string value,
+        string operation)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        byte[] utf8 = Encoding.UTF8.GetBytes(value);
+        fixed (byte* valuePtr = utf8)
+        {
+            GhosttyVtNative.GhosttyString native = new((nint)valuePtr, (nuint)utf8.Length);
+            ThrowIfFailed(GhosttyVtNative.TerminalSet(_handle, option, &native), operation);
+        }
     }
 
     private unsafe T GetValue<T>(GhosttyVtNative.GhosttyTerminalData data) where T : unmanaged

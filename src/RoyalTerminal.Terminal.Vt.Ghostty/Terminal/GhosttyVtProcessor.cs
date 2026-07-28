@@ -320,6 +320,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 screen.Columns,
                 screen.ViewportRows,
                 screen.ScrollbackLimit));
+        _terminal.SetScrollbackMaxLines(
+            GhosttyScrollbackBudget.LineLimitFromRows(
+                screen.Columns,
+                screen.ScrollbackLimit));
         _renderState = new GhosttyRenderState();
         _keyEncoder = new GhosttyKeyEncoder();
         _keyEvent = new GhosttyKeyEvent();
@@ -1202,7 +1206,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _terminal.SetKittyImageStorageLimit(32UL * 1024UL * 1024UL);
         _terminal.SetApcMaxBytesKitty(64UL * 1024UL * 1024UL);
         _terminal.SetKittyImageMediumFile(enabled: true);
-        _terminal.SetKittyImageMediumTempFile(enabled: true);
+        _terminal.SetKittyImageMediumTempFileDirectory(Path.GetTempPath());
         _terminal.SetKittyImageMediumSharedMemory(enabled: true);
     }
 

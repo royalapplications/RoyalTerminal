@@ -55,6 +55,22 @@ internal static class GhosttyScrollbackBudget
         return Math.Max(1UL, StandardPageGridSlots / (effectiveColumns + 1UL));
     }
 
+    /// <summary>
+    /// Calculates the native physical-line limit with one page of pruning
+    /// slack so RoyalTerminal's requested scrollback row contract is retained.
+    /// </summary>
+    internal static nuint LineLimitFromRows(int columns, int scrollbackRows)
+    {
+        if (scrollbackRows <= 0)
+        {
+            return 0;
+        }
+
+        ulong limit = checked((ulong)scrollbackRows + RowsPerPage(columns));
+        ulong nativeMaximum = nuint.Size == sizeof(uint) ? uint.MaxValue : ulong.MaxValue;
+        return limit > nativeMaximum ? nuint.MaxValue : (nuint)limit;
+    }
+
     private static ulong DivideRoundUp(ulong value, ulong divisor)
     {
         return value / divisor + (value % divisor == 0 ? 0UL : 1UL);
