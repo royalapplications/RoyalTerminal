@@ -92,6 +92,29 @@ public class TerminalEffectAndUnicodeTests
     }
 
     [Fact]
+    public void BasicVtProcessor_RejectsMalformedOsc9ProgressSuffixes()
+    {
+        using BasicVtProcessor processor =
+            new(new TerminalScreen(columns: 80, viewportRows: 24, scrollbackLimit: 100));
+
+        List<TerminalProgressReport> progressReports = [];
+        List<TerminalDesktopNotification> notifications = [];
+        processor.ProgressReportCallback = progressReports.Add;
+        processor.DesktopNotificationCallback = notifications.Add;
+
+        processor.Process("\u001b]9;4;1garbage\u0007"u8);
+        processor.Process("\u001b]9;4;1;42garbage\u0007"u8);
+
+        Assert.Empty(progressReports);
+        Assert.Equal(
+            [
+                new TerminalDesktopNotification(string.Empty, "4;1garbage"),
+                new TerminalDesktopNotification(string.Empty, "4;1;42garbage"),
+            ],
+            notifications);
+    }
+
+    [Fact]
     public void BasicVtProcessor_RejectsMalformedOsc52ClipboardWrites()
     {
         using BasicVtProcessor processor =

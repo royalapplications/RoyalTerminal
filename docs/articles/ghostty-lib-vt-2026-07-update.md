@@ -185,7 +185,10 @@ and rejects whitespace or malformed Base64. An empty OSC 52 payload requests a
 clear. OSC 1337 keys are ASCII case-insensitive; `Copy=:BASE64` writes the
 standard clipboard but does not treat an empty payload as a clear. Valid
 non-notification ConEmu OSC 9 commands are consumed rather than being
-misreported as desktop notifications.
+misreported as desktop notifications. OSC 9 progress states accept only an
+end-of-value or a semicolon-delimited decimal percentage; malformed suffixes
+fall back to OSC 9 notification handling instead of producing a false 0%
+progress report.
 
 Some APIs are inherently specific to libghostty's storage:
 
@@ -218,7 +221,10 @@ surrogates, regional indicators, default ignorables, Hangul continuation
 classes, and two-/three-em dashes with Ghostty's rules. VS15 and VS16 only
 change a grapheme width when they immediately follow a base listed by Unicode
 17's emoji-variation-sequence data; invalid selectors do not force text or
-emoji presentation.
+emoji presentation. First-grapheme segmentation also implements Unicode 17
+UAX #29 rule GB9c with the official `Indic_Conjunct_Break` consonant and linker
+sets, so Indic conjuncts are consumed as one cluster consistently with
+Ghostty.
 
 The source comparison used Ghostty's
 [DECRQSS encoding tests](https://github.com/ghostty-org/ghostty/blob/a60cd15bb5a197d8e2596e86442031cbece06bcc/src/terminal/dcs.zig#L465-L506)
@@ -249,7 +255,9 @@ Coverage is split by responsibility:
 - native and managed clipboard, notification, progress, and working-directory
   effects;
 - exhaustive managed/native codepoint-width parity across U+0000–U+10FFFF,
-  plus focused grapheme consumption and variation-selector edge cases;
+  plus focused grapheme consumption, Unicode 17 Indic-conjunct, and
+  variation-selector edge cases;
+- malformed OSC 9 progress suffix rejection and notification fallback;
 - sized callback ABI layouts and undersized callback rejection;
 - selection-gesture reuse across live terminals and after disposal of the
   previous terminal;

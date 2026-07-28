@@ -86,6 +86,13 @@ namespace RoyalTerminal.Unicode
 
             var previousClusterBreakType = _currentType;
 
+            if (IndicConjunctBreakData.Get(_currentCodepoint) ==
+                IndicConjunctBreakClass.Consonant)
+            {
+                ConsumeIndicConjunctSequence();
+                goto ConsumeTrailers;
+            }
+
             ReadNextCodepoint();
 
             switch (previousClusterBreakType)
@@ -198,6 +205,8 @@ namespace RoyalTerminal.Unicode
                     break; // nothing but trailers after the final RI
             }
 
+            ConsumeTrailers:
+
             const uint gb9Mask =
                 (1U << (int)GraphemeBreakClass.Extend) |
                 (1U << (int)GraphemeBreakClass.ZWJ) |
@@ -215,6 +224,39 @@ namespace RoyalTerminal.Unicode
             grapheme = new Grapheme(firstCodepoint, startOffset, graphemeLength);
 
             return true; // rules GB2, GB999
+        }
+
+        private void ConsumeIndicConjunctSequence()
+        {
+            bool linkerSeen = false;
+            ReadNextCodepoint();
+
+            while (true)
+            {
+                IndicConjunctBreakClass current =
+                    IndicConjunctBreakData.Get(_currentCodepoint);
+                if (current == IndicConjunctBreakClass.Linker)
+                {
+                    linkerSeen = true;
+                    ReadNextCodepoint();
+                    continue;
+                }
+
+                if (current == IndicConjunctBreakClass.Extend)
+                {
+                    ReadNextCodepoint();
+                    continue;
+                }
+
+                if (linkerSeen && current == IndicConjunctBreakClass.Consonant)
+                {
+                    linkerSeen = false;
+                    ReadNextCodepoint();
+                    continue;
+                }
+
+                return;
+            }
         }
 
         private void ReadNextCodepoint()

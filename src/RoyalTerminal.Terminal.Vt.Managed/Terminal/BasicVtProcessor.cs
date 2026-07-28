@@ -2721,12 +2721,34 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
 
         byte? progress = state == TerminalProgressState.Set ? (byte)0 : null;
-        if (state is TerminalProgressState.Set or TerminalProgressState.Error or TerminalProgressState.Pause &&
-            value.Length > 3 &&
-            value[3] == ';' &&
-            int.TryParse(value.AsSpan(4), out int parsed))
+        if (value.Length > 3)
         {
-            progress = checked((byte)Math.Clamp(parsed, 0, 100));
+            if (value[3] != ';')
+            {
+                return false;
+            }
+
+            ReadOnlySpan<char> percentage = value.AsSpan(4);
+            if (!percentage.IsEmpty)
+            {
+                int parsed = 0;
+                foreach (char character in percentage)
+                {
+                    if (character is < '0' or > '9')
+                    {
+                        return false;
+                    }
+
+                    parsed = Math.Min(100, (parsed * 10) + (character - '0'));
+                }
+
+                if (state is TerminalProgressState.Set or
+                    TerminalProgressState.Error or
+                    TerminalProgressState.Pause)
+                {
+                    progress = checked((byte)parsed);
+                }
+            }
         }
 
         report = new TerminalProgressReport(state, progress);
