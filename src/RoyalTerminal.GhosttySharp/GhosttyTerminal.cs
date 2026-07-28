@@ -172,6 +172,30 @@ public sealed class GhosttyTerminal : IDisposable
         SetPointerOption(GhosttyVtNative.GhosttyTerminalOption.DeviceAttributes, callback);
     }
 
+    /// <summary>Configures the working-directory-changed callback.</summary>
+    public void SetPwdChangedCallback(nint callback)
+    {
+        SetPointerOption(GhosttyVtNative.GhosttyTerminalOption.PwdChanged, callback);
+    }
+
+    /// <summary>Configures the normalized clipboard-write callback.</summary>
+    public void SetClipboardWriteCallback(nint callback)
+    {
+        SetPointerOption(GhosttyVtNative.GhosttyTerminalOption.ClipboardWrite, callback);
+    }
+
+    /// <summary>Configures the desktop-notification callback.</summary>
+    public void SetDesktopNotificationCallback(nint callback)
+    {
+        SetPointerOption(GhosttyVtNative.GhosttyTerminalOption.DesktopNotification, callback);
+    }
+
+    /// <summary>Configures the terminal-progress callback.</summary>
+    public void SetProgressReportCallback(nint callback)
+    {
+        SetPointerOption(GhosttyVtNative.GhosttyTerminalOption.ProgressReport, callback);
+    }
+
     /// <summary>Clears a configurable terminal option.</summary>
     public unsafe void ClearOption(GhosttyVtNative.GhosttyTerminalOption option)
     {
@@ -308,6 +332,314 @@ public sealed class GhosttyTerminal : IDisposable
             "ghostty_terminal_set(scrollback_max_lines)");
     }
 
+    /// <summary>Sets the default cursor style restored by DECSCUSR reset.</summary>
+    public void SetDefaultCursorStyle(GhosttyVtNative.GhosttyTerminalCursorStyle style)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.DefaultCursorStyle,
+            style,
+            "ghostty_terminal_set(default_cursor_style)");
+    }
+
+    /// <summary>Sets whether the default cursor style blinks.</summary>
+    public void SetDefaultCursorBlink(bool blink)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.DefaultCursorBlink,
+            blink,
+            "ghostty_terminal_set(default_cursor_blink)");
+    }
+
+    /// <summary>Enables or disables Ghostty's glyph protocol.</summary>
+    public void SetGlyphProtocol(bool enabled)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.GlyphProtocol,
+            enabled,
+            "ghostty_terminal_set(glyph_protocol)");
+    }
+
+    /// <summary>Sets the terminal-owned selection, or clears it when null.</summary>
+    public unsafe void SetSelection(GhosttySelection? selection)
+    {
+        if (selection is null)
+        {
+            ClearOption(GhosttyVtNative.GhosttyTerminalOption.Selection);
+            return;
+        }
+
+        GhosttyVtNative.GhosttySelectionRange native = selection.Value.ToNative();
+        ThrowIfFailed(
+            GhosttyVtNative.TerminalSet(
+                _handle,
+                GhosttyVtNative.GhosttyTerminalOption.Selection,
+                &native),
+            "ghostty_terminal_set(selection)");
+    }
+
+    /// <summary>Gets a snapshot of the terminal-owned selection.</summary>
+    public unsafe bool TryGetSelection(out GhosttySelection selection)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange native =
+            GhosttyVtNative.GhosttySelectionRange.CreateSized();
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.TerminalGet(
+            _handle,
+            GhosttyVtNative.GhosttyTerminalData.Selection,
+            &native);
+        return TryConvertSelectionResult(
+            result,
+            in native,
+            "ghostty_terminal_get(selection)",
+            out selection);
+    }
+
+    /// <summary>Derives a word selection at a grid reference.</summary>
+    public unsafe bool TrySelectWord(
+        in GhosttyVtNative.GhosttyGridRef reference,
+        ReadOnlySpan<uint> boundaryCodepoints,
+        out GhosttySelection selection)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange native =
+            GhosttyVtNative.GhosttySelectionRange.CreateSized();
+        fixed (uint* boundariesPtr = boundaryCodepoints)
+        {
+            GhosttyVtNative.GhosttyTerminalSelectWordOptions options =
+                GhosttyVtNative.GhosttyTerminalSelectWordOptions.CreateSized();
+            options.Reference = reference;
+            options.BoundaryCodepoints = boundariesPtr;
+            options.BoundaryCodepointsLength = (nuint)boundaryCodepoints.Length;
+            GhosttyVtNative.GhosttyResult result =
+                GhosttyVtNative.TerminalSelectWord(_handle, &options, ref native);
+            return TryConvertSelectionResult(
+                result,
+                in native,
+                "ghostty_terminal_select_word",
+                out selection);
+        }
+    }
+
+    /// <summary>Derives the nearest word selection between two grid references.</summary>
+    public unsafe bool TrySelectWordBetween(
+        in GhosttyVtNative.GhosttyGridRef start,
+        in GhosttyVtNative.GhosttyGridRef end,
+        ReadOnlySpan<uint> boundaryCodepoints,
+        out GhosttySelection selection)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange native =
+            GhosttyVtNative.GhosttySelectionRange.CreateSized();
+        fixed (uint* boundariesPtr = boundaryCodepoints)
+        {
+            GhosttyVtNative.GhosttyTerminalSelectWordBetweenOptions options =
+                GhosttyVtNative.GhosttyTerminalSelectWordBetweenOptions.CreateSized();
+            options.Start = start;
+            options.End = end;
+            options.BoundaryCodepoints = boundariesPtr;
+            options.BoundaryCodepointsLength = (nuint)boundaryCodepoints.Length;
+            GhosttyVtNative.GhosttyResult result =
+                GhosttyVtNative.TerminalSelectWordBetween(_handle, &options, ref native);
+            return TryConvertSelectionResult(
+                result,
+                in native,
+                "ghostty_terminal_select_word_between",
+                out selection);
+        }
+    }
+
+    /// <summary>Derives a line selection at a grid reference.</summary>
+    public unsafe bool TrySelectLine(
+        in GhosttyVtNative.GhosttyGridRef reference,
+        ReadOnlySpan<uint> whitespaceCodepoints,
+        bool semanticPromptBoundary,
+        out GhosttySelection selection)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange native =
+            GhosttyVtNative.GhosttySelectionRange.CreateSized();
+        fixed (uint* whitespacePtr = whitespaceCodepoints)
+        {
+            GhosttyVtNative.GhosttyTerminalSelectLineOptions options =
+                GhosttyVtNative.GhosttyTerminalSelectLineOptions.CreateSized();
+            options.Reference = reference;
+            options.Whitespace = whitespacePtr;
+            options.WhitespaceLength = (nuint)whitespaceCodepoints.Length;
+            options.SemanticPromptBoundary = semanticPromptBoundary;
+            GhosttyVtNative.GhosttyResult result =
+                GhosttyVtNative.TerminalSelectLine(_handle, &options, ref native);
+            return TryConvertSelectionResult(
+                result,
+                in native,
+                "ghostty_terminal_select_line",
+                out selection);
+        }
+    }
+
+    /// <summary>Derives a selection covering all selectable terminal content.</summary>
+    public bool TrySelectAll(out GhosttySelection selection)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange native =
+            GhosttyVtNative.GhosttySelectionRange.CreateSized();
+        GhosttyVtNative.GhosttyResult result =
+            GhosttyVtNative.TerminalSelectAll(_handle, ref native);
+        return TryConvertSelectionResult(
+            result,
+            in native,
+            "ghostty_terminal_select_all",
+            out selection);
+    }
+
+    /// <summary>Derives a shell-integration command-output selection.</summary>
+    public bool TrySelectOutput(
+        in GhosttyVtNative.GhosttyGridRef reference,
+        out GhosttySelection selection)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange native =
+            GhosttyVtNative.GhosttySelectionRange.CreateSized();
+        GhosttyVtNative.GhosttyResult result =
+            GhosttyVtNative.TerminalSelectOutput(_handle, reference, ref native);
+        return TryConvertSelectionResult(
+            result,
+            in native,
+            "ghostty_terminal_select_output",
+            out selection);
+    }
+
+    /// <summary>
+    /// Formats the terminal-owned selection or a supplied snapshot into plain text, VT, or HTML bytes.
+    /// </summary>
+    public unsafe bool TryFormatSelection(
+        GhosttyVtNative.GhosttyFormatterFormat format,
+        GhosttySelection? selection,
+        bool unwrap,
+        bool trim,
+        out byte[] output)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange nativeSelection = default;
+        GhosttyVtNative.GhosttyTerminalSelectionFormatOptions options =
+            GhosttyVtNative.GhosttyTerminalSelectionFormatOptions.CreateSized();
+        options.Format = format;
+        options.Unwrap = unwrap;
+        options.Trim = trim;
+        if (selection is not null)
+        {
+            nativeSelection = selection.Value.ToNative();
+            options.Selection = &nativeSelection;
+        }
+
+        GhosttyVtNative.GhosttyResult probe = GhosttyVtNative.TerminalSelectionFormatBuffer(
+            _handle,
+            options,
+            null,
+            0,
+            out nuint required);
+        if (probe == GhosttyVtNative.GhosttyResult.NoValue)
+        {
+            output = [];
+            return false;
+        }
+
+        if (probe != GhosttyVtNative.GhosttyResult.OutOfSpace)
+        {
+            ThrowIfFailed(probe, "ghostty_terminal_selection_format_buf(probe)");
+        }
+
+        byte[] result = new byte[checked((int)required)];
+        fixed (byte* resultPtr = result)
+        {
+            ThrowIfFailed(
+                GhosttyVtNative.TerminalSelectionFormatBuffer(
+                    _handle,
+                    options,
+                    resultPtr,
+                    (nuint)result.Length,
+                    out nuint written),
+                "ghostty_terminal_selection_format_buf");
+            if (written != (nuint)result.Length)
+            {
+                Array.Resize(ref result, checked((int)written));
+            }
+        }
+
+        output = result;
+        return true;
+    }
+
+    /// <summary>Adjusts the logical end of a selection snapshot.</summary>
+    public GhosttySelection AdjustSelection(
+        GhosttySelection selection,
+        GhosttyVtNative.GhosttySelectionAdjust adjustment)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange native = selection.ToNative();
+        ThrowIfFailed(
+            GhosttyVtNative.TerminalSelectionAdjust(_handle, ref native, adjustment),
+            "ghostty_terminal_selection_adjust");
+        return GhosttySelection.FromNative(in native);
+    }
+
+    /// <summary>Gets the visual order of a selection snapshot.</summary>
+    public GhosttyVtNative.GhosttySelectionOrder GetSelectionOrder(GhosttySelection selection)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange native = selection.ToNative();
+        ThrowIfFailed(
+            GhosttyVtNative.TerminalSelectionOrder(
+                _handle,
+                in native,
+                out GhosttyVtNative.GhosttySelectionOrder order),
+            "ghostty_terminal_selection_order");
+        return order;
+    }
+
+    /// <summary>Returns an equivalent selection snapshot in the requested visual order.</summary>
+    public GhosttySelection OrderSelection(
+        GhosttySelection selection,
+        GhosttyVtNative.GhosttySelectionOrder order)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange native = selection.ToNative();
+        GhosttyVtNative.GhosttySelectionRange output =
+            GhosttyVtNative.GhosttySelectionRange.CreateSized();
+        ThrowIfFailed(
+            GhosttyVtNative.TerminalSelectionOrdered(_handle, in native, order, ref output),
+            "ghostty_terminal_selection_ordered");
+        return GhosttySelection.FromNative(in output);
+    }
+
+    /// <summary>Gets whether a terminal point is contained in a selection snapshot.</summary>
+    public bool SelectionContains(
+        GhosttySelection selection,
+        GhosttyVtNative.GhosttyPoint point)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange native = selection.ToNative();
+        ThrowIfFailed(
+            GhosttyVtNative.TerminalSelectionContains(_handle, in native, point, out bool contains),
+            "ghostty_terminal_selection_contains");
+        return contains;
+    }
+
+    /// <summary>Gets whether two selection snapshots identify the same cells.</summary>
+    public bool SelectionsEqual(GhosttySelection first, GhosttySelection second)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttySelectionRange nativeFirst = first.ToNative();
+        GhosttyVtNative.GhosttySelectionRange nativeSecond = second.ToNative();
+        ThrowIfFailed(
+            GhosttyVtNative.TerminalSelectionEqual(
+                _handle,
+                in nativeFirst,
+                in nativeSecond,
+                out bool equal),
+            "ghostty_terminal_selection_equal");
+        return equal;
+    }
+
     /// <summary>Gets the terminal width in cells.</summary>
     public ushort GetColumns() => GetValue<ushort>(GhosttyVtNative.GhosttyTerminalData.Cols);
 
@@ -349,6 +681,44 @@ public sealed class GhosttyTerminal : IDisposable
     /// <summary>Gets the current effective terminal scrollbar state.</summary>
     public GhosttyVtNative.GhosttyTerminalScrollbar GetScrollbar()
         => GetValue<GhosttyVtNative.GhosttyTerminalScrollbar>(GhosttyVtNative.GhosttyTerminalData.Scrollbar);
+
+    /// <summary>Gets whether the viewport is pinned to the active area.</summary>
+    public bool GetViewportActive()
+        => GetValue<bool>(GhosttyVtNative.GhosttyTerminalData.ViewportActive);
+
+    /// <summary>Gets whether terminal VT processing has observed a semantic failure.</summary>
+    public bool GetVtProcessingError()
+        => GetValue<bool>(GhosttyVtNative.GhosttyTerminalData.VtProcessingError);
+
+    /// <summary>Gets the configured scrollback byte limit when bounded.</summary>
+    public bool TryGetScrollbackMaxBytes(out nuint bytes)
+        => TryGetValue(GhosttyVtNative.GhosttyTerminalData.ScrollbackMaxBytes, out bytes);
+
+    /// <summary>Gets the configured physical scrollback line limit when bounded.</summary>
+    public bool TryGetScrollbackMaxLines(out nuint lines)
+        => TryGetValue(GhosttyVtNative.GhosttyTerminalData.ScrollbackMaxLines, out lines);
+
+    /// <summary>Gets the current scrollback-compression activity token.</summary>
+    public ulong GetCompressionActivity()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfFailed(
+            GhosttyVtNative.TerminalCompressionActivity(_handle, out ulong activity),
+            "ghostty_terminal_compression_activity");
+        return activity;
+    }
+
+    /// <summary>Runs one incremental or full native scrollback-compression pass.</summary>
+    public GhosttyVtNative.GhosttyTerminalCompressionResult Compress(
+        GhosttyVtNative.GhosttyTerminalCompressionMode mode =
+            GhosttyVtNative.GhosttyTerminalCompressionMode.Incremental)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfFailed(
+            GhosttyVtNative.TerminalCompress(_handle, mode, out GhosttyVtNative.GhosttyTerminalCompressionResult result),
+            "ghostty_terminal_compress");
+        return result;
+    }
 
     /// <summary>Gets the Kitty image storage limit when Kitty Graphics is available.</summary>
     public bool TryGetKittyImageStorageLimit(out ulong bytes)
@@ -439,6 +809,16 @@ public sealed class GhosttyTerminal : IDisposable
 
         ThrowIfFailed(result, "ghostty_terminal_grid_ref");
         return true;
+    }
+
+    /// <summary>Creates an owned grid reference that follows the resolved cell.</summary>
+    public GhosttyTrackedGridReference TrackGridReference(GhosttyVtNative.GhosttyPoint point)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfFailed(
+            GhosttyVtNative.TerminalGridRefTrack(_handle, point, out nint reference),
+            "ghostty_terminal_grid_ref_track");
+        return new GhosttyTrackedGridReference(reference);
     }
 
     /// <summary>Attempts to convert a grid reference back into a point.</summary>
@@ -598,6 +978,23 @@ public sealed class GhosttyTerminal : IDisposable
         }
 
         throw new InvalidOperationException($"{operation} failed with {result}.");
+    }
+
+    private static bool TryConvertSelectionResult(
+        GhosttyVtNative.GhosttyResult result,
+        in GhosttyVtNative.GhosttySelectionRange native,
+        string operation,
+        out GhosttySelection selection)
+    {
+        if (result == GhosttyVtNative.GhosttyResult.NoValue)
+        {
+            selection = default;
+            return false;
+        }
+
+        ThrowIfFailed(result, operation);
+        selection = GhosttySelection.FromNative(in native);
+        return true;
     }
 
     internal static GhosttyVtNative.GhosttyColorRgb ToNativeColor(uint argb)

@@ -40,4 +40,9 @@ public readonly struct GhosttySelection
         range.Rectangle = Rectangle;
         return range;
     }
+
+    internal static GhosttySelection FromNative(in GhosttyVtNative.GhosttySelectionRange range)
+    {
+        return new GhosttySelection(range.Start, range.End, range.Rectangle);
+    }
 }
