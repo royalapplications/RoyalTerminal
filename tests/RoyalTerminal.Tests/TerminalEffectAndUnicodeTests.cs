@@ -187,6 +187,7 @@ public class TerminalEffectAndUnicodeTests
         processor.Process("\u001b]52;c;SG k=\u0007"u8);
         processor.Process("\u001b]52;c;SGk\u0007"u8);
         processor.Process("\u001b]52;c;?\u0007"u8);
+        processor.Process("\u001b]52;x;SGk=\u0007"u8);
 
         Assert.Empty(writes);
 
@@ -258,6 +259,11 @@ public class TerminalEffectAndUnicodeTests
             (nuint)2,
             processor.GetGraphemeWidth([0xD800, 0x0301], out byte surrogateWidth));
         Assert.Equal((byte)0, surrogateWidth);
+
+        Assert.Equal(
+            (nuint)1,
+            processor.GetGraphemeWidth([0xD83D, 0xDE00], out byte surrogatePairWidth));
+        Assert.Equal((byte)0, surrogatePairWidth);
 
         Assert.Equal(
             (nuint)1,

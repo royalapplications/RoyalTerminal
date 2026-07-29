@@ -177,7 +177,11 @@ public static class TerminalCellWidthCalculator
                 uint codepoint = codepoints[index];
                 if (codepoint is >= 0xD800 and <= 0xDFFF)
                 {
-                    utf16[written++] = (char)codepoint;
+                    // The input is a sequence of Unicode scalar values, not
+                    // UTF-16 code units. Preserve each invalid surrogate
+                    // scalar as its own replacement character so adjacent
+                    // high/low values cannot be reinterpreted as one rune.
+                    utf16[written++] = '\uFFFD';
                 }
                 else
                 {

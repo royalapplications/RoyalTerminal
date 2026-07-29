@@ -2540,14 +2540,23 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        TerminalClipboardLocation location = selector.Length > 0
-            ? selector[0] switch
-            {
-                's' => TerminalClipboardLocation.Selection,
-                'p' => TerminalClipboardLocation.Primary,
-                _ => TerminalClipboardLocation.Standard,
-            }
-            : TerminalClipboardLocation.Standard;
+        TerminalClipboardLocation location;
+        if (selector.IsEmpty || selector.SequenceEqual("c"))
+        {
+            location = TerminalClipboardLocation.Standard;
+        }
+        else if (selector.SequenceEqual("s"))
+        {
+            location = TerminalClipboardLocation.Selection;
+        }
+        else if (selector.SequenceEqual("p"))
+        {
+            location = TerminalClipboardLocation.Primary;
+        }
+        else
+        {
+            return;
+        }
 
         TryWriteClipboard(location, payload, allowClear: true);
     }

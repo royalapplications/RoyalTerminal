@@ -75,6 +75,7 @@ public class UnicodeWidthTests
             [0x0600, (uint)'A'],
             [0x0301, 0x0302],
             [0xD800, 0x0301],
+            [0xD83D, 0xDE00],
             [0x11_0000, 0x0301],
             [(uint)'A', 0x11_0000],
         ];
