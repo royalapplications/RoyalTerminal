@@ -469,4 +469,92 @@ public class GhosttySelectionTests
         Assert.Equal((ushort)2, point.X);
         Assert.Equal(0u, point.Y);
     }
+
+    [GhosttyNativeFact]
+    public void TrackedGridReference_FollowsScrollAndResizeReflow()
+    {
+        using GhosttyTerminal terminal = new(5, 2, maxScrollback: 2_000_000);
+        terminal.Write("ABCDEFGHIJ"u8);
+
+        using GhosttyTrackedGridReference tracked =
+            terminal.TrackGridReference(GhosttyVtNative.GhosttyPoint.Active(1, 1));
+        AssertTrackedGrapheme(tracked, (uint)'G');
+
+        terminal.Resize(10, 2);
+        Assert.True(
+            tracked.TryGetPoint(
+                GhosttyVtNative.GhosttyPointTag.Active,
+                out GhosttyVtNative.GhosttyPointCoordinate point));
+        Assert.Equal((ushort)6, point.X);
+        Assert.Equal(0u, point.Y);
+        AssertTrackedGrapheme(tracked, (uint)'G');
+
+        terminal.Write("\r\nKLMNO\r\nPQRST"u8);
+        Assert.True(
+            tracked.TryGetPoint(
+                GhosttyVtNative.GhosttyPointTag.History,
+                out point));
+        Assert.Equal((ushort)6, point.X);
+        Assert.Equal(0u, point.Y);
+        AssertTrackedGrapheme(tracked, (uint)'G');
+
+        terminal.Resize(5, 2);
+        Assert.True(
+            tracked.TryGetPoint(
+                GhosttyVtNative.GhosttyPointTag.History,
+                out point));
+        Assert.Equal((ushort)1, point.X);
+        Assert.Equal(1u, point.Y);
+        AssertTrackedGrapheme(tracked, (uint)'G');
+    }
+
+    [GhosttyNativeFact]
+    public void TrackedGridReference_IsInvalidatedAfterPruning()
+    {
+        using GhosttyTerminal terminal = new(5, 2, maxScrollback: 2_000_000);
+        terminal.SetScrollbackMaxBytes(null);
+        terminal.SetScrollbackMaxLines(2);
+        terminal.Write("A"u8);
+
+        using GhosttyTrackedGridReference tracked =
+            terminal.TrackGridReference(GhosttyVtNative.GhosttyPoint.Active(0, 0));
+
+        byte[] output = new byte[20_000 * 3];
+        for (int offset = 0; offset < output.Length; offset += 3)
+        {
+            output[offset] = (byte)'X';
+            output[offset + 1] = (byte)'\r';
+            output[offset + 2] = (byte)'\n';
+        }
+
+        terminal.Write(output);
+
+        Assert.False(tracked.HasValue);
+        Assert.False(tracked.TrySnapshot(out _));
+        Assert.False(
+            tracked.TryGetPoint(
+                GhosttyVtNative.GhosttyPointTag.Screen,
+                out _));
+    }
+
+    private static unsafe void AssertTrackedGrapheme(
+        GhosttyTrackedGridReference tracked,
+        uint expected)
+    {
+        Assert.True(tracked.TrySnapshot(out GhosttyVtNative.GhosttyGridRef snapshot));
+        uint[] graphemes = new uint[4];
+        fixed (uint* graphemePtr = graphemes)
+        {
+            Assert.Equal(
+                GhosttyVtNative.GhosttyResult.Success,
+                GhosttyVtNative.GridRefGraphemes(
+                    in snapshot,
+                    graphemePtr,
+                    (nuint)graphemes.Length,
+                    out nuint written));
+            Assert.Equal((nuint)1, written);
+        }
+
+        Assert.Equal(expected, graphemes[0]);
+    }
 }

@@ -194,7 +194,7 @@ public class GhosttyVtProcessorTests
         const int resizedColumns = 400;
         const int viewportRows = 24;
         const int scrollbackLimit = 2_000;
-        const int preResizeRows = scrollbackLimit - 100;
+        const int preResizeLogicalRows = 440;
         ulong resizedRowsPerPage = GhosttyScrollbackBudget.RowsPerPage(resizedColumns);
         int outputRows = checked(
             scrollbackLimit + viewportRows + (int)(resizedRowsPerPage * 20UL));
@@ -206,8 +206,11 @@ public class GhosttyVtProcessorTests
             viewportRows,
             widthPx: 800,
             heightPx: 480);
-        PopulateIdentifiedScrollback(processor, preResizeRows);
-        AssertIdentifiedScrollbackVisibleAtTop(processor, screen);
+        PopulateIdentifiedSoftWrappedScrollback(
+            processor,
+            logicalRows: preResizeLogicalRows,
+            lineColumns: resizedColumns);
+        AssertIdentifiedScrollbackVisibleAtTop(processor, screen, "KKKK");
 
         processor.NotifyResize(
             resizedColumns,
@@ -221,7 +224,7 @@ public class GhosttyVtProcessorTests
                 viewportRows,
                 scrollbackLimit),
             processor.NativeScrollbackMaxBytes);
-        AssertIdentifiedScrollbackVisibleAtTop(processor, screen);
+        AssertIdentifiedScrollbackVisibleAtTop(processor, screen, "KKKK");
 
         byte[] output = new byte[outputRows * 3];
         for (int offset = 0; offset < output.Length; offset += 3)
@@ -1216,12 +1219,33 @@ public class GhosttyVtProcessorTests
         processor.Process(output);
     }
 
+    private static void PopulateIdentifiedSoftWrappedScrollback(
+        GhosttyVtProcessor processor,
+        int logicalRows,
+        int lineColumns)
+    {
+        byte[] output = new byte[checked(logicalRows * (lineColumns + 2))];
+        int offset = 0;
+        for (int row = 0; row < logicalRows; row++)
+        {
+            byte fill = row < 100 ? (byte)'K' : (byte)'X';
+            output.AsSpan(offset, lineColumns).Fill(fill);
+
+            offset += lineColumns;
+            output[offset++] = (byte)'\r';
+            output[offset++] = (byte)'\n';
+        }
+
+        processor.Process(output);
+    }
+
     private static void AssertIdentifiedScrollbackVisibleAtTop(
         GhosttyVtProcessor processor,
-        TerminalScreen screen)
+        TerminalScreen screen,
+        string expected = "KEEP")
     {
         processor.ScrollViewportToTop();
-        Assert.Equal("KEEP", ReadAsciiPrefix(screen, row: 0, columns: 4));
+        Assert.Equal(expected, ReadAsciiPrefix(screen, row: 0, columns: expected.Length));
         processor.ScrollViewportToBottom();
     }
 

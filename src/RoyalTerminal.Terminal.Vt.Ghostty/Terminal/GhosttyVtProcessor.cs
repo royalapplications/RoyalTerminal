@@ -605,23 +605,31 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         bool hadPreviousByteLimit =
             _terminal.TryGetScrollbackMaxBytes(out nuint previousByteLimit);
-        bool hadPreviousLimit = _terminal.TryGetScrollbackMaxLines(out nuint previousLimit);
+        bool hadPreviousLineLimit =
+            _terminal.TryGetScrollbackMaxLines(out nuint previousLineLimit);
         nuint resizedByteLimit = GhosttyScrollbackBudget.FromRows(
             columns,
             rows,
+            _screen.ScrollbackLimit);
+        nuint resizedLineLimit = GhosttyScrollbackBudget.LineLimitFromRows(
+            columns,
             _screen.ScrollbackLimit);
         nuint preResizeByteLimit =
             hadPreviousByteLimit && previousByteLimit > resizedByteLimit
                 ? previousByteLimit
                 : resizedByteLimit;
+        nuint preResizeLineLimit =
+            hadPreviousLineLimit && previousLineLimit > resizedLineLimit
+                ? previousLineLimit
+                : resizedLineLimit;
 
         try
         {
-            // Never tighten the byte cap before reflow. A wide-to-narrow resize
-            // makes each page hold more rows, so applying the smaller resized
-            // budget first would prune rows that fit after the resize.
+            // Never tighten either cap before reflow. The target geometry can
+            // make retained content denser, so applying a smaller target limit
+            // first would prune rows that fit after the resize.
             _terminal.SetScrollbackMaxBytes(preResizeByteLimit);
-            ApplyNativeScrollbackLineLimit(columns);
+            _terminal.SetScrollbackMaxLines(preResizeLineLimit);
 
             if (_localReflowOnResize)
             {
@@ -649,6 +657,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             }
 
             _terminal.SetScrollbackMaxBytes(resizedByteLimit);
+            _terminal.SetScrollbackMaxLines(resizedLineLimit);
         }
         catch
         {
@@ -660,7 +669,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             finally
             {
                 _terminal.SetScrollbackMaxLines(
-                    hadPreviousLimit ? previousLimit : null);
+                    hadPreviousLineLimit ? previousLineLimit : null);
             }
 
             throw;
