@@ -148,6 +148,61 @@ public class GhosttyVtProcessorTests
             widthPx: 800,
             heightPx: 480);
 
+        Assert.Equal(
+            GhosttyScrollbackBudget.FromRows(
+                resizedColumns,
+                viewportRows,
+                scrollbackLimit),
+            processor.NativeScrollbackMaxBytes);
+
+        byte[] output = new byte[outputRows * 3];
+        for (int offset = 0; offset < output.Length; offset += 3)
+        {
+            output[offset] = (byte)'X';
+            output[offset + 1] = (byte)'\r';
+            output[offset + 2] = (byte)'\n';
+        }
+
+        processor.Process(output);
+
+        Assert.Equal((ulong)scrollbackLimit, processor.ViewportScrollState.MaxOffsetRows);
+        Assert.InRange(
+            processor.NativeScrollbackRows,
+            (ulong)scrollbackLimit,
+            (ulong)scrollbackLimit + resizedRowsPerPage * 5UL);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_NarrowToWideResizeRetainsConfiguredNativeScrollback_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        const int initialColumns = 80;
+        const int resizedColumns = 400;
+        const int viewportRows = 24;
+        const int scrollbackLimit = 2_000;
+        ulong resizedRowsPerPage = GhosttyScrollbackBudget.RowsPerPage(resizedColumns);
+        int outputRows = checked(
+            scrollbackLimit + viewportRows + (int)(resizedRowsPerPage * 20UL));
+
+        TerminalScreen screen = new(initialColumns, viewportRows, scrollbackLimit);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(
+            resizedColumns,
+            viewportRows,
+            widthPx: 4_000,
+            heightPx: 480);
+
+        Assert.Equal(
+            GhosttyScrollbackBudget.FromRows(
+                resizedColumns,
+                viewportRows,
+                scrollbackLimit),
+            processor.NativeScrollbackMaxBytes);
+
         byte[] output = new byte[outputRows * 3];
         for (int offset = 0; offset < output.Length; offset += 3)
         {

@@ -196,6 +196,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         ? _scrollbar.Total - _scrollbar.Length
         : 0;
 
+    internal nuint? NativeScrollbackMaxBytes =>
+        _terminal.TryGetScrollbackMaxBytes(out nuint bytes) ? bytes : null;
+
     private readonly record struct ViewportScrollMapping(
         ulong VisibleRows,
         ulong EffectiveBaseOffsetRows,
@@ -600,37 +603,66 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     private void ResizeNativeTerminal(ushort columns, ushort rows, uint cellWidthPx, uint cellHeightPx)
     {
+        bool hadPreviousByteLimit =
+            _terminal.TryGetScrollbackMaxBytes(out nuint previousByteLimit);
         bool hadPreviousLimit = _terminal.TryGetScrollbackMaxLines(out nuint previousLimit);
-        ApplyNativeScrollbackLineLimit(columns);
+        nuint resizedByteLimit = GhosttyScrollbackBudget.FromRows(
+            columns,
+            rows,
+            _screen.ScrollbackLimit);
+        nuint preResizeByteLimit =
+            hadPreviousByteLimit && previousByteLimit > resizedByteLimit
+                ? previousByteLimit
+                : resizedByteLimit;
 
         try
         {
+            // Never tighten the byte cap before reflow. A wide-to-narrow resize
+            // makes each page hold more rows, so applying the smaller resized
+            // budget first would prune rows that fit after the resize.
+            _terminal.SetScrollbackMaxBytes(preResizeByteLimit);
+            ApplyNativeScrollbackLineLimit(columns);
+
             if (_localReflowOnResize)
             {
                 _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
-                return;
+            }
+            else
+            {
+                bool previousWraparound = _terminal.GetMode(s_wraparoundMode);
+                if (!previousWraparound)
+                {
+                    _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
+                }
+                else
+                {
+                    _terminal.SetMode(s_wraparoundMode, false);
+                    try
+                    {
+                        _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
+                    }
+                    finally
+                    {
+                        _terminal.SetMode(s_wraparoundMode, true);
+                    }
+                }
             }
 
-            bool previousWraparound = _terminal.GetMode(s_wraparoundMode);
-            if (!previousWraparound)
-            {
-                _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
-                return;
-            }
-
-            _terminal.SetMode(s_wraparoundMode, false);
-            try
-            {
-                _terminal.Resize(columns, rows, cellWidthPx, cellHeightPx);
-            }
-            finally
-            {
-                _terminal.SetMode(s_wraparoundMode, true);
-            }
+            _terminal.SetScrollbackMaxBytes(resizedByteLimit);
         }
         catch
         {
-            _terminal.SetScrollbackMaxLines(hadPreviousLimit ? previousLimit : null);
+            try
+            {
+                _terminal.SetScrollbackMaxBytes(
+                    hadPreviousByteLimit ? previousByteLimit : null);
+            }
+            finally
+            {
+                _terminal.SetScrollbackMaxLines(
+                    hadPreviousLimit ? previousLimit : null);
+            }
+
             throw;
         }
     }

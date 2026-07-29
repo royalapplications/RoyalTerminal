@@ -202,10 +202,12 @@ Some APIs are inherently specific to libghostty's storage:
 - Ghostty palette generation is exposed as an opt-in native utility, while the
   managed VT keeps RoyalTerminal's theme and palette model.
 
-The native physical-line pruning slack is recalculated and installed before
-every width resize. Ghostty enforces the configured limit during reflow, so
-this ordering preserves the requested row contract when a wide terminal is
-resized narrower.
+The native byte budget and physical-line pruning slack are recalculated for
+every resize. Before reflow, RoyalTerminal installs the larger of the previous
+and resized byte budgets together with the resized line limit. This raises
+capacity before a narrow-to-wide resize without prematurely tightening storage
+for a wide-to-narrow resize. After reflow it commits the exact resized budget;
+failures restore both previous limits.
 
 ## Terminal behavior decisions
 
@@ -268,7 +270,8 @@ Coverage is split by responsibility:
   variation-selector edge cases;
 - malformed OSC 9 progress suffix rejection and notification fallback;
 - exact OSC 9 no-payload command recognition and notification-prefix fallback;
-- wide-to-narrow native scrollback retention across line-limit recalculation;
+- bidirectional native resize scrollback retention across width-dependent byte-
+  and line-limit recalculation;
 - sized callback ABI layouts and undersized callback rejection;
 - selection-gesture reuse across live terminals and after disposal of the
   previous terminal;
