@@ -161,7 +161,7 @@ public class GhosttySelectionTests
     }
 
     [GhosttyNativeFact]
-    public void SelectionGesture_CustomWordBoundariesAreCopiedByNativeEvent()
+    public void SelectionGesture_CustomWordBoundariesAreCopiedAndCanBeCleared()
     {
         using GhosttyTerminal terminal = new(7, 2);
         using GhosttySelectionGesture gesture = new();
@@ -195,6 +195,23 @@ public class GhosttySelectionTests
                 trim: false,
                 out byte[] formatted));
         Assert.Equal("abc", Encoding.UTF8.GetString(formatted));
+
+        gesture.Reset(terminal);
+        press.Clear(GhosttyVtNative.GhosttySelectionGestureEventOption.WordBoundaryCodepoints);
+
+        Assert.True(
+            gesture.TryApply(
+                terminal,
+                press,
+                out GhosttySelectionSnapshot defaultBoundarySelection));
+        Assert.True(
+            terminal.TryFormatSelection(
+                GhosttyVtNative.GhosttyFormatterFormat.Plain,
+                defaultBoundarySelection,
+                unwrap: false,
+                trim: false,
+                out byte[] defaultBoundaryFormatted));
+        Assert.Equal("abc.def", Encoding.UTF8.GetString(defaultBoundaryFormatted));
     }
 
     [GhosttyNativeFact]
