@@ -189,6 +189,25 @@ public class GhosttyVtTerminalTests
     }
 
     [GhosttyNativeFact]
+    public void OfficialTerminal_KittyTempFileMediumCanBeDisabled()
+    {
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        using GhosttyTerminal terminal = new(80, 24);
+        terminal.SetKittyImageMediumTempFileDirectory(Path.GetTempPath());
+
+        Assert.True(terminal.TryGetKittyImageMediumTempFileDirectory(out _));
+
+        terminal.DisableKittyImageMediumTempFile();
+
+        Assert.False(terminal.TryGetKittyImageMediumTempFileDirectory(out _));
+    }
+
+    [GhosttyNativeFact]
     public void OfficialTerminal_EffectCallbacks_FireForBellTitleAndWritePty()
     {
         using GhosttyTerminal terminal = new(80, 24);
