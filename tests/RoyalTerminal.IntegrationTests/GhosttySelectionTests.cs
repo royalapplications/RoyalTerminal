@@ -161,6 +161,43 @@ public class GhosttySelectionTests
     }
 
     [GhosttyNativeFact]
+    public void SelectionGesture_CustomWordBoundariesAreCopiedByNativeEvent()
+    {
+        using GhosttyTerminal terminal = new(7, 2);
+        using GhosttySelectionGesture gesture = new();
+        using GhosttySelectionGestureEvent press =
+            new(GhosttyVtNative.GhosttySelectionGestureEventType.Press);
+
+        terminal.Write("abc.def"u8);
+        Assert.True(
+            terminal.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Active(1, 0),
+                out GhosttyVtNative.GhosttyGridRef reference));
+
+        uint[] boundaries = ['.'];
+        press.SetWordBoundaryCodepoints(boundaries);
+        boundaries[0] = 'x';
+        press.SetReference(reference);
+        press.SetBehaviors(
+            new GhosttyVtNative.GhosttySelectionGestureBehaviors
+            {
+                SingleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Word,
+                DoubleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Word,
+                TripleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Line,
+            });
+
+        Assert.True(gesture.TryApply(terminal, press, out GhosttySelectionSnapshot selection));
+        Assert.True(
+            terminal.TryFormatSelection(
+                GhosttyVtNative.GhosttyFormatterFormat.Plain,
+                selection,
+                unwrap: false,
+                trim: false,
+                out byte[] formatted));
+        Assert.Equal("abc", Encoding.UTF8.GetString(formatted));
+    }
+
+    [GhosttyNativeFact]
     public void SelectionGesture_RepeatTimingPromotesConfiguredDoubleClickBehavior()
     {
         using GhosttyTerminal terminal = new(5, 2);
