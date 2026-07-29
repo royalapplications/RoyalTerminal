@@ -136,12 +136,21 @@ public class GhosttyVtProcessorTests
         const int resizedColumns = 80;
         const int viewportRows = 24;
         const int scrollbackLimit = 2_000;
+        const int preResizeRows = scrollbackLimit - 100;
         ulong resizedRowsPerPage = GhosttyScrollbackBudget.RowsPerPage(resizedColumns);
         int outputRows = checked(
             scrollbackLimit + viewportRows + (int)(resizedRowsPerPage * 20UL));
 
         TerminalScreen screen = new(initialColumns, viewportRows, scrollbackLimit);
         using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(
+            initialColumns,
+            viewportRows,
+            widthPx: 4_000,
+            heightPx: 480);
+        PopulateIdentifiedScrollback(processor, preResizeRows);
+        AssertIdentifiedScrollbackVisibleAtTop(processor, screen);
+
         processor.NotifyResize(
             resizedColumns,
             viewportRows,
@@ -154,6 +163,7 @@ public class GhosttyVtProcessorTests
                 viewportRows,
                 scrollbackLimit),
             processor.NativeScrollbackMaxBytes);
+        AssertIdentifiedScrollbackVisibleAtTop(processor, screen);
 
         byte[] output = new byte[outputRows * 3];
         for (int offset = 0; offset < output.Length; offset += 3)
@@ -184,12 +194,21 @@ public class GhosttyVtProcessorTests
         const int resizedColumns = 400;
         const int viewportRows = 24;
         const int scrollbackLimit = 2_000;
+        const int preResizeRows = scrollbackLimit - 100;
         ulong resizedRowsPerPage = GhosttyScrollbackBudget.RowsPerPage(resizedColumns);
         int outputRows = checked(
             scrollbackLimit + viewportRows + (int)(resizedRowsPerPage * 20UL));
 
         TerminalScreen screen = new(initialColumns, viewportRows, scrollbackLimit);
         using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(
+            initialColumns,
+            viewportRows,
+            widthPx: 800,
+            heightPx: 480);
+        PopulateIdentifiedScrollback(processor, preResizeRows);
+        AssertIdentifiedScrollbackVisibleAtTop(processor, screen);
+
         processor.NotifyResize(
             resizedColumns,
             viewportRows,
@@ -202,6 +221,7 @@ public class GhosttyVtProcessorTests
                 viewportRows,
                 scrollbackLimit),
             processor.NativeScrollbackMaxBytes);
+        AssertIdentifiedScrollbackVisibleAtTop(processor, screen);
 
         byte[] output = new byte[outputRows * 3];
         for (int offset = 0; offset < output.Length; offset += 3)
@@ -1177,6 +1197,32 @@ public class GhosttyVtProcessorTests
         }
 
         return new string(chars);
+    }
+
+    private static void PopulateIdentifiedScrollback(
+        GhosttyVtProcessor processor,
+        int rows)
+    {
+        processor.Process("KEEP\r\n"u8);
+
+        byte[] output = new byte[checked((rows - 1) * 3)];
+        for (int offset = 0; offset < output.Length; offset += 3)
+        {
+            output[offset] = (byte)'X';
+            output[offset + 1] = (byte)'\r';
+            output[offset + 2] = (byte)'\n';
+        }
+
+        processor.Process(output);
+    }
+
+    private static void AssertIdentifiedScrollbackVisibleAtTop(
+        GhosttyVtProcessor processor,
+        TerminalScreen screen)
+    {
+        processor.ScrollViewportToTop();
+        Assert.Equal("KEEP", ReadAsciiPrefix(screen, row: 0, columns: 4));
+        processor.ScrollViewportToBottom();
     }
 
     private static string ReadViewportAscii(TerminalScreen screen)

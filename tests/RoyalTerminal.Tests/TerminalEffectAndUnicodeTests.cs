@@ -153,6 +153,24 @@ public class TerminalEffectAndUnicodeTests
     }
 
     [Fact]
+    public void BasicVtProcessor_TreatsOsc9Command10SuffixesAsNotifications()
+    {
+        using BasicVtProcessor processor =
+            new(new TerminalScreen(columns: 80, viewportRows: 24, scrollbackLimit: 100));
+
+        List<TerminalDesktopNotification> notifications = [];
+        processor.DesktopNotificationCallback = notifications.Add;
+
+        processor.Process("\u001b]9;10;3\u0007"u8);
+        Assert.Empty(notifications);
+
+        processor.Process("\u001b]9;10;3 tests passed\u0007"u8);
+        Assert.Equal(
+            new TerminalDesktopNotification(string.Empty, "10;3 tests passed"),
+            Assert.Single(notifications));
+    }
+
+    [Fact]
     public void BasicVtProcessor_RejectsMalformedOsc52ClipboardWrites()
     {
         using BasicVtProcessor processor =
