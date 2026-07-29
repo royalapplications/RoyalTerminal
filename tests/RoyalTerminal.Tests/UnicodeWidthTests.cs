@@ -72,6 +72,7 @@ public class UnicodeWidthTests
             [0x1F3F4, 0x200D, 0x2620, 0xFE0F],
             [0x1F1E6, 0x1F1E7, 0x1F1E8],
             [0x0915, 0x094D, 0x0937, (uint)'A'],
+            [0x0915, 0x094D, 0x0903, 0x0937],
             [0x0600, (uint)'A'],
             [0x0301, 0x0302],
             [0xD800, 0x0301],
@@ -157,6 +158,19 @@ public class UnicodeWidthTests
     public void FirstGraphemeWidth_ConsumesUnicode17IndicConjunct()
     {
         uint[] codepoints = [0x0915, 0x094D, 0x0937, (uint)'A'];
+
+        int consumed = TerminalCellWidthCalculator.GetFirstGraphemeWidth(
+            codepoints,
+            out int width);
+
+        Assert.Equal(3, consumed);
+        Assert.Equal(2, width);
+    }
+
+    [Fact]
+    public void FirstGraphemeWidth_StopsIndicConjunctAtIncbNoneSpacingMark()
+    {
+        uint[] codepoints = [0x0915, 0x094D, 0x0903, 0x0937];
 
         int consumed = TerminalCellWidthCalculator.GetFirstGraphemeWidth(
             codepoints,

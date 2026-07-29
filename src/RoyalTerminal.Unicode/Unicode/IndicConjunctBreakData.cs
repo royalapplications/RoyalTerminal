@@ -2,9 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // Unicode 17.0 Indic_Conjunct_Break data used by UAX #29 rule GB9c.
 
-using System.Globalization;
 using System.Runtime.CompilerServices;
-using System.Text;
 
 namespace RoyalTerminal.Unicode;
 
@@ -32,31 +30,13 @@ internal static class IndicConjunctBreakData
             return IndicConjunctBreakClass.Consonant;
         }
 
-        // Include the non-mark members and Unicode 17 additions that may not
-        // yet have a mark category in the current .NET Unicode tables.
-        if (value is 0x200D or
-            >= 0x1ACF and <= 0x1ADD or
-            >= 0x1AE0 and <= 0x1AEB or
-            >= 0xFF9E and <= 0xFF9F or
-            >= 0x10EFA and <= 0x10EFB or
-            0x11B60 or
-            >= 0x11B62 and <= 0x11B64 or
-            0x11B66 or
-            >= 0x1F3FB and <= 0x1F3FF or
-            0x1E6E3 or
-            0x1E6E6 or
-            >= 0x1E6EE and <= 0x1E6EF or
-            0x1E6F5 or
-            >= 0xE0020 and <= 0xE007F)
-        {
-            return IndicConjunctBreakClass.Extend;
-        }
-
-        UnicodeCategory category =
-            Rune.GetUnicodeCategory(new Rune(checked((int)value)));
-        return category is UnicodeCategory.NonSpacingMark
-            or UnicodeCategory.SpacingCombiningMark
-            or UnicodeCategory.EnclosingMark
+        // Unicode 17's generated InCB=Extend set is the generated GCB Extend
+        // and ZWJ sets, excluding InCB Linkers (handled above) and ZWNJ.
+        // General Unicode mark categories are not equivalent: for example,
+        // U+0903 is a spacing combining mark but has InCB=None.
+        return value != 0x200C &&
+            codepoint.GraphemeBreakClass is GraphemeBreakClass.Extend
+                or GraphemeBreakClass.ZWJ
             ? IndicConjunctBreakClass.Extend
             : IndicConjunctBreakClass.None;
     }
