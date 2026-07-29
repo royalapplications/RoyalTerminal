@@ -2623,7 +2623,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
         return value[1] switch
         {
-            ';' => true,
+            ';' => IsNonEmptyAsciiDecimal(value.AsSpan(2)),
             '0' => value.Length == 2 ||
                    (value.Length == 4 &&
                     value[2] == ';' &&
@@ -2632,6 +2632,24 @@ public sealed class BasicVtProcessor : IVtProcessor,
             '2' => value.Length == 2,
             _ => false,
         };
+    }
+
+    private static bool IsNonEmptyAsciiDecimal(ReadOnlySpan<char> value)
+    {
+        if (value.IsEmpty)
+        {
+            return false;
+        }
+
+        foreach (char character in value)
+        {
+            if (character is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsStrictBase64(ReadOnlySpan<char> value)

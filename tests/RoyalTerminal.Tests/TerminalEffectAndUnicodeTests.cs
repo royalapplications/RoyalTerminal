@@ -86,9 +86,15 @@ public class TerminalEffectAndUnicodeTests
         Assert.Empty(notifications);
 
         processor.Process("\u001b]9;1a\u0007"u8);
+        processor.Process("\u001b]9;1;\u0007"u8);
+        processor.Process("\u001b]9;1;tests passed\u0007"u8);
         Assert.Equal(
-            new TerminalDesktopNotification(string.Empty, "1a"),
-            Assert.Single(notifications));
+            [
+                new TerminalDesktopNotification(string.Empty, "1a"),
+                new TerminalDesktopNotification(string.Empty, "1;"),
+                new TerminalDesktopNotification(string.Empty, "1;tests passed"),
+            ],
+            notifications);
     }
 
     [Fact]
