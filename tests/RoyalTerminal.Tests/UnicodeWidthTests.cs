@@ -78,6 +78,7 @@ public class UnicodeWidthTests
             [0xD83D, 0xDE00],
             [0x11_0000, 0x0301],
             [(uint)'A', 0x11_0000],
+            [0x0600, 0x11_0000],
         ];
 
         foreach (uint[] codepoints in cases)
@@ -176,6 +177,19 @@ public class UnicodeWidthTests
 
         Assert.Equal(2, consumed);
         Assert.Equal(2, width);
+    }
+
+    [Fact]
+    public void FirstGraphemeWidth_TreatsOutOfRangeValueAfterPrependAsBoundary()
+    {
+        uint[] codepoints = [0x0600, 0x11_0000];
+
+        int consumed = TerminalCellWidthCalculator.GetFirstGraphemeWidth(
+            codepoints,
+            out int width);
+
+        Assert.Equal(1, consumed);
+        Assert.Equal(1, width);
     }
 
     [Fact]
