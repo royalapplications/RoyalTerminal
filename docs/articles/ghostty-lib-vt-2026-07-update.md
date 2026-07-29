@@ -287,8 +287,9 @@ native macOS integration tests, documentation generation, and NuGet packing.
 ## Preview version
 
 The repository's default package metadata is `0.5.0-preview.1`
-(`VersionPrefix=0.5.0`, `VersionSuffix=preview.1`). Publishing remains
-tag-driven; this change does not create or push a release tag.
+(`VersionPrefix=0.5.0`, `VersionSuffix=preview.1`). The matching preview is
+published only through the tag-driven release workflow; changing the repository
+version does not publish packages by itself.
 
 ## Consumer guidance
 
