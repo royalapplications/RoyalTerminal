@@ -186,11 +186,12 @@ clear. OSC 1337 keys are ASCII case-insensitive; `Copy=:BASE64` writes the
 standard clipboard but does not treat an empty payload as a clear. Valid
 non-notification ConEmu OSC 9 commands are consumed rather than being
 misreported as desktop notifications. OSC 9 progress states accept only an
-end-of-value or a semicolon-delimited decimal percentage; malformed suffixes
-fall back to OSC 9 notification handling instead of producing a false 0%
-progress report. Payloads `5` and `12` are recognized as no-payload ConEmu
-commands only on exact matches, so notification text beginning with either
-value remains visible.
+end-of-value or a semicolon-delimited decimal percentage containing at least
+one digit; malformed suffixes and empty percentage fields fall back to OSC 9
+notification handling instead of producing a false 0% progress report.
+Payloads `5` and `12` are recognized as no-payload ConEmu commands only on
+exact matches, so notification text beginning with either value remains
+visible.
 
 Some APIs are inherently specific to libghostty's storage:
 
@@ -268,18 +269,26 @@ Coverage is split by responsibility:
 - exhaustive managed/native codepoint-width parity across U+0000–U+10FFFF,
   plus focused grapheme consumption, Unicode 17 Indic-conjunct, and
   variation-selector edge cases;
-- malformed OSC 9 progress suffix rejection and notification fallback;
+- malformed OSC 9 progress suffix and empty-percentage rejection with
+  notification fallback;
 - exact OSC 9 no-payload command recognition and notification-prefix fallback;
 - bidirectional native resize scrollback retention across width-dependent byte-
   and line-limit recalculation;
 - sized callback ABI layouts and undersized callback rejection;
-- selection-gesture reuse across live terminals and after disposal of the
-  previous terminal;
+- selection-gesture press/repeat timing, drag geometry, rectangle, release,
+  deep-press, viewport/autoscroll state, reuse across live terminals, and reuse
+  after disposal of the previous terminal;
 - existing DECRQSS and OSC parity suites.
 
 The CI matrix builds native libraries for Linux x64/ARM64, macOS x64/ARM64, and
 Windows x64/ARM64, then runs managed builds/tests on Linux, macOS, and Windows,
 native macOS integration tests, documentation generation, and NuGet packing.
+
+## Preview version
+
+The repository's default package metadata is `0.5.0-preview.1`
+(`VersionPrefix=0.5.0`, `VersionSuffix=preview.1`). Publishing remains
+tag-driven; this change does not create or push a release tag.
 
 ## Consumer guidance
 

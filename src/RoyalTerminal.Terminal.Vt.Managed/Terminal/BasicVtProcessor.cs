@@ -2729,25 +2729,27 @@ public sealed class BasicVtProcessor : IVtProcessor,
             }
 
             ReadOnlySpan<char> percentage = value.AsSpan(4);
-            if (!percentage.IsEmpty)
+            if (percentage.IsEmpty)
             {
-                int parsed = 0;
-                foreach (char character in percentage)
-                {
-                    if (character is < '0' or > '9')
-                    {
-                        return false;
-                    }
+                return false;
+            }
 
-                    parsed = Math.Min(100, (parsed * 10) + (character - '0'));
+            int parsed = 0;
+            foreach (char character in percentage)
+            {
+                if (character is < '0' or > '9')
+                {
+                    return false;
                 }
 
-                if (state is TerminalProgressState.Set or
-                    TerminalProgressState.Error or
-                    TerminalProgressState.Pause)
-                {
-                    progress = checked((byte)parsed);
-                }
+                parsed = Math.Min(100, (parsed * 10) + (character - '0'));
+            }
+
+            if (state is TerminalProgressState.Set or
+                TerminalProgressState.Error or
+                TerminalProgressState.Pause)
+            {
+                progress = checked((byte)parsed);
             }
         }
 

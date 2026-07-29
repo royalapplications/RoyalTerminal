@@ -104,12 +104,14 @@ public class TerminalEffectAndUnicodeTests
 
         processor.Process("\u001b]9;4;1garbage\u0007"u8);
         processor.Process("\u001b]9;4;1;42garbage\u0007"u8);
+        processor.Process("\u001b]9;4;1;\u0007"u8);
 
         Assert.Empty(progressReports);
         Assert.Equal(
             [
                 new TerminalDesktopNotification(string.Empty, "4;1garbage"),
                 new TerminalDesktopNotification(string.Empty, "4;1;42garbage"),
+                new TerminalDesktopNotification(string.Empty, "4;1;"),
             ],
             notifications);
     }

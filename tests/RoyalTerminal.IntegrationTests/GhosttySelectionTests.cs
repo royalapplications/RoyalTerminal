@@ -161,6 +161,196 @@ public class GhosttySelectionTests
     }
 
     [GhosttyNativeFact]
+    public void SelectionGesture_RepeatTimingPromotesConfiguredDoubleClickBehavior()
+    {
+        using GhosttyTerminal terminal = new(5, 2);
+        using GhosttySelectionGesture gesture = new();
+        using GhosttySelectionGestureEvent press =
+            new(GhosttyVtNative.GhosttySelectionGestureEventType.Press);
+
+        terminal.Write("abc"u8);
+        Assert.True(
+            terminal.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Active(1, 0),
+                out GhosttyVtNative.GhosttyGridRef reference));
+
+        press.SetReference(reference);
+        press.SetPosition(10, 10);
+        press.SetRepeatDistance(2);
+        press.SetRepeatIntervalNanoseconds(1_000_000_000);
+        press.SetBehaviors(
+            new GhosttyVtNative.GhosttySelectionGestureBehaviors
+            {
+                SingleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Cell,
+                DoubleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Word,
+                TripleClick = GhosttyVtNative.GhosttySelectionGestureBehavior.Line,
+            });
+
+        press.SetTimeNanoseconds(1_000_000);
+        gesture.Apply(terminal, press);
+
+        press.SetTimeNanoseconds(2_000_000);
+        Assert.True(gesture.TryApply(terminal, press, out GhosttySelectionSnapshot selection));
+
+        GhosttySelectionGestureSnapshot snapshot = gesture.GetSnapshot(terminal);
+        Assert.Equal((byte)2, snapshot.ClickCount);
+        Assert.False(snapshot.Dragged);
+        Assert.Equal(
+            GhosttyVtNative.GhosttySelectionGestureBehavior.Word,
+            snapshot.Behavior);
+        Assert.True(
+            terminal.TryFormatSelection(
+                GhosttyVtNative.GhosttyFormatterFormat.Plain,
+                selection,
+                unwrap: false,
+                trim: false,
+                out byte[] formatted));
+        Assert.Equal("abc", Encoding.UTF8.GetString(formatted));
+    }
+
+    [GhosttyNativeFact]
+    public void SelectionGesture_DragReleaseAndDeepPressExposeNativeState()
+    {
+        using GhosttyTerminal terminal = new(5, 2);
+        using GhosttySelectionGesture gesture = new();
+        using GhosttySelectionGestureEvent press =
+            new(GhosttyVtNative.GhosttySelectionGestureEventType.Press);
+        using GhosttySelectionGestureEvent drag =
+            new(GhosttyVtNative.GhosttySelectionGestureEventType.Drag);
+        using GhosttySelectionGestureEvent release =
+            new(GhosttyVtNative.GhosttySelectionGestureEventType.Release);
+        using GhosttySelectionGestureEvent deepPress =
+            new(GhosttyVtNative.GhosttySelectionGestureEventType.DeepPress);
+
+        terminal.Write("abcde\r\nfghij"u8);
+        Assert.True(
+            terminal.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Active(1, 0),
+                out GhosttyVtNative.GhosttyGridRef pressReference));
+        Assert.True(
+            terminal.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Active(3, 1),
+                out GhosttyVtNative.GhosttyGridRef dragReference));
+
+        press.SetReference(pressReference);
+        press.SetPosition(10, 10);
+        gesture.Apply(terminal, press);
+
+        drag.SetReference(dragReference);
+        drag.SetPosition(36, 10);
+        drag.SetRectangle(true);
+        drag.SetGeometry(
+            new GhosttyVtNative.GhosttySelectionGestureGeometry
+            {
+                Columns = 5,
+                CellWidth = 10,
+                PaddingLeft = 0,
+                ScreenHeight = 20,
+            });
+
+        Assert.True(gesture.TryApply(terminal, drag, out GhosttySelectionSnapshot selection));
+        Assert.True(selection.Rectangle);
+        GhosttySelectionGestureSnapshot dragSnapshot = gesture.GetSnapshot(terminal);
+        Assert.Equal((byte)1, dragSnapshot.ClickCount);
+        Assert.True(dragSnapshot.Dragged);
+        Assert.Equal(
+            GhosttyVtNative.GhosttySelectionGestureAutoscroll.None,
+            dragSnapshot.Autoscroll);
+
+        release.SetReference(dragReference);
+        gesture.Apply(terminal, release);
+        GhosttySelectionGestureSnapshot releaseSnapshot = gesture.GetSnapshot(terminal);
+        Assert.True(releaseSnapshot.Dragged);
+        Assert.Equal(
+            GhosttyVtNative.GhosttySelectionGestureAutoscroll.None,
+            releaseSnapshot.Autoscroll);
+
+        gesture.Reset(terminal);
+        press.SetReference(pressReference);
+        gesture.Apply(terminal, press);
+        Assert.True(
+            gesture.TryApply(
+                terminal,
+                deepPress,
+                out GhosttySelectionSnapshot deepPressSelection));
+        GhosttySelectionGestureSnapshot deepPressSnapshot = gesture.GetSnapshot(terminal);
+        Assert.Equal((byte)0, deepPressSnapshot.ClickCount);
+        Assert.True(deepPressSnapshot.Dragged);
+        Assert.Equal(
+            GhosttyVtNative.GhosttySelectionGestureAutoscroll.None,
+            deepPressSnapshot.Autoscroll);
+        Assert.True(
+            terminal.TryFormatSelection(
+                GhosttyVtNative.GhosttyFormatterFormat.Plain,
+                deepPressSelection,
+                unwrap: false,
+                trim: false,
+                out byte[] formatted));
+        Assert.Equal("abcde", Encoding.UTF8.GetString(formatted));
+    }
+
+    [GhosttyNativeFact]
+    public void SelectionGesture_AutoscrollTickUsesViewportAndGeometry()
+    {
+        using GhosttyTerminal terminal = new(5, 2);
+        using GhosttySelectionGesture gesture = new();
+        using GhosttySelectionGestureEvent press =
+            new(GhosttyVtNative.GhosttySelectionGestureEventType.Press);
+        using GhosttySelectionGestureEvent drag =
+            new(GhosttyVtNative.GhosttySelectionGestureEventType.Drag);
+        using GhosttySelectionGestureEvent tick =
+            new(GhosttyVtNative.GhosttySelectionGestureEventType.AutoscrollTick);
+
+        terminal.Write("abcde\r\nfghij"u8);
+        Assert.True(
+            terminal.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Active(1, 0),
+                out GhosttyVtNative.GhosttyGridRef pressReference));
+        Assert.True(
+            terminal.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Active(3, 1),
+                out GhosttyVtNative.GhosttyGridRef dragReference));
+        GhosttyVtNative.GhosttySelectionGestureGeometry geometry = new()
+        {
+            Columns = 5,
+            CellWidth = 10,
+            PaddingLeft = 0,
+            ScreenHeight = 20,
+        };
+
+        press.SetReference(pressReference);
+        press.SetPosition(10, 10);
+        gesture.Apply(terminal, press);
+
+        drag.SetReference(dragReference);
+        drag.SetPosition(36, 20);
+        drag.SetGeometry(geometry);
+        Assert.True(gesture.TryApply(terminal, drag, out _));
+        Assert.Equal(
+            GhosttyVtNative.GhosttySelectionGestureAutoscroll.Down,
+            gesture.GetAutoscroll(terminal));
+
+        tick.SetViewport(new GhosttyVtNative.GhosttyPointCoordinate { X = 3, Y = 1 });
+        tick.SetPosition(36, 20);
+        tick.SetGeometry(geometry);
+        Assert.True(gesture.TryApply(terminal, tick, out GhosttySelectionSnapshot selection));
+
+        GhosttySelectionGestureSnapshot snapshot = gesture.GetSnapshot(terminal);
+        Assert.True(snapshot.Dragged);
+        Assert.Equal(
+            GhosttyVtNative.GhosttySelectionGestureAutoscroll.Down,
+            snapshot.Autoscroll);
+        Assert.True(
+            terminal.TryFormatSelection(
+                GhosttyVtNative.GhosttyFormatterFormat.Plain,
+                selection,
+                unwrap: false,
+                trim: false,
+                out byte[] formatted));
+        Assert.NotEmpty(formatted);
+    }
+
+    [GhosttyNativeFact]
     public void SelectionGesture_SafelyResetsWhenReusedAcrossTerminals()
     {
         using GhosttyTerminal first = new(5, 2);
