@@ -142,7 +142,7 @@ jobs:
 
   native-build-macos:
     name: Native Build (macOS)
-    # Zig 0.15.2 fails to link the build runner on macos-26-arm64.
+    # Pin macOS 15 for reproducible SDK compatibility with the native artifacts.
     runs-on: macos-15
     strategy:
       matrix:
@@ -156,16 +156,16 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
           cache-key: ${{ matrix.arch }}
 
       - name: Build libghostty-vt
         working-directory: external/ghostty
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-xcframework=false -Demit-macos-app=false
+            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false -Demit-macos-app=false
           else
-            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-xcframework=false -Demit-macos-app=false -Dtarget=x86_64-macos
+            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false -Demit-macos-app=false -Dtarget=x86_64-macos
           fi
 
       - name: Build ghostty-renderer-capi
@@ -251,7 +251,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
           cache-key: ${{ matrix.arch }}
 
       - name: Build libghostty-vt
@@ -265,6 +265,7 @@ jobs:
             build
             -Doptimize=ReleaseFast
             -Dapp-runtime=none
+            -Demit-lib-vt=true
             -Dtarget=${{ matrix.zig-target }}
             -Dsimd=false
           )
@@ -328,7 +329,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
           cache-key: ${{ matrix.arch }}
 
       - name: Build libghostty-vt
@@ -336,10 +337,14 @@ jobs:
         shell: bash
         run: |
           target=""
+          simd=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            target="-Dtarget=aarch64-windows"
+            target="-Dtarget=aarch64-windows-gnu"
+            # Zig 0.16.0's Windows ARM64 stdlib stack-trace code fails to
+            # compile when Ghostty's vendored SIMD archive is enabled.
+            simd="-Dsimd=false"
           fi
-          zig build -Doptimize=ReleaseFast -Dapp-runtime=none ${target}
+          zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true ${target} ${simd}
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
@@ -347,7 +352,7 @@ jobs:
         run: |
           target=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            target="-Dtarget=aarch64-windows"
+            target="-Dtarget=aarch64-windows-gnu"
           fi
           zig build -Doptimize=ReleaseFast ${target}
 

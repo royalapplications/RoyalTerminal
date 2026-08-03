@@ -478,7 +478,7 @@ public class TerminalQueryTests
         processor.Process("\x1b]10;?\x1b\\"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1b]10;rgb:D4D4/D4D4/D4D4\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1b]10;rgb:d4d4/d4d4/d4d4\x1b\\", System.Text.Encoding.ASCII.GetString(response));
     }
 
     [Fact]
@@ -492,7 +492,7 @@ public class TerminalQueryTests
         processor.Process("\x1b]4;1;?\x07"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1b]4;1;rgb:CDCD/0000/0000\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1b]4;1;rgb:cdcd/0000/0000\x1b\\", System.Text.Encoding.ASCII.GetString(response));
     }
 
     [Fact]
@@ -640,7 +640,30 @@ public class TerminalQueryTests
         processor.Process("\x1bP$qm\x1b\\"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1bP1$r1;38;2;205;0;0m\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1bP1$r0;1;31m\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_DcsDecrqss_SgrQuery_ReportsEffectiveClampedPaletteState()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        // RoyalTerminal retains its saturating palette lookup policy for
+        // invalid indices. The tracked SGR state must use that same effective
+        // index so DECRQSS recreates the colors that were actually rendered.
+        processor.Process("\x1b[38;5;999;48;5;1000mA"u8);
+        processor.Process("\x1bP$qm\x1b\\"u8);
+
+        TerminalCell cell = screen.GetViewportRow(0)[0];
+        Assert.Equal(screen.Theme.Palette[255], cell.Foreground);
+        Assert.Equal(screen.Theme.Palette[255], cell.Background);
+        Assert.NotNull(response);
+        Assert.Equal(
+            "\x1bP1$r0;38:5:255;48:5:255m\x1b\\",
+            System.Text.Encoding.ASCII.GetString(response));
     }
 
     [Fact]
@@ -655,7 +678,7 @@ public class TerminalQueryTests
         processor.Process("\x1bP$qm\x1b\\"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1bP1$r21;53m\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1bP1$r0;4:2;53m\x1b\\", System.Text.Encoding.ASCII.GetString(response));
     }
 
     [Fact]

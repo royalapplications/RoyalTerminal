@@ -6,13 +6,13 @@
 // scrolling, scroll regions (DECSTBM), alternate screen buffer, DEC private modes,
 // DEC line-drawing character set, erase, insert/delete lines & characters, and tabs.
 
+using System.Globalization;
+using System.Net;
+using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Sixel;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Unicode;
-using System.Globalization;
-using System.Net;
-using System.Text;
 
 namespace RoyalTerminal.Terminal;
 
@@ -38,7 +38,9 @@ public sealed class BasicVtProcessor : IVtProcessor,
     ITerminalMouseReportingStateSource,
     ITerminalSixelOptionsSink,
     ITerminalEraseDisplayOptionsSink,
-    ITerminalShellIntegrationEventSource
+    ITerminalShellIntegrationEventSource,
+    ITerminalEffectSource,
+    ITerminalUnicodeWidthProvider
 {
     private const int MaxOscBufferBytes = 4096;
     private const int MaxDcsBufferBytes = 4096;
@@ -87,6 +89,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private int _cursorRow;
     private uint _currentFg;
     private uint _currentBg;
+    private SgrColorKind _currentFgKind;
+    private SgrColorKind _currentBgKind;
+    private int _currentFgPaletteIndex;
+    private int _currentBgPaletteIndex;
     private CellAttributes _currentAttrs;
     private TerminalUnderlineStyle _currentUnderlineStyle;
     private uint _currentUnderlineColor;
@@ -117,6 +123,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private int _savedCursorRow;
     private uint _savedFg;
     private uint _savedBg;
+    private SgrColorKind _savedFgKind;
+    private SgrColorKind _savedBgKind;
+    private int _savedFgPaletteIndex;
+    private int _savedBgPaletteIndex;
     private CellAttributes _savedAttrs;
     private TerminalUnderlineStyle _savedUnderlineStyle;
     private uint _savedUnderlineColor;
@@ -189,6 +199,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
         DcsEscape,
     }
 
+    private enum SgrColorKind : byte
+    {
+        Default,
+        Palette,
+        Rgb,
+    }
+
     private enum SessionScreenResetMode
     {
         ClearViewport,
@@ -257,6 +274,33 @@ public sealed class BasicVtProcessor : IVtProcessor,
     {
         add => _shellIntegrationParser.EventReceived += value;
         remove => _shellIntegrationParser.EventReceived -= value;
+    }
+
+    /// <inheritdoc />
+    public Func<TerminalClipboardWrite, TerminalClipboardWriteResult>? ClipboardWriteCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<TerminalDesktopNotification>? DesktopNotificationCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<TerminalProgressReport>? ProgressReportCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<string>? WorkingDirectoryCallback { get; set; }
+
+    /// <inheritdoc />
+    public byte GetCodepointWidth(uint codepoint)
+        => checked((byte)TerminalCellWidthCalculator.GetCodepointWidth(
+            codepoint > int.MaxValue ? -1 : (int)codepoint));
+
+    /// <inheritdoc />
+    public nuint GetGraphemeWidth(ReadOnlySpan<uint> codepoints, out byte width)
+    {
+        int consumed = TerminalCellWidthCalculator.GetFirstGraphemeWidth(
+            codepoints,
+            out int measuredWidth);
+        width = checked((byte)measuredWidth);
+        return checked((nuint)consumed);
     }
 
     /// <inheritdoc />
@@ -2377,7 +2421,367 @@ public sealed class BasicVtProcessor : IVtProcessor,
             case 8:
                 HandleOscHyperlink(value);
                 break;
+
+            case 7:
+                WorkingDirectoryCallback?.Invoke(value);
+                break;
+
+            case 9:
+                HandleOsc9(value);
+                break;
+
+            case 52:
+                HandleOscClipboard(value);
+                break;
+
+            case 777:
+                HandleOsc777(value);
+                break;
+
+            case 1337:
+                HandleOsc1337(value);
+                break;
         }
+    }
+
+    private void HandleOsc9(string value)
+    {
+        if (value.StartsWith("9;", StringComparison.Ordinal))
+        {
+            WorkingDirectoryCallback?.Invoke(value[2..]);
+            return;
+        }
+
+        if (TryParseOsc9Progress(value, out TerminalProgressReport? report) &&
+            report is not null)
+        {
+            ProgressReportCallback?.Invoke(report);
+            return;
+        }
+
+        if (IsRecognizedConEmuOsc9(value))
+        {
+            return;
+        }
+
+        DesktopNotificationCallback?.Invoke(new TerminalDesktopNotification(string.Empty, value));
+    }
+
+    private void HandleOsc777(string value)
+    {
+        const string Prefix = "notify;";
+        if (!value.StartsWith(Prefix, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        int titleSeparator = value.IndexOf(';', Prefix.Length);
+        if (titleSeparator < 0)
+        {
+            return;
+        }
+
+        string title = value[Prefix.Length..titleSeparator];
+        string body = titleSeparator + 1 < value.Length
+            ? value[(titleSeparator + 1)..]
+            : string.Empty;
+        DesktopNotificationCallback?.Invoke(new TerminalDesktopNotification(title, body));
+    }
+
+    private void HandleOsc1337(string value)
+    {
+        int separator = value.IndexOf('=');
+        if (separator < 0)
+        {
+            return;
+        }
+
+        ReadOnlySpan<char> key = value.AsSpan(0, separator);
+        ReadOnlySpan<char> payload = value.AsSpan(separator + 1);
+        if (AsciiEqualsIgnoreCase(key, "CurrentDir"))
+        {
+            if (!payload.IsEmpty)
+            {
+                WorkingDirectoryCallback?.Invoke(payload.ToString());
+            }
+
+            return;
+        }
+
+        if (AsciiEqualsIgnoreCase(key, "Copy") &&
+            payload.Length > 1 &&
+            payload[0] == ':' &&
+            !(payload.Length == 2 && payload[1] == '?'))
+        {
+            TryWriteClipboard(
+                TerminalClipboardLocation.Standard,
+                payload[1..],
+                allowClear: false);
+        }
+    }
+
+    private void HandleOscClipboard(string value)
+    {
+        int separator = value.IndexOf(';');
+        if (separator < 0)
+        {
+            return;
+        }
+
+        ReadOnlySpan<char> selector = value.AsSpan(0, separator);
+        if (selector.Length > 1)
+        {
+            return;
+        }
+
+        ReadOnlySpan<char> payload = value.AsSpan(separator + 1);
+        if (payload.SequenceEqual("?"))
+        {
+            return;
+        }
+
+        TerminalClipboardLocation location;
+        if (selector.IsEmpty || selector.SequenceEqual("c"))
+        {
+            location = TerminalClipboardLocation.Standard;
+        }
+        else if (selector.SequenceEqual("s"))
+        {
+            location = TerminalClipboardLocation.Selection;
+        }
+        else if (selector.SequenceEqual("p"))
+        {
+            location = TerminalClipboardLocation.Primary;
+        }
+        else
+        {
+            return;
+        }
+
+        TryWriteClipboard(location, payload, allowClear: true);
+    }
+
+    private void TryWriteClipboard(
+        TerminalClipboardLocation location,
+        ReadOnlySpan<char> payload,
+        bool allowClear)
+    {
+        if (payload.IsEmpty)
+        {
+            if (allowClear)
+            {
+                ClipboardWriteCallback?.Invoke(new TerminalClipboardWrite(location, []));
+            }
+
+            return;
+        }
+
+        if (!IsStrictBase64(payload))
+        {
+            return;
+        }
+
+        byte[] decoded;
+        try
+        {
+            decoded = Convert.FromBase64String(payload.ToString());
+        }
+        catch (FormatException)
+        {
+            return;
+        }
+
+        ClipboardWriteCallback?.Invoke(
+            new TerminalClipboardWrite(
+                location,
+                [new TerminalClipboardContent("text/plain", decoded)]));
+    }
+
+    private static bool IsRecognizedConEmuOsc9(string value)
+    {
+        if (value.Length == 0)
+        {
+            return false;
+        }
+
+        return value[0] switch
+        {
+            '1' => IsRecognizedConEmuOsc9Command1(value),
+            '2' or '3' or '6' or '7' or '8' =>
+                value.Length >= 2 && value[1] == ';',
+            '5' => value.Length == 1,
+            _ => false,
+        };
+    }
+
+    private static bool IsRecognizedConEmuOsc9Command1(string value)
+    {
+        if (value.Length < 2)
+        {
+            return false;
+        }
+
+        return value[1] switch
+        {
+            ';' => IsNonEmptyAsciiDecimal(value.AsSpan(2)),
+            '0' => value.Length == 2 ||
+                   (value.Length == 4 &&
+                    value[2] == ';' &&
+                    value[3] is >= '0' and <= '3'),
+            '1' => value.Length >= 3 && value[2] == ';',
+            '2' => value.Length == 2,
+            _ => false,
+        };
+    }
+
+    private static bool IsNonEmptyAsciiDecimal(ReadOnlySpan<char> value)
+    {
+        if (value.IsEmpty)
+        {
+            return false;
+        }
+
+        foreach (char character in value)
+        {
+            if (character is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsStrictBase64(ReadOnlySpan<char> value)
+    {
+        if ((value.Length & 3) != 0)
+        {
+            return false;
+        }
+
+        int paddingStart = value.Length;
+        while (paddingStart > 0 && value[paddingStart - 1] == '=')
+        {
+            paddingStart--;
+        }
+
+        int paddingLength = value.Length - paddingStart;
+        if (paddingLength > 2)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < paddingStart; index++)
+        {
+            char character = value[index];
+            if (!((character is >= 'A' and <= 'Z') ||
+                  (character is >= 'a' and <= 'z') ||
+                  (character is >= '0' and <= '9') ||
+                  character is '+' or '/'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool AsciiEqualsIgnoreCase(
+        ReadOnlySpan<char> value,
+        ReadOnlySpan<char> expected)
+    {
+        if (value.Length != expected.Length)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < value.Length; index++)
+        {
+            char actual = value[index];
+            char target = expected[index];
+            if (actual == target)
+            {
+                continue;
+            }
+
+            if (actual is >= 'A' and <= 'Z')
+            {
+                actual = (char)(actual + ('a' - 'A'));
+            }
+
+            if (target is >= 'A' and <= 'Z')
+            {
+                target = (char)(target + ('a' - 'A'));
+            }
+
+            if (actual != target)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryParseOsc9Progress(
+        string value,
+        out TerminalProgressReport? report)
+    {
+        report = null;
+        if (!value.StartsWith("4;", StringComparison.Ordinal) || value.Length < 3)
+        {
+            return false;
+        }
+
+        TerminalProgressState state = value[2] switch
+        {
+            '0' => TerminalProgressState.Remove,
+            '1' => TerminalProgressState.Set,
+            '2' => TerminalProgressState.Error,
+            '3' => TerminalProgressState.Indeterminate,
+            '4' => TerminalProgressState.Pause,
+            _ => (TerminalProgressState)(-1),
+        };
+        if ((int)state < 0)
+        {
+            return false;
+        }
+
+        byte? progress = state == TerminalProgressState.Set ? (byte)0 : null;
+        if (value.Length > 3)
+        {
+            if (value[3] != ';')
+            {
+                return false;
+            }
+
+            ReadOnlySpan<char> percentage = value.AsSpan(4);
+            if (percentage.IsEmpty)
+            {
+                return false;
+            }
+
+            int parsed = 0;
+            foreach (char character in percentage)
+            {
+                if (character is < '0' or > '9')
+                {
+                    return false;
+                }
+
+                parsed = Math.Min(100, (parsed * 10) + (character - '0'));
+            }
+
+            if (state is TerminalProgressState.Set or
+                TerminalProgressState.Error or
+                TerminalProgressState.Pause)
+            {
+                progress = checked((byte)parsed);
+            }
+        }
+
+        report = new TerminalProgressReport(state, progress);
+        return true;
     }
 
     private void HandleOscHyperlink(string value)
@@ -2487,8 +2891,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
         int blue = (int)(argbColor & 0xFF);
 
         return _theme.OscColorReportFormat == TerminalOscColorReportFormat.Bit8
-            ? $"rgb:{red:X2}/{green:X2}/{blue:X2}"
-            : $"rgb:{red * 0x101:X4}/{green * 0x101:X4}/{blue * 0x101:X4}";
+            ? $"rgb:{red:x2}/{green:x2}/{blue:x2}"
+            : $"rgb:{red * 0x101:x4}/{green * 0x101:x4}/{blue * 0x101:x4}";
     }
 
     private void ProcessDcsString(byte b)
@@ -2892,50 +3296,70 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private string BuildCurrentSgrState()
     {
-        List<int> parameters = [];
+        // DEC DECRPSS requires an initial reset parameter. Ghostty and
+        // Windows Terminal both preserve indexed colors in this response.
+        List<string> parameters = ["0"];
 
-        if ((_currentAttrs & CellAttributes.Bold) != 0) parameters.Add(1);
-        if ((_currentAttrs & CellAttributes.Dim) != 0) parameters.Add(2);
-        if ((_currentAttrs & CellAttributes.Italic) != 0) parameters.Add(3);
+        if ((_currentAttrs & CellAttributes.Bold) != 0) parameters.Add("1");
+        if ((_currentAttrs & CellAttributes.Dim) != 0) parameters.Add("2");
+        if ((_currentAttrs & CellAttributes.Italic) != 0) parameters.Add("3");
         if (_currentUnderlineStyle == TerminalUnderlineStyle.Double)
         {
-            parameters.Add(21);
+            parameters.Add("4:2");
         }
         else if (_currentUnderlineStyle != TerminalUnderlineStyle.None ||
                  (_currentAttrs & CellAttributes.Underline) != 0)
         {
-            parameters.Add(4);
+            parameters.Add("4");
         }
-        if ((_currentAttrs & CellAttributes.Blink) != 0) parameters.Add(5);
-        if ((_currentAttrs & CellAttributes.Inverse) != 0) parameters.Add(7);
-        if ((_currentAttrs & CellAttributes.Hidden) != 0) parameters.Add(8);
-        if ((_currentAttrs & CellAttributes.Strikethrough) != 0) parameters.Add(9);
-        if ((_currentDecorations & CellDecorations.Overline) != 0) parameters.Add(53);
+        if ((_currentAttrs & CellAttributes.Blink) != 0) parameters.Add("5");
+        if ((_currentAttrs & CellAttributes.Inverse) != 0) parameters.Add("7");
+        if ((_currentAttrs & CellAttributes.Hidden) != 0) parameters.Add("8");
+        if ((_currentAttrs & CellAttributes.Strikethrough) != 0) parameters.Add("9");
+        if ((_currentDecorations & CellDecorations.Overline) != 0) parameters.Add("53");
 
-        if (_currentFg != _screen.DefaultForeground)
-        {
-            parameters.Add(38);
-            parameters.Add(2);
-            parameters.Add((int)((_currentFg >> 16) & 0xFF));
-            parameters.Add((int)((_currentFg >> 8) & 0xFF));
-            parameters.Add((int)(_currentFg & 0xFF));
-        }
-
-        if (_currentBg != _screen.DefaultBackground)
-        {
-            parameters.Add(48);
-            parameters.Add(2);
-            parameters.Add((int)((_currentBg >> 16) & 0xFF));
-            parameters.Add((int)((_currentBg >> 8) & 0xFF));
-            parameters.Add((int)(_currentBg & 0xFF));
-        }
-
-        if (parameters.Count == 0)
-        {
-            return "0";
-        }
+        AppendSgrColor(
+            parameters,
+            foreground: true,
+            _currentFgKind,
+            _currentFgPaletteIndex,
+            _currentFg);
+        AppendSgrColor(
+            parameters,
+            foreground: false,
+            _currentBgKind,
+            _currentBgPaletteIndex,
+            _currentBg);
 
         return string.Join(';', parameters);
+    }
+
+    private static void AppendSgrColor(
+        ICollection<string> parameters,
+        bool foreground,
+        SgrColorKind kind,
+        int paletteIndex,
+        uint rgb)
+    {
+        int baseIndex = foreground ? 30 : 40;
+        switch (kind)
+        {
+            case SgrColorKind.Default:
+                return;
+            case SgrColorKind.Palette when paletteIndex < 8:
+                parameters.Add((baseIndex + paletteIndex).ToString(CultureInfo.InvariantCulture));
+                return;
+            case SgrColorKind.Palette when paletteIndex < 16:
+                parameters.Add((baseIndex + 60 + paletteIndex - 8).ToString(CultureInfo.InvariantCulture));
+                return;
+            case SgrColorKind.Palette:
+                parameters.Add($"{baseIndex + 8}:5:{paletteIndex}");
+                return;
+            case SgrColorKind.Rgb:
+                parameters.Add(
+                    $"{baseIndex + 8}:2::{(rgb >> 16) & 0xFF}:{(rgb >> 8) & 0xFF}:{rgb & 0xFF}");
+                return;
+        }
     }
 
     private void ExecuteCsi(char finalByte)
@@ -3865,6 +4289,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _savedCursorRow = _cursorRow;
         _savedFg = _currentFg;
         _savedBg = _currentBg;
+        _savedFgKind = _currentFgKind;
+        _savedBgKind = _currentBgKind;
+        _savedFgPaletteIndex = _currentFgPaletteIndex;
+        _savedBgPaletteIndex = _currentBgPaletteIndex;
         _savedAttrs = _currentAttrs;
         _savedUnderlineStyle = _currentUnderlineStyle;
         _savedUnderlineColor = _currentUnderlineColor;
@@ -3882,6 +4310,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _delayedWrap = _savedDelayedWrap;
         _currentFg = _savedFg;
         _currentBg = _savedBg;
+        _currentFgKind = _savedFgKind;
+        _currentBgKind = _savedBgKind;
+        _currentFgPaletteIndex = _savedFgPaletteIndex;
+        _currentBgPaletteIndex = _savedBgPaletteIndex;
         _currentAttrs = _savedAttrs;
         _currentUnderlineStyle = _savedUnderlineStyle;
         _currentUnderlineColor = _savedUnderlineColor;
@@ -3944,28 +4376,30 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
                 // Standard foreground colors
                 case >= 30 and <= 37:
-                    _currentFg = PaletteColor(p - 30);
+                    SetForegroundPalette(p - 30);
                     break;
                 case 39:
                     _currentFg = _screen.DefaultForeground;
+                    _currentFgKind = SgrColorKind.Default;
                     break;
 
                 // Standard background colors
                 case >= 40 and <= 47:
-                    _currentBg = PaletteColor(p - 40);
+                    SetBackgroundPalette(p - 40);
                     break;
                 case 49:
                     _currentBg = _screen.DefaultBackground;
+                    _currentBgKind = SgrColorKind.Default;
                     break;
 
                 // Bright foreground colors
                 case >= 90 and <= 97:
-                    _currentFg = PaletteColor(p - 82);
+                    SetForegroundPalette(p - 82);
                     break;
 
                 // Bright background colors
                 case >= 100 and <= 107:
-                    _currentBg = PaletteColor(p - 92);
+                    SetBackgroundPalette(p - 92);
                     break;
 
                 // 256-color and truecolor
@@ -3974,13 +4408,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
                     {
                         if (_params[i + 1] == 5 && i + 2 < _params.Count)
                         {
-                            _currentFg = PaletteColor(_params[i + 2]);
+                            SetForegroundPalette(_params[i + 2]);
                             i += 2;
                         }
                         else if (_params[i + 1] == 2 && i + 4 < _params.Count)
                         {
                             _currentFg = 0xFF000000 | ((uint)_params[i + 2] << 16) |
                                          ((uint)_params[i + 3] << 8) | (uint)_params[i + 4];
+                            _currentFgKind = SgrColorKind.Rgb;
                             i += 4;
                         }
                     }
@@ -3991,13 +4426,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
                     {
                         if (_params[i + 1] == 5 && i + 2 < _params.Count)
                         {
-                            _currentBg = PaletteColor(_params[i + 2]);
+                            SetBackgroundPalette(_params[i + 2]);
                             i += 2;
                         }
                         else if (_params[i + 1] == 2 && i + 4 < _params.Count)
                         {
                             _currentBg = 0xFF000000 | ((uint)_params[i + 2] << 16) |
                                          ((uint)_params[i + 3] << 8) | (uint)_params[i + 4];
+                            _currentBgKind = SgrColorKind.Rgb;
                             i += 4;
                         }
                     }
@@ -4036,11 +4472,29 @@ public sealed class BasicVtProcessor : IVtProcessor,
     {
         _currentFg = _screen.DefaultForeground;
         _currentBg = _screen.DefaultBackground;
+        _currentFgKind = SgrColorKind.Default;
+        _currentBgKind = SgrColorKind.Default;
         _currentAttrs = CellAttributes.None;
         _currentUnderlineStyle = TerminalUnderlineStyle.None;
         _currentUnderlineColor = 0;
         _currentHasUnderlineColor = false;
         _currentDecorations = CellDecorations.None;
+    }
+
+    private void SetForegroundPalette(int paletteIndex)
+    {
+        paletteIndex = Math.Clamp(paletteIndex, 0, 255);
+        _currentFg = PaletteColor(paletteIndex);
+        _currentFgKind = SgrColorKind.Palette;
+        _currentFgPaletteIndex = paletteIndex;
+    }
+
+    private void SetBackgroundPalette(int paletteIndex)
+    {
+        paletteIndex = Math.Clamp(paletteIndex, 0, 255);
+        _currentBg = PaletteColor(paletteIndex);
+        _currentBgKind = SgrColorKind.Palette;
+        _currentBgPaletteIndex = paletteIndex;
     }
 
     #endregion

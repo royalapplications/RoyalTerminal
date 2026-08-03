@@ -46,6 +46,11 @@ If you want Ghostty behavior inside RoyalTerminal, you usually begin with the ma
 | `GhosttyMouseEvent` | Mutable mouse event payload. |
 | `GhosttyPaste` | Static helper for paste encoding. |
 | `GhosttySelection` | Managed selection value used by formatters and helpers. |
+| `GhosttySelectionGesture` | Owned state machine for native text-selection gestures. |
+| `GhosttySelectionGestureEvent` | Reusable selection pointer/click event. |
+| `GhosttyTrackedGridReference` | Owned reference that follows a cell through scroll, pruning, and reflow. |
+| `GhosttyColorUtilities` | Native-backed color parsing, palettes, color math, X11 names, and color-scheme reports. |
+| `GhosttyUnicode` | Ghostty-exact codepoint and grapheme width helpers. |
 | `GhosttyKittyGraphics` | Managed helper for Kitty graphics extraction. |
 | `GhosttyKittyGraphicsImage` | Managed Kitty image snapshot. |
 | `GhosttyKittyGraphicsPlacementIterator` | Managed iterator over Kitty placements. |
@@ -59,9 +64,29 @@ If you want Ghostty behavior inside RoyalTerminal, you usually begin with the ma
 
 These are the types used by RoyalTerminal itself when it wants native VT behavior without forcing consumers to work directly against raw pointers and C structs.
 
+## Engine-neutral effects and Unicode
+
+Hosts that can use either VT engine should query the terminal contracts instead
+of depending directly on Ghostty types:
+
+| Contract | Capability |
+| --- | --- |
+| `ITerminalEffectSource` | Clipboard writes, desktop notifications, progress reports, and working-directory changes. |
+| `ITerminalUnicodeWidthProvider` | Codepoint width and first-grapheme width using the active engine's rules. |
+
+`GhosttyVtProcessor` implements these contracts with the normalized
+libghostty callbacks and Ghostty Unicode tables. `BasicVtProcessor` implements
+the same contracts with managed OSC parsing and RoyalTerminal Unicode tables.
+The effect callbacks are policy boundaries: applications still decide whether
+clipboard writes and desktop notifications are allowed.
+
 ## The raw VT mirror is also public
 
 Under those wrappers, `GhosttyVtNative` exposes the Ghostty VT ABI directly. This is not the right layer for most applications, but it is the right layer for advanced interop, diagnostics, or custom wrappers.
+
+At the current Ghostty revision, `TerminalNew` takes `columns` and `rows`
+directly. Configure the returned terminal through `TerminalSet`; the former
+`GhosttyTerminalOptions` constructor struct no longer exists.
 
 ### Root VT exports
 
@@ -85,7 +110,7 @@ Under those wrappers, `GhosttyVtNative` exposes the Ghostty VT ABI directly. Thi
 
 ### Render-state exports
 
-`GhosttyRenderStateDirty`, `GhosttyRenderStateCursorVisualStyle`, `GhosttyRenderStateData`, `GhosttyRenderStateOption`, `GhosttyRenderStateRowData`, `GhosttyRenderStateRowOption`, `GhosttyRenderStateRowCellsData`, `GhosttyRenderStateColors`
+`GhosttyRenderStateDirty`, `GhosttyRenderStateCursorVisualStyle`, `GhosttyRenderStateData`, `GhosttyRenderStateOption`, `GhosttyRenderStateRowData`, `GhosttyRenderStateRowOption`, `GhosttyRenderStateRowCellsData`, `GhosttyRenderStateColors`, `GhosttyRenderStateRowSelection`, `GhosttyBuffer`
 
 ### Screen exports
 
@@ -93,7 +118,7 @@ Under those wrappers, `GhosttyVtNative` exposes the Ghostty VT ABI directly. Thi
 
 ### Selection, system, and terminal exports
 
-`GhosttySelectionRange`, `GhosttyAllocatorVtable`, `GhosttyAllocator`, `GhosttySysImage`, `GhosttySysDecodePngCallback`, `GhosttySysOption`, `GhosttyTerminalOptions`, `GhosttyTerminalScrollViewportTag`, `GhosttyTerminalScrollViewportValue`, `GhosttyTerminalScrollViewport`, `GhosttyTerminalScreen`, `GhosttyTerminalScrollbar`, `GhosttyTerminalBellCallback`, `GhosttyTerminalWritePtyCallback`, `GhosttyTerminalTitleChangedCallback`, `GhosttyTerminalEnquiryCallback`, `GhosttyTerminalXtversionCallback`, `GhosttyTerminalSizeCallback`, `GhosttyTerminalColorSchemeCallback`, `GhosttyTerminalDeviceAttributesCallback`, `GhosttyTerminalOption`, `GhosttyTerminalData`
+`GhosttySelectionRange`, `GhosttySelectionOrder`, `GhosttySelectionAdjust`, `GhosttySelectionGestureBehavior`, `GhosttySelectionGestureBehaviors`, `GhosttySelectionGestureGeometry`, `GhosttySelectionGestureAutoscroll`, `GhosttySelectionGestureData`, `GhosttySelectionGestureEventType`, `GhosttySelectionGestureEventOption`, `GhosttyAllocatorVtable`, `GhosttyAllocator`, `GhosttySysImage`, `GhosttySysDecodePngCallback`, `GhosttySysOption`, `GhosttyTerminalScrollViewportTag`, `GhosttyTerminalScrollViewportValue`, `GhosttyTerminalScrollViewport`, `GhosttyTerminalCompressionMode`, `GhosttyTerminalCompressionResult`, `GhosttyTerminalScreen`, `GhosttyTerminalScrollbar`, `GhosttyTerminalBellCallback`, `GhosttyTerminalWritePtyCallback`, `GhosttyTerminalTitleChangedCallback`, `GhosttyTerminalEnquiryCallback`, `GhosttyTerminalXtversionCallback`, `GhosttyTerminalSizeCallback`, `GhosttyTerminalColorSchemeCallback`, `GhosttyTerminalDeviceAttributesCallback`, `GhosttyTerminalPwdChangedCallback`, `GhosttyTerminalClipboardWriteCallback`, `GhosttyTerminalDesktopNotificationCallback`, `GhosttyTerminalProgressReportCallback`, `GhosttyTerminalOption`, `GhosttyTerminalData`
 
 ## Runtime enums, structs, and callbacks
 

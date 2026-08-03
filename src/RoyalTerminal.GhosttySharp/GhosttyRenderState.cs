@@ -52,6 +52,32 @@ public sealed class GhosttyRenderState : IDisposable
         ThrowIfFailed(GhosttyVtNative.RenderStateUpdate(_handle, terminal.Handle), "ghostty_render_state_update");
     }
 
+    /// <summary>
+    /// Begins a two-phase update while the caller still owns terminal synchronization.
+    /// </summary>
+    /// <remarks>
+    /// Every successful call must be paired with <see cref="EndUpdate"/> before
+    /// reading this render state.
+    /// </remarks>
+    public void BeginUpdate(GhosttyTerminal terminal)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(terminal);
+
+        ThrowIfFailed(
+            GhosttyVtNative.RenderStateBeginUpdate(_handle, terminal.Handle),
+            "ghostty_render_state_begin_update");
+    }
+
+    /// <summary>
+    /// Completes a prior two-phase update without accessing terminal-owned memory.
+    /// </summary>
+    public void EndUpdate()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfFailed(GhosttyVtNative.RenderStateEndUpdate(_handle), "ghostty_render_state_end_update");
+    }
+
     /// <summary>Gets the render-state dirty flag.</summary>
     public GhosttyVtNative.GhosttyRenderStateDirty GetDirty()
         => GetValue<GhosttyVtNative.GhosttyRenderStateDirty>(GhosttyVtNative.GhosttyRenderStateData.Dirty);
@@ -149,6 +175,30 @@ public sealed class GhosttyRenderState : IDisposable
         return GetNativeRowFlag(row, GhosttyVtNative.GhosttyRowData.Wrap);
     }
 
+    /// <summary>Gets the inclusive selected cell range intersecting the current row.</summary>
+    public unsafe bool TryGetCurrentRowSelection(out ushort startX, out ushort endX)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyRenderStateRowSelection selection =
+            GhosttyVtNative.GhosttyRenderStateRowSelection.CreateSized();
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.RenderStateRowGet(
+            _rowIterator,
+            GhosttyVtNative.GhosttyRenderStateRowData.Selection,
+            &selection);
+
+        if (result == GhosttyVtNative.GhosttyResult.NoValue)
+        {
+            startX = 0;
+            endX = 0;
+            return false;
+        }
+
+        ThrowIfFailed(result, "ghostty_render_state_row_get(selection)");
+        startX = selection.StartX;
+        endX = selection.EndX;
+        return true;
+    }
+
     /// <summary>Sets the current row dirty flag.</summary>
     public unsafe void SetCurrentRowDirty(bool value)
     {
@@ -203,6 +253,14 @@ public sealed class GhosttyRenderState : IDisposable
     public uint GetCurrentCellGraphemeLength()
         => GetCellValue<uint>(GhosttyVtNative.GhosttyRenderStateRowCellsData.GraphemesLength);
 
+    /// <summary>Gets whether the current cell intersects the active selection.</summary>
+    public bool GetCurrentCellSelected()
+        => GetCellValue<bool>(GhosttyVtNative.GhosttyRenderStateRowCellsData.Selected);
+
+    /// <summary>Gets whether the current cell has explicit style information.</summary>
+    public bool GetCurrentCellHasStyling()
+        => GetCellValue<bool>(GhosttyVtNative.GhosttyRenderStateRowCellsData.HasStyling);
+
     /// <summary>Copies the current cell grapheme codepoints into the provided buffer.</summary>
     public unsafe void GetCurrentCellGraphemes(Span<uint> destination)
     {
@@ -222,6 +280,42 @@ public sealed class GhosttyRenderState : IDisposable
                     destinationPtr),
                 "ghostty_render_state_row_cells_get(graphemes)");
         }
+    }
+
+    /// <summary>Copies the current cell's complete grapheme cluster as UTF-8.</summary>
+    public unsafe byte[] CopyCurrentCellGraphemeUtf8()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        GhosttyVtNative.GhosttyBuffer buffer = default;
+        GhosttyVtNative.GhosttyResult probe = GhosttyVtNative.RenderStateRowCellsGet(
+            _rowCells,
+            GhosttyVtNative.GhosttyRenderStateRowCellsData.GraphemesUtf8,
+            &buffer);
+        if (probe == GhosttyVtNative.GhosttyResult.Success && buffer.Length == 0)
+        {
+            return [];
+        }
+
+        if (probe != GhosttyVtNative.GhosttyResult.OutOfSpace)
+        {
+            ThrowIfFailed(probe, "ghostty_render_state_row_cells_get(graphemes_utf8 probe)");
+        }
+
+        byte[] result = new byte[checked((int)buffer.Length)];
+        fixed (byte* resultPtr = result)
+        {
+            buffer.Pointer = resultPtr;
+            buffer.Capacity = (nuint)result.Length;
+            ThrowIfFailed(
+                GhosttyVtNative.RenderStateRowCellsGet(
+                    _rowCells,
+                    GhosttyVtNative.GhosttyRenderStateRowCellsData.GraphemesUtf8,
+                    &buffer),
+                "ghostty_render_state_row_cells_get(graphemes_utf8)");
+        }
+
+        return result;
     }
 
     /// <summary>Attempts to get the current cell background color.</summary>

@@ -125,6 +125,125 @@ public class GhosttyVtProcessorTests
     }
 
     [Fact]
+    public void GhosttyVtProcessor_WideToNarrowResizeRetainsConfiguredNativeScrollback_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        const int initialColumns = 400;
+        const int resizedColumns = 80;
+        const int viewportRows = 24;
+        const int scrollbackLimit = 2_000;
+        const int preResizeRows = scrollbackLimit - 100;
+        ulong resizedRowsPerPage = GhosttyScrollbackBudget.RowsPerPage(resizedColumns);
+        int outputRows = checked(
+            scrollbackLimit + viewportRows + (int)(resizedRowsPerPage * 20UL));
+
+        TerminalScreen screen = new(initialColumns, viewportRows, scrollbackLimit);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(
+            initialColumns,
+            viewportRows,
+            widthPx: 4_000,
+            heightPx: 480);
+        PopulateIdentifiedScrollback(processor, preResizeRows);
+        AssertIdentifiedScrollbackVisibleAtTop(processor, screen);
+
+        processor.NotifyResize(
+            resizedColumns,
+            viewportRows,
+            widthPx: 800,
+            heightPx: 480);
+
+        Assert.Equal(
+            GhosttyScrollbackBudget.FromRows(
+                resizedColumns,
+                viewportRows,
+                scrollbackLimit),
+            processor.NativeScrollbackMaxBytes);
+        AssertIdentifiedScrollbackVisibleAtTop(processor, screen);
+
+        byte[] output = new byte[outputRows * 3];
+        for (int offset = 0; offset < output.Length; offset += 3)
+        {
+            output[offset] = (byte)'X';
+            output[offset + 1] = (byte)'\r';
+            output[offset + 2] = (byte)'\n';
+        }
+
+        processor.Process(output);
+
+        Assert.Equal((ulong)scrollbackLimit, processor.ViewportScrollState.MaxOffsetRows);
+        Assert.InRange(
+            processor.NativeScrollbackRows,
+            (ulong)scrollbackLimit,
+            (ulong)scrollbackLimit + resizedRowsPerPage * 5UL);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_NarrowToWideResizeRetainsConfiguredNativeScrollback_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        const int initialColumns = 80;
+        const int resizedColumns = 400;
+        const int viewportRows = 24;
+        const int scrollbackLimit = 2_000;
+        const int preResizeLogicalRows = 440;
+        ulong resizedRowsPerPage = GhosttyScrollbackBudget.RowsPerPage(resizedColumns);
+        int outputRows = checked(
+            scrollbackLimit + viewportRows + (int)(resizedRowsPerPage * 20UL));
+
+        TerminalScreen screen = new(initialColumns, viewportRows, scrollbackLimit);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(
+            initialColumns,
+            viewportRows,
+            widthPx: 800,
+            heightPx: 480);
+        PopulateIdentifiedSoftWrappedScrollback(
+            processor,
+            logicalRows: preResizeLogicalRows,
+            lineColumns: resizedColumns);
+        AssertIdentifiedScrollbackVisibleAtTop(processor, screen, "KKKK");
+
+        processor.NotifyResize(
+            resizedColumns,
+            viewportRows,
+            widthPx: 4_000,
+            heightPx: 480);
+
+        Assert.Equal(
+            GhosttyScrollbackBudget.FromRows(
+                resizedColumns,
+                viewportRows,
+                scrollbackLimit),
+            processor.NativeScrollbackMaxBytes);
+        AssertIdentifiedScrollbackVisibleAtTop(processor, screen, "KKKK");
+
+        byte[] output = new byte[outputRows * 3];
+        for (int offset = 0; offset < output.Length; offset += 3)
+        {
+            output[offset] = (byte)'X';
+            output[offset + 1] = (byte)'\r';
+            output[offset + 2] = (byte)'\n';
+        }
+
+        processor.Process(output);
+
+        Assert.Equal((ulong)scrollbackLimit, processor.ViewportScrollState.MaxOffsetRows);
+        Assert.InRange(
+            processor.NativeScrollbackRows,
+            (ulong)scrollbackLimit,
+            (ulong)scrollbackLimit + resizedRowsPerPage * 5UL);
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_ViewportScrollState_ClampsWhenScreenScrollbackLimitIsReduced_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
@@ -1081,6 +1200,53 @@ public class GhosttyVtProcessorTests
         }
 
         return new string(chars);
+    }
+
+    private static void PopulateIdentifiedScrollback(
+        GhosttyVtProcessor processor,
+        int rows)
+    {
+        processor.Process("KEEP\r\n"u8);
+
+        byte[] output = new byte[checked((rows - 1) * 3)];
+        for (int offset = 0; offset < output.Length; offset += 3)
+        {
+            output[offset] = (byte)'X';
+            output[offset + 1] = (byte)'\r';
+            output[offset + 2] = (byte)'\n';
+        }
+
+        processor.Process(output);
+    }
+
+    private static void PopulateIdentifiedSoftWrappedScrollback(
+        GhosttyVtProcessor processor,
+        int logicalRows,
+        int lineColumns)
+    {
+        byte[] output = new byte[checked(logicalRows * (lineColumns + 2))];
+        int offset = 0;
+        for (int row = 0; row < logicalRows; row++)
+        {
+            byte fill = row < 100 ? (byte)'K' : (byte)'X';
+            output.AsSpan(offset, lineColumns).Fill(fill);
+
+            offset += lineColumns;
+            output[offset++] = (byte)'\r';
+            output[offset++] = (byte)'\n';
+        }
+
+        processor.Process(output);
+    }
+
+    private static void AssertIdentifiedScrollbackVisibleAtTop(
+        GhosttyVtProcessor processor,
+        TerminalScreen screen,
+        string expected = "KEEP")
+    {
+        processor.ScrollViewportToTop();
+        Assert.Equal(expected, ReadAsciiPrefix(screen, row: 0, columns: expected.Length));
+        processor.ScrollViewportToBottom();
     }
 
     private static string ReadViewportAscii(TerminalScreen screen)

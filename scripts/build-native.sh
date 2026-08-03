@@ -7,7 +7,7 @@
 #   ./scripts/build-native.sh --help       # Show usage
 #
 # Prerequisites:
-#   - Zig 0.15.2+ (https://ziglang.org/download/)
+#   - Zig 0.16.0 (https://ziglang.org/download/)
 #   - Git submodule initialized: git submodule update --init
 #
 # The script builds the official libghostty-vt API library and the optional
@@ -45,21 +45,21 @@ usage() {
     echo "  --help        Show this help message"
     echo ""
     echo "Prerequisites:"
-    echo "  - Zig 0.15.2+ must be in PATH"
+    echo "  - Zig 0.16.0 must be in PATH"
     echo "  - Git submodule must be initialized:"
     echo "    git submodule update --init"
 }
 
 # Parse arguments
 CLEAN=false
-OPTIMIZE="-Doptimize=ReleaseFast"
+OPTIMIZE_ARGS=("-Doptimize=ReleaseFast")
 BUILD_STATIC=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --clean)   CLEAN=true; shift ;;
-        --release) OPTIMIZE="-Doptimize=ReleaseFast"; shift ;;
-        --debug)   OPTIMIZE=""; shift ;;
+        --release) OPTIMIZE_ARGS=("-Doptimize=ReleaseFast"); shift ;;
+        --debug)   OPTIMIZE_ARGS=(); shift ;;
         --static)  BUILD_STATIC=true; shift ;;
         --help)    usage; exit 0 ;;
         *)         error "Unknown option: $1"; usage; exit 1 ;;
@@ -70,7 +70,7 @@ done
 if ! command -v zig &>/dev/null; then
     error "Zig not found in PATH."
     echo ""
-    echo "Install Zig 0.15.2+:"
+    echo "Install Zig 0.16.0:"
     echo "  macOS:  brew install zig"
     echo "  Linux:  snap install zig --classic"
     echo "  Manual: https://ziglang.org/download/"
@@ -79,6 +79,10 @@ fi
 
 ZIG_VERSION=$(zig version)
 info "Zig version: $ZIG_VERSION"
+if [ "$ZIG_VERSION" != "0.16.0" ]; then
+    error "Ghostty requires Zig 0.16.0, but found $ZIG_VERSION."
+    exit 1
+fi
 
 if [ ! -d "$GHOSTTY_DIR" ] || [ ! -f "$GHOSTTY_DIR/build.zig" ]; then
     error "Ghostty submodule not found at $GHOSTTY_DIR"
@@ -148,7 +152,7 @@ fi
 info "Building libghostty-vt..."
 ZIG_BUILD_ARGS=(
     build
-    $OPTIMIZE
+    "${OPTIMIZE_ARGS[@]}"
     -Dapp-runtime=none
     -Demit-lib-vt=true
     -Demit-xcframework=false
@@ -250,7 +254,7 @@ if [ -f "$RENDERER_DIR/build.zig" ]; then
         linux) RENDERER_LIB_NAME="libghostty-renderer-capi.so" ;;
     esac
 
-    RENDERER_BUILD_ARGS=(build $OPTIMIZE)
+    RENDERER_BUILD_ARGS=(build "${OPTIMIZE_ARGS[@]}")
     if [ -n "${ZIG_TARGET:-}" ]; then
         RENDERER_BUILD_ARGS+=("-Dtarget=$ZIG_TARGET")
     fi

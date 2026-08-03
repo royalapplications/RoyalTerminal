@@ -27,6 +27,22 @@ public class GhosttyScrollbackBudgetTests
     }
 
     [Fact]
+    public void LineLimitFromRows_AddsOnePageOfPruningSlack()
+    {
+        nuint limit = GhosttyScrollbackBudget.LineLimitFromRows(400, 30_000);
+
+        Assert.Equal((nuint)30_115, limit);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void LineLimitFromRows_DisablesNativeScrollback_ForNonPositiveLimits(int scrollbackRows)
+    {
+        Assert.Equal((nuint)0, GhosttyScrollbackBudget.LineLimitFromRows(80, scrollbackRows));
+    }
+
+    [Fact]
     public void FromRows_ConvertsOrdinaryTerminalRowsToPageBudget()
     {
         nuint budget = GhosttyScrollbackBudget.FromRows(80, 24, 10_000);

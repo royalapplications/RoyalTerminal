@@ -13,10 +13,9 @@ internal static class GhosttyScrollbackBudget
     // 572 KiB, with a 215x215 grid capacity. Both a row and a cell occupy
     // 64 bits, so changing the terminal width divides 215 * (215 cells + one
     // row metadata slot) across rows. These are compatibility assumptions for
-    // the current byte-oriented C adapter and must be reviewed whenever the
-    // Ghostty pin changes.
-    // Ghostty PR #13473 is the future line-oriented replacement:
-    // https://github.com/ghostty-org/ghostty/pull/13473
+    // the byte-budget option and must be reviewed whenever the Ghostty pin
+    // changes. The line-oriented option added by Ghostty PR #13473 is applied
+    // alongside this budget by GhosttyVtProcessor.
     internal const ulong StandardPageBytes = 572UL * 1024UL;
     internal const ulong StandardPageGridSlots = 215UL * (215UL + 1UL);
 
@@ -53,6 +52,22 @@ internal static class GhosttyScrollbackBudget
     {
         ulong effectiveColumns = (ulong)Math.Max(1, columns);
         return Math.Max(1UL, StandardPageGridSlots / (effectiveColumns + 1UL));
+    }
+
+    /// <summary>
+    /// Calculates the native physical-line limit with one page of pruning
+    /// slack so RoyalTerminal's requested scrollback row contract is retained.
+    /// </summary>
+    internal static nuint LineLimitFromRows(int columns, int scrollbackRows)
+    {
+        if (scrollbackRows <= 0)
+        {
+            return 0;
+        }
+
+        ulong limit = checked((ulong)scrollbackRows + RowsPerPage(columns));
+        ulong nativeMaximum = nuint.Size == sizeof(uint) ? uint.MaxValue : ulong.MaxValue;
+        return limit > nativeMaximum ? nuint.MaxValue : (nuint)limit;
     }
 
     private static ulong DivideRoundUp(ulong value, ulong divisor)

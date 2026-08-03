@@ -7,7 +7,7 @@
 #   .\scripts\build-native.ps1 -Help        # Show usage
 #
 # Prerequisites:
-#   - Zig 0.15.2+ (https://ziglang.org/download/)
+#   - Zig 0.16.0 (https://ziglang.org/download/)
 #   - Git submodule initialized: git submodule update --init
 #   - Windows symlink support (Developer Mode enabled or elevated shell)
 #
@@ -205,7 +205,7 @@ Options:
   -Help        Show this help message
 
 Prerequisites:
-  - Zig 0.15.2+ must be in PATH
+  - Zig 0.16.0 must be in PATH
   - Git submodule must be initialized:
     git submodule update --init
   - Windows symlink support:
@@ -223,7 +223,7 @@ $zigPath = Get-Command zig -ErrorAction SilentlyContinue
 if (-not $zigPath) {
     Write-Err "Zig not found in PATH."
     Write-Host ""
-    Write-Host "Install Zig 0.15.2+:"
+    Write-Host "Install Zig 0.16.0:"
     Write-Host "  winget install zig.zig"
     Write-Host "  scoop install zig"
     Write-Host "  Manual: https://ziglang.org/download/"
@@ -232,6 +232,10 @@ if (-not $zigPath) {
 
 $zigVersion = & zig version
 Write-Info "Zig version: $zigVersion"
+if ($zigVersion -ne "0.16.0") {
+    Write-Err "Ghostty requires Zig 0.16.0, but found $zigVersion."
+    exit 1
+}
 
 if (-not (Test-Path (Join-Path $GhosttyDir "build.zig"))) {
     Write-Err "Ghostty submodule not found at $GhosttyDir"
@@ -240,9 +244,9 @@ if (-not (Test-Path (Join-Path $GhosttyDir "build.zig"))) {
 }
 
 $RID = if ($Arch -eq "arm64") { "win-arm64" } else { "win-x64" }
-$ZigTarget = if ($Arch -eq "arm64") { "aarch64-windows-msvc" } else { "x86_64-windows-msvc" }
+$ZigTarget = if ($Arch -eq "arm64") { "aarch64-windows-gnu" } else { "x86_64-windows-msvc" }
 $ZigCpu = if ($Arch -eq "arm64") { $null } else { "x86_64-vzeroupper" }
-$GhosttySimd = if ($Arch -eq "arm64") { $true } else { $false }
+$GhosttySimd = $false
 $LibName = "ghostty-vt.dll"
 
 Write-Info "Platform: Windows ($RID)"
@@ -299,9 +303,9 @@ try {
     Write-Info "Building ghostty-vt shared library..."
     $cpuLog = if ($ZigCpu) { " -Dcpu=$ZigCpu" } else { "" }
     $simdLog = if (-not $GhosttySimd) { " -Dsimd=false" } else { "" }
-    Write-Info "Command: zig build $optimize -Dapp-runtime=none -Dtarget=$ZigTarget$cpuLog$simdLog"
+    Write-Info "Command: zig build $optimize -Dapp-runtime=none -Demit-lib-vt=true -Dtarget=$ZigTarget$cpuLog$simdLog"
 
-    $buildArgs = @("build", "-Dapp-runtime=none", "-Dtarget=$ZigTarget")
+    $buildArgs = @("build", "-Dapp-runtime=none", "-Demit-lib-vt=true", "-Dtarget=$ZigTarget")
     if ($ZigCpu) { $buildArgs += "-Dcpu=$ZigCpu" }
     if (-not $GhosttySimd) { $buildArgs += "-Dsimd=false" }
     if (-not $Debug) { $buildArgs += "-Doptimize=ReleaseFast" }

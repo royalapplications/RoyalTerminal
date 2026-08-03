@@ -24,6 +24,24 @@ public sealed class GhosttyKittyGraphics
     /// <summary>Gets whether the borrowed handle is valid.</summary>
     public bool IsValid => Handle != nint.Zero;
 
+    /// <summary>
+    /// Gets the process-wide generation stamp for images and placements in this storage.
+    /// </summary>
+    public unsafe ulong GetGeneration()
+    {
+        ulong generation = 0;
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.KittyGraphicsGet(
+            Handle,
+            GhosttyVtNative.GhosttyKittyGraphicsData.Generation,
+            &generation);
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            throw new InvalidOperationException($"ghostty_kitty_graphics_get(generation) failed with {result}.");
+        }
+
+        return generation;
+    }
+
     /// <summary>Creates an owned placement iterator.</summary>
     public GhosttyKittyGraphicsPlacementIterator CreatePlacementIterator()
     {
@@ -90,6 +108,10 @@ public readonly struct GhosttyKittyGraphicsImage
     /// <summary>Gets the image compression mode.</summary>
     public GhosttyVtNative.GhosttyKittyImageCompression GetCompression()
         => GetValue<GhosttyVtNative.GhosttyKittyImageCompression>(GhosttyVtNative.GhosttyKittyGraphicsImageData.Compression);
+
+    /// <summary>Gets the process-wide generation stamp for this image payload.</summary>
+    public ulong GetGeneration()
+        => GetValue<ulong>(GhosttyVtNative.GhosttyKittyGraphicsImageData.Generation);
 
     /// <summary>Copies the decoded image pixel payload.</summary>
     public unsafe byte[] CopyData()

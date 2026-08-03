@@ -52,7 +52,7 @@ step "1/7 — Checking prerequisites..."
 check "dotnet SDK installed" "command -v dotnet"
 check "dotnet SDK version" "dotnet --version"
 check "Zig compiler installed" "command -v zig"
-check "Zig version matches Ghostty requirement" "test \"\$(zig version)\" = \"0.15.2\""
+check "Zig version matches Ghostty requirement" "test \"\$(zig version)\" = \"0.16.0\""
 check "Git submodule present" "test -f external/ghostty/build.zig"
 check "macOS platform" "test $(uname -s) = Darwin"
 

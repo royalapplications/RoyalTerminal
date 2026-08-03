@@ -56,6 +56,7 @@ public static partial class GhosttyVtNative
         Dirty = 1,
         Raw = 2,
         Cells = 3,
+        Selection = 4,
     }
 
     public enum GhosttyRenderStateRowOption : int
@@ -72,6 +73,33 @@ public static partial class GhosttyVtNative
         GraphemesBuffer = 4,
         BackgroundColor = 5,
         ForegroundColor = 6,
+        Selected = 7,
+        HasStyling = 8,
+        GraphemesUtf8 = 9,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GhosttyRenderStateRowSelection
+    {
+        public nuint Size;
+        public ushort StartX;
+        public ushort EndX;
+
+        public static GhosttyRenderStateRowSelection CreateSized()
+        {
+            return new GhosttyRenderStateRowSelection
+            {
+                Size = (nuint)Marshal.SizeOf<GhosttyRenderStateRowSelection>(),
+            };
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct GhosttyBuffer
+    {
+        public byte* Pointer;
+        public nuint Capacity;
+        public nuint Length;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -121,6 +149,14 @@ public static partial class GhosttyVtNative
     [LibraryImport(LibName, EntryPoint = "ghostty_render_state_update")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult RenderStateUpdate(nint state, nint terminal);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_render_state_begin_update")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial GhosttyResult RenderStateBeginUpdate(nint state, nint terminal);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_render_state_end_update")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial GhosttyResult RenderStateEndUpdate(nint state);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_render_state_get")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

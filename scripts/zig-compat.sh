@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # zig-compat.sh - Run Zig with RoyalTerminal host workarounds.
 #
-# Ghostty currently pins Zig 0.15.2. On macOS 26 hosts with an Xcode 26.4 SDK,
-# Zig 0.15.2 can select a native target of macOS 26.4.1 but link against an SDK
-# max version of 26.4, which leaves libSystem symbols unresolved while linking
-# build runners and native helper tools. This wrapper keeps Zig 0.15.2 while
-# making those host-tool invocations explicit.
+# Current Ghostty builds use Zig 0.16.0 and pass through this wrapper unchanged.
+# The compatibility branch remains for developers reproducing older Zig 0.15.2
+# builds on macOS 26 with an Xcode 26.4 SDK.
 
 set -euo pipefail
 

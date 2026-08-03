@@ -143,13 +143,14 @@ public class GhosttyVtTerminalTests
         terminal.Resize(80, 24, 8, 16);
         terminal.SetKittyImageStorageLimit(32UL * 1024UL * 1024UL);
         terminal.SetKittyImageMediumFile(enabled: true);
-        terminal.SetKittyImageMediumTempFile(enabled: true);
+        terminal.SetKittyImageMediumTempFileDirectory(Path.GetTempPath());
         terminal.SetKittyImageMediumSharedMemory(enabled: true);
 
         Assert.True(terminal.TryGetKittyImageStorageLimit(out ulong storageLimit));
         Assert.True(storageLimit >= 32UL * 1024UL * 1024UL);
         Assert.True(terminal.TryGetKittyImageMediumFile(out bool fileMedium) && fileMedium);
-        Assert.True(terminal.TryGetKittyImageMediumTempFile(out bool tempFileMedium) && tempFileMedium);
+        Assert.True(terminal.TryGetKittyImageMediumTempFileDirectory(out string tempFileDirectory));
+        Assert.Equal(Path.GetFullPath(Path.GetTempPath()), Path.GetFullPath(tempFileDirectory));
         Assert.True(terminal.TryGetKittyImageMediumSharedMemory(out bool sharedMemoryMedium) && sharedMemoryMedium);
 
         terminal.Write("\u001b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=2,c=10,r=1;////////\u001b\\"u8);
@@ -185,6 +186,25 @@ public class GhosttyVtTerminalTests
         Assert.Equal(1u, sourceWidth);
         Assert.Equal(2u, sourceHeight);
         Assert.False(iterator.MoveNext());
+    }
+
+    [GhosttyNativeFact]
+    public void OfficialTerminal_KittyTempFileMediumCanBeDisabled()
+    {
+        GhosttyVtHelpers.GhosttyBuildFeatures features = GhosttyVtHelpers.GetBuildFeatures();
+        if (!features.KittyGraphics)
+        {
+            return;
+        }
+
+        using GhosttyTerminal terminal = new(80, 24);
+        terminal.SetKittyImageMediumTempFileDirectory(Path.GetTempPath());
+
+        Assert.True(terminal.TryGetKittyImageMediumTempFileDirectory(out _));
+
+        terminal.DisableKittyImageMediumTempFile();
+
+        Assert.False(terminal.TryGetKittyImageMediumTempFileDirectory(out _));
     }
 
     [GhosttyNativeFact]

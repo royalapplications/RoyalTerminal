@@ -8,6 +8,10 @@ namespace RoyalTerminal.GhosttySharp;
 /// <summary>
 /// Managed selection range used by Ghostty VT formatter and Kitty graphics helpers.
 /// </summary>
+/// <remarks>
+/// The endpoints are untracked native snapshots. Use the selection immediately;
+/// it is no longer valid after the originating terminal is mutated.
+/// </remarks>
 public readonly struct GhosttySelection
 {
     /// <summary>
@@ -39,5 +43,10 @@ public readonly struct GhosttySelection
         range.End = End;
         range.Rectangle = Rectangle;
         return range;
+    }
+
+    internal static GhosttySelection FromNative(in GhosttyVtNative.GhosttySelectionRange range)
+    {
+        return new GhosttySelection(range.Start, range.End, range.Rectangle);
     }
 }
