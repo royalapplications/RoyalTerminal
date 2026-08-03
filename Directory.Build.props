@@ -9,7 +9,7 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest</AnalysisLevel>
     <VersionPrefix>0.5.0</VersionPrefix>
-    <VersionSuffix>preview.1</VersionSuffix>
+    <VersionSuffix></VersionSuffix>
     <RoyalTerminalEnablePretextTextPipeline Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == ''">true</RoyalTerminalEnablePretextTextPipeline>
     <DefineConstants Condition="'$(RoyalTerminalEnablePretextTextPipeline)' == 'true'">$(DefineConstants);ROYALTERMINAL_PRETEXT_TEXT_PIPELINE</DefineConstants>
   </PropertyGroup>
