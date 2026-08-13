@@ -33,6 +33,7 @@ using RoyalTerminal.Avalonia.App.Views;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using ReactiveUI;
+using ReactiveUI.Reactive;
 using Xunit;
 using AvaloniaPath = Avalonia.Controls.Shapes.Path;
 

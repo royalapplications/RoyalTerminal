@@ -9,7 +9,8 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- Runtime platform checks handle cross-platform safety -->
-    <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <!-- NU1608 is inherited from the app's SshNet.Agent compatibility bridge. -->
+    <NoWarn>$(NoWarn);CA1416;NU1608</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
@@ -25,7 +26,7 @@
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
-    <PackageReference Include="ReactiveUI.Avalonia" />
+    <PackageReference Include="ReactiveUI.Avalonia.Reactive" />
   </ItemGroup>
 
   <!-- Import native asset targets for file copying (same mechanism as NuGet package) -->

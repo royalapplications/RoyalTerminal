@@ -8,7 +8,8 @@ using Avalonia.Markup.Xaml;
 using RoyalTerminal.Avalonia.App.Services;
 using RoyalTerminal.Avalonia.App.ViewModels;
 using ReactiveUI;
-using ReactiveUI.Avalonia;
+using ReactiveUI.Avalonia.Reactive;
+using ReactiveUI.Reactive;
 
 namespace RoyalTerminal.Avalonia.App;
 

@@ -3,6 +3,7 @@
 // RoyalTerminal.Avalonia.App - About dialog view model.
 
 using ReactiveUI;
+using ReactiveUI.Reactive;
 
 namespace RoyalTerminal.Avalonia.App.ViewModels;
 

@@ -11,7 +11,8 @@
     <IsPackable>true</IsPackable>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- Runtime platform checks handle cross-platform safety. -->
-    <NoWarn>$(NoWarn);CA1416;NU5104</NoWarn>
+    <!-- NU1608 is limited to the SshNet.Agent compatibility bridge until it declares SSH.NET 2026 support. -->
+    <NoWarn>$(NoWarn);CA1416;NU1608;NU5104</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,8 +30,8 @@
   <ItemGroup>
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Skia" />
-    <PackageReference Include="ReactiveUI" />
-    <PackageReference Include="ReactiveUI.Avalonia" />
+    <PackageReference Include="ReactiveUI.Reactive" />
+    <PackageReference Include="ReactiveUI.Avalonia.Reactive" />
     <PackageReference Include="SkiaSharp" />
     <PackageReference Include="Xaml.Behaviors.Avalonia" />
   </ItemGroup>

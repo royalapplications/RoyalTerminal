@@ -19,7 +19,8 @@ using RoyalTerminal.Avalonia.App.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using ReactiveUI;
-using ReactiveUI.Avalonia;
+using ReactiveUI.Primitives.Reactive.Concurrency;
+using ReactiveUI.Reactive;
 
 namespace RoyalTerminal.Avalonia.App.ViewModels;
 

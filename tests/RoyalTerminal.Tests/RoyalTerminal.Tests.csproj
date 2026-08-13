@@ -3,7 +3,8 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+    <!-- NU1608 is inherited from the SshNet.Agent compatibility bridge under test. -->
+    <NoWarn>$(NoWarn);NU1608;xUnit1051</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -4,6 +4,8 @@
     <PackageId>RoyalApps.RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent</PackageId>
     <Description>Optional SSH.NET agent authentication adapter for terminal SSH transport.</Description>
     <IsPackable>true</IsPackable>
+    <!-- SshNet.Agent has no SSH.NET 2026 release yet, while SSH.NET 2026 reports no known breaking changes. -->
+    <NoWarn>$(NoWarn);NU1608</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -12,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="SSH.NET" />
     <PackageReference Include="SshNet.Agent" />
   </ItemGroup>
 
