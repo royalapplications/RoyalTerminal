@@ -10,6 +10,7 @@ using System.IO;
 using System.Reactive;
 using System.Reactive.Linq;
 using System.Runtime.InteropServices;
+using Avalonia.Threading;
 using RoyalTerminal.Avalonia.App;
 using RoyalTerminal.Avalonia.Controls;
 using RoyalTerminal.Avalonia.Rendering;
@@ -58,6 +59,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private TerminalRenderMode _activeRenderMode = TerminalRenderMode.RenderedAuto;
     private readonly ITerminalModeResolver _modeResolver;
     private readonly ITerminalThemeCatalog _themeCatalog;
+    private readonly AvaloniaScheduler _uiScheduler;
     private readonly IReadOnlyList<TerminalThemePreset> _themePresets;
     private readonly bool _showMacOsTitleBarLogos;
     private readonly Dictionary<TerminalRenderMode, ModeThemeState> _modeThemes = [];
@@ -213,6 +215,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         _modeResolver = modeResolver ?? throw new ArgumentNullException(nameof(modeResolver));
         _themeCatalog = themeCatalog ?? throw new ArgumentNullException(nameof(themeCatalog));
         ArgumentNullException.ThrowIfNull(shellOptions);
+        _uiScheduler = new AvaloniaScheduler(Dispatcher.UIThread);
 
         _showMacOsTitleBarLogos = shellOptions.ShowMacOsTitleBarLogos;
         _themePresets = _themeCatalog.Presets;
@@ -2334,7 +2337,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         return PrepareSettingsPanelInteraction
             .Handle(Unit.Default)
-            .ObserveOn(AvaloniaScheduler.Instance)
+            .ObserveOn(_uiScheduler)
             .Do(_ => IsSettingsPanelOpen = true);
     }
 
