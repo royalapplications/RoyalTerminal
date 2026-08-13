@@ -5,7 +5,7 @@ using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Markup.Xaml;
 using Avalonia.Skia;
-using ReactiveUI.Avalonia;
+using ReactiveUI.Avalonia.Reactive;
 
 [assembly: AvaloniaTestApplication(typeof(RoyalTerminal.Tests.TestAppBuilder))]
 

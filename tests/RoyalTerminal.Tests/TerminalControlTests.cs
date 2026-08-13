@@ -7233,7 +7233,7 @@ public class TerminalControlTests
         Assert.NotNull(frame);
 
         using MemoryStream stream = new();
-        frame!.Save(stream);
+        frame!.Save(stream, PngBitmapEncoderOptions.Default);
         return stream.ToArray();
     }
 

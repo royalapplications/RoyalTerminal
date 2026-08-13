@@ -29,6 +29,7 @@ using RoyalTerminal.Avalonia.App.Views;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.Terminal;
 using ReactiveUI;
+using ReactiveUI.Reactive;
 using Xunit;
 
 namespace RoyalTerminal.Tests;

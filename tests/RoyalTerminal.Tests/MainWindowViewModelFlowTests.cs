@@ -33,6 +33,7 @@ using RoyalTerminal.Avalonia.App.Views;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Theming;
 using ReactiveUI;
+using ReactiveUI.Reactive;
 using Xunit;
 using AvaloniaPath = Avalonia.Controls.Shapes.Path;
 
@@ -1165,8 +1166,8 @@ public class MainWindowViewModelFlowTests
         }
     }
 
-    [Fact]
-    public void MainWindowViewModel_MenuCommandsUseCommandCanExecuteState()
+    [AvaloniaFact]
+    public async Task MainWindowViewModel_MenuCommandsUseCommandCanExecuteState()
     {
         MainWindowViewModel viewModel = new();
 
@@ -1213,11 +1214,11 @@ public class MainWindowViewModelFlowTests
             context.SetOutput(Unit.Default);
         });
 
-        viewModel.OpenCommandHistoryOverlayCommand.Execute().Wait();
+        await viewModel.OpenCommandHistoryOverlayCommand.Execute().ToTask();
         AssertCanExecuteNativeMenuCommand(viewModel.AcceptCommandSuggestionCommand);
         AssertCanExecuteNativeMenuCommand(viewModel.CloseCommandHistoryOverlayCommand);
 
-        viewModel.PrepareSettingsPanelCommand.Execute().Wait();
+        await viewModel.PrepareSettingsPanelCommand.Execute().ToTask();
         AssertCanExecuteNativeMenuCommand(viewModel.CloseSettingsPanelCommand);
     }
 
@@ -1975,7 +1976,7 @@ public class MainWindowViewModelFlowTests
     }
 
     [AvaloniaFact]
-    public void MainWindow_SettingsOverlay_ConstrainsSettingsPanelToAvailableHost()
+    public async Task MainWindow_SettingsOverlay_ConstrainsSettingsPanelToAvailableHost()
     {
         MainWindow window = new()
         {
@@ -1992,7 +1993,7 @@ public class MainWindowViewModelFlowTests
                 context.SetOutput(Unit.Default);
             });
 
-            viewModel.PrepareSettingsPanelCommand.Execute().Wait();
+            await viewModel.PrepareSettingsPanelCommand.Execute().ToTask();
 
             window.Measure(new Size(window.Width, window.Height));
             window.Arrange(new Rect(0, 0, window.Width, window.Height));
@@ -2186,8 +2187,8 @@ public class MainWindowViewModelFlowTests
         Assert.Equal(1, closeRequests);
     }
 
-    [Fact]
-    public void SettingsPanel_OpenClose_TogglesOverlayAfterPreparation()
+    [AvaloniaFact]
+    public async Task SettingsPanel_OpenClose_TogglesOverlayAfterPreparation()
     {
         MainWindowViewModel viewModel = new();
         using IDisposable preparationRegistration = viewModel.PrepareSettingsPanelInteraction.RegisterHandler(context =>
@@ -2195,11 +2196,11 @@ public class MainWindowViewModelFlowTests
             context.SetOutput(Unit.Default);
         });
 
-        viewModel.PrepareSettingsPanelCommand.Execute().Wait();
+        await viewModel.PrepareSettingsPanelCommand.Execute().ToTask();
 
         Assert.True(viewModel.IsSettingsPanelOpen);
 
-        viewModel.CloseSettingsPanelCommand.Execute().Wait();
+        await viewModel.CloseSettingsPanelCommand.Execute().ToTask();
 
         Assert.False(viewModel.IsSettingsPanelOpen);
     }

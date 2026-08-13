@@ -1,14 +1,22 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using Renci.SshNet;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent;
+using SshNet.Agent;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
 
 public sealed class SshNetAgentAuthenticationMethodContributorTests
 {
+    [Fact]
+    public void SshAgentPrivateKey_IsCompatibleWithSshNetPrivateKeySource()
+    {
+        Assert.True(typeof(IPrivateKeySource).IsAssignableFrom(typeof(SshAgentPrivateKey)));
+    }
+
     [Fact]
     public void CreateAuthenticationMethods_WhenAgentNotRequested_ReturnsEmpty()
     {

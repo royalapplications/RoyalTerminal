@@ -53,6 +53,7 @@ using RoyalTerminal.Terminal.Transport.Ssh.SshNet;
 using RoyalTerminal.Terminal.Transport.Ssh.SshNet.Agent;
 using RoyalTerminal.Terminal.Transport.Telnet;
 using ReactiveUI;
+using ReactiveUI.Reactive;
 
 namespace RoyalTerminal.Avalonia.App.Services;
 

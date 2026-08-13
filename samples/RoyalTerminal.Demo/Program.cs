@@ -3,7 +3,7 @@
 // RoyalTerminal.Demo — Sample multi-tab terminal application.
 
 using Avalonia;
-using ReactiveUI.Avalonia;
+using ReactiveUI.Avalonia.Reactive;
 
 namespace RoyalTerminal.Demo;
 
