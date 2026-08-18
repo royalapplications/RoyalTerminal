@@ -70,118 +70,200 @@ public sealed class UnixPty : IPty
 
         shell ??= DetectShell();
 
-        // ---- Pre-allocate all native data BEFORE fork ----
-        // After fork(), the child must NOT use .NET runtime (GC, marshaling, etc.)
-        // We resolve function pointers and allocate C strings here, then use only
-        // raw calli in the child.
-
-        var nativeShell = AllocNativeString(shell);
-        var nativeCwd = workingDirectory is not null ? AllocNativeString(workingDirectory) : IntPtr.Zero;
-        var nativeTermName = AllocNativeString("TERM");
-        var nativeTermValue = AllocNativeString("xterm-256color");
-
-        // Build argv: { shell_path, arg1, arg2, ..., NULL }
-        int argumentCount = arguments?.Count ?? 0;
-        int argvLength = argumentCount + 2;
-        var argv = (byte**)Marshal.AllocHGlobal(argvLength * IntPtr.Size);
-        argv[0] = (byte*)nativeShell;
-        IntPtr[] nativeArguments = argumentCount == 0
-            ? Array.Empty<IntPtr>()
-            : new IntPtr[argumentCount];
-        for (int i = 0; i < argumentCount; i++)
+        // 1. Open master PTY descriptor
+        _masterFd = PosixOpen("/dev/ptmx", O_RDWR | O_NOCTTY);
+        if (_masterFd < 0)
         {
-            string argument = arguments![i] ?? string.Empty;
-            IntPtr nativeArgument = AllocNativeString(argument);
-            nativeArguments[i] = nativeArgument;
-            argv[i + 1] = (byte*)nativeArgument;
+            throw new InvalidOperationException($"Failed to open /dev/ptmx: {Marshal.GetLastPInvokeError()}");
         }
 
-        argv[argvLength - 1] = null;
-
-        // Build env key=value pairs for additional environment variables
-        int environmentCount = environment?.Count ?? 0;
-        (IntPtr key, IntPtr val)[] envPairs = environmentCount == 0
-            ? Array.Empty<(IntPtr key, IntPtr val)>()
-            : new (IntPtr key, IntPtr val)[environmentCount];
-        if (environment is not null)
+        try
         {
-            int envIndex = 0;
-            foreach (var (key, value) in environment)
+            // 2. Grant and unlock PTY
+            if (GrantPt(_masterFd) != 0 || UnlockPt(_masterFd) != 0)
             {
-                envPairs[envIndex++] = (AllocNativeString(key), AllocNativeString(value));
-            }
-        }
-
-        // Resolve raw function pointers from libc.
-        // On Linux, soname availability can vary by distro/container image,
-        // so probe a small set of common candidates.
-        var libc = LoadLibcHandle();
-        var pSignal = (delegate* unmanaged[Cdecl]<int, nint, nint>)
-            NativeLibrary.GetExport(libc, "signal");
-        var pChdir = (delegate* unmanaged[Cdecl]<byte*, int>)
-            NativeLibrary.GetExport(libc, "chdir");
-        var pSetenv = (delegate* unmanaged[Cdecl]<byte*, byte*, int, int>)
-            NativeLibrary.GetExport(libc, "setenv");
-        var pExecvp = (delegate* unmanaged[Cdecl]<byte*, byte**, int>)
-            NativeLibrary.GetExport(libc, "execvp");
-        var pExit = (delegate* unmanaged[Cdecl]<int, void>)
-            NativeLibrary.GetExport(libc, "_exit");
-        int[] signalsToReset = GetSignalsToResetForExec();
-
-        // ---- Fork ----
-        var winSize = new WinSize
-        {
-            ws_col = (ushort)columns,
-            ws_row = (ushort)rows,
-        };
-
-        _childPid = ForkPty(out _masterFd, ref winSize);
-
-        if (_childPid < 0)
-        {
-            FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, nativeArguments, envPairs);
-            throw new InvalidOperationException($"forkpty failed: {Marshal.GetLastPInvokeError()}");
-        }
-
-        if (_childPid == 0)
-        {
-            // ---- CHILD PROCESS ----
-            // Only raw native calls via resolved function pointers.
-            // No .NET runtime: no GC, no P/Invoke marshaling, no allocations.
-
-            // Child processes inherit ignored signal dispositions across exec.
-            // Reset the standard terminal-control signals so interactive shells
-            // and shell builtins receive Ctrl+C/Ctrl+Z the same way they do in
-            // native terminals such as Ghostty/xterm.
-            for (int i = 0; i < signalsToReset.Length; i++)
-            {
-                pSignal(signalsToReset[i], 0);
+                throw new InvalidOperationException($"Failed to grantpt/unlockpt: {Marshal.GetLastPInvokeError()}");
             }
 
-            if (nativeCwd != IntPtr.Zero)
-                pChdir((byte*)nativeCwd);
-
-            // Set TERM environment variable
-            pSetenv((byte*)nativeTermName, (byte*)nativeTermValue, 1);
-
-            // Set additional environment variables
-            for (int i = 0; i < envPairs.Length; i++)
+            // 3. Get slave path name
+            nint slaveNamePtr = PtsName(_masterFd);
+            if (slaveNamePtr == nint.Zero)
             {
-                (IntPtr key, IntPtr val) pair = envPairs[i];
-                pSetenv((byte*)pair.key, (byte*)pair.val, 1);
+                throw new InvalidOperationException($"Failed to get ptsname: {Marshal.GetLastPInvokeError()}");
             }
+            string slaveName = Marshal.PtrToStringAnsi(slaveNamePtr)!;
+            _slavePtyPath = slaveName;
 
-            // Replace this process with the shell
-            pExecvp((byte*)nativeShell, argv);
+            // Apply initial window size to the master FD
+            var winSize = new WinSize
+            {
+                ws_col = (ushort)columns,
+                ws_row = (ushort)rows,
+            };
+            Ioctl(_masterFd, TIOCSWINSZ, (nint)(&winSize));
 
-            // If exec failed, exit immediately
-            pExit(127);
+            // 4. Initialize posix_spawn actions and attributes
+            byte[] actions = new byte[1024];
+            byte[] attr = new byte[1024];
+
+            fixed (byte* pActions = actions)
+            fixed (byte* pAttr = attr)
+            {
+                if (PosixSpawnFileActionsInit(pActions) != 0)
+                {
+                    throw new InvalidOperationException("Failed to init spawn file actions.");
+                }
+
+                try
+                {
+                    if (PosixSpawnAttrInit(pAttr) != 0)
+                    {
+                        throw new InvalidOperationException("Failed to init spawn attributes.");
+                    }
+
+                    try
+                    {
+                        // Open slave PTY in the child process for fd 0 (which makes it the controlling terminal of the new session)
+                        if (PosixSpawnFileActionsAddOpen(pActions, 0, slaveName, O_RDWR, 0) != 0)
+                        {
+                            throw new InvalidOperationException($"Failed to add open action: {Marshal.GetLastPInvokeError()}");
+                        }
+                        
+                        // Duplicate to standard descriptors 1 and 2
+                        PosixSpawnFileActionsAddDup2(pActions, 0, 1);
+                        PosixSpawnFileActionsAddDup2(pActions, 0, 2);
+                        
+                        // Close master PTY descriptor in the child process
+                        PosixSpawnFileActionsAddClose(pActions, _masterFd);
+
+                        // Set setsid flag to launch child shell as the session leader
+                        PosixSpawnAttrSetFlags(pAttr, POSIX_SPAWN_SETSID);
+
+                        // 5. Build argv for spawning target shell directly
+                        int argumentCount = arguments?.Count ?? 0;
+                        byte** argv = (byte**)Marshal.AllocHGlobal((argumentCount + 2) * IntPtr.Size);
+                        IntPtr nativeShell = Marshal.StringToHGlobalAnsi(shell);
+                        argv[0] = (byte*)nativeShell;
+
+                        IntPtr[] nativeArguments = new IntPtr[argumentCount];
+                        for (int i = 0; i < argumentCount; i++)
+                        {
+                            string argument = arguments![i] ?? string.Empty;
+                            IntPtr nativeArgument = Marshal.StringToHGlobalAnsi(argument);
+                            nativeArguments[i] = nativeArgument;
+                            argv[i + 1] = (byte*)nativeArgument;
+                        }
+                        argv[argumentCount + 1] = null;
+
+                        // 6. Build merged environment envp
+                        var envVars = Environment.GetEnvironmentVariables();
+                        var mergedEnv = new Dictionary<string, string>();
+                        foreach (System.Collections.DictionaryEntry de in envVars)
+                        {
+                            mergedEnv[de.Key.ToString()!] = de.Value?.ToString() ?? string.Empty;
+                        }
+                        mergedEnv["TERM"] = "xterm-256color";
+                        if (environment != null)
+                        {
+                            foreach (var kv in environment)
+                            {
+                                mergedEnv[kv.Key] = kv.Value;
+                            }
+                        }
+
+                        int envCount = mergedEnv.Count;
+                        byte** envp = (byte**)Marshal.AllocHGlobal((envCount + 1) * IntPtr.Size);
+                        IntPtr[] allocatedStrings = new IntPtr[envCount];
+                        int envIndex = 0;
+                        foreach (var kv in mergedEnv)
+                        {
+                            string entry = $"{kv.Key}={kv.Value}";
+                            IntPtr nativeEntry = Marshal.StringToHGlobalAnsi(entry);
+                            allocatedStrings[envIndex] = nativeEntry;
+                            envp[envIndex] = (byte*)nativeEntry;
+                            envIndex++;
+                        }
+                        envp[envCount] = null;
+
+                        // 7. Spawn child process (temporarily changing CWD to align workingDirectory)
+                        string originalCwd = Directory.GetCurrentDirectory();
+                        if (!string.IsNullOrEmpty(workingDirectory))
+                        {
+                            try
+                            {
+                                Directory.SetCurrentDirectory(workingDirectory);
+                            }
+                            catch
+                            {
+                                // Fallback: try directory change, ignore if fails to prevent start crash
+                            }
+                        }
+
+                        int childPid = 0;
+                        int spawnResult;
+                        try
+                        {
+                            spawnResult = PosixSpawn(
+                                &childPid,
+                                shell,
+                                pActions,
+                                pAttr,
+                                argv,
+                                envp);
+                        }
+                        finally
+                        {
+                            if (!string.IsNullOrEmpty(workingDirectory))
+                            {
+                                try
+                                {
+                                    Directory.SetCurrentDirectory(originalCwd);
+                                }
+                                catch
+                                {
+                                    // Suppress fallback cleanup directory changes exceptions
+                                }
+                            }
+                        }
+
+                        // 8. Free native argv and envp structures
+                        Marshal.FreeHGlobal(nativeShell);
+                        for (int i = 0; i < argumentCount; i++)
+                        {
+                            Marshal.FreeHGlobal(nativeArguments[i]);
+                        }
+                        Marshal.FreeHGlobal((IntPtr)argv);
+
+                        for (int i = 0; i < envCount; i++)
+                        {
+                            Marshal.FreeHGlobal(allocatedStrings[i]);
+                        }
+                        Marshal.FreeHGlobal((IntPtr)envp);
+
+                        if (spawnResult != 0)
+                        {
+                            throw new InvalidOperationException($"posix_spawn failed with error {spawnResult}: {Marshal.GetLastPInvokeError()}");
+                        }
+
+                        _childPid = childPid;
+                    }
+                    finally
+                    {
+                        PosixSpawnAttrDestroy(pAttr);
+                    }
+                }
+                finally
+                {
+                    PosixSpawnFileActionsDestroy(pActions);
+                }
+            }
         }
-
-        // ---- PARENT PROCESS ----
-        // Free the native memory (child has its own copy after fork)
-        FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, nativeArguments, envPairs);
-        _slavePtyPath = TryGetSlavePtyPath(_masterFd);
+        catch
+        {
+            PosixClose(_masterFd);
+            _masterFd = -1;
+            throw;
+        }
 
         // Start writing to the master FD on a dedicated worker so UI/key handling
         // callers never block on back-pressured PTY input.
@@ -519,30 +601,6 @@ public sealed class UnixPty : IPty
 
     #region Helpers
 
-    private static nint LoadLibcHandle()
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            return NativeLibrary.Load("libSystem.dylib");
-        }
-
-        // Linux fallback order:
-        // - libc.so.6: glibc soname
-        // - libc.so: common linker name
-        // - libc: generic probe used by DllImport
-        string[] candidates = ["libc.so.6", "libc.so", "libc"];
-        foreach (string candidate in candidates)
-        {
-            if (NativeLibrary.TryLoad(candidate, out nint handle))
-            {
-                return handle;
-            }
-        }
-
-        throw new DllNotFoundException(
-            "Unable to load libc for UnixPty. Tried: libc.so.6, libc.so, libc.");
-    }
-
     private static string DetectShell()
     {
         var shell = Environment.GetEnvironmentVariable("SHELL");
@@ -554,65 +612,26 @@ public sealed class UnixPty : IPty
         return "/bin/sh";
     }
 
-    private static int[] GetSignalsToResetForExec()
+    private static string EscapeShellArg(string arg)
     {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            return
-            [
-                1,  // SIGHUP
-                2,  // SIGINT
-                3,  // SIGQUIT
-                13, // SIGPIPE
-                15, // SIGTERM
-                18, // SIGTSTP
-                20, // SIGCHLD
-                21, // SIGTTIN
-                22, // SIGTTOU
-            ];
-        }
-
-        return
-        [
-            1,  // SIGHUP
-            2,  // SIGINT
-            3,  // SIGQUIT
-            13, // SIGPIPE
-            15, // SIGTERM
-            17, // SIGCHLD
-            20, // SIGTSTP
-            21, // SIGTTIN
-            22, // SIGTTOU
-        ];
+        return "'" + arg.Replace("'", "'\\''") + "'";
     }
 
-    private static IntPtr AllocNativeString(string s)
+    private static string? TryGetSlavePtyPath(int masterFd)
     {
-        var bytes = Encoding.UTF8.GetBytes(s);
-        var ptr = Marshal.AllocHGlobal(bytes.Length + 1);
-        Marshal.Copy(bytes, 0, ptr, bytes.Length);
-        Marshal.WriteByte(ptr + bytes.Length, 0); // null terminator
-        return ptr;
-    }
-
-    private static unsafe void FreeNative(
-        IntPtr shell, IntPtr cwd, IntPtr termName, IntPtr termValue,
-        byte** argv, IntPtr[] nativeArguments, (IntPtr key, IntPtr val)[] envPairs)
-    {
-        Marshal.FreeHGlobal(shell);
-        if (cwd != IntPtr.Zero) Marshal.FreeHGlobal(cwd);
-        Marshal.FreeHGlobal(termName);
-        Marshal.FreeHGlobal(termValue);
-        for (int i = 0; i < nativeArguments.Length; i++)
+        if (masterFd < 0)
         {
-            Marshal.FreeHGlobal(nativeArguments[i]);
+            return null;
         }
-        Marshal.FreeHGlobal((IntPtr)argv);
-        for (int i = 0; i < envPairs.Length; i++)
+
+        try
         {
-            (IntPtr key, IntPtr val) pair = envPairs[i];
-            Marshal.FreeHGlobal(pair.key);
-            Marshal.FreeHGlobal(pair.val);
+            nint ptr = PtsName(masterFd);
+            return ptr == nint.Zero ? null : Marshal.PtrToStringAnsi(ptr);
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -671,24 +690,6 @@ public sealed class UnixPty : IPty
         }
     }
 
-    private static string? TryGetSlavePtyPath(int masterFd)
-    {
-        if (masterFd < 0)
-        {
-            return null;
-        }
-
-        try
-        {
-            nint ptr = PtsName(masterFd);
-            return ptr == nint.Zero ? null : Marshal.PtrToStringAnsi(ptr);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     #endregion
 
     #region Native Interop
@@ -702,6 +703,10 @@ public sealed class UnixPty : IPty
     private const int ErrnoInterrupted = 4;
     private const int ErrnoWouldBlockLinux = 11;
     private const int ErrnoWouldBlockBsd = 35;
+
+    private const int O_RDWR = 2;
+    private static readonly int O_NOCTTY = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? 0x20000 : 0x400;
+    private static readonly short POSIX_SPAWN_SETSID = (short)(RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? 0x0400 : 0x80);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WinSize
@@ -724,30 +729,55 @@ public sealed class UnixPty : IPty
         public int Offset;
     }
 
-    private static int ForkPty(out int masterFd, ref WinSize winSize)
-    {
-        unsafe
-        {
-            fixed (int* masterPtr = &masterFd)
-            fixed (WinSize* wsPtr = &winSize)
-            {
-                return forkpty(masterPtr, null, null, wsPtr);
-            }
-        }
-    }
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int PosixOpen(string path, int flags);
 
-    [DllImport("libSystem.dylib", EntryPoint = "forkpty", SetLastError = true)]
-    private static extern unsafe int forkpty_macos(int* amaster, byte* name, void* termp, WinSize* winp);
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern unsafe int PosixOpen(byte* path, int flags);
 
-    [DllImport("libutil.so.1", EntryPoint = "forkpty", SetLastError = true)]
-    private static extern unsafe int forkpty_linux(int* amaster, byte* name, void* termp, WinSize* winp);
+    [DllImport("libc", EntryPoint = "grantpt", SetLastError = true)]
+    private static extern int GrantPt(int fd);
 
-    private static unsafe int forkpty(int* amaster, byte* name, void* termp, WinSize* winp)
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            return forkpty_macos(amaster, name, termp, winp);
-        return forkpty_linux(amaster, name, termp, winp);
-    }
+    [DllImport("libc", EntryPoint = "unlockpt", SetLastError = true)]
+    private static extern int UnlockPt(int fd);
+
+    [DllImport("libc", EntryPoint = "posix_spawn", SetLastError = true)]
+    private static extern unsafe int PosixSpawn(
+        int* pid,
+        string path,
+        byte* fileActions,
+        byte* spawnAttr,
+        byte** argv,
+        byte** envp);
+
+    [DllImport("libc", EntryPoint = "posix_spawn_file_actions_init", SetLastError = true)]
+    private static extern unsafe int PosixSpawnFileActionsInit(byte* fileActions);
+
+    [DllImport("libc", EntryPoint = "posix_spawn_file_actions_destroy", SetLastError = true)]
+    private static extern unsafe int PosixSpawnFileActionsDestroy(byte* fileActions);
+
+    [DllImport("libc", EntryPoint = "posix_spawn_file_actions_adddup2", SetLastError = true)]
+    private static extern unsafe int PosixSpawnFileActionsAddDup2(byte* fileActions, int fd, int newFd);
+
+    [DllImport("libc", EntryPoint = "posix_spawn_file_actions_addclose", SetLastError = true)]
+    private static extern unsafe int PosixSpawnFileActionsAddClose(byte* fileActions, int fd);
+
+    [DllImport("libc", EntryPoint = "posix_spawn_file_actions_addopen", SetLastError = true)]
+    private static extern unsafe int PosixSpawnFileActionsAddOpen(
+        byte* fileActions,
+        int fd,
+        string path,
+        int oflag,
+        int mode);
+
+    [DllImport("libc", EntryPoint = "posix_spawnattr_init", SetLastError = true)]
+    private static extern unsafe int PosixSpawnAttrInit(byte* spawnAttr);
+
+    [DllImport("libc", EntryPoint = "posix_spawnattr_destroy", SetLastError = true)]
+    private static extern unsafe int PosixSpawnAttrDestroy(byte* spawnAttr);
+
+    [DllImport("libc", EntryPoint = "posix_spawnattr_setflags", SetLastError = true)]
+    private static extern unsafe int PosixSpawnAttrSetFlags(byte* spawnAttr, short flags);
 
     [DllImport("libc", EntryPoint = "read", SetLastError = true)]
     private static extern unsafe nint PosixRead(int fd, byte* buf, nuint count);
