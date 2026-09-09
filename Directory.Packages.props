@@ -20,7 +20,7 @@
     <PackageVersion Include="HarfBuzzSharp.NativeAssets.macOS" Version="8.3.1.3" />
     <PackageVersion Include="HarfBuzzSharp.NativeAssets.WebAssembly" Version="8.3.1.3" />
     <PackageVersion Include="HarfBuzzSharp.NativeAssets.Win32" Version="8.3.1.3" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
     <PackageVersion Include="Pretext" Version="0.1.0" />
     <PackageVersion Include="Pretext.Contracts" Version="0.1.0" />
     <PackageVersion Include="Pretext.SkiaSharp" Version="0.1.0" />
@@ -33,8 +33,8 @@
     <PackageVersion Include="SkiaSharp.NativeAssets.macOS" Version="3.119.4" />
     <PackageVersion Include="SkiaSharp.NativeAssets.WebAssembly" Version="3.119.4" />
     <PackageVersion Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4" />
-    <PackageVersion Include="System.IO.Ports" Version="10.0.11" />
-    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
+    <PackageVersion Include="System.IO.Ports" Version="10.0.12" />
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
     <PackageVersion Include="SSH.NET" Version="2026.0.0" />
     <PackageVersion Include="SshNet.Agent" Version="2026.0.0" />
     <PackageVersion Include="Tmds.DBus.Protocol" Version="0.94.1" />
