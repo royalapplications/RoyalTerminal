@@ -37,7 +37,9 @@ public class TerminalOutputWorkerTests
         }
 
         releaseFirst.Set();
-        worker.Flush();
+        Assert.True(SpinWait.SpinUntil(
+            () => Volatile.Read(ref invocation) == 2,
+            TimeSpan.FromSeconds(5)));
 
         Assert.Equal(2, invocation);
         Assert.Single(threadIds.Distinct());
