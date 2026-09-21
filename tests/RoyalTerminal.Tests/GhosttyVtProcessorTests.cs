@@ -2,8 +2,8 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Tests — Native Ghostty VT processor integration coverage.
 
-using System.Text;
 using System.Globalization;
+using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
@@ -14,6 +14,75 @@ namespace RoyalTerminal.Tests;
 
 public class GhosttyVtProcessorTests
 {
+    [Fact]
+    public void GhosttyVtProcessor_AnswersClipboardReads_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 20, viewportRows: 3, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        List<byte[]> responses = [];
+        TerminalClipboardRead? request = null;
+        processor.ResponseCallback = responses.Add;
+        processor.ClipboardReadCallback = value =>
+        {
+            request = value;
+            return new TerminalClipboardReadReply(
+                TerminalClipboardReadResult.Success,
+                [new TerminalClipboardContent("text/plain", "Hi"u8.ToArray())]);
+        };
+
+        processor.Process("\u001b]52;c;?\u0007"u8);
+
+        Assert.NotNull(request);
+        Assert.Equal(TerminalClipboardLocation.Standard, request.Location);
+        Assert.Contains("SGk=", Encoding.ASCII.GetString(Assert.Single(responses)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_HoldsLastCompleteFrameDuringSynchronizedOutput_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 20, viewportRows: 3, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.Process("before"u8);
+
+        processor.Process("\u001b[?2026h-hidden"u8);
+        Assert.StartsWith("before", ReadViewportAscii(screen), StringComparison.Ordinal);
+        Assert.DoesNotContain("hidden", ReadViewportAscii(screen), StringComparison.Ordinal);
+
+        processor.Process("\u001b[?2026l"u8);
+        Assert.Contains("before-hidden", ReadViewportAscii(screen), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_ReportsUnknownApcSequences_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 20, viewportRows: 3, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        TerminalUnknownSequence? sequence = null;
+        processor.UnknownSequenceCallback = value => sequence = value;
+
+        processor.Process("\u001b_royal-terminal-test\u001b\\"u8);
+
+        Assert.NotNull(sequence);
+        Assert.Equal(TerminalUnknownSequenceType.Apc, sequence.Type);
+        Assert.Equal("royal-terminal-test", Encoding.ASCII.GetString(sequence.Content));
+        Assert.False(sequence.Truncated);
+    }
+
     [Fact]
     public void GhosttyVtProcessor_ViewportScrollState_TracksNativeScrollback_WhenAvailable()
     {
@@ -547,7 +616,7 @@ public class GhosttyVtProcessorTests
 
         processor.Process(
             "\u001b[?1;6;66;67;1004;1006;1016;1049;2004;2026;2031;2048h"u8);
-        processor.Process("\u001b[?25l\u001b[4h\u001b[20h\u001b[>3u\u001b[2;3r\u001b[3;4HOLD"u8);
+        processor.Process("\u001b[?25l\u001b[4h\u001b[20h\u001b[>3u\u001b[2;3r\u001b[3;4HOLD\u001b[?2026l"u8);
 
         Assert.True(processor.ApplicationCursorKeys);
         Assert.True(processor.ApplicationKeypad);

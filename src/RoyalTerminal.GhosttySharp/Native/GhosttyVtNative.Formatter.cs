@@ -116,6 +116,10 @@ public static partial class GhosttyVtNative
         nint terminal,
         GhosttyFormatterTerminalOptions options);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_formatter_format")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial GhosttyResult FormatterFormat(nint formatter, GhosttyWriter writer);
+
     [LibraryImport(LibName, EntryPoint = "ghostty_formatter_format_buf")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult FormatterFormatBuffer(

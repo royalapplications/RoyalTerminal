@@ -4,6 +4,9 @@ title: Ghostty Integration
 
 # Ghostty Integration
 
+The detailed 2026 dependency, API, managed-behavior, and output-thread parity audit
+is recorded in [Ghostty and Ghostling parity update](../specs/ghostty-ghostling-2026-parity.md).
+
 RoyalTerminal uses Ghostty in two different ways: as a high-level native VT and rendering implementation, and as a low-level public wrapper library for hosts that want direct access to the Ghostty C ABI from .NET. The second role is what `RoyalTerminal.GhosttySharp` exists for.
 
 ## Ghostty-compatible shaders

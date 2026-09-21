@@ -30,6 +30,12 @@ public static partial class GhosttyVtNative
         OutOfSpace = -3,
         /// <summary><c>NoValue</c> enum value.</summary>
         NoValue = -4,
+        /// <summary>A synchronous reader or writer callback reported an I/O failure.</summary>
+        IoError = -5,
+        /// <summary>An operation exceeded an explicit size or accounting limit.</summary>
+        LimitExceeded = -6,
+        /// <summary>The operation was valid but rejected by terminal policy.</summary>
+        Rejected = -7,
     }
 
     // ──────────────────────────── Key Action ────────────────────────
@@ -675,6 +681,45 @@ public static partial class GhosttyVtNative
     public static unsafe partial GhosttySgrAttributeValue* SgrAttributeValue(GhosttySgrAttribute* attr);
 
     // ────────────────────── Paste Functions ─────────────────────────
+
+    /// <summary>Identifies whether a paste came from a clipboard gesture or inserted text.</summary>
+    public enum GhosttyPasteSource : int
+    {
+        /// <summary>User-initiated clipboard paste.</summary>
+        Clipboard = 0,
+        /// <summary>Text insertion such as IME commit or drag and drop.</summary>
+        Text = 1,
+    }
+
+    /// <summary>Native terminal-aware paste request.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct GhosttyPasteRequest
+    {
+        public nuint Size;
+        public GhosttyClipboardLocation Location;
+        public GhosttyPasteSource Source;
+        public GhosttyString* Mimes;
+        public nuint MimesLength;
+        public GhosttyMimeReader Reader;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool AllowUnsafe;
+
+        public static GhosttyPasteRequest CreateSized()
+        {
+            return new GhosttyPasteRequest
+            {
+                Size = (nuint)Marshal.SizeOf<GhosttyPasteRequest>(),
+            };
+        }
+    }
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_paste")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult TerminalPaste(
+        nint terminal,
+        GhosttyPasteRequest* paste,
+        [MarshalAs(UnmanagedType.U1)] out bool written);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_paste_is_safe")]
     [return: MarshalAs(UnmanagedType.U1)]

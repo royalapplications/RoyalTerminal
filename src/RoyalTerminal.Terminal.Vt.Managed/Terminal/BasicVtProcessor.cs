@@ -44,6 +44,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
 {
     private const int MaxOscBufferBytes = 4096;
     private const int MaxDcsBufferBytes = 4096;
+    private const int MaxUnknownSequenceBytes = 4096;
     private const int KittyKeyboardFlagMask = 0x1F;
     private const int KittyKeyboardMaxStackDepth = 32;
     private const int ZeroWidthJoinerCodepoint = 0x200D;
@@ -75,7 +76,9 @@ public sealed class BasicVtProcessor : IVtProcessor,
         2026,
         2027,
         2031,
+        2033,
         2048,
+        5522,
     ];
     private static readonly int[] ExtendedDecModesEnabledByDefault =
     [
@@ -110,11 +113,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private char _intermediateChar;
     private readonly List<byte> _oscBuffer = [];
     private readonly List<byte> _dcsBuffer = [];
+    private readonly List<byte> _apcBuffer = [];
     private readonly SixelDecoder _sixelDecoder;
     private readonly BasicVtProcessorOptions _options;
     private readonly TerminalShellIntegrationParser _shellIntegrationParser = new();
+    private readonly KittyClipboardProtocol _kittyClipboardProtocol = new();
     private bool _isDiscardingOscPayload;
     private bool _isDiscardingDcsPayload;
+    private bool _apcTruncated;
     private bool _sixelGraphicsEnabled;
     private bool _sixelDisplayMode;
 
@@ -197,6 +203,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
         OscEscape,
         DcsString,
         DcsEscape,
+        ApcString,
+        ApcEscape,
     }
 
     private enum SgrColorKind : byte
@@ -278,6 +286,15 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public Func<TerminalClipboardWrite, TerminalClipboardWriteResult>? ClipboardWriteCallback { get; set; }
+
+    /// <inheritdoc />
+    public Func<TerminalClipboardWrite, TerminalClipboardWriteReply>? ClipboardWriteRequestCallback { get; set; }
+
+    /// <inheritdoc />
+    public Func<TerminalClipboardRead, TerminalClipboardReadReply>? ClipboardReadCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<TerminalUnknownSequence>? UnknownSequenceCallback { get; set; }
 
     /// <inheritdoc />
     public Action<TerminalDesktopNotification>? DesktopNotificationCallback { get; set; }
@@ -391,6 +408,23 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             var b = data[i];
 
+            // Match Ghostty's print-slice fast path: keep contiguous printable
+            // ASCII out of the parser state switch and UTF-8 decoder.
+            if (_state == ParserState.Ground &&
+                _utf8Remaining == 0 &&
+                b is >= 0x20 and < 0x7F)
+            {
+                int end = i + 1;
+                while (end < data.Length && data[end] is >= 0x20 and < 0x7F)
+                {
+                    end++;
+                }
+
+                ProcessPrintableAscii(data[i..end]);
+                i = end - 1;
+                continue;
+            }
+
             if (TryHandleAnywhereCancelControl(b))
             {
                 continue;
@@ -428,10 +462,34 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 case ParserState.DcsEscape:
                     ProcessDcsEscape(b);
                     break;
+                case ParserState.ApcString:
+                    ProcessApcString(b);
+                    break;
+                case ParserState.ApcEscape:
+                    ProcessApcEscape(b);
+                    break;
             }
         }
 
         RaiseModeChangedIfNeeded(before);
+    }
+
+    private void ProcessPrintableAscii(ReadOnlySpan<byte> data)
+    {
+        if (_useLineDrawing)
+        {
+            for (int index = 0; index < data.Length; index++)
+            {
+                PutChar(MapLineDrawing((char)data[index]));
+            }
+
+            return;
+        }
+
+        for (int index = 0; index < data.Length; index++)
+        {
+            PutChar(data[index]);
+        }
     }
 
     /// <inheritdoc />
@@ -535,8 +593,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        sequence = TerminalPasteEncoder.Encode(text, bracketedPaste);
-        return sequence.Length > 0;
+        return _kittyClipboardProtocol.TryEncodePaste(
+            text,
+            bracketedPaste,
+            _extendedDecModesEnabled.Contains(5522),
+            out sequence);
     }
 
     /// <inheritdoc />
@@ -1501,6 +1562,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _isDiscardingDcsPayload = false;
     }
 
+    private void EnterApcState()
+    {
+        _state = ParserState.ApcString;
+        _apcBuffer.Clear();
+        _apcTruncated = false;
+    }
+
     #region Ground State
 
     private void ProcessGround(byte b)
@@ -1513,7 +1581,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 _utf8Codepoint = (_utf8Codepoint << 6) | (b & 0x3F);
                 _utf8Remaining--;
                 if (_utf8Remaining == 0)
-                    PutChar(_utf8Codepoint);
+                {
+                    // UTF-8 encoded C1 controls are ignored in ground state. This
+                    // matches Ghostty: only their single-byte forms are controls.
+                    if (_utf8Codepoint is < 0x80 or > 0x9F)
+                    {
+                        PutChar(_utf8Codepoint);
+                    }
+                }
             }
             else
             {
@@ -1540,6 +1615,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
             case 0x90: // C1 DCS
                 EnterDcsState();
+                break;
+
+            case 0x9F: // C1 APC
+                EnterApcState();
                 break;
 
             case 0x9C: // C1 ST
@@ -2110,6 +2189,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 EnterDcsState();
                 break;
 
+            case (byte)'_': // APC
+                EnterApcState();
+                break;
+
             case (byte)'(': // Designate G0 charset
                 _intermediateChar = '(';
                 _state = ParserState.EscapeIntermediate;
@@ -2292,14 +2375,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
     {
         if (b == 0x07) // BEL terminator
         {
-            HandleOscString();
+            HandleOscString(bellTerminator: true);
             _state = ParserState.Ground;
             return;
         }
 
         if (b == 0x9C) // 8-bit ST
         {
-            HandleOscString();
+            HandleOscString(bellTerminator: false);
             _state = ParserState.Ground;
             return;
         }
@@ -2322,7 +2405,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
     {
         if (b == (byte)'\\')
         {
-            HandleOscString();
+            HandleOscString(bellTerminator: false);
             _state = ParserState.Ground;
             return;
         }
@@ -2343,14 +2426,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
         if (b == 0x07)
         {
-            HandleOscString();
+            HandleOscString(bellTerminator: true);
             _state = ParserState.Ground;
             return;
         }
 
         if (b == 0x9C)
         {
-            HandleOscString();
+            HandleOscString(bellTerminator: false);
             _state = ParserState.Ground;
             return;
         }
@@ -2359,7 +2442,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _state = ParserState.OscString;
     }
 
-    private void HandleOscString()
+    private void HandleOscString(bool bellTerminator)
     {
         if (_isDiscardingOscPayload)
         {
@@ -2432,6 +2515,16 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
             case 52:
                 HandleOscClipboard(value);
+                break;
+
+            case 5522:
+                _kittyClipboardProtocol.Handle(
+                    value,
+                    bellTerminator,
+                    ClipboardReadCallback,
+                    ClipboardWriteRequestCallback,
+                    ClipboardWriteCallback,
+                    ResponseCallback);
                 break;
 
             case 777:
@@ -2534,12 +2627,6 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        ReadOnlySpan<char> payload = value.AsSpan(separator + 1);
-        if (payload.SequenceEqual("?"))
-        {
-            return;
-        }
-
         TerminalClipboardLocation location;
         if (selector.IsEmpty || selector.SequenceEqual("c"))
         {
@@ -2558,7 +2645,53 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        ReadOnlySpan<char> payload = value.AsSpan(separator + 1);
+        if (payload.SequenceEqual("?"))
+        {
+            TryReadClipboard(location, selector);
+            return;
+        }
+
         TryWriteClipboard(location, payload, allowClear: true);
+    }
+
+    private void TryReadClipboard(TerminalClipboardLocation location, ReadOnlySpan<char> selector)
+    {
+        if (ClipboardReadCallback is null || ResponseCallback is null)
+        {
+            return;
+        }
+
+        TerminalClipboardReadReply reply;
+        try
+        {
+            reply = ClipboardReadCallback(
+                new TerminalClipboardRead(location, ["text/plain"]));
+        }
+        catch
+        {
+            return;
+        }
+
+        if (reply.Result != TerminalClipboardReadResult.Success)
+        {
+            return;
+        }
+
+        TerminalClipboardContent? content = reply.Contents.FirstOrDefault(
+            static value => value.MimeType.StartsWith("text/", StringComparison.OrdinalIgnoreCase));
+        if (content is null)
+        {
+            return;
+        }
+
+        string response = string.Concat(
+            "\u001b]52;",
+            selector.ToString(),
+            ";",
+            Convert.ToBase64String(content.Data),
+            "\u001b\\");
+        ResponseCallback(Encoding.ASCII.GetBytes(response));
     }
 
     private void TryWriteClipboard(
@@ -2570,7 +2703,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             if (allowClear)
             {
-                ClipboardWriteCallback?.Invoke(new TerminalClipboardWrite(location, []));
+                DispatchClipboardWrite(new TerminalClipboardWrite(location, []));
             }
 
             return;
@@ -2591,10 +2724,21 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        ClipboardWriteCallback?.Invoke(
+        DispatchClipboardWrite(
             new TerminalClipboardWrite(
                 location,
                 [new TerminalClipboardContent("text/plain", decoded)]));
+    }
+
+    private void DispatchClipboardWrite(TerminalClipboardWrite request)
+    {
+        if (ClipboardWriteRequestCallback is not null)
+        {
+            ClipboardWriteRequestCallback(request);
+            return;
+        }
+
+        ClipboardWriteCallback?.Invoke(request);
     }
 
     private static bool IsRecognizedConEmuOsc9(string value)
@@ -2952,6 +3096,78 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _state = ParserState.DcsString;
     }
 
+    private void ProcessApcString(byte b)
+    {
+        if (b == 0x9C)
+        {
+            CompleteApc();
+            return;
+        }
+
+        if (b == 0x1B)
+        {
+            _state = ParserState.ApcEscape;
+            return;
+        }
+
+        AppendApcByte(b);
+    }
+
+    private void ProcessApcEscape(byte b)
+    {
+        if (b == (byte)'\\')
+        {
+            CompleteApc();
+            return;
+        }
+
+        AppendApcByte(0x1B);
+        if (b == 0x1B)
+        {
+            _state = ParserState.ApcEscape;
+            return;
+        }
+
+        if (b == 0x9C)
+        {
+            CompleteApc();
+            return;
+        }
+
+        AppendApcByte(b);
+        _state = ParserState.ApcString;
+    }
+
+    private void AppendApcByte(byte value)
+    {
+        if (_apcBuffer.Count < MaxUnknownSequenceBytes)
+        {
+            _apcBuffer.Add(value);
+        }
+        else
+        {
+            _apcTruncated = true;
+        }
+    }
+
+    private void CompleteApc()
+    {
+        try
+        {
+            UnknownSequenceCallback?.Invoke(
+                new TerminalUnknownSequence(
+                    TerminalUnknownSequenceType.Apc,
+                    _apcBuffer.ToArray(),
+                    _apcTruncated));
+        }
+        finally
+        {
+            _apcBuffer.Clear();
+            _apcTruncated = false;
+            _state = ParserState.Ground;
+        }
+    }
+
     private void HandleDcsString()
     {
         if (_isDiscardingDcsPayload)
@@ -3247,8 +3463,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _utf8Remaining = 0;
         _oscBuffer.Clear();
         _dcsBuffer.Clear();
+        _apcBuffer.Clear();
         _isDiscardingOscPayload = false;
         _isDiscardingDcsPayload = false;
+        _apcTruncated = false;
         _state = ParserState.Ground;
     }
 
@@ -4176,7 +4394,9 @@ public sealed class BasicVtProcessor : IVtProcessor,
             case 2026: // Synchronized output
             case 2027: // Grapheme cluster mode
             case 2031: // Report color scheme mode
+            case 2033: // Report terminal visibility mode
             case 2048: // In-band size reports
+            case 5522: // Kitty clipboard paste events
                 SetExtendedDecMode(mode, set);
                 break;
 
@@ -4840,6 +5060,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _isDiscardingOscPayload = false;
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
+        _apcBuffer.Clear();
+        _apcTruncated = false;
         _savedUnderlineStyle = TerminalUnderlineStyle.None;
         _savedUnderlineColor = 0;
         _savedHasUnderlineColor = false;
@@ -5020,6 +5242,9 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _isDiscardingOscPayload = false;
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
+        _apcBuffer.Clear();
+        _apcTruncated = false;
+        _kittyClipboardProtocol.Reset();
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
         _inAltScreen = false;

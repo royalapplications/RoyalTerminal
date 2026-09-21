@@ -157,7 +157,19 @@ fi
 info "Library: $(file "$NATIVE_LIB")"
 
 # Verify expected symbols
-EXPECTED_SYMBOLS=("ghostty_paste_is_safe" "ghostty_osc_new" "ghostty_sgr_new" "ghostty_key_encoder_new" "ghostty_key_event_new")
+EXPECTED_SYMBOLS=(
+    "ghostty_paste_is_safe"
+    "ghostty_terminal_paste"
+    "ghostty_osc_new"
+    "ghostty_sgr_new"
+    "ghostty_key_encoder_new"
+    "ghostty_key_event_new"
+    "ghostty_search_new"
+    "ghostty_snapshot_encode_buf"
+    "ghostty_snapshot_decoder_decode"
+    "ghostty_formatter_format"
+    "ghostty_render_state_clean"
+)
 MISSING=0
 for sym in "${EXPECTED_SYMBOLS[@]}"; do
     if ! nm -gU "$NATIVE_LIB" 2>/dev/null | grep -q "_$sym"; then

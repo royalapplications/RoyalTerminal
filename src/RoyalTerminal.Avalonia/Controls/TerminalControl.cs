@@ -674,6 +674,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private readonly Queue<byte[]> _pendingTransportOutput = new();
     private readonly Queue<PendingTransportUiBatch> _pendingTransportUiBatches = new();
     private readonly Queue<TerminalShellIntegrationEvent> _pendingShellIntegrationEvents = new();
+    private TerminalOutputWorker? _outputWorker;
     private EraseDisplaySequenceDetector _eraseDisplaySequenceDetector;
     private int _pendingTransportOutputBytes;
     private int _pendingTransportUiBatchBytes;
@@ -5602,6 +5603,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             throw;
         }
 
+        DisposeOutputWorker();
+        _outputWorker = new TerminalOutputWorker(DrainPendingTransportOutput);
         SetPendingTransportOutputAcceptance(acceptOutput: true);
         _mouseModeTracker.Reset();
         ResetPointerButtons();
@@ -5649,6 +5652,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 _activeTransportExitHandler = null;
             }
 
+            DisposeOutputWorker();
             throw;
         }
 
@@ -5823,7 +5827,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        DrainPendingTransportOutput(flushAll: true);
+        if (_outputWorker is not null)
+        {
+            _outputWorker.Flush();
+        }
+        else
+        {
+            DrainPendingTransportOutput(flushAll: true);
+        }
         DrainPendingTransportOutputUiBatches(flushAll: true);
         DrainPendingShellIntegrationEvents();
     }
@@ -5857,6 +5868,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         FlushPendingTransportOutput();
+        DisposeOutputWorker();
         ResetPendingTransportOutputQueue();
         _activeTransportId = null;
         _mouseModeTracker.Reset();
@@ -6214,8 +6226,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 return;
             }
 
-            DrainPendingTransportOutput(flushAll: true);
+            if (_outputWorker is not null)
+            {
+                _outputWorker.Flush();
+            }
+            else
+            {
+                DrainPendingTransportOutput(flushAll: true);
+            }
             DrainPendingTransportOutputUiBatches(flushAll: true);
+            DisposeOutputWorker();
             _activeTransportId = null;
             // Write exit message to screen
             string msg = $"\r\n[Process exited with code {exitCode}]\r\n";
@@ -6237,7 +6257,14 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        DrainPendingTransportOutput(flushAll: true);
+        if (_outputWorker is not null)
+        {
+            _outputWorker.Flush();
+        }
+        else
+        {
+            DrainPendingTransportOutput(flushAll: true);
+        }
         DrainPendingTransportOutputUiBatches(flushAll: true);
     }
 
@@ -6597,10 +6624,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         if (ShouldUseBackgroundOutputPipeline())
         {
-            ThreadPool.UnsafeQueueUserWorkItem(
-                static state => RunPendingTransportOutputDrainBelowNormal((TerminalControl)state!),
-                this);
-            return;
+            if (_outputWorker is not null)
+            {
+                _outputWorker.Schedule();
+                return;
+            }
         }
 
         Dispatcher.UIThread.Post(DrainPendingTransportOutput, NativePendingOutputDrainPriority);
@@ -6631,20 +6659,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return _vtProcessor is not null;
     }
 
-    private static void RunPendingTransportOutputDrainBelowNormal(TerminalControl control)
+    private void DisposeOutputWorker()
     {
-        Thread thread = Thread.CurrentThread;
-        ThreadPriority originalPriority = thread.Priority;
-
-        try
-        {
-            thread.Priority = ThreadPriority.BelowNormal;
-            control.DrainPendingTransportOutput();
-        }
-        finally
-        {
-            thread.Priority = originalPriority;
-        }
+        TerminalOutputWorker? worker = Interlocked.Exchange(ref _outputWorker, null);
+        worker?.Dispose();
     }
 
     private int GetPendingTransportBacklogBytesLocked()

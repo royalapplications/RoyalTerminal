@@ -78,6 +78,13 @@ public sealed class GhosttyRenderState : IDisposable
         ThrowIfFailed(GhosttyVtNative.RenderStateEndUpdate(_handle), "ghostty_render_state_end_update");
     }
 
+    /// <summary>Marks the global and per-row dirty state as consumed after a complete frame.</summary>
+    public void Clean()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfFailed(GhosttyVtNative.RenderStateClean(_handle), "ghostty_render_state_clean");
+    }
+
     /// <summary>Gets the render-state dirty flag.</summary>
     public GhosttyVtNative.GhosttyRenderStateDirty GetDirty()
         => GetValue<GhosttyVtNative.GhosttyRenderStateDirty>(GhosttyVtNative.GhosttyRenderStateData.Dirty);
@@ -103,8 +110,32 @@ public sealed class GhosttyRenderState : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         GhosttyVtNative.GhosttyRenderStateColors colors = GhosttyVtNative.GhosttyRenderStateColors.CreateSized();
-        ThrowIfFailed(GhosttyVtNative.RenderStateColorsGet(_handle, ref colors), "ghostty_render_state_colors_get");
+        unsafe
+        {
+            ThrowIfFailed(
+                GhosttyVtNative.RenderStateGet(
+                    _handle,
+                    GhosttyVtNative.GhosttyRenderStateData.Colors,
+                    &colors),
+                "ghostty_render_state_get(colors)");
+        }
+
         return colors;
+    }
+
+    /// <summary>Gets all cursor state in a single native call.</summary>
+    public unsafe GhosttyVtNative.GhosttyRenderStateCursor GetCursor()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyRenderStateCursor cursor =
+            GhosttyVtNative.GhosttyRenderStateCursor.CreateSized();
+        ThrowIfFailed(
+            GhosttyVtNative.RenderStateGet(
+                _handle,
+                GhosttyVtNative.GhosttyRenderStateData.Cursor,
+                &cursor),
+            "ghostty_render_state_get(cursor)");
+        return cursor;
     }
 
     /// <summary>Gets the cursor visual style.</summary>
@@ -160,6 +191,16 @@ public sealed class GhosttyRenderState : IDisposable
         return GhosttyVtNative.RenderStateRowIteratorNext(_rowIterator);
     }
 
+    /// <summary>Moves to the next row that requires redraw and returns its viewport row.</summary>
+    public unsafe bool MoveNextDirtyRow(out ushort row)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ushort value = 0;
+        bool result = GhosttyVtNative.RenderStateRowIteratorNextDirty(_rowIterator, &value);
+        row = value;
+        return result;
+    }
+
     /// <summary>Gets whether the current row is dirty.</summary>
     public bool GetCurrentRowDirty()
         => GetRowValue<bool>(GhosttyVtNative.GhosttyRenderStateRowData.Dirty);
@@ -167,6 +208,23 @@ public sealed class GhosttyRenderState : IDisposable
     /// <summary>Gets the raw current row value.</summary>
     public ulong GetCurrentRowRaw()
         => GetRowValue<ulong>(GhosttyVtNative.GhosttyRenderStateRowData.Raw);
+
+    /// <summary>
+    /// Gets a borrowed view over the raw cells in the current row.
+    /// The span is invalidated by the next render-state update.
+    /// </summary>
+    public unsafe ReadOnlySpan<ulong> GetCurrentRowRawCells()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyCellsView view = default;
+        ThrowIfFailed(
+            GhosttyVtNative.RenderStateRowGet(
+                _rowIterator,
+                GhosttyVtNative.GhosttyRenderStateRowData.CellsRaw,
+                &view),
+            "ghostty_render_state_row_get(cells_raw)");
+        return new ReadOnlySpan<ulong>(view.Pointer, checked((int)view.Length));
+    }
 
     /// <summary>Gets whether the current row soft-wraps into the next row.</summary>
     public bool GetCurrentRowWrap()

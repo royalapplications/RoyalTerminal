@@ -43,6 +43,8 @@ public static partial class GhosttyVtNative
         CursorViewportX = 15,
         CursorViewportY = 16,
         CursorViewportWideTail = 17,
+        Cursor = 18,
+        Colors = 19,
     }
 
     public enum GhosttyRenderStateOption : int
@@ -57,6 +59,7 @@ public static partial class GhosttyVtNative
         Raw = 2,
         Cells = 3,
         Selection = 4,
+        CellsRaw = 5,
     }
 
     public enum GhosttyRenderStateRowOption : int
@@ -100,6 +103,47 @@ public static partial class GhosttyVtNative
         public byte* Pointer;
         public nuint Capacity;
         public nuint Length;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public readonly unsafe struct GhosttyCellsView
+    {
+        public readonly ulong* Pointer;
+        public readonly nuint Length;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GhosttyRenderStateCursor
+    {
+        public nuint Size;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool ViewportHasValue;
+
+        public ushort ViewportX;
+        public ushort ViewportY;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool WideTail;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool Visible;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool Blinking;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool PasswordInput;
+
+        public GhosttyRenderStateCursorVisualStyle VisualStyle;
+
+        public static GhosttyRenderStateCursor CreateSized()
+        {
+            return new GhosttyRenderStateCursor
+            {
+                Size = (nuint)Marshal.SizeOf<GhosttyRenderStateCursor>(),
+            };
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -158,6 +202,10 @@ public static partial class GhosttyVtNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult RenderStateEndUpdate(nint state);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_render_state_clean")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial GhosttyResult RenderStateClean(nint state);
+
     [LibraryImport(LibName, EntryPoint = "ghostty_render_state_get")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult RenderStateGet(nint state, GhosttyRenderStateData data, void* output);
@@ -175,10 +223,6 @@ public static partial class GhosttyVtNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult RenderStateSet(nint state, GhosttyRenderStateOption option, void* value);
 
-    [LibraryImport(LibName, EntryPoint = "ghostty_render_state_colors_get")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial GhosttyResult RenderStateColorsGet(nint state, ref GhosttyRenderStateColors colors);
-
     [LibraryImport(LibName, EntryPoint = "ghostty_render_state_row_iterator_new")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult RenderStateRowIteratorNew(nint allocator, out nint iterator);
@@ -191,6 +235,11 @@ public static partial class GhosttyVtNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     [return: MarshalAs(UnmanagedType.U1)]
     public static partial bool RenderStateRowIteratorNext(nint iterator);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_render_state_row_iterator_next_dirty")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static unsafe partial bool RenderStateRowIteratorNextDirty(nint iterator, ushort* row);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_render_state_row_get")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

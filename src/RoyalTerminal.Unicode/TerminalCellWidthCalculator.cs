@@ -50,7 +50,7 @@ public static class TerminalCellWidthCalculator
             return 1;
         }
 
-        int overrideWidth = GetGhosttyUnicode17WidthOverride(codepoint);
+        int overrideWidth = GetGhosttyUnicode18WidthOverride(codepoint);
         if (overrideWidth >= 0)
         {
             return overrideWidth;
@@ -353,17 +353,23 @@ public static class TerminalCellWidthCalculator
         return bases.BinarySearch(codepoint) >= 0;
     }
 
-    private static int GetGhosttyUnicode17WidthOverride(int codepoint)
+    private static int GetGhosttyUnicode18WidthOverride(int codepoint)
     {
-        // RoyalTerminal's compact tries predate Ghostty's Unicode 17 table.
+        // RoyalTerminal's compact tries predate Ghostty's Unicode 18 table.
         // Keep the public managed width API aligned with the pinned libghostty
         // table until the full tries are regenerated.
         return codepoint switch
         {
             0x0897 or
+            >= 0x05C8 and <= 0x05C9 or
+            >= 0x0B53 and <= 0x0B54 or
             >= 0x1ACF and <= 0x1ADD or
+            >= 0x1ADE and <= 0x1ADF or
             >= 0x1AE0 and <= 0x1AEB or
+            >= 0x1AEC and <= 0x1AF0 or
             >= 0x10D69 and <= 0x10D6D or
+            >= 0x10ECB and <= 0x10ECF or
+            >= 0x10EF0 and <= 0x10EF9 or
             >= 0x10EFA and <= 0x10EFC or
             >= 0x113BB and <= 0x113C0 or
             0x113CE or
@@ -378,6 +384,9 @@ public static class TerminalCellWidthCalculator
             >= 0x1612D and <= 0x1612F or
             0x16D63 or
             >= 0x16D67 and <= 0x16D6A or
+            0x11DF0 or
+            >= 0x1D127 and <= 0x1D128 or
+            >= 0x1D25B and <= 0x1D25C or
             >= 0x1E5EE and <= 0x1E5EF or
             0x1E6E3 or
             0x1E6E6 or
@@ -420,13 +429,27 @@ public static class TerminalCellWidthCalculator
             >= 0x187F8 and <= 0x187FF or
             0x18CFF or
             >= 0x18D09 and <= 0x18D1E or
+            >= 0x18CD6 and <= 0x18CDA or
+            >= 0x18D1F and <= 0x18D20 or
             >= 0x18D80 and <= 0x18DF2 or
+            >= 0x18E00 and <= 0x19191 or
+            >= 0x191A0 and <= 0x191D2 or
+            >= 0x1B123 and <= 0x1B128 or
+            0x1B168 or
             >= 0x1D300 and <= 0x1D356 or
             >= 0x1D360 and <= 0x1D376 or
             >= 0x1F3FB and <= 0x1F3FF or
             0x1F6D8 or
+            0x1F1AE or
+            0x1F6D9 or
+            0x1F7DA or
             >= 0x1FA89 and <= 0x1FA8A or
+            >= 0x1FA8B and <= 0x1FA8D or
             >= 0x1FA8E and <= 0x1FA8F or
+            0x1FACC or
+            0x1FADD or
+            0x1FAEB or
+            >= 0x1FAF9 and <= 0x1FAFA or
             0x1FABE or
             0x1FAC6 or
             0x1FAC8 or
