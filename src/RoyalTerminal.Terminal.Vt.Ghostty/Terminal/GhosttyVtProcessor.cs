@@ -2331,43 +2331,64 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void OnNativeWritePty(nint terminal, nint userdata, nint data, nuint len)
     {
-        if (len == 0 || len > int.MaxValue)
+        try
         {
-            return;
-        }
+            if (len == 0 || len > int.MaxValue)
+            {
+                return;
+            }
 
-        int length = checked((int)len);
-        if (_pasteCapture is not null)
+            int length = checked((int)len);
+            if (_pasteCapture is not null)
+            {
+                ReadOnlySpan<byte> source = new((void*)data, length);
+                source.CopyTo(_pasteCapture.GetSpan(length));
+                _pasteCapture.Advance(length);
+                return;
+            }
+
+            if (ResponseCallback is null)
+            {
+                return;
+            }
+
+            byte[] response = new byte[length];
+            Marshal.Copy(data, response, 0, response.Length);
+            ResponseCallback(response);
+        }
+        catch
         {
-            ReadOnlySpan<byte> source = new((void*)data, length);
-            source.CopyTo(_pasteCapture.GetSpan(length));
-            _pasteCapture.Advance(length);
-            return;
+            // Exceptions must never cross the unmanaged callback boundary.
         }
-
-        if (ResponseCallback is null)
-        {
-            return;
-        }
-
-        byte[] response = new byte[length];
-        Marshal.Copy(data, response, 0, response.Length);
-        ResponseCallback(response);
     }
 
     private void OnNativeBell(nint terminal, nint userdata)
     {
-        BellCallback?.Invoke();
+        try
+        {
+            BellCallback?.Invoke();
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
+        }
     }
 
     private void OnNativeTitleChanged(nint terminal, nint userdata)
     {
-        if (TitleCallback is null)
+        try
         {
-            return;
-        }
+            if (TitleCallback is null)
+            {
+                return;
+            }
 
-        TitleCallback(_terminal.GetTitle());
+            TitleCallback(_terminal.GetTitle());
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
+        }
     }
 
     private void OnNativePwdChanged(nint terminal, nint userdata)
@@ -2481,7 +2502,24 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             }
         }
 
-        ReplyToClipboardRead(read, managedReply);
+        try
+        {
+            ReplyToClipboardRead(read, managedReply);
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
+            try
+            {
+                ReplyToClipboardRead(
+                    read,
+                    new TerminalClipboardReadReply(TerminalClipboardReadResult.IoError, []));
+            }
+            catch
+            {
+                // A failed failure reply must also remain within the callback boundary.
+            }
+        }
     }
 
     private static unsafe void ReplyToClipboardRead(
@@ -2653,23 +2691,47 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe byte OnNativeSize(nint terminal, nint userdata, GhosttyVtNative.GhosttySizeReportSize* size)
     {
-        *size = new GhosttyVtNative.GhosttySizeReportSize
+        try
         {
-            Rows = checked((ushort)_screen.ViewportRows),
-            Columns = checked((ushort)_screen.Columns),
-            CellWidth = checked((uint)Math.Max(_sizeReportCellWidthPx, 0)),
-            CellHeight = checked((uint)Math.Max(_sizeReportCellHeightPx, 0)),
-        };
+            if (size is null)
+            {
+                return 0;
+            }
 
-        return 1;
+            *size = new GhosttyVtNative.GhosttySizeReportSize
+            {
+                Rows = checked((ushort)_screen.ViewportRows),
+                Columns = checked((ushort)_screen.Columns),
+                CellWidth = checked((uint)Math.Max(_sizeReportCellWidthPx, 0)),
+                CellHeight = checked((uint)Math.Max(_sizeReportCellHeightPx, 0)),
+            };
+
+            return 1;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private unsafe byte OnNativeColorScheme(nint terminal, nint userdata, GhosttyColorScheme* scheme)
     {
-        *scheme = IsPerceivedLightColor(_theme.DefaultBackground)
-            ? GhosttyColorScheme.Light
-            : GhosttyColorScheme.Dark;
-        return 1;
+        try
+        {
+            if (scheme is null)
+            {
+                return 0;
+            }
+
+            *scheme = IsPerceivedLightColor(_theme.DefaultBackground)
+                ? GhosttyColorScheme.Light
+                : GhosttyColorScheme.Dark;
+            return 1;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private unsafe byte OnNativeDeviceAttributes(
@@ -2677,23 +2739,35 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         nint userdata,
         GhosttyVtNative.GhosttyDeviceAttributes* attributes)
     {
-        *attributes = GhosttyVtNative.GhosttyDeviceAttributes.Create();
-        attributes->Primary.ConformanceLevel = 62;
-        int featureCount = 0;
-        attributes->Primary.SetFeature(featureCount++, 1);
-        if (_sixelGraphicsEnabled)
+        try
         {
-            attributes->Primary.SetFeature(featureCount++, 4);
-        }
+            if (attributes is null)
+            {
+                return 0;
+            }
 
-        attributes->Primary.SetFeature(featureCount++, 6);
-        attributes->Primary.SetFeature(featureCount++, 22);
-        attributes->Primary.NumFeatures = (nuint)featureCount;
-        attributes->Secondary.DeviceType = 1;
-        attributes->Secondary.FirmwareVersion = 10;
-        attributes->Secondary.RomCartridge = 0;
-        attributes->Tertiary.UnitId = 0x00464F4F;
-        return 1;
+            *attributes = GhosttyVtNative.GhosttyDeviceAttributes.Create();
+            attributes->Primary.ConformanceLevel = 62;
+            int featureCount = 0;
+            attributes->Primary.SetFeature(featureCount++, 1);
+            if (_sixelGraphicsEnabled)
+            {
+                attributes->Primary.SetFeature(featureCount++, 4);
+            }
+
+            attributes->Primary.SetFeature(featureCount++, 6);
+            attributes->Primary.SetFeature(featureCount++, 22);
+            attributes->Primary.NumFeatures = (nuint)featureCount;
+            attributes->Secondary.DeviceType = 1;
+            attributes->Secondary.FirmwareVersion = 10;
+            attributes->Secondary.RomCartridge = 0;
+            attributes->Tertiary.UnitId = 0x00464F4F;
+            return 1;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static bool IsPerceivedLightColor(uint argb)

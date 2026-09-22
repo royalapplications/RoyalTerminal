@@ -3198,6 +3198,29 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             string request = payload.Length > 2 ? payload[2..] : string.Empty;
             HandleDecRequestStatusString(request);
+            return;
+        }
+
+        // DCS + q Pt ST — XTGETTCAP query. One reply is emitted per supported key.
+        if (payload.StartsWith("+q", StringComparison.Ordinal))
+        {
+            ReadOnlySpan<char> keys = payload.AsSpan(2);
+            while (!keys.IsEmpty)
+            {
+                int separator = keys.IndexOf(';');
+                ReadOnlySpan<char> key = separator < 0 ? keys : keys[..separator];
+                if (GhosttyXtgettcap.TryCreateResponse(key, _options.TerminfoName, out byte[] response))
+                {
+                    ResponseCallback?.Invoke(response);
+                }
+
+                if (separator < 0)
+                {
+                    break;
+                }
+
+                keys = keys[(separator + 1)..];
+            }
         }
     }
 
@@ -3596,6 +3619,12 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 return;
             }
 
+            if (finalByte == 'n')
+            {
+                HandleDecDeviceStatusQuery();
+                return;
+            }
+
             if (finalByte == 'u')
             {
                 HandleKittyKeyboardQuery();
@@ -3979,9 +4008,66 @@ public sealed class BasicVtProcessor : IVtProcessor,
             }
 
             case 21: // CSI 21 t — report window title
-                ResponseCallback?.Invoke("\x1b]l\x1b\\"u8.ToArray());
+                if (_options.TitleReportEnabled)
+                {
+                    ResponseCallback?.Invoke("\x1b]l\x1b\\"u8.ToArray());
+                }
                 break;
         }
+    }
+
+    private void HandleDecDeviceStatusQuery()
+    {
+        if (_params.Count == 0)
+        {
+            return;
+        }
+
+        switch (_params[0])
+        {
+            case 996: // Report current color scheme.
+                EmitColorSchemeReport();
+                break;
+            case 998: // Report terminal visibility. The C embedding is potentially visible.
+                EmitVisibilityReport();
+                break;
+        }
+    }
+
+    private void EmitColorSchemeReport()
+    {
+        uint background = _theme.DefaultBackground;
+        int red = (int)((background >> 16) & 0xFF);
+        int green = (int)((background >> 8) & 0xFF);
+        int blue = (int)(background & 0xFF);
+        int luminance = ((red * 299) + (green * 587) + (blue * 114)) / 1000;
+        ResponseCallback?.Invoke(luminance >= 128
+            ? "\x1b[?997;2n"u8.ToArray()
+            : "\x1b[?997;1n"u8.ToArray());
+    }
+
+    private void EmitVisibilityReport()
+    {
+        ResponseCallback?.Invoke("\x1b[?999;1n"u8.ToArray());
+    }
+
+    private void EmitInBandSizeReport()
+    {
+        if (!_extendedDecModesEnabled.Contains(2048) ||
+            _screen.Columns <= 0 ||
+            _screen.ViewportRows <= 0 ||
+            _widthPx <= 0 ||
+            _heightPx <= 0)
+        {
+            return;
+        }
+
+        int cellWidth = Math.Max(1, _widthPx / _screen.Columns);
+        int cellHeight = Math.Max(1, _heightPx / _screen.ViewportRows);
+        long reportWidth = (long)_screen.Columns * cellWidth;
+        long reportHeight = (long)_screen.ViewportRows * cellHeight;
+        string response = $"\x1b[48;{_screen.ViewportRows};{_screen.Columns};{reportHeight};{reportWidth}t";
+        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
     }
 
     private void HandleDecModeQuery()
@@ -4037,6 +4123,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private int GetDecPrivateModeReportStatus(int mode)
     {
+        if (mode == 117) // DECECM is recognized but permanently reset.
+        {
+            return 4;
+        }
+
         if (mode == 80)
         {
             return _sixelGraphicsEnabled
@@ -4395,7 +4486,21 @@ public sealed class BasicVtProcessor : IVtProcessor,
             case 2027: // Grapheme cluster mode
             case 2031: // Report color scheme mode
             case 2033: // Report terminal visibility mode
+                SetExtendedDecMode(mode, set);
+                if (set)
+                {
+                    EmitVisibilityReport();
+                }
+                break;
+
             case 2048: // In-band size reports
+                SetExtendedDecMode(mode, set);
+                if (set)
+                {
+                    EmitInBandSizeReport();
+                }
+                break;
+
             case 5522: // Kitty clipboard paste events
                 SetExtendedDecMode(mode, set);
                 break;
@@ -5334,6 +5439,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _widthPx = Math.Max(0, widthPx);
         _heightPx = Math.Max(0, heightPx);
         NotifyResize(columns, rows);
+        EmitInBandSizeReport();
     }
 
     /// <summary>
@@ -5419,6 +5525,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
 
         ApplyResizeState(columns, rows);
+        EmitInBandSizeReport();
     }
 
     private void ApplyResizeState(int columns, int rows)

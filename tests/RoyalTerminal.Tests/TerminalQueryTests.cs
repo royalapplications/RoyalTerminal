@@ -215,7 +215,7 @@ public class TerminalQueryTests
     }
 
     [Fact]
-    public void BasicVtProcessor_Csi21t_ReportsWindowTitlePayload()
+    public void BasicVtProcessor_Csi21t_IsDisabledByDefault()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -225,8 +225,68 @@ public class TerminalQueryTests
 
         processor.Process("\x1b[21t"u8);
 
+        Assert.Null(response);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Csi21t_ReportsWhenExplicitlyEnabled()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(
+            screen,
+            new BasicVtProcessorOptions { TitleReportEnabled = true });
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[21t"u8);
+
         Assert.NotNull(response);
-        Assert.Equal("\x1b]l\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1b]l\x1b\\", Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_PrivateDeviceStatus_ReportsColorSchemeAndVisibility()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+
+        processor.Process("\x1b[?996n\x1b[?998n"u8);
+
+        Assert.Equal(["\x1b[?997;1n", "\x1b[?999;1n"], responses);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_VisibilityMode_ReportsImmediatelyOnEveryEnable()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+
+        processor.Process("\x1b[?2033h\x1b[?2033h\x1b[?2033l"u8);
+
+        Assert.Equal(["\x1b[?999;1n", "\x1b[?999;1n"], responses);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_InBandSizeMode_ReportsOnEnableAndPixelResize()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+        processor.NotifyResize(80, 24, 800, 480);
+
+        processor.Process("\x1b[?2048h"u8);
+        processor.NotifyResize(80, 24, 805, 485);
+        processor.Process("\x1b[?2048l"u8);
+        processor.NotifyResize(80, 24, 810, 490);
+
+        Assert.Equal(
+            ["\x1b[48;24;80;480;800t", "\x1b[48;24;80;480;800t"],
+            responses);
     }
 
     [Fact]
@@ -305,6 +365,41 @@ public class TerminalQueryTests
 
         Assert.NotNull(response);
         Assert.Equal("\x1bP1$r1;24r\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Xtgettcap_UsesCompleteGhosttyMapAndConfiguredName()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+
+        processor.Process("\x1bP+q616d;436f;536d756c78;544e;57484f\x1b\\"u8);
+
+        Assert.Equal(
+            [
+                "\x1bP1+r616D\x1b\\",
+                "\x1bP1+r436F=323536\x1b\\",
+                "\x1bP1+r536D756C78=5C455B343A25703125646D\x1b\\",
+                "\x1bP1+r544E=787465726D2D67686F73747479\x1b\\",
+            ],
+            responses);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Xtgettcap_TerminfoNameCanBeSuppressed()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(
+            screen,
+            new BasicVtProcessorOptions { TerminfoName = null });
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+
+        processor.Process("\x1bP+q544E;436F\x1b\\"u8);
+
+        Assert.Equal(["\x1bP1+r436F=323536\x1b\\"], responses);
     }
 
     [Fact]
@@ -1238,6 +1333,20 @@ public class TerminalQueryTests
     }
 
     [Fact]
+    public void BasicVtProcessor_ModeQuery_ReportsDececmPermanentlyReset()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[?117$p"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?117;4$y", Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
     public void BasicVtProcessor_ModeQuery_CoversXtermModesSurface()
     {
         var screen = new TerminalScreen(80, 24, 0);
@@ -1573,6 +1682,46 @@ public class TerminalQueryTests
         parity.ProcessBoth("\x1b[5 q"u8);
         parity.ProcessBoth("\x1bP$q q\x1b\\"u8);
         AssertResponseParity(parity, "DECRQSS cursor style");
+    }
+
+    [Fact]
+    public void ManagedVsNative_NewGhosttyReportsAndXtgettcapMatch_WhenNativeAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        using VtParityPair parity = CreateVtParityPair(columns: 80, rows: 24);
+
+        parity.ProcessBoth("\x1b[?117$p"u8);
+        if (!CanCompareResponseParity(parity))
+        {
+            return;
+        }
+        AssertResponseParity(parity, "DECECM permanent reset");
+
+        parity.ProcessBoth("\x1b[?996n"u8);
+        AssertResponseParity(parity, "color scheme report");
+
+        parity.ProcessBoth("\x1b[?998n"u8);
+        AssertResponseParity(parity, "visibility query");
+
+        parity.ProcessBoth("\x1b[?2033h"u8);
+        AssertResponseParity(parity, "visibility mode enable");
+
+        parity.ProcessBoth("\x1bP+q616D;436F;536D756C78;544E\x1b\\"u8);
+        AssertResponseParity(parity, "XTGETTCAP");
+
+        parity.ManagedProcessor.NotifyResize(80, 24, 800, 480);
+        parity.NativeProcessor.NotifyResize(80, 24, 800, 480);
+        parity.ClearResponses();
+        parity.ProcessBoth("\x1b[?2048h"u8);
+        AssertResponseParity(parity, "mode 2048 enable");
+
+        parity.ManagedProcessor.NotifyResize(80, 24, 805, 485);
+        parity.NativeProcessor.NotifyResize(80, 24, 805, 485);
+        AssertResponseParity(parity, "mode 2048 resize");
     }
 
     [Fact]

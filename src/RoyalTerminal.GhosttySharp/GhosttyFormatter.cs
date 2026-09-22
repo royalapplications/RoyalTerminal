@@ -1,7 +1,6 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.GhosttySharp.Native;
@@ -46,6 +45,7 @@ public readonly record struct GhosttyFormatterOptions(
 /// </summary>
 public sealed class GhosttyFormatter : IDisposable
 {
+    private readonly GhosttyTerminal.NativeLifetimeLease _terminalLease;
     private nint _handle;
     private bool _disposed;
 
@@ -75,13 +75,22 @@ public sealed class GhosttyFormatter : IDisposable
     {
         ArgumentNullException.ThrowIfNull(terminal);
         NativeLibraryLoader.Initialize();
+        _terminalLease = terminal.AcquireNativeLifetimeLease();
 
-        unsafe
+        try
         {
-            GhosttyVtNative.GhosttySelectionRange nativeSelection = default;
-            GhosttyVtNative.GhosttyFormatterTerminalOptions nativeOptions =
-                CreateNativeOptions(in options, &nativeSelection);
-            Initialize(terminal, nativeOptions);
+            unsafe
+            {
+                GhosttyVtNative.GhosttySelectionRange nativeSelection = default;
+                GhosttyVtNative.GhosttyFormatterTerminalOptions nativeOptions =
+                    CreateNativeOptions(in options, &nativeSelection);
+                Initialize(terminal, nativeOptions);
+            }
+        }
+        catch
+        {
+            _terminalLease.Dispose();
+            throw;
         }
     }
 
@@ -94,7 +103,16 @@ public sealed class GhosttyFormatter : IDisposable
     {
         ArgumentNullException.ThrowIfNull(terminal);
         NativeLibraryLoader.Initialize();
-        Initialize(terminal, options);
+        _terminalLease = terminal.AcquireNativeLifetimeLease();
+        try
+        {
+            Initialize(terminal, options);
+        }
+        catch
+        {
+            _terminalLease.Dispose();
+            throw;
+        }
     }
 
     /// <summary>Returns true when the native formatter handle is valid.</summary>
@@ -134,30 +152,13 @@ public sealed class GhosttyFormatter : IDisposable
     }
 
     /// <summary>Streams the current terminal snapshot without building an intermediate native buffer.</summary>
-    public unsafe void WriteTo(Stream destination)
+    public void WriteTo(Stream destination)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(destination);
-        if (!destination.CanWrite)
-        {
-            throw new ArgumentException("The destination stream is not writable.", nameof(destination));
-        }
-
-        WriterContext context = new(destination);
-        GCHandle contextHandle = GCHandle.Alloc(context);
-        try
-        {
-            GhosttyVtNative.GhosttyWriter writer = new(
-                (nint)(delegate* unmanaged[Cdecl]<nint, byte*, nuint, byte>)&Write,
-                GCHandle.ToIntPtr(contextHandle));
-            GhosttyVtNative.GhosttyResult result = GhosttyVtNative.FormatterFormat(_handle, writer);
-            context.Failure?.Throw();
-            ThrowIfFailed(result, "ghostty_formatter_format");
-        }
-        finally
-        {
-            contextHandle.Free();
-        }
+        GhosttyStreamWriter.Write(
+            destination,
+            writer => GhosttyVtNative.FormatterFormat(_handle, writer),
+            "ghostty_formatter_format");
     }
 
     /// <inheritdoc />
@@ -174,6 +175,8 @@ public sealed class GhosttyFormatter : IDisposable
             GhosttyVtNative.FormatterFree(_handle);
             _handle = nint.Zero;
         }
+
+        _terminalLease.Dispose();
     }
 
     private void Initialize(
@@ -234,31 +237,4 @@ public sealed class GhosttyFormatter : IDisposable
         throw new InvalidOperationException($"{operation} failed with {result}.");
     }
 
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static unsafe byte Write(nint userdata, byte* data, nuint length)
-    {
-        WriterContext? context = GCHandle.FromIntPtr(userdata).Target as WriterContext;
-        if (context is null || length > int.MaxValue)
-        {
-            return 0;
-        }
-
-        try
-        {
-            context.Stream.Write(new ReadOnlySpan<byte>(data, checked((int)length)));
-            return 1;
-        }
-        catch (Exception exception)
-        {
-            context.Failure = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception);
-            return 0;
-        }
-    }
-
-    private sealed class WriterContext(Stream stream)
-    {
-        public Stream Stream { get; } = stream;
-
-        public System.Runtime.ExceptionServices.ExceptionDispatchInfo? Failure { get; set; }
-    }
 }

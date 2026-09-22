@@ -2,6 +2,8 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.GhosttySharp;
@@ -43,6 +45,16 @@ public static class GhosttySnapshot
         return result;
     }
 
+    /// <summary>Streams the complete terminal state without an intermediate native buffer.</summary>
+    public static void WriteTo(GhosttyTerminal terminal, Stream destination)
+    {
+        ArgumentNullException.ThrowIfNull(terminal);
+        GhosttyStreamWriter.Write(
+            destination,
+            writer => GhosttyVtNative.SnapshotEncode(terminal.Handle, writer),
+            "ghostty_snapshot_encode");
+    }
+
     /// <summary>Decodes a complete binary snapshot into a new owned terminal.</summary>
     public static GhosttyTerminal Decode(byte[] snapshot, bool retainContinuation = false)
     {
@@ -66,9 +78,12 @@ public static class GhosttySnapshot
 /// </summary>
 public sealed class GhosttySnapshotDecoder : IDisposable
 {
-    private readonly byte[] _source;
+    private readonly byte[]? _source;
+    private readonly ReaderContext? _readerContext;
     private GCHandle _sourceHandle;
+    private GCHandle _readerContextHandle;
     private nint _handle;
+    private GhosttyTerminal.NativeLifetimeLease? _terminalLease;
     private bool _disposed;
 
     /// <summary>Creates a decoder over a borrowed managed byte array.</summary>
@@ -98,6 +113,37 @@ public sealed class GhosttySnapshotDecoder : IDisposable
         }
     }
 
+    /// <summary>
+    /// Creates a decoder over a synchronous managed stream. The stream remains caller-owned
+    /// and must stay readable until the decoder is disposed.
+    /// </summary>
+    public unsafe GhosttySnapshotDecoder(Stream source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (!source.CanRead)
+        {
+            throw new ArgumentException("The source stream is not readable.", nameof(source));
+        }
+
+        NativeLibraryLoader.Initialize();
+        _readerContext = new ReaderContext(source);
+        _readerContextHandle = GCHandle.Alloc(_readerContext);
+        try
+        {
+            GhosttyVtNative.GhosttyReader reader = new(
+                (nint)(delegate* unmanaged[Cdecl]<nint, byte*, nuint, nuint*, byte>)&Read,
+                GCHandle.ToIntPtr(_readerContextHandle));
+            ThrowIfFailed(
+                GhosttyVtNative.SnapshotDecoderNew(nint.Zero, out _handle, reader),
+                "ghostty_snapshot_decoder_new");
+        }
+        catch
+        {
+            _readerContextHandle.Free();
+            throw;
+        }
+    }
+
     /// <summary>Gets whether the native decoder handle is valid.</summary>
     public bool IsValid => _handle != nint.Zero && !_disposed;
 
@@ -117,9 +163,13 @@ public sealed class GhosttySnapshotDecoder : IDisposable
     public GhosttyTerminal Ready()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ThrowIfFailed(GhosttyVtNative.SnapshotDecoderReady(_handle, out nint terminal),
-            "ghostty_snapshot_decoder_ready");
-        return new GhosttyTerminal(terminal, ownsHandle: true);
+        GhosttyVtNative.GhosttyResult nativeResult =
+            GhosttyVtNative.SnapshotDecoderReady(_handle, out nint terminal);
+        ThrowIfReaderFailed();
+        ThrowIfFailed(nativeResult, "ghostty_snapshot_decoder_ready");
+        GhosttyTerminal result = new(terminal, ownsHandle: true);
+        _terminalLease = result.AcquireNativeLifetimeLease();
+        return result;
     }
 
     /// <summary>Decodes one additional history page; returns false after FINISH.</summary>
@@ -127,8 +177,10 @@ public sealed class GhosttySnapshotDecoder : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         GhosttyVtNative.GhosttyResult result = GhosttyVtNative.SnapshotDecoderNext(_handle);
+        ThrowIfReaderFailed();
         if (result == GhosttyVtNative.GhosttyResult.NoValue)
         {
+            ReleaseTerminalLease();
             return false;
         }
 
@@ -140,8 +192,10 @@ public sealed class GhosttySnapshotDecoder : IDisposable
     public GhosttyTerminal Decode()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ThrowIfFailed(GhosttyVtNative.SnapshotDecoderDecode(_handle, out nint terminal),
-            "ghostty_snapshot_decoder_decode");
+        GhosttyVtNative.GhosttyResult result =
+            GhosttyVtNative.SnapshotDecoderDecode(_handle, out nint terminal);
+        ThrowIfReaderFailed();
+        ThrowIfFailed(result, "ghostty_snapshot_decoder_decode");
         return new GhosttyTerminal(terminal, ownsHandle: true);
     }
 
@@ -195,12 +249,26 @@ public sealed class GhosttySnapshotDecoder : IDisposable
             _handle = nint.Zero;
         }
 
+        ReleaseTerminalLease();
+
         if (_sourceHandle.IsAllocated)
         {
             _sourceHandle.Free();
         }
 
+        if (_readerContextHandle.IsAllocated)
+        {
+            _readerContextHandle.Free();
+        }
+
         GC.KeepAlive(_source);
+        GC.KeepAlive(_readerContext);
+    }
+
+    private void ReleaseTerminalLease()
+    {
+        GhosttyTerminal.NativeLifetimeLease? lease = Interlocked.Exchange(ref _terminalLease, null);
+        lease?.Dispose();
     }
 
     private unsafe void SetOption(GhosttyVtNative.GhosttySnapshotDecoderOption option, void* value)
@@ -242,5 +310,45 @@ public sealed class GhosttySnapshotDecoder : IDisposable
         {
             throw new InvalidOperationException($"{operation} failed with {result}.");
         }
+    }
+
+    private void ThrowIfReaderFailed()
+    {
+        _readerContext?.Failure?.Throw();
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static unsafe byte Read(nint userdata, byte* buffer, nuint capacity, nuint* outRead)
+    {
+        if (outRead is not null)
+        {
+            *outRead = 0;
+        }
+
+        ReaderContext? context = GCHandle.FromIntPtr(userdata).Target as ReaderContext;
+        if (context is null || buffer is null || outRead is null)
+        {
+            return 0;
+        }
+
+        try
+        {
+            int length = capacity > int.MaxValue ? int.MaxValue : (int)capacity;
+            int read = context.Stream.Read(new Span<byte>(buffer, length));
+            *outRead = (nuint)read;
+            return 1;
+        }
+        catch (Exception exception)
+        {
+            context.Failure = ExceptionDispatchInfo.Capture(exception);
+            return 0;
+        }
+    }
+
+    private sealed class ReaderContext(Stream stream)
+    {
+        internal Stream Stream { get; } = stream;
+
+        internal ExceptionDispatchInfo? Failure { get; set; }
     }
 }

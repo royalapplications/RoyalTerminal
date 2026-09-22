@@ -11,8 +11,11 @@ namespace RoyalTerminal.GhosttySharp;
 /// </summary>
 public sealed class GhosttyTerminal : IDisposable
 {
+    private readonly object _lifetimeSync = new();
     private nint _handle;
     private bool _disposed;
+    private bool _disposeRequested;
+    private int _nativeLeaseCount;
     private readonly bool _ownsHandle;
 
     /// <summary>
@@ -62,6 +65,20 @@ public sealed class GhosttyTerminal : IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             return _handle;
+        }
+    }
+
+    internal NativeLifetimeLease AcquireNativeLifetimeLease()
+    {
+        lock (_lifetimeSync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            checked
+            {
+                _nativeLeaseCount++;
+            }
+
+            return new NativeLifetimeLease(this);
         }
     }
 
@@ -141,6 +158,16 @@ public sealed class GhosttyTerminal : IDisposable
         }
 
         return result;
+    }
+
+    /// <summary>Streams the replay-safe unfinished VT continuation.</summary>
+    public void WriteContinuationTo(Stream destination)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyStreamWriter.Write(
+            destination,
+            writer => GhosttyVtNative.TerminalContinuationWrite(_handle, writer),
+            "ghostty_terminal_continuation_write");
     }
 
     /// <summary>Resets the terminal to its initial state.</summary>
@@ -318,6 +345,36 @@ public sealed class GhosttyTerminal : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ThrowIfFailed(GhosttyVtNative.TerminalSet(_handle, option, null), $"ghostty_terminal_set({option})");
+    }
+
+    /// <summary>Sets the terminal title, or clears it when null.</summary>
+    public void SetTitle(string? title)
+    {
+        if (title is null)
+        {
+            ClearOption(GhosttyVtNative.GhosttyTerminalOption.Title);
+            return;
+        }
+
+        SetStringOption(
+            GhosttyVtNative.GhosttyTerminalOption.Title,
+            title,
+            "ghostty_terminal_set(title)");
+    }
+
+    /// <summary>Sets the terminal working-directory value, or clears it when null.</summary>
+    public void SetWorkingDirectory(string? workingDirectory)
+    {
+        if (workingDirectory is null)
+        {
+            ClearOption(GhosttyVtNative.GhosttyTerminalOption.Pwd);
+            return;
+        }
+
+        SetStringOption(
+            GhosttyVtNative.GhosttyTerminalOption.Pwd,
+            workingDirectory,
+            "ghostty_terminal_set(pwd)");
     }
 
     /// <summary>Sets the default foreground color.</summary>
@@ -839,12 +896,34 @@ public sealed class GhosttyTerminal : IDisposable
     /// <summary>Gets the cursor row in active-screen coordinates.</summary>
     public ushort GetCursorY() => GetValue<ushort>(GhosttyVtNative.GhosttyTerminalData.CursorY);
 
+    /// <summary>Gets whether the next printable cell will soft-wrap.</summary>
+    public bool GetCursorPendingWrap()
+        => GetValue<bool>(GhosttyVtNative.GhosttyTerminalData.CursorPendingWrap);
+
     /// <summary>Gets the active screen buffer.</summary>
     public GhosttyVtNative.GhosttyTerminalScreen GetActiveScreen()
         => GetValue<GhosttyVtNative.GhosttyTerminalScreen>(GhosttyVtNative.GhosttyTerminalData.ActiveScreen);
 
     /// <summary>Gets whether the cursor is visible.</summary>
     public bool GetCursorVisible() => GetValue<bool>(GhosttyVtNative.GhosttyTerminalData.CursorVisible);
+
+    /// <summary>Gets the current SGR style applied to newly printed cells.</summary>
+    public GhosttyVtNative.GhosttyStyle GetCursorStyle()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyStyle style = GhosttyVtNative.GhosttyStyle.CreateSized();
+        unsafe
+        {
+            ThrowIfFailed(
+                GhosttyVtNative.TerminalGet(
+                    _handle,
+                    GhosttyVtNative.GhosttyTerminalData.CursorStyle,
+                    &style),
+                "ghostty_terminal_get(cursor_style)");
+        }
+
+        return style;
+    }
 
     /// <summary>Gets the kitty keyboard protocol flags.</summary>
     public GhosttyVtNative.GhosttyKittyKeyFlags GetKittyKeyboardFlags()
@@ -864,6 +943,12 @@ public sealed class GhosttyTerminal : IDisposable
 
     /// <summary>Gets the current terminal working directory.</summary>
     public string GetWorkingDirectory() => GetBorrowedString(GhosttyVtNative.GhosttyTerminalData.Pwd);
+
+    /// <summary>Gets active-screen rows including scrollback.</summary>
+    public nuint GetTotalRows() => GetValue<nuint>(GhosttyVtNative.GhosttyTerminalData.TotalRows);
+
+    /// <summary>Gets active-screen rows currently retained as scrollback.</summary>
+    public nuint GetScrollbackRows() => GetValue<nuint>(GhosttyVtNative.GhosttyTerminalData.ScrollbackRows);
 
     /// <summary>Gets the current effective terminal scrollbar state.</summary>
     public GhosttyVtNative.GhosttyTerminalScrollbar GetScrollbar()
@@ -980,6 +1065,18 @@ public sealed class GhosttyTerminal : IDisposable
     public bool TryGetCursorColor(out GhosttyVtNative.GhosttyColorRgb color)
         => TryGetColor(GhosttyVtNative.GhosttyTerminalData.ColorCursor, out color);
 
+    /// <summary>Gets the configured default foreground color, ignoring OSC overrides.</summary>
+    public bool TryGetDefaultForegroundColor(out GhosttyVtNative.GhosttyColorRgb color)
+        => TryGetColor(GhosttyVtNative.GhosttyTerminalData.ColorForegroundDefault, out color);
+
+    /// <summary>Gets the configured default background color, ignoring OSC overrides.</summary>
+    public bool TryGetDefaultBackgroundColor(out GhosttyVtNative.GhosttyColorRgb color)
+        => TryGetColor(GhosttyVtNative.GhosttyTerminalData.ColorBackgroundDefault, out color);
+
+    /// <summary>Gets the configured default cursor color, ignoring OSC overrides.</summary>
+    public bool TryGetDefaultCursorColor(out GhosttyVtNative.GhosttyColorRgb color)
+        => TryGetColor(GhosttyVtNative.GhosttyTerminalData.ColorCursorDefault, out color);
+
     /// <summary>Copies the current terminal palette into the provided span.</summary>
     public unsafe void GetPalette(Span<GhosttyVtNative.GhosttyColorRgb> destination)
     {
@@ -995,6 +1092,27 @@ public sealed class GhosttyTerminal : IDisposable
             ThrowIfFailed(
                 GhosttyVtNative.TerminalGet(_handle, GhosttyVtNative.GhosttyTerminalData.ColorPalette, destinationPtr),
                 "ghostty_terminal_get(color_palette)");
+        }
+    }
+
+    /// <summary>Copies the configured default palette, ignoring OSC overrides.</summary>
+    public unsafe void GetDefaultPalette(Span<GhosttyVtNative.GhosttyColorRgb> destination)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (destination.Length < 256)
+        {
+            throw new ArgumentException("Destination span must contain at least 256 colors.", nameof(destination));
+        }
+
+        fixed (GhosttyVtNative.GhosttyColorRgb* destinationPtr = destination)
+        {
+            ThrowIfFailed(
+                GhosttyVtNative.TerminalGet(
+                    _handle,
+                    GhosttyVtNative.GhosttyTerminalData.ColorPaletteDefault,
+                    destinationPtr),
+                "ghostty_terminal_get(color_palette_default)");
         }
     }
 
@@ -1078,18 +1196,74 @@ public sealed class GhosttyTerminal : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed)
+        nint handleToFree = nint.Zero;
+        lock (_lifetimeSync)
         {
-            return;
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            if (_ownsHandle && _handle != nint.Zero && _nativeLeaseCount > 0)
+            {
+                _disposeRequested = true;
+                return;
+            }
+
+            if (_ownsHandle)
+            {
+                handleToFree = _handle;
+            }
+
+            _handle = nint.Zero;
         }
 
-        _disposed = true;
-        if (_ownsHandle && _handle != nint.Zero)
+        if (handleToFree != nint.Zero)
         {
-            GhosttyVtNative.TerminalFree(_handle);
+            GhosttyVtNative.TerminalFree(handleToFree);
+        }
+    }
+
+    private void ReleaseNativeLifetimeLease()
+    {
+        nint handleToFree = nint.Zero;
+        lock (_lifetimeSync)
+        {
+            if (_nativeLeaseCount <= 0)
+            {
+                throw new InvalidOperationException("The native terminal lifetime lease was released more than once.");
+            }
+
+            _nativeLeaseCount--;
+            if (_nativeLeaseCount == 0 && _disposeRequested && _handle != nint.Zero)
+            {
+                handleToFree = _handle;
+                _handle = nint.Zero;
+                _disposeRequested = false;
+            }
         }
 
-        _handle = nint.Zero;
+        if (handleToFree != nint.Zero)
+        {
+            GhosttyVtNative.TerminalFree(handleToFree);
+        }
+    }
+
+    internal sealed class NativeLifetimeLease : IDisposable
+    {
+        private GhosttyTerminal? _terminal;
+
+        internal NativeLifetimeLease(GhosttyTerminal terminal)
+        {
+            _terminal = terminal;
+        }
+
+        public void Dispose()
+        {
+            GhosttyTerminal? terminal = Interlocked.Exchange(ref _terminal, null);
+            terminal?.ReleaseNativeLifetimeLease();
+        }
     }
 
     private unsafe string GetBorrowedString(GhosttyVtNative.GhosttyTerminalData data)

@@ -61,6 +61,47 @@ public class GhosttyLatestApiTests
     }
 
     [GhosttyNativeFact]
+    public void StreamingSnapshotAndContinuationApisRoundTrip()
+    {
+        using GhosttyTerminal terminal = new(12, 3);
+        terminal.SetContinuationMaxBytes(1024);
+        terminal.Write("stream snapshot\u001b[31"u8);
+
+        using MemoryStream continuation = new();
+        terminal.WriteContinuationTo(continuation);
+        Assert.Equal(terminal.GetContinuation(), continuation.ToArray());
+
+        using MemoryStream encoded = new();
+        GhosttySnapshot.WriteTo(terminal, encoded);
+        Assert.NotEmpty(encoded.ToArray());
+
+        encoded.Position = 0;
+        using GhosttySnapshotDecoder decoder = new(encoded);
+        decoder.SetMaxContinuationBytes(1024);
+        decoder.SetRetainContinuation(true);
+        using GhosttyTerminal restored = decoder.Decode();
+
+        Assert.Equal(terminal.GetColumns(), restored.GetColumns());
+        Assert.Equal(terminal.GetRows(), restored.GetRows());
+        Assert.Equal(terminal.GetContinuation(), restored.GetContinuation());
+    }
+
+    [GhosttyNativeFact]
+    public void StreamingCallbacksRethrowManagedIoFailures()
+    {
+        using GhosttyTerminal terminal = new(10, 2);
+        terminal.Write("failure"u8);
+
+        IOException writeFailure = Assert.Throws<IOException>(
+            () => GhosttySnapshot.WriteTo(terminal, new FailingWriteStream()));
+        Assert.Equal("managed write failure", writeFailure.Message);
+
+        using GhosttySnapshotDecoder decoder = new(new FailingReadStream());
+        IOException readFailure = Assert.Throws<IOException>(() => decoder.Decode());
+        Assert.Equal("managed read failure", readFailure.Message);
+    }
+
+    [GhosttyNativeFact]
     public void RenderStateExposesCursorRawCellsAndDirtyRows()
     {
         using GhosttyTerminal terminal = new(10, 3);
@@ -94,5 +135,72 @@ public class GhosttyLatestApiTests
         formatter.WriteTo(destination);
 
         Assert.StartsWith("streamed", Encoding.UTF8.GetString(destination.ToArray()), StringComparison.Ordinal);
+    }
+
+    [GhosttyNativeFact]
+    public void TerminalWrapperCoversEveryCurrentTerminalDataFamily()
+    {
+        using GhosttyTerminal terminal = new(4, 2);
+        terminal.SetTitle("managed title");
+        terminal.SetWorkingDirectory("file:///tmp/example");
+        GhosttyVtNative.GhosttyColorRgb foreground = new() { R = 1, G = 2, B = 3 };
+        terminal.SetForegroundColor(foreground);
+
+        terminal.Write("1234"u8);
+
+        Assert.Equal("managed title", terminal.GetTitle());
+        Assert.Equal("file:///tmp/example", terminal.GetWorkingDirectory());
+        Assert.True(terminal.GetCursorPendingWrap());
+        Assert.Equal((nuint)2, terminal.GetTotalRows());
+        Assert.Equal((nuint)0, terminal.GetScrollbackRows());
+        Assert.True(terminal.TryGetDefaultForegroundColor(out GhosttyVtNative.GhosttyColorRgb actual));
+        Assert.Equal(foreground.R, actual.R);
+        Assert.Equal(foreground.G, actual.G);
+        Assert.Equal(foreground.B, actual.B);
+        Assert.True(terminal.GetCursorStyle().Size > 0);
+
+        GhosttyVtNative.GhosttyColorRgb[] palette = new GhosttyVtNative.GhosttyColorRgb[256];
+        terminal.GetDefaultPalette(palette);
+        Assert.Contains(palette, color => color.R != 0 || color.G != 0 || color.B != 0);
+    }
+
+    [GhosttyNativeFact]
+    public void FormatterLeaseKeepsBorrowedTerminalAliveUntilFormatterDisposal()
+    {
+        GhosttyTerminal terminal = new(10, 2);
+        terminal.Write("leased"u8);
+        using GhosttyFormatter formatter = new(terminal);
+
+        terminal.Dispose();
+
+        Assert.StartsWith("leased", formatter.FormatToString(), StringComparison.Ordinal);
+    }
+
+    [GhosttyNativeFact]
+    public void IncrementalSnapshotLeaseAllowsTerminalDisposalBeforeDecoder()
+    {
+        using GhosttyTerminal source = new(10, 2);
+        source.Write("snapshot"u8);
+        byte[] snapshot = GhosttySnapshot.Encode(source);
+        using GhosttySnapshotDecoder decoder = new(snapshot);
+        GhosttyTerminal restored = decoder.Ready();
+
+        restored.Dispose();
+
+        while (decoder.Next())
+        {
+        }
+    }
+
+    private sealed class FailingWriteStream : MemoryStream
+    {
+        public override void Write(ReadOnlySpan<byte> buffer)
+            => throw new IOException("managed write failure");
+    }
+
+    private sealed class FailingReadStream : MemoryStream
+    {
+        public override int Read(Span<byte> buffer)
+            => throw new IOException("managed read failure");
     }
 }

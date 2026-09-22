@@ -22,16 +22,37 @@ public sealed class GhosttyRenderState : IDisposable
     public GhosttyRenderState()
     {
         NativeLibraryLoader.Initialize();
+        try
+        {
+            ThrowIfFailed(GhosttyVtNative.RenderStateNew(nint.Zero, out _handle), "ghostty_render_state_new");
+            ThrowIfFailed(
+                GhosttyVtNative.RenderStateRowIteratorNew(nint.Zero, out _rowIterator),
+                "ghostty_render_state_row_iterator_new");
+            ThrowIfFailed(
+                GhosttyVtNative.RenderStateRowCellsNew(nint.Zero, out _rowCells),
+                "ghostty_render_state_row_cells_new");
 
-        ThrowIfFailed(GhosttyVtNative.RenderStateNew(nint.Zero, out _handle), "ghostty_render_state_new");
-        ThrowIfFailed(
-            GhosttyVtNative.RenderStateRowIteratorNew(nint.Zero, out _rowIterator),
-            "ghostty_render_state_row_iterator_new");
-        ThrowIfFailed(
-            GhosttyVtNative.RenderStateRowCellsNew(nint.Zero, out _rowCells),
-            "ghostty_render_state_row_cells_new");
+            _ownsHandle = true;
+        }
+        catch
+        {
+            if (_rowCells != nint.Zero)
+            {
+                GhosttyVtNative.RenderStateRowCellsFree(_rowCells);
+            }
 
-        _ownsHandle = true;
+            if (_rowIterator != nint.Zero)
+            {
+                GhosttyVtNative.RenderStateRowIteratorFree(_rowIterator);
+            }
+
+            if (_handle != nint.Zero)
+            {
+                GhosttyVtNative.RenderStateFree(_handle);
+            }
+
+            throw;
+        }
     }
 
     internal GhosttyRenderState(nint handle, bool ownsHandle = false)
