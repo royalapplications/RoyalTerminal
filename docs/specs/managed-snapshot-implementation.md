@@ -123,7 +123,7 @@ reflow marker mapping are implemented. Both native extraction paths retain this
 metadata, including owned history snapshots. The adapter must still map these
 live values to/from SCREEN/PAGE. Wrap-continuation storage, prompt-seen/click
 policy, managed redraw behavior and blank-cursor/trailing-blank reflow corrections
-are now implemented with tests awaiting the requested post-push validation.
+are now implemented and pass native differential and full-suite validation.
 Host click/navigation/selection consumers and inactive-screen resize remain open.
 A complete adapter must implement and test
 these runtime semantics, not merely deserialize values silently dropped later.
@@ -146,6 +146,10 @@ including single-shift consumption by printed spacer cells. Saved cursors are
 independent per screen and retain position, logical pen, protection, pending wrap,
 origin and full charset state. Default restoration, current hyperlink preservation,
 CSI save/restore aliases and current-theme color resolution have native tests.
+Active-screen resize temporarily tracks the saved cell, remaps its coordinates
+and pending-wrap state, and preserves the rest of the saved pen. Deferred-wrap
+blank-pin clamping follows native PageList behavior. Inactive-screen resize is
+still separate work; this is not a claim that both dormant screens reflow yet.
 The adapter still must construct/install these values from wire records; this
 runtime prerequisite does not itself expose managed snapshot restore.
 

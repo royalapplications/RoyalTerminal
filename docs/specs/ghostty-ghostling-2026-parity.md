@@ -76,15 +76,11 @@ it from the head. A native-owned snapshot regression now covers this case;
 malformed tails containing text are still normalized.
 
 This is live cell/row and cursor-semantic groundwork, **not complete shell or
-snapshot parity**. Remaining requirements include wrap-continuation row storage,
-prompt-seen/click/redraw policy and their navigation/selection/resize consumers,
-ED2's prompt-scroll heuristic, formatter integration, and managed snapshot
-installation. The reflow investigation also exposed existing blank-cursor and
-trailing-blank viewport differences: native includes the cursor's blank cell and
-defers trailing empty rows, while managed reflow can retain bottom blanks and
-shift content into history. The new reflow tests isolate physical row metadata
-with the cursor on existing content; they do not prove those cursor/viewport
-policies equivalent. These gaps remain part of the full goal.
+snapshot parity**. The following implementation section closes the initially
+identified wrap-continuation, prompt-policy, redraw, ED2 heuristic and active
+cursor/viewport reflow gaps with native differential tests. Host prompt navigation,
+click/selection consumers, formatter integration and managed snapshot installation
+remain part of the full goal.
 
 The earlier semantic-only working tree passed **2,349 unit/headless tests with
 16 conditional skips**, plus **228 native integration tests** (external SSH
@@ -97,7 +93,7 @@ unvalidated extension of this batch.
 
 ### Wrap, resize, prompt policy and hyperlink implementation (2026-09-23)
 
-Implementation added, with regression tests written but **not yet executed**:
+Implementation and regression coverage (post-push results below):
 
 - Independent packed wrap-continuation row storage, preserved by row copies,
   synchronized publication and native extraction. Implicit wrap sets the target
@@ -137,11 +133,10 @@ IDs rather than treating the URL alone as a link identity.
 
 Still open: full live managed snapshot installation/export and incremental
 READY/history reconciliation; prompt click/navigation/selection host consumers;
-inactive-screen resize and saved-cursor mapping differentials; formatter and
+inactive-screen resize; formatter and
 remaining graphics/protocol edges; the complete renderer/per-change performance
-audit and third-IO-worker platform/lifecycle sign-off. The new source changes
-and written tests must pass native rebuild, focused/full tests and fresh CI
-before the corresponding gaps can be marked verified.
+audit and third-IO-worker platform/lifecycle sign-off. Local native rebuild and
+focused/full tests have passed; fresh platform CI is still required.
 
 Post-push validation: native extension build succeeds after an explicit signed
 C-enum conversion correction (`a6f44f3`); native integration passes **228/228**.
@@ -173,7 +168,32 @@ screen-specific coordinates and restores pen/origin/delayed wrap. Their coordina
 policies differ, so this managed implementation deliberately follows Ghostty's
 cell-pin behavior. New native differential cases cover width/height changes,
 pending wrap, wide tails, blank pins, history and the active alternate screen;
-validation is pending. Inactive-screen resize remains a separate open item.
+all 17 saved-cursor cases pass with native available. The full unit/headless
+suite on `9adaaa9` passes **2,415 / 16 conditional skips / zero failures**
+(`saved-cursor-full.trx`). The Release benchmark project builds with zero warnings
+and errors. Inactive-screen resize remains a separate open item.
+
+The differential also exposed two adjacent discrepancies now corrected:
+ordinary blank pins clamp against the reflow cursor before its deferred newline
+or pending wrap advances, and DEC 1049 clears with the dormant alternate screen's
+logical background before copying the entering cursor. The latter retains the
+alternate background across exits, resolves palette changes on re-entry and
+resets it on RIS. Repeated 1049 also clears even when already on the alternate
+screen. Native comparisons cover first entry, re-entry and reset. Reflow retains
+the previous destination column directly from its copy loop, avoiding an added
+full-cell scan on the ordinary unpinned path.
+
+A sequential Release/.NET 10.0.5 ARM64 smoke comparison against the existing
+`b862691` archive (seven samples per workload, no concurrent test/build processes)
+measured ASCII 47.581→50.830 ms, CJK 43.090→44.251 ms, graphemes
+39.821→31.981 ms and mixed input 41.692→40.532 ms. Reflow allocations were
+112.92–112.93 MB per workload in both versions (current deltas: +56 ASCII,
++1,080 CJK, zero grapheme/mixed bytes); final row counts agree. Steady-state
+50,000-row scrolling measured 7.729→7.786 ms and zero allocated bytes in both.
+This single paired run includes the entire semantic/wrap/identity batch and
+does not isolate the saved-cursor change. It is not evidence of an overall
+performance gain; the slower ASCII/CJK cases and end-to-end rendering remain
+part of the outstanding performance audit.
 
 ### Current/saved charsets and cursor state (2026-09-23)
 
