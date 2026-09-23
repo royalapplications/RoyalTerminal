@@ -814,7 +814,7 @@ public class TerminalScreenTests
     public void BasicVtProcessor_ResizeWithReflow_PreservesLiveBottomAfterWidthRestore()
     {
         TerminalScreen screen = new(8, 3, scrollbackLimit: 20);
-        using BasicVtProcessor processor = new(screen);
+        using BasicVtProcessor processor = new(screen, new BasicVtProcessorOptions { ResizePullScrollback = true });
 
         processor.Process(Encoding.UTF8.GetBytes("12345678\r\nabcdefgh\r\nABCDEFGH\r\nPROMPT"));
 

@@ -2445,16 +2445,17 @@ public class TerminalControlTests
         Assert.True(ContainsScreenText(control, "070-END"));
     }
 
-    [AvaloniaFact]
-    public void Control_HorizontalResizeShrinkWithoutReflow_HidesAndRestoresBufferedContent()
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public void Control_HorizontalResizeWithoutReflow_DiscardsTruncatedContent(VtProcessorPreference preference)
     {
-        TerminalControl control = new()
-        {
-            Columns = 80,
-            Rows = 24,
-            ReflowOnResize = false,
-            VtProcessorPreference = VtProcessorPreference.Managed,
-        };
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        TerminalControl control = CreateControlWithTransport(new FakeTransport(),
+            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]), preference);
+        control.Columns = 80;
+        control.Rows = 24;
+        control.ReflowOnResize = false;
 
         string line = "COLUMN-000-010-020-030-040-050-060-070-END";
         control.WriteOutput(Encoding.UTF8.GetBytes(line));
@@ -2469,7 +2470,7 @@ public class TerminalControlTests
         control.Columns = 80;
 
         Assert.Equal(80, control.Screen.Columns);
-        Assert.True(ContainsScreenText(control, "070-END"));
+        Assert.False(ContainsScreenText(control, "070-END"));
     }
 
     [AvaloniaFact]
@@ -2830,16 +2831,15 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public void Control_ManagedResize_ShrinkFromNonScrollableViewportStaysAtLiveBottom()
+    public void Control_ManagedResize_WithHistoryPull_ShrinkFromNonScrollableViewportStaysAtLiveBottom()
     {
-        TerminalControl control = new()
-        {
-            Columns = 40,
-            Rows = 20,
-            AutoScroll = true,
-            ReflowOnResize = true,
-            VtProcessorPreference = VtProcessorPreference.Managed,
-        };
+        TerminalControl control = CreateControlWithTransport(new FakeTransport(),
+            new DefaultVtProcessorFactory(new BasicVtProcessorOptions { ResizePullScrollback = true }),
+            VtProcessorPreference.Managed);
+        control.Columns = 40;
+        control.Rows = 20;
+        control.AutoScroll = true;
+        control.ReflowOnResize = true;
 
         control.WriteOutput(Encoding.UTF8.GetBytes(
             "line-00\r\nline-01\r\nline-02\r\nline-03\r\nline-04\r\nline-05\r\nPROMPT"));
