@@ -880,6 +880,60 @@ therefore not evidence of managed snapshot feature parity. Managed state snapsho
 require additional implementation and validation. Parser continuation is now
 implemented separately and has split-input/reset/limit/replay tests.
 
+### Saved modes and column-mode runtime state
+
+The managed engine now implements XTSAVE/XTRESTORE (`CSI ? Pm s/r`) for all 39
+Ghostty DEC modes. Its saved bank follows snapshot-v1's stable 43-bit registry;
+ANSI modes occupy the first four bits but are not selected by these private CSI
+commands. Unsaved modes use the native initial values, saves overwrite the slot,
+restores do not pop it, and RIS resets the saved bank. Restore invokes the normal
+mode handler even when unchanged so origin homing, cursor save/restore, margin
+reset, alternate-screen clearing and size reports retain their side effects.
+Repeated synchronized-output restore does not publish a partial frame. Current
+and saved bank capture are internal prerequisites, not yet full snapshot installation
+or configurable-default-mode parity.
+
+DEC 47, 1047 and 1049 are independent protocol values, not aliases of the active
+buffer. Native differential tests exposed a second issue in the native adapter:
+it ORed stale mode values into `AlternateScreen`. Publication and restart routing
+now use Ghostty's actual active-screen key. Mixed saves, restores and screen
+switches are checked at every byte split, including their DECRQM responses.
+Malformed DECRQM now requires exactly one parameter, matching Ghostty instead of
+emitting invented multi-mode/omitted-mode replies.
+
+DECCOLM now obeys mode 40, clearing its mode value when disabled. When allowed it
+resizes to 80/132 columns, clears the display with current background, resets
+margins through resize and homes the cursor, including on XTRESTORE. The native
+mirror follows terminal-owned grid changes before extracting cells, so columns
+past the old host width remain visible. Native resize can clear synchronized
+output without its mode callback; the adapter now observes that cleared state.
+Size callbacks read current native dimensions rather than the not-yet-refreshed
+mirror during a write. Managed size reports retain host cell metrics across
+column-mode changes, use zero for unknown geometry and round measured pixel
+dimensions like native. VT-driven column changes do not emit host-resize reports.
+
+References: Ghostty `modes.zig`, `stream.zig`, `stream_terminal.zig`,
+`Terminal.deccolm` and `Terminal.switchScreenMode` are authoritative for saved
+state and these side effects. Windows Terminal `_SetColumnMode` also gates on
+DECCOLM permission, resizes, clears and homes; xterm.js gates its resize/reset
+through `windowOptions.setWinLines`. Neither checked private-CSI dispatcher
+provides Ghostty's saved bank. We follow Ghostty's mode-40 protocol gate while
+retaining the existing managed DECSTR extension (native does not implement that
+command); managed DECSTR resets its new bank alongside its other mode state.
+
+Tests compare both native snapshot mode banks after each operation for every
+mode, verify repeated/unsaved restore and RIS, mix screen aliases and parameter
+orders, exercise cursor/margin/screen side effects and check held publication.
+DECCOLM tests cover styled erase, origin/margins, both screens, restored column
+mode, right-edge native/managed drawing, same-write queries, and rounded/unknown
+geometry. Warm save/reset/restore cycles plus bank reads allocate zero managed
+bytes. The focused mode/query/synchronized-output suite passed **163 tests** before
+three additional geometry cases were added for the final full-suite run.
+The complete Release suite through `5c4a881` then passed **2,521 tests,
+16 conditional skips, zero failures (2,537 total)** in `saved-modes-full2.trx`,
+including all 62 new saved-mode/column/query cases with native available. This is
+local macOS arm64 evidence, not completed platform validation or full parity.
+
 The current Ghostty version1 binary format itself omits Kitty images/placements and
 glyph glossary registrations (`snapshot/terminal.zig`, field classification). Virtual
 placeholder text is preserved, but the graphics are not. Native binary snapshot

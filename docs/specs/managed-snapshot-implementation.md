@@ -125,6 +125,13 @@ Terminal output dispatcher register ordinary margins/cursor save but do not supp
 this Ghostty-compatible private saved-mode bank. RoyalTerminal follows Ghostty here.
 The existing managed DECSTR reset contract remains a documented extension beyond
 the native parser; it resets this new bank with other managed mode state.
+Native snapshot-bank comparisons now cover every registered DEC mode, unsaved and
+repeated restore and RIS. Restore side-effect tests also closed the DECCOLM gate,
+resize/erase/home behavior and malformed DECRQM arity gaps. Native adapter screen
+publication uses the actual screen key rather than stale 47/1047/1049 aliases;
+terminal-owned column changes update the mirror, release a cleared render hold and
+report current dimensions even within a single input batch. Host cell geometry is
+kept separate from committed snapshot pixel dimensions for size-query responses.
 
 `TerminalCell` now retains four-byte logical foreground/background/underline
 identities alongside resolved ARGB. Both VT integrations populate these from
