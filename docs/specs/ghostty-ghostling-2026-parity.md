@@ -599,11 +599,45 @@ The focused snapshot suite passed **77 tests, zero failures/skips** in
 The full unit/headless run passed **1,960 tests, 16 conditional skips, zero
 failures (1,976 total)** in `snapshot-screen-history-full.trx`.
 
+The ordered `GhosttySnapshotStateReader` now validates the entire snapshot
+sequence: TERMINAL, unique declared SCREEN groups with counted PAGEs, validated
+CONTINUATION, READY, unique declared HISTORY groups with counted newest-first
+PAGEs, and FINISH. Either key order is accepted. READY state is published only
+after its marker validates; history is returned one owned page at a time. Failure
+invalidates subsequent reads but not already-owned state. Active rows must cover
+the terminal height; mixed-width pages remain valid as upstream's PageList builder
+permits. Cell/page/total-payload limits are aggregate rather than resetting per
+record. These are explicit decoder resource policies, separate from source
+scrollback policies. Source streams remain caller-owned; FINISH leaves trailing
+transport bytes unread.
+
+Continuation validation executes no terminal code or callbacks. Its non-allocating
+scan follows `stream_continuation.zig` and `parse_table.zig`, preserving incomplete
+UTF-8, inert builder state and DCS high-byte payloads while rejecting complete,
+nonminimal or effectful fragments. Windows Terminal's `_ActionExecute` and xterm's
+parser EXECUTE transitions likewise treat controls as immediate actions; Ghostty's
+binary continuation registry remains authoritative. A comparison of all 256 bytes
+after 16 parser-state prefixes, 1,000 random fragments and 10 UTF-8 boundary cases
+(5,106 total) agrees with native validation. Every golden continuation is accepted
+and warmed validation allocates zero bytes.
+
+The **101-case snapshot suite passes** (`snapshot-sequence-transcode.trx`). It
+covers every truncation of the complete fixture, removed records, duplicate and
+undeclared routes, reordered groups, aggregate budgets, corrupt FINISH, short
+non-seekable reads and injected IO failure. Combined re-encoding through all managed
+payload codecs preserves the complete golden fixture exactly. Live native snapshots
+with 100 styled history lines, Unicode, links, either screen and pending CSI compare
+equal after full managed transcoding, native restoration and subsequent input.
+This is wire interoperability, not BasicVtProcessor restoration: valid native parser
+tails still need managed replay/state coverage and installation of decoded metadata.
+The complete macOS unit/headless regression passed **1,984 tests, 16 conditional
+skips, zero failures (2,000 total)** in `snapshot-sequence-full.trx`.
+
 Reference choice: Ghostty's snapshot per-record Zig codecs define the format.
 Windows Terminal `TextBuffer::SerializeTo` and xterm.js's serialize addon emit VT
 text; neither is an interchangeable binary-state format. Remaining implementation
-is explicit: strict record sequencing and continuation validation, constructing
-semantic records from live managed state, conversion/installation into both
+is explicit: constructing semantic records from live managed state, complete
+managed parser replay semantics, conversion/installation into both
 managed screens, and incremental READY/history
 coordination with parser continuation. The public managed binary restore path
 remains unavailable until those layers are complete and validated.

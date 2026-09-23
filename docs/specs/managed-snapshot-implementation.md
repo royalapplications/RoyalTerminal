@@ -49,7 +49,23 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
   and 100 malformed semantic records; all 65,536 charset words are checked.
 - The fixed HISTORY header, including zero-page sequences and key/count/resource
   validation. This routes a later sequence, not a request to allocate its declared
-  number of pages. Complete sequence routing is still required below.
+  number of pages.
+- Ordered decoding transactionally through READY, then one owned history PAGE at
+  a time through FINISH. Declared screen keys are unique in each group and may
+  arrive in either order; active pages must cover terminal height but may have
+  mixed physical widths. Failed reads poison the decoder without invalidating
+  already-owned READY state. Caller streams stay open and trailing transport bytes
+  remain unread. Cell/page/payload-byte budgets are aggregate, while string/suffix
+  limits are per-record/per-page; source scrollback policies are not these limits.
+- Snapshot continuation validation is a pure, non-executing scan matching upstream
+  minimal/unfinished/side-effect-free rules, including UTF-8 bounds, ignored string
+  controls, DCS C1 payload overrides and APC termination effects. It is independent
+  of BasicVtProcessor, so parsing untrusted input cannot replay terminal callbacks.
+  All 5,106 native differential cases agree; warmed validation allocates zero bytes.
+- Combined transcoding through all managed codecs preserves the complete golden
+  fixture exactly. Live native snapshots with 100 styled history lines, Unicode,
+  hyperlinks, either screen and unfinished CSI round-trip through the ordered
+  reader and native restoration, retaining behavior after completing the input.
 
 Tests read the pinned upstream golden fixtures and check every truncation boundary,
 malformed fields, byte-for-byte re-encoding and allocation-free borrowed reads.
@@ -82,12 +98,11 @@ boundary while keeping presentation URL access convenient.
 
 ## Remaining codec and integration order
 
-1. Complete snapshot encoder/decoder with strict record ordering. READY exposes
-   a usable terminal before optional HISTORY, whose pages arrive newest first.
-   Incremental history ingestion must remain safe if live input, reset or resize
-   occurs after READY, matching upstream's reconciliation rules. The complete
-   decoder must validate continuation's minimal, unfinished, side-effect-free
-   shape before replay, not just accept a well-framed byte string.
+1. READY installation into a usable managed terminal and incremental history
+   reconciliation. The ordered wire reader is implemented but does not yet apply
+   pages to a live screen. History ingestion must remain safe if live input, reset
+   or resize occurs after READY, matching upstream generation/width/limit checks
+   and dropping the remaining older pages after the first gap.
 2. Managed processor adapter and public ownership/error contracts. PAGE/grid,
    TERMINAL, SCREEN and HISTORY payload decoding/re-encoding are implemented;
    constructing semantic records from live managed state and installing them in
@@ -95,6 +110,9 @@ boundary while keeping presentation URL access convenient.
    original bytes. A partial
    decode must not overwrite the caller's existing terminal on failure. Parser
    continuation must resume byte-for-byte across UTF-8 and control-string splits.
+   A native-valid wire continuation is not proof that the current managed parser
+   supports every corresponding state: its CSI/control/ignore-state handling and
+   current/saved charset semantics need integration coverage before exposure.
 3. Native-to-managed and managed-to-native differential tests, including every
    upstream complete fixture, both screens, history, pending wrap, saved cursors,
    palette/RGB identity, malformed inputs and streaming IO failures. Benchmark
