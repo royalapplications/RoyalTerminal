@@ -2288,6 +2288,41 @@ public sealed class TerminalControlHeadlessInteractionTests
         finally { await CleanupWindowAsync(window, control.StopPty); }
     }
 
+    [AvaloniaTheory]
+    [MemberData(nameof(TerminalMouseShiftCaptureTests.Policies), MemberType = typeof(TerminalMouseShiftCaptureTests))]
+    public async Task Headless_ShiftMouse_RespectsHostAndApplicationPolicy(
+        TerminalMouseShiftCapturePolicy policy, bool? application, bool captured)
+    {
+        RecordingTransport transport = new();
+        NativePointerRecordingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        control.Width = 640; control.Height = 400;
+        control.MouseShiftCapturePolicy = policy;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("\u001b[?1000;1006h"u8);
+            Dispatcher.UIThread.RunJobs();
+            NativePointerRecordingVtProcessor processor = factory.LastProcessor!;
+            processor.MouseShiftCaptureOverride = application;
+            transport.Inputs.Clear();
+            Point point = await GetCellInteractionPointAsync(control, window, column: 3, row: 2);
+            RaiseMousePressReleaseSequence(control, window, point, KeyModifiers.Shift);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(captured, transport.Inputs.Count != 0);
+            Assert.Equal(captured, processor.PointerEvents.Count != 0);
+            if (captured) Assert.All(processor.PointerEvents, e => Assert.True((e.Modifiers & TerminalModifiers.Shift) != 0));
+            transport.Inputs.Clear();
+            RaiseMousePressReleaseSequence(control, window, point);
+            Dispatcher.UIThread.RunJobs();
+            Assert.NotEmpty(transport.Inputs);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
     [AvaloniaFact]
     public async Task Headless_MouseInput_EncodesSgrReleaseToTransport_WhenMode1006Enabled()
     {
@@ -4131,13 +4166,14 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    private sealed class NativePointerRecordingVtProcessor : IVtProcessor, ITerminalPointerSequenceEncoderSource, ITerminalMouseModeStateSource
+    private sealed class NativePointerRecordingVtProcessor : IVtProcessor, ITerminalPointerSequenceEncoderSource, ITerminalMouseModeStateSource, ITerminalMouseShiftCaptureState
     {
         public const byte EncodedPointerByte = 0x4E;
 
         public TerminalMouseModeState MouseModeState { get; set; } = new(TerminalMouseTrackingMode.PressRelease, TerminalMouseEncoding.Sgr);
         public bool MouseReportingEnabled => MouseModeState.IsMouseReportingEnabled;
         public bool SuppressPointer { get; set; }
+        public bool? MouseShiftCaptureOverride { get; set; }
 
         public List<TerminalPointerEvent> PointerEvents { get; } = [];
         public List<TerminalPointerEncodingContext> Contexts { get; } = [];

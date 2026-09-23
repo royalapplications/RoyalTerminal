@@ -4,6 +4,7 @@ const RoyalMouseState = extern struct {
     size: usize = @sizeOf(RoyalMouseState),
     tracking: u32 = 0,
     format: u32 = 0,
+    shift_capture: u32 = 0,
 };
 
 // These are the same effective flags consumed by mouse_encode.setopt_from_terminal,
@@ -18,7 +19,18 @@ export fn ghostty_royal_mouse_state(
     result.* = .{
         .tracking = @intCast(@intFromEnum(t.flags.mouse_event)),
         .format = @intCast(@intFromEnum(t.flags.mouse_format)),
+        .shift_capture = @intCast(@intFromEnum(t.flags.mouse_shift_capture)),
     };
+    return 0;
+}
+
+export fn ghostty_royal_mouse_shift_capture_set(
+    handle: @import("terminal/c/terminal.zig").Terminal,
+    value: u32,
+) callconv(.c) c_int {
+    if (value > 2) return -2;
+    const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
+    t.flags.mouse_shift_capture = @enumFromInt(value);
     return 0;
 }
 

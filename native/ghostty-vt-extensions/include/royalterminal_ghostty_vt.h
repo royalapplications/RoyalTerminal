@@ -14,10 +14,15 @@ extern "C" {
  */
 typedef struct {
     size_t size;
-    uint32_t tracking, format;
+    uint32_t tracking, format, shift_capture; /** shift_capture: 0 default, 1 false, 2 true. */
 } RoyalMouseState;
 GHOSTTY_API GhosttyResult ghostty_royal_mouse_state(
     GhosttyTerminal terminal, RoyalMouseState* output);
+
+/** Sets XTSHIFTESCAPE state without replaying VT. 0 default, 1 false, 2 true.
+ * Invalid values leave the terminal unchanged. Serialize with terminal mutation. */
+GHOSTTY_API GhosttyResult ghostty_royal_mouse_shift_capture_set(
+    GhosttyTerminal terminal, uint32_t value);
 
 /** Copied active-screen prompt policy. Set size before calling. Content uses
  * Ghostty cell semantic values. Click: 0 none, 1 absolute, 2 relative, 3 line,

@@ -208,6 +208,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool _scrollToBottomOnInput = true;
 
+    /// <summary>Host Shift-mouse policy for VT transport backends. Native input endpoints own their policy.</summary>
+    public static readonly DirectProperty<TerminalControl, TerminalMouseShiftCapturePolicy> MouseShiftCapturePolicyProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, TerminalMouseShiftCapturePolicy>(
+            nameof(MouseShiftCapturePolicy), o => o.MouseShiftCapturePolicy, (o, v) => o.MouseShiftCapturePolicy = v);
+
+    private TerminalMouseShiftCapturePolicy _mouseShiftCapturePolicy;
+
     /// <summary>Whether buffered terminal rows reflow when the terminal width changes.</summary>
     public static readonly StyledProperty<bool> ReflowOnResizeProperty =
         AvaloniaProperty.Register<TerminalControl, bool>(nameof(ReflowOnResize), true);
@@ -423,6 +430,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         get => _scrollToBottomOnInput;
         set => SetAndRaise(ScrollToBottomOnInputProperty, ref _scrollToBottomOnInput, value);
+    }
+
+    /// <summary>Gets or sets Shift-mouse policy for VT transport backends; defaults to selection with application override.</summary>
+    public TerminalMouseShiftCapturePolicy MouseShiftCapturePolicy
+    {
+        get => _mouseShiftCapturePolicy;
+        set
+        {
+            _ = TerminalMouseCapturePolicy.IsShiftCaptured(value, null);
+            SetAndRaise(MouseShiftCapturePolicyProperty, ref _mouseShiftCapturePolicy, value);
+        }
     }
 
     /// <summary>Gets or sets whether buffered terminal rows reflow when the terminal width changes.</summary>
@@ -7124,6 +7142,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // An authoritative off state must gate transport input itself, not only
         // the selection/reporting decision made by those handlers.
         if (_vtProcessor is ITerminalMouseReportingStateSource { MouseReportingEnabled: false }) return false;
+
+        if ((pointerEvent.Modifiers & TerminalModifiers.Shift) != 0 &&
+            !TerminalMouseCapturePolicy.IsShiftCaptured(MouseShiftCapturePolicy,
+                (_vtProcessor as ITerminalMouseShiftCaptureState)?.MouseShiftCaptureOverride)) return false;
 
         FlushPendingTransportResize();
 

@@ -30,6 +30,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalPasteSequenceEncoderSource,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseModeStateSource,
+    ITerminalMouseShiftCaptureState,
     ITerminalSessionHistoryController,
     ITerminalViewportScrollSource,
     ITerminalSelectionExportSource,
@@ -317,6 +318,19 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public TerminalMouseModeState MouseModeState => _mouseModeState;
+
+    private bool? _mouseShiftCaptureOverride;
+
+    /// <inheritdoc />
+    public bool? MouseShiftCaptureOverride
+    {
+        get => _mouseShiftCaptureOverride;
+        set
+        {
+            _terminal.SetMouseShiftCapture(value);
+            _mouseShiftCaptureOverride = value;
+        }
+    }
 
     /// <inheritdoc />
     public TerminalModeState ModeState => new(
@@ -809,6 +823,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         ResetProcessVisibleNativeModes();
         _terminal.SetTitleBytes([]);
         _terminal.SetWorkingDirectoryBytes([]);
+        _terminal.SetMouseShiftCapture(null);
         ApplyConfiguredModeDefaultsAfterSessionReset();
         // Mode reset above clears mode 12; reselect the retained cursor policy
         // afterwards, matching native fullReset without discarding history.
@@ -1610,7 +1625,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         // substitute for the actual active-screen key after mixed switches.
         _alternateScreen = _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate;
         _bracketedPaste = _terminal.GetMode(GhosttyVtNative.ModeBracketedPaste);
-        _mouseModeState = _terminal.GetMouseModeState();
+        TerminalMouseInputState mouse = _terminal.GetMouseInputState();
+        _mouseModeState = mouse.Modes;
+        _mouseShiftCaptureOverride = mouse.ShiftCaptureOverride;
         _focusEventMode = _terminal.GetMode(GhosttyVtNative.ModeFocusEvent);
         _kittyKeyboardFlags = (int)_terminal.GetKittyKeyboardFlags();
         _scrollbar = _terminal.GetScrollbar();
@@ -1630,6 +1647,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _alternateScreen = false;
         _bracketedPaste = false;
         _mouseModeState = default;
+        _mouseShiftCaptureOverride = null;
         _win32InputMode = false;
         _focusEventMode = false;
         _kittyKeyboardFlags = 0;

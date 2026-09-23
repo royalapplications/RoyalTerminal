@@ -57,10 +57,12 @@ The first five were reproduced through the native C API before correction and
 have focused tests. No public upstream issue is claimed. Reassess and
 remove an overlay when its upstream fix is incorporated.
 
-The eight additional C exports are declared in
+The nine additional C exports are declared in
 `include/royalterminal_ghostty_vt.h`:
 
-- `ghostty_royal_mouse_state` copies the effective tracking/format flags consumed
+- `ghostty_royal_mouse_shift_capture_set` sets or clears the nullable application
+  Shift capture override without replaying terminal input.
+- `ghostty_royal_mouse_state` copies the nullable Shift capture override and effective tracking/format flags consumed
   by `mouse_encode.setopt_from_terminal`, without allocation or mutation. The
   upstream boolean terminal query ORs independent mode bits; mixed mode resets
   and decoded snapshots can legitimately disagree with those bits. The adapter

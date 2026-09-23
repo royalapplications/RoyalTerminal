@@ -2044,6 +2044,27 @@ assemblies (`9fa5d453…` / `a981cc92…`).
 
 ## Validation requirements
 
+### Shift-mouse capture (September 23 follow-up)
+
+Ghostty `Surface.mouseShiftCapture` and `stream.zig` XTSHIFTESCAPE are the
+compatibility reference: CSI > s / > 0 s disables capture, > 1 s enables it,
+and other parameter forms are ignored. The nullable application override is
+global, survives DECSTR and buffer switches, and clears on RIS/session reset.
+Both engines expose this state, including snapshot installation, and the native
+state copy retrieves modes and capture together without an extra per-frame call.
+
+The control's VT transport path defaults to Shift selection, with application
+override permitted. Enabled reverses that default; Never/Always ignore the
+application override. Native input endpoints retain their own host policy.
+Windows Terminal `ControlInteractivity::_canSendVTMouseInput` also reserves Shift;
+xterm.js `SelectionService.shouldForceSelection` has platform-specific force
+selection behavior. Ghostty's four-way configurable policy is chosen here.
+Headless tests cover all twelve host/nullable-application combinations; parser
+tests cover every split and malformed forms, reset, hold, snapshot and ABI guards.
+Validation is pending after the implementation push. This does not claim full
+mouse parity: physical button lifecycle, hyperlink modifier policy and outside
+viewport host normalization still require separate review.
+
 - Build the release native library with Zig 0.16 using `scripts/build-native.sh --release`.
 - Build the complete .NET solution with no warnings.
 - Run all xUnit unit and native integration tests.

@@ -40,6 +40,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalSnapshotExportSource,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseModeStateSource,
+    ITerminalMouseShiftCaptureState,
     ITerminalSixelOptionsSink,
     ITerminalEraseDisplayOptionsSink,
     ITerminalShellIntegrationEventSource,
@@ -268,6 +269,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public TerminalMouseModeState MouseModeState => _mouseModeState;
+
+    /// <inheritdoc />
+    public bool? MouseShiftCaptureOverride { get; set; }
 
     /// <inheritdoc />
     public event EventHandler<TerminalModeState>? ModeChanged;
@@ -3784,6 +3788,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             {
                 HandleKittyKeyboardPush();
             }
+            else if (finalByte == 's' && _params.Count <= 1 && p0 is 0 or 1)
+            {
+                MouseShiftCaptureOverride = p0 == 1;
+            }
             return;
         }
 
@@ -5255,6 +5263,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _statusDisplay = 0;
         _title.Set([]);
         _workingDirectory.Set([]);
+        MouseShiftCaptureOverride = null;
         _params.Clear();
         _currentParam = 0;
         _hasParam = false;

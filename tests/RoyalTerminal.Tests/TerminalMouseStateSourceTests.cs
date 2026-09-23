@@ -74,7 +74,7 @@ public sealed class TerminalMouseStateSourceTests(ITestOutputHelper output)
     [Fact]
     public unsafe void NativeStateAbiGuardsAndWarmCopies()
     {
-        Assert.Equal(IntPtr.Size + 8, Unsafe.SizeOf<GhosttyVtNative.RoyalMouseState>());
+        Assert.Equal(IntPtr.Size == 8 ? 24 : 16, Unsafe.SizeOf<GhosttyVtNative.RoyalMouseState>());
         if (!Available()) return;
         using GhosttyTerminal native = new(8, 3);
         GhosttyVtNative.RoyalMouseState state = GhosttyVtNative.RoyalMouseState.CreateSized();
