@@ -2,6 +2,32 @@
 
 ## Reopened completion audit
 
+### Raw metadata and active status display (2026-09-23)
+
+The shared optional `ITerminalMetadata` contract exposes owned host setters and
+nonallocating raw-byte copies of title/PWD state in both processors. Host setters
+do not synthesize OSC callbacks, decode UTF-8/URIs, or apply protocol byte limits.
+Managed snapshot installation retains raw strings and status-display selection
+without effects. CSI 21 t now returns the actual title, only when explicitly
+enabled by the host; this policy survives resets while metadata/status reset.
+
+Compatibility follows Ghostty `osc.zig`, its title/PWD/OSC 9/iTerm2 parsers,
+`stream.zig`, `stream_terminal.zig` and `Terminal.print`: OSC 0/2 validate UTF-8
+before byte truncation; OSC 1 is icon-only; raw directory reports are preserved;
+fixed captures include their NUL reservation. DECSASD suppresses printing, not
+controls, and preserves REP/charset state until printing resumes. Windows
+Terminal delegates window titles to its host (`AdaptDispatch::SetWindowTitle`);
+xterm.js distinguishes title/icon OSC handlers and gates title reports through
+window options. Ghostty's byte limits, explicit title-report policy and
+status-display behavior are the parity target, not those hosts' string models.
+
+Focused tests cover host ownership, short destinations, raw/invalid UTF-8,
+canonical selectors, every split, capture limits in scalar/bulk input, callbacks,
+status/REP/control behavior, session resets and side-effect-free restoration.
+This batch is awaiting post-push validation. Full snapshot orchestration,
+remaining keyboard/mouse consumers, quota policy and platform sign-off remain
+open; these primitives do not establish full terminal parity.
+
 ### Snapshot geometry and current/saved processor registers (2026-09-23)
 
 New unpublished installation primitives assign exact tab stops, unsigned 32-bit

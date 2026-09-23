@@ -32,6 +32,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     IKittyKeyboardStateSource,
     ITerminalCursorStyleSource,
     ITerminalCursorDefaults,
+    ITerminalMetadata,
     ITerminalFocusEventModeSource,
     ITerminalSessionHistoryController,
     ITerminalSelectionExportSource,
@@ -385,6 +386,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _screen = screen;
         _publishedScreen = screen;
         _options = options ?? BasicVtProcessorOptions.Default;
+        TitleReportEnabled = _options.TitleReportEnabled;
         ArgumentNullException.ThrowIfNull(_options.TimeProvider);
         ArgumentOutOfRangeException.ThrowIfNegative(_options.ClipboardWriteLimitBytes);
         ArgumentOutOfRangeException.ThrowIfNegative(_options.ContinuationMaxBytes);
@@ -1906,6 +1908,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void PutChar(int codepoint)
     {
+        // Ghostty currently suppresses printable output to the unsupported
+        // status line; controls and parser state still advance normally.
+        if (_statusDisplay != 0) return;
         ClampCursor();
 
         if (!Rune.IsValid(codepoint))
@@ -2701,6 +2706,32 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ReadOnlySpan<byte> rawPayload = CollectionsMarshal.AsSpan(_oscBuffer);
+        if (rawPayload.StartsWith("0;"u8) || rawPayload.StartsWith("2;"u8))
+        {
+            SetOscTitle(rawPayload[2..]);
+            _oscBuffer.Clear();
+            return;
+        }
+        if (rawPayload.StartsWith("7;"u8))
+        {
+            SetOscWorkingDirectory(rawPayload[2..], shellIntegration: true);
+            _oscBuffer.Clear();
+            return;
+        }
+        if (rawPayload.StartsWith("9;9;"u8))
+        {
+            // OSC 9 reserves a final NUL only for commands that need strings.
+            if (rawPayload.Length - 2 < 2048) SetOscWorkingDirectory(rawPayload[4..]);
+            _oscBuffer.Clear();
+            return;
+        }
+        if (rawPayload.StartsWith("1337;"u8) && IsCurrentDirectoryCommand(rawPayload[5..]))
+        {
+            ReadOnlySpan<byte> directory = rawPayload[16..];
+            if (!directory.IsEmpty) SetOscWorkingDirectory(directory);
+            _oscBuffer.Clear();
+            return;
+        }
         int colorSeparator = rawPayload.IndexOf((byte)';');
         ReadOnlySpan<byte> colorSelector = colorSeparator < 0 ? rawPayload : rawPayload[..colorSeparator];
         if (TryOscColorOperation(colorSelector, out int colorOperation))
@@ -2731,21 +2762,17 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        // Metadata selectors are canonical decimal strings, not numeric aliases.
+        // The supported raw-byte forms were already handled above; OSC 1 is icon-only.
+        if (selectorCode is 0 or 1 or 2 or 7 ||
+            (selectorCode == 9 && !selector.SequenceEqual("9")) ||
+            (selectorCode == 1337 && !selector.SequenceEqual("1337"))) return;
+
         if (selectorCode == 133) HandleSemanticPrompt(value.AsSpan());
         _shellIntegrationParser.TryHandleOsc(selectorCode, value);
 
         switch (selectorCode)
         {
-            case 0:
-            case 1:
-            case 2:
-                TitleCallback?.Invoke(value);
-                break;
-
-            case 7:
-                WorkingDirectoryCallback?.Invoke(value);
-                break;
-
             case 9:
                 HandleOsc9(value);
                 break;
@@ -2776,12 +2803,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void HandleOsc9(string value)
     {
-        if (value.StartsWith("9;", StringComparison.Ordinal))
-        {
-            WorkingDirectoryCallback?.Invoke(value[2..]);
-            return;
-        }
-
         if (TryParseOsc9Progress(value, out TerminalProgressReport? report) &&
             report is not null)
         {
@@ -2828,16 +2849,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         ReadOnlySpan<char> key = value.AsSpan(0, separator);
         ReadOnlySpan<char> payload = value.AsSpan(separator + 1);
-        if (AsciiEqualsIgnoreCase(key, "CurrentDir"))
-        {
-            if (!payload.IsEmpty)
-            {
-                WorkingDirectoryCallback?.Invoke(payload.ToString());
-            }
-
-            return;
-        }
-
         if (AsciiEqualsIgnoreCase(key, "Copy") &&
             payload.Length > 1 &&
             payload[0] == ':' &&
@@ -3569,19 +3580,24 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private int GetOscBufferLimit(ReadOnlySpan<byte> incoming)
     {
-        // Native color OSC captures are fixed-size (2048 payload bytes), not
+        // Native metadata/color OSC captures are fixed-size (2048 payload bytes), not
         // allocating like clipboard strings. Recognize prefixes split anywhere
         // across bytewise or bulk input before retaining a large incoming span.
         ReadOnlySpan<byte> retained = CollectionsMarshal.AsSpan(_oscBuffer);
-        Span<byte> prefix = stackalloc byte[4];
+        Span<byte> prefix = stackalloc byte[5];
         int retainedLength = Math.Min(prefix.Length, retained.Length);
         retained[..retainedLength].CopyTo(prefix);
         int added = Math.Min(prefix.Length - retainedLength, incoming.Length);
         incoming[..added].CopyTo(prefix[retainedLength..]);
         ReadOnlySpan<byte> combined = prefix[..(retainedLength + added)];
         int separator = combined.IndexOf((byte)';');
-        return separator >= 0 && TryOscColorOperation(combined[..separator], out _)
-            ? 2048 + separator + 1 : MaxOscBufferBytes;
+        if (separator < 0) return MaxOscBufferBytes;
+        ReadOnlySpan<byte> selector = combined[..separator];
+        // Title/PWD parsers reserve one byte of their fixed capture for NUL.
+        if (selector is [(byte)'0'] or [(byte)'1'] or [(byte)'2'] or [(byte)'7'] || selector.SequenceEqual("1337"u8))
+            return 2047 + separator + 1;
+        if (selector.SequenceEqual("9"u8)) return 2048 + separator + 1;
+        return TryOscColorOperation(selector, out _) ? 2048 + separator + 1 : MaxOscBufferBytes;
     }
 
     private bool TryHandleAnywhereCancelControl(byte b)
@@ -3721,6 +3737,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         var p0 = _params.Count > 0 ? _params[0] : 0;
         var p1 = _params.Count > 1 ? _params[1] : 0;
+
+        if (_csiPrivateMarker == '\0' && _intermediateChar == '$' && finalByte == '}')
+        {
+            if (_params.Count == 1 && p0 is 0 or 1) _statusDisplay = (byte)p0;
+            return;
+        }
 
         // DEC private mode families: CSI ? ...
         if (_csiPrivateMarker == '?')
@@ -4133,10 +4155,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
 
             case 21: // CSI 21 t — report window title
-                if (_options.TitleReportEnabled)
-                {
-                    ResponseCallback?.Invoke("\x1b]l\x1b\\"u8.ToArray());
-                }
+                ReportTitle();
                 break;
         }
     }
@@ -5252,6 +5271,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _utf8Codepoint = 0;
         _utf8Remaining = 0;
         _continuation.Reset();
+        _statusDisplay = 0;
+        _title.Set([]);
+        _workingDirectory.Set([]);
         _params.Clear();
         _currentParam = 0;
         _hasParam = false;

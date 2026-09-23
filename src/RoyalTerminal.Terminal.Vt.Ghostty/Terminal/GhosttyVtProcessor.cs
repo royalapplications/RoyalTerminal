@@ -24,6 +24,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     IKittyKeyboardStateSource,
     ITerminalCursorStyleSource,
     ITerminalCursorDefaults,
+    ITerminalMetadata,
     ITerminalFocusEventModeSource,
     ITerminalKeySequenceEncoderSource,
     ITerminalPasteSequenceEncoderSource,
@@ -801,10 +802,12 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         }
 
         ResetProcessVisibleNativeModes();
+        _terminal.SetTitleBytes([]);
+        _terminal.SetWorkingDirectoryBytes([]);
         ApplyConfiguredModeDefaultsAfterSessionReset();
         // Mode reset above clears mode 12; reselect the retained cursor policy
         // afterwards, matching native fullReset without discarding history.
-        _terminal.Write("\u001b[0 q"u8);
+        _terminal.Write("\u001b[0 q\u001b[0$}"u8);
         ConfigureOptionalNativeFeatures();
         ApplyThemeToNative(_theme);
         SetupTerminalEffects();
@@ -1355,7 +1358,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     private void ConfigureOptionalNativeFeatures()
     {
         _terminal.SetContinuationMaxBytes(64 * 1024);
-        _terminal.SetTitleReport(enabled: false);
+        _terminal.SetTitleReport(_titleReportEnabled);
         _terminal.SetUnknownSequenceMaxBytes(4 * 1024);
         _terminal.SetTerminfoName("xterm-ghostty");
         _terminal.SetClipboardWriteMaxBytes(16 * 1024 * 1024);
