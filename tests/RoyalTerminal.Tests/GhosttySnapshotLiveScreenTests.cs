@@ -131,15 +131,40 @@ public sealed class GhosttySnapshotLiveScreenTests(ITestOutputHelper output)
         encoded.Write(original.AsSpan((int)reader.SourceOffset));
         using GhosttyTerminal direct = GhosttySnapshot.Decode(original, retainContinuation: true);
         using GhosttyTerminal restored = GhosttySnapshot.Decode(encoded.ToArray(), retainContinuation: true);
-        Assert.Equal(GhosttySnapshot.Encode(direct), GhosttySnapshot.Encode(restored));
+        Assert.Equal(CanonicalSnapshot(direct), CanonicalSnapshot(restored));
         direct.Write("mNEXT\u001b[?47h!\u001b[?47l?"u8);
         restored.Write("mNEXT\u001b[?47h!\u001b[?47l?"u8);
-        Assert.Equal(GhosttySnapshot.Encode(direct), GhosttySnapshot.Encode(restored));
+        Assert.Equal(CanonicalSnapshot(direct), CanonicalSnapshot(restored));
 
         void WritePayload(GhosttySnapshotRecordTag tag)
         {
             GhosttySnapshotFraming.WriteRecord(encoded, tag, payload.GetBuffer().AsSpan(0, (int)payload.Length));
             payload.SetLength(0);
+        }
+    }
+
+    private byte[] CanonicalSnapshot(GhosttyTerminal terminal)
+    {
+        using GhosttySnapshotRecordReader reader = new(GhosttySnapshot.Encode(terminal), 8 * 1024 * 1024);
+        reader.ReadEnvelope();
+        using MemoryStream result = new(); result.Write(GhosttySnapshotFraming.Envelope);
+        while (true)
+        {
+            GhosttySnapshotRecordTag tag = reader.ReadRecord(out ReadOnlySpan<byte> original);
+            if (tag == GhosttySnapshotRecordTag.Page)
+            {
+                // Native allocation capacities and page-local style/link IDs are
+                // not state identity. Reassign them deterministically from cells.
+                GhosttySnapshotPage page = GhosttySnapshotPage.Read(original, 1_000_000, 1_000_000, 1_000_000);
+                output.WriteLine($"Native PAGE allocation header: {Convert.ToHexString(original[..20])}");
+                TerminalScreen owner = new(1, 1);
+                TerminalRow[] rows = GhosttySnapshotLivePage.Decode(page, owner);
+                using MemoryStream payload = new();
+                GhosttySnapshotLivePage.Capture(rows, owner, 1_000_000).WritePayloadTo(payload);
+                GhosttySnapshotFraming.WriteRecord(result, tag, payload.GetBuffer().AsSpan(0, (int)payload.Length));
+            }
+            else GhosttySnapshotFraming.WriteRecord(result, tag, original);
+            if (tag == GhosttySnapshotRecordTag.Finish) return result.ToArray();
         }
     }
 
