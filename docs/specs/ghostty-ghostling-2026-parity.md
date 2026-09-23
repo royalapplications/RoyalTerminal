@@ -2061,9 +2061,13 @@ xterm.js `SelectionService.shouldForceSelection` has platform-specific force
 selection behavior. Ghostty's four-way configurable policy is chosen here.
 Headless tests cover all twelve host/nullable-application combinations; parser
 tests cover every split and malformed forms, reset, hold, snapshot and ABI guards.
-Validation is pending after the implementation push. This does not claim full
-mouse parity: physical button lifecycle, hyperlink modifier policy and outside
-viewport host normalization still require separate review.
+The initial 67 focused cases pass against the rebuilt native library. The host
+now observes physical button transitions before reporting/Shift suppression,
+following Ghostty's `mouseButtonCallback`; it does not encode suppressed input or
+advance motion history. Regression coverage checks suppressed releases and presses
+while reporting is off. Full-suite validation is pending after the follow-up push.
+This does not claim full mouse parity: broader capture-loss lifecycle, hyperlink
+policy and outside-viewport host normalization still require separate review.
 
 - Build the release native library with Zig 0.16 using `scripts/build-native.sh --release`.
 - Build the complete .NET solution with no warnings.

@@ -31,6 +31,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseModeStateSource,
     ITerminalMouseShiftCaptureState,
+    ITerminalPointerButtonStateSink,
     ITerminalSessionHistoryController,
     ITerminalViewportScrollSource,
     ITerminalSelectionExportSource,
@@ -3196,6 +3197,13 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         }
 
         _pressedMouseButtons = (byte)(_pressedMouseButtons | mask);
+    }
+
+    /// <inheritdoc />
+    public void ObservePointerButton(in TerminalPointerEvent pointerEvent)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        UpdatePressedMouseButtons(pointerEvent);
     }
 
     private bool IsAnyMouseButtonPressed(in TerminalPointerEvent pointerEvent)

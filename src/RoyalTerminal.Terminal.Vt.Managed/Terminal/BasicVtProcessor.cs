@@ -41,6 +41,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseModeStateSource,
     ITerminalMouseShiftCaptureState,
+    ITerminalPointerButtonStateSink,
     ITerminalSixelOptionsSink,
     ITerminalEraseDisplayOptionsSink,
     ITerminalShellIntegrationEventSource,
@@ -272,6 +273,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public bool? MouseShiftCaptureOverride { get; set; }
+
+    /// <inheritdoc />
+    public void ObservePointerButton(in TerminalPointerEvent pointerEvent) => _mouseEncoder.ObserveButton(pointerEvent);
 
     /// <inheritdoc />
     public event EventHandler<TerminalModeState>? ModeChanged;

@@ -2252,6 +2252,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             RaiseMousePressReleaseSequence(control, window, point);
             Dispatcher.UIThread.RunJobs();
             Assert.Empty(transport.Inputs);
+            Assert.Equal(2, processor.ObservedButtons.Count);
             if (disabled) Assert.Empty(processor.PointerEvents);
             else Assert.NotEmpty(processor.PointerEvents);
         }
@@ -2314,6 +2315,8 @@ public sealed class TerminalControlHeadlessInteractionTests
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(captured, transport.Inputs.Count != 0);
             Assert.Equal(captured, processor.PointerEvents.Count != 0);
+            Assert.Equal(2, processor.ObservedButtons.Count);
+            Assert.Equal(TerminalInputAction.Release, processor.ObservedButtons[^1].Action);
             if (captured) Assert.All(processor.PointerEvents, e => Assert.True((e.Modifiers & TerminalModifiers.Shift) != 0));
             transport.Inputs.Clear();
             RaiseMousePressReleaseSequence(control, window, point);
@@ -4166,7 +4169,7 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    private sealed class NativePointerRecordingVtProcessor : IVtProcessor, ITerminalPointerSequenceEncoderSource, ITerminalMouseModeStateSource, ITerminalMouseShiftCaptureState
+    private sealed class NativePointerRecordingVtProcessor : IVtProcessor, ITerminalPointerSequenceEncoderSource, ITerminalMouseModeStateSource, ITerminalMouseShiftCaptureState, ITerminalPointerButtonStateSink
     {
         public const byte EncodedPointerByte = 0x4E;
 
@@ -4174,6 +4177,11 @@ public sealed class TerminalControlHeadlessInteractionTests
         public bool MouseReportingEnabled => MouseModeState.IsMouseReportingEnabled;
         public bool SuppressPointer { get; set; }
         public bool? MouseShiftCaptureOverride { get; set; }
+        public List<TerminalPointerEvent> ObservedButtons { get; } = [];
+        public void ObservePointerButton(in TerminalPointerEvent pointerEvent)
+        {
+            if (pointerEvent.Kind == TerminalPointerEventKind.Button) ObservedButtons.Add(pointerEvent);
+        }
 
         public List<TerminalPointerEvent> PointerEvents { get; } = [];
         public List<TerminalPointerEncodingContext> Contexts { get; } = [];

@@ -7138,6 +7138,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
+        // Ghostty records physical transitions before Shift/reporting filters.
+        // Otherwise a suppressed release can leave viewport drag state stuck.
+        if (_vtProcessor is ITerminalPointerButtonStateSink buttons) buttons.ObservePointerButton(pointerEvent);
+
         // Press/release handlers also call this while starting text selection.
         // An authoritative off state must gate transport input itself, not only
         // the selection/reporting decision made by those handlers.

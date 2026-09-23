@@ -16,6 +16,19 @@ internal sealed class ManagedMouseEncoder
     internal void Reset() { _lastCell = null; _pressedButtons = 0; }
     internal void ResetMotion() => _lastCell = null;
 
+    internal void ObserveButton(in TerminalPointerEvent pointer)
+    {
+        if (pointer.Kind != TerminalPointerEventKind.Button) return;
+        byte mask = ButtonMask(pointer.Button);
+        _pressedButtons = pointer.Action == TerminalInputAction.Release
+            ? (byte)(_pressedButtons & ~mask) : (byte)(_pressedButtons | mask);
+    }
+
+    private static byte ButtonMask(TerminalMouseButton button) => button switch
+    {
+        TerminalMouseButton.Left => 1, TerminalMouseButton.Middle => 2, TerminalMouseButton.Right => 4, _ => 0,
+    };
+
     internal bool TryEncode(in TerminalPointerEvent pointer, in TerminalPointerEncodingContext context,
         in TerminalMouseModeState mode, out byte[] sequence)
     {
@@ -27,13 +40,13 @@ internal sealed class ManagedMouseEncoder
         _mode = mode; _context = geometry.Context;
 
         // Match the adapter's normalization of supported buttons/actions.
-        byte mask = pointer.Button switch { TerminalMouseButton.Left => 1, TerminalMouseButton.Middle => 2, TerminalMouseButton.Right => 4, _ => 0 };
+        byte mask = ButtonMask(pointer.Button);
         TerminalPointerEvent normalized = pointer;
         if (pointer.Kind == TerminalPointerEventKind.Button)
         {
             if (mask == 0) return false;
             bool release = pointer.Action == TerminalInputAction.Release;
-            _pressedButtons = release ? (byte)(_pressedButtons & ~mask) : (byte)(_pressedButtons | mask);
+            ObserveButton(pointer);
             normalized = pointer with { Action = release ? TerminalInputAction.Release : TerminalInputAction.Press };
         }
         else if (pointer.Kind == TerminalPointerEventKind.Move && mask == 0)

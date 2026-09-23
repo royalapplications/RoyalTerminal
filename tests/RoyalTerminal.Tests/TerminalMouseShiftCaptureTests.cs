@@ -123,6 +123,37 @@ public sealed class TerminalMouseShiftCaptureTests(ITestOutputHelper output)
         Assert.Throws<ObjectDisposedException>(() => native.SetMouseShiftCapture(null));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SuppressedButtonTransitionsDoNotLeaveViewportDraggingStuck(bool native)
+    {
+        if (native && !Available()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(new TerminalScreen(8, 3)) : new BasicVtProcessor(new TerminalScreen(8, 3));
+        ITerminalPointerButtonStateSink buttons = (ITerminalPointerButtonStateSink)processor;
+        ITerminalPointerSequenceEncoderSource encoder = (ITerminalPointerSequenceEncoderSource)processor;
+        TerminalPointerEncodingContext context = new(80, 60, 10, 20);
+        TerminalPointerEvent press = new(TerminalPointerEventKind.Button, 21, 21, TerminalMouseButton.Left, TerminalInputAction.Press, TerminalModifiers.None);
+        TerminalPointerEvent outside = new(TerminalPointerEventKind.Move, -1, -1, TerminalMouseButton.None, TerminalInputAction.Press, TerminalModifiers.None);
+        processor.Process("\u001b[?1003;1016h"u8);
+        Assert.True(encoder.TryEncodePointer(press, context, out _));
+        Assert.True(encoder.TryEncodePointer(outside, context, out _));
+        // Shift owns this release; the host observes it but does not encode it.
+        buttons.ObservePointerButton(press with { Action = TerminalInputAction.Release, Modifiers = TerminalModifiers.Shift });
+        Assert.False(encoder.TryEncodePointer(outside, context, out _));
+        // A press while reporting is off still establishes physical state.
+        processor.Process("\u001b[?1003l"u8);
+        buttons.ObservePointerButton(press);
+        processor.Process("\u001b[?1003h"u8);
+        Assert.True(encoder.TryEncodePointer(outside, context, out _));
+        // Non-button and unsupported-button observations cannot release it.
+        buttons.ObservePointerButton(outside with { Action = TerminalInputAction.Release });
+        buttons.ObservePointerButton(press with { Button = TerminalMouseButton.None, Action = TerminalInputAction.Release });
+        Assert.True(encoder.TryEncodePointer(outside, context, out _));
+        buttons.ObservePointerButton(press with { Action = TerminalInputAction.Release });
+        Assert.False(encoder.TryEncodePointer(outside, context, out _));
+    }
+
     private bool Available()
     {
         bool available = GhosttyVtProcessor.IsAvailable();
