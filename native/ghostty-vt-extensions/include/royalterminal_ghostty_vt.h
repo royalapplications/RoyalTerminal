@@ -39,6 +39,44 @@ GHOSTTY_API GhosttyResult ghostty_royal_kitty_graphics_placement_metadata(
     GhosttyKittyGraphics graphics, GhosttyKittyGraphicsPlacementIterator iterator,
     RoyalKittyPlacementMetadata* output);
 
+/** Copied glyph metadata. Set size before calling. Sizing: 0 = unchanged,
+ * 1 = aspect-preserving fit (Ghostty constraint.cover), 2 = stretch.
+ * Alignment: 0 = start, 1 = center, 2 = end. These are normalized renderer
+ * constraints: native storage does not retain the original request names.
+ */
+typedef struct {
+    size_t size;
+    uint32_t codepoint, units_per_em, advance_width, line_height, width;
+    uint32_t sizing, horizontal, vertical, contour_count, point_count;
+    double pad_top, pad_right, pad_bottom, pad_left;
+} RoyalGlyphMetadata;
+
+/** Y-up design coordinate; on_curve is exactly zero or one. */
+typedef struct { int32_t x, y; uint32_t on_curve; } RoyalGlyphPoint;
+
+/** Read the count and pending glyph dirty flag without mutation/allocation.
+ * Inspect before render-state update clears dirty flags. Reset/disable also
+ * change the count. Serialize all calls below with terminal mutation/disposal.
+ */
+GHOSTTY_API GhosttyResult ghostty_royal_glyph_glossary_info(
+    GhosttyTerminal terminal, uint32_t* out_count, uint8_t* out_dirty);
+
+/** Copy one FIFO-ordered entry's metadata. NO_VALUE means index is past the end;
+ * INVALID_VALUE means null arguments or an undersized output structure.
+ */
+GHOSTTY_API GhosttyResult ghostty_royal_glyph_metadata(
+    GhosttyTerminal terminal, uint32_t index, RoyalGlyphMetadata* output);
+
+/** Copy validated contours/points into caller-owned buffers. All validation
+ * precedes writes: OUT_OF_SPACE leaves both buffers unchanged. Null buffers are
+ * valid only for zero-length outlines. No borrowed pointer escapes the call.
+ * Do not mutate the terminal between metadata and outline calls.
+ */
+GHOSTTY_API GhosttyResult ghostty_royal_glyph_outline(
+    GhosttyTerminal terminal, uint32_t index,
+    RoyalGlyphPoint* points, size_t point_capacity,
+    uint16_t* contours, size_t contour_capacity);
+
 #ifdef __cplusplus
 }
 #endif

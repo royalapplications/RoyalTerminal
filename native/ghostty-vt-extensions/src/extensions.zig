@@ -68,3 +68,116 @@ export fn ghostty_royal_kitty_graphics_placement_metadata(
     }
     return -4;
 }
+
+const RoyalGlyphMetadata = extern struct {
+    size: usize = @sizeOf(RoyalGlyphMetadata),
+    codepoint: u32 = 0,
+    units_per_em: u32 = 0,
+    advance_width: u32 = 0,
+    line_height: u32 = 0,
+    width: u32 = 0,
+    sizing: u32 = 0,
+    horizontal: u32 = 0,
+    vertical: u32 = 0,
+    contour_count: u32 = 0,
+    point_count: u32 = 0,
+    pad_top: f64 = 0,
+    pad_right: f64 = 0,
+    pad_bottom: f64 = 0,
+    pad_left: f64 = 0,
+};
+
+const RoyalGlyphPoint = extern struct {
+    x: i32,
+    y: i32,
+    on_curve: u32,
+};
+
+// Read-only peek: callers must inspect dirty before render-state update clears
+// terminal dirty flags. Reset/disable are also detected through the entry count.
+export fn ghostty_royal_glyph_glossary_info(
+    handle: @import("terminal/c/terminal.zig").Terminal,
+    out_count: ?*u32,
+    out_dirty: ?*u8,
+) callconv(.c) c_int {
+    const count = out_count orelse return -2;
+    const dirty = out_dirty orelse return -2;
+    const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
+    count.* = @intCast(t.glyph_glossary.entries.count());
+    dirty.* = @intFromBool(t.flags.dirty.glyph_glossary);
+    return 0;
+}
+
+// Entries are addressed in FIFO order. No borrowed pointer crosses the ABI.
+export fn ghostty_royal_glyph_metadata(
+    handle: @import("terminal/c/terminal.zig").Terminal,
+    index: u32,
+    output: ?*RoyalGlyphMetadata,
+) callconv(.c) c_int {
+    const result = output orelse return -2;
+    if (result.size < @sizeOf(RoyalGlyphMetadata)) return -2;
+    const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
+    const entries = &t.glyph_glossary.entries;
+    if (index >= entries.count()) return -4;
+    const entry = &entries.values()[index];
+    const outline = entry.glyph.glyf;
+    result.* = .{
+        .codepoint = entries.keys()[index],
+        .units_per_em = entry.design.units_per_em,
+        .advance_width = entry.design.advance_width,
+        .line_height = entry.design.line_height,
+        .width = @intFromEnum(entry.width),
+        // The glossary stores normalized renderer constraints, not the original
+        // request names (height/advance and contain/cover are aliases upstream).
+        .sizing = switch (entry.constraint.size) {
+            .none => 0,
+            .cover => 1,
+            .stretch => 2,
+            else => return -2,
+        },
+        .horizontal = switch (entry.constraint.align_horizontal) {
+            .start => 0,
+            .center => 1,
+            .end => 2,
+            else => return -2,
+        },
+        .vertical = switch (entry.constraint.align_vertical) {
+            .start => 0,
+            .center => 1,
+            .end => 2,
+            else => return -2,
+        },
+        .contour_count = @intCast(outline.contours.len),
+        .point_count = @intCast(outline.points.len),
+        .pad_top = entry.constraint.pad_top,
+        .pad_right = entry.constraint.pad_right,
+        .pad_bottom = entry.constraint.pad_bottom,
+        .pad_left = entry.constraint.pad_left,
+    };
+    return 0;
+}
+
+export fn ghostty_royal_glyph_outline(
+    handle: @import("terminal/c/terminal.zig").Terminal,
+    index: u32,
+    points: ?[*]RoyalGlyphPoint,
+    point_capacity: usize,
+    contours: ?[*]u16,
+    contour_capacity: usize,
+) callconv(.c) c_int {
+    const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
+    const entries = &t.glyph_glossary.entries;
+    if (index >= entries.count()) return -4;
+    const outline = entries.values()[index].glyph.glyf;
+    if (point_capacity < outline.points.len or contour_capacity < outline.contours.len) return -3;
+    if (outline.points.len > 0 and points == null) return -2;
+    if (outline.contours.len > 0 and contours == null) return -2;
+    // All validation precedes writes, including validation of the second buffer.
+    for (outline.points, 0..) |glyph_point, i| points.?[i] = .{
+        .x = glyph_point.x,
+        .y = glyph_point.y,
+        .on_curve = @intFromBool(glyph_point.on_curve),
+    };
+    if (outline.contours.len > 0) @memcpy(contours.?[0..outline.contours.len], outline.contours);
+    return 0;
+}

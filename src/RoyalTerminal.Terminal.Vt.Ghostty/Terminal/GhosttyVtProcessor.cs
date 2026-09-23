@@ -17,7 +17,7 @@ namespace RoyalTerminal.Terminal;
 /// VT processor that wraps Ghostty's official <c>GhosttyTerminal</c> and
 /// <c>GhosttyRenderState</c> libghostty-vt APIs.
 /// </summary>
-public sealed class GhosttyVtProcessor : IVtProcessor,
+public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalThemeSink,
     ITerminalShellIntegrationEventSource,
     IKittyKeyboardStateSource,
@@ -1402,6 +1402,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         }
 
         AdvanceKittyAnimations();
+        SyncGlyphGlossaryFromNative();
         _renderState.Update(_terminal);
         RefreshStateFromNative();
         SyncScreenFromNative();
@@ -1467,6 +1468,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 // Start/advance the animation clock for the completed prefix,
                 // even if its control command and DECSET arrive in one write.
                 AdvanceKittyAnimations();
+                SyncGlyphGlossaryFromNative();
                 _renderState.Update(_terminal);
                 // A single write may finish a frame before starting the hold.
                 // Publish it now, while hyperlinks and graphics still refer to

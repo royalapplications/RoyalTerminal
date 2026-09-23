@@ -8,3 +8,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("RoyalTerminal.Terminal.Vt.Managed")]
 [assembly: InternalsVisibleTo("RoyalTerminal.Terminal.Vt.Ghostty")]
 [assembly: InternalsVisibleTo("RoyalTerminal.Tests")]
+[assembly: InternalsVisibleTo("RoyalTerminal.GhosttySharp")]

@@ -44,7 +44,7 @@ All were reproduced through the native C API before correction and have
 focused integration tests. No public upstream issue is claimed. Reassess and
 remove an overlay when its upstream fix is incorporated.
 
-The two additional C exports are declared in
+The five additional C exports are declared in
 `include/royalterminal_ghostty_vt.h`:
 
 - `ghostty_royal_kitty_graphics_animation_tick` calls Ghostty's own
@@ -60,12 +60,22 @@ The two additional C exports are declared in
   root identity. Relative offsets use upstream `resolveChain`, including its
   saturation behavior. This is read-only and allocation-free. The iterator must
   belong to the supplied storage and have a current entry; serialize access with
-  terminal mutations. Both exports are required by the native VT integration.
+  terminal mutations.
+
+- `ghostty_royal_glyph_glossary_info`, `ghostty_royal_glyph_metadata` and
+  `ghostty_royal_glyph_outline` copy session glyph information without mutation,
+  allocation or borrowed output pointers. Entries use FIFO indices, valid only
+  while terminal mutation is excluded. Metadata describes normalized Ghostty
+  constraints, not unrecoverable request aliases. Outline copying validates both
+  buffers before writing either. The native VT adapter reads the dirty flag before
+  render-state update clears it, and publishes owned, immutable glyph models only
+  at presentation boundaries. Unchanged frames perform one allocation-free info
+  query and retain existing glyph objects. Reset/disable also change the count.
 
 `scripts/build-native.sh` and `scripts/build-native.ps1` build and stage this
 package. CI and release jobs also use it. Do not stage a plain upstream build:
-RoyalTerminal's native VT processor requires both additional exports for idle
-animations and virtual-placement metadata.
+RoyalTerminal's native VT processor requires these exports for idle animations,
+virtual-placement metadata and glyph publication.
 
 The integration intentionally uses upstream animation state and composition,
 not a parallel implementation of animation semantics. If Ghostty adds a public

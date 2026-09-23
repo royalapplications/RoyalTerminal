@@ -22,6 +22,12 @@ public sealed partial class TerminalScreen
 
     internal TerminalGlyphGlossary GlyphGlossary => _glyphGlossary ??= new();
 
+    internal void ReplaceGlyphGlossary(TerminalGlyphGlossary glossary)
+    {
+        _glyphGlossary = glossary.Count == 0 ? null : glossary;
+        InvalidateAll();
+    }
+
     internal void ClearRegisteredGlyphs()
     {
         if (_glyphGlossary is null) return;

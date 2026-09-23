@@ -53,7 +53,7 @@ an applicable feature from the user's requested scope.
 | Upstream changes | Current execution evidence and required disposition |
 |---|---|
 | [`ca8868a29`](https://github.com/ghostty-org/ghostty/commit/ca8868a29) allocation-free whole-grapheme font selection | Audit found the span overload resolved only the **first rune**. A correction now checks every substantive cluster component and discovers candidates lazily, with no cluster-key/candidate-list allocation. Deterministic tests use the pinned JetBrains Mono/Noto Emoji font fixtures and a controlled matcher; validation is recorded below when completed. |
-| [`6f02d9aad`](https://github.com/ghostty-org/ghostty/commit/6f02d9aad) rasterize downloaded glyf directly into output bitmap, and associated APC glyph limits | Bounded managed outline decoding, live managed APC/session glossary and direct reusable Skia paths are implemented and tested below. Native extraction, placement, cache invalidation and terminal-row drawing remain open; protocol support alone does not enable glyph presentation. |
+| [`6f02d9aad`](https://github.com/ghostty-org/ghostty/commit/6f02d9aad) rasterize downloaded glyf directly into output bitmap, and associated APC glyph limits | Bounded managed decoding, live managed APC/session glossary, native owned-copy extraction/publication and direct reusable Skia paths are implemented and tested below. Placement, renderer cache ownership and terminal-row drawing remain open; model publication alone does not draw registered glyphs. |
 | [`5beb94c16`](https://github.com/ghostty-org/ghostty/commit/5beb94c16) / `88abb77b1` apply font-thicken to IME preedit | No `font-thicken` setting or matching preedit glyph raster path exists in the current RoyalTerminal renderer. The upstream fix cannot be applied merely by updating the library. Any new thickness option must affect ordinary and preedit text consistently and have rendering tests. |
 | [`6688aa072`](https://github.com/ghostty-org/ghostty/commit/6688aa072), [`97f57edcc`](https://github.com/ghostty-org/ghostty/commit/97f57edcc), [`72cf50855`](https://github.com/ghostty-org/ghostty/commit/72cf50855) idle DisplayLink, unfocused dirty redraws, lock-order fix | There is no Ghostty DisplayLink in RoyalTerminal. The equivalent obligations belong to Avalonia presentation scheduling: idle work must stop, dirty unfocused surfaces must still present, and stopping presentation must not invert terminal/render locks. The third-thread/presentation audit and tests must establish these obligations. |
 | [`c4e16970a`](https://github.com/ghostty-org/ghostty/commit/c4e16970a), [`4b4a5b241`](https://github.com/ghostty-org/ghostty/commit/4b4a5b241), [`a177ba90a`](https://github.com/ghostty-org/ghostty/commit/a177ba90a) hidden GPU resources, Metal callback teardown, DisplayLink failure | Ghostty-specific objects are absent. RoyalTerminal still needs its own renderer detach/dispose/visibility ownership review; the absence of those object types does not prove equivalent lifecycle behavior. |
@@ -140,8 +140,41 @@ The full macOS unit/headless run passes **2,206 tests / 16 conditional skips /
 19f0604, CI passed all six native builds, documentation and Ubuntu build/tests;
 macOS/Windows build/test jobs were still running. The protocol commit needs fresh CI.
 
-Still required before claiming feature parity: native glossary/outline extraction;
-host font coverage policy; an explicit width/layout policy where native currently
+### Native extraction and model publication
+
+Three repository-owned C exports now expose glossary count/dirty state, FIFO entry
+metadata and copied contour/point data. They are read-only and allocation-free;
+the copied ABI uses explicit 32-bit flags, not Zig bool/padding. All pointer/size/
+capacity checks precede outline writes, including validation of the second buffer.
+There is no borrowed glyph pointer or native allocation for a caller to retain.
+Calls must be serialized with terminal mutation/disposal, including the interval
+between metadata and outline reads.
+
+`GhosttyTerminal.GetGlyphRegistrations` uses a lifetime lease, validates counts and
+contours, and returns owned immutable registrations that survive replacement,
+clear/reset and terminal disposal. Native storage contains normalized constraints:
+height/advance, contain/cover and start/baseline aliases cannot be recovered.
+The native processor checks dirty state **before** render-state update clears it,
+also detects count changes, and publishes the common glyph model at completed-frame
+boundaries. While output is held, queries see native working state but the published
+screen retains the old glossary. Unchanged frames retain entry object identity;
+1,000 info queries allocate zero managed bytes. Mutation still copies the bounded
+glossary; this is not an allocation-free registration claim.
+
+The 127-test focused glyph/APC run passes with native available. Tests cover native
+points versus managed decoding, all normalized sizing policies, explicit padding/
+metrics, ABI sizes/offsets, null/undersized buffers with untouched sentinels, empty
+outlines, FIFO order, dirty peeking, disposal and processor hold/replacement/reset.
+The full macOS suite passes **2,218 tests / 16 conditional skips / 2,234 total**;
+the separate native integration run passes **228 tests**, zero skips/failures
+(external SSH tests excluded). Host arm64 and five cross-builds cover all six
+supported RIDs, with artifact architectures inspected. Non-host runtime validation
+remains a separate CI gate. Earlier CI runs for 19f0604 and 0a2f02a were cancelled
+by later pushes, not completed successfully; their partial results do not close
+that gate.
+
+Still required before claiming feature parity: host font coverage policy;
+an explicit width/layout policy where native currently
 stores metadata only; Ghostty-compatible sizing/alignment/padding; renderer cache ownership,
 row invalidation and drawing in both engines; end-to-end differential/pixel tests.
 The path helper is not yet wired into live terminal rendering. This remains an
@@ -209,9 +242,10 @@ regressions are also covered by focused tests.
 
 ## Validation scope
 
-The extension package was cross-built for macOS arm64/x64, Linux arm64/x64 and
-Windows GNU arm64/x64. On macOS arm64 the exported-symbol difference from the
-plain upstream library is exactly the one repository-owned animation export.
+The extension package was built for macOS arm64 and cross-built for macOS x64,
+Linux arm64/x64 and Windows GNU arm64/x64. The host library exports five
+repository-owned functions: animation tick, placement metadata and three glyph
+extraction functions. They are additional to the unchanged upstream C surface.
 Windows/MSVC and non-host runtime execution remain CI validation obligations;
 cross-compilation is not runtime testing. Shell/Zig formatting checks passed.
 Focused native integration and native processor tests cover the implemented

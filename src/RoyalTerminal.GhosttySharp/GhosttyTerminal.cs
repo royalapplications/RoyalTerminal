@@ -9,7 +9,7 @@ namespace RoyalTerminal.GhosttySharp;
 /// <summary>
 /// Managed lifetime wrapper for the official <c>GhosttyTerminal</c> libghostty-vt API.
 /// </summary>
-public sealed class GhosttyTerminal : IDisposable
+public sealed partial class GhosttyTerminal : IDisposable
 {
     private readonly object _lifetimeSync = new();
     private nint _handle;

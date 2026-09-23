@@ -40,8 +40,10 @@ bounded registration, FIFO eviction/replacement, clear, disable, alternate-scree
 sharing and reset behavior match focused native conversations. Synchronized-output
 copies share immutable entries but isolate glossary mutation until publication.
 All 103 focused glyph/APC/synchronized-output tests pass, with native availability
-confirmed. Native extraction, sizing/layout and both engines' row rendering remain
-required; protocol support is not yet end-to-end glyph presentation.
+confirmed. Native extraction and native-processor model publication now use three
+tested read-only exports with owned-copy lifetime, normalized metadata and dirty
+tracking; the 127-test focused glyph/APC suite passes. Sizing/layout and both engines'
+row rendering remain required; model publication is not yet end-to-end glyph presentation.
 
 ### DCS parser review (2026-09-23)
 
