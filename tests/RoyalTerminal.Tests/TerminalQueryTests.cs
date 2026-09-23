@@ -850,14 +850,16 @@ public class TerminalQueryTests
         int firstId = row[0].HyperlinkId;
         int secondId = row[1].HyperlinkId;
         int closedId = row[2].HyperlinkId;
-        int reusedId = row[3].HyperlinkId;
+        int nextImplicitId = row[3].HyperlinkId;
 
         Assert.True(firstId > 0);
         Assert.Equal(firstId, secondId);
         Assert.Equal(0, closedId);
-        Assert.Equal(firstId, reusedId);
+        Assert.NotEqual(firstId, nextImplicitId);
         Assert.True(screen.TryGetHyperlinkUrl(firstId, out string? resolvedUrl));
         Assert.Equal("https://example.com/a", resolvedUrl);
+        Assert.True(screen.TryGetHyperlinkUrl(nextImplicitId, out string? nextUrl));
+        Assert.Equal(resolvedUrl, nextUrl);
     }
 
     [Fact]

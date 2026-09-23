@@ -5476,14 +5476,22 @@ public class TerminalControlTests
         }
     }
 
-    [AvaloniaFact]
-    public async Task Control_AltDragSelection_SetsRectangularSelection()
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Control_AltDragSelection_SetsRectangularSelection(VtProcessorPreference preference)
     {
-        TerminalControl control = new()
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable())
         {
-            Width = 640,
-            Height = 400,
-        };
+            return;
+        }
+
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]),
+            preference);
+        control.Width = 640;
+        control.Height = 400;
         Window window = new()
         {
             Width = 640,
@@ -5510,7 +5518,9 @@ public class TerminalControlTests
             (int endColumn, int endRow) = renderer.SelectionEnd.GetValueOrDefault();
             Assert.Equal(1, startColumn);
             Assert.Equal(3, endColumn);
-            Assert.Equal(1, endRow - startRow);
+            // The pointer spans the centers of physical rows zero through two.
+            // Resize padding must not displace or clamp that three-row range.
+            Assert.Equal(2, endRow - startRow);
             Assert.True(startRow >= 0);
             Assert.True(renderer.SelectionIsRectangle);
         }

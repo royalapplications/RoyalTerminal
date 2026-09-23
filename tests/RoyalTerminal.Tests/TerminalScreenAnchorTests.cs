@@ -131,7 +131,7 @@ public sealed class TerminalScreenAnchorTests
         screen.Resize(4, 3);
         AssertPosition(screen, text, 1, 2);
         AssertPosition(screen, blank, 2, 3);
-        Assert.Equal(4, screen.TotalRows);
+        Assert.Equal(3, screen.TotalRows);
         screen.Resize(8, 3);
         AssertPosition(screen, text, 0, 6);
         AssertPosition(screen, blank, 1, 3);
@@ -143,6 +143,9 @@ public sealed class TerminalScreenAnchorTests
         TerminalScreen screen = new(6, 2, 1);
         using BasicVtProcessor processor = new(screen);
         processor.Process("AB界CD"u8);
+        // Actual content, rather than disposable viewport padding, must push
+        // the first reflowed row beyond the one-row history limit.
+        screen.GetViewportRow(1)[0].Codepoint = 'Z';
         TerminalScreenAnchor wide = screen.CreateAnchor(0, 2);
         TerminalScreenAnchor tail = screen.CreateAnchor(0, 5);
         screen.Resize(3, 2);
