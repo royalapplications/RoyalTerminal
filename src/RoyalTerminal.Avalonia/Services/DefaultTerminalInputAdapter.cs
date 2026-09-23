@@ -63,9 +63,9 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
                     sessionService,
                     vtProcessor,
                     action,
-                    e.KeySymbol))
+                    e.KeySymbol) is bool kittyHandled)
             {
-                return true;
+                return kittyHandled;
             }
 
             if (ShouldUseWin32InputMode(modeState) &&
@@ -89,9 +89,9 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
                     sessionService,
                     vtProcessor,
                     action,
-                    e.KeySymbol))
+                    e.KeySymbol) is bool backendHandled)
             {
-                return true;
+                return backendHandled;
             }
 
             if (TerminalKeySequenceEncoder.TryEncode(e.Key, e.KeyModifiers, modeState, kittyKeyboardFlags, out string sequence))
@@ -126,9 +126,9 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
                         sessionService,
                         vtProcessor: null,
                         TerminalInputAction.Release,
-                        text: null))
+                        text: null) is bool kittyHandled)
                 {
-                    return true;
+                    return kittyHandled;
                 }
 
                 if (ShouldUseWin32InputMode(modeState) &&
@@ -148,9 +148,9 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
                         sessionService,
                         vtProcessor: null,
                         TerminalInputAction.Release,
-                        text: null))
+                        text: null) is bool backendHandled)
                 {
-                    return true;
+                    return backendHandled;
                 }
             }
 
@@ -188,7 +188,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
         }
 
         TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor: null);
-        if (ShouldUseWin32InputMode(modeState))
+        if (ShouldUseWin32InputMode(modeState) && ResolveKittyKeyboardFlags(sessionService, vtProcessor: null) == 0)
         {
             return true;
         }
@@ -271,15 +271,17 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
         return sessionService.ModeSource as ITerminalKeySequenceEncoderSource;
     }
 
-    private static bool TrySendNativeKeySequence(
+    // null permits fallback; false is authoritative suppression; true sent bytes.
+    private static bool? TrySendNativeKeySequence(
         KeyEventArgs e,
         ITerminalSessionService sessionService,
         IVtProcessor? vtProcessor,
         TerminalInputAction action,
         string? text)
     {
-        if (ResolveKeySequenceEncoderSource(sessionService, vtProcessor) is not ITerminalKeySequenceEncoderSource nativeEncoder ||
-            !nativeEncoder.TryEncodeKey(
+        if (ResolveKeySequenceEncoderSource(sessionService, vtProcessor) is not ITerminalKeySequenceEncoderSource nativeEncoder)
+            return null;
+        if (!nativeEncoder.TryEncodeKey(
                 new TerminalKeyEncodingRequest(
                     e.Key.ToString(),
                     action,
@@ -287,10 +289,9 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
                     ConvertTerminalModifiers(e.KeyModifiers)),
                 out byte[] nativeSequence))
         {
-            return false;
+            return (nativeEncoder as ITerminalKeyEncodingPolicy)?.IsKeyEncodingAuthoritative == true ? false : null;
         }
 
-        _ = action;
         sessionService.SendInput(nativeSequence);
         return true;
     }

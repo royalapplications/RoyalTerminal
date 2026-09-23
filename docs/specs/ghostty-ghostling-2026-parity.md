@@ -22,8 +22,18 @@ decision follows `input/kitty.zig`, `function_keys.zig` and `key_encode.zig`;
 Windows Terminal's virtual-key translation and xterm.js's browser keyCode mapping
 are host adapters rather than interchangeable string-ID registries. Added native
 differential matrices cover flags, modes, modifiers, actions and text/composition.
-Validation for this batch is pending after commit/push; no performance gain is
-claimed.
+All **165 focused allocation/key cases pass**, including 45 new key-registry
+cases. No performance gain is claimed.
+
+Both built-in processors now opt into an authoritative key-encoding policy. A
+deliberate empty result must not fall through to legacy or win32-input encoding;
+the session mode-source adapter preserves that policy. Third-party encoders
+without the capability retain their existing fallback contract. Committed text
+still reaches Kitty mode when win32-input is also set. This follows Ghostty's
+empty-output contract and Windows Terminal's Kitty-before-win32 precedence;
+xterm.js's unhandled browser fallback is retained only for non-authoritative
+sources. Four new real-engine adapter cases cover direct/proxied suppression,
+IME Back, releases and separate committed text; validation follows commit/push.
 
 Windows ARM64 CI runs 35901210398 and 35902114973 fail before compilation with a
 missing cached Zig build.exe. CI and release Windows jobs now disable restored

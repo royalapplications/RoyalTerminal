@@ -27,6 +27,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalMetadata,
     ITerminalFocusEventModeSource,
     ITerminalKeySequenceEncoderSource,
+    ITerminalKeyEncodingPolicy,
     ITerminalPasteSequenceEncoderSource,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseModeStateSource,
@@ -2439,6 +2440,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             ModeChanged?.Invoke(this, current);
         }
     }
+
+    /// <inheritdoc />
+    public bool IsKeyEncodingAuthoritative => true;
 
     /// <inheritdoc />
     public bool TryEncodeKey(in TerminalKeyEncodingRequest request, out byte[] sequence)

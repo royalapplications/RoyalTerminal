@@ -13,6 +13,50 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalInputAdapterTests
 {
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task AuthoritativeKeySuppressionCannotFallThroughToLegacy(bool native, bool useModeSource)
+    {
+        if (native && !GhosttyVtProcessor.IsAvailable()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3)) :
+            new BasicVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3));
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService session = new();
+        FakeTransport transport = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+        await session.StartSessionAsync(new StaticTransportFactory(transport), new FakeTransportOptions(TerminalTransportIds.Pipe),
+            processor, onData, onExit, _ => { }, () => { }, _ => { });
+        try
+        {
+            Assert.True(((ITerminalKeyEncodingPolicy)session.ModeSource!).IsKeyEncodingAuthoritative);
+            // Ghostty deliberately has no physical Ctrl+I legacy C0 fallback.
+            // Without text the backend suppresses it; the host must not inject Tab.
+            KeyEventArgs args = new() { Key = Key.I, KeyModifiers = KeyModifiers.Control };
+            Assert.False(adapter.HandleKeyDown(args, session, useModeSource ? null : processor));
+            Assert.Null(transport.LastInput);
+            Assert.False(adapter.HandleKeyUp(args, session));
+            Assert.Null(transport.LastInput);
+
+            // IME Back is deliberately suppressed, not re-encoded as DEL.
+            processor.Process("\u001b[=3u\u001b[?9001h"u8);
+            Assert.True(session.ModeSource!.ModeState.Win32InputMode);
+            Assert.False(adapter.HandleKeyDown(new() { Key = Key.Back, KeySymbol = "preedit" }, session,
+                useModeSource ? null : processor));
+            Assert.Null(transport.LastInput);
+            Assert.False(adapter.HandleKeyUp(new() { Key = Key.Enter }, session));
+            Assert.Null(transport.LastInput);
+
+            // Suppression must not disable the separate committed-text path.
+            Assert.True(adapter.HandleTextInput(new() { Text = "committed" }, session));
+            Assert.Equal("committed", Encoding.UTF8.GetString(transport.LastInput!));
+        }
+        finally { await session.StopSessionAsync(processor, onData, onExit); }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task KittyRepeatsAndReleasesReachBothProcessorsAndResetStartsNewPress(bool native)

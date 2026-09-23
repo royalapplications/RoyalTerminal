@@ -6,6 +6,9 @@ namespace RoyalTerminal.Terminal;
 public sealed partial class BasicVtProcessor
 {
     /// <inheritdoc />
+    public bool IsKeyEncodingAuthoritative => true;
+
+    /// <inheritdoc />
     public bool ModifyOtherKeys2 { get; private set; }
 
     /// <inheritdoc />

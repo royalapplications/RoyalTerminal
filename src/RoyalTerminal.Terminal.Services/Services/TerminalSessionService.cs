@@ -425,6 +425,7 @@ public sealed class TerminalSessionService : ITerminalSessionService, ITerminalO
         IKittyKeyboardStateSource,
         ITerminalModifyOtherKeysStateSource,
         ITerminalKeySequenceEncoderSource,
+        ITerminalKeyEncodingPolicy,
         ITerminalMouseReportingStateSource,
         IDisposable
     {
@@ -454,6 +455,9 @@ public sealed class TerminalSessionService : ITerminalSessionService, ITerminalO
             add => _modeChanged += value;
             remove => _modeChanged -= value;
         }
+
+        public bool IsKeyEncodingAuthoritative =>
+            (_vtProcessor as ITerminalKeyEncodingPolicy)?.IsKeyEncodingAuthoritative == true;
 
         public bool TryEncodeKey(in TerminalKeyEncodingRequest request, out byte[] sequence)
         {

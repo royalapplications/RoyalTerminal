@@ -57,9 +57,21 @@ public interface ITerminalKeySequenceEncoderSource
 {
     /// <summary>
     /// Tries to encode the supplied key event into terminal input bytes.
-    /// False allows the host's legacy fallback encoder to handle the key.
+    /// False allows the host's legacy fallback encoder to handle the key unless
+    /// the source opts into <see cref="ITerminalKeyEncodingPolicy"/>.
     /// </summary>
     bool TryEncodeKey(in TerminalKeyEncodingRequest request, out byte[] sequence);
+}
+
+/// <summary>Optional policy for a backend that completely owns key encoding.</summary>
+public interface ITerminalKeyEncodingPolicy
+{
+    /// <summary>
+    /// When true, a false encoding result means suppression, not permission to
+    /// retry through legacy or win32-input encoders. Text-input deferral remains
+    /// the host's responsibility. Sources without this policy retain fallback.
+    /// </summary>
+    bool IsKeyEncodingAuthoritative { get; }
 }
 
 /// <summary>
