@@ -12,6 +12,7 @@ public sealed partial class TerminalScreen
     internal TerminalScreen CreateStateCopy()
     {
         TerminalScreen copy = new(CopyRows(_rows));
+        copy._glyphGlossary = _glyphGlossary is { Count: > 0 } ? _glyphGlossary.Copy() : null;
         copy._primaryRows = CopyOptionalRows(_primaryRows);
         copy._alternateRows = CopyOptionalRows(_alternateRows);
         copy._rasterImagesById = new(_rasterImagesById);
@@ -52,6 +53,7 @@ public sealed partial class TerminalScreen
     internal void AdoptStateFrom(TerminalScreen source)
     {
         if (ReferenceEquals(this, source)) return;
+        _glyphGlossary = source._glyphGlossary;
         _rows = source._rows;
         _primaryRows = source._primaryRows;
         _alternateRows = source._alternateRows;

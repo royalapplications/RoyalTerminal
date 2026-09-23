@@ -35,8 +35,13 @@ has been inspected.
 The [renderer audit](ghostty-renderer-audit-2026.md) now records implemented bounded
 managed glyf decoding and direct Skia path construction. Native registration
 acceptance/error differentials and real pixel/zero-managed-allocation tests pass.
-The 19-test foundation is not live protocol support: managed glossary/APC handling,
-native extraction, sizing/layout and both engines' row rendering remain required.
+Managed APC handling and a session glossary are now connected: support/query,
+bounded registration, FIFO eviction/replacement, clear, disable, alternate-screen
+sharing and reset behavior match focused native conversations. Synchronized-output
+copies share immutable entries but isolate glossary mutation until publication.
+All 103 focused glyph/APC/synchronized-output tests pass, with native availability
+confirmed. Native extraction, sizing/layout and both engines' row rendering remain
+required; protocol support is not yet end-to-end glyph presentation.
 
 ### DCS parser review (2026-09-23)
 

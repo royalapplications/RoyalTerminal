@@ -125,6 +125,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private readonly List<byte> _oscBuffer = [];
     private readonly List<byte> _dcsBuffer = [];
     private readonly List<byte> _apcBuffer = [];
+    private bool _glyphProtocolEnabled;
+    private bool _apcGlyphRecognized;
+    private bool _apcGlyphEnabled;
     private readonly SixelDecoder _sixelDecoder;
     private readonly BasicVtProcessorOptions _options;
     private readonly TerminalShellIntegrationParser _shellIntegrationParser = new();
@@ -375,6 +378,24 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
     }
 
+    /// <summary>
+    /// Enables future glyph APC commands. Disabling clears session registrations;
+    /// an already-identified command retains its original enablement, as in libvt.
+    /// </summary>
+    public bool GlyphProtocolEnabled
+    {
+        get => _glyphProtocolEnabled;
+        set
+        {
+            if (_glyphProtocolEnabled == value) return;
+            _glyphProtocolEnabled = value;
+            if (!value)
+            {
+                _screen.ClearRegisteredGlyphs();
+            }
+        }
+    }
+
     /// <inheritdoc />
     public bool ScrollOnEraseInDisplay { get; set; }
 
@@ -403,6 +424,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _kittyClipboardProtocol = new KittyClipboardProtocol(_options.ClipboardWriteLimitBytes);
         _sixelDecoder = new SixelDecoder(_options.SixelDecoderOptions);
         _sixelGraphicsEnabled = _options.SixelGraphicsEnabled;
+        _glyphProtocolEnabled = _options.GlyphProtocolEnabled;
         ScrollOnEraseInDisplay = _options.ScrollOnEraseInDisplay;
         _theme = screen.Theme;
         _colors = new ManagedTerminalColors(_theme);
@@ -1763,6 +1785,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _state = ParserState.ApcString;
         _apcBuffer.Clear();
         _apcTruncated = false;
+        _apcGlyphRecognized = false;
+        _apcGlyphEnabled = false;
     }
 
     private void ProcessC1(byte value)
@@ -3356,8 +3380,26 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void AppendApcPayload(ReadOnlySpan<byte> payload)
     {
         if (payload.IsEmpty) return;
+        ReadOnlySpan<byte> glyphIdentifier = "25a1;"u8;
+        // Identify only the small prefix byte-by-byte, then retain bulk payload
+        // scanning. Unknown '2...' commands keep the existing 4 KiB capture cap.
+        while (_apcBuffer.Count < glyphIdentifier.Length && !payload.IsEmpty &&
+            CollectionsMarshal.AsSpan(_apcBuffer).SequenceEqual(glyphIdentifier[.._apcBuffer.Count]) &&
+            payload[0] == glyphIdentifier[_apcBuffer.Count])
+        {
+            _apcBuffer.Add(payload[0]);
+            payload = payload[1..];
+            if (_apcBuffer.Count == glyphIdentifier.Length)
+            {
+                _apcGlyphRecognized = true;
+                _apcGlyphEnabled = _glyphProtocolEnabled;
+            }
+        }
+        if (payload.IsEmpty) return;
         byte first = _apcBuffer.Count > 0 ? _apcBuffer[0] : payload[0];
-        int limit = first == (byte)'G'
+        int limit = _apcGlyphRecognized
+            ? (_apcGlyphEnabled ? 1024 * 1024 + 5 : 5)
+            : first == (byte)'G'
             ? _options.KittyGraphicsMaxApcBytes
             : MaxUnknownSequenceBytes;
         int count = Math.Min(payload.Length, Math.Max(0, limit - _apcBuffer.Count));
@@ -3375,6 +3417,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         try
         {
+            if (_apcGlyphRecognized)
+            {
+                if (_apcGlyphEnabled && !_apcTruncated &&
+                    ManagedGlyphProtocol.Execute(CollectionsMarshal.AsSpan(_apcBuffer)[5..], _screen.GlyphGlossary, ResponseCallback))
+                    _screen.InvalidateAll();
+                return;
+            }
             if (_apcBuffer.Count > 0 && _apcBuffer[0] == (byte)'G')
             {
                 if (!_apcTruncated)
@@ -5597,6 +5646,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _apcBuffer.Clear();
         _apcTruncated = false;
         _kittyClipboardProtocol.Reset();
+        _screen.ClearRegisteredGlyphs();
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
         ResetHorizontalMargins();

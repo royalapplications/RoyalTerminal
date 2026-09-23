@@ -17,6 +17,9 @@ public sealed record BasicVtProcessorOptions
     /// <summary>Gets whether managed sixel image decoding is enabled.</summary>
     public bool SixelGraphicsEnabled { get; init; }
 
+    /// <summary>Enables Ghostty-compatible session glyph registration and queries.</summary>
+    public bool GlyphProtocolEnabled { get; init; } = true;
+
     /// <summary>
     /// Gets whether ED 2 (<c>CSI 2 J</c>) scrolls the active viewport into
     /// history before clearing it.
