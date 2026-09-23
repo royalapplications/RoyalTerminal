@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Text;
+using System.Runtime.InteropServices;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
 using RoyalTerminal.IntegrationTests.TestInfrastructure;
@@ -99,6 +100,59 @@ public class GhosttyLatestApiTests
         using GhosttySnapshotDecoder decoder = new(new FailingReadStream());
         IOException readFailure = Assert.Throws<IOException>(() => decoder.Decode());
         Assert.Equal("managed read failure", readFailure.Message);
+    }
+
+    [GhosttyNativeFact]
+    public void MimePasteBorrowsPayloadInsteadOfCopyingEveryRepresentation()
+    {
+        using GhosttyTerminal terminal = new(10, 2);
+        nuint bytesWritten = 0;
+        GhosttyVtNative.GhosttyTerminalWritePtyCallback callback = (_, _, _, length) => bytesWritten += length;
+        terminal.SetWritePtyCallback(Marshal.GetFunctionPointerForDelegate(callback));
+        Dictionary<string, ReadOnlyMemory<byte>> representations = new()
+        {
+            ["text/plain"] = "small text"u8.ToArray(),
+            ["application/octet-stream"] = new byte[1024 * 1024],
+        };
+
+        Assert.True(GhosttyPaste.Paste(terminal, representations));
+        bytesWritten = 0;
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.True(GhosttyPaste.Paste(terminal, representations));
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        Assert.Equal((nuint)10, bytesWritten);
+        Assert.True(allocated < 64 * 1024, $"Paste allocated {allocated} bytes for a 10-byte selected payload.");
+        GC.KeepAlive(callback);
+    }
+
+    [GhosttyNativeFact]
+    public unsafe void ManagedSecureRandomHookSupportsAuthenticatedPasteEvents()
+    {
+        GhosttySys.UseManagedSecureRandom();
+        try
+        {
+            using GhosttyTerminal terminal = new(10, 2);
+            StringBuilder response = new();
+            GhosttyVtNative.GhosttyTerminalWritePtyCallback write = (_, _, data, length) =>
+                response.Append(Encoding.UTF8.GetString(new ReadOnlySpan<byte>((void*)data, checked((int)length))));
+            GhosttyVtNative.GhosttyTerminalClipboardReadCallback read = (_, _, _) => { };
+            terminal.SetWritePtyCallback(Marshal.GetFunctionPointerForDelegate(write));
+            terminal.SetClipboardReadCallback(Marshal.GetFunctionPointerForDelegate(read));
+            terminal.SetMode(GhosttyVtNative.ModePasteEvents, true);
+
+            Assert.True(GhosttyPaste.PasteText(terminal, "private text"));
+
+            Assert.Contains("pw=", response.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("private text", response.ToString(), StringComparison.Ordinal);
+            GC.KeepAlive(write);
+            GC.KeepAlive(read);
+        }
+        finally
+        {
+            GhosttySys.UsePlatformSecureRandom();
+        }
     }
 
     [GhosttyNativeFact]

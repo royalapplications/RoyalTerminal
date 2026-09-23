@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Runtime.ExceptionServices;
+using RoyalTerminal.Terminal;
 
 namespace RoyalTerminal.Avalonia.Services;
 
@@ -12,7 +13,6 @@ namespace RoyalTerminal.Avalonia.Services;
 internal sealed class TerminalOutputWorker : IDisposable
 {
     private readonly object _sync = new();
-    private readonly AutoResetEvent _signal = new(initialState: false);
     private readonly Action _drain;
     private readonly Thread _thread;
     private bool _scheduled;
@@ -28,7 +28,6 @@ internal sealed class TerminalOutputWorker : IDisposable
         {
             IsBackground = true,
             Name = "RoyalTerminal.Output",
-            Priority = ThreadPriority.BelowNormal,
         };
         _thread.Start();
     }
@@ -45,12 +44,17 @@ internal sealed class TerminalOutputWorker : IDisposable
             }
 
             _scheduled = true;
-            _signal.Set();
+            Monitor.PulseAll(_sync);
         }
     }
 
     public void Flush()
     {
+        if (ReferenceEquals(Thread.CurrentThread, _thread))
+        {
+            throw new InvalidOperationException("The output thread cannot wait for its own drain to finish.");
+        }
+
         lock (_sync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -58,7 +62,7 @@ internal sealed class TerminalOutputWorker : IDisposable
             if (!_stopping && !_scheduled)
             {
                 _scheduled = true;
-                _signal.Set();
+                Monitor.PulseAll(_sync);
             }
 
             while (_scheduled || _executing)
@@ -73,46 +77,42 @@ internal sealed class TerminalOutputWorker : IDisposable
     {
         lock (_sync)
         {
-            if (_disposed)
+            if (!_disposed)
             {
-                return;
+                _disposed = true;
+                _stopping = true;
+                _scheduled = false;
+                Monitor.PulseAll(_sync);
             }
-
-            _stopping = true;
-            _signal.Set();
         }
 
         if (!ReferenceEquals(Thread.CurrentThread, _thread))
         {
             _thread.Join();
         }
-
-        lock (_sync)
-        {
-            _disposed = true;
-            Monitor.PulseAll(_sync);
-        }
-
-        _signal.Dispose();
     }
 
     private void Run()
     {
+        if (OperatingSystem.IsMacOS())
+        {
+            _ = UnixThreadScheduling.TrySetCurrentThreadUserInitiated();
+        }
+
         while (true)
         {
-            _signal.WaitOne();
             lock (_sync)
             {
+                while (!_scheduled && !_stopping)
+                {
+                    Monitor.Wait(_sync);
+                }
+
                 if (_stopping)
                 {
                     _scheduled = false;
                     Monitor.PulseAll(_sync);
                     return;
-                }
-
-                if (!_scheduled)
-                {
-                    continue;
                 }
 
                 _scheduled = false;

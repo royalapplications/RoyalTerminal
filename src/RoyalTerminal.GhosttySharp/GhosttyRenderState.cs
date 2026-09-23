@@ -328,6 +328,28 @@ public sealed class GhosttyRenderState : IDisposable
         return style;
     }
 
+    /// <summary>
+    /// Gets the current cell's style and grapheme length with one native call,
+    /// sharing iterator validation across both required metadata values.
+    /// </summary>
+    public unsafe void GetCurrentCellMetadata(out GhosttyVtNative.GhosttyStyle style, out uint graphemeLength)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyStyle nativeStyle = GhosttyVtNative.GhosttyStyle.CreateSized();
+        uint nativeLength = 0;
+        GhosttyVtNative.GhosttyRenderStateRowCellsData* keys = stackalloc GhosttyVtNative.GhosttyRenderStateRowCellsData[2]
+        {
+            GhosttyVtNative.GhosttyRenderStateRowCellsData.Style,
+            GhosttyVtNative.GhosttyRenderStateRowCellsData.GraphemesLength,
+        };
+        void** values = stackalloc void*[2] { &nativeStyle, &nativeLength };
+        ThrowIfFailed(
+            GhosttyVtNative.RenderStateRowCellsGetMulti(_rowCells, 2, keys, values, null),
+            "ghostty_render_state_row_cells_get_multi(metadata)");
+        style = nativeStyle;
+        graphemeLength = nativeLength;
+    }
+
     /// <summary>Gets the number of codepoints in the current cell grapheme.</summary>
     public uint GetCurrentCellGraphemeLength()
         => GetCellValue<uint>(GhosttyVtNative.GhosttyRenderStateRowCellsData.GraphemesLength);
@@ -452,7 +474,10 @@ public sealed class GhosttyRenderState : IDisposable
             return false;
         }
 
-        ThrowIfFailed(result, $"ghostty_render_state_row_cells_get({data})");
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_render_state_row_cells_get({data})");
+        }
         color = value;
         return true;
     }
@@ -461,7 +486,11 @@ public sealed class GhosttyRenderState : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         T value = default;
-        ThrowIfFailed(GhosttyVtNative.RenderStateRowGet(_rowIterator, data, &value), $"ghostty_render_state_row_get({data})");
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.RenderStateRowGet(_rowIterator, data, &value);
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_render_state_row_get({data})");
+        }
         return value;
     }
 
@@ -469,7 +498,11 @@ public sealed class GhosttyRenderState : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         bool value = false;
-        ThrowIfFailed(GhosttyVtNative.RowGet(row, data, &value), $"ghostty_row_get({data})");
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.RowGet(row, data, &value);
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_row_get({data})");
+        }
         return value;
     }
 
@@ -477,7 +510,11 @@ public sealed class GhosttyRenderState : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         T value = default;
-        ThrowIfFailed(GhosttyVtNative.RenderStateRowCellsGet(_rowCells, data, &value), $"ghostty_render_state_row_cells_get({data})");
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.RenderStateRowCellsGet(_rowCells, data, &value);
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_render_state_row_cells_get({data})");
+        }
         return value;
     }
 
@@ -487,7 +524,10 @@ public sealed class GhosttyRenderState : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         T value = default;
         GhosttyVtNative.GhosttyResult result = GhosttyVtNative.RenderStateGet(_handle, data, &value);
-        ThrowIfFailed(result, $"ghostty_render_state_get({data})");
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_render_state_get({data})");
+        }
         return value;
     }
 

@@ -1,0 +1,10 @@
+.{
+    .name = .royalterminal_ghostty_vt,
+    .fingerprint = 0x5ead9ba77d303301,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .paths = .{""},
+    .dependencies = .{
+        .ghostty = .{ .path = "../../external/ghostty" },
+    },
+}

@@ -160,12 +160,12 @@ jobs:
           cache-key: ${{ matrix.arch }}
 
       - name: Build libghostty-vt
-        working-directory: external/ghostty
+        working-directory: native/ghostty-vt-extensions
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false -Demit-macos-app=false
+            zig build -Doptimize=ReleaseFast
           else
-            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false -Demit-macos-app=false -Dtarget=x86_64-macos
+            zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos
           fi
 
       - name: Build ghostty-renderer-capi
@@ -180,7 +180,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p artifacts/osx-${{ matrix.arch }}/native
-          find external/ghostty/zig-out -name "libghostty-vt*.dylib" -exec cp -L {} artifacts/osx-${{ matrix.arch }}/native/ \;
+          find native/ghostty-vt-extensions/zig-out -name "libghostty-vt*.dylib" -exec cp -L {} artifacts/osx-${{ matrix.arch }}/native/ \;
           if [ -f native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib ]; then
             cp -L native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib artifacts/osx-${{ matrix.arch }}/native/
           fi
@@ -255,7 +255,7 @@ jobs:
           cache-key: ${{ matrix.arch }}
 
       - name: Build libghostty-vt
-        working-directory: external/ghostty
+        working-directory: native/ghostty-vt-extensions
         run: |
           # Keep Linux native packages on a portable CPU baseline. A runner-native
           # Ghostty build can SIGILL during terminal/PageList startup on another
@@ -264,8 +264,6 @@ jobs:
           build_args=(
             build
             -Doptimize=ReleaseFast
-            -Dapp-runtime=none
-            -Demit-lib-vt=true
             -Dtarget=${{ matrix.zig-target }}
             -Dsimd=false
           )
@@ -280,7 +278,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p artifacts/linux-${{ matrix.arch }}/native
-          find external/ghostty/zig-out -name "libghostty-vt.so*" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \;
+          find native/ghostty-vt-extensions/zig-out -name "libghostty-vt.so*" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \;
           find native/ghostty-renderer-capi/zig-out -name "libghostty-renderer-capi.so*" -exec cp -L {} artifacts/linux-${{ matrix.arch }}/native/ \; || true
           for base in libghostty-vt libghostty-renderer-capi; do
             if [ ! -f "artifacts/linux-${{ matrix.arch }}/native/${base}.so" ]; then
@@ -333,7 +331,7 @@ jobs:
           cache-key: ${{ matrix.arch }}
 
       - name: Build libghostty-vt
-        working-directory: external/ghostty
+        working-directory: native/ghostty-vt-extensions
         shell: bash
         run: |
           target=""
@@ -344,7 +342,7 @@ jobs:
             # compile when Ghostty's vendored SIMD archive is enabled.
             simd="-Dsimd=false"
           fi
-          zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true ${target} ${simd}
+          zig build -Doptimize=ReleaseFast ${target} ${simd}
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
@@ -360,7 +358,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts/win-${{ matrix.arch }}/native
-          find external/ghostty/zig-out \( -name "ghostty-vt.dll" -o -name "libghostty-vt.dll" \) -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \;
+          find native/ghostty-vt-extensions/zig-out \( -name "ghostty-vt.dll" -o -name "libghostty-vt.dll" \) -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \;
           find native/ghostty-renderer-capi/zig-out \( -name "ghostty-renderer-capi.dll" -o -name "libghostty-renderer-capi.dll" \) -exec cp -L {} artifacts/win-${{ matrix.arch }}/native/ \; || true
           for base in ghostty-vt ghostty-renderer-capi; do
             if [ ! -f "artifacts/win-${{ matrix.arch }}/native/${base}.dll" ] && [ -f "artifacts/win-${{ matrix.arch }}/native/lib${base}.dll" ]; then

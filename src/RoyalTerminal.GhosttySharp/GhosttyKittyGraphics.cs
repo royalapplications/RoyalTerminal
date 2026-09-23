@@ -1,7 +1,6 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
-using System.Runtime.InteropServices;
 using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.GhosttySharp;
@@ -12,23 +11,32 @@ namespace RoyalTerminal.GhosttySharp;
 public sealed class GhosttyKittyGraphics
 {
     private readonly GhosttyTerminal _terminal;
+    private readonly nint _handle;
 
     internal GhosttyKittyGraphics(GhosttyTerminal terminal, nint handle)
     {
         _terminal = terminal;
-        Handle = handle;
+        _handle = handle;
     }
 
-    internal nint Handle { get; }
+    internal nint Handle
+    {
+        get
+        {
+            _ = _terminal.Handle;
+            return _handle;
+        }
+    }
 
     /// <summary>Gets whether the borrowed handle is valid.</summary>
-    public bool IsValid => Handle != nint.Zero;
+    public bool IsValid => _handle != nint.Zero && _terminal.IsValid;
 
     /// <summary>
     /// Gets the process-wide generation stamp for images and placements in this storage.
     /// </summary>
     public unsafe ulong GetGeneration()
     {
+        _ = _terminal.Handle;
         ulong generation = 0;
         GhosttyVtNative.GhosttyResult result = GhosttyVtNative.KittyGraphicsGet(
             Handle,
@@ -40,6 +48,29 @@ public sealed class GhosttyKittyGraphics
         }
 
         return generation;
+    }
+
+    /// <summary>
+    /// Advances running animations and returns the delay until the next required
+    /// tick, or null when none remain. Use the same monotonic millisecond clock
+    /// for every tick and serialize with all access to the owning terminal.
+    /// </summary>
+    public ulong? AdvanceAnimations(ulong nowMilliseconds)
+    {
+        _ = _terminal.Handle;
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.KittyGraphicsAnimationTick(
+            Handle, nowMilliseconds, out ulong delay);
+        if (result == GhosttyVtNative.GhosttyResult.NoValue)
+        {
+            return null;
+        }
+
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            throw new InvalidOperationException($"ghostty_royal_kitty_graphics_animation_tick failed with {result}.");
+        }
+
+        return delay;
     }
 
     /// <summary>Creates an owned placement iterator.</summary>
@@ -58,6 +89,7 @@ public sealed class GhosttyKittyGraphics
     /// <summary>Looks up an image by image id.</summary>
     public bool TryGetImage(uint imageId, out GhosttyKittyGraphicsImage image)
     {
+        _ = _terminal.Handle;
         nint handle = GhosttyVtNative.KittyGraphicsImage(Handle, imageId);
         if (handle == nint.Zero)
         {
@@ -84,10 +116,17 @@ public readonly struct GhosttyKittyGraphicsImage
         _handle = handle;
     }
 
-    internal nint Handle => _handle;
+    internal nint Handle
+    {
+        get
+        {
+            _ = _terminal.Handle;
+            return _handle;
+        }
+    }
 
     /// <summary>Gets whether the borrowed handle is valid.</summary>
-    public bool IsValid => _handle != nint.Zero;
+    public bool IsValid => _handle != nint.Zero && _terminal.IsValid;
 
     /// <summary>Gets the image id.</summary>
     public uint GetId() => GetValue<uint>(GhosttyVtNative.GhosttyKittyGraphicsImageData.Id);
@@ -113,27 +152,53 @@ public readonly struct GhosttyKittyGraphicsImage
     public ulong GetGeneration()
         => GetValue<ulong>(GhosttyVtNative.GhosttyKittyGraphicsImageData.Generation);
 
-    /// <summary>Copies the decoded image pixel payload.</summary>
-    public unsafe byte[] CopyData()
+    /// <summary>Copies decoded pixels, or returns an empty array while the payload is pending.</summary>
+    public byte[] CopyData() => GetData().ToArray();
+
+    /// <summary>
+    /// Copies decoded pixels into RGBA8888 in one allocation, fusing the native
+    /// copy with RGB or grayscale expansion. Returns an empty array while the
+    /// payload is pending or when its size does not match its pixel format.
+    /// </summary>
+    public byte[] CopyRgbaData()
     {
-        nint dataPtr = GetValue<nint>(GhosttyVtNative.GhosttyKittyGraphicsImageData.DataPtr);
+        ReadOnlySpan<byte> data = GetData();
+        return data.IsEmpty
+            ? []
+            : GhosttyImagePixelConverter.CopyRgba(
+                data, GetFormat(), checked((int)GetWidth()), checked((int)GetHeight()));
+    }
+
+    private unsafe ReadOnlySpan<byte> GetData()
+    {
+        _ = _terminal.Handle;
+        nint dataPtr = nint.Zero;
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.KittyGraphicsImageGet(
+            _handle, GhosttyVtNative.GhosttyKittyGraphicsImageData.DataPtr, &dataPtr);
+        if (result == GhosttyVtNative.GhosttyResult.NoValue)
+        {
+            return [];
+        }
+
+        ThrowIfFailed(result, "ghostty_kitty_graphics_image_get(data_ptr)");
         nuint dataLength = GetValue<nuint>(GhosttyVtNative.GhosttyKittyGraphicsImageData.DataLength);
         if (dataPtr == nint.Zero || dataLength == 0)
         {
             return [];
         }
 
-        byte[] data = new byte[checked((int)dataLength)];
-        Marshal.Copy(dataPtr, data, 0, data.Length);
-        return data;
+        return new ReadOnlySpan<byte>((void*)dataPtr, checked((int)dataLength));
     }
 
     private unsafe T GetValue<T>(GhosttyVtNative.GhosttyKittyGraphicsImageData data) where T : unmanaged
     {
+        _ = _terminal.Handle;
         T value = default;
-        ThrowIfFailed(
-            GhosttyVtNative.KittyGraphicsImageGet(_handle, data, &value),
-            $"ghostty_kitty_graphics_image_get({data})");
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.KittyGraphicsImageGet(_handle, data, &value);
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_kitty_graphics_image_get({data})");
+        }
         return value;
     }
 
@@ -414,10 +479,13 @@ public sealed class GhosttyKittyGraphicsPlacementIterator : IDisposable
 
     private unsafe T GetPlacementValue<T>(GhosttyVtNative.GhosttyKittyGraphicsPlacementData data) where T : unmanaged
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         T value = default;
-        ThrowIfFailed(
-            GhosttyVtNative.KittyGraphicsPlacementGet(_handle, data, &value),
-            $"ghostty_kitty_graphics_placement_get({data})");
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.KittyGraphicsPlacementGet(_handle, data, &value);
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_kitty_graphics_placement_get({data})");
+        }
         return value;
     }
 

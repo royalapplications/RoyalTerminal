@@ -3117,7 +3117,16 @@ internal sealed class MainWindowController
             new HandledInputSuppressingTerminalInputAdapter(new DefaultTerminalInputAdapter()),
             new DefaultTerminalSelectionService(),
             new DefaultTerminalScrollService(),
-            new DefaultVtProcessorFactory(nativeProviders),
+            new DefaultVtProcessorFactory(nativeProviders, new BasicVtProcessorOptions
+            {
+                KittyGraphicsPngDecoder = new SkiaKittyGraphicsPngDecoder(),
+                KittyGraphicsMediumReader = new LocalKittyGraphicsMediumReader(new KittyGraphicsMediumPolicy
+                {
+                    FileEnabled = true,
+                    TemporaryDirectory = System.IO.Path.GetTempPath(),
+                    SharedMemoryEnabled = true,
+                }),
+            }),
             ptyFactory,
             credentialProvider,
             hostKeyValidator,

@@ -10,9 +10,8 @@ namespace RoyalTerminal.Terminal;
 /// Stateful OSC 5522 codec. Its limits and transaction behavior mirror Ghostty's
 /// Kitty clipboard implementation while keeping application policy in callbacks.
 /// </summary>
-internal sealed class KittyClipboardProtocol
+internal sealed class KittyClipboardProtocol(int maxWriteBytes)
 {
-    private const int MaxWriteBytes = 16 * 1024 * 1024;
     private const int MaxReadMimeTypes = 4;
     private const int MaxWriteMimeTypes = 64;
     private const int MaxAliases = 64;
@@ -50,9 +49,9 @@ internal sealed class KittyClipboardProtocol
         int separator = value.IndexOf(';');
         string metadataText = separator < 0 ? value : value[..separator];
         string payload = separator < 0 ? string.Empty : value[(separator + 1)..];
-        if (!TryParseMetadata(metadataText, out Metadata metadata))
+        if (!TryParseMetadata(metadataText, out Metadata metadata, out bool invalidValue))
         {
-            if (TryGetOperation(metadataText, out Operation invalidOperation) &&
+            if (invalidValue && TryGetOperation(metadataText, out Operation invalidOperation) &&
                 invalidOperation is Operation.WriteData or Operation.WriteAlias &&
                 _write is not null)
             {
@@ -68,7 +67,7 @@ internal sealed class KittyClipboardProtocol
                 HandleRead(metadata, payload, bellTerminator, read, respond);
                 break;
             case Operation.Write:
-                _write = new WriteTransaction(metadata);
+                _write = new WriteTransaction(metadata, maxWriteBytes);
                 break;
             case Operation.WriteData:
                 HandleWriteData(metadata, payload, bellTerminator, write, legacyWrite, respond);
@@ -205,9 +204,20 @@ internal sealed class KittyClipboardProtocol
         if (list)
         {
             IReadOnlyList<string> available = reply.AvailableMimeTypes ?? [];
-            string listing = available.Count == 0
-                ? string.Empty
-                : string.Concat(string.Join(' ', available.Take(16)), "\n");
+            Span<byte> listing = stackalloc byte[ReadChunkBytes];
+            int listingLength = 0;
+            for (int index = 0; index < available.Count; index++)
+            {
+                string mime = available[index];
+                int separatorLength = index == 0 ? 0 : 1;
+                if (Encoding.UTF8.GetByteCount(mime) + separatorLength + 1 > listing.Length - listingLength)
+                {
+                    break;
+                }
+                if (separatorLength != 0) listing[listingLength++] = (byte)' ';
+                listingLength += Encoding.UTF8.GetBytes(mime, listing[listingLength..]);
+            }
+            if (available.Count > 0) listing[listingLength++] = (byte)'\n';
             AppendResponse(
                 builder,
                 "read",
@@ -215,14 +225,25 @@ internal sealed class KittyClipboardProtocol
                 metadata.Id,
                 ".",
                 null,
-                listing.Length == 0 ? null : Encoding.UTF8.GetBytes(listing),
+                listing[..listingLength],
                 false,
                 bellTerminator);
         }
 
-        foreach (TerminalClipboardContent content in reply.Contents)
+        // Responses follow requested MIME order and use the first host value
+        // for each type, as Ghostty's stream handler does.
+        foreach (string mime in mimes)
         {
-            if (!mimes.Contains(content.MimeType, StringComparer.Ordinal) || content.Data.Length == 0)
+            TerminalClipboardContent? content = null;
+            foreach (TerminalClipboardContent candidate in reply.Contents)
+            {
+                if (candidate.MimeType == mime)
+                {
+                    content = candidate;
+                    break;
+                }
+            }
+            if (content is null || content.Data.Length == 0)
             {
                 continue;
             }
@@ -268,7 +289,7 @@ internal sealed class KittyClipboardProtocol
 
         if (!_write.TryAppend(metadata.Mime, payload))
         {
-            FinishWrite(_write.TotalBytes > MaxWriteBytes ? "EFBIG" : "EINVAL", bellTerminator, respond);
+            FinishWrite(_write.LimitExceeded ? "EFBIG" : "EINVAL", bellTerminator, respond);
         }
     }
 
@@ -284,7 +305,7 @@ internal sealed class KittyClipboardProtocol
         }
 
         if (metadata.Mime.Length == 0 ||
-            !TryDecodeBase64Text(payload, MaxMimeBytes * MaxAliases, out string aliases))
+            !TryDecodeBase64Text(payload, int.MaxValue, out string aliases))
         {
             FinishWrite("EINVAL", bellTerminator, respond);
             return;
@@ -402,9 +423,10 @@ internal sealed class KittyClipboardProtocol
         builder.Append(bellTerminator ? '\u0007' : "\u001b\\");
     }
 
-    private static bool TryParseMetadata(string value, out Metadata metadata)
+    private static bool TryParseMetadata(string value, out Metadata metadata, out bool invalidValue)
     {
         metadata = default;
+        invalidValue = false;
         Dictionary<string, string> fields = new(StringComparer.Ordinal);
         foreach (string record in value.Split(':'))
         {
@@ -425,9 +447,17 @@ internal sealed class KittyClipboardProtocol
         string id = fields.TryGetValue("id", out string? idValue) ? SanitizeId(idValue) : string.Empty;
         if (!TryDecodeMetadata(fields, "mime", MaxMimeBytes, out string mime) ||
             !TryDecodeMetadata(fields, "name", MaxNameBytes, out string name) ||
-            !TryDecodeMetadata(fields, "pw", MaxPasswordBytes, out string password))
+            !TryDecodeMetadata(fields, "pw", int.MaxValue, out string password))
         {
+            invalidValue = true;
             return false;
+        }
+
+        // Ghostty treats an overlong but otherwise valid password as absent.
+        // Invalid base64/UTF-8 still invalidates the packet above.
+        if (Encoding.UTF8.GetByteCount(password) > MaxPasswordBytes)
+        {
+            password = string.Empty;
         }
 
         metadata = new Metadata(
@@ -666,7 +696,7 @@ internal sealed class KittyClipboardProtocol
         public bool OneTime { get; set; } = oneTime;
     }
 
-    private sealed class WriteTransaction(Metadata metadata)
+    private sealed class WriteTransaction(Metadata metadata, int maxSize)
     {
         private readonly List<Entry> _entries = [];
         private readonly List<(string Alias, string Target)> _aliases = [];
@@ -677,6 +707,7 @@ internal sealed class KittyClipboardProtocol
         public string Name { get; } = metadata.Name;
         public string Password { get; } = metadata.Password;
         public int TotalBytes { get; private set; }
+        public bool LimitExceeded { get; private set; }
 
         public bool TryAppend(string mime, string payload)
         {
@@ -703,9 +734,10 @@ internal sealed class KittyClipboardProtocol
             }
 
             int before = _current.DataLength;
-            bool success = _current.Append(payload);
+            bool success = _current.Append(payload, maxSize - TotalBytes, out bool limitExceeded);
+            LimitExceeded = limitExceeded;
             TotalBytes += _current.DataLength - before;
-            return success && TotalBytes <= MaxWriteBytes;
+            return success;
         }
 
         public void AddAliases(string target, string aliases)
@@ -765,59 +797,80 @@ internal sealed class KittyClipboardProtocol
         private sealed class Entry(string mime)
         {
             private readonly MemoryStream _data = new();
-            private readonly StringBuilder _pending = new(4);
+            private readonly char[] _pending = new char[4];
+            private int _pendingLength;
             private bool _ended;
 
             public string Mime { get; } = mime;
             public int DataLength => checked((int)_data.Length);
 
-            public bool Append(string payload)
+            public bool Append(string payload, int remainingBytes, out bool limitExceeded)
             {
-                if (_ended)
+                limitExceeded = false;
+                _ended = false;
+                foreach (char character in payload)
                 {
-                    _ended = false;
-                }
-
-                Span<byte> decoded = stackalloc byte[3];
-                for (int index = 0; index < payload.Length; index++)
-                {
-                    char character = payload[index];
-                    if (!IsBase64Character(character) || (_ended && character != '='))
+                    if (!IsBase64Character(character))
                     {
                         return false;
                     }
-                    _pending.Append(character);
-                    if (_pending.Length != 4)
+                }
+
+                // Decode complete groups in batches so the runtime can use its
+                // vectorized base64 implementation. Only split groups need the
+                // four-character carry buffer; no string is allocated per group.
+                Span<byte> decoded = stackalloc byte[3072];
+                ReadOnlySpan<char> input = payload;
+                while (!input.IsEmpty)
+                {
+                    ReadOnlySpan<char> chunk;
+                    if (_pendingLength > 0 || input.Length < 4)
                     {
-                        continue;
+                        int take = Math.Min(4 - _pendingLength, input.Length);
+                        input[..take].CopyTo(_pending.AsSpan(_pendingLength));
+                        _pendingLength += take;
+                        input = input[take..];
+                        if (_pendingLength < 4)
+                        {
+                            return true;
+                        }
+                        chunk = _pending;
+                        _pendingLength = 0;
+                    }
+                    else
+                    {
+                        int take = Math.Min(4096, input.Length & ~3);
+                        chunk = input[..take];
+                        input = input[take..];
                     }
 
-                    string quartet = _pending.ToString();
-                    _pending.Clear();
-                    if (!Convert.TryFromBase64Chars(quartet, decoded, out int written))
+                    if (!Convert.TryFromBase64Chars(chunk, decoded, out int written))
                     {
+                        return false;
+                    }
+                    _ended = chunk.Contains('=');
+                    if (_ended && !input.IsEmpty)
+                    {
+                        return false;
+                    }
+                    if (written > remainingBytes)
+                    {
+                        limitExceeded = true;
                         return false;
                     }
                     _data.Write(decoded[..written]);
-                    if (quartet.Contains('='))
-                    {
-                        _ended = true;
-                        if (index != payload.Length - 1)
-                        {
-                            return false;
-                        }
-                    }
+                    remainingBytes -= written;
                 }
 
                 return true;
             }
 
-            public bool Finish() => _pending.Length == 0;
+            public bool Finish() => _pendingLength == 0;
 
             public void Reset()
             {
                 _data.SetLength(0);
-                _pending.Clear();
+                _pendingLength = 0;
                 _ended = false;
             }
 

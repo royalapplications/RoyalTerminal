@@ -5,7 +5,6 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.ExceptionServices;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -645,6 +644,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private readonly StringBuilder _linkTokenScratch = new();
     private int[] _rowColumnMapScratch = Array.Empty<int>();
     private DispatcherTimer? _cursorBlinkTimer;
+    private DispatcherTimer? _timedRefreshTimer;
+    private long _timedRefreshDeadlineTimestamp;
     private bool _cursorBlinkVisiblePhase = true;
     private int _lastBlinkCursorColumn = -1;
     private int _lastBlinkCursorRow = -1;
@@ -671,7 +672,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private readonly object _pendingTransportOutputSync = new();
     private readonly object _pendingTransportOutputDrainExecutionSync = new();
     private readonly object _pendingShellIntegrationEventSync = new();
-    private readonly Queue<byte[]> _pendingTransportOutput = new();
+    private readonly Queue<TerminalOutputLease> _pendingTransportOutput = new();
     private readonly Queue<PendingTransportUiBatch> _pendingTransportUiBatches = new();
     private readonly Queue<TerminalShellIntegrationEvent> _pendingShellIntegrationEvents = new();
     private TerminalOutputWorker? _outputWorker;
@@ -1066,7 +1067,16 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             new DefaultTerminalInputAdapter(),
             new DefaultTerminalSelectionService(),
             new DefaultTerminalScrollService(),
-            new DefaultVtProcessorFactory(),
+            new DefaultVtProcessorFactory(new BasicVtProcessorOptions
+            {
+                KittyGraphicsPngDecoder = new SkiaKittyGraphicsPngDecoder(),
+                KittyGraphicsMediumReader = new LocalKittyGraphicsMediumReader(new KittyGraphicsMediumPolicy
+                {
+                    FileEnabled = true,
+                    TemporaryDirectory = System.IO.Path.GetTempPath(),
+                    SharedMemoryEnabled = true,
+                }),
+            }),
             new DefaultPtyFactory(),
             new NullSshCredentialProvider(),
             new KnownHostsSshHostKeyValidator(),
@@ -1585,6 +1595,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         IVtProcessor nextProcessor = CreateConfiguredVtProcessor();
         IVtProcessor previousProcessor = _vtProcessor;
+        _timedRefreshTimer?.Stop();
         DetachShellIntegrationEventSource(previousProcessor);
         _vtProcessor = nextProcessor;
         _vtProcessorHasProcessedOutput = false;
@@ -2116,6 +2127,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // Look for the presenter in the template, or create one
         _presenter = e.NameScope.Find<TerminalPresenter>("PART_Presenter");
         EnsurePresenter();
+        UpdateTimedRefreshTimer();
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -2128,6 +2140,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // TemplatedControl without a template never fires OnApplyTemplate.
         // Create the presenter here as a fallback so rendering always works.
         EnsurePresenter();
+        UpdateTimedRefreshTimer();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -2137,6 +2150,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         CancelPendingTransportResize();
         StopMouseSelectionDrag();
         EnsureCursorBlinkTimerRunning(false);
+        _timedRefreshTimer?.Stop();
         RestoreReservedAncestorKeyBindings();
         DetachTopLevelScaling();
     }
@@ -2477,6 +2491,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _mouseModeTracker.Reset();
         ResetPointerButtons();
         EnsureCursorBlinkTimerRunning(false);
+        _timedRefreshTimer?.Stop();
     }
 
     /// <summary>
@@ -2549,6 +2564,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void FinalizeOutputBatchOnUiThread()
     {
+        UpdateTimedRefreshTimer();
         if (_screen is null)
         {
             TerminalScrollService.HandleOutput(
@@ -2671,7 +2687,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return new TerminalOutputProcessResult(resetMouseSelection, eraseDisplayClearsLiveViewport);
     }
 
-    private TerminalOutputProcessResult ProcessOutputBatchCore(IReadOnlyList<byte[]> chunks)
+    private TerminalOutputProcessResult ProcessOutputBatchCore(IReadOnlyList<TerminalOutputLease> chunks)
     {
         if (_screen is null)
         {
@@ -2712,7 +2728,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             {
                 for (int i = 0; i < chunks.Count; i++)
                 {
-                    byte[] chunk = chunks[i];
+                    ReadOnlySpan<byte> chunk = chunks[i].Data.Span;
                     bool mouseModeChanged = _mouseModeTracker.Process(chunk);
                     if (mouseModeChanged && IsMouseReportingActiveForInput())
                     {
@@ -5580,9 +5596,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         SetPendingTransportOutputAcceptance(acceptOutput: false);
         try
         {
-            ResetPendingTransportOutputQueue();
             if (Dispatcher.UIThread.CheckAccess())
             {
+                FlushPendingTransportOutput();
+                DisposeOutputWorker();
+                ResetPendingTransportOutputQueue();
                 IVtProcessor processor = EnsureVtProcessorInitialized();
                 ApplyEraseDisplayOptionsToProcessor(processor, options.TransportId);
                 PrepareTerminalForSessionStart(preserveScrollback);
@@ -5591,6 +5609,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             {
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
+                    FlushPendingTransportOutput();
+                    DisposeOutputWorker();
+                    ResetPendingTransportOutputQueue();
                     IVtProcessor processor = EnsureVtProcessorInitialized();
                     ApplyEraseDisplayOptionsToProcessor(processor, options.TransportId);
                     PrepareTerminalForSessionStart(preserveScrollback);
@@ -5603,7 +5624,6 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             throw;
         }
 
-        DisposeOutputWorker();
         _outputWorker = new TerminalOutputWorker(DrainPendingTransportOutput);
         SetPendingTransportOutputAcceptance(acceptOutput: true);
         _mouseModeTracker.Reset();
@@ -5623,6 +5643,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             OnPtyProcessExited(sessionGeneration, exitCode);
         _activeTransportDataHandler = dataHandler;
         _activeTransportExitHandler = exitHandler;
+        if (TerminalSessionService is ITerminalOutputLeaseSource leaseSession)
+        {
+            leaseSession.OutputLeaseCallback = lease =>
+            {
+                if (sessionGeneration != Volatile.Read(ref _transportSessionGeneration))
+                {
+                    lease.Dispose();
+                    return;
+                }
+
+                EnqueueOutputForUiThread(lease, sessionGeneration);
+            };
+        }
         IVtProcessor vtProcessor = _vtProcessor
             ?? throw new InvalidOperationException("The VT processor was not initialized before starting the session.");
 
@@ -5827,9 +5860,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        if (_outputWorker is not null)
+        TerminalOutputWorker? worker = Volatile.Read(ref _outputWorker);
+        if (worker is not null)
         {
-            _outputWorker.Flush();
+            worker.Flush();
         }
         else
         {
@@ -5867,14 +5901,21 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             _activeTransportExitHandler = null;
         }
 
-        FlushPendingTransportOutput();
-        DisposeOutputWorker();
-        ResetPendingTransportOutputQueue();
-        _activeTransportId = null;
-        _mouseModeTracker.Reset();
-        ResetPointerButtons();
-        StopMouseSelectionDrag();
-        EnsureCursorBlinkTimerRunning(false);
+        try
+        {
+            FlushPendingTransportOutput();
+        }
+        finally
+        {
+            DisposeOutputWorker();
+            ResetPendingTransportOutputQueue();
+            _activeTransportId = null;
+            _mouseModeTracker.Reset();
+            ResetPointerButtons();
+            StopMouseSelectionDrag();
+            EnsureCursorBlinkTimerRunning(false);
+            _timedRefreshTimer?.Stop();
+        }
     }
 
     /// <summary>Requests the host/application to close the terminal surface.</summary>
@@ -6169,15 +6210,21 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             int chunkLength = Math.Min(MaxQueuedOutputChunkBytes, length - offset);
             byte[] copy = data.AsSpan(offset, chunkLength).ToArray();
-            EnqueueOutputForUiThread(copy);
+            EnqueueOutputForUiThread(new TerminalOutputLease(copy), sessionGeneration);
             offset += chunkLength;
         }
     }
 
     private void EnqueueOutputForUiThread(byte[] copy)
     {
-        if (copy.Length == 0)
+        EnqueueOutputForUiThread(new TerminalOutputLease(copy));
+    }
+
+    private void EnqueueOutputForUiThread(TerminalOutputLease copy, int? sessionGeneration = null)
+    {
+        if (copy.Data.IsEmpty)
         {
+            copy.Dispose();
             return;
         }
 
@@ -6187,18 +6234,21 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             while (canBlockForCapacity &&
                    _acceptPendingTransportOutput &&
+                   (!sessionGeneration.HasValue || sessionGeneration.Value == Volatile.Read(ref _transportSessionGeneration)) &&
                    IsPendingTransportBacklogAtCapacityLocked())
             {
                 Monitor.Wait(_pendingTransportOutputSync);
             }
 
-            if (!_acceptPendingTransportOutput)
+            if (!_acceptPendingTransportOutput ||
+                (sessionGeneration.HasValue && sessionGeneration.Value != Volatile.Read(ref _transportSessionGeneration)))
             {
+                copy.Dispose();
                 return;
             }
 
             _pendingTransportOutput.Enqueue(copy);
-            _pendingTransportOutputBytes += copy.Length;
+            _pendingTransportOutputBytes += copy.Data.Length;
             if (!_pendingTransportOutputDrainScheduled)
             {
                 _pendingTransportOutputDrainScheduled = true;
@@ -6208,7 +6258,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (scheduleDrain)
         {
-            SchedulePendingTransportOutputDrain();
+            try
+            {
+                SchedulePendingTransportOutputDrain();
+            }
+            catch
+            {
+                ResetPendingTransportOutputQueue();
+                throw;
+            }
         }
     }
 
@@ -6226,17 +6284,25 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 return;
             }
 
-            if (_outputWorker is not null)
+            try
             {
-                _outputWorker.Flush();
+                TerminalOutputWorker? worker = Volatile.Read(ref _outputWorker);
+                if (worker is not null)
+                {
+                    worker.Flush();
+                }
+                else
+                {
+                    DrainPendingTransportOutput(flushAll: true);
+                }
+
+                DrainPendingTransportOutputUiBatches(flushAll: true);
             }
-            else
+            finally
             {
-                DrainPendingTransportOutput(flushAll: true);
+                DisposeOutputWorker();
+                _activeTransportId = null;
             }
-            DrainPendingTransportOutputUiBatches(flushAll: true);
-            DisposeOutputWorker();
-            _activeTransportId = null;
             // Write exit message to screen
             string msg = $"\r\n[Process exited with code {exitCode}]\r\n";
             byte[] bytes = Encoding.UTF8.GetBytes(msg);
@@ -6257,9 +6323,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        if (_outputWorker is not null)
+        TerminalOutputWorker? worker = Volatile.Read(ref _outputWorker);
+        if (worker is not null)
         {
-            _outputWorker.Flush();
+            worker.Flush();
         }
         else
         {
@@ -6284,12 +6351,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         int processedChunks = 0;
         int processedBytes = 0;
         bool scheduleContinuation = false;
-        List<byte[]>? pendingBatch = flushAll ? null : [];
+        List<TerminalOutputLease>? pendingBatch = flushAll ? null : [];
         Stopwatch? dispatchStopwatch = flushAll ? null : Stopwatch.StartNew();
 
         while (true)
         {
-            byte[] nextChunk;
+            TerminalOutputLease nextChunk;
             lock (_pendingTransportOutputSync)
             {
                 if (_pendingTransportOutput.Count == 0)
@@ -6312,7 +6379,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 }
 
                 nextChunk = _pendingTransportOutput.Dequeue();
-                _pendingTransportOutputBytes = Math.Max(0, _pendingTransportOutputBytes - nextChunk.Length);
+                _pendingTransportOutputBytes = Math.Max(0, _pendingTransportOutputBytes - nextChunk.Data.Length);
                 if (_pendingTransportOutputBytes <= ResumePendingOutputQueueBytes &&
                     _pendingTransportOutput.Count <= ResumePendingOutputQueueChunks)
                 {
@@ -6322,7 +6389,17 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
             if (flushAll)
             {
-                WriteOutputOnUiThread(nextChunk, finalizeOutputBatch: false);
+                try
+                {
+                    ReadOnlyMemory<byte> stableData = nextChunk.IsBorrowed && DataReceived is not null
+                        ? nextChunk.Data.ToArray()
+                        : nextChunk.Data;
+                    WriteOutputOnUiThread(stableData, finalizeOutputBatch: false);
+                }
+                finally
+                {
+                    nextChunk.Dispose();
+                }
             }
             else
             {
@@ -6330,7 +6407,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             }
 
             processedChunks++;
-            processedBytes += nextChunk.Length;
+            processedBytes += nextChunk.Data.Length;
         }
 
         if (!flushAll && processedChunks > 0)
@@ -6367,21 +6444,21 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         lock (_pendingTransportOutputDrainExecutionSync)
         {
-            while (TryDequeuePendingTransportOutputBatch(flushAll, out List<byte[]>? chunks, out int totalBytes))
+            while (TryDequeuePendingTransportOutputBatch(flushAll, out List<TerminalOutputLease>? chunks, out int totalBytes))
             {
                 PendingTransportUiBatch pendingBatch;
                 try
                 {
                     pendingBatch = ProcessPendingTransportOutputBatch(chunks!, totalBytes);
                 }
-                catch (Exception exception)
+                catch
                 {
                     ResetPendingTransportOutputQueue();
-                    RethrowOnUiThread(exception);
-                    return;
+                    throw;
                 }
 
                 EnqueuePendingTransportUiBatch(pendingBatch);
+                _screen?.Synchronization.YieldToDemand();
 
                 if (!flushAll)
                 {
@@ -6392,15 +6469,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
     }
 
-    private static void RethrowOnUiThread(Exception exception)
-    {
-        ExceptionDispatchInfo exceptionDispatchInfo = ExceptionDispatchInfo.Capture(exception);
-        Dispatcher.UIThread.Post(exceptionDispatchInfo.Throw);
-    }
-
     private bool TryDequeuePendingTransportOutputBatch(
         bool flushAll,
-        out List<byte[]>? chunks,
+        out List<TerminalOutputLease>? chunks,
         out int totalBytes)
     {
         chunks = null;
@@ -6430,10 +6501,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                     break;
                 }
 
-                byte[] nextChunk = _pendingTransportOutput.Dequeue();
-                _pendingTransportOutputBytes = Math.Max(0, _pendingTransportOutputBytes - nextChunk.Length);
+                TerminalOutputLease nextChunk = _pendingTransportOutput.Dequeue();
+                _pendingTransportOutputBytes = Math.Max(0, _pendingTransportOutputBytes - nextChunk.Data.Length);
                 chunks.Add(nextChunk);
-                totalBytes += nextChunk.Length;
+                totalBytes += nextChunk.Data.Length;
             }
 
             _pendingTransportOutputDrainScheduled = false;
@@ -6441,16 +6512,37 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
     }
 
-    private PendingTransportUiBatch ProcessPendingTransportOutputBatch(List<byte[]> chunks, int totalBytes)
+    private PendingTransportUiBatch ProcessPendingTransportOutputBatch(List<TerminalOutputLease> chunks, int totalBytes)
     {
-        TerminalOutputProcessResult result = chunks.Count == 1
-            ? ProcessOutputCore(chunks[0])
-            : ProcessOutputBatchCore(chunks);
-        return new PendingTransportUiBatch(
-            chunks,
-            totalBytes,
-            result.ResetMouseSelection,
-            result.LiveViewportCleared);
+        try
+        {
+            TerminalOutputProcessResult result = chunks.Count == 1
+                ? ProcessOutputCore(chunks[0].Data.Span)
+                : ProcessOutputBatchCore(chunks);
+            bool deliverDataEvents = DataReceived is not null;
+            for (int index = 0; index < chunks.Count; index++)
+            {
+                TerminalOutputLease chunk = chunks[index];
+                ReadOnlyMemory<byte> stableData = !deliverDataEvents ? default
+                    : chunk.IsBorrowed ? chunk.Data.ToArray() : chunk.Data;
+                chunks[index] = new TerminalOutputLease(stableData);
+                chunk.Dispose();
+            }
+
+            return new PendingTransportUiBatch(
+                chunks,
+                totalBytes,
+                result.ResetMouseSelection,
+                result.LiveViewportCleared,
+                deliverDataEvents);
+        }
+        finally
+        {
+            for (int index = 0; index < chunks.Count; index++)
+            {
+                chunks[index].Dispose();
+            }
+        }
     }
 
     private void EnqueuePendingTransportUiBatch(PendingTransportUiBatch batch)
@@ -6531,9 +6623,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 ApplyOutputProcessResultOnUiThread(new TerminalOutputProcessResult(false, true));
             }
 
-            for (int i = 0; i < nextBatch.Chunks.Count; i++)
+            for (int i = 0; nextBatch.DeliverDataEvents && i < nextBatch.Chunks.Count; i++)
             {
-                DataReceived?.Invoke(this, new TerminalDataEventArgs(nextBatch.Chunks[i]));
+                DataReceived?.Invoke(this, new TerminalDataEventArgs(nextBatch.Chunks[i].Data));
             }
 
             processedChunks += nextBatch.ChunkCount;
@@ -6551,20 +6643,29 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
     }
 
-    private void WriteOutputBatchOnUiThread(List<byte[]> chunks, int totalBytes)
+    private void WriteOutputBatchOnUiThread(List<TerminalOutputLease> chunks, int totalBytes)
     {
-        if (chunks.Count == 1)
+        try
         {
-            WriteOutputOnUiThread(chunks[0], finalizeOutputBatch: false);
-            return;
+            TerminalOutputProcessResult result = ProcessOutputBatchCore(chunks);
+            ApplyOutputProcessResultOnUiThread(result);
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                if (DataReceived is not null)
+                {
+                    ReadOnlyMemory<byte> stableData = chunks[i].IsBorrowed
+                        ? chunks[i].Data.ToArray()
+                        : chunks[i].Data;
+                    DataReceived?.Invoke(this, new TerminalDataEventArgs(stableData));
+                }
+            }
         }
-
-        TerminalOutputProcessResult result = ProcessOutputBatchCore(chunks);
-        ApplyOutputProcessResultOnUiThread(result);
-
-        for (int i = 0; i < chunks.Count; i++)
+        finally
         {
-            DataReceived?.Invoke(this, new TerminalDataEventArgs(chunks[i]));
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                chunks[i].Dispose();
+            }
         }
     }
 
@@ -6572,7 +6673,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         lock (_pendingTransportOutputSync)
         {
-            _pendingTransportOutput.Clear();
+            while (_pendingTransportOutput.TryDequeue(out TerminalOutputLease lease))
+            {
+                lease.Dispose();
+            }
             _pendingTransportUiBatches.Clear();
             _pendingTransportOutputBytes = 0;
             _pendingTransportUiBatchBytes = 0;
@@ -6622,9 +6726,9 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void SchedulePendingTransportOutputDrain()
     {
-        if (ShouldUseBackgroundOutputPipeline())
+        lock (_pendingTransportOutputSync)
         {
-            if (_outputWorker is not null)
+            if (ShouldUseBackgroundOutputPipeline() && _outputWorker is not null)
             {
                 _outputWorker.Schedule();
                 return;
@@ -6661,7 +6765,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void DisposeOutputWorker()
     {
-        TerminalOutputWorker? worker = Interlocked.Exchange(ref _outputWorker, null);
+        TerminalOutputWorker? worker;
+        lock (_pendingTransportOutputSync)
+        {
+            worker = _outputWorker;
+            _outputWorker = null;
+        }
+
         worker?.Dispose();
     }
 
@@ -6713,18 +6823,21 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private sealed class PendingTransportUiBatch
     {
         public PendingTransportUiBatch(
-            List<byte[]> chunks,
+            List<TerminalOutputLease> chunks,
             int totalBytes,
             bool resetMouseSelection,
-            bool liveViewportCleared)
+            bool liveViewportCleared,
+            bool deliverDataEvents)
         {
             Chunks = chunks;
             TotalBytes = totalBytes;
             ResetMouseSelection = resetMouseSelection;
             LiveViewportCleared = liveViewportCleared;
+            DeliverDataEvents = deliverDataEvents;
         }
 
-        public List<byte[]> Chunks { get; }
+        public List<TerminalOutputLease> Chunks { get; }
+        public bool DeliverDataEvents { get; }
 
         public int TotalBytes { get; }
 
@@ -8671,6 +8784,75 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         ResetCursorBlinkPhase();
+    }
+
+    private void UpdateTimedRefreshTimer()
+    {
+        TimeSpan? delay = null;
+        if (_screen is not null && _vtProcessor is ITerminalTimedRefreshSource source)
+        {
+            lock (_screen.SyncRoot)
+            {
+                delay = source.NextTimedRefreshDelay;
+            }
+        }
+
+        if (!delay.HasValue)
+        {
+            _timedRefreshTimer?.Stop();
+            _timedRefreshDeadlineTimestamp = 0;
+            return;
+        }
+
+        TimeSpan interval = TimeSpan.FromMilliseconds(
+            Math.Clamp(delay.Value.TotalMilliseconds, 1d, int.MaxValue));
+        long deadline = Stopwatch.GetTimestamp() + (long)(interval.TotalSeconds * Stopwatch.Frequency);
+        if (_timedRefreshTimer?.IsEnabled == true && _timedRefreshDeadlineTimestamp <= deadline)
+        {
+            // Repeated output must not keep postponing an already scheduled frame.
+            return;
+        }
+
+        if (_timedRefreshTimer is null)
+        {
+            _timedRefreshTimer = new DispatcherTimer();
+            _timedRefreshTimer.Tick += OnTimedRefreshTick;
+        }
+
+        // A minimum delay prevents immediate deadlines from spinning the dispatcher.
+        _timedRefreshTimer.Stop();
+        _timedRefreshTimer.Interval = interval;
+        _timedRefreshDeadlineTimestamp = deadline;
+        _timedRefreshTimer.Start();
+    }
+
+    private void OnTimedRefreshTick(object? sender, EventArgs e)
+    {
+        _timedRefreshTimer?.Stop();
+        _timedRefreshDeadlineTimestamp = 0;
+        if (_screen is null || _vtProcessor is not ITerminalTimedRefreshSource source)
+        {
+            return;
+        }
+
+        bool changed;
+        using (_screen.Synchronization.AcquireDemand())
+        {
+            changed = source.RefreshTimedState();
+            if (changed)
+            {
+                UpdateRendererParityStateLocked();
+            }
+        }
+
+        if (changed)
+        {
+            FinalizeOutputBatchOnUiThread();
+        }
+        else
+        {
+            UpdateTimedRefreshTimer();
+        }
     }
 
     private void ResetCursorBlinkPhase()

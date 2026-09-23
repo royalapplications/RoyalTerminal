@@ -103,6 +103,63 @@ public sealed class PtyTerminalTransportTests
         await transport.StopAsync();
     }
 
+    [Fact]
+    public async Task LeaseReceiver_LegacyPtyGetsStableCopiedOutput()
+    {
+        FakePty pty = new();
+        using PtyTerminalTransport transport = new(new FakePtyFactory(pty), new StaticShellProfileCatalog("/bin/sh"));
+        TerminalOutputLease received = default;
+        transport.OutputLeaseCallback = lease => received = lease;
+        await transport.StartAsync(new PtyTransportOptions(
+            Command: null, WorkingDirectory: null, Environment: null,
+            Dimensions: new TerminalSessionDimensions(80, 24, 0, 0)));
+        pty.Write("legacy");
+        pty.LastBytes!.AsSpan().Fill((byte)'x');
+        Assert.Equal("legacy", System.Text.Encoding.UTF8.GetString(received.Data.Span));
+        Assert.False(received.IsBorrowed);
+        received.Dispose();
+    }
+
+    [Fact]
+    public async Task LeaseReceiver_IsInstalledBeforePtyStarts_AndRemovedOnStop()
+    {
+        LeasePty pty = new();
+        using PtyTerminalTransport transport = new(new FakePtyFactory(pty), new StaticShellProfileCatalog("/bin/sh"));
+        string? received = null;
+        transport.OutputLeaseCallback = lease =>
+        {
+            received = System.Text.Encoding.UTF8.GetString(lease.Data.Span);
+            lease.Dispose();
+        };
+        await transport.StartAsync(new PtyTransportOptions(
+            Command: null, WorkingDirectory: null, Environment: null,
+            Dimensions: new TerminalSessionDimensions(80, 24, 0, 0)));
+        Assert.Equal("startup", received);
+        await transport.StopAsync();
+        Assert.Null(pty.OutputLeaseCallback);
+    }
+
+    private sealed class LeasePty : IPty, ITerminalOutputLeaseSource
+    {
+        public Action<TerminalOutputLease>? OutputLeaseCallback { get; set; }
+        public event Action<byte[], int>? DataReceived { add { } remove { } }
+        public event Action<int>? ProcessExited { add { } remove { } }
+        public bool IsRunning { get; private set; }
+        public int ChildPid => 1;
+        public void Start(string? shell = null, int columns = 80, int rows = 24,
+            string? workingDirectory = null, Dictionary<string, string>? environment = null,
+            IReadOnlyList<string>? arguments = null)
+        {
+            IsRunning = true;
+            OutputLeaseCallback?.Invoke(new TerminalOutputLease("startup"u8.ToArray()));
+        }
+        public void Write(string text) { }
+        public void Write(byte[] data, int offset, int count) { }
+        public void Resize(int columns, int rows) { }
+        public void Stop() => IsRunning = false;
+        public void Dispose() => Stop();
+    }
+
     private sealed class FakePtyFactory : IPtyFactory
     {
         private readonly IPty _pty;

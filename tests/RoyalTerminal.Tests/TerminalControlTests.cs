@@ -3733,15 +3733,18 @@ public class TerminalControlTests
         }
     }
 
-    [AvaloniaFact]
-    public async Task Control_ManagedTransportOutput_ParsesOffUiThread_WhileDataReceivedRemainsOnUiThread()
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Control_TransportOutput_ParsesOnDedicatedThread_WhileDataReceivedRemainsOnUiThread(
+        VtProcessorPreference preference)
     {
         FakeTransport transport = new();
         ThreadTrackingVtProcessorFactory factory = new();
         TerminalControl control = CreateControlWithTransport(
             transport,
             factory,
-            VtProcessorPreference.Managed);
+            preference);
 
         int uiThreadId = Environment.CurrentManagedThreadId;
         int? dataReceivedThreadId = null;
@@ -3766,7 +3769,154 @@ public class TerminalControlTests
 
             Assert.True(eventRaised, "Expected DataReceived to be raised for managed transport output.");
             Assert.NotEqual(uiThreadId, factory.LastProcessor!.LastProcessThreadId);
+            Assert.False(factory.LastProcessor.LastProcessUsedThreadPool);
             Assert.Equal(uiThreadId, dataReceivedThreadId);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_Flush_ReportsParserFailure_AndStopStillDisposesWorker()
+    {
+        FakeTransport transport = new();
+        ThreadTrackingVtProcessorFactory factory = new()
+        {
+            ProcessException = new InvalidOperationException("test parser failure"),
+        };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            factory,
+            VtProcessorPreference.Managed);
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await Task.Run(() => transport.RaiseData("fail"u8.ToArray()));
+
+            InvalidOperationException failure = Assert.Throws<InvalidOperationException>(
+                control.FlushPendingTransportOutput);
+            Assert.Equal("test parser failure", failure.Message);
+            Assert.Throws<InvalidOperationException>(control.StopPty);
+            Assert.False(control.HasActiveSession);
+
+            // Stop must dispose the failed worker even when its barrier reports a failure.
+            control.FlushPendingTransportOutput();
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_TimedRefresh_AdvancesWithoutNewOutput_OnUiThreadUnderStateLock()
+    {
+        FakeTransport transport = new();
+        ThreadTrackingVtProcessorFactory factory = new() { EnableTimedRefresh = true };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            factory,
+            VtProcessorPreference.Managed);
+        int uiThreadId = Environment.CurrentManagedThreadId;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await Task.Run(() => transport.RaiseData("frame"u8.ToArray()));
+            Assert.True(await WaitUntilAsync(
+                () => factory.LastProcessor!.TimedRefreshCount == 1,
+                TimeSpan.FromSeconds(5)));
+
+            Assert.Equal(uiThreadId, factory.LastProcessor!.TimedRefreshThreadId);
+            Assert.True(factory.LastProcessor.TimedRefreshHeldStateLock);
+            await Task.Delay(30);
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+            Assert.Equal(1, factory.LastProcessor.TimedRefreshCount);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_LeasedOutput_ReturnsStorageAfterParsing_AndPreservesEventPayload()
+    {
+        LeasedFakeTransport transport = new();
+        ThreadTrackingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        byte[] storage = "borrowed output"u8.ToArray();
+        ClearingOutputOwner owner = new(storage);
+        ReadOnlyMemory<byte> retained = default;
+        control.DataReceived += (_, args) => retained = args.Data;
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            Assert.NotNull(transport.OutputLeaseCallback);
+            transport.OutputLeaseCallback!(new TerminalOutputLease(storage, owner, 1));
+            control.FlushPendingTransportOutput();
+
+            Assert.Equal(1, owner.ReleaseCount);
+            Assert.True(storage.AsSpan().IndexOfAnyExcept((byte)'z') < 0);
+            Assert.Equal("borrowed output", Encoding.UTF8.GetString(retained.Span));
+            Assert.True(factory.LastProcessor!.HasRecordedThread);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_LeasedOutput_ParserFailureReturnsStorage()
+    {
+        LeasedFakeTransport transport = new();
+        ThreadTrackingVtProcessorFactory factory = new()
+        {
+            ProcessException = new InvalidOperationException("parse failed"),
+        };
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        ClearingOutputOwner owner = new("bad"u8.ToArray());
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            transport.OutputLeaseCallback!(new TerminalOutputLease(owner.Storage, owner, 1));
+            Assert.Throws<InvalidOperationException>(control.FlushPendingTransportOutput);
+            Assert.Equal(1, owner.ReleaseCount);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_UnixPty_NaturalExit_AllowsNextSession()
+    {
+        if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux()) return;
+        TerminalControl control = new() { VtProcessorPreference = VtProcessorPreference.Managed };
+        int exits = 0;
+        StringBuilder output = new();
+        control.ProcessExited += (_, _) => exits++;
+        control.DataReceived += (_, args) => output.Append(Encoding.UTF8.GetString(args.Data.Span));
+        try
+        {
+            foreach (string word in new[] { "first", "second" })
+            {
+                int previousExits = exits;
+                await control.StartSessionAsync(new PtyTransportOptions(
+                    Command: new TerminalCommandSpec("/bin/sh", ["-c", $"printf {word}"]),
+                    WorkingDirectory: null, Environment: null,
+                    Dimensions: new TerminalSessionDimensions(80, 24, 0, 0)));
+                Assert.True(await WaitUntilAsync(() => exits == previousExits + 1, TimeSpan.FromSeconds(5)));
+                Assert.False(control.HasActiveSession);
+            }
+
+            Assert.Contains("first", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("second", output.ToString(), StringComparison.Ordinal);
         }
         finally
         {
@@ -6553,7 +6703,7 @@ public class TerminalControlTests
     }
 
     private static TerminalControl CreateControlWithTransport(
-        FakeTransport transport,
+        ITerminalTransport transport,
         IVtProcessorFactory vtProcessorFactory,
         VtProcessorPreference preference,
         ITerminalScrollService? scrollService = null,
@@ -7934,20 +8084,46 @@ public class TerminalControlTests
     private sealed class ThreadTrackingVtProcessorFactory : IVtProcessorFactory
     {
         public ThreadTrackingVtProcessor? LastProcessor { get; private set; }
+        public Exception? ProcessException { get; init; }
+        public bool EnableTimedRefresh { get; init; }
 
         public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
         {
             _ = screen;
             _ = preference;
-            ThreadTrackingVtProcessor processor = new();
+            ThreadTrackingVtProcessor processor = new()
+            {
+                ProcessException = ProcessException,
+                EnableTimedRefresh = EnableTimedRefresh,
+                StateSyncRoot = screen.SyncRoot,
+            };
             LastProcessor = processor;
             return processor;
         }
     }
 
-    private sealed class ThreadTrackingVtProcessor : IVtProcessor
+    private sealed class ThreadTrackingVtProcessor : IVtProcessor, ITerminalTimedRefreshSource
     {
         private int _lastProcessThreadId = -1;
+        public Exception? ProcessException { get; init; }
+        public bool LastProcessUsedThreadPool { get; private set; }
+        public bool EnableTimedRefresh { get; init; }
+        public object StateSyncRoot { get; init; } = new();
+        public int TimedRefreshCount { get; private set; }
+        public int TimedRefreshThreadId { get; private set; }
+        public bool TimedRefreshHeldStateLock { get; private set; }
+        private bool _refreshPending;
+
+        public TimeSpan? NextTimedRefreshDelay => _refreshPending ? TimeSpan.FromMilliseconds(1) : null;
+
+        public bool RefreshTimedState()
+        {
+            TimedRefreshCount++;
+            TimedRefreshThreadId = Environment.CurrentManagedThreadId;
+            TimedRefreshHeldStateLock = Monitor.IsEntered(StateSyncRoot);
+            _refreshPending = false;
+            return true;
+        }
 
         public int CursorCol => 0;
         public int CursorRow => 0;
@@ -7982,7 +8158,13 @@ public class TerminalControlTests
         public void Process(ReadOnlySpan<byte> data)
         {
             _ = data;
+            _refreshPending |= EnableTimedRefresh;
+            LastProcessUsedThreadPool = Thread.CurrentThread.IsThreadPoolThread;
             Volatile.Write(ref _lastProcessThreadId, Environment.CurrentManagedThreadId);
+            if (ProcessException is not null)
+            {
+                throw ProcessException;
+            }
         }
 
         public void NotifyResize(int columns, int rows)
@@ -8431,6 +8613,34 @@ public class TerminalControlTests
         {
             return _transport;
         }
+    }
+
+    private sealed class ClearingOutputOwner(byte[] storage) : ITerminalOutputLeaseOwner
+    {
+        public byte[] Storage { get; } = storage;
+        public int ReleaseCount { get; private set; }
+        public void Release(long generation)
+        {
+            ReleaseCount++;
+            Storage.AsSpan().Fill((byte)'z');
+        }
+    }
+
+    private sealed class LeasedFakeTransport : ITerminalTransport, ITerminalOutputLeaseSource
+    {
+        public Action<TerminalOutputLease>? OutputLeaseCallback { get; set; }
+        public event Action<byte[], int>? DataReceived { add { } remove { } }
+        public event Action<int>? ProcessExited { add { } remove { } }
+        public bool IsRunning { get; private set; }
+        public ValueTask StartAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
+        {
+            IsRunning = true;
+            return ValueTask.CompletedTask;
+        }
+        public void SendInput(ReadOnlySpan<byte> utf8) { }
+        public void Resize(TerminalSessionDimensions dimensions) { }
+        public ValueTask StopAsync() { IsRunning = false; return ValueTask.CompletedTask; }
+        public void Dispose() => IsRunning = false;
     }
 
     private sealed class FakeTransport : ITerminalTransport

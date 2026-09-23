@@ -1,5 +1,34 @@
 # Ghostty and Ghostling parity update (2026-09-22)
 
+## Reopened completion audit
+
+The complete upstream review is **in progress**. The prior API inventory and green
+test suite establish the implemented C surface, but do not establish full native
+and managed feature or performance parity. The [308-commit source inventory](ghostty-upstream-inventory-2026.md)
+is the review input. The upstream heads were reverified on 2026-09-22 and have not
+changed from the revisions below.
+
+The renewed review found the following missing or weakly verified requirements:
+
+| Requirement | Evidence needed for completion | Current review state |
+| --- | --- | --- |
+| Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded direct image loading, PNG provider and tracked screen anchors are implemented with focused tests; graphics store/execution/geometry/animation and external-medium integration remain in progress |
+| Native Kitty animation playback | Animation tick in the built library, scheduling without further PTY input, deterministic frame tests | Repository-owned extension and timed refresh implemented; deterministic frame tests pass, and all six native RID variants cross-build; non-macOS runtime execution remains CI validation |
+| Synchronized output | Completed prefix visible at enable; following output frozen; release/reset/one-second timeout without additional input | Both engines now implement prefix publication, frozen presentation and idle timeout; managed copy-on-write state transfer and focused native/managed tests pass |
+| Managed snapshot and continuation features | Restore both screens, history, parser/UTF-8 continuation, modes, styles, links and saved cursors with bounded validation | Managed ground-boundary processing, bounded continuation export and replay tests pass; Ghostty-compatible CRC32C framing and style/hyperlink codecs pass upstream golden, corruption, truncation and allocation tests; complete state codecs and incremental READY/history restore remain open |
+| Managed resize/reflow optimization | Baseline/after measurements plus wide/grapheme/style/link/cursor/anchor regressions | Bulk reflow copies and redundant initialization removal implemented and measured below; tracked cell identity/reflow/COW/pruning regressions pass; end-to-end Kitty anchor comparisons remain part of graphics integration |
+| Managed row allocation/recycling | Stable content/metadata after eviction and measured allocations | Evicted row storage is reused with a focused zero-allocation steady-state test |
+| Parser/clipboard throughput and bounds | Split-input protocol tests, malformed UTF-8/base64 tests, limits, before/after measurements | Review added span payload scanning, bulk base64 decode, correct 64 MiB configurable clipboard bound, 65-codepoint grapheme bound and protocol fixes; measurement review pending |
+| Third IO thread and render fairness | Dedicated lifetime/flush/failure tests, renderer demand handoff, batching/backpressure throughput and latency measurements | Dedicated worker, demand handoff and bounded gather/lease path implemented; isolated PTY throughput and allocation improvements measured; platform scheduling rejection handling and final lifecycle validation remain in review |
+| Managed colors and VT formatter state | Dynamic override resets, pending-wrap and tabstop/cursor round-trip differential tests | OSC 104/110/111/112 resets and configured-vs-override state implemented; edge-cell replay, post-tabstop cursor home and CRLF replay tests pass; broader formatter audit remains open |
+| Unicode 18 grapheme behavior | Authoritative generated grapheme/Indic/emoji properties and conformance tests, not only scalar widths | Full generated properties and boundary kernel pass official conformance/native comparisons; mode2027 on/off is implemented; differential testing found an upstream dirty-mark bug and a remaining managed right-edge spacer case |
+| Platform renderer improvements | Per-change applicability evidence for Skia/native bridge vs upstream Metal/OpenGL, with relevant tests/measurements | Detailed inspection remains open; native dependency pin alone does not port full-app renderer behavior |
+
+Rows above are requirements to finish, not exclusions from the requested scope.
+Tests cited elsewhere in this document describe existing coverage; they must not
+be used to mark these broader requirements complete until their specific evidence
+has been inspected.
+
 ## Scope and pinned references
 
 This update moves the `external/ghostty` submodule from
@@ -55,6 +84,14 @@ the following surfaces.
 | Result values | I/O, limit, and rejected errors | Managed result enum matches the current ABI |
 | Platform support | TinyIO-backed current C API | The same bindings can use Ghostty's new Windows implementation when the updated Windows native asset is built |
 
+The [generated ABI inventory](ghostty-abi-inventory-2026.md) covers all 159
+manifest types, 27 callback signatures, 17 header-only flags and 43 modes. Its
+runtime tests check all enum values, aggregate sizes/alignment/field offsets and
+primitive widths without reflection. This audit restored 35 omitted key values,
+four side-specific modifier flags and missing OSC/RNG declarations. The focused
+ABI/native wrapper/PNG run passed 170 tests before the subsequently described
+upstream bug-fix overlays.
+
 ABI-sensitive structs and enum values have focused tests. Search, snapshot,
 continuation, render cursor/raw-cell/dirty-state, and streaming formatter behavior
 have native integration tests. Managed stream callbacks preserve Ghostty's synchronous
@@ -71,9 +108,9 @@ render-state construction now frees every already-created native handle on failu
 
 ## Managed-engine parity
 
-The managed VT engine cannot reuse Ghostty's internal Zig storage types, but its
-observable terminal behavior and normalized application effects now match the new
-interfaces where they apply.
+The managed VT engine cannot reuse Ghostty's internal Zig storage types. The
+following implemented behaviors have focused coverage; this list is not a claim
+that the open requirements above have already reached full parity.
 
 | Behavior | Managed implementation |
 | --- | --- |
@@ -92,10 +129,18 @@ interfaces where they apply.
 | Print throughput | Contiguous printable ASCII is processed as a run, avoiding a parser-state dispatch for every ordinary byte |
 | Paste | The shared interface supports terminal-aware encoding; the managed engine continues to produce the same bracketed-paste protocol directly |
 
-Native snapshot bytes are deliberately not treated as a cross-engine serialization
-format. They encode Ghostty's terminal implementation. The managed engine retains
-its existing engine-independent text snapshot contract, while native snapshot APIs
-are fully exposed for native-terminal restore and continuation workflows.
+Native snapshot bytes encode Ghostty's terminal implementation. The managed engine's
+existing text snapshot contract does not restore equivalent terminal state and is
+therefore not evidence of managed snapshot feature parity. Managed state snapshots
+require additional implementation and validation. Parser continuation is now
+implemented separately and has split-input/reset/limit/replay tests.
+
+The current Ghostty version1 binary format itself omits Kitty images/placements and
+glyph glossary registrations (`snapshot/terminal.zig`, field classification). Virtual
+placeholder text is preserved, but the graphics are not. Native binary snapshot
+wrappers therefore must not be described as complete graphics-preserving backups.
+Managed compatible restoration will follow those documented format limits rather
+than silently claiming graphics persistence that the native wire format lacks.
 
 Ghostty's background search thread is part of the full Ghostty application, not the
 `libghostty-vt` C search iterator. RoyalTerminal keeps search orchestration in its
@@ -105,10 +150,11 @@ OSC 99 and Kitty drag-and-drop were reviewed separately because their parsers ex
 inside Ghostty. They are not current public `libghostty-vt` features: the stream
 handler still classifies Kitty OSC 99 notification commands as unimplemented, and
 the C terminal wrapper installs no drag-and-drop effect (`drag_and_drop = null`) or
-public option. RoyalTerminal therefore does not invent a managed-only host contract
-that the native backend cannot provide. OSC 9/777 notifications remain normalized
-across both engines. This boundary should be re-audited when Ghostty exposes either
-protocol through its C API.
+public option. OSC 9/777 notifications remain normalized across both engines.
+An unimplemented upstream stream action offers no working behavior to port;
+full-application drag-and-drop, however, needs a separate applicability and host
+contract decision. The absent public C option alone does not establish completion
+or exclude applicable functionality from this request.
 
 ## Performance work carried into RoyalTerminal
 
@@ -129,8 +175,10 @@ internals:
   full-result allocations when the consumer or source is a stream.
 - Printable ASCII runs use one tight managed loop and preserve the slower state
   machine only at control, non-ASCII, or line-drawing boundaries.
-- Unicode width parity uses compact sorted ranges and binary search rather than a
-  per-codepoint table or reflection.
+- Unicode properties use a deduplicated two-level packed table generated from
+  the pinned upstream Unicode 18 UCD, shared by width and grapheme lookup. The
+  generated private tables initialize once: focused tests caught and eliminated
+  debug-build allocations from repeated span-literal construction.
 
 ## Dedicated terminal-output thread
 
@@ -143,8 +191,11 @@ shared resource.
 
 1. Transport callbacks enqueue into the existing bounded output queue.
 2. Repeated notifications coalesce into one scheduled drain.
-3. One named background thread (`RoyalTerminal.Output`) performs all VT parsing for
-   that session at `BelowNormal` priority.
+3. One named background thread (`RoyalTerminal.Output`) performs transport-output VT
+   parsing for that session. Explicit UI `WriteOutput` APIs retain their synchronous
+   contract. Dedicated macOS gather/parser threads request Ghostty's user-initiated
+   QoS, with a normal-priority fallback; shared thread-pool threads are never changed.
+   Priority variants are being measured separately from gather throughput.
 4. Parsed changes continue through the existing bounded UI-batch queue, so Avalonia
    objects are still updated only on the UI thread.
 5. Resize, explicit flush, process exit, and stop use a barrier before touching
@@ -153,9 +204,17 @@ shared resource.
    session that owns it. Worker failures are captured and rethrown at the next
    scheduling or flush boundary.
 
-This follows Ghostty's ownership model: its PTY read thread feeds a single termio
-thread through a mailbox, while rendering remains separately scheduled. It also
-matches the important properties of the reference implementations:
+Ghostty's current `Exec.zig` separates a gather thread from the IO reader/parser,
+using four 64 KiB buffers, a 1 KiB saturation threshold, sixteen EAGAIN spins and
+bounded 1 ms polling (3 ms bridge cap). Its termio thread primarily handles
+control/write work. RoyalTerminal's Unix reader now implements that gather stage
+with a generation-checked four-slot ownership ring and idle/cancellation wake
+pipes. Optional leases pass buffer ownership through transport/session to the
+parser; legacy public byte events still receive stable copies. Renderer demand
+now causes bounded lock handoff at parser batch boundaries. Focused ordering,
+full-ring/quiet shutdown and lease-lifetime tests pass; throughput, latency and
+platform scheduling measurements are still being consolidated.
+The reference implementations contribute these properties:
 
 - Windows Terminal owns a dedicated ConPTY output thread, queues the next overlapped
   read before delivering the previous output, and waits for that thread during
@@ -168,6 +227,44 @@ RoyalTerminal intentionally keeps transport reading in the transport implementat
 instead of adding another duplicate PTY reader. The new worker is the third stage of
 the existing transport -> parser -> UI-render pipeline. Existing byte and batch
 limits remain the source of backpressure.
+
+## Renewed audit: measured managed storage changes
+
+The reflow port follows Ghostty `c249b9de3`, `ec5b36961` and `88ed6bebf` at the
+behavioral level: copy complete normalized cell runs, retain the scalar path for
+wide pairs that cross a destination edge or need normalization, and preserve
+tracked cursor/anchor positions. Managed cells already contain managed references
+and resolved style values, so they do not need native style-ID remapping. The row
+reset follows `b31fbc846`: recycled storage loses wrap/transient flags, graphemes,
+hyperlinks and prior visual state. Focused reflow and screen tests pass.
+
+`TerminalReflowBenchmark` is runnable with `--terminal-reflow`. An isolated archive
+of pre-review commit `b8b16e9` receives the same harness for comparison. One paired
+Release/.NET 10.0.5 ARM64 run without concurrent builds (median of seven samples,
+2,000 rows and thirteen resizes per sample) measured 40.605→32.041 ms ASCII,
+40.246→31.148 ms CJK, 33.126→23.416 ms grapheme and 37.343→27.200 ms mixed input.
+Reflow allocations remain
+approximately 94–96 MB per sample; this change improves copying/initialization
+work, not total reflow storage. These are model-only microbenchmarks, not end-to-end
+render timings. A steady-state 50,000-row scroll improved 15.951→5.296 ms and
+162,800,000→0 allocated bytes. The optimized row-reuse unit test also asserts zero
+allocation after reaching the scrollback limit.
+
+A correctness-first managed synchronized-output copy initially cost 1.1535 ms and
+3,421,736 bytes per begin/release with 1,000 history rows. Copy-on-write cell storage
+and omission of a throwaway viewport reduced the measured operation to 0.0583 ms
+and 41,752 bytes. Only row metadata/registries are copied at the boundary; each
+subsequently mutated row detaches its cell array. The operation is internal, runs
+under the screen lock, and permits no writable cell reference to span that copy
+boundary. Both mutation directions, hidden-column preservation, and evicted-row
+recycling have dedicated isolation tests. The remaining O(history-row-count)
+metadata cost is explicit; this is not a claim of allocation-free TUI frames.
+
+The detailed [IO performance report](ghostty-io-performance-2026.md) records isolated
+gather throughput, allocations, latency, priority variants and the initial spin-order
+regression that the measurements exposed. The [renderer audit](ghostty-renderer-audit-2026.md)
+separates code that executes in Skia/libvt from Ghostty's full application renderer,
+and records applicable transfers plus unresolved gaps.
 
 ## Validation requirements
 

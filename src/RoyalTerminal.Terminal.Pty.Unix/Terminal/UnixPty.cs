@@ -19,17 +19,25 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-public sealed class UnixPty : IPty
+public sealed class UnixPty : IPty, ITerminalOutputLeaseSource
 {
     private int _masterFd = -1;
     private int _childPid = -1;
+    private readonly object _childProcessSync = new();
     private string? _slavePtyPath;
     private volatile bool _disposed;
+    private volatile bool _readCompleted;
+    private int _cleanupStarted;
     private readonly object _pendingWritesSync = new();
     private readonly Queue<PendingWrite> _priorityWrites = new();
     private readonly Queue<PendingWrite> _pendingWrites = new();
     private Thread? _readThread;
     private Thread? _writeThread;
+    private UnixPtyPoller? _poller;
+    private UnixPtyOutputRing? _outputRing;
+
+    /// <inheritdoc />
+    public Action<TerminalOutputLease>? OutputLeaseCallback { get; set; }
 
     /// <summary>Raised when data is received from the PTY.</summary>
     public event Action<byte[], int>? DataReceived;
@@ -38,7 +46,7 @@ public sealed class UnixPty : IPty
     public event Action<int>? ProcessExited;
 
     /// <summary>Whether the PTY is currently active.</summary>
-    public bool IsRunning => _masterFd >= 0 && _childPid > 0 && !_disposed;
+    public bool IsRunning => _masterFd >= 0 && _childPid > 0 && !_disposed && !_readCompleted;
 
     /// <summary>The child process ID.</summary>
     public int ChildPid => _childPid;
@@ -182,6 +190,20 @@ public sealed class UnixPty : IPty
         // Free the native memory (child has its own copy after fork)
         FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, nativeArguments, envPairs);
         _slavePtyPath = TryGetSlavePtyPath(_masterFd);
+        try
+        {
+            _poller = new UnixPtyPoller();
+            _outputRing = new UnixPtyOutputRing(_poller.SignalIdle);
+            if (!UnixPtyPoller.SetNonblocking(_masterFd))
+            {
+                throw new IOException("Unable to make the PTY master nonblocking.");
+            }
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
 
         // Start writing to the master FD on a dedicated worker so UI/key handling
         // callers never block on back-pressured PTY input.
@@ -196,7 +218,7 @@ public sealed class UnixPty : IPty
         _readThread = new Thread(ReadLoop)
         {
             IsBackground = true,
-            Name = "PTY-Reader",
+            Name = "PTY-Gather",
         };
         _readThread.Start();
     }
@@ -297,59 +319,21 @@ public sealed class UnixPty : IPty
 
     private void ReadLoop()
     {
-        var buffer = new byte[8192];
+        if (OperatingSystem.IsMacOS())
+        {
+            _ = UnixThreadScheduling.TrySetCurrentThreadUserInitiated();
+        }
 
         try
         {
-            while (!_disposed)
-            {
-                int bytesRead;
-                unsafe
-                {
-                    fixed (byte* ptr = buffer)
-                    {
-                        bytesRead = (int)PosixRead(_masterFd, ptr, (nuint)buffer.Length);
-                    }
-                }
-
-                if (_disposed)
-                {
-                    break;
-                }
-
-                if (bytesRead < 0)
-                {
-                    int error = Marshal.GetLastPInvokeError();
-                    if (error == ErrnoInterrupted || error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
-                    {
-                        Thread.Yield();
-                        continue;
-                    }
-
-                    break;
-                }
-
-                if (bytesRead == 0)
-                {
-                    // EOF — child process likely exited or PTY was closed.
-                    break;
-                }
-
-                try
-                {
-                    DataReceived?.Invoke(buffer, bytesRead);
-                }
-                catch
-                {
-                    // Don't let subscriber exceptions kill the read loop
-                }
-            }
+            GatherOutput();
         }
         catch
         {
             // Reader thread must never crash the process on unexpected runtime/PInvoke errors.
         }
 
+        _readCompleted = true;
         if (_disposed) return;
 
         // Check child exit status
@@ -364,21 +348,152 @@ public sealed class UnixPty : IPty
         }
     }
 
-    private int WaitForChild()
+    private unsafe void GatherOutput()
     {
-        if (_childPid <= 0) return -1;
-
-        try
+        UnixPtyOutputRing ring = _outputRing!;
+        UnixPtyPoller poller = _poller!;
+        int fd = _masterFd;
+        bool finished = false;
+        while (!_disposed && !finished)
         {
-            var result = Waitpid(_childPid, out var status, WNOHANG);
-            if (result == _childPid)
+            UnixPtyOutputRing.Slot? slot = ring.Acquire();
+            if (slot is null)
             {
-                return (status >> 8) & 0xFF; // WEXITSTATUS
+                break;
+            }
+
+            int length = 0;
+            int spins = 0;
+            long bridgeStarted = 0;
+            fixed (byte* buffer = slot.Buffer)
+            {
+                while (!_disposed && length < slot.Buffer.Length)
+                {
+                    int bytesRead = (int)PosixRead(fd, buffer + length, (nuint)(slot.Buffer.Length - length));
+                    if (bytesRead > 0)
+                    {
+                        length += bytesRead;
+                        spins = 0;
+                        continue;
+                    }
+
+                    if (bytesRead == 0)
+                    {
+                        finished = true;
+                        break;
+                    }
+
+                    int error = Marshal.GetLastPInvokeError();
+                    if (error == ErrnoInterrupted)
+                    {
+                        continue;
+                    }
+
+                    if (error != ErrnoWouldBlockLinux && error != ErrnoWouldBlockBsd)
+                    {
+                        finished = true;
+                        break;
+                    }
+
+                    // Match Ghostty's adaptive gather: interactive bytes are delivered
+                    // immediately, and refill gaps are bridged only behind a busy parser.
+                    if (length < 1024)
+                    {
+                        break;
+                    }
+
+                    if (spins++ < 16)
+                    {
+                        continue;
+                    }
+
+                    long now = Stopwatch.GetTimestamp();
+                    if (bridgeStarted == 0)
+                    {
+                        bridgeStarted = now;
+                    }
+                    else if (Stopwatch.GetElapsedTime(bridgeStarted, now) >= TimeSpan.FromMilliseconds(3))
+                    {
+                        break;
+                    }
+
+                    if (!ring.TryBeginBridge())
+                    {
+                        break;
+                    }
+
+                    UnixPtyPoller.Readiness readiness = poller.Wait(fd, writable: false,
+                        timeoutMilliseconds: 1, includeIdle: true);
+                    ring.EndBridge();
+                    if (readiness != UnixPtyPoller.Readiness.Ready)
+                    {
+                        finished = readiness is UnixPtyPoller.Readiness.Stopped or UnixPtyPoller.Readiness.Closed;
+                        break;
+                    }
+                }
+            }
+
+            TerminalOutputLease lease = slot.CreateLease(length);
+            if (length == 0 || _disposed)
+            {
+                lease.Dispose();
+            }
+            else
+            {
+                try
+                {
+                    DataReceived?.Invoke(slot.Buffer, length);
+                }
+                catch
+                {
+                    // Conventional event subscribers must not terminate PTY reading.
+                }
+
+                Action<TerminalOutputLease>? receiver = OutputLeaseCallback;
+                if (receiver is null)
+                {
+                    lease.Dispose();
+                }
+                else
+                {
+                    try
+                    {
+                        receiver(lease);
+                    }
+                    catch
+                    {
+                        lease.Dispose();
+                    }
+                }
+            }
+
+            if (!_disposed && !finished && length < slot.Buffer.Length)
+            {
+                finished = poller.Wait(fd, writable: false, timeoutMilliseconds: -1)
+                    != UnixPtyPoller.Readiness.Ready;
             }
         }
-        catch
+    }
+
+    private int WaitForChild()
+    {
+        lock (_childProcessSync)
         {
-            // Best effort only; reader thread must not crash the process.
+            if (_childPid <= 0) return -1;
+
+            try
+            {
+                int result = Waitpid(_childPid, out int status, WNOHANG);
+                if (result == _childPid)
+                {
+                    _childPid = -1;
+                    return (status >> 8) & 0xFF; // WEXITSTATUS
+                }
+            }
+            catch
+            {
+                // Best effort only; reader thread must not crash the process.
+            }
         }
 
         return -1;
@@ -449,9 +564,18 @@ public sealed class UnixPty : IPty
             }
 
             int error = Marshal.GetLastPInvokeError();
-            if (error == ErrnoInterrupted || error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
+            if (error == ErrnoInterrupted)
             {
-                Thread.Yield();
+                continue;
+            }
+
+            if (error == ErrnoWouldBlockLinux || error == ErrnoWouldBlockBsd)
+            {
+                if (_poller?.Wait(fd, writable: true, timeoutMilliseconds: -1) != UnixPtyPoller.Readiness.Ready)
+                {
+                    return;
+                }
+
                 continue;
             }
 
@@ -471,49 +595,73 @@ public sealed class UnixPty : IPty
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        bool initiateStop;
         lock (_pendingWritesSync)
         {
+            initiateStop = !_disposed;
+            _disposed = true;
             _priorityWrites.Clear();
             _pendingWrites.Clear();
             Monitor.PulseAll(_pendingWritesSync);
         }
 
-        // Signal child to terminate first
-        var pid = _childPid;
-        if (pid > 0)
+        if (initiateStop)
         {
-            try { Kill(pid, 1); } catch { } // SIGHUP
+            _outputRing?.Stop();
+            _poller?.SignalStop();
+            // Signal child to terminate first.
+            lock (_childProcessSync)
+            {
+                if (_childPid > 0)
+                {
+                    try { Kill(_childPid, 1); } catch { } // SIGHUP
+                }
+            }
         }
 
-        // Close master FD — this unblocks the read loop
-        var fd = _masterFd;
-        _masterFd = -1;
+        // Nonblocking IO plus the stop pipe lets both workers exit before the
+        // descriptor is closed, so a recycled descriptor can never be read/written.
+        if (_readThread is not null && !ReferenceEquals(Thread.CurrentThread, _readThread))
+        {
+            _readThread.Join();
+        }
+        if (_writeThread is not null && !ReferenceEquals(Thread.CurrentThread, _writeThread))
+        {
+            _writeThread.Join();
+        }
+
+        if (Interlocked.Exchange(ref _cleanupStarted, 1) != 0)
+        {
+            return;
+        }
+
+        int fd = Interlocked.Exchange(ref _masterFd, -1);
         if (fd >= 0)
         {
             try { PosixClose(fd); } catch { }
         }
         _slavePtyPath = null;
 
-        // Wait for read thread (don't block too long)
-        _readThread?.Join(TimeSpan.FromMilliseconds(500));
-        _writeThread?.Join(TimeSpan.FromMilliseconds(500));
+        _poller?.Dispose();
 
         // Reap child process (non-blocking to avoid hanging the UI thread)
-        if (pid > 0)
+        lock (_childProcessSync)
         {
-            try
+            int pid = _childPid;
+            if (pid > 0)
             {
-                var result = Waitpid(pid, out _, WNOHANG);
-                if (result == 0) // Still running
+                try
                 {
-                    Kill(pid, 9); // SIGKILL
-                    Waitpid(pid, out _, WNOHANG);
+                    int result = Waitpid(pid, out _, WNOHANG);
+                    if (result == 0) // Still running
+                    {
+                        Kill(pid, 9); // SIGKILL
+                        Waitpid(pid, out _, WNOHANG);
+                    }
                 }
+                catch { }
+                _childPid = -1;
             }
-            catch { }
-            _childPid = -1;
         }
     }
 

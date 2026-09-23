@@ -290,11 +290,27 @@ public static partial class GhosttyVtNative
         History = 3,
     }
 
+    /// <summary>Native coordinate payload and reserved storage for a Ghostty point.</summary>
+    [StructLayout(LayoutKind.Explicit, Size = 16)]
+    public unsafe struct GhosttyPointValue
+    {
+        /// <summary>The coordinate for the point's tagged coordinate space.</summary>
+        [FieldOffset(0)]
+        public GhosttyPointCoordinate Coordinate;
+
+        [FieldOffset(0)]
+        internal fixed ulong _padding[2];
+    }
+
     [StructLayout(LayoutKind.Explicit, Size = 24)]
     public struct GhosttyPoint
     {
         [FieldOffset(0)]
         public GhosttyPointTag Tag;
+
+        /// <summary>Native tagged union payload; overlaps the convenience X/Y fields.</summary>
+        [FieldOffset(8)]
+        public GhosttyPointValue Value;
 
         [FieldOffset(8)]
         public ushort X;

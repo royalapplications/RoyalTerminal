@@ -15,6 +15,81 @@ namespace RoyalTerminal.Tests;
 public class GhosttyVtProcessorTests
 {
     [Fact]
+    public void GhosttyVtProcessor_ScreenSnapshotPreservesHistoryMetadata_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable()) return;
+        TerminalScreen screen = new(columns: 8, viewportRows: 3, scrollbackLimit: 20);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.Process(Encoding.UTF8.GetBytes("\u001b[?2027h\u001b[1;2;3;4:3;9;53;38;2;10;20;30;48;2;40;50;60;58;2;70;80;90m\u001b]8;;https://example.test/history\u001b\\e\u0301界ABCDEZ"));
+        TerminalCell[] expected = screen.GetViewportRow(0).ReadOnlyCells.ToArray();
+        Assert.True(screen.GetViewportRow(0).WrapsToNext);
+        Assert.Equal("e\u0301", expected[0].Grapheme);
+        Assert.Equal((byte)2, expected[1].Width);
+        Assert.Equal((byte)0, expected[2].Width);
+        Assert.True(screen.TryGetHyperlinkUrl(expected[0].HyperlinkId, out string? expectedLink));
+
+        processor.Process("\u001b]8;;\u001b\\\u001b[0m\r\nline2\r\nline3"u8);
+        Assert.True(processor.TryCreateScreenSnapshot(0, 1, 0, out TerminalScreen snapshot));
+
+        Assert.True(snapshot.GetRow(0).WrapsToNext);
+        Assert.True(snapshot.GetRow(0).IsDirty);
+        Assert.Equal(expected, snapshot.GetRow(0).ReadOnlyCells.ToArray());
+        Assert.True(snapshot.TryGetHyperlinkUrl(snapshot.GetRow(0)[0].HyperlinkId, out string? actualLink));
+        Assert.Equal(expectedLink, actualLink);
+        Assert.Equal(0xFF0A141Eu, snapshot.GetRow(0)[0].Foreground);
+        Assert.Equal(0xFF28323Cu, snapshot.GetRow(0)[0].Background);
+        Assert.Equal(0xFF46505Au, snapshot.GetRow(0)[0].UnderlineColor);
+        Assert.Equal(TerminalUnderlineStyle.Curly, snapshot.GetRow(0)[0].UnderlineStyle);
+        Assert.Equal(CellDecorations.Overline, snapshot.GetRow(0)[0].Decorations);
+    }
+
+    [Theory]
+    [InlineData("48;2;4;5;6", 0xFF040506u)]
+    [InlineData("48;5;196", 0xFFFF0000u)]
+    public void GhosttyVtProcessor_ScreenSnapshotPreservesErasedCellBackgrounds_WhenAvailable(string sgr, uint expected)
+    {
+        if (!GhosttyVtProcessor.IsAvailable()) return;
+        TerminalScreen screen = new(columns: 8, viewportRows: 3, scrollbackLimit: 20);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.Process(Encoding.ASCII.GetBytes($"\u001b[{sgr}m\u001b[2K"));
+        Assert.True(processor.TryCreateScreenSnapshot(0, 1, 0, out TerminalScreen snapshot));
+        for (int column = 0; column < 8; column++)
+        {
+            Assert.Equal(expected, snapshot.GetRow(0)[column].Background);
+            Assert.True(snapshot.GetRow(0)[column].HasBackground);
+            Assert.Equal(screen.GetViewportRow(0)[column], snapshot.GetRow(0)[column]);
+        }
+    }
+
+    [Theory]
+    [InlineData("F21", 57384)]
+    [InlineData("F22", 57385)]
+    [InlineData("F23", 57386)]
+    [InlineData("F24", 57387)]
+    [InlineData("F25", 57388)]
+    [InlineData("PrintScreen", 57361)]
+    [InlineData("Scroll", 57359)]
+    [InlineData("ScrollLock", 57359)]
+    [InlineData("Pause", 57362)]
+    public void GhosttyVtProcessor_EncodesExtendedKittyKeyIdentities_WhenAvailable(string keyId, int codepoint)
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 20, viewportRows: 3, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.Process("\u001b[>1u"u8);
+
+        // Ghostty's input/kitty.zig functional-key table is the native reference;
+        // these identities previously fell through the managed bridge as unknown.
+        TerminalKeyEncodingRequest request = new(keyId, TerminalInputAction.Press, null, TerminalModifiers.None);
+        Assert.True(processor.TryEncodeKey(request, out byte[] sequence));
+        Assert.Equal($"\u001b[{codepoint}u", Encoding.ASCII.GetString(sequence));
+    }
+
+    [Fact]
     public void GhosttyVtProcessor_AnswersClipboardReads_WhenAvailable()
     {
         if (!GhosttyVtProcessor.IsAvailable())
@@ -60,6 +135,131 @@ public class GhosttyVtProcessorTests
 
         processor.Process("\u001b[?2026l"u8);
         Assert.Contains("before-hidden", ReadViewportAscii(screen), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_PublishesCompletedPrefixBeforeRenderHoldInSameWrite_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 20, viewportRows: 3, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+
+        // Ghostty's render-hold callback captures the frame at the mode boundary,
+        // including text preceding that boundary in this same PTY write.
+        processor.Process("complete\u001b[?2026h-hidden"u8);
+
+        Assert.StartsWith("complete", ReadViewportAscii(screen), StringComparison.Ordinal);
+        Assert.DoesNotContain("hidden", ReadViewportAscii(screen), StringComparison.Ordinal);
+
+        processor.Process("\u001b[?2026l"u8);
+        Assert.Contains("complete-hidden", ReadViewportAscii(screen), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_ExpiresRenderHoldWithoutFurtherPtyInput_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        TestTimeProvider clock = new();
+        TerminalScreen screen = new(columns: 20, viewportRows: 3, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen, clock);
+        processor.Process("before\u001b[?2026h-after"u8);
+        Assert.Equal(TimeSpan.FromSeconds(1), processor.NextTimedRefreshDelay);
+
+        clock.Advance(TimeSpan.FromMilliseconds(999));
+        Assert.False(processor.RefreshTimedState());
+        Assert.DoesNotContain("after", ReadViewportAscii(screen), StringComparison.Ordinal);
+
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.True(processor.RefreshTimedState());
+        Assert.Contains("before-after", ReadViewportAscii(screen), StringComparison.Ordinal);
+        Assert.Null(processor.NextTimedRefreshDelay);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_AdvancesKittyAnimationWithoutFurtherPtyInput_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable() || !GhosttyVtHelpers.GetBuildFeatures().KittyGraphics)
+        {
+            return;
+        }
+
+        TestTimeProvider clock = new();
+        TerminalScreen screen = new(columns: 20, viewportRows: 3, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen, clock);
+        processor.NotifyResize(20, 3, 160, 48);
+        processor.Process("\u001b_Ga=T,f=32,i=1,s=1,v=1;/wAA/w==\u001b\\"u8);
+        processor.Process("\u001b_Ga=f,f=32,i=1,s=1,v=1,z=40;AAD//w==\u001b\\"u8);
+        processor.Process("\u001b_Ga=a,i=1,r=1,z=40,s=3\u001b\\"u8);
+        Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? red));
+        Assert.Equal(new byte[] { 255, 0, 0, 255 }, red!.RgbaPixels);
+        Assert.Equal(TimeSpan.FromMilliseconds(40), processor.NextTimedRefreshDelay);
+
+        clock.Advance(TimeSpan.FromMilliseconds(39));
+        Assert.False(processor.RefreshTimedState());
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.True(processor.RefreshTimedState());
+        Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? blue));
+        Assert.Equal(new byte[] { 0, 0, 255, 255 }, blue!.RgbaPixels);
+
+        clock.Advance(TimeSpan.FromMilliseconds(40));
+        Assert.True(processor.RefreshTimedState());
+        Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? redAgain));
+        Assert.Equal(red.RgbaPixels, redAgain!.RgbaPixels);
+
+        processor.Process("\u001b_Ga=a,i=1,s=1\u001b\\"u8);
+        Assert.Null(processor.NextTimedRefreshDelay);
+    }
+
+    [Fact]
+    public void GhosttyVtProcessor_ReusesKittyPayloadUntilItsGenerationChanges_WhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable() || !GhosttyVtHelpers.GetBuildFeatures().KittyGraphics)
+        {
+            return;
+        }
+
+        TerminalScreen screen = new(columns: 20, viewportRows: 3, scrollbackLimit: 100);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.NotifyResize(20, 3, 160, 48);
+        processor.Process("\u001b_Ga=T,t=d,f=32,i=1,p=1,s=1,v=1;/////w==\u001b\\"u8);
+        Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? original));
+
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            screen.GetViewportRow(row).IsDirty = false;
+        }
+
+        processor.Process("text"u8);
+        Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? afterText));
+        Assert.Same(original, afterText);
+        Assert.True(screen.GetViewportRow(0).IsDirty);
+        Assert.False(screen.GetViewportRow(1).IsDirty);
+        Assert.False(screen.GetViewportRow(2).IsDirty);
+
+        for (int row = 0; row < screen.ViewportRows; row++)
+        {
+            screen.GetViewportRow(row).IsDirty = false;
+        }
+
+        processor.Process("\u001b[5n"u8);
+        Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? afterQuery));
+        Assert.Same(original, afterQuery);
+        Assert.False(screen.GetViewportRow(0).IsDirty);
+
+        // The ID, dimensions and byte length stay identical. Only the native
+        // image generation reliably detects the replacement pixel payload.
+        processor.Process("\u001b_Ga=T,t=d,f=32,i=1,p=1,s=1,v=1;AAAA/w==\u001b\\"u8);
+        Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? replacement));
+        Assert.NotSame(original, replacement);
+        Assert.Equal(new byte[] { 0, 0, 0, 255 }, replacement!.RgbaPixels);
     }
 
     [Fact]
@@ -615,7 +815,7 @@ public class GhosttyVtProcessorTests
         processor.NotifyResize(columns: 8, rows: 4, widthPx: 64, heightPx: 64);
 
         processor.Process(
-            "\u001b[?1;6;66;67;1004;1006;1016;1049;2004;2026;2031;2048h"u8);
+            "\u001b[?1;6;66;67;1004;1006;1016;1049;2004;2026;2031;2033;2048;5522h"u8);
         processor.Process("\u001b[?25l\u001b[4h\u001b[20h\u001b[>3u\u001b[2;3r\u001b[3;4HOLD\u001b[?2026l"u8);
 
         Assert.True(processor.ApplicationCursorKeys);
@@ -638,6 +838,13 @@ public class GhosttyVtProcessorTests
         Assert.Equal(0, processor.CursorCol);
         Assert.Equal(0, processor.CursorRow);
         Assert.True(string.IsNullOrWhiteSpace(ReadViewportAscii(screen)));
+
+        List<byte[]> reports = [];
+        processor.ResponseCallback = reports.Add;
+        processor.Process("\u001b[?2033$p\u001b[?5522$p"u8);
+        Assert.Equal(
+            "\u001b[?2033;2$y\u001b[?5522;2$y",
+            Encoding.ASCII.GetString(reports.SelectMany(report => report).ToArray()));
     }
 
     [Fact]
@@ -1364,5 +1571,16 @@ public class GhosttyVtProcessorTests
             row[col].Codepoint = text[col];
             row[col].Width = 1;
         }
+    }
+
+    private sealed class TestTimeProvider : TimeProvider
+    {
+        private long _timestamp;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => _timestamp;
+
+        public void Advance(TimeSpan duration) => _timestamp += duration.Ticks;
     }
 }

@@ -649,7 +649,7 @@ public class TerminalQueryTests
         string? title = null;
         processor.TitleCallback = value => title = value;
 
-        string largePayload = "2;" + new string('A', 5000);
+        string largePayload = "2;" + new string('A', 8 * 1024 * 1024);
         processor.Process(System.Text.Encoding.ASCII.GetBytes($"\x1b]{largePayload}\x1b\\"));
 
         Assert.Null(title);
@@ -1423,6 +1423,7 @@ public class TerminalQueryTests
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(familyEmoji));
 
         TerminalRow row = screen.GetViewportRow(0);
@@ -1443,6 +1444,7 @@ public class TerminalQueryTests
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(coupleWithHeart));
 
         TerminalRow row = screen.GetViewportRow(0);
@@ -1462,6 +1464,7 @@ public class TerminalQueryTests
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(canadaFlag));
 
         TerminalRow row = screen.GetViewportRow(0);
@@ -1482,6 +1485,7 @@ public class TerminalQueryTests
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(triplet));
 
         TerminalRow row = screen.GetViewportRow(0);
@@ -1504,6 +1508,7 @@ public class TerminalQueryTests
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(keycap));
 
         TerminalRow row = screen.GetViewportRow(0);
@@ -1516,19 +1521,20 @@ public class TerminalQueryTests
     }
 
     [Fact]
-    public void BasicVtProcessor_TextPresentationSelector_KeepsSymbolSingleWidth()
+    public void BasicVtProcessor_InvalidTextPresentationSelector_IsNotStored()
     {
         const string sliderThumb = "\U0001F837\uFE0E";
 
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(sliderThumb + "-"));
 
         TerminalRow row = screen.GetViewportRow(0);
         Assert.Equal(2, processor.CursorCol);
         Assert.Equal(0x1F837, row[0].Codepoint);
-        Assert.Equal(sliderThumb, row[0].Grapheme);
+        Assert.Null(row[0].Grapheme);
         Assert.Equal(1, row[0].Width);
         Assert.Equal('-', row[1].Codepoint);
         Assert.Equal(1, row[1].Width);

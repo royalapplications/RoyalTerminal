@@ -32,7 +32,8 @@ public sealed class TerminalFontResolver : IDisposable
     private const int TagEnd = 0xE007F;
     private static readonly string[] s_emojiOnlyLanguageTags = ["und-Zsye"];
 
-    private readonly SKFontManager _fontManager;
+    private readonly SKFontManager? _fontManager;
+    private readonly ITerminalFontMatcher _fontMatcher;
     private readonly bool _ownsFontManager;
     private readonly Dictionary<FontFallbackCacheKey, FontFallbackCacheEntry> _fallbackCache = new();
     private readonly Dictionary<nint, SKFont> _containsGlyphFontCache = new();
@@ -53,10 +54,18 @@ public sealed class TerminalFontResolver : IDisposable
         }
     }
 
+    /// <summary>Creates a resolver using the supplied, caller-owned font manager or an owned default manager.</summary>
     public TerminalFontResolver(SKFontManager? fontManager = null)
     {
         _fontManager = fontManager ?? SKFontManager.CreateDefault();
         _ownsFontManager = fontManager is null;
+        _fontMatcher = new SkiaTerminalFontMatcher(_fontManager);
+    }
+
+    internal TerminalFontResolver(ITerminalFontMatcher fontMatcher)
+    {
+        ArgumentNullException.ThrowIfNull(fontMatcher);
+        _fontMatcher = fontMatcher;
     }
 
     /// <summary>
@@ -101,12 +110,41 @@ public sealed class TerminalFontResolver : IDisposable
         bool preferEmojiPresentation =
             ShouldPreferEmojiPresentation(text, firstRune.Value);
 
-        if (!preferEmojiPresentation && charsConsumed == text.Length)
+        TerminalFontResolution primary = ResolveTypefaceCore(
+            primaryTypeface, firstRune.Value, culture, preferEmojiPresentation);
+        if (charsConsumed == text.Length || ContainsGrapheme(primary.Typeface, text))
         {
-            return ResolveTypefaceCore(primaryTypeface, firstRune.Value, culture, preferEmojiPresentation: false);
+            return primary;
         }
 
-        return ResolveTypefaceCore(primaryTypeface, firstRune.Value, culture, preferEmojiPresentation);
+        // Ghostty's run iterator discovers candidates lazily: first the base
+        // character's font, then each substantive component's font. The cache
+        // stores candidates per codepoint, never the final cluster decision.
+        // Rechecking the complete span avoids first-rune cache collisions
+        // without allocating a string key or a temporary candidate collection.
+        ReadOnlySpan<char> remaining = text[charsConsumed..];
+        while (!remaining.IsEmpty &&
+               Rune.DecodeFromUtf16(remaining, out Rune component, out int consumed) == OperationStatus.Done)
+        {
+            remaining = remaining[consumed..];
+            if (IsGraphemePresentationControl(component.Value))
+            {
+                continue;
+            }
+
+            // Additional components do not inherit the base's presentation:
+            // emoji fonts may cover a component only in text presentation.
+            TerminalFontResolution candidate = ResolveTypefaceCore(
+                primaryTypeface, component.Value, culture, preferEmojiPresentation: false);
+            if (candidate.Typeface.Handle != primary.Typeface.Handle && ContainsGrapheme(candidate.Typeface, text))
+            {
+                return candidate;
+            }
+        }
+
+        // Preserve this API's non-null best-effort fallback when no single
+        // available font covers the cluster; missing components remain .notdef.
+        return primary;
     }
 
     /// <summary>
@@ -235,7 +273,7 @@ public sealed class TerminalFontResolver : IDisposable
 
         if (_ownsFontManager)
         {
-            _fontManager.Dispose();
+            _fontManager?.Dispose();
         }
     }
 
@@ -251,7 +289,7 @@ public sealed class TerminalFontResolver : IDisposable
             : string.IsNullOrWhiteSpace(primaryTypeface.FamilyName)
                 ? null
                 : primaryTypeface.FamilyName;
-        SKTypeface? fallbackTypeface = _fontManager.MatchCharacter(
+        SKTypeface? fallbackTypeface = _fontMatcher.MatchCharacter(
             familyName,
             primaryTypeface.FontStyle,
             languageTags,
@@ -287,6 +325,30 @@ public sealed class TerminalFontResolver : IDisposable
         SKFont font = GetContainsGlyphFont(typeface);
         return font.ContainsGlyph(codepoint);
     }
+
+    private bool ContainsGrapheme(SKTypeface typeface, ReadOnlySpan<char> text)
+    {
+        SKFont font = GetContainsGlyphFont(typeface);
+        while (!text.IsEmpty)
+        {
+            if (Rune.DecodeFromUtf16(text, out Rune rune, out int consumed) != OperationStatus.Done)
+            {
+                return false;
+            }
+
+            if (!IsGraphemePresentationControl(rune.Value) && !font.ContainsGlyph(rune.Value))
+            {
+                return false;
+            }
+
+            text = text[consumed..];
+        }
+
+        return true;
+    }
+
+    private static bool IsGraphemePresentationControl(int codepoint)
+        => codepoint is VariationSelector15 or VariationSelector16 or 0x200D;
 
     private SKFont GetContainsGlyphFont(SKTypeface typeface)
     {

@@ -185,7 +185,7 @@ public static class GhosttyPaste
         {
             PasteContext? context = GCHandle.FromIntPtr(userdata).Target as PasteContext;
             if (context is null || writer.Write == nint.Zero ||
-                !context.Representations.TryGetValue(mime.ToUtf8String(), out byte[]? data))
+                !context.Representations.TryGetValue(mime.ToUtf8String(), out ReadOnlyMemory<byte> data))
             {
                 return 0;
             }
@@ -195,7 +195,7 @@ public static class GhosttyPaste
                 return 1;
             }
 
-            fixed (byte* pointer = data)
+            fixed (byte* pointer = data.Span)
             {
                 delegate* unmanaged[Cdecl]<nint, byte*, nuint, byte> write =
                     (delegate* unmanaged[Cdecl]<nint, byte*, nuint, byte>)writer.Write;
@@ -213,18 +213,18 @@ public static class GhosttyPaste
     {
         public PasteContext(IReadOnlyDictionary<string, ReadOnlyMemory<byte>> representations)
         {
-            Representations = new Dictionary<string, byte[]>(representations.Count, StringComparer.OrdinalIgnoreCase);
+            Representations = new Dictionary<string, ReadOnlyMemory<byte>>(representations.Count, StringComparer.OrdinalIgnoreCase);
             MimeBytes = new byte[representations.Count][];
             int index = 0;
             foreach ((string mime, ReadOnlyMemory<byte> data) in representations)
             {
                 ArgumentException.ThrowIfNullOrWhiteSpace(mime);
-                Representations.Add(mime, data.ToArray());
+                Representations.Add(mime, data);
                 MimeBytes[index++] = Encoding.UTF8.GetBytes(mime);
             }
         }
 
-        public Dictionary<string, byte[]> Representations { get; }
+        public Dictionary<string, ReadOnlyMemory<byte>> Representations { get; }
 
         public byte[][] MimeBytes { get; }
     }

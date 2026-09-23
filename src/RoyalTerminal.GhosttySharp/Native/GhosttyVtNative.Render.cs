@@ -157,7 +157,7 @@ public static partial class GhosttyVtNative
         [MarshalAs(UnmanagedType.U1)]
         public bool CursorHasValue;
 
-        private fixed byte _palette[256 * 3];
+        internal fixed byte _palette[256 * 3];
 
         public static GhosttyRenderStateColors CreateSized()
         {

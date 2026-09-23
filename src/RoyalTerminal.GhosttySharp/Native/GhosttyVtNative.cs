@@ -341,6 +341,76 @@ public static partial class GhosttyVtNative
         F19,
         /// <summary><c>F20</c> enum value.</summary>
         F20,
+        /// <summary><c>F21</c> enum value.</summary>
+        F21,
+        /// <summary><c>F22</c> enum value.</summary>
+        F22,
+        /// <summary><c>F23</c> enum value.</summary>
+        F23,
+        /// <summary><c>F24</c> enum value.</summary>
+        F24,
+        /// <summary><c>F25</c> enum value.</summary>
+        F25,
+        /// <summary>Function modifier key.</summary>
+        Fn,
+        /// <summary>Function modifier lock key.</summary>
+        FnLock,
+        /// <summary>Print screen key.</summary>
+        PrintScreen,
+        /// <summary>Scroll lock key.</summary>
+        ScrollLock,
+        /// <summary>Pause key.</summary>
+        Pause,
+        /// <summary>Browser back key.</summary>
+        BrowserBack,
+        /// <summary>Browser favorites key.</summary>
+        BrowserFavorites,
+        /// <summary>Browser forward key.</summary>
+        BrowserForward,
+        /// <summary>Browser home key.</summary>
+        BrowserHome,
+        /// <summary>Browser refresh key.</summary>
+        BrowserRefresh,
+        /// <summary>Browser search key.</summary>
+        BrowserSearch,
+        /// <summary>Browser stop key.</summary>
+        BrowserStop,
+        /// <summary>Media eject key.</summary>
+        Eject,
+        /// <summary>Application launcher key 1.</summary>
+        LaunchApp1,
+        /// <summary>Application launcher key 2.</summary>
+        LaunchApp2,
+        /// <summary>Mail launcher key.</summary>
+        LaunchMail,
+        /// <summary>Media play/pause key.</summary>
+        MediaPlayPause,
+        /// <summary>Media selector key.</summary>
+        MediaSelect,
+        /// <summary>Media stop key.</summary>
+        MediaStop,
+        /// <summary>Next media track key.</summary>
+        MediaTrackNext,
+        /// <summary>Previous media track key.</summary>
+        MediaTrackPrevious,
+        /// <summary>Power key.</summary>
+        Power,
+        /// <summary>Sleep key.</summary>
+        Sleep,
+        /// <summary>Volume down key.</summary>
+        AudioVolumeDown,
+        /// <summary>Mute key.</summary>
+        AudioVolumeMute,
+        /// <summary>Volume up key.</summary>
+        AudioVolumeUp,
+        /// <summary>Wake key.</summary>
+        WakeUp,
+        /// <summary>Copy key.</summary>
+        Copy,
+        /// <summary>Cut key.</summary>
+        Cut,
+        /// <summary>Paste key.</summary>
+        Paste,
     }
 
     // ──────────────────────────── Mods ───────────────────────────────
@@ -363,6 +433,14 @@ public static partial class GhosttyVtNative
         CapsLock = 1 << 4,
         /// <summary><c>NumLock</c> enum value.</summary>
         NumLock = 1 << 5,
+        /// <summary>The active shift modifier is on the right side.</summary>
+        ShiftSide = 1 << 6,
+        /// <summary>The active control modifier is on the right side.</summary>
+        CtrlSide = 1 << 7,
+        /// <summary>The active alt modifier is on the right side.</summary>
+        AltSide = 1 << 8,
+        /// <summary>The active super modifier is on the right side.</summary>
+        SuperSide = 1 << 9,
     }
 
     // ──────────────────────────── OSC ────────────────────────────────
@@ -394,6 +472,36 @@ public static partial class GhosttyVtNative
         HyperlinkStart = 10,
         /// <summary><c>HyperlinkEnd</c> enum value.</summary>
         HyperlinkEnd = 11,
+        /// <summary>ConEmu sleep request.</summary>
+        ConEmuSleep = 12,
+        /// <summary>ConEmu message-box request.</summary>
+        ConEmuShowMessageBox = 13,
+        /// <summary>ConEmu tab-title request.</summary>
+        ConEmuChangeTabTitle = 14,
+        /// <summary>ConEmu progress report.</summary>
+        ConEmuProgressReport = 15,
+        /// <summary>ConEmu input-wait request.</summary>
+        ConEmuWaitInput = 16,
+        /// <summary>ConEmu GUI macro request.</summary>
+        ConEmuGuiMacro = 17,
+        /// <summary>ConEmu process-start request.</summary>
+        ConEmuRunProcess = 18,
+        /// <summary>ConEmu environment-output request.</summary>
+        ConEmuOutputEnvironmentVariable = 19,
+        /// <summary>ConEmu xterm-emulation request.</summary>
+        ConEmuXtermEmulation = 20,
+        /// <summary>ConEmu comment.</summary>
+        ConEmuComment = 21,
+        /// <summary>Kitty text-sizing command.</summary>
+        KittyTextSizing = 22,
+        /// <summary>Kitty clipboard protocol command.</summary>
+        KittyClipboardProtocol = 23,
+        /// <summary>Kitty drag-and-drop protocol command.</summary>
+        KittyDragAndDropProtocol = 24,
+        /// <summary>OSC 3008 context signal.</summary>
+        ContextSignal = 25,
+        /// <summary>Kitty desktop-notification command.</summary>
+        KittyDesktopNotification = 26,
     }
 
     /// <summary>Data selector when reading typed OSC command data.</summary>

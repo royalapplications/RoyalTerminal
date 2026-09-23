@@ -35,6 +35,43 @@ public sealed record BasicVtProcessorOptions
     /// </summary>
     public string? TerminfoName { get; init; } = "xterm-ghostty";
 
+    /// <summary>
+    /// Gets the maximum decoded bytes accumulated by one Kitty clipboard write.
+    /// The 64 MiB default matches Ghostty. Zero permits only empty writes.
+    /// </summary>
+    public int ClipboardWriteLimitBytes { get; init; } = 64 * 1024 * 1024;
+
+    /// <summary>Maximum encoded Kitty graphics bytes in one APC command.</summary>
+    public int KittyGraphicsMaxApcBytes { get; init; } = 64 * 1024 * 1024;
+
+    /// <summary>Maximum bytes in one loaded or decompressed Kitty image.</summary>
+    public int KittyGraphicsMaxImageBytes { get; init; } = 400 * 1024 * 1024;
+
+    /// <summary>Maximum retained Kitty image and animation storage per screen.</summary>
+    public int KittyGraphicsStorageLimitBytes { get; init; } = 32 * 1024 * 1024;
+
+    /// <summary>
+    /// Maximum retained unfinished VT/UTF-8 fragment for continuation export.
+    /// Zero disables retention; processing continues even when this bound is exceeded.
+    /// </summary>
+    public int ContinuationMaxBytes { get; init; } = 64 * 1024;
+
+    /// <summary>Gets the monotonic clock used to expire synchronized-output holds.</summary>
+    public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    /// Gets the optional PNG decoder for Kitty graphics. Framework-independent callers
+    /// inject an imaging provider; the Avalonia defaults provide the Skia implementation.
+    /// Null supports raw RGB/RGBA images but rejects PNG images.
+    /// </summary>
+    public IKittyGraphicsPngDecoder? KittyGraphicsPngDecoder { get; init; }
+
+    /// <summary>
+    /// Gets optional host capabilities for Kitty file, temporary-file, and shared-memory
+    /// payloads. Null permits direct transmission only; hosts inject their explicit policy.
+    /// </summary>
+    public IKittyGraphicsMediumReader? KittyGraphicsMediumReader { get; init; }
+
     /// <summary>Gets resource limits and compatibility settings for sixel decoding.</summary>
     public SixelDecoderOptions SixelDecoderOptions { get; init; } = SixelDecoderOptions.Default;
 }

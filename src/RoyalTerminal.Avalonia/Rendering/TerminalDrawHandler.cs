@@ -140,7 +140,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             SKColor background = default;
             GRContext? grContext = lease.GrContext;
 
-            lock (screen.SyncRoot)
+            using (screen.Synchronization.AcquireDemand())
             {
                 background = new SKColor(screen.DefaultBackground);
                 if (!EnsureTerminalSurface(width, height, renderScale, grContext))

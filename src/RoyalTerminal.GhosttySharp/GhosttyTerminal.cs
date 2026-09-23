@@ -1285,7 +1285,10 @@ public sealed class GhosttyTerminal : IDisposable
             return false;
         }
 
-        ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        }
         color = value;
         return true;
     }
@@ -1301,7 +1304,10 @@ public sealed class GhosttyTerminal : IDisposable
             return false;
         }
 
-        ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        }
         value = copy;
         return true;
     }
@@ -1343,7 +1349,10 @@ public sealed class GhosttyTerminal : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         T value = default;
         GhosttyVtNative.GhosttyResult result = GhosttyVtNative.TerminalGet(_handle, data, &value);
-        ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        }
         return value;
     }
 
