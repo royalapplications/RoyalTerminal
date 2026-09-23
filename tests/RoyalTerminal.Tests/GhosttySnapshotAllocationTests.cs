@@ -124,4 +124,39 @@ public sealed class GhosttySnapshotAllocationTests(ITestOutputHelper output)
             if (tag == GhosttySnapshotRecordTag.Finish) return records;
         }
     }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(80)]
+    [InlineData(132)]
+    [InlineData(1000)]
+    [InlineData(32768)]
+    public void ZeroLineLimitAllowsExactlyOneAdjustedStandardPage(int columns)
+    {
+        if (!GhosttyVtProcessor.IsAvailable()) return;
+        GhosttySnapshotAllocation allocation = new(OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 16384 : 4096);
+        TerminalScreen screen = new(columns, 2);
+        using BasicVtProcessor processor = new(screen);
+        int minimum = allocation.InitialRows(columns);
+        foreach (int count in new[] { minimum - 1, minimum, minimum + 1 })
+        {
+            if (count == 0) continue;
+            List<SnapshotTestRecord> records = ReadRecords(processor.GetBinarySnapshot());
+            BinaryPrimitives.WriteUInt64LittleEndian(records[0].Payload.AsSpan(87), ulong.MaxValue);
+            BinaryPrimitives.WriteUInt64LittleEndian(records[0].Payload.AsSpan(95), 0);
+            TerminalRow[] rows = new TerminalRow[count];
+            for (int i = 0; i < rows.Length; i++) rows[i] = new(columns);
+            GhosttySnapshotPage history = GhosttySnapshotLivePage.Capture(rows, screen, 4_000_000);
+            using MemoryStream payload = new();
+            history.WritePayloadTo(payload);
+            int index = records.FindIndex(static record => record.Tag == GhosttySnapshotRecordTag.History);
+            BinaryPrimitives.WriteUInt32LittleEndian(records[index].Payload.AsSpan(2), 1);
+            records.Insert(index + 1, new(GhosttySnapshotRecordTag.Page, payload.ToArray()));
+            using GhosttySnapshotDecoder decoder = new(SnapshotTestRecords.Encode(records));
+            using GhosttyTerminal native = decoder.Ready();
+            Assert.True(decoder.Next());
+            Assert.Equal(count <= minimum ? (nuint)count : 0, decoder.GetProgressRows());
+            Assert.False(decoder.Next());
+        }
+    }
 }
