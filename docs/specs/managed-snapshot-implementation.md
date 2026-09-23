@@ -17,6 +17,13 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
   backgrounds to effective style backgrounds (Ghostty `Style.bg` precedence), so
   live round trips are semantic, not byte-identical. Decode requires an unpublished
   hyperlink owner; this is not yet an atomic READY-state installation API.
+  Capture derives nonzero native allocation capacities: fixed-capacity Ghostty
+  decoding otherwise silently drops styles, links or grapheme suffixes. Budgets
+  include hash-set headroom, linked-cell map entries, aligned strings and temporary
+  old/new grapheme storage. Pages exceeding the wire capacity fields must be split
+  by the future screen encoder. Managed payload readers still ignore untrusted
+  allocation hints. The 121-test snapshot suite passes with native available,
+  including 128 dense history rows with 64-scalar suffixes and 200-byte URIs.
 
 - The 10-byte envelope and 10-byte tag/length/CRC32C record header, including
   rejection of unknown tags, oversize payloads and non-empty checkpoints.

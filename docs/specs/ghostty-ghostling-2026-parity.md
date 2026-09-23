@@ -915,6 +915,42 @@ and cursor state. The containing terminal/screen/history records are passed
 through in this test: this is evidence for PAGE interoperability, **not** proof
 that BasicVtProcessor can yet restore the full binary snapshot.
 
+The live PAGE bridge now converts these records directly to/from `TerminalRow`
+and `TerminalCell`, without parser replay. It retains physical page widths,
+independent wide-tail styles, wrap/protection/prompt flags, full grapheme text,
+unresolved color identities and original hyperlink bytes/IDs. Per-page style/link
+lookup caches avoid repeated identity construction. Small graphemes use stack
+scratch space; large UTF-16 conversions rent a buffer. Repeated PAGE emission
+remains allocation-free; live capture/decode themselves allocate owned state.
+
+Reference decisions: Ghostty's `Style.bg` gives inline background content priority
+over the style background, including RGB black. Live capture writes the effective
+background into the style table, preserving semantics rather than original IDs or
+bytes. Windows Terminal's text-buffer serialization and xterm.js SerializeAddon
+produce text/VT, not the native GHOSTSNP contract, so they cannot substitute for
+this conversion. Ghostty `Page.exactRowCapacity`, `RefCountedSet.capacityForCount`
+and snapshot grid suffix decoding define the generated allocation budgets. Native
+decoding uses the hints as fixed capacities: zero hints initially lost styles and
+graphemes in differential tests. Capture now includes hash-set load-factor space,
+linked-cell map capacity, 32-byte string chunks and 16-byte grapheme chunks with
+growth headroom. Overflow requests a PAGE split instead of emitting lossy output.
+
+All **121 focused snapshot tests pass** in `live-page-focused.trx` on macOS arm64
+with native available. Added cases cover malformed live metadata/UTF-16, cell
+budgets, raw invalid-UTF-8 link identities, ID collisions, independently styled
+wide tails, inline RGB/palette backgrounds, pooled large-grapheme conversion,
+zero-allocation re-emission and hyperlink-capacity overflow. Native differential
+tests include both screens and subsequent input, plus 128 dense history rows with
+64-scalar grapheme suffixes, indexed foreground/RGB background/curly underline and
+200-byte hyperlink URIs. Non-PAGE records are still passed through; full READY
+installation, mixed-width live integration and incremental-history reconciliation
+remain open. Native's 64-suffix runtime cap is separate from the larger wire-codec
+limit; pooled conversion testing does not assert that native retains larger clusters.
+The complete Release unit/headless suite subsequently passed **2,459 tests,
+16 conditional skips, zero failures (2,475 total)** in `live-page-full.trx`.
+All six native-build CI jobs for `707289d` were still running at inspection;
+this local result does not establish fresh cross-platform runtime coverage.
+
 `GhosttySnapshotTerminalHeader` and `GhosttySnapshotTerminalState` now decode and
 re-encode the complete TERMINAL payload: geometry/pixel dimensions, per-axis
 margins, routing, previous codepoint, cursor/mouse/input policies, all three
