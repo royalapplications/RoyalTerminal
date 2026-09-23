@@ -23,9 +23,23 @@ behavior is to never override the owning encoder's no-output result.
 
 ABI guards, all tracking/format snapshot combinations, all 64 ordered mode pairs,
 live hold/session-reset behavior, and headless routing/pixel tests are added.
-Post-push native rebuild and validation are pending. This does not yet close
-mouse-shift policy, encoder lifetime/deduplication, keyboard flags or the broader
-snapshot/orchestration/performance requirements.
+The post-push native rebuild succeeds with Zig 0.16; **129 focused tests pass**
+with native available on macOS arm64. Initial validation exposed a signed Zig
+enum conversion and a second press/release path that bypassed the reporting-off
+gate; both are corrected. Full post-push Release validation through `a1427a7`:
+**3,417 unit/headless + 231 integration tests passed, 16 conditional skips, zero
+failures** (`mouse-authority-full.trx`). The complete solution builds with zero
+warnings/errors. All **32 new cases** pass. The native state copy has a
+zero-allocation warm-loop regression; no throughput gain is claimed. Other RID
+runtime sign-off is still a separate gate.
+
+This does not yet close mouse-shift policy, encoder lifetime/deduplication,
+keyboard flags or broader snapshot/orchestration/performance requirements.
+Follow-up source evidence: native `setopt_from_terminal` and size setters reset
+last-cell tracking, and the adapter invokes them for every pointer event. Native
+pixel reporting uses rounded terminal-space coordinates (not clamped one-based
+cells); managed pointer normalization currently differs. These are outstanding
+encoder issues, not covered by the state-source/routing completion claim.
 
 ### Raw metadata and active status display (2026-09-23)
 
