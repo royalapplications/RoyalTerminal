@@ -29,8 +29,27 @@ It allocates no intermediate buffers; the callback allocates the exact final byt
 array. The default sixteen-bit path stays a direct copy. This is an explicit
 host policy applied above libghostty-vt, not a change to the native core ABI.
 
-Implementation and regression tests are pushed before validation as requested.
-Full snapshot orchestration and the broader renderer/IO/platform gates remain open.
+Post-push Release validation through `1c3d0fd`: **317 focused tests** pass with
+native available, including **153 new cases**. The complete unit/headless suite
+passes **2,975 tests, 16 conditional skips, zero failures (2,991 total)**
+(`legacy-colors-full.trx`). Native core and adapter differentials ran on macOS
+arm64. The native report formatter has a warm zero-allocation regression test.
+
+A separate 80x24 managed palette benchmark performs 10,000 warmup updates and
+seven samples of 10,000 OSC 4 batches (three RGB palette entries per batch).
+Sequential Release measurements against the saved preceding binary produced
+**42.768→41.739 ms** and **31,760,000→28,240,000 allocated bytes**. Removing
+per-token strings/arrays and redundant selector decoding saves 352 bytes per
+batch on this workload; the small timing change is not a broad throughput claim.
+The binary hashes were verified before timing: preceding managed assembly
+`81053658…`, current `9fa5d453…`. An initial attempted after run selected a stale
+MSBuild candidate DLL and was discarded; explicit hint-path resolution corrected
+the harness. No performance claim uses that stale result.
+
+At CI inspection, the native macOS arm64 build for the implementation had passed;
+the other native builds were queued/running. The preceding `f93439a` run was
+cancelled by later pushes, not a completed platform validation. Full snapshot
+orchestration and the broader renderer/IO/platform gates remain open.
 
 ### Kitty color protocol and shared VT color parsing (2026-09-23)
 
