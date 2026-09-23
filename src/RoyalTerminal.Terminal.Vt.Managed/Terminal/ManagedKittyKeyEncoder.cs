@@ -130,7 +130,7 @@ internal static class ManagedKittyKeyEncoder
 
     private static bool IsControl(int value) => value < 32 || value == 127;
 
-    private static int PhysicalCodepoint(string? key)
+    internal static int PhysicalCodepoint(string? key)
     {
         if (key is { Length: 1 } && key[0] is >= 'A' and <= 'Z') return key[0] + 32;
         if (key is { Length: 2 } && key[0] == 'D' && key[1] is >= '0' and <= '9') return key[1];

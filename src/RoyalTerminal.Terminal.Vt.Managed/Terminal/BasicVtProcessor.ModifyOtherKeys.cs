@@ -17,8 +17,9 @@ public sealed partial class BasicVtProcessor
             request.UnshiftedCodepoint != 0 && !System.Text.Rune.IsValid(request.UnshiftedCodepoint)) return false;
         // Kitty takes precedence over the legacy extension.
         if (KittyKeyboardFlags != 0) return ManagedKittyKeyEncoder.TryEncode(request, KittyKeyboardFlags, out sequence);
-        return ModifyOtherKeys2 &&
-            ManagedModifyOtherKeysEncoder.TryEncode(request, _backarrowKeyMode, out sequence);
+        return ManagedLegacyKeyEncoder.TryEncode(request, ApplicationCursorKeys, ApplicationKeypad,
+            _extendedDecModesEnabled.Contains(1035), _extendedDecModesEnabled.Contains(1036),
+            _backarrowKeyMode, ModifyOtherKeys2, out sequence);
     }
 
     private void SetModifyKeyFormat(char finalByte)
