@@ -53,6 +53,8 @@ public sealed class GhosttySnapshotAllocationTests(ITestOutputHelper output)
     [InlineData(1000000U, 0U, (ushort)0, (ushort)0)]
     [InlineData(0U, 1000000U, (ushort)0, (ushort)0)]
     [InlineData(1U, 33U, (ushort)65535, (ushort)65535)]
+    [InlineData(0U, 0U, (ushort)65535, (ushort)0)]
+    [InlineData(0U, 0U, (ushort)0, (ushort)65535)]
     [InlineData(16385U, 2049U, (ushort)129, (ushort)193)]
     public void ExactHistoryByteAndLineBoundariesMatchNative(uint graphemes, uint strings, ushort styles, ushort links)
     {

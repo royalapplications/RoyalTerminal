@@ -83,8 +83,9 @@ internal sealed class GhosttySnapshotAllocation
 
     private static ulong MetadataBytes(GhosttySnapshotPageCapacity capacity)
     {
-        // RefCountedSet styles: u16 table IDs; 20-byte items aligned to two.
-        ulong end = SetBytes(capacity.Styles, 20, 2);
+        // RGB is a packed u24 with four-byte ABI alignment. Each tagged color
+        // therefore occupies eight bytes; Style is 28 and Set.Item is 36.
+        ulong end = SetBytes(capacity.Styles, 36, 4);
         end = Align(end, 8) + BitmapBytes(capacity.GraphemeBytes, 16);
         ulong graphemes = PowerOfTwo(((ulong)capacity.GraphemeBytes + 15) / 16);
         // Offset(Cell): u32; Offset(u21).Slice: 16 bytes, aligned to eight.
