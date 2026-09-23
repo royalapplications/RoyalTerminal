@@ -39,7 +39,7 @@ public sealed class ManagedSavedModeParityTests(ITestOutputHelper output)
             GhosttySnapshotTerminalHeader header = Header(native);
             Assert.Equal(header.CurrentModes, managed.SnapshotCurrentModes);
             Assert.Equal(header.SavedModes, managed.SnapshotSavedModes);
-            Assert.Equal(header.DefaultModes, BasicVtProcessor.SnapshotInitialModes);
+            Assert.Equal(BasicVtProcessor.SnapshotInitialModes, header.DefaultModes);
         }
     }
 

@@ -113,6 +113,19 @@ They do not assert that a fully decoded managed terminal already exists.
 
 ## Required storage changes before a complete adapter
 
+The managed runtime now has a saved-mode bank in snapshot-v1 bit order. XTSAVE
+(`CSI ? Pm s`) overwrites selected values; XTRESTORE (`CSI ? Pm r`) reuses those
+values without popping, invoking normal mode side effects. Unsaved values and RIS
+follow Ghostty `ModeState.saved = .{}` defaults. DEC 47/1047/1049 retain independent
+mode bits, separate from the active buffer. Current/saved bank capture is internal;
+configurable default banks and complete snapshot installation remain outstanding.
+Reference: Ghostty `modes.zig`, `stream.zig` and `stream_terminal.zig` define these
+commands and restored-mode effects. The checked xterm.js InputHandler and Windows
+Terminal output dispatcher register ordinary margins/cursor save but do not supply
+this Ghostty-compatible private saved-mode bank. RoyalTerminal follows Ghostty here.
+The existing managed DECSTR reset contract remains a documented extension beyond
+the native parser; it resets this new bank with other managed mode state.
+
 `TerminalCell` now retains four-byte logical foreground/background/underline
 identities alongside resolved ARGB. Both VT integrations populate these from
 original styles, with focused print/erase/save/restore/wide/reflow/hold tests.
