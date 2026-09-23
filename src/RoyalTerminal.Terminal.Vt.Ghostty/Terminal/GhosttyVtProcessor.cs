@@ -2462,15 +2462,15 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             TerminalPointerEncodingContext normalized = geometry.Context;
             _mouseEncoder.SetSize(new GhosttyVtNative.GhosttyMouseEncoderSize
             {
-            Size = (nuint)Marshal.SizeOf<GhosttyVtNative.GhosttyMouseEncoderSize>(),
-            ScreenWidth = (uint)normalized.ScreenWidthPx,
-            ScreenHeight = (uint)normalized.ScreenHeightPx,
-            CellWidth = (uint)normalized.CellWidthPx,
-            CellHeight = (uint)normalized.CellHeightPx,
-            PaddingTop = (uint)normalized.PaddingTopPx,
-            PaddingBottom = (uint)normalized.PaddingBottomPx,
-            PaddingRight = (uint)normalized.PaddingRightPx,
-            PaddingLeft = (uint)normalized.PaddingLeftPx,
+                Size = (nuint)Unsafe.SizeOf<GhosttyVtNative.GhosttyMouseEncoderSize>(),
+                ScreenWidth = (uint)normalized.ScreenWidthPx,
+                ScreenHeight = (uint)normalized.ScreenHeightPx,
+                CellWidth = (uint)normalized.CellWidthPx,
+                CellHeight = (uint)normalized.CellHeightPx,
+                PaddingTop = (uint)normalized.PaddingTopPx,
+                PaddingBottom = (uint)normalized.PaddingBottomPx,
+                PaddingRight = (uint)normalized.PaddingRightPx,
+                PaddingLeft = (uint)normalized.PaddingLeftPx,
             });
             _mouseEncoderContext = normalized;
         }

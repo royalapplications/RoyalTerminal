@@ -1,6 +1,8 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using System.Text;
+
 namespace RoyalTerminal.Terminal;
 
 // Persistent encoder state belongs to a processor, never to a frozen render frame.
@@ -18,7 +20,9 @@ internal sealed class ManagedMouseEncoder
         in TerminalMouseModeState mode, out byte[] sequence)
     {
         sequence = [];
-        if (!TerminalPointerGeometry.TryCreate(pointer, context, out TerminalPointerGeometry geometry)) return false;
+        if (!TerminalPointerGeometry.TryCreate(pointer, context, out TerminalPointerGeometry geometry) ||
+            (mode.Encoding == TerminalMouseEncoding.Utf8 &&
+             (!Rune.IsValid(geometry.Column + 32) || !Rune.IsValid(geometry.Row + 32)))) return false;
         if (_mode != mode || _context != geometry.Context) _lastCell = null;
         _mode = mode; _context = geometry.Context;
 

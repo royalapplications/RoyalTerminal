@@ -155,6 +155,25 @@ public sealed class TerminalPointerEncoderParityTests(ITestOutputHelper output)
         TerminalMouseButton button = TerminalMouseButton.None, TerminalInputAction action = TerminalInputAction.Press)
         => new(kind, x, y, button, action, TerminalModifiers.None);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnencodableUtf8CoordinateDoesNotMutateMotionHistory(bool native)
+    {
+        if (native && !Available()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(new TerminalScreen(8, 3)) : new BasicVtProcessor(new TerminalScreen(8, 3));
+        ITerminalPointerSequenceEncoderSource encoder = (ITerminalPointerSequenceEncoderSource)processor;
+        processor.Process("\u001b[?1003;1005h"u8);
+        TerminalPointerEncodingContext context = new(60000, 60, 1, 20);
+        TerminalPointerEvent pointer = Pointer(TerminalPointerEventKind.Move, 1, 1);
+        Assert.True(encoder.TryEncodePointer(pointer, context, out _));
+        // 55263 + 1 (wire cell) + 32 would be U+D800: native's utf8Encode
+        // rejects that scalar. Guard it before calling native or changing state.
+        Assert.False(encoder.TryEncodePointer(pointer with { X = 55263 }, context, out byte[] bytes));
+        Assert.Empty(bytes);
+        Assert.False(encoder.TryEncodePointer(pointer, context, out _));
+    }
+
     private static byte[] ModeBytes(int tracking, int format)
     {
         int[] trackingModes = [9, 9, 1000, 1002, 1003], formats = [1006, 1005, 1006, 1015, 1016];
