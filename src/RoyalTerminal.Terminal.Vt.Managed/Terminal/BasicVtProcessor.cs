@@ -2286,7 +2286,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ulong revision = _kittyStore.Revision;
         if (adjustImages)
             _kittyStore.BeginMarginScroll(_screen, _scrollTop, _scrollBottom, down ? count : -count,
-                (uint)(_widthPx / _screen.Columns), (uint)(_heightPx / _screen.ViewportRows));
+                (uint)(_widthPx / _screen.Columns), (uint)(_heightPx / _screen.ViewportRows),
+                windowShift: !down && _scrollTop == 0 && !_inAltScreen);
         try
         {
             for (int i = 0; i < count; i++)
@@ -2307,10 +2308,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ScrollUpOneRow()
     {
-        if (_scrollTop == 0 && _scrollBottom == _screen.ViewportRows - 1 && !_inAltScreen)
+        if (_scrollTop == 0 && !_inAltScreen)
         {
-            // Whole-screen scroll — push to scrollback
-            TerminalRow added = _screen.AddRow();
+            // A top-origin region creates history even with a bottom margin.
+            TerminalRow added = _scrollBottom == _screen.ViewportRows - 1
+                ? _screen.AddRow() : _screen.AddRowAtActiveRow(_scrollBottom);
             if (_currentBgKind != SgrColorKind.Default)
                 added.Clear(_screen.DefaultForeground, _currentBg, CurrentBackgroundIdentity);
             _screen.InvalidateViewport();

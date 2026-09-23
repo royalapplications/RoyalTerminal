@@ -13,7 +13,7 @@ The renewed review found the following missing or weakly verified requirements:
 
 | Requirement | Evidence needed for completion | Current review state |
 | --- | --- | --- |
-| Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store, live APC and virtual-placeholder projection are implemented with focused tests; vertical in-place margin clipping and stationary IL/DL now match native cases; horizontal-margin integration, top-origin partial-scroll history behavior, protocol-response/streaming edges and full differential coverage remain open |
+| Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store, live APC and virtual-placeholder projection are implemented with focused tests; vertical margin clipping, top-origin partial-scroll history and stationary IL/DL now match native cases; horizontal-margin integration, protocol-response/streaming edges and full differential coverage remain open |
 | Native Kitty animation playback | Animation tick in the built library, scheduling without further PTY input, deterministic frame tests | Repository-owned extension and timed refresh implemented; deterministic frame tests pass, and all six native RID variants cross-build; non-macOS runtime execution remains CI validation |
 | Synchronized output | Completed prefix visible at enable; following output frozen; release/reset/one-second timeout without additional input | Both engines now implement prefix publication, frozen presentation and idle timeout; managed copy-on-write state transfer and focused native/managed tests pass |
 | Managed snapshot and continuation features | Restore both screens, history, parser/UTF-8 continuation, modes, styles, links and saved cursors with bounded validation | Managed ground-boundary processing, bounded continuation export and replay tests pass; Ghostty-compatible CRC32C framing and style/hyperlink codecs pass upstream golden, corruption, truncation and allocation tests; complete state codecs and incremental READY/history restore remain open |
@@ -266,10 +266,53 @@ tiles to buffer cells and is not a Kitty placement/clipping oracle. Its scrollin
 code was inspected as a coordinate/lifetime reference, not copied as Kitty policy.
 
 This closes the tested in-place vertical clipping gap, not all margin behavior.
-Managed horizontal-margin state is not yet integrated. Also, Ghostty creates
-scrollback when the top margin is zero but a bottom margin is set; the managed
-text path currently shifts that region in place. The corresponding window-shift
-restoration path and history tests remain required, along with the wider audit.
+Managed horizontal-margin state is not yet integrated. The top-origin history
+gap found during this review is addressed by the follow-up below.
+
+### Top-origin partial-scroll history (2026-09-23)
+
+Managed SU/IND now retain history when the primary scrolling region begins at
+row zero, even when its bottom margin is above the last row. The initial native
+differential reproduced missing managed history while native passed; native
+history is read through its viewport-state/snapshot APIs, not its viewport-only
+`TerminalScreen` projection. Alternate-screen operations continue in place.
+
+`TerminalScreen.AddRowAtActiveRow` follows Ghostty `Screen.cursorScrollAbove`:
+append/recycle a blank row, then rotate row references below the margin. Work is
+proportional to status-row count, not scrollback or cell count. Row storage,
+wrap metadata and copy-on-write ownership are preserved; tracked and raster
+anchors below the margin follow the rotation. The existing full-screen fast
+path is unchanged. A warmed 1,000-scroll test at the history limit allocates
+**zero bytes**; identity tests prove status-row storage is reused, not copied.
+
+Kitty margin adjustment now handles the window-shift path as well as in-place
+scrolling. It restores all active placements after row movement, including
+straddlers whose original anchors were pruned, while history remains tracked.
+Ten additional native/managed differential cases cover SU/IND, primary/alternate
+buffers, status rows, source geometry, synchronized output and background erase
+colors. Five storage tests cover zero/one/growing history limits, row identity,
+anchors, raster placements and allocation behavior; the combined margin/storage
+suite passes all 32 cases on macOS arm64 with native available.
+
+Reference choice: Ghostty is the behavior and optimization target. xterm.js
+`BufferService.scroll` likewise inserts at the bottom margin and advances history
+when the top margin is zero. Windows Terminal `AdaptDispatch::ScrollUp` instead
+uses `_ScrollRectVertically` for SU, rotating full-width rows in place; its storage
+rotation supports the optimization choice but its SU history policy is not used.
+No shell or PowerShell startup/invocation contract is changed.
+
+Validation accounts for all **1,844** unit/headless cases: **1,828 passed**
+after one isolated retry, and 16 conditional skips. Two monolithic runs exited
+successfully with incomplete counts (790 and 13) during the PTY contract group;
+those are not accepted as full-suite passes. The remaining 1,830 cases ran as
+one partition (1,813 passed, one PTY startup timeout, 16 skipped), and all 14 PTY
+contract cases passed in separate hosts. The timed-out headless OSC-flood case
+passed separately without a code change. TRX reports are
+`partial-history-without-pty-contract.trx`, `pty-contract/*.trx` and
+`partial-history-osc-retry.trx`. Runner early termination and intermittent PTY
+startup behavior remain open IO-validation concerns, not resolved by this patch.
+Windows-only test bodies are platform-guarded on this macOS host; these counts
+do not establish Windows runtime coverage.
 
 ## Scope and pinned references
 
