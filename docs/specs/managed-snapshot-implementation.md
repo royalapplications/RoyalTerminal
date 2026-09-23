@@ -11,6 +11,18 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
 
 ## Implemented and tested
 
+- READY cell storage now stages both buffers directly without input replay, normal
+  buffer switching, row resizing or incidental-history trimming. Physical widths,
+  screen routing, raw links and current snapshot palette/dynamic colors survive;
+  host selection/cursor-text preferences remain host-owned. The staged screen is
+  intentionally unpublished until the processor adapter also installs cursor,
+  mode, charset and parser state. Publication now transfers all registries with
+  the row storage, removing allocation failures from the commit phase and retaining
+  the destination synchronization object. Native staging/recapture round trips
+  compare complete canonicalized snapshots before and after subsequent input;
+  PAGE capacities/local IDs are normalized, all other record bytes compared.
+  This is not yet a usable managed processor restore API or history reconciler.
+
 - PAGE-to-live-cell conversion and live PAGE capture preserve physical row widths,
   logical styles, independent wide-tail styles, wrap/protection/prompt metadata,
   grapheme suffixes and raw hyperlink identities. Capture canonicalizes inline
@@ -205,8 +217,8 @@ runtime prerequisite does not itself expose managed snapshot restore.
 ## Remaining codec and integration order
 
 1. READY installation into a usable managed terminal and incremental history
-   reconciliation. The ordered wire reader is implemented but does not yet apply
-   pages to a live screen. History ingestion must remain safe if live input, reset
+   reconciliation. The ordered wire reader and unpublished two-buffer cell staging
+   are implemented; full processor installation remains. History ingestion must remain safe if live input, reset
    or resize occurs after READY, matching upstream generation/width/limit checks
    and dropping the remaining older pages after the first gap.
 2. Managed processor adapter and public ownership/error contracts. PAGE/grid,

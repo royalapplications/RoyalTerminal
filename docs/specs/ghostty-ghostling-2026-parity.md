@@ -1468,6 +1468,50 @@ regression that the measurements exposed. The [renderer audit](ghostty-renderer-
 separates code that executes in Skia/libvt from Ghostty's full application renderer,
 and records applicable transfers plus unresolved gaps.
 
+## Snapshot storage staging and publication ownership
+
+`GhosttySnapshotLiveScreen.Stage` now creates unpublished storage for both READY
+buffers, with the final screen-height rows as the active area. It preserves the
+complete resident suffix, including incidental history and mixed physical widths,
+without replaying input or invoking ordinary buffer-switch resize/trim behavior.
+Current palette overrides and dynamic color precedence resolve live cells; absent
+dynamic colors use host fallback, while selection and cursor-text preferences stay
+host-owned. SCREEN/TERMINAL processor state and continuation still need installation
+before this staging object can be published as a usable managed terminal.
+
+Reference decision: Ghostty `snapshot/screen.zig` constructs its PageList privately
+and clamps cursor pins against the physical row before returning it. RoyalTerminal
+follows that ownership/staging contract. Windows Terminal `TextBuffer::SerializeTo`
+and xterm.js `SerializeAddon.serialize` emit VT text rather than this binary state;
+they cannot replace Ghostty's no-replay restoration. Neither reference justifies
+silently flattening mixed-width rows.
+
+Screen publication previously transferred rows and then rebuilt destination
+hyperlink/Kitty registries, allowing allocation failure to expose a partial state.
+`AdoptStateFrom` now transfers registry ownership too, under its existing caller-lock
+and discard-source contract. COW copies still independently copy registries; a
+published destination keeps its original synchronization object. The new allocation
+test publishes 1,001 raw identities plus a legacy URL into empty registries with
+zero allocated bytes and verifies subsequent copy isolation.
+
+The first differential run found unequal raw native PAGE allocation headers after
+recapture; canonicalizing capacities and local style/link IDs makes complete native
+snapshots equal, including after continuing unfinished CSI and switching buffers.
+The broader snapshot/publication selection passes **228 tests**, zero skips/failures
+(`snapshot-stage-focused2.trx`, macOS arm64 with native available).
+
+A sequential Release publication microbenchmark (80x24, 1,000 raw hyperlinks,
+100 warm publications, seven samples of 100 independently staged transfers) measured
+median **17.260→0.053 ms** and **30,640,800→0 allocated bytes** from the preceding
+`520d267` binary to `749b6a5`. Construction/copying is outside the timed region:
+this measures publication only, not complete snapshot restore or frame throughput.
+
+Full post-push Release suite through `8da188f`: **2,614 passed, 16 conditional
+skips, zero failures (2,630 total)** in `snapshot-stage-full.trx`, native available
+on macOS arm64. Build has no warnings/errors. All seven new staging/ownership
+cases pass. Fresh six-RID CI run `35869030082` was still pending at inspection;
+this is not cross-platform runtime sign-off or complete managed snapshot restore.
+
 ## Validation requirements
 
 - Build the release native library with Zig 0.16 using `scripts/build-native.sh --release`.
