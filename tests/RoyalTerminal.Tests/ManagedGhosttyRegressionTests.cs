@@ -148,14 +148,28 @@ public sealed class ManagedGhosttyRegressionTests
     }
 
     [Fact]
-    public void OscAcceptsPayloadsLargerThanTheOldFourKiBLimit()
+    public void AllocatingClipboardOscAcceptsPayloadsLargerThanTheOldFourKiBLimit()
     {
         using BasicVtProcessor processor = new(new TerminalScreen(8, 2, 0));
-        string? title = null;
-        processor.TitleCallback = value => title = value;
+        string? clipboard = null;
+        processor.ClipboardWriteCallback = (_, value) => clipboard = value;
         string expected = new('a', 16_384);
-        processor.Process(Encoding.UTF8.GetBytes($"\u001b]2;{expected}\u0007"));
-        Assert.Equal(expected, title);
+        string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(expected));
+        processor.Process(Encoding.UTF8.GetBytes($"\u001b]52;c;{encoded}\u0007"));
+        Assert.Equal(expected, clipboard);
+    }
+
+    [Fact]
+    public void FixedTitleOscRejectsOversizedPayloadWithoutChangingPriorTitle()
+    {
+        using BasicVtProcessor processor = new(new TerminalScreen(8, 2, 0));
+        processor.SetTitle("previous"u8);
+        int callbacks = 0;
+        processor.TitleCallback = _ => callbacks++;
+        processor.Process(Encoding.UTF8.GetBytes($"\u001b]2;{new string('a', 16_384)}\u0007"));
+        byte[] title = new byte[8];
+        Assert.True(processor.TryCopyTitle(title, out int length));
+        Assert.Equal("previous"u8.ToArray(), title); Assert.Equal(8, length); Assert.Equal(0, callbacks);
     }
 
     [Fact]
