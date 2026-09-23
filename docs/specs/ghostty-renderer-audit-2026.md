@@ -53,7 +53,7 @@ an applicable feature from the user's requested scope.
 | Upstream changes | Current execution evidence and required disposition |
 |---|---|
 | [`ca8868a29`](https://github.com/ghostty-org/ghostty/commit/ca8868a29) allocation-free whole-grapheme font selection | Audit found the span overload resolved only the **first rune**. A correction now checks every substantive cluster component and discovers candidates lazily, with no cluster-key/candidate-list allocation. Deterministic tests use the pinned JetBrains Mono/Noto Emoji font fixtures and a controlled matcher; validation is recorded below when completed. |
-| [`6f02d9aad`](https://github.com/ghostty-org/ghostty/commit/6f02d9aad) rasterize downloaded glyf directly into output bitmap, and associated APC glyph limits | Bounded managed decoding, live managed APC/session glossary, native owned-copy extraction/publication and direct reusable Skia paths are implemented and tested below. Placement, renderer cache ownership and terminal-row drawing remain open; model publication alone does not draw registered glyphs. |
+| [`6f02d9aad`](https://github.com/ghostty-org/ghostty/commit/6f02d9aad) rasterize downloaded glyf directly into output bitmap, and associated APC glyph limits | Bounded managed decoding, live managed APC/session glossary, native owned-copy extraction/publication and cached direct Skia row/cursor drawing are implemented below. Cell-grid placement follows the upstream normalized constraints. Host-font coverage reporting remains open. |
 | [`5beb94c16`](https://github.com/ghostty-org/ghostty/commit/5beb94c16) / `88abb77b1` apply font-thicken to IME preedit | No `font-thicken` setting or matching preedit glyph raster path exists in the current RoyalTerminal renderer. The upstream fix cannot be applied merely by updating the library. Any new thickness option must affect ordinary and preedit text consistently and have rendering tests. |
 | [`6688aa072`](https://github.com/ghostty-org/ghostty/commit/6688aa072), [`97f57edcc`](https://github.com/ghostty-org/ghostty/commit/97f57edcc), [`72cf50855`](https://github.com/ghostty-org/ghostty/commit/72cf50855) idle DisplayLink, unfocused dirty redraws, lock-order fix | There is no Ghostty DisplayLink in RoyalTerminal. The equivalent obligations belong to Avalonia presentation scheduling: idle work must stop, dirty unfocused surfaces must still present, and stopping presentation must not invert terminal/render locks. The third-thread/presentation audit and tests must establish these obligations. |
 | [`c4e16970a`](https://github.com/ghostty-org/ghostty/commit/c4e16970a), [`4b4a5b241`](https://github.com/ghostty-org/ghostty/commit/4b4a5b241), [`a177ba90a`](https://github.com/ghostty-org/ghostty/commit/a177ba90a) hidden GPU resources, Metal callback teardown, DisplayLink failure | Ghostty-specific objects are absent. RoyalTerminal still needs its own renderer detach/dispose/visibility ownership review; the absence of those object types does not prove equivalent lifecycle behavior. |
@@ -173,12 +173,41 @@ remains a separate CI gate. Earlier CI runs for 19f0604 and 0a2f02a were cancell
 by later pushes, not completed successfully; their partial results do not close
 that gate.
 
-Still required before claiming feature parity: host font coverage policy;
-an explicit width/layout policy where native currently
-stores metadata only; Ghostty-compatible sizing/alignment/padding; renderer cache ownership,
-row invalidation and drawing in both engines; end-to-end differential/pixel tests.
-The path helper is not yet wired into live terminal rendering. This remains an
-explicit implementation requirement, not a scope exclusion.
+### Live row and cursor rendering
+
+Both processors' published glyph models now feed the common Skia renderer.
+`TerminalGlyphGeometry` follows `font/glyf_rasterize.zig` and `font/Glyph.zig`:
+computed point/control bounds, the authored advance/line-height box, em-to-cell
+height scaling, normalized size aliases, padding and alignment. The chosen face
+metrics are the cell grid (face width/height equal cell width/height, face Y zero),
+as in upstream rasterizer tests. Glyphs are clipped to their actual terminal cell
+span. Width metadata does not retroactively widen cells; this preserves current
+native printing behavior. Multi-scalar clusters retain the font shaping path so
+registered base scalars do not silently discard combining marks.
+
+Normalized Skia paths are cached by registration identity/codepoint, independent
+of color and cell size. Double-precision normalization precedes conversion to
+Skia floats. No intermediate glyph bitmap is allocated. Publication revisions
+invalidate stale paths and dirty rows only after synchronized-output release;
+replacement, clear, screen switch and renderer disposal release cached paths.
+Font and sprite batches stop at registered glyphs. Normal foreground/highlight
+resolution, decorations, clipping and block-cursor colors remain in their
+existing passes. This is a structural allocation reduction, not a measured
+end-to-end rendering speedup.
+
+Focused tests exercise placement aliases, padding, the wide-face stretch rule,
+invalid metrics, overflow-safe bounds, actual managed/native row and cursor
+pixels, held replacement, incremental repaint and cache cleanup. The upstream
+boundary above still applies: this supplies live rendering that the pinned
+Ghostty rasterizer currently exposes only through its test path. Host-font
+coverage reporting and broader rendering/performance parity remain open.
+
+Validation: all 12 new rendering/geometry tests pass, including native availability
+confirmed in the pixel test. The full macOS suite passes **2,230 tests / 16 conditional
+skips / 2,246 total**, zero failures (`glyph-render-full.trx`). Preceding commit
+`8a5bd27` CI run `35848785754` passed all six native builds and Ubuntu/Windows
+build/tests; its macOS job was still running at inspection. This renderer change
+requires fresh CI; those preceding results do not validate it.
 
 ## Whole-cluster fallback risk and implementation contract
 

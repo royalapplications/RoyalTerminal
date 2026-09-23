@@ -42,8 +42,14 @@ copies share immutable entries but isolate glossary mutation until publication.
 All 103 focused glyph/APC/synchronized-output tests pass, with native availability
 confirmed. Native extraction and native-processor model publication now use three
 tested read-only exports with owned-copy lifetime, normalized metadata and dirty
-tracking; the 127-test focused glyph/APC suite passes. Sizing/layout and both engines'
-row rendering remain required; model publication is not yet end-to-end glyph presentation.
+tracking; the 127-test focused glyph/APC suite passes. Both engines now draw registered
+glyphs through the common Skia row/cursor passes with normalized Ghostty placement,
+cell clipping and publication-aware path ownership. Actual cell widths remain
+authoritative; multi-scalar clusters retain font shaping. See the renderer audit
+for the explicit upstream boundary and remaining host-font coverage policy.
+The live-renderer batch adds 12 focused regressions; the full macOS run passes
+**2,230 tests / 16 conditional skips / 2,246 total**, zero failures
+(`glyph-render-full.trx`), with native glyph drawing confirmed available.
 
 ### DCS parser review (2026-09-23)
 

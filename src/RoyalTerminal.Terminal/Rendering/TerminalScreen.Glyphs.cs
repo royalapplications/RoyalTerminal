@@ -10,6 +10,9 @@ public sealed partial class TerminalScreen
 {
     private TerminalGlyphGlossary? _glyphGlossary;
 
+    /// <summary>Local publication revision for renderer cache invalidation.</summary>
+    public ulong GlyphRevision { get; private set; }
+
     /// <summary>Number of session glyph registrations, shared by both screen buffers.</summary>
     public int RegisteredGlyphCount => _glyphGlossary?.Count ?? 0;
 
@@ -25,6 +28,12 @@ public sealed partial class TerminalScreen
     internal void ReplaceGlyphGlossary(TerminalGlyphGlossary glossary)
     {
         _glyphGlossary = glossary.Count == 0 ? null : glossary;
+        NotifyGlyphGlossaryChanged();
+    }
+
+    internal void NotifyGlyphGlossaryChanged()
+    {
+        GlyphRevision = unchecked(GlyphRevision + 1);
         InvalidateAll();
     }
 
@@ -32,6 +41,6 @@ public sealed partial class TerminalScreen
     {
         if (_glyphGlossary is null) return;
         _glyphGlossary = null;
-        InvalidateAll();
+        NotifyGlyphGlossaryChanged();
     }
 }

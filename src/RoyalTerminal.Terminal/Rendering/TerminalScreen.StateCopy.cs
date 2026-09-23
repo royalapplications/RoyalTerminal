@@ -91,6 +91,7 @@ public sealed partial class TerminalScreen
         destination._nextHyperlinkId = _nextHyperlinkId;
         destination._nextRasterImageId = _nextRasterImageId;
         destination._anchorRevision = _anchorRevision;
+        destination.GlyphRevision = GlyphRevision;
     }
 
     private TerminalRowBuffer CopyRows(TerminalRowBuffer rows)

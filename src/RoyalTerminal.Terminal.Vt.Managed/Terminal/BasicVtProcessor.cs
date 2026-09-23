@@ -3421,7 +3421,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             {
                 if (_apcGlyphEnabled && !_apcTruncated &&
                     ManagedGlyphProtocol.Execute(CollectionsMarshal.AsSpan(_apcBuffer)[5..], _screen.GlyphGlossary, ResponseCallback))
-                    _screen.InvalidateAll();
+                    _screen.NotifyGlyphGlossaryChanged();
                 return;
             }
             if (_apcBuffer.Count > 0 && _apcBuffer[0] == (byte)'G')

@@ -15,12 +15,25 @@ internal static class SkiaTerminalGlyphPath
     /// is preserved, including holes; consecutive off-curve controls imply midpoints.
     /// </summary>
     internal static SKPath Create(TerminalGlyphOutline outline)
+        => Create(outline, 0, 0, 1, 1);
+
+    // Normalize in double precision before Skia's float conversion. This retains
+    // small details in an outline with large translated design coordinates.
+    internal static SKPath CreateNormalized(TerminalGlyphOutline outline)
+    {
+        TerminalGlyphBounds bounds = outline.Bounds;
+        return Create(outline, bounds.MinX, bounds.MinY,
+            bounds.Width > 0 ? 1 / bounds.Width : 0, bounds.Height > 0 ? 1 / bounds.Height : 0);
+    }
+
+    private static SKPath Create(TerminalGlyphOutline outline, double originX, double originY, double scaleX, double scaleY)
     {
         ArgumentNullException.ThrowIfNull(outline);
         SKPath path = new() { FillType = SKPathFillType.Winding };
         try
         {
-            for (int i = 0; i < outline.ContourEnds.Length; i++) AppendContour(path, outline.GetContour(i));
+            for (int i = 0; i < outline.ContourEnds.Length; i++)
+                AppendContour(path, outline.GetContour(i), originX, originY, scaleX, scaleY);
             return path;
         }
         catch
@@ -30,7 +43,8 @@ internal static class SkiaTerminalGlyphPath
         }
     }
 
-    private static void AppendContour(SKPath path, ReadOnlySpan<TerminalGlyphPoint> points)
+    private static void AppendContour(SKPath path, ReadOnlySpan<TerminalGlyphPoint> points,
+        double originX, double originY, double scaleX, double scaleY)
     {
         if (points.IsEmpty) return;
         TerminalGlyphPoint first = points[0], last = points[^1];
@@ -61,9 +75,10 @@ internal static class SkiaTerminalGlyphPath
             index += next.OnCurve ? 2 : 1;
         }
         path.Close();
-    }
 
-    private static SKPoint Point(TerminalGlyphPoint point) => new(point.X, point.Y);
+        SKPoint Point(TerminalGlyphPoint point) => new(
+            (float)(((double)point.X - originX) * scaleX), (float)(((double)point.Y - originY) * scaleY));
+    }
 
     private static SKPoint Midpoint(SKPoint left, SKPoint right) =>
         new((left.X + right.X) * 0.5f, (left.Y + right.Y) * 0.5f);

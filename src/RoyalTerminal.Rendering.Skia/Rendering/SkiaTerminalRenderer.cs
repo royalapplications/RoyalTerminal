@@ -27,7 +27,7 @@ namespace RoyalTerminal.Avalonia.Rendering;
 /// - Cursor rendering with configurable styles
 /// - Selection highlighting
 /// </summary>
-public sealed class SkiaTerminalRenderer : IDisposable
+public sealed partial class SkiaTerminalRenderer : IDisposable
 {
     /// <summary>Default selection highlight color.</summary>
     public static SKColor DefaultSelectionColor { get; } = new(0x40, 0x60, 0xA0, 0x80);
@@ -634,6 +634,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(screen);
 
+        PrepareRegisteredGlyphCache(screen);
         canvas.Save();
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
         ReadOnlySpan<TerminalHighlightSpan> selectionSpans = _selectionSpans;
@@ -736,7 +737,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                         rowTextHighlights);
                 }
 
-                RenderRowText(canvas, terminalRow, y, row, rowOverlays, rowTextHighlights);
+                RenderRowText(canvas, screen, terminalRow, y, row, rowOverlays, rowTextHighlights);
                 terminalRow.IsDirty = false;
             }
         }
@@ -829,6 +830,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private void RenderRowText(
         SKCanvas canvas,
+        TerminalScreen screen,
         TerminalRow row,
         float y,
         int rowIndex,
@@ -854,6 +856,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             Math.Abs(_cellWidth - _measuredCellWidth) < CellMetricEpsilon &&
             TryDrawSimpleTextRowBatch(
                 canvas,
+                screen,
                 cells,
                 rowOverlays,
                 rowTextHighlights,
@@ -868,6 +871,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         if (CanUseSimpleHarfBuzzTextRowBatch() &&
             TryDrawSimpleTextRowBatch(
                 canvas,
+                screen,
                 cells,
                 rowOverlays,
                 rowTextHighlights,
@@ -886,6 +890,15 @@ public sealed class SkiaTerminalRenderer : IDisposable
             if (!IsRenderableGlyphCell(in firstCell))
             {
                 col++;
+                continue;
+            }
+
+            if (TryGetRegisteredGlyph(screen, in firstCell, out var registeredGlyph))
+            {
+                SKColor color = ResolveForegroundColorForCell(in firstCell, rowOverlays[col], GetTextHighlightOverride(rowTextHighlights, col));
+                DrawRegisteredGlyph(canvas, (uint)GetCellPrimaryCodepoint(in firstCell), registeredGlyph, col, y, firstCell.Width, color);
+                DrawRunDecorations(canvas, cells, rowOverlays, col, Math.Min(cells.Length, col + firstCell.Width), y, color);
+                col += Math.Max(1, (int)firstCell.Width);
                 continue;
             }
 
@@ -909,7 +922,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
                         break;
                     }
 
-                    if (!TryGetSpriteCodepoint(in spriteCandidate, out _))
+                    if (TryGetRegisteredGlyph(screen, in spriteCandidate, out _) ||
+                        !TryGetSpriteCodepoint(in spriteCandidate, out _))
                     {
                         break;
                     }
@@ -965,6 +979,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 }
 
                 ref readonly TerminalCell nextCell = ref cells[runEnd];
+                if (TryGetRegisteredGlyph(screen, in nextCell, out _)) break;
                 if (!IsRenderableGlyphCell(in nextCell))
                 {
                     break;
@@ -3132,6 +3147,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private bool TryDrawSimpleTextRowBatch(
         SKCanvas canvas,
+        TerminalScreen screen,
         ReadOnlySpan<TerminalCell> cells,
         ReadOnlySpan<CellOverlayFlags> rowOverlays,
         ReadOnlySpan<CellTextHighlightOverride> rowTextHighlights,
@@ -3165,6 +3181,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             ref readonly TerminalCell cell = ref cells[col];
+            if (TryGetRegisteredGlyph(screen, in cell, out _)) return false;
             if (!cell.HasContent || cell.Width == 0 || IsCellHidden(in cell))
             {
                 continue;
@@ -5835,6 +5852,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         _fgPaint.Color = CursorTextColor;
+        if (TryGetRegisteredGlyph(screen, in cell, out var registeredGlyph))
+        {
+            DrawRegisteredGlyph(canvas, (uint)GetCellPrimaryCodepoint(in cell), registeredGlyph, column, y, cell.Width, CursorTextColor);
+            return;
+        }
         float x = column * _cellWidth;
         float baselineY = GetTextBaselineY(y);
 
@@ -6377,6 +6399,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        ClearRegisteredGlyphCache();
+        _registeredGlyphScreen = null;
 
         foreach (TerminalBitmapCacheEntry entry in _kittyBitmapCache.Values)
         {
