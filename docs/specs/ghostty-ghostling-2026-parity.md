@@ -13,7 +13,7 @@ The renewed review found the following missing or weakly verified requirements:
 
 | Requirement | Evidence needed for completion | Current review state |
 | --- | --- | --- |
-| Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store, live APC and virtual-placeholder projection are implemented with focused tests; vertical margin clipping, top-origin partial-scroll history and stationary IL/DL now match native cases; horizontal-margin integration, protocol-response/streaming edges and full differential coverage remain open |
+| Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store, live APC and virtual-placeholder projection are implemented with focused tests; vertical clipping, top-origin history, stationary IL/DL and horizontal containment now match native cases; protocol-response/streaming edges and full differential coverage remain open |
 | Native Kitty animation playback | Animation tick in the built library, scheduling without further PTY input, deterministic frame tests | Repository-owned extension and timed refresh implemented; deterministic frame tests pass, and all six native RID variants cross-build; non-macOS runtime execution remains CI validation |
 | Synchronized output | Completed prefix visible at enable; following output frozen; release/reset/one-second timeout without additional input | Both engines now implement prefix publication, frozen presentation and idle timeout; managed copy-on-write state transfer and focused native/managed tests pass |
 | Managed snapshot and continuation features | Restore both screens, history, parser/UTF-8 continuation, modes, styles, links and saved cursors with bounded validation | Managed ground-boundary processing, bounded continuation export and replay tests pass; Ghostty-compatible CRC32C framing and style/hyperlink codecs pass upstream golden, corruption, truncation and allocation tests; complete state codecs and incremental READY/history restore remain open |
@@ -266,8 +266,9 @@ tiles to buffer cells and is not a Kitty placement/clipping oracle. Its scrollin
 code was inspected as a coordinate/lifetime reference, not copied as Kitty policy.
 
 This closes the tested in-place vertical clipping gap, not all margin behavior.
-Managed horizontal-margin state is not yet integrated. The top-origin history
-gap found during this review is addressed by the follow-up below.
+Managed horizontal-margin state was not yet integrated at that checkpoint; the
+later horizontal-margin follow-up below addresses it. The top-origin history gap
+found during this review is addressed by the next follow-up.
 
 ### Top-origin partial-scroll history (2026-09-23)
 
@@ -313,6 +314,56 @@ passed separately without a code change. TRX reports are
 startup behavior remain open IO-validation concerns, not resolved by this patch.
 Windows-only test bodies are platform-guarded on this macOS host; these counts
 do not establish Windows runtime coverage.
+
+## Horizontal-margin integration follow-up
+
+The managed engine previously reported mode 69 while ignoring its geometry.
+The first 22-case native comparison reproduced 18 failures. The engine now
+implements DECLRMM/DECSLRM state, margin-aware origin/cursor/tab/CR behavior,
+rectangular SU/SD/IND/RI/IL/DL, and bounded ICH/DCH. Erase-in-line/display and ECH
+retain their full-screen-coordinate semantics. Explicit DECSLRM parameters are
+ignored when mode 69 is disabled; parameterless CSI s retains cursor-save meaning.
+Invalid margins do not move the cursor. Disabling mode 69 resets horizontal
+margins, resize resets both axes, and switching screen buffers retains the
+terminal-wide margin state. SU/SD preserve pending wrap as native does.
+
+Rectangular scrolling copies cell spans once per affected row, regardless of
+scroll count, and creates no history. It retains outside cells and row metadata,
+cleans split wide glyphs without replacing their styles, and normalizes orphaned
+real-edge spacer heads under Ghostty's `rowWillBeShifted` rules. Wide printing
+and selector-driven grapheme widening wrap at the effective margin, but only
+the real screen edge creates spacer-head/soft-wrap metadata. A warmed 1,000-pair
+SU/SD test allocates zero bytes; this is an allocation invariant, not an
+end-to-end throughput claim.
+
+Kitty placement adjustment now also tests horizontal containment, clamping the
+right extent to the physical screen edge exactly as Ghostty does. Straddling
+placements remain stationary; wholly contained placements move/clip. Tracked
+text anchors move only inside both rectangle axes. CPR and DECRQSS report the
+new state, and styled-VT export/replay retains origin, margins and pending wrap.
+
+Reference choice: Ghostty `Terminal.zig`, `kitty/graphics_storage.zig`,
+`stream_terminal.zig`, `dcs.zig` and `formatter.zig` are authoritative. Windows
+Terminal `SetLeftRightScrollingMargins` agrees on mode-gated DECSLRM/CSI-s
+ambiguity; the inspected xterm.js input handler does not implement mode 69.
+RoyalTerminal deliberately retains its existing DECSTR implementation, including
+margin reset; the pinned Ghostty stream handler ignores DECSTR. A managed-only
+test records that divergence rather than treating it as native equivalence.
+
+The focused suite has **102 passing cases** with the native library available,
+covering text/cursor/reply differentials, wide/grapheme/wrap metadata, backgrounds,
+screen switches, resize, formatter round trips, anchor movement, Kitty placement
+containment and allocation behavior (`horizontal-boundaries.trx`). This closes
+the reproduced horizontal-margin integration gap, not exhaustive reverse-wrap,
+all graphics protocol transitions, complete binary snapshot restore or the
+remaining per-change renderer/performance audit.
+
+Final batch validation: **1,908 passed, 16 conditional skips, zero failures
+(1,924 total)** in a single macOS unit/headless run,
+`/private/tmp/royalterminal-margin-validation/horizontal-complete-batch.trx`.
+No native source or ABI changed in this batch; the pinned macOS native fixture
+was available for the differential tests. Non-macOS runtime coverage remains
+a separate validation requirement.
 
 ## Unix launch and IO validation follow-up
 

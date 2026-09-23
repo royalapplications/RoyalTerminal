@@ -1271,6 +1271,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 .Append(';')
                 .Append(_scrollBottom + 1)
                 .Append('r');
+            if (HasHorizontalMargins)
+                builder.Append("\x1b[").Append(_scrollLeft + 1).Append(';').Append(RightMargin + 1).Append('s');
         }
 
         if (options.Extras.IncludeTabstops)
@@ -1327,7 +1329,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         int cursorColumn = _cursorCol;
         TerminalRow row = _screen.GetRow(Math.Max(0, _screen.TotalRows - _screen.ViewportRows) + _cursorRow);
-        bool restoreWrap = _delayedWrap && cursorColumn == _screen.Columns - 1;
+        bool restoreWrap = _delayedWrap && cursorColumn == CursorRightLimit;
         if (restoreWrap && cursorColumn > 0 && row[cursorColumn].Width == 0 && row[cursorColumn - 1].Width == 2)
         {
             cursorColumn--;
@@ -1336,7 +1338,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         builder.Append("\x1b[")
             .Append(_cursorRow - (options.Extras.IncludeModes && _originMode ? _scrollTop : 0) + 1)
             .Append(';')
-            .Append(cursorColumn + 1)
+            .Append(cursorColumn - (options.Extras.IncludeModes && _originMode ? _scrollLeft : 0) + 1)
             .Append('H');
 
         if (!restoreWrap)
@@ -1349,7 +1351,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         builder.Append("\x1b(B\x0F");
         SnapshotCellStyleKey? style = null;
         string? hyperlink = null;
-        AppendStyledSnapshotRow(builder, row, cursorColumn, _screen.Columns - 1,
+        AppendStyledSnapshotRow(builder, row, cursorColumn, CursorRightLimit,
             options with { TrimTrailingWhitespace = false }, ref style, ref hyperlink);
         CloseStyledHyperlink(builder, ref hyperlink);
     }
@@ -1739,21 +1741,21 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 0x0B:       // VT
             case 0x0C:       // FF
                 ResetDelayedWrap();
+                LineFeed(wrapForced: false);
                 if (_lineFeedNewLineMode)
                 {
-                    _cursorCol = 0;
+                    CarriageReturn();
                 }
-                LineFeed(wrapForced: false);
                 break;
 
             case (byte)'\r': // CR
                 ResetDelayedWrap();
-                _cursorCol = 0;
+                CarriageReturn();
                 break;
 
             case 0x08: // BS — Backspace
                 ResetDelayedWrap();
-                if (_cursorCol > 0) _cursorCol--;
+                _cursorCol = Math.Max(0, _cursorCol - 1);
                 break;
 
             case (byte)'\t': // HT — Horizontal Tab
@@ -1862,18 +1864,19 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (_cursorCol >= row.Columns) return;
         ClearPreservedCellsForMutation(row);
 
-        if (width == 2 && _cursorCol == _screen.Columns - 1)
+        if (width == 2 && _cursorCol == CursorRightLimit)
         {
             if (_autoWrap)
             {
                 ClearRasterGraphicsForTextMutation(_cursorRow, _cursorCol, 1);
                 ClearCellAndWideArtifacts(row, _cursorCol);
-                WriteCellFromPen(ref row[_cursorCol], 0, 0);
-                row[_cursorCol].IsWideSpacerHead = true;
+                bool atScreenEdge = _cursorCol == _screen.Columns - 1;
+                WriteCellFromPen(ref row[_cursorCol], 0, atScreenEdge ? (byte)0 : (byte)1);
+                row[_cursorCol].IsWideSpacerHead = atScreenEdge;
                 row.IsDirty = true;
                 ResetDelayedWrap();
-                _cursorCol = 0;
-                LineFeed(wrapForced: true);
+                LineFeed(wrapForced: atScreenEdge);
+                _cursorCol = _scrollLeft;
                 ClampCursor();
             }
             else
@@ -1966,7 +1969,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         int targetRowIndex = _cursorRow;
         int targetColIndex = _autoWrap && _delayedWrap ? _cursorCol : _cursorCol - 1;
-        if (useBoundaries && !_autoWrap && _cursorCol == _screen.Columns - 1 &&
+        if (useBoundaries && !_autoWrap && _cursorCol == CursorRightLimit &&
             _screen.GetViewportRow(_cursorRow)[_cursorCol].HasContent)
         {
             targetColIndex = _cursorCol;
@@ -2040,7 +2043,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         newWidth = newWidth <= 1 ? 1 : 2;
 
-        if (newWidth == 2 && targetColIndex >= targetRow.Columns - 1)
+        if (newWidth == 2 && targetColIndex >= CursorRightLimit)
         {
             // A selector can widen a base already printed in the last column.
             // Ghostty moves the entire styled grapheme to the next line.
@@ -2055,23 +2058,24 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             TerminalCell spacerHead = moved;
             spacerHead.Codepoint = 0;
             spacerHead.Grapheme = null;
-            spacerHead.Width = 0;
-            spacerHead.IsWideSpacerHead = true;
+            bool atScreenEdge = targetColIndex == _screen.Columns - 1;
+            spacerHead.Width = atScreenEdge ? (byte)0 : (byte)1;
+            spacerHead.IsWideSpacerHead = atScreenEdge;
             targetRow[targetColIndex] = spacerHead;
             targetRow.IsDirty = true;
-            _cursorCol = 0;
             _delayedWrap = false;
-            LineFeed(wrapForced: true);
+            LineFeed(wrapForced: atScreenEdge);
+            _cursorCol = _scrollLeft;
             TerminalRow destination = _screen.GetViewportRow(_cursorRow);
             ClearPreservedCellsForMutation(destination);
-            ClearRasterGraphicsForTextMutation(_cursorRow, 0, 2);
-            ClearCellAndWideArtifacts(destination, 0);
-            ClearCellAndWideArtifacts(destination, 1);
-            destination[0] = moved;
+            ClearRasterGraphicsForTextMutation(_cursorRow, _scrollLeft, 2);
+            ClearCellAndWideArtifacts(destination, _scrollLeft);
+            ClearCellAndWideArtifacts(destination, _scrollLeft + 1);
+            destination[_scrollLeft] = moved;
             moved.Codepoint = 0;
             moved.Grapheme = null;
             moved.Width = 0;
-            destination[1] = moved;
+            destination[_scrollLeft + 1] = moved;
             destination.IsDirty = true;
             AdvanceCursorAfterGraphic(2);
             return true;
@@ -2115,7 +2119,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             if (targetRowIndex == _cursorRow)
             {
                 _delayedWrap = false;
-                _cursorCol = Math.Min(targetColIndex + 1, _screen.Columns - 1);
+                _cursorCol = Math.Min(targetColIndex + 1, CursorRightLimit);
             }
         }
 
@@ -2141,22 +2145,23 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        _cursorCol = 0;
-        LineFeed(wrapForced: true);
+        LineFeed(wrapForced: _cursorCol == _screen.Columns - 1);
+        _cursorCol = _scrollLeft;
         return true;
     }
 
     private void AdvanceCursorAfterGraphic(int width)
     {
         int nextColumn = _cursorCol + Math.Max(1, width);
-        if (_autoWrap && nextColumn >= _screen.Columns)
+        int right = CursorRightLimit;
+        if (_autoWrap && nextColumn > right)
         {
-            _cursorCol = Math.Max(0, _screen.Columns - 1);
+            _cursorCol = right;
             _delayedWrap = true;
             return;
         }
 
-        _cursorCol = Math.Min(nextColumn, Math.Max(0, _screen.Columns - 1));
+        _cursorCol = Math.Min(nextColumn, right);
         _delayedWrap = false;
     }
 
@@ -2228,38 +2233,34 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _screen.GetViewportRow(_cursorRow).WrapsToNext = wrapForced;
         }
 
-        if (_cursorRow == _scrollBottom)
+        if (_cursorRow == _scrollBottom && CursorInsideHorizontalMargins)
         {
             // At bottom of scroll region — scroll the region up
             ScrollUpInRegion();
         }
-        else if (_cursorRow < _screen.ViewportRows - 1)
+        else if (_cursorRow < _screen.ViewportRows - 1 && _cursorRow != _scrollBottom)
         {
             _cursorRow++;
-        }
-        else
-        {
-            // Below scroll region — scroll the whole screen
-            ScrollUpInRegion();
         }
     }
 
     private void ReverseIndex()
     {
-        if (_cursorRow == _scrollTop)
+        if (_cursorRow == _scrollTop && CursorInsideHorizontalMargins)
         {
             // At top of scroll region — scroll region down
             ScrollDownInRegion();
         }
         else if (_cursorRow > 0)
         {
-            _cursorRow--;
+            _cursorRow = Math.Max(_cursorRow >= _scrollTop ? _scrollTop : 0, _cursorRow - 1);
         }
     }
 
     private void TabForward()
     {
-        for (var c = _cursorCol + 1; c < _screen.Columns; c++)
+        if (_cursorCol >= RightMargin) return;
+        for (var c = _cursorCol + 1; c <= RightMargin; c++)
         {
             if (_tabStops.Contains(c))
             {
@@ -2267,7 +2268,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 return;
             }
         }
-        _cursorCol = _screen.Columns - 1;
+        _cursorCol = RightMargin;
     }
 
     #endregion
@@ -2282,14 +2283,20 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         count = Math.Clamp(count, 1, _scrollBottom - _scrollTop + 1);
         bool adjustImages = _kittyStore.PlacementCount > 0 &&
-            (_scrollTop != 0 || _scrollBottom != _screen.ViewportRows - 1);
+            (_scrollTop != 0 || _scrollBottom != _screen.ViewportRows - 1 || HasHorizontalMargins);
         ulong revision = _kittyStore.Revision;
         if (adjustImages)
             _kittyStore.BeginMarginScroll(_screen, _scrollTop, _scrollBottom, down ? count : -count,
                 (uint)(_widthPx / _screen.Columns), (uint)(_heightPx / _screen.ViewportRows),
-                windowShift: !down && _scrollTop == 0 && !_inAltScreen);
+                windowShift: !down && _scrollTop == 0 && !_inAltScreen && !HasHorizontalMargins,
+                left: _scrollLeft, right: RightMargin);
         try
         {
+            if (HasHorizontalMargins)
+            {
+                ScrollRectangle(_scrollTop, _scrollBottom, count, down);
+                return;
+            }
             for (int i = 0; i < count; i++)
             {
                 if (down) ScrollDownOneRow();
@@ -2425,7 +2432,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case (byte)'E': // NEL — Next line
                 ResetDelayedWrap();
-                _cursorCol = 0;
+                CarriageReturn();
                 LineFeed(wrapForced: false);
                 _state = ParserState.Ground;
                 break;
@@ -3782,6 +3789,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             "m" => $"{BuildCurrentSgrState()}m",
             "r" => $"{_scrollTop + 1};{_scrollBottom + 1}r",
+            "s" when _extendedDecModesEnabled.Contains(69) => $"{_scrollLeft + 1};{RightMargin + 1}s",
             " q" => $"{_cursorStyle} q",
             _ => null,
         };
@@ -3968,15 +3976,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         switch (finalByte)
         {
             case 'A': // CUU — Cursor Up
-                _cursorRow = Math.Max(_scrollTop, _cursorRow - Math.Max(1, p0));
+                _cursorRow = Math.Max(_cursorRow >= _scrollTop ? _scrollTop : 0, _cursorRow - Math.Max(1, p0));
                 break;
 
             case 'B': // CUD — Cursor Down
-                _cursorRow = Math.Min(_scrollBottom, _cursorRow + Math.Max(1, p0));
+                _cursorRow = Math.Min(_cursorRow <= _scrollBottom ? _scrollBottom : _screen.ViewportRows - 1, _cursorRow + Math.Max(1, p0));
                 break;
 
             case 'C': // CUF — Cursor Forward
-                _cursorCol = Math.Min(_screen.Columns - 1, _cursorCol + Math.Max(1, p0));
+                _cursorCol = Math.Min(CursorRightLimit, _cursorCol + Math.Max(1, p0));
                 break;
 
             case 'D': // CUB — Cursor Back
@@ -3984,17 +3992,17 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 'E': // CNL — Cursor Next Line
-                _cursorCol = 0;
-                _cursorRow = Math.Min(_scrollBottom, _cursorRow + Math.Max(1, p0));
+                CarriageReturn();
+                _cursorRow = Math.Min(_cursorRow <= _scrollBottom ? _scrollBottom : _screen.ViewportRows - 1, _cursorRow + Math.Max(1, p0));
                 break;
 
             case 'F': // CPL — Cursor Previous Line
-                _cursorCol = 0;
-                _cursorRow = Math.Max(_scrollTop, _cursorRow - Math.Max(1, p0));
+                CarriageReturn();
+                _cursorRow = Math.Max(_cursorRow >= _scrollTop ? _scrollTop : 0, _cursorRow - Math.Max(1, p0));
                 break;
 
             case 'G': // CHA — Cursor Horizontal Absolute
-                _cursorCol = Math.Clamp(Math.Max(1, p0) - 1, 0, _screen.Columns - 1);
+                _cursorCol = Math.Clamp(Math.Max(1, p0) - 1 + (_originMode ? _scrollLeft : 0), 0, _originMode ? RightMargin : _screen.Columns - 1);
                 break;
 
             case 'H': // CUP — Cursor Position
@@ -4006,6 +4014,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 {
                     row += _scrollTop;
                     row = Math.Clamp(row, _scrollTop, _scrollBottom);
+                    col = Math.Clamp(col + _scrollLeft, _scrollLeft, RightMargin);
                 }
                 else
                 {
@@ -4041,15 +4050,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 'd': // VPA — Vertical line Position Absolute
-                _cursorRow = Math.Clamp(Math.Max(1, p0) - 1, 0, _screen.ViewportRows - 1);
+                _cursorRow = Math.Clamp(Math.Max(1, p0) - 1 + (_originMode ? _scrollTop : 0), 0, _originMode ? _scrollBottom : _screen.ViewportRows - 1);
                 break;
 
             case 'e': // VPR — Vertical Position Relative
-                _cursorRow = Math.Min(_screen.ViewportRows - 1, _cursorRow + Math.Max(1, p0));
+                _cursorRow = Math.Min(_cursorRow <= _scrollBottom ? _scrollBottom : _screen.ViewportRows - 1, _cursorRow + Math.Max(1, p0));
                 break;
 
             case 'a': // HPR — Horizontal Position Relative
-                _cursorCol = Math.Min(_screen.Columns - 1, _cursorCol + Math.Max(1, p0));
+                _cursorCol = Math.Min(CursorRightLimit, _cursorCol + Math.Max(1, p0));
                 break;
 
             case 'm': // SGR — Select Graphic Rendition
@@ -4066,14 +4075,19 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 {
                     _scrollTop = top;
                     _scrollBottom = bottom;
+                    HomeCursor();
                 }
-                // After setting margins, cursor moves to home
-                _cursorCol = 0;
-                _cursorRow = _originMode ? _scrollTop : 0;
                 break;
             }
 
             case 's': // SCP — Save Cursor Position (ANSI.SYS)
+                if (_params.Count > 2) break;
+                if (_extendedDecModesEnabled.Contains(69))
+                {
+                    SetHorizontalMargins();
+                    break;
+                }
+                if (_params.Count != 0) break; // Explicit parameters mean DECSLRM, disabled without mode 69.
                 _savedCursorCol = _cursorCol;
                 _savedCursorRow = _cursorRow;
                 break;
@@ -4111,7 +4125,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 else if (p0 == 6)
                 {
                     // CPR — Cursor Position Report (1-based)
-                    var cpr = $"\x1b[{_cursorRow + 1};{_cursorCol + 1}R";
+                    int reportRow = Math.Max(0, _cursorRow - (_originMode ? _scrollTop : 0));
+                    int reportColumn = Math.Max(0, _cursorCol - (_originMode ? _scrollLeft : 0));
+                    var cpr = $"\x1b[{reportRow + 1};{reportColumn + 1}R";
                     ResponseCallback?.Invoke(System.Text.Encoding.ASCII.GetBytes(cpr));
                 }
                 break;
@@ -4170,10 +4186,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 'Z': // CBT — Cursor Backward Tabulation
             {
                 var count = Math.Max(1, p0);
+                int left = _originMode ? _scrollLeft : 0;
                 for (var n = 0; n < count; n++)
                 {
+                    if (_cursorCol <= left) break;
                     var found = false;
-                    for (var c = _cursorCol - 1; c >= 0; c--)
+                    for (var c = _cursorCol - 1; c >= left; c--)
                     {
                         if (_tabStops.Contains(c))
                         {
@@ -4182,7 +4200,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                             break;
                         }
                     }
-                    if (!found) _cursorCol = 0;
+                    if (!found) _cursorCol = left;
                 }
                 break;
             }
@@ -4218,8 +4236,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 'P': // DCH
             case 'X': // ECH
             case '@': // ICH
-            case 'S': // SU
-            case 'T': // SD
             case 'Z': // CBT
             case 'I': // CHT
             case 'd': // VPA
@@ -4682,8 +4698,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 6: // DECOM — Origin mode
                 ResetDelayedWrap();
                 _originMode = set;
-                _cursorCol = 0;
-                _cursorRow = _originMode ? _scrollTop : 0;
+                HomeCursor();
+                break;
+
+            case 69: // DECLRMM — disabling restores full-width margins
+                SetExtendedDecMode(mode, set);
+                if (!set) ResetHorizontalMargins();
                 break;
 
             case 7: // DECAWM — Auto-wrap mode
@@ -4728,7 +4748,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 12: // Cursor blinking
             case 40: // Allow 80/132 mode
             case 45: // Reverse wraparound
-            case 69: // Left/right margin mode
             case 1000: // Mouse tracking normal
             case 1002: // Mouse button-event tracking
             case 1003: // Mouse any-event tracking
@@ -4848,9 +4867,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _cursorRow = 0;
         }
 
-        // Reset scroll region
-        _scrollTop = 0;
-        _scrollBottom = _screen.ViewportRows - 1;
+        // Scrolling margins are terminal-wide and survive screen switches.
     }
 
     private void SwitchToMainScreen()
@@ -4872,9 +4889,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _delayedWrap = _savedMainDelayedWrap;
         _inAltScreen = false;
 
-        // Reset scroll region
-        _scrollTop = 0;
-        _scrollBottom = _screen.ViewportRows - 1;
+        // Scrolling margins are terminal-wide and survive screen switches.
 
         _screen.InvalidateAll();
     }
@@ -5261,17 +5276,23 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ShiftLines(int count, bool insert)
     {
         ClampCursor();
-        if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom) return;
+        if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom || !CursorInsideHorizontalMargins) return;
         bool restoreImages = _kittyStore.PlacementCount > 0;
         if (restoreImages) _kittyStore.BeginMarginScroll(_screen, _cursorRow, _scrollBottom, 0, 0, 0);
         try
         {
+            if (HasHorizontalMargins)
+            {
+                ScrollRectangle(_cursorRow, _scrollBottom, count, insert);
+                return;
+            }
             if (insert) InsertLinesCore(count);
             else DeleteLinesCore(count);
         }
         finally
         {
             if (restoreImages) _kittyStore.EndMarginScroll(_screen);
+            _cursorCol = _scrollLeft;
         }
     }
 
@@ -5337,12 +5358,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         ClampCursor();
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
+        if (!CursorInsideHorizontalMargins) return;
+        count = Math.Min(count, RightMargin - _cursorCol + 1);
 
         var row = _screen.GetViewportRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
-        for (var c = _screen.Columns - 1; c >= _cursorCol + count; c--)
+        for (var c = RightMargin; c >= _cursorCol + count; c--)
             row[c] = row[c - count];
-        for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
+        for (var c = _cursorCol; c < _cursorCol + count && c <= RightMargin; c++)
             row[c] = CreateErasedCell();
         NormalizeRowWideCells(row);
         row.IsDirty = true;
@@ -5357,6 +5380,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         ClampCursor();
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
+        if (!CursorInsideHorizontalMargins) return;
+        count = Math.Min(count, RightMargin - _cursorCol + 1);
 
         var row = _screen.GetViewportRow(_cursorRow);
         if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2) ClearPreviousWideSpacerHead();
@@ -5365,9 +5390,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             row[row.Columns - 1] = CreateErasedCell();
         row.WrapsToNext = false;
         ResetDelayedWrap();
-        for (var c = _cursorCol; c + count < _screen.Columns; c++)
+        for (var c = _cursorCol; c + count <= RightMargin; c++)
             row[c] = row[c + count];
-        for (var c = Math.Max(_cursorCol, _screen.Columns - count); c < _screen.Columns; c++)
+        for (var c = Math.Max(_cursorCol, RightMargin + 1 - count); c <= RightMargin; c++)
             row[c] = CreateErasedCell();
         NormalizeRowWideCells(row);
         row.IsDirty = true;
@@ -5496,6 +5521,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResetDelayedWrap();
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
+        ResetHorizontalMargins();
         _useLineDrawing = false;
         _g0IsLineDrawing = false;
         _g1IsLineDrawing = false;
@@ -5702,6 +5728,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _kittyClipboardProtocol.Reset();
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
+        ResetHorizontalMargins();
         _inAltScreen = false;
         _autoWrap = true;
         _cursorVisible = true;
@@ -5892,12 +5919,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         int safeColumns = Math.Max(1, columns);
         int safeRows = Math.Max(1, rows);
+        ResetHorizontalMargins();
 
         _scrollBottom = safeRows - 1;
-        if (_scrollTop >= safeRows)
-        {
-            _scrollTop = 0;
-        }
+        _scrollTop = 0;
 
         if (_cursorRow >= safeRows)
         {

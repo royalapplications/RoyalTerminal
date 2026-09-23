@@ -13,7 +13,7 @@ internal sealed partial class ManagedKittyGraphicsStore
     // generic row movement can prune pins, then restore them after rows settle.
     // Virtual placements follow text; relative placements follow their root.
     internal void BeginMarginScroll(TerminalScreen screen, int top, int bottom, int delta,
-        uint cellWidth, uint cellHeight, bool windowShift = false)
+        uint cellWidth, uint cellHeight, bool windowShift = false, int left = 0, int right = int.MaxValue)
     {
         _marginScrollRestores.Clear();
         int activeTop = screen.GetAbsoluteRowForViewportRow(0);
@@ -32,7 +32,8 @@ internal sealed partial class ManagedKittyGraphicsStore
                 uint width = (uint)image.Animation.CurrentImage.Width;
                 uint height = (uint)image.Animation.CurrentImage.Height;
                 ManagedKittyPlacementGeometry grid = placement.Options.Calculate(width, height, cellWidth, cellHeight);
-                if (grid.Rows > 0 && grid.Columns > 0 && row >= top && (long)row + grid.Rows - 1 <= bottom)
+                if (grid.Rows > 0 && grid.Columns > 0 && row >= top && (long)row + grid.Rows - 1 <= bottom &&
+                    origin.Column >= left && Math.Min((long)origin.Column + grid.Columns - 1, screen.Columns - 1) <= right)
                 {
                     long moved = (long)row + delta;
                     uint topClip = (uint)Math.Max(0, top - moved);

@@ -63,7 +63,8 @@ public sealed partial class TerminalScreen
     }
 
     /// <summary>Tracks an in-place vertical row copy, pruning cells scrolled outside its region.</summary>
-    internal void ShiftAnchorsInViewportRows(int startViewportRow, int endViewportRow, int rowDelta)
+    internal void ShiftAnchorsInViewportRows(int startViewportRow, int endViewportRow, int rowDelta,
+        int startColumn = 0, int endColumn = int.MaxValue)
     {
         if (_trackedAnchors.Count == 0 || rowDelta == 0) return;
         _anchorRevision++;
@@ -72,6 +73,7 @@ public sealed partial class TerminalScreen
         foreach ((TerminalScreenAnchor token, TrackedCell original) in _trackedAnchors)
         {
             if (original.Alternate != _alternateBufferActive || original.Row < start || original.Row > end) continue;
+            if (original.Column < startColumn || original.Column > endColumn) continue;
             long row = (long)original.Row + rowDelta;
             ref TrackedCell cell = ref CollectionsMarshal.GetValueRefOrNullRef(_trackedAnchors, token);
             cell.Row = row < start || row > end ? -1 : (int)row;

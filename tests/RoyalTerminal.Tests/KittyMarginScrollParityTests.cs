@@ -11,6 +11,28 @@ namespace RoyalTerminal.Tests;
 public sealed class KittyMarginScrollParityTests(ITestOutputHelper output)
 {
     [Theory]
+    [InlineData(false, 6)]
+    [InlineData(true, 6)]
+    [InlineData(false, 8)]
+    [InlineData(true, 8)]
+    public void HorizontalContainmentLeavesStraddlersStationaryAndClampsExtentAtScreenEdge(bool native, int right)
+    {
+        if (!CanRun(native)) return;
+        TerminalScreen screen = new(8, 7, 20);
+        using IVtProcessor processor = Create(native, screen);
+        processor.NotifyResize(8, 7, 80, 70);
+        for (int id = 1; id <= 3; id++) Upload(processor, id, 8);
+        Write(processor, "\u001b[3;3H\u001b_Ga=p,i=1,p=1,c=2,r=2,C=1\u001b\\" +
+            "\u001b[3;2H\u001b_Ga=p,i=2,p=1,c=2,r=2,C=1\u001b\\" +
+            "\u001b[3;6H\u001b_Ga=p,i=3,p=1,c=4,r=2,C=1\u001b\\" +
+            $"\u001b[?69h\u001b[3;{right}s\u001b[2;6r\u001b[S");
+        Assert.Equal(1, Find(screen, 1).ViewportRow);
+        Assert.Equal(2, Find(screen, 2).ViewportRow);
+        Assert.Equal(right == 8 ? 1 : 2, Find(screen, 3).ViewportRow);
+        Assert.Equal(8, Find(screen, 2).SourceHeight);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void MultiRowScrollClipsSourceOnceAndKeepsStraddlingPlacementStationary(bool native)

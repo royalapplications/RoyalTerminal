@@ -10,6 +10,21 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalScreenAnchorTests
 {
     [Fact]
+    public void RectangularScrollMovesOnlyAnchorsInsideBothAxes()
+    {
+        TerminalScreen screen = new(8, 5);
+        TerminalScreenAnchor left = screen.CreateAnchor(2, 1);
+        TerminalScreenAnchor right = screen.CreateAnchor(2, 6);
+        TerminalScreenAnchor inside = screen.CreateAnchor(2, 3);
+        TerminalScreenAnchor clipped = screen.CreateAnchor(1, 3);
+        screen.ShiftAnchorsInViewportRows(1, 3, -1, 2, 5);
+        AssertPosition(screen, left, 2, 1);
+        AssertPosition(screen, right, 2, 6);
+        AssertPosition(screen, inside, 1, 3);
+        Assert.False(screen.TryResolveAnchor(clipped, out _));
+    }
+
+    [Fact]
     public void Anchor_TracksHistoryAndIsPrunedBeforeRowStorageIsReused()
     {
         TerminalScreen screen = new(8, 2, scrollbackLimit: 1);
