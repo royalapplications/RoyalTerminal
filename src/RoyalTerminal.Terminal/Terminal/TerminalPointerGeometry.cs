@@ -8,7 +8,7 @@ namespace RoyalTerminal.Terminal;
 internal readonly record struct TerminalPointerGeometry(
     TerminalPointerEncodingContext Context, int Column, int Row, int PixelX, int PixelY, bool Outside)
 {
-    internal static bool TryCreate(in TerminalPointerEvent pointer, in TerminalPointerEncodingContext context,
+    internal static bool TryCreate(in TerminalPointerEvent pointer, in TerminalPointerEncodingContext context, TerminalMouseEncoding encoding,
         out TerminalPointerGeometry geometry)
     {
         geometry = default;
@@ -26,7 +26,14 @@ internal readonly record struct TerminalPointerGeometry(
         float columns = (float)width / context.CellWidthPx, rows = (float)height / context.CellHeightPx;
         double terminalX = (double)x - normalized.PaddingLeftPx, terminalY = (double)y - normalized.PaddingTopPx;
         double column = Math.Max(0, terminalX) / context.CellWidthPx, row = Math.Max(0, terminalY) / context.CellHeightPx;
-        double pixelX = Math.Round(terminalX, MidpointRounding.AwayFromZero), pixelY = Math.Round(terminalY, MidpointRounding.AwayFromZero);
+        // Cell protocols never convert negative terminal coordinates to signed
+        // pixels; even far-outside releases can safely clamp to the first cell.
+        double pixelX = 0, pixelY = 0;
+        if (encoding == TerminalMouseEncoding.SgrPixels)
+        {
+            pixelX = Math.Round(terminalX, MidpointRounding.AwayFromZero);
+            pixelY = Math.Round(terminalY, MidpointRounding.AwayFromZero);
+        }
         // Reject unrepresentable host input before native float-to-int conversions.
         if (columns >= 65536 || rows >= 65536 || column >= 65536 || row >= 65536 ||
             pixelX < int.MinValue || pixelX > int.MaxValue || pixelY < int.MinValue || pixelY > int.MaxValue) return false;

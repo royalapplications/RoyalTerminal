@@ -99,6 +99,29 @@ public sealed class TerminalPointerEncoderParityTests(ITestOutputHelper output)
     }
 
     [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void CellProtocolsAllowFarNegativeReleaseCoordinates(int format)
+    {
+        if (!Available()) return;
+        using GhosttyVtProcessor native = new(new TerminalScreen(8, 3));
+        using BasicVtProcessor managed = new(new TerminalScreen(8, 3));
+        using GhosttyMouseEncoder oracle = new(); using GhosttyMouseEvent evt = new();
+        byte[] mode = ModeBytes(2, format); native.Process(mode); managed.Process(mode);
+        oracle.SetTrackingMode(GhosttyVtNative.GhosttyMouseTrackingMode.Normal);
+        oracle.SetFormat((GhosttyVtNative.GhosttyMouseFormat)format);
+        TerminalPointerEncodingContext context = new(80, 60, 10, 20); oracle.SetSize(Size(context));
+        TerminalPointerEvent pointer = Pointer(TerminalPointerEventKind.Button, -1e10, -1e10, TerminalMouseButton.Left, TerminalInputAction.Release);
+        byte pressed = 0; byte[] expected = OracleEncode(oracle, evt, pointer, ref pressed);
+        Assert.NotEmpty(expected);
+        Assert.True(native.TryEncodePointer(pointer, context, out byte[] nativeBytes));
+        Assert.True(managed.TryEncodePointer(pointer, context, out byte[] managedBytes));
+        Assert.Equal(expected, nativeBytes); Assert.Equal(expected, managedBytes);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void GeometryModesResizeAndSessionResetsInvalidateMotionHistory(bool native)

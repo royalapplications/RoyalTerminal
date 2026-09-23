@@ -20,7 +20,7 @@ internal sealed class ManagedMouseEncoder
         in TerminalMouseModeState mode, out byte[] sequence)
     {
         sequence = [];
-        if (!TerminalPointerGeometry.TryCreate(pointer, context, out TerminalPointerGeometry geometry) ||
+        if (!TerminalPointerGeometry.TryCreate(pointer, context, mode.Encoding, out TerminalPointerGeometry geometry) ||
             (mode.Encoding == TerminalMouseEncoding.Utf8 &&
              (!Rune.IsValid(geometry.Column + 32) || !Rune.IsValid(geometry.Row + 32)))) return false;
         if (_mode != mode || _context != geometry.Context) _lastCell = null;

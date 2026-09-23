@@ -2442,7 +2442,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!TerminalPointerGeometry.TryCreate(pointerEvent, context, out TerminalPointerGeometry geometry) ||
+        if (!TerminalPointerGeometry.TryCreate(pointerEvent, context, _mouseModeState.Encoding, out TerminalPointerGeometry geometry) ||
             (_mouseModeState.Encoding == TerminalMouseEncoding.Utf8 &&
              (!Rune.IsValid(geometry.Column + 32) || !Rune.IsValid(geometry.Row + 32))))
         {
