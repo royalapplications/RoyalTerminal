@@ -35,11 +35,17 @@ public sealed partial class BasicVtProcessor
 
     private void ApplyConfiguredModeDefaults()
     {
-        foreach (int mode in TerminalModeRegistry.AnsiModes)
-            SetPolicyModeValue(mode, (_defaultModeValues & (1UL << TerminalModeRegistry.IndexOf(mode, true))) != 0, true);
-        foreach (int mode in SnapshotDecModes)
-            if (TerminalModeRegistry.IsDefaultConfigurable(mode, false))
-                SetPolicyModeValue(mode, (_defaultModeValues & (1UL << TerminalModeRegistry.IndexOf(mode, false))) != 0, false);
+        // Reset already assigned the built-in defaults. The common no-policy
+        // path does no additional work; only changed defaults need overriding.
+        ulong differences = _defaultModeValues ^ SnapshotInitialModes;
+        while (differences != 0)
+        {
+            int index = System.Numerics.BitOperations.TrailingZeroCount(differences);
+            bool ansi = index < 4;
+            int mode = ansi ? TerminalModeRegistry.AnsiModes[index] : SnapshotDecModes[index - 4];
+            SetPolicyModeValue(mode, (_defaultModeValues & (1UL << index)) != 0, ansi);
+            differences &= differences - 1;
+        }
     }
 
     private void SetPolicyModeValue(int mode, bool enabled, bool ansi)
