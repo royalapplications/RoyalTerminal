@@ -172,6 +172,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private uint _reportCellHeightPx;
     private readonly HashSet<int> _extendedDecModesEnabled = [];
     private TerminalMouseModeState _mouseModeState;
+    private readonly ManagedMouseEncoder _mouseEncoder = new();
 
     // Tab stops
     private readonly HashSet<int> _tabStops = [];
@@ -634,29 +635,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         in TerminalPointerEvent pointerEvent,
         in TerminalPointerEncodingContext context,
         out byte[] sequence)
-    {
-        sequence = [];
-        if (context.CellWidthPx <= 0 || context.CellHeightPx <= 0)
-        {
-            return false;
-        }
-
-        double contentX = pointerEvent.X - context.PaddingLeftPx;
-        double contentY = pointerEvent.Y - context.PaddingTopPx;
-        int column = Math.Clamp((int)Math.Floor(contentX / context.CellWidthPx) + 1, 1, Math.Max(1, _screen.Columns));
-        int row = Math.Clamp((int)Math.Floor(contentY / context.CellHeightPx) + 1, 1, Math.Max(1, _screen.ViewportRows));
-        int pixelX = Math.Max(1, (int)Math.Floor(contentX) + 1);
-        int pixelY = Math.Max(1, (int)Math.Floor(contentY) + 1);
-
-        return TerminalMouseProtocolEncoder.TryEncode(
-            pointerEvent,
-            MouseModeState,
-            column,
-            row,
-            pixelX,
-            pixelY,
-            out sequence);
-    }
+        => _mouseEncoder.TryEncode(pointerEvent, context, MouseModeState, out sequence);
 
     /// <inheritdoc />
     public string? ReadSelection(in TerminalSelectionRange selection)
@@ -4350,6 +4329,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ResetExtendedDecModesToDefaults()
     {
+        _mouseEncoder.Reset();
         _mouseModeState = default;
         _extendedDecModesEnabled.Clear();
         for (int i = 0; i < ExtendedDecModesEnabledByDefault.Length; i++)
@@ -5374,6 +5354,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// </summary>
     public void NotifyResize(int columns, int rows)
     {
+        _mouseEncoder.ResetMotion();
         if (EndRenderHold())
         {
             SetExtendedDecMode(2026, false);
@@ -5437,6 +5418,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(rows, 1);
+        _mouseEncoder.ResetMotion();
         if (reportSize) UpdateReportCellSize(columns, rows, widthPx, heightPx);
         EndRenderHold();
         SetExtendedDecMode(2026, false);

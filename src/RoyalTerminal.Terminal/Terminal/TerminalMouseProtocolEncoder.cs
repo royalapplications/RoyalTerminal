@@ -45,8 +45,8 @@ public static class TerminalMouseProtocolEncoder
     /// <param name="modeState">Active mouse mode and encoding.</param>
     /// <param name="column">Pointer column (1-based cell coordinate).</param>
     /// <param name="row">Pointer row (1-based cell coordinate).</param>
-    /// <param name="pixelX">Pointer x position (1-based pixel coordinate).</param>
-    /// <param name="pixelY">Pointer y position (1-based pixel coordinate).</param>
+    /// <param name="pixelX">Rounded terminal-space x pixel coordinate; zero and negative values are allowed.</param>
+    /// <param name="pixelY">Rounded terminal-space y pixel coordinate; zero and negative values are allowed.</param>
     /// <param name="sequence">Encoded VT byte sequence when successful.</param>
     /// <returns><see langword="true"/> when the event should be sent to the terminal.</returns>
     public static bool TryEncode(
@@ -80,7 +80,7 @@ public static class TerminalMouseProtocolEncoder
                 return true;
 
             case TerminalMouseEncoding.SgrPixels:
-                sequence = EncodeSgrProtocol(finalCode, Math.Max(1, pixelX), Math.Max(1, pixelY), sgrRelease);
+                sequence = EncodeSgrProtocol(finalCode, pixelX, pixelY, sgrRelease);
                 return true;
 
             case TerminalMouseEncoding.Urxvt:
@@ -88,16 +88,18 @@ public static class TerminalMouseProtocolEncoder
                 return true;
 
             case TerminalMouseEncoding.Utf8:
+                if (column > 65536 || row > 65536 || !Rune.IsValid(column + 32) || !Rune.IsValid(row + 32)) return false;
                 sequence = EncodeUtf8Protocol(finalCode, column, row);
                 return true;
 
             default:
+                if (column > 223 || row > 223) return false;
                 sequence = EncodeDefaultProtocol(finalCode, column, row);
                 return true;
         }
     }
 
-    private static bool TryGetMouseCode(
+    internal static bool TryGetMouseCode(
         in TerminalPointerEvent pointerEvent,
         in TerminalMouseModeState modeState,
         out int mouseCode,
@@ -231,18 +233,14 @@ public static class TerminalMouseProtocolEncoder
 
     private static byte[] EncodeDefaultProtocol(int finalCode, int column, int row)
     {
-        // Legacy xterm byte protocol can only represent coordinates up to 223.
-        int clampedColumn = Math.Min(column, 223);
-        int clampedRow = Math.Min(row, 223);
-
         return
         [
             0x1B,
             (byte)'[',
             (byte)'M',
             (byte)(finalCode + 32),
-            (byte)(clampedColumn + 32),
-            (byte)(clampedRow + 32),
+            (byte)(column + 32),
+            (byte)(row + 32),
         ];
     }
 

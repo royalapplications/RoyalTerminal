@@ -131,6 +131,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     private readonly GhosttyKeyEncoder _keyEncoder;
     private readonly GhosttyKeyEvent _keyEvent;
     private readonly GhosttyMouseEncoder _mouseEncoder;
+    private TerminalMouseModeState _mouseEncoderModes;
+    private TerminalPointerEncodingContext? _mouseEncoderContext;
     private readonly GhosttyMouseEvent _mouseEvent;
     private bool _disposed;
     private TerminalTheme _theme;
@@ -2440,28 +2442,38 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (context.ScreenWidthPx <= 0 ||
-            context.ScreenHeightPx <= 0 ||
-            context.CellWidthPx <= 0 ||
-            context.CellHeightPx <= 0)
+        if (!TerminalPointerGeometry.TryCreate(pointerEvent, context, out TerminalPointerGeometry geometry) ||
+            (_mouseModeState.Encoding == TerminalMouseEncoding.Utf8 &&
+             (!Rune.IsValid(geometry.Column + 32) || !Rune.IsValid(geometry.Row + 32))))
         {
             sequence = [];
             return false;
         }
 
-        _mouseEncoder.SetFromTerminal(_terminal);
-        _mouseEncoder.SetSize(new GhosttyVtNative.GhosttyMouseEncoderSize
+        // Both native setters clear last-cell tracking. Reconfigure only when
+        // effective modes/geometry change, preserving deduplication across events.
+        if (_mouseEncoderModes != _mouseModeState)
         {
+            _mouseEncoder.SetFromTerminal(_terminal);
+            _mouseEncoderModes = _mouseModeState;
+        }
+        if (_mouseEncoderContext != geometry.Context)
+        {
+            TerminalPointerEncodingContext normalized = geometry.Context;
+            _mouseEncoder.SetSize(new GhosttyVtNative.GhosttyMouseEncoderSize
+            {
             Size = (nuint)Marshal.SizeOf<GhosttyVtNative.GhosttyMouseEncoderSize>(),
-            ScreenWidth = checked((uint)context.ScreenWidthPx),
-            ScreenHeight = checked((uint)context.ScreenHeightPx),
-            CellWidth = checked((uint)context.CellWidthPx),
-            CellHeight = checked((uint)context.CellHeightPx),
-            PaddingTop = checked((uint)Math.Max(0, context.PaddingTopPx)),
-            PaddingBottom = checked((uint)Math.Max(0, context.PaddingBottomPx)),
-            PaddingRight = checked((uint)Math.Max(0, context.PaddingRightPx)),
-            PaddingLeft = checked((uint)Math.Max(0, context.PaddingLeftPx)),
-        });
+            ScreenWidth = (uint)normalized.ScreenWidthPx,
+            ScreenHeight = (uint)normalized.ScreenHeightPx,
+            CellWidth = (uint)normalized.CellWidthPx,
+            CellHeight = (uint)normalized.CellHeightPx,
+            PaddingTop = (uint)normalized.PaddingTopPx,
+            PaddingBottom = (uint)normalized.PaddingBottomPx,
+            PaddingRight = (uint)normalized.PaddingRightPx,
+            PaddingLeft = (uint)normalized.PaddingLeftPx,
+            });
+            _mouseEncoderContext = normalized;
+        }
         _mouseEncoder.SetAnyButtonPressed(IsAnyMouseButtonPressed(pointerEvent));
         _mouseEncoder.SetTrackLastCell(true);
 

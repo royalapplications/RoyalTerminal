@@ -2,6 +2,33 @@
 
 ## Reopened completion audit
 
+### Stateful mouse encoding and geometry (2026-09-23)
+
+Native pointer configuration is now cached: unchanged effective modes/geometry
+do not call native setters that reset last-cell tracking. The managed processor
+has a session-owned encoder with matching motion history and pressed-button
+state. Motion in the same reported cell is suppressed, but Ghostty's raw-pixel
+mode intentionally continues emitting identical positions. Mode/geometry changes,
+explicit resize and session resets invalidate the appropriate state.
+
+Geometry follows Ghostty `renderer/size.zig`, `input/mouse_encode.zig`, its C
+wrapper and `Surface.mouseReport`: f32 surface coordinates, padding subtraction,
+context-derived grid bounds, unclamped rounded terminal-space SGR pixels,
+out-of-viewport filtering with release/drag exceptions, and rejection rather than
+clamping beyond legacy 223-cell limits. Windows Terminal tracks last mouse
+position/button; xterm.js filters/deduplicates through its active protocol and
+encoding service. Their deduplication/pixel policies are not substituted for
+Ghostty's behavior. Invalid host geometry, nonfinite positions and values outside
+native integer conversion ranges are rejected before calling unsafe native math.
+
+Tests compare both processors against an independently configured persistent
+native encoder across all 25 mode/format combinations and six geometry contexts,
+with mixed press/release/drag/scroll/duplicate events. Dedicated tests cover
+zero-allocation duplicate suppression, pixel repeats, resize/session invalidation
+and invalid geometry. Old managed one-based-pixel/clamping assertions are updated
+to the native reference; legacy boundary acceptance remains covered. Implementation
+is awaiting the requested post-push validation and performance measurements.
+
 ### Authoritative mouse state and input routing (2026-09-23)
 
 Both processors now expose effective tracking/encoding via the optional

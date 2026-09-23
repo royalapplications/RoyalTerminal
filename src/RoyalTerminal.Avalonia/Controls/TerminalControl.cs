@@ -7212,8 +7212,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
                 mouseState,
                 column,
                 row,
-                Math.Max(1, (int)Math.Floor(pointerEvent.X) + 1),
-                Math.Max(1, (int)Math.Floor(pointerEvent.Y) + 1),
+                (int)Math.Round(pointerEvent.X, MidpointRounding.AwayFromZero),
+                (int)Math.Round(pointerEvent.Y, MidpointRounding.AwayFromZero),
                 out encoded))
         {
             return false;

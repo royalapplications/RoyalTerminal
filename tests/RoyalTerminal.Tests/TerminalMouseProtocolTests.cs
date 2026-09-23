@@ -240,7 +240,7 @@ public sealed class TerminalMouseProtocolTests
         bool encoded = processor.TryEncodePointer(pointerEvent, context, out byte[] sequence);
 
         Assert.True(encoded);
-        Assert.Equal("\x1b[<0;41;81M", Encoding.ASCII.GetString(sequence));
+        Assert.Equal("\x1b[<0;40;80M", Encoding.ASCII.GetString(sequence));
     }
 
     [Fact]
@@ -270,7 +270,7 @@ public sealed class TerminalMouseProtocolTests
         bool encoded = processor.TryEncodePointer(pointerEvent, context, out byte[] sequence);
 
         Assert.True(encoded);
-        Assert.Equal("\x1b[<0;41;81M", Encoding.ASCII.GetString(sequence));
+        Assert.Equal("\x1b[<0;40;80M", Encoding.ASCII.GetString(sequence));
     }
 
     [Fact]
@@ -294,7 +294,7 @@ public sealed class TerminalMouseProtocolTests
     }
 
     [Fact]
-    public void Encoder_DefaultProtocol_ClampsCoordinatesToLegacyLimit()
+    public void Encoder_DefaultProtocol_RejectsCoordinatesBeyondLegacyLimit()
     {
         TerminalMouseModeState mode = new(
             TerminalMouseTrackingMode.PressRelease,
@@ -309,9 +309,10 @@ public sealed class TerminalMouseProtocolTests
 
         bool encoded = TerminalMouseProtocolEncoder.TryEncode(pointerEvent, mode, column: 500, row: 400, out byte[] sequence);
 
-        Assert.True(encoded);
-        Assert.Equal(255, sequence[4]);
-        Assert.Equal(255, sequence[5]);
+        Assert.False(encoded);
+        Assert.Empty(sequence);
+        Assert.True(TerminalMouseProtocolEncoder.TryEncode(pointerEvent, mode, column: 223, row: 223, out sequence));
+        Assert.Equal(255, sequence[4]); Assert.Equal(255, sequence[5]);
     }
 
     [Fact]

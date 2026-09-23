@@ -63,6 +63,8 @@ public interface ITerminalPointerSequenceEncoderSource
     /// Tries to encode the supplied pointer event into terminal input bytes.
     /// False means no bytes should be sent; callers must not re-encode the event
     /// through a fallback, which could bypass protocol filtering or deduplication.
+    /// Positions are normalized to native single-precision surface coordinates;
+    /// invalid/nonfinite geometry or unrepresentable native coordinates return false.
     /// </summary>
     bool TryEncodePointer(
         in TerminalPointerEvent pointerEvent,
