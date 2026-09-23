@@ -910,7 +910,7 @@ public class TerminalQueryTests
     }
 
     [Fact]
-    public void BasicVtProcessor_UnterminatedDcs_AbortsOnPromptControlBytes_AndRendersFollowingPrompt()
+    public void BasicVtProcessor_UnterminatedDcs_KeepsPromptControlsInPayloadUntilTerminated()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -921,7 +921,10 @@ public class TerminalQueryTests
         processor.Process("\r\n$ ready\r\n"u8);
 
         Assert.Null(response);
-        Assert.Contains("$ ready", ReadAsciiPrefix(screen, 1, 16));
+        Assert.Equal((0, 0), (processor.CursorRow, processor.CursorCol));
+        processor.Process("\x1b\\X"u8);
+        Assert.Null(response); // Oversized DECRQSS is silently discarded.
+        Assert.Equal('X', screen.GetViewportRow(0)[0].Codepoint);
     }
 
     [Fact]

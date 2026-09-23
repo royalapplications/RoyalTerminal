@@ -46,7 +46,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 {
     private const int MaxOscBufferBytes = 8 * 1024 * 1024;
     private const int MaxGraphemeCodepoints = 65;
-    private const int MaxDcsBufferBytes = 4096;
+    private const int MaxDcsQueryBytes = 1024 * 1024;
     private const int MaxUnknownSequenceBytes = 4096;
     private const int KittyKeyboardFlagMask = 0x1F;
     private const int KittyKeyboardMaxStackDepth = 32;
@@ -215,8 +215,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         CsiIntermediate,
         CsiIgnore,
         OscString,
+        DcsEntry,
+        DcsParam,
+        DcsIntermediate,
+        DcsIgnore,
         DcsString,
-        DcsEscape,
         ApcString,
     }
 
@@ -447,9 +450,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 continuationStart = i;
             }
 
-            // OSC/APC commit when ESC arrives, not after a subsequent backslash.
+            // Strings commit when ESC arrives, not after a subsequent backslash.
             // Only the new ESC operation belongs to a replayable continuation.
-            if (_state is ParserState.OscString or ParserState.ApcString && b == 0x1B) continuationStart = i;
+            if (_state is ParserState.OscString or ParserState.ApcString or ParserState.DcsString or
+                ParserState.DcsEntry or ParserState.DcsParam or ParserState.DcsIntermediate or ParserState.DcsIgnore && b == 0x1B)
+                continuationStart = i;
 
             if (_state == ParserState.ApcString && b < 0x80 && b is not (0x18 or 0x1A or 0x1B))
             {
@@ -464,11 +469,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
 
             if (_state is ParserState.OscString or ParserState.DcsString &&
-                b >= 0x20)
+                b >= 0x20 && !(_state == ParserState.DcsString && b == 0x7F))
             {
                 ReadOnlySpan<byte> remaining = data[i..];
                 int count = remaining.IndexOfAnyInRange((byte)0, (byte)0x1F);
                 if (count < 0) count = remaining.Length;
+                if (_state == ParserState.DcsString)
+                {
+                    int delete = remaining[..count].IndexOf((byte)0x7F);
+                    if (delete >= 0) count = delete;
+                }
                 AppendControlStringPayload(remaining[..count]);
                 i += count - 1;
                 continue;
@@ -588,8 +598,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 case ParserState.DcsString:
                     ProcessDcsString(b);
                     break;
-                case ParserState.DcsEscape:
-                    ProcessDcsEscape(b);
+                case ParserState.DcsEntry:
+                case ParserState.DcsParam:
+                case ParserState.DcsIntermediate:
+                case ParserState.DcsIgnore:
+                    ProcessDcsHeader(b);
                     break;
                 case ParserState.ApcString:
                     ProcessApcString(b);
@@ -1738,8 +1751,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void EnterDcsState()
     {
-        _state = ParserState.DcsString;
+        EnterCsiState(); // Parameter/intermediate storage is shared, never concurrent.
+        _state = ParserState.DcsEntry;
         _dcsBuffer.Clear();
+        _dcsBufferLimit = 0;
         _isDiscardingDcsPayload = false;
     }
 
@@ -3307,43 +3322,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         if (b == 0x1B)
         {
-            _state = ParserState.DcsEscape;
-            return;
-        }
-
-        if (TryAbortBrokenDcsOnControl(b))
-        {
-            return;
-        }
-
-        AppendDcsByteOrDiscard(b);
-    }
-
-    private void ProcessDcsEscape(byte b)
-    {
-        if (b == (byte)'\\')
-        {
             HandleDcsString();
-            _state = ParserState.Ground;
+            EnterCsiState();
+            _state = ParserState.Escape;
             return;
         }
 
-        if (TryAbortBrokenDcsOnControl(b))
-        {
-            return;
-        }
-
-        // False alarm: preserve ESC as payload and continue DCS parsing.
-        AppendDcsByteOrDiscard(0x1B);
-
-        if (b == 0x1B)
-        {
-            _state = ParserState.DcsEscape;
-            return;
-        }
-
-        AppendDcsByteOrDiscard(b);
-        _state = ParserState.DcsString;
+        // All C0 bytes except CAN/SUB/ESC are payload; DEL alone is ignored.
+        if (b != 0x7F) AppendDcsByteOrDiscard(b);
     }
 
     private void ProcessApcString(byte b)
@@ -3409,7 +3395,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
     }
 
-    private void HandleDcsString()
+    private void HandleDcsString(bool aborted = false)
     {
         if (_isDiscardingDcsPayload)
         {
@@ -3428,7 +3414,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         if (_sixelGraphicsEnabled && IsSixelDcsPayload(payloadBytes))
         {
-            HandleSixelDcsPayload(payloadBytes);
+            // Optional Sixel follows xterm's unsuccessful-unhook policy.
+            if (!aborted) HandleSixelDcsPayload(payloadBytes);
             return;
         }
 
@@ -3626,10 +3613,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        int maxDcsBytes = _sixelGraphicsEnabled
-            ? Math.Max(MaxDcsBufferBytes, _options.SixelDecoderOptions.MaxInputBytes)
-            : MaxDcsBufferBytes;
-        if (_dcsBuffer.Count >= maxDcsBytes)
+        if (_dcsBuffer.Count >= _dcsBufferLimit)
         {
             _dcsBuffer.Clear();
             _isDiscardingDcsPayload = true;
@@ -3668,9 +3652,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         List<byte> buffer = osc ? _oscBuffer : _dcsBuffer;
         int limit = osc
             ? MaxOscBufferBytes
-            : _sixelGraphicsEnabled
-                ? Math.Max(MaxDcsBufferBytes, _options.SixelDecoderOptions.MaxInputBytes)
-                : MaxDcsBufferBytes;
+            : _dcsBufferLimit;
         if (payload.Length > limit - buffer.Count)
         {
             buffer.Clear();
@@ -3695,55 +3677,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // Unknown APCs are suppressed on abort, but parsed Kitty commands still
         // finalize, matching stream_terminal.apcEnd's protocol-specific policy.
         if (_state == ParserState.ApcString) CompleteApc(terminated: false);
+        if (_state == ParserState.DcsString) HandleDcsString(aborted: true);
         AbortActiveControlString();
         return true;
-    }
-
-    private bool TryAbortBrokenDcsOnControl(byte b)
-    {
-        if (_state is not ParserState.DcsString and
-            not ParserState.DcsEscape)
-        {
-            return false;
-        }
-
-        if (_state is ParserState.DcsString or ParserState.DcsEscape &&
-            IsIgnorableSixelControl(b) &&
-            IsCurrentDcsSixelPayload())
-        {
-            return false;
-        }
-
-        if (!IsBrokenStringTerminatorControl(b))
-        {
-            return false;
-        }
-
-        // Legacy recovery from malformed DCS strings in binary streams so shell
-        // prompt control bytes can return the parser to ground.
-        AbortActiveControlString();
-        ProcessGround(b);
-        return true;
-    }
-
-    private bool IsCurrentDcsSixelPayload()
-    {
-        int index = 0;
-        while (index < _dcsBuffer.Count && _dcsBuffer[index] is >= 0x30 and <= 0x3F)
-        {
-            index++;
-        }
-
-        bool hasIntermediate = false;
-        while (index < _dcsBuffer.Count && _dcsBuffer[index] is >= 0x20 and <= 0x2F)
-        {
-            hasIntermediate = true;
-            index++;
-        }
-
-        return index < _dcsBuffer.Count &&
-            _dcsBuffer[index] == (byte)'q' &&
-            !hasIntermediate;
     }
 
     private void AbortActiveControlString()
@@ -3764,27 +3700,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _isDiscardingDcsPayload = false;
         _apcTruncated = false;
         _state = ParserState.Ground;
-    }
-
-    private static bool IsBrokenStringTerminatorControl(byte b)
-    {
-        return b is 0x08 or // BS
-            0x09 or // HT
-            0x0A or // LF
-            0x0B or // VT
-            0x0C or // FF
-            0x0D or // CR
-            0x0E or // SO
-            0x0F;   // SI
-    }
-
-    private static bool IsIgnorableSixelControl(byte b)
-    {
-        return b is 0x09 or // HT
-            0x0A or // LF
-            0x0B or // VT
-            0x0C or // FF
-            0x0D;   // CR
     }
 
     private void HandleDecRequestStatusString(string request)

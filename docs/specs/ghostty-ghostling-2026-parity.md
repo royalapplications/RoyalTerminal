@@ -30,6 +30,39 @@ Tests cited elsewhere in this document describe existing coverage; they must not
 be used to mark these broader requirements complete until their specific evidence
 has been inspected.
 
+### DCS parser review (2026-09-23)
+
+The managed parser now separates DCS entry, parameters, intermediates, ignored
+headers and passthrough payloads. The previous combined buffer could dispatch
+malformed headers and incorrectly abandon payloads on prompt control bytes.
+Ghostty `parse_table.zig`, `Parser.zig` and `dcs.zig` are the byte-level reference:
+header C0/DEL are ignored, parameters saturate at 16 bits with a 24-slot hook
+limit, malformed headers enter ignore, payload DEL is ignored and other C0/high
+bytes remain payload except CAN/SUB/ESC. ESC immediately unhooks and starts a new
+escape sequence; completed query effects are not replayed by continuation.
+DECRQSS has a two-byte request bound; XTGETTCAP has a 1 MiB payload bound instead
+of the former shared 4 KiB limit. Unsupported hooks retain no payload buffer.
+
+Windows Terminal's DCS entry/passthrough/ignore states and xterm.js's transition
+table corroborate separate header parsing. Ghostty's byte-level C1 rules and
+query-unhook behavior are authoritative where decoded-character parsers differ.
+Optional managed Sixel remains an extension absent from Ghostty's DCS handler;
+it keeps xterm's image-addon policy of discarding CAN/SUB-aborted images.
+No PowerShell startup or shell invocation behavior changes.
+
+The focused query/continuation/Sixel suite passes **208 tests**, with the native
+library confirmed available. New differential cases cover all 256 bytes in five
+DCS states at every input split, malformed and saturated headers, parameter
+overflow, cancellation, DEL, false terminators and exact query payload bounds.
+The obsolete prompt-control recovery test now requires explicit termination.
+The full macOS unit/headless run passes **2,124 tests / 16 conditional skips /
+2,140 total**, zero failures (`dcs-full.trx`). At the preceding commit e38d0a2,
+CI has passed all six native builds, documentation and Ubuntu build/tests;
+macOS and Windows build/test jobs were still running at inspection. This is
+not a claim of CI validation for the subsequent DCS commit.
+This closes these DCS parser discrepancies, not the remaining snapshot-install,
+graphics, renderer or platform-validation requirements above.
+
 ### Graphics viewport and lifecycle review (2026-09-23)
 
 Managed image projection now retains immutable tracked-anchor recipes, including
