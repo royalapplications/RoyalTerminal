@@ -151,6 +151,25 @@ public sealed class ManagedSavedModeParityTests(ITestOutputHelper output)
     }
 
     [Theory]
+    [InlineData(0, 0)]
+    [InlineData(125, 67)]
+    [InlineData(1, 1)]
+    public void SizeQueriesUseKnownHostCellGeometryIncludingZeroAndRounding(int width, int height)
+    {
+        if (!Available()) return;
+        using GhosttyVtProcessor native = new(new TerminalScreen(12, 4));
+        using BasicVtProcessor managed = new(new TerminalScreen(12, 4));
+        native.NotifyResize(12, 4, width, height); managed.NotifyResize(12, 4, width, height);
+        List<byte> expected = [], actual = [];
+        native.ResponseCallback = data => expected.AddRange(data);
+        managed.ResponseCallback = data => actual.AddRange(data);
+        ReadOnlySpan<byte> input = "\u001b[14t\u001b[16t\u001b[18t\u001b[?2048h"u8;
+        native.Process(input); managed.Process(input);
+        Assert.NotEmpty(expected);
+        Assert.Equal(expected, actual);
+    }
+
+    [Theory]
     [InlineData("\u001b[?$p")]
     [InlineData("\u001b[$p")]
     [InlineData("\u001b[?7;25$p")]
