@@ -2702,6 +2702,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ReadOnlySpan<byte> rawPayload = CollectionsMarshal.AsSpan(_oscBuffer);
+        if (rawPayload.StartsWith("21;"u8))
+        {
+            string colors = Encoding.UTF8.GetString(rawPayload[3..]);
+            _oscBuffer.Clear();
+            HandleKittyColors(colors.AsSpan(), bellTerminator);
+            return;
+        }
         if (rawPayload.StartsWith("8;"u8))
         {
             HandleOscHyperlink(rawPayload[2..]);
@@ -2735,10 +2742,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case 4:
                 HandleOscPalette(value);
-                break;
-
-            case 21:
-                HandleKittyColors(value.AsSpan(), bellTerminator);
                 break;
 
             case 104:
@@ -3659,7 +3662,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        if (_oscBuffer.Count >= MaxOscBufferBytes)
+        if (_oscBuffer.Count >= GetOscBufferLimit([]))
         {
             _oscBuffer.Clear();
             _isDiscardingOscPayload = true;
@@ -3680,7 +3683,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
         List<byte> buffer = osc ? _oscBuffer : _dcsBuffer;
         int limit = osc
-            ? MaxOscBufferBytes
+            ? GetOscBufferLimit(payload)
             : _dcsBufferLimit;
         if (payload.Length > limit - buffer.Count)
         {
@@ -3692,6 +3695,20 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         int offset = buffer.Count;
         CollectionsMarshal.SetCount(buffer, offset + payload.Length);
         payload.CopyTo(CollectionsMarshal.AsSpan(buffer)[offset..]);
+    }
+
+    private int GetOscBufferLimit(ReadOnlySpan<byte> incoming)
+    {
+        // The native OSC 21 capture is fixed-size (2048 payload bytes), not
+        // allocating like clipboard strings. Recognize prefixes split anywhere
+        // across bytewise or bulk input before retaining a large incoming span.
+        ReadOnlySpan<byte> retained = CollectionsMarshal.AsSpan(_oscBuffer);
+        if (retained.Length >= 3) return retained.StartsWith("21;"u8) ? 2051 : MaxOscBufferBytes;
+        if (incoming.Length < 3 - retained.Length) return MaxOscBufferBytes;
+        Span<byte> prefix = stackalloc byte[3];
+        retained.CopyTo(prefix);
+        incoming[..(3 - retained.Length)].CopyTo(prefix[retained.Length..]);
+        return prefix.SequenceEqual("21;"u8) ? 2051 : MaxOscBufferBytes;
     }
 
     private bool TryHandleAnywhereCancelControl(byte b)

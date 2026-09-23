@@ -32,6 +32,8 @@ public sealed class ManagedKittyColorTests(ITestOutputHelper output)
         }
         yield return ["\u001b]21;1=red;1=?\u009c"];
         yield return ["\u001b]21;1=red\u0018\u001b]21;1=?\u001b\\"];
+        yield return ["\u001b]021;foreground=red\a\u001b]21;foreground=?\a"];
+        yield return ["\u001b]+21;foreground=red\a\u001b]21;foreground=?\a"];
     }
 
     [Theory]
@@ -51,7 +53,7 @@ public sealed class ManagedKittyColorTests(ITestOutputHelper output)
     public void RequestLimitIsAtomicAndCountsUnsupportedButValidKeys(int count, string suffix)
     {
         if (!Available()) return;
-        string request = "foreground=red;" + string.Join(';', Enumerable.Repeat("cursor_text=?", count - 1)) + suffix;
+        string request = "foreground=red;cursor_text=?;" + string.Join(';', Enumerable.Repeat("0", count - 2)) + suffix;
         Compare("\u001b]21;" + request + "\a\u001b]21;foreground=?\a", everySplit: false);
     }
 
@@ -59,7 +61,20 @@ public sealed class ManagedKittyColorTests(ITestOutputHelper output)
     public void InvalidRequestsDoNotConsumeTheAcceptedRequestLimit()
     {
         if (!Available()) return;
-        Compare("\u001b]21;" + string.Concat(Enumerable.Repeat("invalid=?;", 1000)) + "foreground=red;foreground=?\a", false);
+        Compare("\u001b]21;" + new string(';', 1000) + "foreground=red;foreground=?\a", false);
+    }
+
+    [Theory]
+    [InlineData(2047)]
+    [InlineData(2048)]
+    [InlineData(2049)]
+    [InlineData(8192)]
+    public void FixedCaptureByteLimitMatchesNativeAcrossPrefixAndPayloadSplits(int length)
+    {
+        if (!Available()) return;
+        const string request = "foreground=red;foreground=?";
+        Compare("\u001b]21;" + request + new string(' ', length - request.Length) +
+            "\a\u001b]21;foreground=?\a", everySplit: length < 8192);
     }
 
     [Fact]
@@ -94,6 +109,7 @@ public sealed class ManagedKittyColorTests(ITestOutputHelper output)
     {
         byte[] bytes = Encoding.Latin1.GetBytes(input);
         using GhosttyTerminal native = new(8, 2);
+        native.SetContinuationMaxBytes(65536); // Includes tests ending inside OSC (C1 ST is payload).
         GhosttySnapshotTerminalState initial = Read(native);
         StringBuilder expected = new();
         GhosttyVtNative.GhosttyTerminalWritePtyCallback callback = (_, _, data, length) =>

@@ -16,12 +16,15 @@ internal static partial class ManagedColorParser
             value = value[1..];
             return value.Length is 3 or 6 or 9 or 12 && HexTriplet(value, out color);
         }
-        // Native names use ASCII case folding, not Unicode case equivalence.
-        foreach (char c in value) if (c > 127) return false;
-        if (NamedColors.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(value, out color)) return true;
-        if (value.Length is 3 or 6) return HexTriplet(value, out color);
         bool intensity = value.StartsWith("rgbi:");
-        if (!intensity && !value.StartsWith("rgb:")) return false;
+        if (!intensity && !value.StartsWith("rgb:"))
+        {
+            // Protocol prefixes cannot be X11 names. Keep numeric channels out
+            // of the name table and its ASCII scan on the common OSC path.
+            foreach (char c in value) if (c > 127) return false;
+            if (NamedColors.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(value, out color)) return true;
+            return value.Length is 3 or 6 && HexTriplet(value, out color);
+        }
         value = value[(intensity ? 5 : 4)..];
         Span<byte> channels = stackalloc byte[3];
         for (int i = 0; i < channels.Length; i++)
