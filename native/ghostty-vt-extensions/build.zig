@@ -23,7 +23,15 @@ pub fn build(b: *std.Build) !void {
     // root would silently omit them.
     const sources = b.addWriteFiles();
     _ = sources.addCopyDirectory(ghostty.path("src"), "src", .{
-        .exclude_extensions = &.{ "terminal/Terminal.zig", "terminal/Screen.zig", "terminal/kitty/graphics_storage.zig", "terminal/stream_continuation.zig" },
+        // WriteFile compares suffixes against host-native walker paths and
+        // copies directories after generated files. Literal '/' suffixes on
+        // Windows would miss these files and overwrite the reviewed overlays.
+        .exclude_extensions = &.{
+            b.pathJoin(&.{ "terminal", "Terminal.zig" }),
+            b.pathJoin(&.{ "terminal", "Screen.zig" }),
+            b.pathJoin(&.{ "terminal", "kitty", "graphics_storage.zig" }),
+            b.pathJoin(&.{ "terminal", "stream_continuation.zig" }),
+        },
     });
     try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "3305a832a49891b2e84d0efa4ace415d0d5e709d9c3c8f7e061228a3e1f18035", &.{
         .{
