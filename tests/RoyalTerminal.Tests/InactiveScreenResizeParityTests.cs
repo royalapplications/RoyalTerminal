@@ -131,6 +131,26 @@ public sealed class InactiveScreenResizeParityTests(ITestOutputHelper output)
         Assert.Equal('P', screen.GetViewportRow(0)[0].Codepoint);
     }
 
+    [Theory]
+    [InlineData(8, 4)]
+    [InlineData(8, 6)]
+    [InlineData(12, 4)]
+    public void ResizeOnlyResetsCustomTabStopsWhenColumnsChange(int columns, int rows)
+    {
+        if (!Available()) return;
+        TerminalScreen expected = new(8, 4), actual = new(8, 4);
+        using GhosttyVtProcessor native = new(expected);
+        using BasicVtProcessor managed = new(actual);
+        native.Process("\u001b[3g\u001b[4G\u001bH\u001b[H"u8);
+        managed.Process("\u001b[3g\u001b[4G\u001bH\u001b[H"u8);
+        expected.Resize(columns, rows, reflowOnResize: false);
+        native.NotifyResize(columns, rows, columns * 9, rows * 18);
+        managed.ResizeScreen(columns, rows, columns * 9, rows * 18, reflowOnResize: true);
+        native.Process("\tX"u8); managed.Process("\tX"u8);
+        Compare(expected, native, actual, managed);
+        Assert.Equal('X', actual.GetViewportRow(0)[columns == 8 ? 3 : 8].Codepoint);
+    }
+
     private bool Available()
     {
         bool available = GhosttyVtProcessor.IsAvailable();

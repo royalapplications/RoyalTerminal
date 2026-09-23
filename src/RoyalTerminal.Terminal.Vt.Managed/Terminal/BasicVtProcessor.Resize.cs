@@ -10,6 +10,7 @@ public sealed partial class BasicVtProcessor
     private int _savedAlternateCursorCol;
     private int _savedAlternateCursorRow;
     private bool _savedAlternateDelayedWrap;
+    private int _tabStopColumns;
 
     private void ResizeInactiveScreen(int oldColumns, int oldRows, int columns, int rows,
         bool reflowOnResize, bool preserveViewportTopOnRowsIncrease)

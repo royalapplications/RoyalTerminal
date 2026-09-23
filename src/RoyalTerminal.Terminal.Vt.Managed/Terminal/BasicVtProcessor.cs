@@ -414,6 +414,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void InitTabStops()
     {
+        _tabStopColumns = _screen.Columns;
         _tabStops.Clear();
         for (var i = 0; i < _screen.Columns; i += 8)
             _tabStops.Add(i);
@@ -5830,7 +5831,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _cursorCol = 0;
         }
 
-        InitTabStops();
+        if (_tabStopColumns != safeColumns) InitTabStops();
     }
 
     private void SetCursorFromMappedResize(int columns, TerminalGridPosition mappedCursor, bool restoreDelayedWrapAtEnd)
