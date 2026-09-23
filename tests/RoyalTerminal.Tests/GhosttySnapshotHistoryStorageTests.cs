@@ -172,6 +172,40 @@ public sealed class GhosttySnapshotHistoryStorageTests(ITestOutputHelper output)
         }
     }
 
+    [Theory]
+    [InlineData(0, true)] // No changes.
+    [InlineData(1, true)] // Height-only resize retains the screen and current width.
+    [InlineData(2, false)] // Current width differs from READY.
+    [InlineData(3, true)] // Width restored before the next page is consumed.
+    [InlineData(4, true)] // RIS resets primary contents, not its ScreenSet generation.
+    public void NativeHistoryDecisionUsesCurrentWidthAndScreenGeneration(int operation, bool accepted)
+    {
+        bool available = GhosttyVtProcessor.IsAvailable();
+        output.WriteLine($"Native history applicability reference available: {available}");
+        if (!available) return;
+        byte[] source = GhosttySnapshotFramingTests.Fixture("complete-v1.hex");
+        using GhosttySnapshotStateReader wire = new(source, new());
+        wire.ReadReady();
+        GhosttySnapshotHistoryPage page = wire.ReadNextHistoryPage()!.Value;
+        using GhosttySnapshotDecoder decoder = new(source);
+        using GhosttyTerminal terminal = decoder.Ready();
+        switch (operation)
+        {
+            case 1: terminal.Resize(2, 4); break;
+            case 2: terminal.Resize(3, 3); break;
+            case 3: terminal.Resize(3, 3); terminal.Resize(2, 3); break;
+            case 4: terminal.Write("\u001bc"u8); break;
+        }
+        Assert.True(decoder.Next());
+        Assert.Equal(accepted ? (nuint)page.Page.Grid.Rows : 0, decoder.GetProgressRows());
+        if (!accepted)
+        {
+            // Restoring width after a gap must not re-enable the older sequence.
+            terminal.Resize(2, 3);
+            while (decoder.Next()) Assert.Equal((nuint)0, decoder.GetProgressRows());
+        }
+    }
+
     private static TerminalRow Row(int codepoint)
     {
         TerminalRow row = new(1); row[0].Codepoint = codepoint; return row;
