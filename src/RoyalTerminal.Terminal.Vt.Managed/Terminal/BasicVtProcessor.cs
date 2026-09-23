@@ -2274,7 +2274,38 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     #region Scroll Region Operations
 
-    private void ScrollUpInRegion()
+    private void ScrollUpInRegion(int count = 1) => ScrollRegion(count, down: false);
+
+    private void ScrollDownInRegion(int count = 1) => ScrollRegion(count, down: true);
+
+    private void ScrollRegion(int count, bool down)
+    {
+        count = Math.Clamp(count, 1, _scrollBottom - _scrollTop + 1);
+        bool adjustImages = _kittyStore.PlacementCount > 0 &&
+            (_scrollTop != 0 || _scrollBottom != _screen.ViewportRows - 1);
+        ulong revision = _kittyStore.Revision;
+        if (adjustImages)
+            _kittyStore.BeginMarginScroll(_screen, _scrollTop, _scrollBottom, down ? count : -count,
+                (uint)(_widthPx / _screen.Columns), (uint)(_heightPx / _screen.ViewportRows));
+        try
+        {
+            for (int i = 0; i < count; i++)
+            {
+                if (down) ScrollDownOneRow();
+                else ScrollUpOneRow();
+            }
+        }
+        finally
+        {
+            if (adjustImages)
+            {
+                _kittyStore.EndMarginScroll(_screen);
+                if (_kittyStore.Revision != revision) PublishKittyGraphics();
+            }
+        }
+    }
+
+    private void ScrollUpOneRow()
     {
         if (_scrollTop == 0 && _scrollBottom == _screen.ViewportRows - 1 && !_inAltScreen)
         {
@@ -2304,7 +2335,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
     }
 
-    private void ScrollDownInRegion()
+    private void ScrollDownOneRow()
     {
         // Shift rows down within the scroll region, insert blank at top of region
         _screen.ShiftAnchorsInViewportRows(_scrollTop, _scrollBottom, rowDelta: 1);
@@ -4055,13 +4086,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 'S': // SU — Scroll Up
-                for (var i = 0; i < Math.Max(1, p0); i++)
-                    ScrollUpInRegion();
+                ScrollUpInRegion(Math.Max(1, p0));
                 break;
 
             case 'T': // SD — Scroll Down
-                for (var i = 0; i < Math.Max(1, p0); i++)
-                    ScrollDownInRegion();
+                ScrollDownInRegion(Math.Max(1, p0));
                 break;
 
             case 'g': // TBC — Tab Clear
@@ -5223,7 +5252,28 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         row.IsDirty = true;
     }
 
-    private void InsertLines(int count)
+    private void InsertLines(int count) => ShiftLines(count, insert: true);
+
+    private void DeleteLines(int count) => ShiftLines(count, insert: false);
+
+    private void ShiftLines(int count, bool insert)
+    {
+        ClampCursor();
+        if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom) return;
+        bool restoreImages = _kittyStore.PlacementCount > 0;
+        if (restoreImages) _kittyStore.BeginMarginScroll(_screen, _cursorRow, _scrollBottom, 0, 0, 0);
+        try
+        {
+            if (insert) InsertLinesCore(count);
+            else DeleteLinesCore(count);
+        }
+        finally
+        {
+            if (restoreImages) _kittyStore.EndMarginScroll(_screen);
+        }
+    }
+
+    private void InsertLinesCore(int count)
     {
         ClampCursor();
         if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom) return;
@@ -5252,7 +5302,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _screen.InvalidateAll();
     }
 
-    private void DeleteLines(int count)
+    private void DeleteLinesCore(int count)
     {
         ClampCursor();
         if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom) return;

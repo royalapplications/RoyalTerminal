@@ -13,7 +13,7 @@ The renewed review found the following missing or weakly verified requirements:
 
 | Requirement | Evidence needed for completion | Current review state |
 | --- | --- | --- |
-| Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store, live APC and virtual-placeholder projection are implemented with focused tests, including direct/chunked load, resize, scrollback/anchor reprojection, alternate-screen restoration, timed animation advancement and delete selector families; scroll-margin clipping, protocol-response/streaming edge cases and full native differential coverage remain open |
+| Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store, live APC and virtual-placeholder projection are implemented with focused tests; vertical in-place margin clipping and stationary IL/DL now match native cases; horizontal-margin integration, top-origin partial-scroll history behavior, protocol-response/streaming edges and full differential coverage remain open |
 | Native Kitty animation playback | Animation tick in the built library, scheduling without further PTY input, deterministic frame tests | Repository-owned extension and timed refresh implemented; deterministic frame tests pass, and all six native RID variants cross-build; non-macOS runtime execution remains CI validation |
 | Synchronized output | Completed prefix visible at enable; following output frozen; release/reset/one-second timeout without additional input | Both engines now implement prefix publication, frozen presentation and idle timeout; managed copy-on-write state transfer and focused native/managed tests pass |
 | Managed snapshot and continuation features | Restore both screens, history, parser/UTF-8 continuation, modes, styles, links and saved cursors with bounded validation | Managed ground-boundary processing, bounded continuation export and replay tests pass; Ghostty-compatible CRC32C framing and style/hyperlink codecs pass upstream golden, corruption, truncation and allocation tests; complete state codecs and incremental READY/history restore remain open |
@@ -227,6 +227,49 @@ Final full unit/headless verification passes **1,796 tests**, with 16 conditiona
 skips and zero failures (1,812 total, confirmed by TRX), including 19 new
 wide-edge/spacer cases. This closes the reproduced spacer gap, not the remaining
 snapshot, graphics, renderer/performance or exhaustive state-transition audit.
+
+## Kitty margin-scroll integration (2026-09-23)
+
+The previously isolated clipping geometry helpers are now used by live managed
+SU/SD/IND/RI scrolling. Following Ghostty `ImageStorage.scrollMarginsBegin/end`,
+the store records final positions before text rows move and restores anchors
+afterwards, including anchors temporarily pruned by the row operation. Placements
+wholly inside vertical margins move and permanently clip their source rectangle;
+straddling placements stay stationary. Fully clipped placements and relative
+orphans are removed, while image data remains available for later redisplay.
+Virtual placements follow their text, and relative placements follow the root.
+
+SU/SD clamp counts to the region height and clip once for the complete command,
+not once per shifted row: an 8-pixel image spanning five rows loses three source
+pixels on SU 2, rather than two successive one-pixel crops. IL/DL restore image
+positions without clipping even when their original text rows are discarded,
+matching the distinct upstream operation semantics. Unreported pixel dimensions
+do not establish containment. Publication after clipping keeps synchronized-output
+snapshots unchanged until release and reuses unchanged image pixel buffers.
+
+Seventeen focused tests pass against the real native library on macOS arm64,
+covering scaled and native-size crops, offsets, large scrolls, straddling images,
+orphan cleanup, image reuse, IL/DL, missing metrics and synchronized output.
+A warmed loop of 1,000 SU/SD pairs with an unclipped image allocates **zero bytes**:
+restoration scratch is reused and unchanged geometry is not republished. The
+no-placement path skips the placement adjustment entirely.
+
+The full unit/headless rerun passes **1,813 tests**, with 16 conditional skips
+and zero failures (1,829 total, `margin-final.trx`). An older IL test expectation
+was corrected to match the native-verified stationary-image rule. The initial
+run also encountered a PTY command-start timeout; that test passed on the full
+rerun without a production change.
+
+Reference decision: Ghostty is authoritative for Kitty margin rules. Windows
+Terminal ignores Kitty APC images; xterm's image addon attaches Sixel/iTerm image
+tiles to buffer cells and is not a Kitty placement/clipping oracle. Its scrolling
+code was inspected as a coordinate/lifetime reference, not copied as Kitty policy.
+
+This closes the tested in-place vertical clipping gap, not all margin behavior.
+Managed horizontal-margin state is not yet integrated. Also, Ghostty creates
+scrollback when the top margin is zero but a bottom margin is set; the managed
+text path currently shifts that region in place. The corresponding window-shift
+restoration path and history tests remain required, along with the wider audit.
 
 ## Scope and pinned references
 

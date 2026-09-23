@@ -58,7 +58,7 @@ public sealed class ManagedKittyViewportTests
     }
 
     [Fact]
-    public void InsertedLinesAndPrunedHistory_InvalidateAnchorProjection()
+    public void InsertedLinesKeepImageStationaryAndPrunedHistoryInvalidatesProjection()
     {
         TerminalScreen screen = new(8, 3, 0);
         using BasicVtProcessor processor = new(screen);
@@ -67,9 +67,10 @@ public sealed class ManagedKittyViewportTests
         processor.Process(TwoRowImage);
         Assert.Equal(1, screen.GetKittyPlacements()[0].ViewportRow);
         processor.Process("\u001b[1;1H\u001b[L"u8);
-        Assert.Equal(2, screen.GetKittyPlacements()[0].ViewportRow);
-        processor.Process("\u001b[3;1H\r\n"u8);
+        // Ghostty keeps image pins stationary for IL/DL; ordinary scrolling moves them.
         Assert.Equal(1, screen.GetKittyPlacements()[0].ViewportRow);
+        processor.Process("\u001b[3;1H\r\n"u8);
+        Assert.Equal(0, screen.GetKittyPlacements()[0].ViewportRow);
         processor.Process("\r\n\r\n"u8);
         Assert.False(screen.HasKittyGraphics);
     }
