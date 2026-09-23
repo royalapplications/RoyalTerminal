@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Terminal.Theming;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -32,7 +33,7 @@ public sealed class TerminalRowStateCopyTests
             case 3: copy.CopyFrom(new TerminalRow(4)); break;
             case 4: copy.CopyActiveFrom(new TerminalRow(4)); break;
             case 5: copy.ClearPreservedCellsFrom(0); break;
-            case 6: copy.RemapCellColors(new Dictionary<uint, uint> { [source.ReadOnlyCells[0].Foreground] = 0xFF123456 }); break;
+            case 6: copy.ResolveCellColors(TerminalTheme.Dark.WithDefaultForeground(0xFF123456)); break;
         }
 
         Assert.Equal('A', source.ReadOnlyCells[0].Codepoint);

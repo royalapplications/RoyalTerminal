@@ -340,24 +340,25 @@ public sealed class TerminalRow
         IsDirty = true;
     }
 
-    /// <summary>Remaps cell colors across active and retained cells.</summary>
-    internal bool RemapCellColors(IReadOnlyDictionary<uint, uint> colorRemap)
+    /// <summary>Resolves logical colors across active and retained cells.</summary>
+    internal bool ResolveCellColors(TerminalTheme theme)
     {
-        EnsureWritableCells();
         bool changed = false;
         for (int col = 0; col < _cells.Length; col++)
         {
-            ref TerminalCell cell = ref _cells[col];
-
-            if (colorRemap.TryGetValue(cell.Foreground, out uint mappedFg))
+            TerminalCell cell = _cells[col];
+            uint foreground = Resolve(cell.ForegroundIdentity, cell.Foreground, theme.DefaultForeground);
+            uint background = Resolve(cell.BackgroundIdentity, cell.Background, theme.DefaultBackground);
+            uint underline = cell.HasUnderlineColor
+                ? Resolve(cell.UnderlineIdentity, cell.UnderlineColor, foreground)
+                : cell.UnderlineColor;
+            if (foreground != cell.Foreground || background != cell.Background || underline != cell.UnderlineColor)
             {
-                cell.Foreground = mappedFg;
-                changed = true;
-            }
-
-            if (colorRemap.TryGetValue(cell.Background, out uint mappedBg))
-            {
-                cell.Background = mappedBg;
+                // Resolve first so cursor-only or unchanged themes do not detach shared rows.
+                EnsureWritableCells();
+                _cells[col].Foreground = foreground;
+                _cells[col].Background = background;
+                _cells[col].UnderlineColor = underline;
                 changed = true;
             }
         }
@@ -368,6 +369,14 @@ public sealed class TerminalRow
         }
 
         return changed;
+
+        uint Resolve(TerminalColorIdentity identity, uint current, uint defaultColor)
+            => identity.Kind switch
+            {
+                TerminalColorKind.Palette => theme.Palette[(int)identity.Value],
+                TerminalColorKind.Rgb => current,
+                _ => defaultColor,
+            };
     }
 
     /// <summary>Clear all cells to the default state.</summary>
@@ -787,12 +796,9 @@ public sealed partial class TerminalScreen
     {
         ArgumentNullException.ThrowIfNull(theme);
 
-        TerminalTheme previousTheme = _theme;
-        Dictionary<uint, uint> colorRemap = BuildColorRemap(previousTheme, theme);
-
-        if (colorRemap.Count > 0)
+        if (CellThemeColorsChanged(_theme, theme))
         {
-            RemapExistingCellColors(colorRemap);
+            ResolveExistingCellColors(theme);
         }
 
         _theme = theme;
@@ -806,66 +812,36 @@ public sealed partial class TerminalScreen
         }
     }
 
-    private void RemapExistingCellColors(IReadOnlyDictionary<uint, uint> colorRemap)
+    private static bool CellThemeColorsChanged(TerminalTheme previous, TerminalTheme next)
     {
-        RemapRowColors(_rows, colorRemap);
+        if (previous.DefaultForeground != next.DefaultForeground || previous.DefaultBackground != next.DefaultBackground)
+            return true;
+        if (ReferenceEquals(previous.Palette, next.Palette)) return false;
+        for (int i = 0; i < 256; i++)
+            if (previous.Palette[i] != next.Palette[i]) return true;
+        return false;
+    }
+
+    private void ResolveExistingCellColors(TerminalTheme theme)
+    {
+        ResolveRowColors(_rows, theme);
 
         if (_primaryRows is not null && !ReferenceEquals(_primaryRows, _rows))
         {
-            RemapRowColors(_primaryRows, colorRemap);
+            ResolveRowColors(_primaryRows, theme);
         }
 
         if (_alternateRows is not null && !ReferenceEquals(_alternateRows, _rows))
         {
-            RemapRowColors(_alternateRows, colorRemap);
+            ResolveRowColors(_alternateRows, theme);
         }
     }
 
-    private static void RemapRowColors(TerminalRowBuffer rows, IReadOnlyDictionary<uint, uint> colorRemap)
+    private static void ResolveRowColors(TerminalRowBuffer rows, TerminalTheme theme)
     {
         for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
         {
-            rows[rowIndex].RemapCellColors(colorRemap);
-        }
-    }
-
-    private static Dictionary<uint, uint> BuildColorRemap(TerminalTheme previousTheme, TerminalTheme nextTheme)
-    {
-        Dictionary<uint, uint> remap = new(capacity: 258);
-        HashSet<uint> ambiguousSources = new();
-
-        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultForeground, nextTheme.DefaultForeground);
-        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultBackground, nextTheme.DefaultBackground);
-
-        for (int i = 0; i < 256; i++)
-        {
-            AddColorRemap(remap, ambiguousSources, previousTheme.Palette[i], nextTheme.Palette[i]);
-        }
-
-        return remap;
-    }
-
-    private static void AddColorRemap(
-        IDictionary<uint, uint> remap,
-        ISet<uint> ambiguousSources,
-        uint source,
-        uint target)
-    {
-        if (source == target || ambiguousSources.Contains(source))
-        {
-            return;
-        }
-
-        if (!remap.TryGetValue(source, out uint existing))
-        {
-            remap[source] = target;
-            return;
-        }
-
-        if (existing != target)
-        {
-            remap.Remove(source);
-            ambiguousSources.Add(source);
+            rows[rowIndex].ResolveCellColors(theme);
         }
     }
 

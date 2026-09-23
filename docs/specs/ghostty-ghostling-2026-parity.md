@@ -104,8 +104,8 @@ it for display. The new identity is four bytes; grouping the cell fields keeps
 
 The review additionally corrected managed whole-screen scroll blanks to retain
 the active background and changed live/saved pen theme resolution to use logical
-color kind rather than ambiguous RGB matching. Existing-cell theme remapping
-still has a legacy RGB-heuristic path and needs a separate compatibility review.
+color kind rather than ambiguous RGB matching. Existing-cell theme resolution
+now follows the same rule, as detailed below.
 
 The shared placeholder scanner ports Ghostty's contiguous-run rules, including
 nullable row/column/high-byte inheritance, invalid marks, palette and underline
@@ -155,6 +155,37 @@ Final verification of this integration: the full unit/headless suite passes
 **1,770 tests**, with 16 conditional skips and zero failures (1,786 total,
 confirmed by TRX). The full native integration suite passes **230 tests**,
 with zero skips or failures. `git diff --check` passes.
+
+## Existing-cell theme resolution follow-up (2026-09-23)
+
+Removed the legacy RGB-to-RGB remap dictionary. Existing default, palette and
+explicit RGB cells now remain distinct even when all three initially have the
+same displayed color. Foreground, background and explicit underline palette
+colors resolve against the new theme; truecolor stays unchanged. Resolution
+covers history, inactive screens and columns retained by non-reflow resize.
+Copy-on-write rows detach only when a resolved value actually changes. Unchanged
+or cursor-only themes skip cell/history traversal entirely; equal palettes are
+compared without allocating a remap dictionary.
+
+Reference decision: Ghostty `terminal/style.zig` (`fg`, `bg`, `underlineColor`),
+Windows Terminal `TextColor::GetColor`, and xterm's WebGL `CellColorResolver`
+all retain color kind before theme resolution. RoyalTerminal follows this
+representation-based behavior; inverse/dim rendering remains downstream and
+is not baked into the logical identities.
+
+The initial focused theme/query/screen/copy regression run passes **193 tests**,
+including six new cases. A seventh regression verifies that unused palette changes
+neither allocate shared-row copies nor dirty rows. Both real processors agree on equal-RGB palette collisions,
+explicit RGB preservation, underline updates, OSC 4/104 and erased backgrounds.
+Managed history/hidden/alternate cells and snapshot isolation have dedicated
+coverage. One hundred unchanged theme applications to a shared 80x24 screen
+allocate **zero bytes**, eliminating the previous remap dictionary/set and
+unconditional shared-row copies. This does not close the separate full snapshot
+codec or formatter requirements.
+
+Final full unit/headless verification passes **1,777 tests**, with 16 conditional
+skips, zero failures and 1,793 total tests confirmed by TRX. An earlier partial
+601-test run was not counted as complete verification.
 
 ## Scope and pinned references
 

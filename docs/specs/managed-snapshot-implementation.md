@@ -37,9 +37,10 @@ identities alongside resolved ARGB. Both VT integrations populate these from
 original styles, with focused print/erase/save/restore/wide/reflow/hold tests.
 This removes the need to guess whether identical displayed RGB values came from
 default, indexed or explicit colors. The snapshot adapter still needs to map
-these identities to its style records. Remaining legacy existing-cell theme
-remapping and wide-boundary normalization paths need review before claiming all
-state transitions preserve native semantics.
+these identities to its style records. Existing-cell theme resolution now uses
+the logical identities, with native/managed collision and underline regressions.
+Wide-boundary normalization paths still need review before claiming all state
+transitions preserve native semantics.
 
 The wire format also preserves protected cells, semantic cell content, row semantic
 prompt and wrap-continuation flags. The current managed model lacks some of these
