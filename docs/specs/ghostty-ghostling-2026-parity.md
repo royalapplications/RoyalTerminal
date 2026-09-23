@@ -13,6 +13,10 @@ queries outside the processor lock, then updates both engine implementations und
 the screen's demand lock. A read-only control property exposes the hint to hosts.
 Focus gain refreshes immediately; focus loss/detach stop polling; stop/exit clear
 the hint. Failure/unavailable probes resolve to false, not a stale password hint.
+Only changed hints update processor state, matching Ghostty's timer and avoiding
+unchanged samples undoing RIS. Endpoint changes switch ownership; refocusing an
+exited process cannot restart its poller. Monitoring startup is posted without an
+await when transport startup resumes off-thread, preserving synchronous StartPty.
 
 Reference decision: Ghostty `termio/Exec.zig::termiosTimer/focusGained` and
 `pty.zig::getMode` use `ICANON && !ECHO`; raw no-echo mode is not password input.
@@ -21,7 +25,12 @@ Unix termios capability. No Windows password detection or text-based guessing is
 introduced. This is metadata detection, **not** macOS secure-input activation or
 the renderer lock glyph; those remain separate completion items. Seven Unix
 ABI/lifetime/allocation cases, one transport-capability case and two real-engine
-headless focus/session cases are added; validation follows commit/push.
+headless focus/session cases were initially added (16 focused tests passed).
+The expanded four headless cases also cover natural exit and reset/no-change
+semantics. The first full run exposed a synchronous-start/UI-callback deadlock;
+live managed stacks identified the wait, the run was terminated, and startup was
+corrected to post without blocking. That aborted run is not passing validation.
+Final validation follows commit/push.
 
 ### Native allocation model and key registry follow-up (2026-09-23)
 

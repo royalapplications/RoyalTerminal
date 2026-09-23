@@ -50,6 +50,11 @@ public sealed class TerminalControlHeadlessInteractionTests
             control.Focus();
             Assert.True(control.PasswordInput);
             Assert.True(((ITerminalPasswordInputState)factory.Processor!).PasswordInput);
+            int resetPolls = transport.Polls;
+            control.WriteOutput("\u001bc"u8);
+            Assert.True(await WaitUntilAsync(() => transport.Polls > resetPolls, TimeSpan.FromSeconds(3)));
+            Assert.False(((ITerminalPasswordInputState)factory.Processor!).PasswordInput);
+            Assert.True(control.PasswordInput); // Latest host hint, not replayed after RIS.
             transport.Detected = false;
             Assert.True(await WaitUntilAsync(() => !control.PasswordInput, TimeSpan.FromSeconds(3)));
             Assert.False(((ITerminalPasswordInputState)factory.Processor!).PasswordInput);

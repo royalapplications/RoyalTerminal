@@ -55,7 +55,9 @@ public partial class TerminalControl
             return;
         }
         bool detected = source is not null && source.TryGetPasswordInput(out bool value) && value;
-        SetPasswordInput(detected);
+        // Like Exec.termiosTimer, publish transitions, not every sample. Besides
+        // avoiding repeated state writes, unchanged termios must not undo RIS.
+        if (detected != _passwordInput) SetPasswordInput(detected);
     }
 
     private void SetPasswordInput(bool value)
