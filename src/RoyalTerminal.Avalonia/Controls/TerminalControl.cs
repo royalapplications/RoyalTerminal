@@ -5929,26 +5929,20 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         Action<byte[], int> dataHandler = _activeTransportDataHandler ?? OnPtyDataReceived;
         Action<int> exitHandler = _activeTransportExitHandler ?? OnPtyProcessExited;
-        TerminalSessionService.StopSessionAsync(_vtProcessor, dataHandler, exitHandler)
-            .AsTask()
-            .GetAwaiter()
-            .GetResult();
-        if (ReferenceEquals(_activeTransportDataHandler, dataHandler))
-        {
-            _activeTransportDataHandler = null;
-        }
-
-        if (ReferenceEquals(_activeTransportExitHandler, exitHandler))
-        {
-            _activeTransportExitHandler = null;
-        }
-
         try
         {
+            TerminalSessionService.StopSessionAsync(_vtProcessor, dataHandler, exitHandler)
+                .AsTask()
+                .GetAwaiter()
+                .GetResult();
             FlushPendingTransportOutput();
         }
         finally
         {
+            // A transport may fail while stopping or disposing. Still join the
+            // session's parser before releasing queued leases or starting again.
+            if (ReferenceEquals(_activeTransportDataHandler, dataHandler)) _activeTransportDataHandler = null;
+            if (ReferenceEquals(_activeTransportExitHandler, exitHandler)) _activeTransportExitHandler = null;
             DisposeOutputWorker();
             ResetPendingTransportOutputQueue();
             _activeTransportId = null;

@@ -3842,6 +3842,47 @@ public class TerminalControlTests
         }
     }
 
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Control_TransportShutdownFailureStillJoinsWorkerAndAllowsRestart(bool failDispose)
+    {
+        InvalidOperationException failure = new("transport shutdown failed");
+        FakeTransport transport = new()
+        {
+            StopException = failDispose ? null : failure,
+            DisposeException = failDispose ? failure : null,
+        };
+        TerminalControl control = CreateControlWithTransport(transport, new DefaultVtProcessorFactory(), VtProcessorPreference.Managed);
+        StringBuilder received = new();
+        control.DataReceived += (_, args) => received.Append(Encoding.UTF8.GetString(args.Data.Span));
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await Task.Run(() => transport.RaiseData("before"u8.ToArray()));
+            control.FlushPendingTransportOutput();
+            Assert.Same(failure, Assert.Throws<InvalidOperationException>(control.StopPty));
+            Assert.False(control.HasActiveSession);
+            // A disposed worker cannot be left installed: Flush would throw.
+            control.FlushPendingTransportOutput();
+            transport.StopException = null;
+            transport.DisposeException = null;
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await Task.Run(() => transport.RaiseRemovedData("stale"u8.ToArray()));
+            await Task.Run(() => transport.RaiseData("after"u8.ToArray()));
+            control.FlushPendingTransportOutput();
+            Assert.True(control.HasActiveSession);
+            Assert.DoesNotContain("stale", received.ToString(), StringComparison.Ordinal);
+            Assert.Contains("after", received.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            transport.StopException = null;
+            transport.DisposeException = null;
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
     [AvaloniaFact]
     public async Task Control_LeasedOutput_ReturnsStorageAfterParsing_AndPreservesEventPayload()
     {
@@ -8690,6 +8731,8 @@ public class TerminalControlTests
 
         public bool IsRunning { get; private set; }
         public bool StopCalled { get; private set; }
+        public Exception? StopException { get; set; }
+        public Exception? DisposeException { get; set; }
         public bool EchoInput { get; init; } = true;
         public Action? Starting { get; init; }
         public byte[]? OutputOnStart { get; init; }
@@ -8730,6 +8773,7 @@ public class TerminalControlTests
             StopCalled = true;
             IsRunning = false;
             _processExited?.Invoke(0);
+            if (StopException is not null) throw StopException;
             return ValueTask.CompletedTask;
         }
 
@@ -8762,6 +8806,7 @@ public class TerminalControlTests
         public void Dispose()
         {
             IsRunning = false;
+            if (DisposeException is not null) throw DisposeException;
         }
     }
 }

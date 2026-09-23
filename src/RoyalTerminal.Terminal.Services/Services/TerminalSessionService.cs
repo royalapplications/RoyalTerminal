@@ -337,10 +337,16 @@ public sealed class TerminalSessionService : ITerminalSessionService, ITerminalO
         }
         finally
         {
-            transport.Dispose();
-            Transport = null;
-            Pty = null;
-            ReplaceTransportModeSource(null);
+            try
+            {
+                transport.Dispose();
+            }
+            finally
+            {
+                Transport = null;
+                Pty = null;
+                ReplaceTransportModeSource(null);
+            }
         }
     }
 
