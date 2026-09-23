@@ -60,4 +60,40 @@ public sealed class ManagedKittyGraphicsVtProcessorTests
         processor.Process("\u001b[?1049l"u8);
         Assert.Single(screen.GetKittyPlacements().ToArray());
     }
+
+    [Fact]
+    public void Animation_AdvancesWithoutFurtherTerminalInput()
+    {
+        TestClock clock = new();
+        TerminalScreen screen = new(10, 4, 10);
+        using BasicVtProcessor processor = new(screen, new() { TimeProvider = clock });
+        processor.NotifyResize(10, 4, 100, 40);
+        processor.Process("\u001b_Ga=T,f=32,i=1,s=1,v=1,C=1;/wAA/w==\u001b\\"u8);
+        processor.Process("\u001b_Ga=f,f=32,i=1,s=1,v=1,z=40;AAD//w==\u001b\\"u8);
+        processor.Process("\u001b_Ga=a,i=1,r=1,z=40,s=3\u001b\\"u8);
+        Assert.Equal(TimeSpan.FromMilliseconds(40), processor.NextTimedRefreshDelay);
+
+        clock.Advance(TimeSpan.FromMilliseconds(39));
+        Assert.False(processor.RefreshTimedState());
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.True(processor.RefreshTimedState());
+        Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? frame));
+        Assert.Equal(new byte[] { 0, 0, 255, 255 }, frame!.RgbaPixels);
+
+        clock.Advance(TimeSpan.FromMilliseconds(40));
+        Assert.True(processor.RefreshTimedState());
+        Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? rootFrame));
+        Assert.Equal(new byte[] { 255, 0, 0, 255 }, rootFrame!.RgbaPixels);
+
+        processor.Process("\u001b_Ga=a,i=1,s=1\u001b\\"u8);
+        Assert.Null(processor.NextTimedRefreshDelay);
+    }
+
+    private sealed class TestClock : TimeProvider
+    {
+        private long _timestamp;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => _timestamp;
+        public void Advance(TimeSpan duration) => _timestamp += duration.Ticks;
+    }
 }

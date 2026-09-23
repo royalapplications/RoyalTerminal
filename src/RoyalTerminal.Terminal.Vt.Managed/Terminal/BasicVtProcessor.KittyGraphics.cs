@@ -8,6 +8,9 @@ namespace RoyalTerminal.Terminal;
 
 public sealed partial class BasicVtProcessor
 {
+    private TimeSpan? _animationNextTickDelay;
+    private long _animationTickTimestamp;
+
     private void ProcessKittyApc(ReadOnlySpan<byte> payload)
     {
         if (!_kittyStore.Enabled ||
@@ -62,6 +65,7 @@ public sealed partial class BasicVtProcessor
             }
         }
 
+        changed |= AdvanceKittyAnimations();
         if (changed) PublishKittyGraphics();
         if (!respond || quiet == 2 || quiet == 1 && error == "OK") return;
         if (responseId == 0 && responseCommand.ImageNumber == 0) return;
@@ -199,4 +203,21 @@ public sealed partial class BasicVtProcessor
     private void PublishKittyGraphics()
         => _kittyStore.Publish(_screen,
             (uint)GetEffectiveCellWidthPx(), (uint)GetEffectiveCellHeightPx());
+
+    private bool AdvanceKittyAnimations()
+    {
+        long now = _options.TimeProvider.GetTimestamp();
+        long milliseconds = Math.Max(0, (long)_options.TimeProvider.GetElapsedTime(0, now).TotalMilliseconds);
+        long? nextDelay = null;
+        bool changed = false;
+        foreach (ManagedKittyGraphicsStore.Image image in _kittyStore.Images)
+        {
+            changed |= image.Animation.Tick(milliseconds, image.PlacementCount > 0, out long? delay);
+            if (delay is long value && (nextDelay is null || value < nextDelay.Value))
+                nextDelay = value;
+        }
+        _animationTickTimestamp = now;
+        _animationNextTickDelay = nextDelay is long next ? TimeSpan.FromMilliseconds(next) : null;
+        return changed;
+    }
 }

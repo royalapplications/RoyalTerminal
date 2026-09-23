@@ -4767,6 +4767,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _screen.SwitchToAlternateBuffer(clearAlt);
         _kittyStore = _alternateKittyStore ??= new ManagedKittyGraphicsStore(_options.KittyGraphicsStorageLimitBytes);
         if (clearAlt) _kittyStore.Clear(_screen);
+        AdvanceKittyAnimations();
         PublishKittyGraphics();
         if (clearAlt)
         {
@@ -4791,6 +4792,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         _screen.SwitchToPrimaryBuffer();
         _kittyStore = _primaryKittyStore;
+        AdvanceKittyAnimations();
         PublishKittyGraphics();
 
         _cursorCol = _savedMainCursorCol;
@@ -5344,6 +5346,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _primaryKittyStore.Clear(_screen);
         _alternateKittyStore?.Clear(_screen);
         _kittyStore = _primaryKittyStore;
+        _animationNextTickDelay = null;
         _screen.ClearKittyGraphics();
         _cursorVisible = true;
         _originMode = false;
@@ -5878,27 +5881,45 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         get
         {
-            if (_renderHold is not { } hold) return null;
-            TimeSpan remaining = TimeSpan.FromSeconds(1) -
-                _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp);
-            return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+            TimeSpan? holdDelay = _renderHold is { } hold
+                ? ClampRefreshDelay(TimeSpan.FromSeconds(1) -
+                    _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp))
+                : null;
+            TimeSpan? animationDelay = _animationNextTickDelay is TimeSpan next
+                ? ClampRefreshDelay(next - _options.TimeProvider.GetElapsedTime(_animationTickTimestamp))
+                : null;
+            return holdDelay is null ? animationDelay : animationDelay is null
+                ? holdDelay : TimeSpan.FromTicks(Math.Min(holdDelay.Value.Ticks, animationDelay.Value.Ticks));
         }
     }
 
     /// <inheritdoc />
     public bool RefreshTimedState()
     {
-        if (_renderHold is not { } hold ||
-            _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp) < TimeSpan.FromSeconds(1))
+        bool changed = false;
+        if (_renderHold is { } hold &&
+            _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp) >= TimeSpan.FromSeconds(1))
         {
-            return false;
+            TerminalModeState before = ModeState;
+            SetExtendedDecMode(2026, false);
+            EndRenderHold();
+            RaiseModeChangedIfNeeded(before);
+            changed = true;
         }
-        TerminalModeState before = ModeState;
-        SetExtendedDecMode(2026, false);
-        EndRenderHold();
-        RaiseModeChangedIfNeeded(before);
-        return true;
+        if (_animationNextTickDelay is TimeSpan delay &&
+            _options.TimeProvider.GetElapsedTime(_animationTickTimestamp) >= delay)
+        {
+            if (AdvanceKittyAnimations())
+            {
+                PublishKittyGraphics();
+                changed = true;
+            }
+        }
+        return changed;
     }
+
+    private static TimeSpan ClampRefreshDelay(TimeSpan delay)
+        => delay > TimeSpan.Zero ? delay : TimeSpan.Zero;
 
     private void BeginRenderHold()
     {
