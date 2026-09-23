@@ -1382,9 +1382,9 @@ public sealed partial class TerminalScreen
         _primaryRasterPlacements = null;
         _alternateBufferActive = false;
 
-        ResizeActiveRows(Columns);
+        if (!_snapshotRowGeometry) ResizeActiveRows(Columns);
         EnsureMinimumRows(ViewportRows);
-        TrimScrollbackRows();
+        if (!_snapshotRowGeometry) TrimScrollbackRows();
         ScrollOffset = _primaryScrollOffset;
         InvalidateAll();
     }
@@ -1666,6 +1666,14 @@ public sealed partial class TerminalScreen
 
     private void EnsureAlternateRows()
     {
+        // Restored pages may retain physical widths and incidental history.
+        // Switching routes is not a resize or a request to evict those pages.
+        if (_snapshotRowGeometry)
+        {
+            EnsureMinimumRows(ViewportRows);
+            ScrollOffset = 0;
+            return;
+        }
         ResizeActiveRows(Columns);
         EnsureMinimumRows(ViewportRows);
         if (_rows.Count > ViewportRows)

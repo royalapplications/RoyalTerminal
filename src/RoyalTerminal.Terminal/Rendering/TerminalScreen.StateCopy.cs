@@ -99,6 +99,7 @@ public sealed partial class TerminalScreen
         destination.GlyphRevision = GlyphRevision;
         destination._snapshotLineage = _snapshotLineage;
         destination._snapshotAlternateGeneration = _snapshotAlternateGeneration;
+        destination._snapshotRowGeometry = _snapshotRowGeometry;
     }
 
     private TerminalRowBuffer CopyRows(TerminalRowBuffer rows)

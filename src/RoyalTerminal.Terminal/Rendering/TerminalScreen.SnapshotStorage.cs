@@ -13,6 +13,7 @@ public sealed partial class TerminalScreen
     // preserves it; a separately restored terminal receives a different identity.
     private object? _snapshotLineage;
     private ulong _snapshotAlternateGeneration;
+    private bool _snapshotRowGeometry;
 
     internal object SnapshotLineage => _snapshotLineage ??= new object();
 
@@ -60,6 +61,7 @@ public sealed partial class TerminalScreen
         _primaryRows = _alternateBufferActive ? primaryBuffer : null;
         _alternateRows = alternateBuffer;
         _rows = _alternateBufferActive ? alternateBuffer! : primaryBuffer;
+        _snapshotRowGeometry = true;
 
         void ValidateRows(TerminalRow[] rows)
         {

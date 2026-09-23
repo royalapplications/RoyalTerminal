@@ -55,7 +55,7 @@ public sealed class ManagedSnapshotProcessorStateTests(ITestOutputHelper output)
             {
                 byte[] bytes = Encoding.UTF8.GetBytes(command);
                 native.Write(bytes); managed.Process(bytes);
-                Compare(native, managed, screen); Assert.Equal(expected, actual);
+                Compare(native, managed, screen, exactPhysicalWidths: false); Assert.Equal(expected, actual);
             }
         }
         finally { native.SetWritePtyCallback(0); GC.KeepAlive(callback); }
@@ -124,7 +124,7 @@ public sealed class ManagedSnapshotProcessorStateTests(ITestOutputHelper output)
         foreach (string command in new[] { "\u001b8X", "\u001b[?47h\u001b8Y", "\u001b[?47l\u001b8Z" })
         {
             byte[] bytes = Encoding.ASCII.GetBytes(command);
-            native.Write(bytes); managed.Process(bytes); Compare(native, managed, screen);
+            native.Write(bytes); managed.Process(bytes); Compare(native, managed, screen, exactPhysicalWidths: false);
         }
     }
 
@@ -201,6 +201,34 @@ public sealed class ManagedSnapshotProcessorStateTests(ITestOutputHelper output)
         Assert.Throws<ArgumentOutOfRangeException>(() => managed.GetSnapshotCharset(2));
     }
 
+    [Fact]
+    public void BufferSwitchesAndCopyPublicationPreserveRestoredPhysicalRowsAndIncidentalHistory()
+    {
+        GhosttySnapshotReadyState original = Read(GhosttySnapshotFramingTests.Fixture("complete-v1.hex"));
+        TerminalScreen owner = new(2, 3);
+        TerminalRow hidden = new(5); hidden[4].Codepoint = 'H';
+        GhosttySnapshotPage[] pages = [GhosttySnapshotLivePage.Capture([hidden, new(5), new(5), new(5)], owner, 100)];
+        GhosttySnapshotReadyState ready = new(original.Terminal,
+            [new(original.Screens[0].State, pages), new(original.Screens[1].State, pages)], []);
+        TerminalScreen staged = GhosttySnapshotLiveScreen.Stage(ready, TerminalTheme.Dark, 0);
+        TerminalScreen copy = staged.CreateStateCopy();
+        foreach (TerminalScreen screen in new[] { staged, copy })
+        {
+            for (int i = 0; i < 3; i++) { screen.SwitchToPrimaryBuffer(); screen.SwitchToAlternateBuffer(clear: false); }
+            for (int key = 0; key < 2; key++)
+            {
+                TerminalRowBuffer rows = screen.GetSnapshotRows(key)!;
+                Assert.Equal(4, rows.Count);
+                Assert.Equal(5, rows[0].Columns);
+                Assert.Equal('H', rows[0][4].Codepoint);
+            }
+        }
+        staged.AdoptStateFrom(copy);
+        staged.SwitchToPrimaryBuffer();
+        Assert.Equal(5, staged.GetSnapshotRows(0)![0].Columns);
+        Assert.Equal(4, staged.GetSnapshotRows(0)!.Count);
+    }
+
     private static BasicVtProcessor Stage(GhosttySnapshotReadyState ready, out TerminalScreen screen)
     {
         screen = GhosttySnapshotLiveScreen.Stage(ready, TerminalTheme.Dark, 10000);
@@ -221,7 +249,7 @@ public sealed class ManagedSnapshotProcessorStateTests(ITestOutputHelper output)
         for (int col = 0; col < h.Columns; col++) Assert.Equal(ready.Terminal.IsTabStop(col), managed.IsSnapshotTabStop(col));
     }
 
-    private static void Compare(GhosttyTerminal native, BasicVtProcessor managed, TerminalScreen screen)
+    private static void Compare(GhosttyTerminal native, BasicVtProcessor managed, TerminalScreen screen, bool exactPhysicalWidths = true)
     {
         GhosttySnapshotReadyState ready = Read(native);
         AssertGeometry(ready, managed);
@@ -237,11 +265,16 @@ public sealed class ManagedSnapshotProcessorStateTests(ITestOutputHelper output)
             for (int r = 0; r < erows.Count; r++)
             {
                 TerminalRow e = erows[r], a = arows[r];
-                Assert.Equal((e.Columns, e.WrapsToNext, e.IsWrapContinuation, e.SemanticPrompt),
-                    (a.Columns, a.WrapsToNext, a.IsWrapContinuation, a.SemanticPrompt));
-                for (int col = 0; col < e.Columns; col++)
+                if (exactPhysicalWidths) Assert.Equal(e.Columns, a.Columns);
+                Assert.Equal((e.WrapsToNext, e.IsWrapContinuation, e.SemanticPrompt),
+                    (a.WrapsToNext, a.IsWrapContinuation, a.SemanticPrompt));
+                // New rows allocated after READY need not copy native page
+                // capacities; compare all retained cells, padding only absent
+                // physical cells with the default blank. Initial widths are exact.
+                for (int col = 0; col < Math.Max(e.Columns, a.Columns); col++)
                 {
-                    TerminalCell ec = e[col], ac = a[col];
+                    TerminalCell ec = col < e.Columns ? e[col] : TerminalCell.Empty(expected.DefaultForeground, expected.DefaultBackground);
+                    TerminalCell ac = col < a.Columns ? a[col] : TerminalCell.Empty(screen.DefaultForeground, screen.DefaultBackground);
                     Assert.Equal((ec.Codepoint, ec.Width, ec.Grapheme, ec.IsProtected, ec.SemanticContent),
                         (ac.Codepoint, ac.Width, ac.Grapheme, ac.IsProtected, ac.SemanticContent));
                     Assert.Equal((ec.ForegroundIdentity, ec.BackgroundIdentity, ec.UnderlineIdentity, ec.Attributes, ec.Decorations, ec.UnderlineStyle),
