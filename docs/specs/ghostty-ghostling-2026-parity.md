@@ -11,6 +11,13 @@ unsupported keys, retains query ordering, and echoes BEL versus ST. Supported
 queries report eight-bit channels regardless of host OSC report preferences;
 absent dynamic colors produce empty values, with no OSC-12-style cursor fallback.
 Color changes resolve the theme once per batch and obey synchronized publication.
+The first native differential run found a second, independent limit: OSC 21 uses
+the upstream fixed **2,048-byte payload capture**, not the allocating 8 MiB OSC
+capture. Streaming bytewise and bulk paths now reject overflow before copying or
+applying it, including splits inside `21;`. Tests independently exercise both the
+byte and accepted-request limits. Noncanonical selectors are ignored; C1 ST stays
+payload as in the already-aligned Ghostty stream parser (tests retain continuation
+when taking a snapshot of an unfinished OSC).
 
 The shared VT color parser now follows Ghostty `color.zig:RGB.parse` and
 `fraction.zig`, including all generated X11 names, ASCII-only name folding,
@@ -28,7 +35,30 @@ different rounding/hash rules. Neither inspected OSC dispatcher implements Kitty
 OSC 21. Native/managed comparisons cover protocol replies and every palette
 override bit after split input, batch-limit rejection, invalid keys, resets,
 absence, and legacy OSC updates. Parser differentials include every upstream X11
-name and all 65,536 sixteen-bit channel values. Validation follows the push.
+name and all 65,536 sixteen-bit channel values, plus 4,096 twelve-bit hash channel
+values. After the capture correction, all **138 focused Release tests** pass with
+native available, including **120 new cases**. The generated data check verifies
+all **782** unique upstream names and now runs in Ubuntu CI.
+
+The allocation/timing test compares the old theme parser used by managed OSC with
+the replacement on identical supported strings (`#abcdef`, `rgb:12/34/56`, and a
+tab-padded hash), 10,000 warmup iterations and seven samples of 100,000 parses.
+An initial implementation measured 11.294 ms versus 9.194 ms; bypassing the name
+table for protocol numeric prefixes corrected that regression. The subsequent
+Release/macOS arm64 medians were **8.764 ms versus 9.183 ms**, and **0 versus
+1,333,320 allocated bytes**. This isolated result is not an end-to-end rendering
+or parser throughput claim. Names and intensity parsing also have a tested
+zero-allocation warm path. Full Release validation follows.
+
+The same audit found remaining pre-existing legacy color-operation differences:
+OSC 4 should stop at an invalid pair and skip empty tokens; dynamic OSC 10-12
+should support successive color parameters; nonempty OSC 110-112 reset arguments
+must be rejected; OSC 104 invalid-only lists and valid-but-unsupported special
+entries need distinct handling. Legacy color operations also need native fixed
+capture limits and matching reply terminators. Managed host-configured eight-bit
+OSC reports intentionally differ from libghostty-vt's fixed sixteen-bit reports;
+the native adapter's corresponding host policy remains to be reconciled. These
+items are outstanding requirements, not exclusions from full parity.
 
 ### Snapshot color-state installation (2026-09-23)
 
