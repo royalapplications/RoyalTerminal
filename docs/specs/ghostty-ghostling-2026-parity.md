@@ -197,6 +197,20 @@ part of the outstanding performance audit.
 
 ### Current/saved charsets and cursor state (2026-09-23)
 
+Inactive-buffer resize implementation is now under validation. The managed
+processor resizes primary first and alternate second, without publishing a
+temporary screen switch. A stack-only scope reuses the existing screen resize,
+tracked-anchor and raster machinery while preserving active geometry/buffer
+identity on exit. Both dormant current and saved cursor positions are remapped;
+only the primary can reflow, and wraparound-disabled primary state does not.
+Primary prompt redraw also runs while that screen is hidden. Ghostty
+`Terminal.resize`/`Screen.resize` define this policy; xterm.js `BufferSet.resize`
+also resizes both buffers, whereas Windows Terminal `PageManager::_getBuffer`
+lazily normalizes inactive pages without reflow. RoyalTerminal intentionally
+follows Ghostty. New differential tests switch back into both buffers after
+resizing and compare contents, cursor, wrap/prompt markers and pens. This section
+records implementation intent; post-push validation is required before closure.
+
 `ManagedCharsetState` replaces two line-drawing booleans with all four G0–G3
 designations, GL/GR and a pending single shift in the SCREEN-compatible compact
 registry. ESC `(`, `)`, `*`, `+` accept ASCII, British and DEC Special Graphics;

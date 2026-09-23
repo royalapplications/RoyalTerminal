@@ -4845,6 +4845,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         if (!_inAltScreen) return;
         _alternateEraseBackground = CurrentBackgroundIdentity;
+        (_savedAlternateCursorCol, _savedAlternateCursorRow, _savedAlternateDelayedWrap) = (_cursorCol, _cursorRow, _delayedWrap);
 
         if (_screen.ScrollOffset != 0)
         {
@@ -5599,6 +5600,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _lastGraphicCodepoint = 0;
         _primarySavedCursor = _alternateSavedCursor = null;
         _alternateEraseBackground = default;
+        _savedAlternateCursorCol = _savedAlternateCursorRow = 0;
+        _savedAlternateDelayedWrap = false;
         _currentHyperlinkId = 0;
         _kittyKeyboardFlagsMain = 0;
         _kittyKeyboardFlagsAlt = 0;
@@ -5701,11 +5704,32 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         Span<TerminalGridPosition> trackedAbsolutePositions,
         bool preserveViewportTopOnRowsIncrease = false)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(rows, 1);
         EndRenderHold();
         SetExtendedDecMode(2026, false);
         _widthPx = Math.Max(0, widthPx);
         _heightPx = Math.Max(0, heightPx);
 
+        int oldColumns = _screen.Columns;
+        int oldRows = _screen.ViewportRows;
+        if (columns != oldColumns || rows != oldRows)
+        {
+            // Ghostty resizes primary first, even when the alternate is visible.
+            if (_inAltScreen)
+                ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
+            ResizeActiveScreenBuffer(columns, rows, reflowOnResize, trackedAbsolutePositions, preserveViewportTopOnRowsIncrease);
+            if (!_inAltScreen)
+                ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
+            ApplyResizeState(columns, rows);
+        }
+        PublishKittyGraphics();
+        EmitInBandSizeReport();
+    }
+
+    private void ResizeActiveScreenBuffer(int columns, int rows, bool reflowOnResize,
+        Span<TerminalGridPosition> trackedAbsolutePositions, bool preserveViewportTopOnRowsIncrease)
+    {
         bool alternateScreen = _inAltScreen;
         bool gridSizeChanged = columns != _screen.Columns || rows != _screen.ViewportRows;
         int previousCursorCol = _cursorCol;
@@ -5731,7 +5755,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             mappedCursor = _screen.Resize(
                 columns,
                 rows,
-                reflowOnResize && !alternateScreen,
+                reflowOnResize && _autoWrap && !alternateScreen,
                 alternateScreen ? null : new TerminalGridPosition(resizeCursorCol, _cursorRow),
                 trackedAbsolutePositions,
                 preserveViewportTopOnRowsIncrease && !alternateScreen);
@@ -5766,10 +5790,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _cursorRow = mappedCursor.Row;
         }
 
-        ApplyResizeState(columns, rows);
-        if (gridSizeChanged) ClearPromptForRedraw();
-        PublishKittyGraphics();
-        EmitInBandSizeReport();
+        _cursorCol = Math.Clamp(_cursorCol, 0, columns - 1);
+        _cursorRow = Math.Clamp(_cursorRow, 0, rows - 1);
+        if (gridSizeChanged)
+        {
+            // Redraw concerns the live cursor, not the user's scrolled viewport.
+            int scrollOffset = _screen.ScrollOffset;
+            _screen.ScrollOffset = 0;
+            try { ClearPromptForRedraw(); }
+            finally { _screen.ScrollOffset = scrollOffset; }
+        }
     }
 
     private void ApplyResizeState(int columns, int rows)
