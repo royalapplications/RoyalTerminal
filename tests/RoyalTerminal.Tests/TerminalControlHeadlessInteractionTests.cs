@@ -29,6 +29,48 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalControlHeadlessInteractionTests
 {
     [AvaloniaFact]
+    public async Task Headless_KittyRepeatStateClearsOnFocusLossDetachAndSessionRestart()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        TextBox sibling = new();
+        StackPanel panel = new() { Children = { control, sibling } };
+        Window window = new() { Width = 640, Height = 400, Content = panel };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("\u001b[=11u"u8);
+            control.Focus();
+            Press("\u001b[97u");
+            Press("\u001b[97;1:2u");
+            sibling.Focus();
+            control.Focus();
+            Press("\u001b[97u");
+            panel.Children.Remove(control);
+            panel.Children.Insert(0, control);
+            control.Focus();
+            Press("\u001b[97u");
+            control.StopPty();
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("\u001b[=11u"u8);
+            control.Focus();
+            Press("\u001b[97u");
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+
+        void Press(string expected)
+        {
+            transport.ClearInputs();
+            window.KeyPressQwerty(PhysicalKey.A, RawInputModifiers.None);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Single(transport.Inputs);
+            Assert.Equal(expected, Encoding.UTF8.GetString(transport.Inputs[0]));
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Headless_WindowResize_UpdatesGrid_AndPropagatesToTransport()
     {
         RecordingTransport transport = new();

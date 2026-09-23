@@ -2169,6 +2169,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        ResetKeyboardInputState();
         _terminalMouseCursorAttached = false;
         if (_terminalMouseCursors is { } cursors)
         {
@@ -5018,6 +5019,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
+        ResetKeyboardInputState();
         RestoreReservedAncestorKeyBindings();
         _suppressNextScrollbackEscapeKeyUp = false;
         Endpoint?.SetFocus(false);
@@ -5025,6 +5027,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         EnsureCursorBlinkTimerRunning(false);
         _renderer?.SetCursorVisible(false);
         _presenter?.Invalidate();
+    }
+
+    private void ResetKeyboardInputState()
+    {
+        if (TerminalInputAdapter is IResettableTerminalInputAdapter resettable) resettable.ResetInputState();
     }
 
     #endregion
@@ -5667,6 +5674,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _outputWorker = new TerminalOutputWorker(DrainPendingTransportOutput);
+        ResetKeyboardInputState();
         SetPendingTransportOutputAcceptance(acceptOutput: true);
         _mouseModeTracker.Reset();
         ResetPointerButtons();
@@ -5945,6 +5953,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             if (ReferenceEquals(_activeTransportExitHandler, exitHandler)) _activeTransportExitHandler = null;
             DisposeOutputWorker();
             ResetPendingTransportOutputQueue();
+            ResetKeyboardInputState();
             _activeTransportId = null;
             _mouseModeTracker.Reset();
             ResetPointerButtons();

@@ -12,9 +12,10 @@ namespace RoyalTerminal.Avalonia.Services;
 /// <summary>
 /// Default implementation for terminal keyboard and mouse input mapping.
 /// </summary>
-public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
+public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResettableTerminalInputAdapter
 {
     private readonly ITerminalKeyboardInputNormalizer _keyboardInputNormalizer;
+    private readonly HashSet<int> _pressedKeys = [];
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DefaultTerminalInputAdapter"/> class.
@@ -32,6 +33,9 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
     /// <inheritdoc />
     public bool HandleKeyDown(KeyEventArgs e, ITerminalSessionService sessionService, IVtProcessor? vtProcessor)
     {
+        int identity = KeyIdentity(e);
+        TerminalInputAction action = identity != 0 && !_pressedKeys.Add(identity)
+            ? TerminalInputAction.Repeat : TerminalInputAction.Press;
         TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor);
         if (_keyboardInputNormalizer.HandleKeyDown(e, modeState) == TerminalKeyboardInputAction.SuppressForTextInput)
         {
@@ -42,7 +46,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         if (inputSink is not null)
         {
             TerminalKeyEvent keyEvent = new(
-                TerminalInputAction.Press,
+                action,
                 KeyCode: (uint)e.Key,
                 Text: null,
                 Modifiers: ConvertTerminalModifiers(e.KeyModifiers),
@@ -58,7 +62,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
                     e,
                     sessionService,
                     vtProcessor,
-                    TerminalInputAction.Press,
+                    action,
                     e.KeySymbol))
             {
                 return true;
@@ -84,7 +88,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
                     e,
                     sessionService,
                     vtProcessor,
-                    TerminalInputAction.Press,
+                    action,
                     e.KeySymbol))
             {
                 return true;
@@ -103,6 +107,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
     /// <inheritdoc />
     public bool HandleKeyUp(KeyEventArgs e, ITerminalSessionService sessionService)
     {
+        _pressedKeys.Remove(KeyIdentity(e));
         TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor: null);
         if (_keyboardInputNormalizer.HandleKeyUp(e, modeState) == TerminalKeyboardInputAction.SuppressForTextInput)
         {
@@ -191,6 +196,18 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
         sessionService.SendInput(e.Text);
         return true;
     }
+
+    /// <inheritdoc />
+    public void ResetInputState()
+    {
+        _pressedKeys.Clear();
+        _keyboardInputNormalizer.ResetInputState();
+    }
+
+    // Physical identity survives a layout/modifier change between down and up.
+    // Synthetic/headless events may only provide the logical key.
+    private static int KeyIdentity(KeyEventArgs e) => e.PhysicalKey != PhysicalKey.None
+        ? 0x10000 | (int)e.PhysicalKey : (int)e.Key;
 
     private static TerminalModeState ResolveModeState(
         ITerminalSessionService sessionService,

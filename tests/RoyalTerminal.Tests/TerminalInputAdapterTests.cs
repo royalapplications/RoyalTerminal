@@ -13,6 +13,80 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalInputAdapterTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task KittyRepeatsAndReleasesReachBothProcessorsAndResetStartsNewPress(bool native)
+    {
+        if (native && !GhosttyVtProcessor.IsAvailable()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3)) :
+            new BasicVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3));
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService session = new();
+        FakeTransport transport = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+        await session.StartSessionAsync(new StaticTransportFactory(transport), new FakeTransportOptions(TerminalTransportIds.Pipe),
+            processor, onData, onExit, _ => { }, () => { }, _ => { });
+        try
+        {
+            processor.Process("\u001b[=11u"u8);
+            KeyEventArgs args = new() { Key = Key.A, KeySymbol = "a", PhysicalKey = PhysicalKey.A };
+            Assert.True(adapter.HandleKeyDown(args, session, processor));
+            Assert.Equal("\u001b[97u", Encoding.UTF8.GetString(transport.LastInput!));
+            Assert.True(adapter.HandleKeyDown(args, session, processor));
+            Assert.Equal("\u001b[97;1:2u", Encoding.UTF8.GetString(transport.LastInput!));
+            Assert.True(adapter.HandleKeyUp(args, session));
+            Assert.Equal("\u001b[97;1:3u", Encoding.UTF8.GetString(transport.LastInput!));
+            Assert.True(adapter.HandleKeyDown(args, session, processor));
+            Assert.Equal("\u001b[97u", Encoding.UTF8.GetString(transport.LastInput!));
+            adapter.ResetInputState();
+            Assert.True(adapter.HandleKeyDown(args, session, processor));
+            Assert.Equal("\u001b[97u", Encoding.UTF8.GetString(transport.LastInput!));
+        }
+        finally { await session.StopSessionAsync(processor, onData, onExit); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RepeatTrackingUsesPhysicalIdentityAndResetsWithoutSynthesizedInput(bool physical)
+    {
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService session = new();
+        FakeEndpoint endpoint = new();
+        session.AttachEndpoint(endpoint);
+        KeyEventArgs down = new() { Key = Key.A, PhysicalKey = physical ? PhysicalKey.A : PhysicalKey.None };
+        adapter.HandleKeyDown(down, session, null);
+        Assert.Equal(TerminalInputAction.Press, endpoint.LastKeyEvent!.Value.Action);
+        adapter.HandleKeyDown(down, session, null);
+        Assert.Equal(TerminalInputAction.Repeat, endpoint.LastKeyEvent!.Value.Action);
+        // The logical key can change while a physical key is held.
+        adapter.HandleKeyUp(new() { Key = physical ? Key.Q : Key.A, PhysicalKey = down.PhysicalKey }, session);
+        adapter.HandleKeyDown(down, session, null);
+        Assert.Equal(TerminalInputAction.Press, endpoint.LastKeyEvent!.Value.Action);
+        int count = endpoint.KeyCallCount;
+        adapter.ResetInputState();
+        Assert.Equal(count, endpoint.KeyCallCount);
+        adapter.HandleKeyDown(down, session, null);
+        Assert.Equal(TerminalInputAction.Press, endpoint.LastKeyEvent!.Value.Action);
+    }
+
+    [Fact]
+    public void ResetClearsWindowsAltGrSuppressionAndPendingRelease()
+    {
+        WindowsTerminalKeyboardInputNormalizer normalizer = new();
+        DefaultTerminalInputAdapter adapter = new(normalizer);
+        TerminalModeState modes = default;
+        normalizer.HandleKeyDown(new() { Key = Key.RightAlt }, modes);
+        Assert.Equal(TerminalKeyboardInputAction.SuppressForTextInput,
+            normalizer.HandleKeyDown(new() { Key = Key.A, KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt }, modes));
+        adapter.ResetInputState();
+        Assert.Equal(TerminalKeyboardInputAction.Forward, normalizer.HandleKeyUp(new() { Key = Key.A }, modes));
+        Assert.Equal(TerminalKeyboardInputAction.Forward,
+            normalizer.HandleKeyDown(new() { Key = Key.A, KeyModifiers = KeyModifiers.Control | KeyModifiers.Alt }, modes));
+    }
+
+    [Theory]
     [InlineData(false, Key.A, "A", KeyModifiers.Shift, "\u001b[27;2;65~")]
     [InlineData(true, Key.A, "A", KeyModifiers.Shift, "\u001b[27;2;65~")]
     [InlineData(false, Key.C, "c", KeyModifiers.Control, "\u001b[27;5;99~")]
