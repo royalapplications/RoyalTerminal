@@ -170,6 +170,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private int _reportCellWidthPx;
     private int _reportCellHeightPx;
     private readonly HashSet<int> _extendedDecModesEnabled = [];
+    private TerminalMouseModeState _mouseModeState;
 
     // Tab stops
     private readonly HashSet<int> _tabStops = [];
@@ -263,9 +264,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         Win32InputMode,
         _backarrowKeyMode);
 
-    private TerminalMouseModeState MouseModeState => new(
-        GetMouseTrackingMode(),
-        GetMouseEncodingMode());
+    private TerminalMouseModeState MouseModeState => _mouseModeState;
 
     /// <inheritdoc />
     public event EventHandler<TerminalModeState>? ModeChanged;
@@ -4329,58 +4328,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         return true;
     }
 
-    private TerminalMouseTrackingMode GetMouseTrackingMode()
-    {
-        if (_extendedDecModesEnabled.Contains(1003))
-        {
-            return TerminalMouseTrackingMode.AnyMotion;
-        }
-
-        if (_extendedDecModesEnabled.Contains(1002))
-        {
-            return TerminalMouseTrackingMode.ButtonMotion;
-        }
-
-        if (_extendedDecModesEnabled.Contains(1000))
-        {
-            return TerminalMouseTrackingMode.PressRelease;
-        }
-
-        if (_extendedDecModesEnabled.Contains(9))
-        {
-            return TerminalMouseTrackingMode.X10Press;
-        }
-
-        return TerminalMouseTrackingMode.None;
-    }
-
-    private TerminalMouseEncoding GetMouseEncodingMode()
-    {
-        if (_extendedDecModesEnabled.Contains(1016))
-        {
-            return TerminalMouseEncoding.SgrPixels;
-        }
-
-        if (_extendedDecModesEnabled.Contains(1006))
-        {
-            return TerminalMouseEncoding.Sgr;
-        }
-
-        if (_extendedDecModesEnabled.Contains(1015))
-        {
-            return TerminalMouseEncoding.Urxvt;
-        }
-
-        if (_extendedDecModesEnabled.Contains(1005))
-        {
-            return TerminalMouseEncoding.Utf8;
-        }
-
-        return TerminalMouseEncoding.Default;
-    }
-
     private void ResetExtendedDecModesToDefaults()
     {
+        _mouseModeState = default;
         _extendedDecModesEnabled.Clear();
         for (int i = 0; i < ExtendedDecModesEnabledByDefault.Length; i++)
         {
@@ -4500,19 +4450,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 4: // Smooth scroll
             case 5: // Reverse video
             case 8: // Auto-repeat
-            case 9: // X10 mouse tracking
             case 12: // Cursor blinking
             case 40: // Allow 80/132 mode
             case 45: // Reverse wraparound
-            case 1000: // Mouse tracking normal
-            case 1002: // Mouse button-event tracking
-            case 1003: // Mouse any-event tracking
             case 1004: // Focus event reporting
-            case 1005: // Mouse UTF-8 encoding
-            case 1006: // Mouse SGR encoding
             case 1007: // Alternate scroll mode
-            case 1015: // Mouse urxvt encoding
-            case 1016: // Mouse pixel mode
             case 1035: // Ignore keypad with numlock
             case 1036: // Meta sends escape prefix
             case 1039: // Alt sends escape
@@ -4520,6 +4462,18 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 2027: // Grapheme cluster mode
             case 2031: // Report color scheme mode
                 SetExtendedDecMode(mode, set);
+                break;
+
+            case 9:
+            case 1000:
+            case 1002:
+            case 1003:
+            case 1005:
+            case 1006:
+            case 1015:
+            case 1016:
+                SetExtendedDecMode(mode, set);
+                _mouseModeState = TerminalMouseModeTransitions.Apply(_mouseModeState, mode, set);
                 break;
 
             case 2026: // Synchronized output

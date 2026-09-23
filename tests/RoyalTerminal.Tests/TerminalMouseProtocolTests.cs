@@ -61,7 +61,7 @@ public sealed class TerminalMouseProtocolTests
     }
 
     [Fact]
-    public void Tracker_X10AndNormalTracking_FallsBackToX10_When1000Disabled()
+    public void Tracker_X10AndNormalTracking_DisablesTracking_When1000Disabled()
     {
         TerminalMouseModeTracker tracker = new();
 
@@ -70,7 +70,7 @@ public sealed class TerminalMouseProtocolTests
         Assert.Equal(TerminalMouseTrackingMode.PressRelease, tracker.ModeState.TrackingMode);
 
         tracker.Process("\x1b[?1000l"u8);
-        Assert.Equal(TerminalMouseTrackingMode.X10Press, tracker.ModeState.TrackingMode);
+        Assert.Equal(TerminalMouseTrackingMode.None, tracker.ModeState.TrackingMode);
     }
 
     [Fact]

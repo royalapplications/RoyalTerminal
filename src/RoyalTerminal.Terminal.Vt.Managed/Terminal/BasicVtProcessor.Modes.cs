@@ -20,6 +20,24 @@ public sealed partial class BasicVtProcessor
 
     internal ulong SnapshotSavedModes => _savedModeValues;
     internal ulong SnapshotDefaultModes => _defaultModeValues;
+    internal TerminalMouseModeState SnapshotMouseModes => _mouseModeState;
+
+    // Only for unpublished snapshot assembly. Assign protocol bits, not VT
+    // operations: no erase, resize, cursor save, screen switch, response or hold.
+    internal void InstallSnapshotModes(Snapshots.GhosttySnapshotTerminalHeader header)
+    {
+        _extendedDecModesEnabled.EnsureCapacity(ExtendedDecModes.Length);
+        ulong values = header.CurrentModes;
+        for (int i = 0; i < TerminalModeRegistry.AnsiModes.Length; i++)
+            SetPolicyModeValue(TerminalModeRegistry.AnsiModes[i], (values & (1UL << i)) != 0, ansi: true);
+        for (int i = 0; i < SnapshotDecModes.Length; i++)
+            SetPolicyModeValue(SnapshotDecModes[i], (values & (1UL << (i + 4))) != 0, ansi: false);
+        _savedModeValues = header.SavedModes;
+        _defaultModeValues = header.DefaultModes;
+        // The header validates these enum registries, whose values match the
+        // managed enums. Neither field is derived from the restored mode bank.
+        _mouseModeState = new((TerminalMouseTrackingMode)header.MouseEvent, (TerminalMouseEncoding)header.MouseFormat);
+    }
 
     /// <inheritdoc />
     public bool TrySetDefaultMode(int mode, bool enabled, bool ansi = false)
@@ -56,10 +74,15 @@ public sealed partial class BasicVtProcessor
         switch (mode)
         {
             case 1: _applicationCursorKeys = enabled; break;
+            case 6: _originMode = enabled; break;
             case 7: _autoWrap = enabled; break;
             case 25: _cursorVisible = enabled; break;
             case 66: _applicationKeypad = enabled; break;
             case 67: _backarrowKeyMode = enabled; break;
+            case 47: _alternateScreenModeBits = (byte)(enabled ? _alternateScreenModeBits | 1 : _alternateScreenModeBits & ~1); break;
+            case 1047: _alternateScreenModeBits = (byte)(enabled ? _alternateScreenModeBits | 2 : _alternateScreenModeBits & ~2); break;
+            case 1048: _saveCursorMode = enabled; break;
+            case 1049: _alternateScreenModeBits = (byte)(enabled ? _alternateScreenModeBits | 4 : _alternateScreenModeBits & ~4); break;
             case 2004: _bracketedPaste = enabled; break;
             default: SetExtendedDecMode(mode, enabled); break;
         }

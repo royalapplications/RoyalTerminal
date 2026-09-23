@@ -1781,6 +1781,25 @@ on macOS arm64 and the build reports no warnings/errors. Documentation CI passed
 native builds in run `35872036749` were pending at inspection. Full processor
 installation and other-platform runtime sign-off remain open.
 
+### Independent mouse state and snapshot mode banks
+
+Ghostty `stream_terminal.zig` retains individual mouse protocol bits but each
+tracking/encoding command selects the effective state independently: disabling
+any tracking mode selects none, and disabling any encoding selects X10. The
+managed processor and UI fallback tracker now follow these transitions instead
+of choosing the highest-priority enabled bit. The tracker also saves/restores
+individual mouse bits through XTSAVE/XTRESTORE. Windows Terminal delegates these
+commands to TerminalInput; xterm.js likewise uses last-command protocol selection,
+but lacks Ghostty's UTF-8/URXVT formats. Ghostty is the compatibility reference.
+
+Internal snapshot mode installation assigns all 43 current/saved/default bits and
+the independent mouse event/format flags without executing escape sequences or
+triggering resize, buffer switching, erase, replies or synchronized-output holds.
+This follows `snapshot/terminal.zig` decode; it is a prerequisite, not the complete
+processor restoration API. Tests cover every bit, arbitrary defaults through RIS,
+all 64 ordered mouse-mode pairs, save/restore, bytewise input, pointer encoding and
+warm allocation behavior. Post-push validation is pending for this batch.
+
 ## Validation requirements
 
 - Build the release native library with Zig 0.16 using `scripts/build-native.sh --release`.
