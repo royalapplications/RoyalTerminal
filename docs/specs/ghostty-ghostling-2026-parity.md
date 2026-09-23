@@ -37,8 +37,17 @@ the adapter does not invent layout data from physical US key positions.
 Full post-push Release through `d71eaf8`: **3,774 unit/headless + 231 integration
 passed, 16 conditional skips, zero failures** (`export-legacy-lifecycle-full.trx`).
 This includes 20 binary export, 56 legacy and two shutdown-failure cases. Native
-VT and renderer rebuild with Zig 0.16 on macOS arm64. Repeat routing was added
-after this full run and has focused validation; a new full run is required.
+VT and renderer rebuild with Zig 0.16 on macOS arm64.
+
+Final full Release through `ff9a7be`: **3,780 unit/headless + 231 integration
+passed, 16 conditional skips, zero failures** (`export-legacy-repeat-verified.trx`).
+The complete solution also builds with **zero warnings/errors** at `eecae9b`.
+The new required-native CI gate passes all **232 integration cases**, zero skips,
+with `ROYALTERMINAL_REQUIRE_NATIVE_TESTS=1` (`native-required-verified.trx`).
+Together the final suites cover **4,012 passing tests / 85 new cases**. CI now
+executes this separate integration suite on its three managed runtime runners;
+six native RID builds alone are not six-platform runtime sign-off. Remote HEADs
+remain Ghostty `622b4eecd` / Ghostling `63842bf8` at the final recheck.
 
 ### Managed binary export (2026-09-23)
 
