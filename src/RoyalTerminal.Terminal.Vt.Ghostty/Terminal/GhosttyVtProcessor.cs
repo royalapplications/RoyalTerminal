@@ -1827,6 +1827,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                 _ => 1,
             };
             targetCell.IsWideSpacerHead = wide == GhosttyVtNative.GhosttyCellWide.SpacerHead;
+            bool isProtected = false;
+            GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.Protected, &isProtected);
+            targetCell.IsProtected = isProtected;
 
             targetCell.Grapheme = BuildGridReferenceGrapheme(in reference);
             if (GhosttyVtNative.GridRefStyle(in reference, out GhosttyVtNative.GhosttyStyle style) ==
@@ -1944,6 +1947,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             _ => 1,
         };
         target.IsWideSpacerHead = wide == GhosttyVtNative.GhosttyCellWide.SpacerHead;
+        bool isProtected = false;
+        GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.Protected, &isProtected);
+        target.IsProtected = isProtected;
 
         if (_renderState.TryGetCurrentCellForegroundColor(out GhosttyVtNative.GhosttyColorRgb foreground))
         {
@@ -2012,6 +2018,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         target.HyperlinkId = 0;
         target.Width = 1;
         target.IsWideSpacerHead = false;
+        target.IsProtected = false;
     }
 
     private static TerminalColorIdentity MapColorIdentity(in GhosttyVtNative.GhosttyStyleColor color)

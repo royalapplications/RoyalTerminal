@@ -2064,6 +2064,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         cell.HyperlinkId = _currentHyperlinkId;
         cell.Width = width;
         cell.IsWideSpacerHead = false;
+        cell.IsProtected = _currentProtected;
     }
 
     private bool ShouldAttemptGraphemeAppend(int codepoint)
@@ -2232,6 +2233,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             spacer.Decorations = targetCell.Decorations;
             spacer.HasBackground = targetCell.HasBackground;
             spacer.HyperlinkId = targetCell.HyperlinkId;
+            spacer.IsProtected = targetCell.IsProtected;
             spacer.Width = 0;
             spacer.IsWideSpacerHead = false;
         }
@@ -2532,6 +2534,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 EnterApcState();
                 break;
 
+
+            case (byte)'V': // SPA — Start of guarded area
+                SetCharacterProtection(CharacterProtectionMode.Iso);
+                _state = ParserState.Ground;
+                break;
+
+            case (byte)'W': // EPA — End of guarded area
+                SetCharacterProtection(CharacterProtectionMode.Off);
+                _state = ParserState.Ground;
+                break;
 
             case (byte)'7': // DECSC — Save cursor
                 SaveCursor();
@@ -3855,6 +3867,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // DEC private mode families: CSI ? ...
         if (_csiPrivateMarker == '?')
         {
+            if (finalByte is 'J' or 'K' && _params.Count <= 1)
+            {
+                if (finalByte == 'J') EraseInDisplay(p0, selective: true);
+                else EraseInLine(p0, selective: true);
+                return;
+            }
             if (_intermediateChar == '$' && finalByte == 'p')
             {
                 HandleDecModeQuery();
@@ -3943,6 +3961,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        if (_intermediateChar == '"' && finalByte == 'q' && _params.Count <= 1)
+        {
+            if (p0 is 0 or 2) SetCharacterProtection(CharacterProtectionMode.Off);
+            else if (p0 == 1) SetCharacterProtection(CharacterProtectionMode.Dec);
+            return;
+        }
         if (_intermediateChar != '\0') return;
 
         ResetDelayedWrapForCsi(finalByte);
@@ -4768,10 +4792,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case 1047: // Use alternate screen buffer
                 if (set && !_inAltScreen)
-                    SwitchToAltScreen(clearAlt: true);
+                    SwitchToAltScreen(clearAlt: false);
                 else if (!set && _inAltScreen)
                 {
-                    ClearScreen();
+                    EraseInDisplay(2);
                     SwitchToMainScreen();
                 }
                 break;
@@ -4829,22 +4853,21 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _savedMainCursorRow = _cursorRow;
         _savedMainDelayedWrap = _delayedWrap;
         _inAltScreen = true;
-        _screen.SwitchToAlternateBuffer(clearAlt);
+        _screen.SwitchToAlternateBuffer(clear: false);
         _kittyStore = _alternateKittyStore ??= new ManagedKittyGraphicsStore(_options.KittyGraphicsStorageLimitBytes);
-        if (clearAlt) _kittyStore.Clear(_screen);
         AdvanceKittyAnimations();
         PublishKittyGraphics();
         if (clearAlt)
         {
-            ResetDelayedWrap();
-            _cursorCol = 0;
-            _cursorRow = 0;
+            EraseInDisplay(2);
+            // Ghostty clears the destination before copying the entering cursor.
+            _delayedWrap = _savedMainDelayedWrap;
         }
 
         // Scrolling margins are terminal-wide and survive screen switches.
     }
 
-    private void SwitchToMainScreen()
+    private void SwitchToMainScreen(bool restoreRestartPosition = false)
     {
         if (!_inAltScreen) return;
 
@@ -4858,9 +4881,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         AdvanceKittyAnimations();
         PublishKittyGraphics();
 
-        _cursorCol = _savedMainCursorCol;
-        _cursorRow = _savedMainCursorRow;
-        _delayedWrap = _savedMainDelayedWrap;
+        if (restoreRestartPosition)
+        {
+            _cursorCol = _savedMainCursorCol;
+            _cursorRow = _savedMainCursorRow;
+            _delayedWrap = _savedMainDelayedWrap;
+        }
         _inAltScreen = false;
 
         // Scrolling margins are terminal-wide and survive screen switches.
@@ -4891,6 +4917,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _savedHyperlinkId = _currentHyperlinkId;
         _savedUseLineDrawing = _useLineDrawing;
         _savedDelayedWrap = _delayedWrap;
+        SavedProtection = _currentProtected;
     }
 
     private void RestoreCursor()
@@ -4912,6 +4939,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _currentDecorations = _savedDecorations;
         _currentHyperlinkId = _savedHyperlinkId;
         _useLineDrawing = _savedUseLineDrawing;
+        _currentProtected = SavedProtection;
     }
 
     #endregion
@@ -5063,9 +5091,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _screen.InvalidateAll();
     }
 
-    private void EraseInDisplay(int mode)
+    private void EraseInDisplay(int mode, bool selective = false)
     {
         ClampCursor();
+        if ((selective || ProtectionMode == CharacterProtectionMode.Iso) && mode is >= 0 and <= 2)
+        {
+            EraseProtectedDisplay(mode);
+            return;
+        }
 
         switch (mode)
         {
@@ -5141,10 +5174,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _screen.InvalidateAll();
     }
 
-    private void EraseInLine(int mode)
+    private void EraseInLine(int mode, bool selective = false)
     {
         ClampCursor();
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
+        if (selective || ProtectionMode == CharacterProtectionMode.Iso)
+        {
+            EraseProtectedLine(mode);
+            return;
+        }
 
         var row = _screen.GetViewportRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
@@ -5300,7 +5338,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         count = Math.Min(count, RightMargin - _cursorCol + 1);
 
         var row = _screen.GetViewportRow(_cursorRow);
-        if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2) ClearPreviousWideSpacerHead();
+        if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2) ErasePreviousWideSpacerHead();
         ClearPreservedCellsForMutation(row);
         if (row.ReadOnlyCells[^1].IsWideSpacerHead)
             row[row.Columns - 1] = CreateErasedCell();
@@ -5323,9 +5361,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         ClampCursor();
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
+        if (ProtectionMode == CharacterProtectionMode.Iso)
+        {
+            EraseProtectedCharacters(count);
+            return;
+        }
 
         var row = _screen.GetViewportRow(_cursorRow);
-        if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2) ClearPreviousWideSpacerHead();
+        if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2) ErasePreviousWideSpacerHead();
         ClearPreservedCellsForMutation(row);
         if (row.ReadOnlyCells[^1].IsWideSpacerHead)
             row[row.Columns - 1] = CreateErasedCell();
@@ -5386,6 +5429,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 trailing.Decorations = cell.Decorations;
                 trailing.HasBackground = cell.HasBackground;
                 trailing.HyperlinkId = cell.HyperlinkId;
+                trailing.IsProtected = cell.IsProtected;
                 trailing.Width = 0;
                 trailing.IsWideSpacerHead = false;
                 col++;
@@ -5602,7 +5646,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             if (_inAltScreen)
             {
-                SwitchToMainScreen();
+                SwitchToMainScreen(restoreRestartPosition: true);
                 restoredPrimaryCursorCol = _cursorCol;
                 restoredPrimaryCursorRow = _cursorRow;
             }
@@ -5647,6 +5691,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _apcTruncated = false;
         _kittyClipboardProtocol.Reset();
         _screen.ClearRegisteredGlyphs();
+        _currentProtected = _primarySavedProtection = _alternateSavedProtection = false;
+        _primaryProtectionMode = _alternateProtectionMode = CharacterProtectionMode.Off;
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
         ResetHorizontalMargins();

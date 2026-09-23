@@ -67,7 +67,8 @@ public sealed class TerminalCellThemeParityTests(ITestOutputHelper output)
         TerminalScreen frozen = screen.CreateStateCopy();
         TerminalCell before = frozen.GetRow(0).ReadOnlyCells[10];
         screen.Resize(6, 3, reflowOnResize: false);
-        processor.Process("\u001b[?1049h\u001b[38;5;1mZ"u8);
+        // Alternate-screen entry copies the cursor; position this theme fixture explicitly.
+        processor.Process("\u001b[?1049h\u001b[H\u001b[38;5;1mZ"u8);
         TerminalTheme next = screen.Theme.WithPaletteColor(1, 0xFF010203)
             .WithPaletteColor(2, 0xFF040506).WithPaletteColor(3, 0xFF070809);
         processor.ApplyTheme(next);

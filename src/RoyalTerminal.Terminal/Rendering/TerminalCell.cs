@@ -71,7 +71,20 @@ public struct TerminalCell
 
     /// <summary>Whether this zero-width cell pads the right edge before a wrapped wide glyph,
     /// rather than being the trailing half of a glyph on this row.</summary>
-    public bool IsWideSpacerHead;
+    public bool IsWideSpacerHead
+    {
+        readonly get => (_metadata & 1) != 0;
+        set => _metadata = (byte)(value ? _metadata | 1 : _metadata & ~1);
+    }
+
+    private byte _metadata;
+
+    /// <summary>Whether selective erase must preserve this cell (DEC/ISO character protection).</summary>
+    public bool IsProtected
+    {
+        readonly get => (_metadata & 2) != 0;
+        set => _metadata = (byte)(value ? _metadata | 2 : _metadata & ~2);
+    }
 
     /// <summary>Returns true if this cell has content.</summary>
     public readonly bool HasContent => Codepoint != 0 || !string.IsNullOrEmpty(Grapheme);
@@ -2726,7 +2739,7 @@ public sealed partial class TerminalScreen
            tail.Attributes == head.Attributes && tail.UnderlineStyle == head.UnderlineStyle &&
            tail.UnderlineColor == head.UnderlineColor && tail.HasUnderlineColor == head.HasUnderlineColor &&
            tail.Decorations == head.Decorations && tail.HasBackground == head.HasBackground &&
-           tail.HyperlinkId == head.HyperlinkId;
+           tail.HyperlinkId == head.HyperlinkId && tail.IsProtected == head.IsProtected;
 
     private static TerminalCell CreateWideSpacer(TerminalCell source) => new()
     {
@@ -2744,6 +2757,7 @@ public sealed partial class TerminalScreen
         Decorations = source.Decorations,
         HasBackground = source.HasBackground,
         HyperlinkId = source.HyperlinkId,
+        IsProtected = source.IsProtected,
         Width = 0,
     };
 

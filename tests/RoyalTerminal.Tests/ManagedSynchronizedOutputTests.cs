@@ -60,7 +60,8 @@ public sealed class ManagedSynchronizedOutputTests
     {
         TerminalScreen screen = new(8, 2, 16);
         using BasicVtProcessor processor = new(screen);
-        processor.Process("history\r\nprimary\u001b[?2026h\u001b[?1049h\u001b]8;;https://example.com\u001b\\\u001b[31mALT"u8);
+        // Home explicitly: DECSET 1049 copies the entering cursor, as native does.
+        processor.Process("history\r\nprimary\u001b[?2026h\u001b[?1049h\u001b[H\u001b]8;;https://example.com\u001b\\\u001b[31mALT"u8);
         Assert.False(screen.AlternateBufferActive);
         Assert.False(processor.AlternateScreen);
         Assert.Equal("primary", Text(screen.GetViewportRow(1)));

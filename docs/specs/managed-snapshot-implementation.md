@@ -110,8 +110,14 @@ Wide-edge printing, overwrite and erase paths now have focused differential
 coverage; broader state-transition coverage is still required.
 
 The wire format also preserves protected cells, semantic cell content, row semantic
-prompt and wrap-continuation flags. The current managed model lacks some of these
-fields. A complete adapter must implement their runtime semantics and tests,
+prompt and wrap-continuation flags. Cell protection now has a live representation
+and runtime semantics: packed `TerminalCell.IsProtected` keeps the 48-byte cell
+budget, both native extraction paths retain it, and managed DECSCA/SPA/EPA,
+selective ED/EL and ISO ECH respect current/most-recent screen protection modes.
+SGR does not reset the protection pen; save/restore, reflow and synchronized-output
+publication preserve it. See the main parity report for source decisions and tests.
+Semantic content/prompt and wrap-continuation storage remain missing. A complete
+adapter must implement their runtime semantics and tests,
 not merely deserialize values that are then silently dropped. Wide spacer-head
 and spacer-tail distinctions are now explicit in `TerminalCell.IsWideSpacerHead`
 without increasing the 48-byte cell budget; the complete codec still needs to

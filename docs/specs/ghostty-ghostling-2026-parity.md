@@ -30,6 +30,52 @@ Tests cited elsewhere in this document describe existing coverage; they must not
 be used to mark these broader requirements complete until their specific evidence
 has been inspected.
 
+### Character protection and screen-state prerequisite (2026-09-23)
+
+Review of snapshot PAGE/SCREEN fields exposed missing live character protection.
+`TerminalCell.IsProtected` is now packed with spacer metadata without increasing
+the 48-byte cell budget. Native viewport and owned history extraction use the
+public cell protection getter; cleared cells reset the flag. Managed printing,
+wide-cell construction/reflow, copies and synchronized-output publication retain
+it. DECSCA (`CSI Ps " q`) and ISO SPA/EPA (`ESC V` / `ESC W`) control the pen;
+turning it off does not forget the most recent non-off mode for that screen.
+SGR leaves protection unchanged and DECSC/DECRC save/restore it per screen.
+
+Reference decision: follow Ghostty `Terminal.setProtectedMode`, `eraseLine`,
+`eraseDisplay`, `eraseChars` and `Screen.clearUnprotectedCells`. DEC selective
+ED/EL preserves protected cells; ordinary erasure respects protection only when
+ISO was most recent. Erased cells use the current background and discard other
+attributes. xterm.js `InputHandler.selectProtected`/`_eraseInBufferLine` supports
+the DEC protection rule. Windows Terminal `AdaptDispatch::_SelectiveEraseRect`
+instead keeps erased cells' attributes; this is an intentional Ghostty-aligned
+difference, covered by styled/link/grapheme tests. Ghostty's documented ISO ECH
+wide-boundary behavior (split the pair before protection filtering) is preserved,
+including fully clearing the preceding wrapped spacer head and its protection.
+
+Differential testing also exposed mode 47 restoring an obsolete primary cursor.
+Screen switches now carry the entering cursor, mode 1047 clears on exit (not
+entry), and mode 1049 clears before preserving the copied pending-wrap state.
+ISO-protected alternate cells survive these clears just as native cells do.
+Session restart retains its separate primary-position restoration contract.
+Two theme/synchronized-output fixtures now explicitly home their alternate-screen
+content instead of depending on the previous incorrect implicit home.
+
+The tests include every input split for protocol/save/restore/screen-switch cases,
+288 erase-mode/cursor combinations, 768 wide/wrapped erase combinations, native
+owned history capture, held publication, reflow and protection-bit independence.
+A warmed 1,000-operation selective erase loop allocates zero managed bytes.
+These close a runtime storage prerequisite, not managed snapshot installation:
+semantic/row metadata, full saved state, live encoding/READY installation and
+history reconciliation still require implementation and integration validation.
+
+Validation: **2,266 passed / 16 conditional skips / 2,282 total**, zero failures
+in the full macOS run (`protection-final.trx`), including all 36 new protection
+tests with native availability confirmed. The previous full run exposed the
+wide spacer protection defect and two implicit-home fixtures; the final run
+includes their corrections. For preceding commit `41a378d`, CI run `35850135929`
+passed all six native builds and Ubuntu/macOS build/tests; Windows build/tests
+were still running at inspection. This change requires fresh CI.
+
 ### Downloaded glyph foundation (2026-09-23)
 
 The [renderer audit](ghostty-renderer-audit-2026.md) now records implemented bounded
