@@ -2,8 +2,8 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
 using RoyalTerminal.Terminal;
 
 namespace RoyalTerminal.Avalonia.Controls;
@@ -30,7 +30,7 @@ public partial class TerminalControl
 
     private void UpdatePasswordInputMonitoring()
     {
-        if (!IsFocused || this.GetVisualRoot() is null ||
+        if (!IsFocused || TopLevel.GetTopLevel(this) is null ||
             ResolvePasswordInputSource() is not { SupportsPasswordInputDetection: true })
         {
             _passwordInputTimer?.Stop();
