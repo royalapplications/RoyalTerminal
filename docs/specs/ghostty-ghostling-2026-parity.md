@@ -2,6 +2,34 @@
 
 ## Reopened completion audit
 
+### Kitty color protocol and shared VT color parsing (2026-09-23)
+
+Managed OSC 21 now parses a bounded ordered batch before applying any changes.
+It preserves Ghostty's exact 526-accepted-request limit, rejects the entire batch
+when another token follows that limit (even an invalid/empty token), counts valid
+unsupported keys, retains query ordering, and echoes BEL versus ST. Supported
+queries report eight-bit channels regardless of host OSC report preferences;
+absent dynamic colors produce empty values, with no OSC-12-style cursor fallback.
+Color changes resolve the theme once per batch and obey synchronized publication.
+
+The shared VT color parser now follows Ghostty `color.zig:RGB.parse` and
+`fraction.zig`, including all generated X11 names, ASCII-only name folding,
+case-sensitive protocol prefixes, one-to-four-digit mixed channel widths,
+scaled/truncated hash colors, unsigned underscore syntax, and bounded-precision
+decimal fractions. Existing OSC 4/10/11/12 use the same parser. Host theme-file
+syntax remains unchanged. The generated table is reproducible with
+`scripts/generate-ghostty-x11-colors.py --check` against the pinned source.
+
+Reference decision: follow Ghostty `kitty/color.zig`,
+`osc/parsers/kitty_color.zig` and `stream_terminal.zig:kittyColorOperation`.
+Windows Terminal `ColorFromXTermColor` also supports X11 names, but its XParse
+syntax differs; xterm.js `XParseColor.ts` excludes names/intensity and uses
+different rounding/hash rules. Neither inspected OSC dispatcher implements Kitty
+OSC 21. Native/managed comparisons cover protocol replies and every palette
+override bit after split input, batch-limit rejection, invalid keys, resets,
+absence, and legacy OSC updates. Parser differentials include every upstream X11
+name and all 65,536 sixteen-bit channel values. Validation follows the push.
+
 ### Snapshot color-state installation (2026-09-23)
 
 The unpublished managed processor can now install TERMINAL colors without
@@ -35,12 +63,8 @@ still in progress at inspection, so cross-platform runtime sign-off remains open
 This is a prerequisite, not the complete managed snapshot restore/export
 orchestrator; that remains open.
 
-The continued color audit also identifies managed OSC 21 as missing. Its port must
-include Ghostty's strict keys, ordered batched requests, all-or-nothing request
-count rejection, matching BEL/ST responses, optional-color queries without cursor
-fallback, and shared native-compatible color parsing (X11 names and `rgbi:` among
-other formats). The current managed OSC color parser only accepts a smaller theme
-parser subset. These are outstanding implementation requirements, not exclusions.
+The continued color audit identified missing OSC 21 and incomplete shared color
+parsing; the subsequent implementation and its validation are described above.
 
 The complete upstream review is **in progress**. The prior API inventory and green
 test suite establish the implemented C surface, but do not establish full native

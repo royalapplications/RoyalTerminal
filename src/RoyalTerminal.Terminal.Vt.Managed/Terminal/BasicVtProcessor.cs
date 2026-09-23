@@ -2737,6 +2737,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 HandleOscPalette(value);
                 break;
 
+            case 21:
+                HandleKittyColors(value.AsSpan(), bellTerminator);
+                break;
+
             case 104:
                 HandleOscPaletteReset(value);
                 break;
@@ -5337,33 +5341,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     }
 
     private static bool TryParseOscColorSpec(string value, out uint color)
-    {
-        color = 0;
-        string token = value.Trim();
-        if (token.Length == 0)
-        {
-            return false;
-        }
-
-        if (token.StartsWith('#'))
-        {
-            return TerminalThemeParser.TryParseColor(token, out color);
-        }
-
-        if (token.StartsWith("rgb:", StringComparison.OrdinalIgnoreCase))
-        {
-            return TerminalThemeParser.TryParseColor(token, out color);
-        }
-
-        if (token.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
-            uint.TryParse(token.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint packed))
-        {
-            color = (packed & 0x00FFFFFFu) | 0xFF000000u;
-            return true;
-        }
-
-        return false;
-    }
+        => ManagedColorParser.TryParse(value.AsSpan(), out color);
 
     #endregion
 
