@@ -2,6 +2,8 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using RoyalTerminal.Terminal.Theming;
+using RoyalTerminal.Terminal.Snapshots;
+using System.Runtime.InteropServices;
 
 namespace RoyalTerminal.Avalonia.Rendering;
 
@@ -68,4 +70,60 @@ public sealed partial class TerminalScreen
         1 => _alternateBufferActive ? _rows : _alternateRows,
         _ => throw new ArgumentOutOfRangeException(nameof(key)),
     };
+
+    /// <summary>
+    /// Atomically prepends one validated page. Caller holds the screen lock and
+    /// has already checked generation, width and byte/row budgets. A missing
+    /// buffer is an error, not an instruction to create one. This storage primitive
+    /// does not itself decide whether live changes have invalidated the sequence.
+    /// </summary>
+    internal int PrependSnapshotHistory(int key, GhosttySnapshotPage page)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        TerminalRowBuffer rows = GetSnapshotRows(key) ?? throw new InvalidOperationException("Snapshot screen no longer exists.");
+        int added = page.Grid.Rows;
+        _ = checked(rows.Count + added);
+        bool alternate = key == 1;
+        bool active = alternate == _alternateBufferActive;
+
+        // PAGE decoding registers links. Isolate only those registries, not every
+        // existing row/cell; a decode/allocation failure must leave live state intact.
+        TerminalScreen owner = this;
+        if (page.HyperlinkCount != 0)
+        {
+            owner = CreateSnapshotStorage(Columns, ViewportRows, _scrollbackLimit, _theme);
+            owner._nextHyperlinkId = _nextHyperlinkId;
+            CopyRegistry(_hyperlinksById, owner._hyperlinksById);
+            CopyRegistry(_hyperlinkIdsByUrl, owner._hyperlinkIdsByUrl);
+            owner._hyperlinkIdentities.CopyFrom(_hyperlinkIdentities);
+        }
+        TerminalRow[] decoded = GhosttySnapshotLivePage.Decode(page, owner);
+
+        List<TerminalRasterImagePlacement>? placements = active ? _rasterPlacements
+            : alternate ? _alternateRasterPlacements : _primaryRasterPlacements;
+        List<TerminalRasterImagePlacement>? moved = placements is null ? null : new(placements.Count);
+        if (placements is not null)
+            foreach (TerminalRasterImagePlacement placement in placements)
+                moved!.Add(placement.WithAnchorRow(checked(placement.AnchorRow + added)));
+        // Validate anchor arithmetic before committing any of the storage.
+        foreach (TrackedCell anchor in _trackedAnchors.Values)
+            if (anchor.Alternate == alternate && anchor.Row >= 0) _ = checked(anchor.Row + added);
+
+        rows.PrependRange(decoded); // Capacity growth may throw; no mutation until it succeeds.
+        _hyperlinksById = owner._hyperlinksById;
+        _hyperlinkIdsByUrl = owner._hyperlinkIdsByUrl;
+        _hyperlinkIdentities = owner._hyperlinkIdentities;
+        _nextHyperlinkId = owner._nextHyperlinkId;
+        if (active) _rasterPlacements = moved!;
+        else if (alternate) _alternateRasterPlacements = moved;
+        else _primaryRasterPlacements = moved;
+        foreach ((TerminalScreenAnchor token, TrackedCell anchor) in _trackedAnchors)
+            if (anchor.Alternate == alternate && anchor.Row >= 0)
+                CollectionsMarshal.GetValueRefOrNullRef(_trackedAnchors, token).Row += added;
+        _anchorRevision++;
+        // Bottom-relative scroll offsets stay unchanged: both the live viewport
+        // and a scrolled-back viewport keep their original row identities.
+        if (active) InvalidateViewport();
+        return added;
+    }
 }

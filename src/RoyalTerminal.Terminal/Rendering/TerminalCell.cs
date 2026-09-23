@@ -556,6 +556,20 @@ internal sealed class TerminalRowBuffer
         }
     }
 
+    /// <summary>Prepends owned rows in oldest-to-newest order without moving existing cells.</summary>
+    internal void PrependRange(ReadOnlySpan<TerminalRow> rows)
+    {
+        if (rows.IsEmpty) return;
+        foreach (TerminalRow row in rows) ArgumentNullException.ThrowIfNull(row);
+        int count = checked(Count + rows.Length);
+        EnsureCapacity(count); // All fallible work precedes mutation.
+        int head = (int)(((long)_head + _items.Length - rows.Length % _items.Length) % _items.Length);
+        for (int i = 0; i < rows.Length; i++)
+            _items[(int)(((long)head + i) % _items.Length)] = rows[i];
+        _head = head;
+        Count = count;
+    }
+
     public void Clear()
     {
         if (Count == 0)
@@ -654,11 +668,8 @@ internal sealed class TerminalRowBuffer
             return;
         }
 
-        int nextCapacity = _items.Length == 0 ? 4 : _items.Length * 2;
-        while (nextCapacity < desiredCapacity)
-        {
-            nextCapacity *= 2;
-        }
+        int nextCapacity = (int)Math.Max(desiredCapacity,
+            Math.Min(Array.MaxLength, Math.Max(4L, (long)_items.Length * 2)));
 
         TerminalRow?[] nextItems = new TerminalRow[nextCapacity];
         CopyLogicalTo(nextItems);
