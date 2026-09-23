@@ -92,7 +92,7 @@ public sealed class GhosttySnapshotLivePageTests
     {
         GhosttySnapshotStyle style = new(default, new(2, 255, 0, 0), default, 1);
         GhosttySnapshotGrid grid = GhosttySnapshotGrid.FromOwnedCells(1, [0],
-            [(ulong)kind | ((ulong)content << 2) | (1UL << 26)], []);
+            [(uint)kind | ((ulong)content << 2) | (1UL << 26)], []);
         GhosttySnapshotPage page = GhosttySnapshotPage.FromOwnedGrid(grid, new() { [1] = style }, []);
         TerminalScreen owner = new(1, 1);
         TerminalRow row = Assert.Single(GhosttySnapshotLivePage.Decode(Reframe(page), owner));
