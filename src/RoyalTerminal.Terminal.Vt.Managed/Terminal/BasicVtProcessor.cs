@@ -108,6 +108,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private TerminalTheme _theme;
     private readonly ManagedTerminalColors _colors;
     private readonly ManagedVtContinuation _continuation;
+    private readonly ManagedKittyGraphicsStore _primaryKittyStore;
+    private ManagedKittyGraphicsStore? _alternateKittyStore;
+    private ManagedKittyGraphicsStore _kittyStore;
 
     // Parser state machine
     private ParserState _state = ParserState.Ground;
@@ -385,6 +388,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ArgumentOutOfRangeException.ThrowIfNegative(_options.ClipboardWriteLimitBytes);
         ArgumentOutOfRangeException.ThrowIfNegative(_options.ContinuationMaxBytes);
         _continuation = new ManagedVtContinuation(_options.ContinuationMaxBytes);
+        ArgumentOutOfRangeException.ThrowIfNegative(_options.KittyGraphicsStorageLimitBytes);
+        ArgumentOutOfRangeException.ThrowIfNegative(_options.KittyGraphicsMaxApcBytes);
+        ArgumentOutOfRangeException.ThrowIfNegative(_options.KittyGraphicsMaxImageBytes);
+        _primaryKittyStore = new ManagedKittyGraphicsStore(_options.KittyGraphicsStorageLimitBytes);
+        _kittyStore = _primaryKittyStore;
         _kittyClipboardProtocol = new KittyClipboardProtocol(_options.ClipboardWriteLimitBytes);
         _sixelDecoder = new SixelDecoder(_options.SixelDecoderOptions);
         _sixelGraphicsEnabled = _options.SixelGraphicsEnabled;
@@ -3284,7 +3292,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void AppendApcByte(byte value)
     {
-        if (_apcBuffer.Count < MaxUnknownSequenceBytes)
+        int limit = _apcBuffer.Count > 0 && _apcBuffer[0] == (byte)'G'
+            ? _options.KittyGraphicsMaxApcBytes
+            : MaxUnknownSequenceBytes;
+        if (_apcBuffer.Count < limit)
         {
             _apcBuffer.Add(value);
         }
@@ -3298,6 +3309,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         try
         {
+            if (_apcBuffer.Count > 0 && _apcBuffer[0] == (byte)'G')
+            {
+                if (!_apcTruncated)
+                    ProcessKittyApc(CollectionsMarshal.AsSpan(_apcBuffer)[1..]);
+                return;
+            }
             UnknownSequenceCallback?.Invoke(
                 new TerminalUnknownSequence(
                     TerminalUnknownSequenceType.Apc,
@@ -4748,6 +4765,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _savedMainDelayedWrap = _delayedWrap;
         _inAltScreen = true;
         _screen.SwitchToAlternateBuffer(clearAlt);
+        _kittyStore = _alternateKittyStore ??= new ManagedKittyGraphicsStore(_options.KittyGraphicsStorageLimitBytes);
+        if (clearAlt) _kittyStore.Clear(_screen);
+        PublishKittyGraphics();
         if (clearAlt)
         {
             ResetDelayedWrap();
@@ -4770,6 +4790,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         _screen.SwitchToPrimaryBuffer();
+        _kittyStore = _primaryKittyStore;
+        PublishKittyGraphics();
 
         _cursorCol = _savedMainCursorCol;
         _cursorRow = _savedMainCursorRow;
@@ -5319,6 +5341,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void SoftReset()
     {
         EndRenderHold();
+        _primaryKittyStore.Clear(_screen);
+        _alternateKittyStore?.Clear(_screen);
+        _kittyStore = _primaryKittyStore;
+        _screen.ClearKittyGraphics();
         _cursorVisible = true;
         _originMode = false;
         _autoWrap = true;
@@ -5718,6 +5744,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ApplyResizeState(columns, rows);
+        PublishKittyGraphics();
         EmitInBandSizeReport();
     }
 
