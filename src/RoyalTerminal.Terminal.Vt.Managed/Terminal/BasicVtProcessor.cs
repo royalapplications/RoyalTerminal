@@ -5888,15 +5888,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         get
         {
-            TimeSpan? holdDelay = _renderHold is { } hold
-                ? ClampRefreshDelay(TimeSpan.FromSeconds(1) -
-                    _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp))
-                : null;
-            TimeSpan? animationDelay = _animationNextTickDelay is TimeSpan next
+            if (_renderHold is { } hold)
+                return ClampRefreshDelay(TimeSpan.FromSeconds(1) -
+                    _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp));
+            return _animationNextTickDelay is TimeSpan next
                 ? ClampRefreshDelay(next - _options.TimeProvider.GetElapsedTime(_animationTickTimestamp))
                 : null;
-            return holdDelay is null ? animationDelay : animationDelay is null
-                ? holdDelay : TimeSpan.FromTicks(Math.Min(holdDelay.Value.Ticks, animationDelay.Value.Ticks));
         }
     }
 
@@ -5946,6 +5943,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _publishedScreen.AdoptStateFrom(_screen);
         _screen = _publishedScreen;
         _renderHold = null;
+        if (AdvanceKittyAnimations()) PublishKittyGraphics();
         return true;
     }
 

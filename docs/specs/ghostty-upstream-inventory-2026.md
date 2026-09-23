@@ -4,7 +4,9 @@ This inventory defines the review input; inclusion here does **not** establish a
 completed managed port. Each entry is a non-merge commit touching the terminal,
 VT ABI, renderer, termio, SIMD, Unicode, or font paths between the original
 RoyalTerminal pin `a60cd15bb5a197d8e2596e86442031cbece06bcc` and the audited upstream
-head `22391ed6491f2924361dcad1f9a9176a390fd20f`.
+head `4ae9f1a2de5484de3d6a13fe03676b8853b9c41c` (reverified 2026-09-23).
+The three commits after the previous head `22391ed6491f` touch only
+`.github/VOUCHED.td` and `CLAUDE.md`; the 308 relevant entries remain unchanged.
 
 Current feature evidence and outstanding requirements are tracked in
 [the parity audit](ghostty-ghostling-2026-parity.md). Platform and allocator-specific
@@ -15,7 +17,7 @@ Reproduce this inventory with:
 
 ```sh
 git -C external/ghostty log --no-merges --format='%H%x09%s' \
-  a60cd15bb5a197d8e2596e86442031cbece06bcc..22391ed6491f2924361dcad1f9a9176a390fd20f \
+  a60cd15bb5a197d8e2596e86442031cbece06bcc..4ae9f1a2de5484de3d6a13fe03676b8853b9c41c \
   -- src/terminal src/renderer src/termio src/simd src/unicode src/font \
   include/ghostty/vt src/lib_vt.zig
 ```

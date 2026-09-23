@@ -5,8 +5,9 @@
 The complete upstream review is **in progress**. The prior API inventory and green
 test suite establish the implemented C surface, but do not establish full native
 and managed feature or performance parity. The [308-commit source inventory](ghostty-upstream-inventory-2026.md)
-is the review input. The upstream heads were reverified on 2026-09-22 and have not
-changed from the revisions below.
+is the review input. The upstream heads were reverified on 2026-09-23. Ghostty
+advanced by three documentation/contributor-list commits; Ghostling is unchanged.
+The new Ghostty head changes no source, build, ABI, or renderer files.
 
 The renewed review found the following missing or weakly verified requirements:
 
@@ -63,9 +64,41 @@ whole-project parity requirements above.
 
 ## Scope and pinned references
 
+### Graphics protocol differential follow-up (2026-09-23)
+
+Eight command conversations initially disagreed with the actual native library.
+The managed processor now matches native replies for animation frame numbers,
+missing targets, queries during quiet chunked uploads, conflicting identifiers,
+silent successful animation controls, image-number composition and stale-target
+frame uploads. Image content generations change on displayed-frame edits,
+composition, selection and ticks; a chunked frame cannot commit to a changed
+target. Frame geometry/base validation precedes quota eviction, and failed
+replacement mutations still invalidate published placements. Focused tests cover
+both quota preservation and removal of stale relative children.
+
+Both integrations suppress animation wakeups during synchronized output and
+advance playback when publication resumes. Native prefix capture now starts the
+animation clock before entering a hold, including control and DECSET in one input
+chunk. Deterministic-clock tests exercise both processors. The combined graphics,
+renderer, anchor, protocol and synchronized-output run passes **130 tests** with
+the native library available on macOS arm64. These are targeted results, not a
+claim of complete protocol or whole-project parity.
+
+After rebuilding the native VT library and renderer bridge at `4ae9f1a2d`, the
+full Debug unit/headless suite passes **1,716 tests**, with 16 conditional skips
+and zero failures. The native integration suite passes **227 tests**, with no
+skips or failures. This includes the dedicated output-worker, gather/ring and
+session transport regression tests; it does not substitute for the remaining
+platform/performance audit.
+
+## Dependency revision
+
 This update moves the `external/ghostty` submodule from
 `a60cd15bb5a197d8e2596e86442031cbece06bcc` to the then-current Ghostty `main`
-commit `22391ed6491f2924361dcad1f9a9176a390fd20f`.
+commit `4ae9f1a2de5484de3d6a13fe03676b8853b9c41c` (verified 2026-09-23).
+The preceding reviewed head, `22391ed6491f2924361dcad1f9a9176a390fd20f`, has
+identical runtime sources: the intervening commits update `.github/VOUCHED.td`
+and remove `CLAUDE.md` only.
 
 The comparison also used:
 

@@ -122,6 +122,34 @@ public sealed class KittyGraphicsRuntimeParityTests(ITestOutputHelper output)
         Assert.Equal(64, screen.GetKittyPlacements()[0].HeightPx);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SynchronizedOutputDefersAnimationUntilPublication(bool native)
+    {
+        if (!CanRun(native)) return;
+        TestClock clock = new();
+        TerminalScreen screen = new(8, 3, 10);
+        using IVtProcessor processor = native
+            ? new GhosttyVtProcessor(screen, clock)
+            : new BasicVtProcessor(screen, new() { TimeProvider = clock });
+        ITerminalTimedRefreshSource timer = (ITerminalTimedRefreshSource)processor;
+        processor.NotifyResize(8, 3, 64, 48);
+        processor.Process("\u001b_Ga=T,f=32,i=1,p=1,s=1,v=1,C=1;/wAA/w==\u001b\\"u8);
+        processor.Process("\u001b_Ga=f,f=32,i=1,s=1,v=1,z=40;AAD//w==\u001b\\"u8);
+        processor.Process("\u001b_Ga=a,i=1,r=1,z=40,s=3\u001b\\\u001b[?2026h"u8);
+        clock.Advance(TimeSpan.FromMilliseconds(40));
+        Assert.Equal(TimeSpan.FromMilliseconds(960), timer.NextTimedRefreshDelay);
+        Assert.False(timer.RefreshTimedState());
+        Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? held));
+        Assert.Equal(new byte[] { 255, 0, 0, 255 }, held!.RgbaPixels);
+
+        processor.Process("\u001b[?2026l"u8);
+        Assert.Equal(TimeSpan.FromMilliseconds(40), timer.NextTimedRefreshDelay);
+        Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? released));
+        Assert.Equal(new byte[] { 0, 0, 255, 255 }, released!.RgbaPixels);
+    }
+
     private bool CanRun(bool native)
     {
         bool available = !native || GhosttyVtProcessor.IsAvailable() && GhosttyVtHelpers.GetBuildFeatures().KittyGraphics;
@@ -131,4 +159,12 @@ public sealed class KittyGraphicsRuntimeParityTests(ITestOutputHelper output)
 
     private static IVtProcessor Create(bool native, TerminalScreen screen)
         => native ? new GhosttyVtProcessor(screen) : new BasicVtProcessor(screen);
+
+    private sealed class TestClock : TimeProvider
+    {
+        private long _timestamp;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => _timestamp;
+        public void Advance(TimeSpan duration) => _timestamp += duration.Ticks;
+    }
 }

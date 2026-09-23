@@ -145,6 +145,33 @@ public sealed class ManagedKittyGraphicsVtProcessorTests
         Assert.True(screen.GetKittyPlacements().IsEmpty);
     }
 
+    [Fact]
+    public void InvalidAnimationBase_DoesNotEvictAnotherImageBeforeValidation()
+    {
+        TerminalScreen screen = new(10, 4, 10);
+        using BasicVtProcessor processor = new(screen, new() { KittyGraphicsStorageLimitBytes = 8 });
+        processor.NotifyResize(10, 4, 100, 40);
+        processor.Process("\u001b_Ga=T,f=32,i=1,p=1,s=1,v=1,C=1;/wAA/w==\u001b\\"u8);
+        processor.Process("\u001b_Ga=t,f=32,i=2,s=1,v=1;AAD//w==\u001b\\"u8);
+        processor.Process("\u001b_Ga=f,f=32,i=1,s=1,v=1,c=99;AP8A/w==\u001b\\"u8);
+        processor.Process("\u001b_Ga=p,i=2,p=1,C=1\u001b\\"u8);
+        Assert.Equal(2, screen.GetKittyPlacements().Length);
+        Assert.True(screen.TryGetKittyImageSource(2, out _));
+    }
+
+    [Fact]
+    public void FailedReplacement_RemovesRelativePlacementFromPublishedSnapshot()
+    {
+        TerminalScreen screen = new(10, 4, 10);
+        using BasicVtProcessor processor = new(screen);
+        processor.NotifyResize(10, 4, 100, 40);
+        processor.Process("\u001b_Ga=T,f=32,i=1,p=1,s=1,v=1,C=1;/wAA/w==\u001b\\"u8);
+        processor.Process("\u001b_Ga=T,f=32,i=2,p=1,s=1,v=1,P=1,Q=1,H=1,C=1;AAD//w==\u001b\\"u8);
+        Assert.Equal(2, screen.GetKittyPlacements().Length);
+        processor.Process("\u001b_Ga=t,f=32,i=2,s=1,v=1;\u001b\\"u8);
+        Assert.Equal(1, Assert.Single(screen.GetKittyPlacements().ToArray()).ImageId);
+    }
+
     private sealed class TestClock : TimeProvider
     {
         private long _timestamp;

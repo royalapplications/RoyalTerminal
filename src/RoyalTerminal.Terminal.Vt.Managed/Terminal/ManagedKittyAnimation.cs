@@ -36,11 +36,11 @@ internal sealed class ManagedKittyAnimation
         return editFrame == 0 || editFrame > (uint)_frames.Count ? RootImage.Rgba.Length : 0;
     }
 
-    internal bool TryTransmitFrame(ManagedKittyGraphicsCommand command, KittyGraphicsDecodedImage source,
-        long maxStoredBytes, out uint frameNumber, out string error)
+    internal bool TryValidateFrame(ManagedKittyGraphicsCommand command, KittyGraphicsDecodedImage source,
+        out uint frameNumber, out string error)
     {
         uint requested = command.Get('r');
-        frameNumber = requested == 0 || requested > (uint)_frames.Count + 1 ? (uint)_frames.Count + 1 : requested;
+        frameNumber = requested;
         error = "OK";
         KittyGraphicsDecodedImage root = RootImage;
         if (source.Width > root.Width || source.Height > root.Height)
@@ -49,6 +49,7 @@ internal sealed class ManagedKittyAnimation
             return false;
         }
 
+        frameNumber = requested == 0 || requested > (uint)_frames.Count + 1 ? (uint)_frames.Count + 1 : requested;
         bool append = frameNumber == (uint)_frames.Count + 1;
         uint baseFrame = command.Get('c');
         if (append && baseFrame > (uint)_frames.Count)
@@ -56,6 +57,16 @@ internal sealed class ManagedKittyAnimation
             error = "EINVAL: base frame not found";
             return false;
         }
+        return true;
+    }
+
+    internal bool TryTransmitFrame(ManagedKittyGraphicsCommand command, KittyGraphicsDecodedImage source,
+        long maxStoredBytes, out uint frameNumber, out string error)
+    {
+        if (!TryValidateFrame(command, source, out frameNumber, out error)) return false;
+        KittyGraphicsDecodedImage root = RootImage;
+        bool append = frameNumber == (uint)_frames.Count + 1;
+        uint baseFrame = command.Get('c');
         if (append && (maxStoredBytes < StoredBytes || root.Rgba.Length > maxStoredBytes - StoredBytes))
         {
             error = "ENOSPC: animation frame storage full";

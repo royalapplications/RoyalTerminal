@@ -19,7 +19,8 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
     internal long StoredBytes => _storedBytes;
     internal int ImageCount => _images.Count;
     internal int PlacementCount => _placements.Count;
-    internal IEnumerable<Image> Images => _images.Values;
+    internal ulong Revision => _generation;
+    internal Dictionary<uint, Image>.ValueCollection Images => _images.Values;
     internal IEnumerable<KeyValuePair<PlacementKey, Placement>> Placements => _placements;
     internal ManagedKittyImageLoader? Loading { get; set; }
     internal uint LoadingImageId { get; set; }
@@ -76,11 +77,15 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         long bytes = image.Animation.StoredBytes;
         _storedBytes += bytes - image.QuotaBytes;
         image.QuotaBytes = bytes;
+        _generation++;
     }
+
+    internal void MarkContentChanged(Image image) => image.Generation = ++_generation;
 
     internal bool RemoveImage(TerminalScreen screen, uint id)
     {
         if (!_images.Remove(id, out Image? image)) return false;
+        _generation++;
         _storedBytes -= image.QuotaBytes;
         foreach ((PlacementKey key, Placement _) in _placements)
             if (key.ImageId == id) RemovePlacement(screen, key);
@@ -97,6 +102,7 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         Loading = null;
         LoadingImageId = 0;
         _storedBytes = 0;
+        _generation++;
     }
 
     internal bool TryAddPlacement(TerminalScreen screen, Image image, ManagedKittyGraphicsCommand command,
@@ -124,6 +130,7 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         RemovePlacement(screen, key);
         _placements[key] = placement;
         image.PlacementCount++;
+        _generation++;
         error = "OK";
         return true;
     }
@@ -131,6 +138,7 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
     internal bool RemovePlacement(TerminalScreen screen, PlacementKey key)
     {
         if (!_placements.Remove(key, out Placement? placement)) return false;
+        _generation++;
         if (placement.Anchor is not null) screen.ReleaseAnchor(placement.Anchor);
         if (_images.TryGetValue(key.ImageId, out Image? image)) image.PlacementCount--;
         return true;
@@ -238,7 +246,7 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         private TerminalKittyImageSource? _source;
         internal uint Id { get; } = id;
         internal uint Number { get; } = number;
-        internal ulong Generation { get; } = generation;
+        internal ulong Generation { get; set; } = generation;
         internal ManagedKittyAnimation Animation { get; } = new(decoded);
         internal long QuotaBytes { get; set; } = quotaBytes;
         internal int PlacementCount { get; set; }

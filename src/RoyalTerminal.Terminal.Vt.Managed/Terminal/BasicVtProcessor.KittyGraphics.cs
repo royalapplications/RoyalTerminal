@@ -17,10 +17,12 @@ public sealed partial class BasicVtProcessor
             !ManagedKittyGraphicsCommand.TryParse(payload, _options.KittyGraphicsMaxApcBytes,
                 out ManagedKittyGraphicsCommand? command)) return;
 
-        ManagedKittyGraphicsCommand responseCommand = _kittyStore.Loading?.InitialCommand ?? command;
-        int quiet = command.Quiet == 0 ? _kittyStore.Loading?.Quiet ?? 0 : command.Quiet;
+        ulong initialRevision = _kittyStore.Revision;
+        ManagedKittyGraphicsCommand responseCommand = command;
+        int quiet = command.Quiet;
         string error = "OK";
         uint responseId = command.ImageId;
+        uint responseFrame = 0;
         bool respond = true;
         bool changed = false;
 
@@ -33,7 +35,7 @@ public sealed partial class BasicVtProcessor
             switch (command.Action)
             {
                 case 'q':
-                    if (command.ImageId == 0) error = "EINVAL: image ID required";
+                    if (command.ImageId == 0) respond = false;
                     else if (!ManagedKittyImageLoader.TryCreate(command, _options.KittyGraphicsPngDecoder,
                                  _options.KittyGraphicsMaxImageBytes, out ManagedKittyImageLoader? query,
                                  out error, _options.KittyGraphicsMediumReader)) { }
@@ -42,8 +44,9 @@ public sealed partial class BasicVtProcessor
                 case 't':
                 case 'T':
                 case 'f':
+                    quiet = command.Quiet == 0 ? _kittyStore.Loading?.Quiet ?? 0 : command.Quiet;
                     changed = ProcessKittyTransmission(command, out responseCommand, out responseId,
-                        out error, out respond);
+                        out responseFrame, out error, out respond);
                     break;
                 case 'p':
                     changed = TryDisplayKittyImage(command, out responseId, out error);
@@ -55,18 +58,30 @@ public sealed partial class BasicVtProcessor
                 case 'a':
                     ManagedKittyGraphicsStore.Image? controlled = _kittyStore.Find(command.ImageId, command.ImageNumber);
                     if (controlled is null) error = "ENOENT: image not found";
-                    else changed = controlled.Animation.ApplyControl(command);
+                    else
+                    {
+                        changed = controlled.Animation.ApplyControl(command);
+                        if (changed) _kittyStore.MarkContentChanged(controlled);
+                        respond = false;
+                    }
                     break;
                 case 'c':
                     ManagedKittyGraphicsStore.Image? composed = _kittyStore.Find(command.ImageId, command.ImageNumber);
                     if (composed is null) error = "ENOENT: image not found";
-                    else changed = composed.Animation.TryCompose(command, out error);
+                    else
+                    {
+                        responseId = composed.Id;
+                        KittyGraphicsDecodedImage previous = composed.Animation.CurrentImage;
+                        changed = composed.Animation.TryCompose(command, out error);
+                        if (!ReferenceEquals(previous, composed.Animation.CurrentImage))
+                            _kittyStore.MarkContentChanged(composed);
+                    }
                     break;
             }
         }
 
         changed |= AdvanceKittyAnimations();
-        if (changed) PublishKittyGraphics();
+        if (changed || _kittyStore.Revision != initialRevision) PublishKittyGraphics();
         if (!respond || quiet == 2 || quiet == 1 && error == "OK") return;
         if (responseId == 0 && responseCommand.ImageNumber == 0) return;
         StringBuilder reply = new("\x1b_G");
@@ -78,20 +93,36 @@ public sealed partial class BasicVtProcessor
         }
         if (responseCommand.PlacementId != 0)
             reply.Append(",p=").Append(responseCommand.PlacementId);
+        if (responseFrame != 0) reply.Append(",r=").Append(responseFrame);
         reply.Append(';').Append(error).Append("\x1b\\");
         ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(reply.ToString()));
     }
 
     private bool ProcessKittyTransmission(ManagedKittyGraphicsCommand command,
         out ManagedKittyGraphicsCommand responseCommand, out uint responseId,
-        out string error, out bool respond)
+        out uint responseFrame, out string error, out bool respond)
     {
         respond = true;
         ManagedKittyImageLoader? loader = _kittyStore.Loading;
         responseCommand = loader?.InitialCommand ?? command;
         responseId = responseCommand.ImageId;
+        responseFrame = responseCommand.Action == 'f' ? responseCommand.Get('r') : 0;
+        if (loader is not null && responseCommand.Action == 'f') responseId = _kittyStore.LoadingImageId;
         if (loader is null)
         {
+            _kittyStore.LoadingImageId = 0;
+            _kittyStore.LoadingTargetGeneration = 0;
+            if (command.Action == 'f')
+            {
+                error = "EINVAL: image ID or number required";
+                if (command.ImageId == 0 && command.ImageNumber == 0) return false;
+                ManagedKittyGraphicsStore.Image? target = _kittyStore.Find(command.ImageId, command.ImageNumber);
+                error = "ENOENT: image not found";
+                if (target is null) return false;
+                responseId = target.Id;
+                _kittyStore.LoadingImageId = target.Id;
+                _kittyStore.LoadingTargetGeneration = target.Generation;
+            }
             if (!ManagedKittyImageLoader.TryCreate(command, _options.KittyGraphicsPngDecoder,
                     _options.KittyGraphicsMaxImageBytes, out loader, out error,
                     _options.KittyGraphicsMediumReader)) return false;
@@ -104,6 +135,8 @@ public sealed partial class BasicVtProcessor
             return false;
         }
 
+        if (responseCommand.Action == 'f') responseId = _kittyStore.LoadingImageId;
+
         if (command.MoreChunks)
         {
             _kittyStore.Loading = loader;
@@ -113,20 +146,32 @@ public sealed partial class BasicVtProcessor
         }
 
         _kittyStore.Loading = null;
+        ManagedKittyGraphicsStore.Image? animationImage = null;
+        if (responseCommand.Action == 'f')
+        {
+            animationImage = _kittyStore.Find(responseCommand.ImageId, responseCommand.ImageNumber);
+            error = "ENOENT: image not found";
+            if (animationImage is null || animationImage.Generation != _kittyStore.LoadingTargetGeneration)
+                return false;
+        }
         if (!loader.TryComplete(out KittyGraphicsDecodedImage? decoded, out error)) return false;
-        if (responseCommand.Action == 'f' &&
-            _kittyStore.Find(responseCommand.ImageId, responseCommand.ImageNumber) is { } animationImage)
+        if (animationImage is not null)
         {
             responseId = animationImage.Id;
+            if (!animationImage.Animation.TryValidateFrame(responseCommand, decoded, out responseFrame, out error))
+                return false;
             if (!_kittyStore.TryReserveAnimation(_screen, animationImage,
                     animationImage.Animation.RequiredAdditionalBytes(responseCommand)))
             {
                 error = "ENOSPC: animation frame storage full";
                 return false;
             }
+            KittyGraphicsDecodedImage previous = animationImage.Animation.CurrentImage;
             if (!animationImage.Animation.TryTransmitFrame(responseCommand, decoded,
-                    _options.KittyGraphicsStorageLimitBytes, out _, out error)) return false;
+                    _options.KittyGraphicsStorageLimitBytes, out responseFrame, out error)) return false;
             _kittyStore.CommitAnimationBytes(animationImage);
+            if (!ReferenceEquals(previous, animationImage.Animation.CurrentImage))
+                _kittyStore.MarkContentChanged(animationImage);
             return true;
         }
 
@@ -225,6 +270,7 @@ public sealed partial class BasicVtProcessor
             if (!image.Animation.DeleteFrame(command.Get('r'), out bool visibleChanged))
                 return action == 'F' && _kittyStore.RemoveImage(_screen, image.Id);
             _kittyStore.CommitAnimationBytes(image);
+            if (visibleChanged) _kittyStore.MarkContentChanged(image);
             return visibleChanged;
         }
         return false;
@@ -236,6 +282,7 @@ public sealed partial class BasicVtProcessor
 
     private bool AdvanceKittyAnimations()
     {
+        if (_renderHold is not null) return false;
         _kittyStore.ReapPrunedPlacements(_screen);
         long now = _options.TimeProvider.GetTimestamp();
         long milliseconds = Math.Max(0, (long)_options.TimeProvider.GetElapsedTime(0, now).TotalMilliseconds);
@@ -243,7 +290,9 @@ public sealed partial class BasicVtProcessor
         bool changed = false;
         foreach (ManagedKittyGraphicsStore.Image image in _kittyStore.Images)
         {
-            changed |= image.Animation.Tick(milliseconds, image.PlacementCount > 0, out long? delay);
+            bool imageChanged = image.Animation.Tick(milliseconds, image.PlacementCount > 0, out long? delay);
+            if (imageChanged) _kittyStore.MarkContentChanged(image);
+            changed |= imageChanged;
             if (delay is long value && (nextDelay is null || value < nextDelay.Value))
                 nextDelay = value;
         }

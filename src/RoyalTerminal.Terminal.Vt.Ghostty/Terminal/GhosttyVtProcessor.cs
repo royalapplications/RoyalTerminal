@@ -1462,6 +1462,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         {
             if (held)
             {
+                // Start/advance the animation clock for the completed prefix,
+                // even if its control command and DECSET arrive in one write.
+                AdvanceKittyAnimations();
                 _renderState.Update(_terminal);
                 // A single write may finish a frame before starting the hold.
                 // Publish it now, while hyperlinks and graphics still refer to
