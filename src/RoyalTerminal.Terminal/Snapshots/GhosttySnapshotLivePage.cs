@@ -173,7 +173,7 @@ internal static class GhosttySnapshotLivePage
         return cell;
     }
 
-    private static GhosttySnapshotStyle EncodeStyle(in TerminalCell cell)
+    internal static GhosttySnapshotStyle EncodeStyle(in TerminalCell cell)
     {
         CellAttributes a = cell.Attributes;
         int underline = (int)cell.UnderlineStyle;

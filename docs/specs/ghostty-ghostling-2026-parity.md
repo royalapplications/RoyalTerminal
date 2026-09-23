@@ -2,6 +2,31 @@
 
 ## Reopened completion audit
 
+### Managed binary export (2026-09-23)
+
+Implementation pending post-push validation: `BasicVtProcessor.GetBinarySnapshot`
+and `WriteBinarySnapshotTo` capture live (not frozen render) terminal/processor
+state without VT replay or screen switches. The stream remains caller-owned;
+an IO/encoding failure can leave a prefix without FINISH. Invalid or unavailable
+continuation and planning-limit failures emit no envelope. The same configurable
+cell/page/string/suffix/payload/continuation bounds used by decode apply to export.
+
+Ghostty `snapshot/snapshot.zig`, `screen.zig`, and `Terminal.switchScreenMode`
+define record ordering and dormant cursor state. Departing pens/protection and
+snapshot-installed dormant hyperlinks now survive capture. Windows Terminal's
+DECRC restores per-buffer cursor state, while xterm.js SerializeAddon replays VT
+and intentionally omits temporary synchronized-output mode; neither replaces the
+Ghostty binary contract, which preserves the raw mode bank and continuation.
+
+Pages group equal physical widths, with native style/hash-map capacity headroom;
+link-dense rows split rather than silently dropping identities. READY carries the
+viewport, HISTORY carries older pages newest-first without overlap. Planning
+retains row references/ranges, not a full cell copy; streaming buffers one payload
+at a time. A single row exceeding wire or configured capacity is rejected.
+Managed export has no native page-byte policy, so bytes are unlimited in the
+header and the managed row policy is written explicitly. Exact native quota
+parity, wider differential coverage and performance measurements remain open.
+
 ### Public restore, Kitty encoding and pointer lifecycle (2026-09-23)
 
 Implemented and pushed before validation, then corrected against the native oracle:

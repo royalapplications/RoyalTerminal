@@ -4573,6 +4573,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _savedMainCursorCol = _cursorCol;
         _savedMainCursorRow = _cursorRow;
         _savedMainDelayedWrap = _delayedWrap;
+        CaptureDepartingSnapshotCursor();
         _alternateSemanticPen = _primarySemanticPen;
         _primaryCharsets = _charsets;
         _alternateCursorStyle = _primaryCursorStyle;
@@ -4596,6 +4597,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void SwitchToMainScreen(bool restoreRestartPosition = false, bool copySemanticPen = true)
     {
         if (!_inAltScreen) return;
+        CaptureDepartingSnapshotCursor();
         _alternateEraseBackground = CurrentBackgroundIdentity;
         (_savedAlternateCursorCol, _savedAlternateCursorRow, _savedAlternateDelayedWrap) = (_cursorCol, _cursorRow, _delayedWrap);
 
@@ -5331,6 +5333,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _charsets = _primaryCharsets = _alternateCharsets = new();
         _lastGraphicCodepoint = -1;
         _primarySavedCursor = _alternateSavedCursor = null;
+        _snapshotPrimaryPen = _snapshotAlternatePen = default;
+        _snapshotPrimaryProtected = _snapshotAlternateProtected = false;
+        _snapshotPrimaryHyperlink = _snapshotAlternateHyperlink = 0;
         _alternateEraseBackground = default;
         _savedAlternateCursorCol = _savedAlternateCursorRow = 0;
         _savedAlternateDelayedWrap = false;

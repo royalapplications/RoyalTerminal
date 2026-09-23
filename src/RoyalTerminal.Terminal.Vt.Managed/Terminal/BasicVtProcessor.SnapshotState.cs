@@ -117,13 +117,22 @@ public sealed partial class BasicVtProcessor
         }
         InstallSnapshotCursorStyle(state);
         InstallSnapshotKittyKeyboard(state);
+        int linkToken = state.TryGetHyperlink(out GhosttySnapshotHyperlink link)
+            ? _screen.RegisterHyperlink(link.Uri, link.ExplicitId, link.ImplicitId) : 0;
+        if (state.Key == 0)
+        {
+            _snapshotPrimaryPen = state.Pen; _snapshotPrimaryProtected = state.Protected; _snapshotPrimaryHyperlink = linkToken;
+        }
+        else
+        {
+            _snapshotAlternatePen = state.Pen; _snapshotAlternateProtected = state.Protected; _snapshotAlternateHyperlink = linkToken;
+        }
         if ((state.Key == 1) != _inAltScreen) return;
         (_cursorCol, _cursorRow, _delayedWrap) = (x, y, wrap);
         _currentProtected = state.Protected;
         _charsets = charset;
         InstallSnapshotPen(in pen);
-        _currentHyperlinkId = state.TryGetHyperlink(out GhosttySnapshotHyperlink link)
-            ? _screen.RegisterHyperlink(link.Uri, link.ExplicitId, link.ImplicitId) : 0;
+        _currentHyperlinkId = linkToken;
     }
 
     private SavedCursorState? DecodeSnapshotSavedCursor(GhosttySnapshotSavedCursor? source)
