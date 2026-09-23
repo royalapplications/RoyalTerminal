@@ -55,7 +55,11 @@ public sealed class UnixPtyInputModeTests
         if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux()) return;
         using UnixPty pty = new();
         pty.Start(shell: "/bin/sh", arguments: ["-c", "sleep 30"]);
-        await Task.WhenAll(Task.Run(() => { for (int i = 0; i < 1000; i++) pty.TryGetPasswordInput(out _); }),
+        await Task.WhenAll(Task.Run(() =>
+        {
+            if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
+                for (int i = 0; i < 1000; i++) pty.TryGetPasswordInput(out _);
+        }),
             Task.Run(pty.Dispose)).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(pty.TryGetPasswordInput(out bool detected));
         Assert.False(detected);
