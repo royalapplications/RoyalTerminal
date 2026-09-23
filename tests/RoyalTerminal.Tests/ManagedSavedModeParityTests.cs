@@ -53,7 +53,7 @@ public sealed class ManagedSavedModeParityTests(ITestOutputHelper output)
     public void MixedModeBanksAndModeQueriesMatchAtEveryInputSplit(string input)
     {
         if (!Available()) return;
-        byte[] bytes = Encoding.ASCII.GetBytes(input + "\u001b[?47;1047;1049;7;25;1007$p");
+        byte[] bytes = Encoding.ASCII.GetBytes(input + "\u001b[?47$p\u001b[?1047$p\u001b[?1049$p\u001b[?7$p\u001b[?25$p\u001b[?1007$p");
         for (int split = 0; split <= bytes.Length; split++)
         {
             TerminalScreen expected = new(12, 4), actual = new(12, 4);
@@ -88,6 +88,59 @@ public sealed class ManagedSavedModeParityTests(ITestOutputHelper output)
         for (int row = 0; row < 4; row++)
         for (int column = 0; column < 12; column++)
             Assert.Equal(expected.GetViewportRow(row)[column].Codepoint, actual.GetViewportRow(row)[column].Codepoint);
+    }
+
+    [Fact]
+    public void ColumnModeRestoreResizesClearsAndHomesLikeNative()
+    {
+        if (!Available()) return;
+        using GhosttyTerminal native = new(12, 4);
+        TerminalScreen screen = new(12, 4);
+        using BasicVtProcessor managed = new(screen, new BasicVtProcessorOptions { ResizePullScrollback = true });
+        string[] operations = ["\u001b[44mOLD\u001b[?3h", // Disabled by mode 40.
+            "\u001b[?40h\u001b[?3h", "WIDE\u001b[?3s\u001b[?3l", "NARROW\u001b[?3r",
+            "\u001b[2;4r\u001b[?6h\u001b[?3r", "\u001b[?1049hALT\u001b[?3l",
+            "\u001b[?1049l\u001b[?40l\u001b[?3r"];
+        foreach (string operation in operations)
+        {
+            byte[] bytes = Encoding.ASCII.GetBytes(operation);
+            native.Write(bytes); managed.Process(bytes);
+            Assert.Equal(native.GetColumns(), screen.Columns);
+            Assert.Equal((native.GetCursorX(), native.GetCursorY()), ((ushort)managed.CursorCol, (ushort)managed.CursorRow));
+            using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());
+            GhosttySnapshotReadyState ready = reader.ReadReady();
+            Assert.Equal(ready.Terminal.Header.CurrentModes, managed.SnapshotCurrentModes);
+            List<TerminalRow> rows = [];
+            TerminalScreen owner = new(screen.Columns, 4);
+            foreach (GhosttySnapshotPage page in ready.Screens[ready.Terminal.Header.ActiveScreenKey].Pages)
+                rows.AddRange(GhosttySnapshotLivePage.Decode(page, owner));
+            for (int row = 0; row < 4; row++)
+            for (int column = 0; column < screen.Columns; column++)
+            {
+                TerminalCell expected = rows[rows.Count - 4 + row][column], actual = screen.GetViewportRow(row)[column];
+                Assert.Equal(expected.Codepoint, actual.Codepoint);
+                Assert.Equal(expected.BackgroundIdentity, actual.BackgroundIdentity);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("\u001b[?$p")]
+    [InlineData("\u001b[$p")]
+    [InlineData("\u001b[?7;25$p")]
+    [InlineData("\u001b[2;4$p")]
+    [InlineData("\u001b[?7:25$p")]
+    public void MalformedModeQueriesAreIgnoredLikeNative(string input)
+    {
+        if (!Available()) return;
+        using GhosttyVtProcessor native = new(new TerminalScreen(12, 4));
+        using BasicVtProcessor managed = new(new TerminalScreen(12, 4));
+        int nativeReplies = 0, managedReplies = 0;
+        native.ResponseCallback = _ => nativeReplies++;
+        managed.ResponseCallback = _ => managedReplies++;
+        byte[] bytes = Encoding.ASCII.GetBytes(input);
+        native.Process(bytes); managed.Process(bytes);
+        Assert.Equal(0, nativeReplies); Assert.Equal(nativeReplies, managedReplies);
     }
 
     [Fact]

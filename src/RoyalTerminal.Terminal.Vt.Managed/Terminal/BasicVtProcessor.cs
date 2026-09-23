@@ -4319,34 +4319,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void HandleDecModeQuery()
     {
-        if (_params.Count == 0)
-        {
-            EmitDecModeQueryResponse(mode: 0, status: 0);
-            return;
-        }
-
-        for (int i = 0; i < _params.Count; i++)
-        {
-            int mode = _params[i];
-            int status = GetDecPrivateModeReportStatus(mode);
-            EmitDecModeQueryResponse(mode, status);
-        }
+        if (_params.Count != 1) return;
+        int mode = _params[0];
+        EmitDecModeQueryResponse(mode, GetDecPrivateModeReportStatus(mode));
     }
 
     private void HandleAnsiModeQuery()
     {
-        if (_params.Count == 0)
-        {
-            EmitAnsiModeQueryResponse(mode: 0, status: 0);
-            return;
-        }
-
-        for (int i = 0; i < _params.Count; i++)
-        {
-            int mode = _params[i];
-            int status = GetAnsiModeReportStatus(mode);
-            EmitAnsiModeQueryResponse(mode, status);
-        }
+        if (_params.Count != 1) return;
+        int mode = _params[0];
+        EmitAnsiModeQueryResponse(mode, GetAnsiModeReportStatus(mode));
     }
 
     private int GetAnsiModeReportStatus(int mode)
@@ -4712,7 +4694,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     SwitchToMainScreen();
                 break;
 
-            case 3: // 132-column mode
+            case 3: // DECCOLM is ignored (including its mode value) unless DEC 40 permits it.
+                SetColumnMode(set);
+                break;
+
             case 4: // Smooth scroll
             case 5: // Reverse video
             case 8: // Auto-repeat

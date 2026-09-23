@@ -63,4 +63,17 @@ public sealed partial class BasicVtProcessor
         _savedModeValues = SnapshotInitialModes;
         _alternateScreenModeBits = 0;
     }
+
+    private void SetColumnMode(bool enabled)
+    {
+        if (!_extendedDecModesEnabled.Contains(40))
+        {
+            SetExtendedDecMode(3, false);
+            return;
+        }
+        SetExtendedDecMode(3, enabled);
+        ResizeScreen(enabled ? 132 : 80, _screen.ViewportRows, _widthPx, _heightPx, reflowOnResize: true);
+        EraseInDisplay(2);
+        HomeCursor();
+    }
 }
