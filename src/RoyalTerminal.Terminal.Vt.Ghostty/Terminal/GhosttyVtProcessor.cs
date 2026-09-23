@@ -3182,6 +3182,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private bool IsAnyMouseButtonPressed(in TerminalPointerEvent pointerEvent)
     {
+        // A drag may enter the surface without its initial press being routed
+        // here. Its current button is still authoritative for viewport filtering.
+        if (pointerEvent.Kind == TerminalPointerEventKind.Move && GetMouseButtonMask(pointerEvent.Button) != 0) return true;
         if (pointerEvent.Kind != TerminalPointerEventKind.Button)
         {
             return _pressedMouseButtons != 0;

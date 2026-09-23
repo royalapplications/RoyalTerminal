@@ -41,7 +41,8 @@ internal sealed class ManagedMouseEncoder
 
         if (!mode.IsMouseReportingEnabled || !TerminalMouseProtocolEncoder.TryGetMouseCode(normalized, mode, out _, out _)) return false;
         bool releaseEvent = normalized.Kind == TerminalPointerEventKind.Button && normalized.Action == TerminalInputAction.Release;
-        if (!releaseEvent && geometry.Outside && (!mode.ReportsMotion || _pressedButtons == 0)) return false;
+        bool anyButton = _pressedButtons != 0 || (pointer.Kind == TerminalPointerEventKind.Move && mask != 0);
+        if (!releaseEvent && geometry.Outside && (!mode.ReportsMotion || !anyButton)) return false;
         (int, int) cell = (geometry.Column, geometry.Row);
         if (pointer.Kind == TerminalPointerEventKind.Move && mode.Encoding != TerminalMouseEncoding.SgrPixels && _lastCell == cell) return false;
         // Ghostty records the cell before checking the encoding's coordinate limit.

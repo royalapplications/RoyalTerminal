@@ -39,6 +39,7 @@ public sealed class TerminalPointerEncoderParityTests(ITestOutputHelper output)
         {
             oracle.SetSize(Size(context));
             TerminalPointerEvent[] events = [
+                Pointer(TerminalPointerEventKind.Move, -1, -1, TerminalMouseButton.Left),
                 Pointer(TerminalPointerEventKind.Move, 1.1, 1.2),
                 Pointer(TerminalPointerEventKind.Move, 1.4, 1.4),
                 Pointer(TerminalPointerEventKind.Button, 1, 1, TerminalMouseButton.Left),
@@ -217,7 +218,7 @@ public sealed class TerminalPointerEncoderParityTests(ITestOutputHelper output)
         byte mask = pointer.Button switch { TerminalMouseButton.Left => 1, TerminalMouseButton.Middle => 2, TerminalMouseButton.Right => 4, _ => 0 };
         if (pointer.Kind == TerminalPointerEventKind.Button)
             pressed = pointer.Action == TerminalInputAction.Release ? (byte)(pressed & ~mask) : (byte)(pressed | mask);
-        encoder.SetAnyButtonPressed(pressed != 0);
+        encoder.SetAnyButtonPressed(pressed != 0 || (pointer.Kind == TerminalPointerEventKind.Move && mask != 0));
         evt.SetPosition((float)pointer.X, (float)pointer.Y);
         GhosttyVtNative.GhosttyVtMods mods = 0;
         if ((pointer.Modifiers & TerminalModifiers.Shift) != 0) mods |= GhosttyVtNative.GhosttyVtMods.Shift;
