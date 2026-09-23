@@ -1,7 +1,14 @@
 # Managed Ghostty snapshot compatibility work
 
-Status: **incomplete**. The implemented framing, metadata and continuation pieces
-do not yet constitute an import/export API for a managed terminal.
+Status: **public restore implemented; export and exact native quota parity incomplete**.
+`ManagedTerminalSnapshot.Restore` supports transactional memory/stream imports;
+`ManagedTerminalSnapshotDecoder.Ready/Next` supports live incremental history.
+It installs complete processor state, verifies continuation replay, applies history
+to the live COW screen and updates prompt-seen state. Public decode limits bound
+untrusted input, including discarded pages. History uses the managed host's row
+limit, not native page-allocation byte/minimum-line accounting. See the main parity
+report for current validation evidence. The chronological notes below describe
+individual component milestones and their then-outstanding integration work.
 
 The compatibility target is Ghostty's version 1 `GHOSTSNP` wire format at
 `622b4eecd7d2ce1a10930537c17f0d61abdba817`, rather than a separate RoyalTerminal-only dump. Upstream
@@ -245,12 +252,11 @@ runtime prerequisite does not itself expose managed snapshot restore.
 
 ## Remaining codec and integration order
 
-1. READY installation into a usable managed terminal and incremental history
-   reconciliation. The ordered wire reader, unpublished two-buffer cell staging,
-   atomic history prepend and lifecycle/gap application are implemented. Full
-   processor installation, quota accounting and orchestration remain. The lifecycle
-   component handles live changes after READY; its caller must supply the current
-   quota decision rather than treating every structurally valid page as applicable.
+1. Native-compatible quota accounting. READY installation, complete processor
+   state, public ownership/error contracts and live incremental reconciliation are
+   implemented. The adapter supplies a managed row-quota decision; native page
+   allocation accounting remains distinct rather than treating every valid page
+   as applicable.
    Follow the actual upstream predicate, not a blanket resize/reset invalidation:
    `snapshot.zig.nextPage` checks the **current** column count and ScreenSet
    generation. Height-only resize is not inherently disqualifying; width restored
@@ -258,7 +264,7 @@ runtime prerequisite does not itself expose managed snapshot restore.
    storage but resets primary contents in place without changing its generation.
    `PageList.Limits` also applies page-granular minimum byte/line limits, even to a
    configured zero limit; do not substitute the managed host row limit directly.
-2. Managed processor adapter and public ownership/error contracts. PAGE/grid,
+2. Public managed binary export. PAGE/grid,
    TERMINAL, SCREEN and HISTORY payload decoding/re-encoding are implemented;
    constructing semantic records from live managed state and installing them in
    both managed screens still belong to the adapter, rather than replaying their

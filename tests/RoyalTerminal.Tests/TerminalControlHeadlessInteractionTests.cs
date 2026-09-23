@@ -1800,7 +1800,7 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
-    public async Task Headless_Padding_DragReleaseOutsideContentClampsToContentEdge()
+    public async Task Headless_Padding_DragReleaseOutsideContentPreservesEndpointCoordinates()
     {
         RecordingEndpoint endpoint = new();
         TerminalControl control = new()
@@ -1846,8 +1846,8 @@ public sealed class TerminalControlHeadlessInteractionTests
             TerminalPointerEvent release = endpoint.PointerEvents.Last(static evt =>
                 evt.Kind == TerminalPointerEventKind.Button &&
                 evt.Action == TerminalInputAction.Release);
-            double expectedContentRight = control.Bounds.Width - control.Padding.Left - control.Padding.Right;
-            Assert.InRange(release.X, expectedContentRight - 0.01d, expectedContentRight + 0.01d);
+            double expectedReleaseX = control.Bounds.Width - 4d - control.Padding.Left;
+            Assert.InRange(release.X, expectedReleaseX - 0.01d, expectedReleaseX + 0.01d);
             Assert.InRange(release.Y, 2.5d * control.Renderer.CellHeight - 1d, 2.5d * control.Renderer.CellHeight + 1d);
         }
         finally
@@ -1905,13 +1905,17 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    [AvaloniaFact]
-    public async Task Headless_Padding_SgrPixelsReleaseOutsideContentClampsToLastContentPixel()
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_Padding_SgrPixelsReleaseOutsideContentPreservesRawPixel(VtProcessorPreference preference)
     {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
         RecordingTransport transport = new();
         TerminalControl control = CreateControlWithTransport(
             transport,
-            preference: VtProcessorPreference.Managed);
+            new DefaultVtProcessorFactory(new INativeVtProcessorProvider[] { new GhosttyVtProcessorProvider() }),
+            preference: preference);
         control.Width = 640;
         control.Height = 400;
         control.Padding = new Thickness(10);
@@ -1946,10 +1950,8 @@ public sealed class TerminalControlHeadlessInteractionTests
             string release = transport.Inputs
                 .Select(static input => Encoding.ASCII.GetString(input))
                 .Last(static text => text.EndsWith('m'));
-            int expectedRightPixel = (int)Math.Round(control.Bounds.Width - control.Padding.Left - control.Padding.Right);
-
-            Assert.Contains($";{expectedRightPixel};", release, StringComparison.Ordinal);
-            Assert.DoesNotContain($";{expectedRightPixel + 1};", release, StringComparison.Ordinal);
+            int expectedPixel = (int)Math.Round(control.Bounds.Width - 2d - control.Padding.Left);
+            Assert.Equal($"\u001b[<0;{expectedPixel};20m", release);
         }
         finally
         {
