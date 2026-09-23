@@ -67,6 +67,59 @@ public sealed class TerminalModeDefaultsTests(ITestOutputHelper output)
     }
 
     [Theory]
+    [MemberData(nameof(ConfigurableModes))]
+    public void SharedApiRetainsEveryPolicyAcrossHistoryPreservingSessionRestart(int mode, bool ansi)
+    {
+        if (!Available()) return;
+        TerminalScreen expected = new(12, 4), actual = new(12, 4);
+        using GhosttyVtProcessor native = new(expected);
+        using BasicVtProcessor managed = new(actual);
+        foreach (bool enabled in new[] { true, false })
+        {
+            Assert.True(native.TrySetDefaultMode(mode, enabled, ansi));
+            Assert.True(managed.TrySetDefaultMode(mode, enabled, ansi));
+            byte[] write = Encoding.ASCII.GetBytes($"OLD\u001b[{(ansi ? "" : "?")}{mode}{(enabled ? 'l' : 'h')}");
+            native.Process(write); managed.Process(write);
+            native.PrepareForNewSession(preserveScrollback: true);
+            managed.PrepareForNewSession(preserveScrollback: true);
+            Assert.Equal(12, expected.Columns); Assert.Equal(expected.Columns, actual.Columns);
+            Assert.Equal(native.ModeState, managed.ModeState);
+            string? nativeReply = null, managedReply = null;
+            native.ResponseCallback = bytes => nativeReply = Encoding.ASCII.GetString(bytes);
+            managed.ResponseCallback = bytes => managedReply = Encoding.ASCII.GetString(bytes);
+            byte[] query = Encoding.ASCII.GetBytes($"\u001b[{(ansi ? "" : "?")}{mode}$p");
+            native.Process(query); managed.Process(query);
+            string reply = $"\u001b[{(ansi ? "" : "?")}{mode};{(enabled ? 1 : 2)}$y";
+            Assert.Equal(reply, nativeReply); Assert.Equal(reply, managedReply);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PolicyChangesRespectHeldPublicationAndRaiseModeEventsOnce(bool native)
+    {
+        if (native && !Available()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(new TerminalScreen(12, 4)) : new BasicVtProcessor(new TerminalScreen(12, 4));
+        ITerminalModeDefaults policy = (ITerminalModeDefaults)processor;
+        int events = 0;
+        processor.ModeChanged += (_, _) => events++;
+        Assert.True(policy.TrySetDefaultMode(1, true));
+        Assert.True(policy.TrySetDefaultMode(1, true));
+        Assert.Equal(1, events);
+        processor.Process("\u001b[?2026h"u8);
+        Assert.True(policy.TrySetDefaultMode(25, false));
+        Assert.True(processor.CursorVisible);
+        Assert.Equal(1, events);
+        processor.Process("\u001b[?2026l"u8);
+        Assert.False(processor.CursorVisible);
+        Assert.Equal(2, events);
+        processor.Reset();
+        Assert.False(processor.CursorVisible);
+        Assert.True(processor.ApplicationCursorKeys);
+    }
+
+    [Theory]
     [MemberData(nameof(RejectedModes))]
     public void InvalidPolicyDoesNotMutateEitherProcessor(int mode, bool ansi)
     {

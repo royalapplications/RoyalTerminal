@@ -774,6 +774,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         ResetSessionInputState();
         bool wasAlternateScreenSave = _terminal.GetMode(GhosttyVtNative.ModeAltScreenSave);
         bool wasAlternateScreen = _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate;
+        // Resetting DEC 3 in the cleanup sequence must not resize a user's
+        // current grid merely because their previous process enabled DEC 40.
+        _terminal.SetMode(GhosttyVtNative.CreateMode(40, ansi: false), false);
 
         if (wasAlternateScreen)
         {
