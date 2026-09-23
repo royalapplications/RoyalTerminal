@@ -49,8 +49,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private const int MaxGraphemeCodepoints = 65;
     private const int MaxDcsQueryBytes = 1024 * 1024;
     private const int MaxUnknownSequenceBytes = 4096;
-    private const int KittyKeyboardFlagMask = 0x1F;
-    private const int KittyKeyboardMaxStackDepth = 32;
     private static readonly int[] ExtendedDecModes =
     [
         3,
@@ -171,10 +169,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private int _heightPx;
     private int _reportCellWidthPx;
     private int _reportCellHeightPx;
-    private int _kittyKeyboardFlagsMain;
-    private int _kittyKeyboardFlagsAlt;
-    private readonly List<int> _kittyKeyboardStackMain = [];
-    private readonly List<int> _kittyKeyboardStackAlt = [];
     private readonly HashSet<int> _extendedDecModesEnabled = [];
 
     // Tab stops
@@ -257,7 +251,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     public bool CursorBlinking => IsCursorStyleBlinking(_renderHold?.CursorStyle ?? _cursorStyle);
 
     /// <inheritdoc />
-    public int KittyKeyboardFlags => _inAltScreen ? _kittyKeyboardFlagsAlt : _kittyKeyboardFlagsMain;
+    public int KittyKeyboardFlags => ActiveKittyKeyboard.Current;
 
     /// <inheritdoc />
     public TerminalModeState ModeState => new(
@@ -4401,82 +4395,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
     }
 
-    private void HandleKittyKeyboardSet()
-    {
-        int flags = _params.Count > 0 ? _params[0] : 0;
-        int operation = _params.Count > 1 ? _params[1] : 1;
-        flags = NormalizeKittyKeyboardFlags(flags);
-
-        switch (operation)
-        {
-            case 2: // OR
-                SetKittyKeyboardFlags(KittyKeyboardFlags | flags);
-                break;
-            case 3: // AND NOT
-                SetKittyKeyboardFlags(KittyKeyboardFlags & ~flags);
-                break;
-            case 1:
-            default: // SET
-                SetKittyKeyboardFlags(flags);
-                break;
-        }
-    }
-
-    private void HandleKittyKeyboardPush()
-    {
-        List<int> stack = GetActiveKittyKeyboardStack();
-        if (stack.Count >= KittyKeyboardMaxStackDepth)
-        {
-            stack.RemoveAt(0);
-        }
-
-        stack.Add(KittyKeyboardFlags);
-        int flags = _params.Count > 0 ? _params[0] : 0;
-        SetKittyKeyboardFlags(flags);
-    }
-
-    private void HandleKittyKeyboardPop()
-    {
-        int count = _params.Count > 0 ? Math.Max(1, _params[0]) : 1;
-        List<int> stack = GetActiveKittyKeyboardStack();
-
-        for (int i = 0; i < count; i++)
-        {
-            if (stack.Count == 0)
-            {
-                break;
-            }
-
-            int topIndex = stack.Count - 1;
-            int flags = stack[topIndex];
-            stack.RemoveAt(topIndex);
-            SetKittyKeyboardFlags(flags);
-        }
-    }
-
-    private List<int> GetActiveKittyKeyboardStack()
-    {
-        return _inAltScreen ? _kittyKeyboardStackAlt : _kittyKeyboardStackMain;
-    }
-
-    private void SetKittyKeyboardFlags(int flags)
-    {
-        int normalized = NormalizeKittyKeyboardFlags(flags);
-        if (_inAltScreen)
-        {
-            _kittyKeyboardFlagsAlt = normalized;
-        }
-        else
-        {
-            _kittyKeyboardFlagsMain = normalized;
-        }
-    }
-
-    private static int NormalizeKittyKeyboardFlags(int flags)
-    {
-        return Math.Max(0, flags) & KittyKeyboardFlagMask;
-    }
-
     private static bool IsExtendedDecModeSupported(int mode)
     {
         for (int i = 0; i < ExtendedDecModes.Length; i++)
@@ -5404,10 +5322,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _apcBuffer.Clear();
         _apcTruncated = false;
         _currentHyperlinkId = 0;
-        _kittyKeyboardFlagsMain = 0;
-        _kittyKeyboardFlagsAlt = 0;
-        _kittyKeyboardStackMain.Clear();
-        _kittyKeyboardStackAlt.Clear();
+        _kittyKeyboardMain = default;
+        _kittyKeyboardAlt = default;
         ResetAttributes();
         InitTabStops();
         ApplyConfiguredModeDefaults();
@@ -5589,10 +5505,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _savedAlternateCursorCol = _savedAlternateCursorRow = 0;
         _savedAlternateDelayedWrap = false;
         _currentHyperlinkId = 0;
-        _kittyKeyboardFlagsMain = 0;
-        _kittyKeyboardFlagsAlt = 0;
-        _kittyKeyboardStackMain.Clear();
-        _kittyKeyboardStackAlt.Clear();
+        _kittyKeyboardMain = default;
+        _kittyKeyboardAlt = default;
         ResetAttributes();
         InitTabStops();
         ApplyConfiguredModeDefaults();
