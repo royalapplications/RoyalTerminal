@@ -2507,6 +2507,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void AttachEndpoint(ITerminalEndpoint endpoint)
     {
+        StopPasswordInputMonitoring();
         _mouseModeTracker.Reset();
         ResetPointerButtons();
         TerminalSessionService.AttachEndpoint(endpoint);
@@ -2533,6 +2534,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         ResetPointerButtons();
         EnsureCursorBlinkTimerRunning(false);
         _timedRefreshTimer?.Stop();
+        UpdatePasswordInputMonitoring();
     }
 
     /// <summary>

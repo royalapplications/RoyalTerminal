@@ -29,9 +29,11 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalControlHeadlessInteractionTests
 {
     [AvaloniaTheory]
-    [InlineData(VtProcessorPreference.Managed)]
-    [InlineData(VtProcessorPreference.Native)]
-    public async Task Headless_PasswordModePollingUpdatesBothEnginesAndStopsWithFocusAndSession(VtProcessorPreference preference)
+    [InlineData(VtProcessorPreference.Managed, false)]
+    [InlineData(VtProcessorPreference.Native, false)]
+    [InlineData(VtProcessorPreference.Managed, true)]
+    [InlineData(VtProcessorPreference.Native, true)]
+    public async Task Headless_PasswordModePollingUpdatesBothEnginesAndStopsWithFocusAndSession(VtProcessorPreference preference, bool naturalExit)
     {
         if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
         PasswordModeTransport transport = new() { Detected = true };
@@ -73,10 +75,17 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(await WaitUntilAsync(() => !control.PasswordInput, TimeSpan.FromSeconds(3)));
             transport.Available = true;
             Assert.True(await WaitUntilAsync(() => control.PasswordInput, TimeSpan.FromSeconds(3)));
-            control.StopPty();
+            if (naturalExit)
+            {
+                await transport.StopAsync();
+                Dispatcher.UIThread.RunJobs();
+            }
+            else control.StopPty();
             Assert.False(control.PasswordInput);
             Assert.False(((ITerminalPasswordInputState)factory.Processor!).PasswordInput);
             polls = transport.Polls;
+            sibling.Focus();
+            control.Focus();
             await Task.Delay(300);
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(polls, transport.Polls);

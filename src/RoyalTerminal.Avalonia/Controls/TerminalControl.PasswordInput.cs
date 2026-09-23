@@ -25,8 +25,8 @@ public partial class TerminalControl
 
     private ITerminalPasswordInputSource? ResolvePasswordInputSource() =>
         TerminalSessionService.Endpoint is { } endpoint ? endpoint as ITerminalPasswordInputSource :
-        TerminalSessionService.Transport is { } transport ? transport as ITerminalPasswordInputSource :
-        TerminalSessionService.Pty as ITerminalPasswordInputSource;
+        TerminalSessionService.Transport is { } transport ? (transport.IsRunning ? transport as ITerminalPasswordInputSource : null) :
+        TerminalSessionService.Pty is { IsRunning: true } pty ? pty as ITerminalPasswordInputSource : null;
 
     private void UpdatePasswordInputMonitoring()
     {
@@ -49,6 +49,11 @@ public partial class TerminalControl
     private void PollPasswordInput()
     {
         ITerminalPasswordInputSource? source = ResolvePasswordInputSource();
+        if (source is not { SupportsPasswordInputDetection: true })
+        {
+            StopPasswordInputMonitoring();
+            return;
+        }
         bool detected = source is not null && source.TryGetPasswordInput(out bool value) && value;
         SetPasswordInput(detected);
     }
