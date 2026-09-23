@@ -138,25 +138,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private bool _sixelGraphicsEnabled;
     private bool _sixelDisplayMode;
 
-    // Saved cursor state (for DECSC/DECRC — ESC 7 / ESC 8)
-    private int _savedCursorCol;
-    private int _savedCursorRow;
-    private uint _savedFg;
-    private uint _savedBg;
-    private SgrColorKind _savedFgKind;
-    private SgrColorKind _savedBgKind;
-    private int _savedFgPaletteIndex;
-    private int _savedBgPaletteIndex;
-    private CellAttributes _savedAttrs;
-    private TerminalUnderlineStyle _savedUnderlineStyle;
-    private uint _savedUnderlineColor;
-    private TerminalColorIdentity _savedUnderlineIdentity;
-    private bool _savedHasUnderlineColor;
-    private CellDecorations _savedDecorations;
-    private int _savedHyperlinkId;
-    private bool _savedUseLineDrawing;
-    private bool _savedDelayedWrap;
-
     // Scroll region (DECSTBM)
     private int _scrollTop;    // 0-based inclusive
     private int _scrollBottom; // 0-based inclusive (ViewportRows - 1 at init)
@@ -166,12 +147,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private int _savedMainCursorRow;
     private bool _savedMainDelayedWrap;
     private bool _inAltScreen;
-
-    // DEC line-drawing character set
-    private bool _useLineDrawing; // true when active charset is DEC Special Graphics
-    private bool _g0IsLineDrawing;
-    private bool _g1IsLineDrawing;
-    private bool _shiftOut; // SO/SI for G1/G0 switching
 
     // DEC private modes
     private bool _autoWrap = true;     // DECAWM (mode 7)
@@ -646,16 +621,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ProcessPrintableAscii(ReadOnlySpan<byte> data)
     {
-        if (_useLineDrawing)
-        {
-            for (int index = 0; index < data.Length; index++)
-            {
-                PutChar(MapLineDrawing((char)data[index]));
-            }
-
-            return;
-        }
-
         for (int index = 0; index < data.Length; index++)
         {
             PutChar(data[index]);
@@ -878,6 +843,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         StringBuilder builder = new();
+        // Screen selection may restore a saved cursor or clear the alternate
+        // screen. Perform it before content and before restoring origin mode.
+        if (options.Extras.IncludeModes) AppendMode(builder, ansi: false, 1049, _inAltScreen);
         builder.Append("\x1b[0m");
 
         SnapshotCellStyleKey? currentStyle = null;
@@ -1405,9 +1373,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // the application's character set and pen after that synthetic print.
         if (options.Extras.IncludeCharsets)
         {
-            builder.Append(_g0IsLineDrawing ? "\x1b(0" : "\x1b(B");
-            builder.Append(_g1IsLineDrawing ? "\x1b)0" : "\x1b)B");
-            builder.Append(_shiftOut ? "\x0E" : "\x0F");
+            _charsets.AppendRestoreSequence(builder);
         }
 
         if (options.Extras.IncludeStyle)
@@ -1492,7 +1458,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             AppendMode(builder, ansi: false, 80, _sixelDisplayMode);
         }
 
-        AppendMode(builder, ansi: false, 1049, _inAltScreen);
         AppendMode(builder, ansi: false, 1004, FocusEventsEnabled);
         AppendMode(builder, ansi: false, 2004, _bracketedPaste);
         AppendMode(builder, ansi: false, 2031, _extendedDecModesEnabled.Contains(2031));
@@ -1880,13 +1845,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 0x0E: // SO — Shift Out (activate G1)
-                _shiftOut = true;
-                _useLineDrawing = _g1IsLineDrawing;
+                _charsets.Invoke(1);
                 break;
 
             case 0x0F: // SI — Shift In (activate G0)
-                _shiftOut = false;
-                _useLineDrawing = _g0IsLineDrawing;
+                _charsets.Invoke(0);
                 break;
 
             default:
@@ -1896,11 +1859,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 }
                 else if (b < 0x80)
                 {
-                    // ASCII printable — check line-drawing mapping
-                    if (_useLineDrawing)
-                        PutChar(MapLineDrawing((char)b));
-                    else
-                        PutChar(b);
+                    PutChar(b);
                 }
                 else
                 {
@@ -2048,7 +2007,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void WriteCellFromPen(ref TerminalCell cell, int codepoint, byte width)
     {
-        cell.Codepoint = codepoint;
+        cell.Codepoint = _charsets.MapPrintedCell(codepoint);
         cell.Grapheme = null;
         cell.Foreground = _currentFg;
         cell.Background = _currentBg;
@@ -2535,6 +2494,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
 
+            case (byte)'N': _charsets.Invoke(2, single: true); _state = ParserState.Ground; break;
+            case (byte)'O': _charsets.Invoke(3, single: true); _state = ParserState.Ground; break;
+            case (byte)'n': _charsets.Invoke(2); _state = ParserState.Ground; break;
+            case (byte)'o': _charsets.Invoke(3); _state = ParserState.Ground; break;
+            case (byte)'~': _charsets.Invoke(1, right: true); _state = ParserState.Ground; break;
+            case (byte)'}': _charsets.Invoke(2, right: true); _state = ParserState.Ground; break;
+            case (byte)'|': _charsets.Invoke(3, right: true); _state = ParserState.Ground; break;
+
             case (byte)'V': // SPA — Start of guarded area
                 SetCharacterProtection(CharacterProtectionMode.Iso);
                 _state = ParserState.Ground;
@@ -2614,21 +2581,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (b is >= 0x20 and <= 0x2F) { _intermediateCount = Math.Min(5, _intermediateCount + 1); return; }
         if (b >= 0x80) return;
         if (_intermediateCount > 1) { _state = ParserState.Ground; return; }
-        // Designate character set
-        if (_intermediateChar == '(')
-        {
-            // G0
-            _g0IsLineDrawing = (b == (byte)'0');
-            if (!_shiftOut)
-                _useLineDrawing = _g0IsLineDrawing;
-        }
-        else if (_intermediateChar == ')')
-        {
-            // G1
-            _g1IsLineDrawing = (b == (byte)'0');
-            if (_shiftOut)
-                _useLineDrawing = _g1IsLineDrawing;
-        }
+        int slot = _intermediateChar switch { '(' => 0, ')' => 1, '*' => 2, '+' => 3, _ => -1 };
+        if (slot >= 0) _charsets.Designate(slot, b);
 
         _state = ParserState.Ground;
     }
@@ -4086,13 +4040,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     break;
                 }
                 if (_params.Count != 0) break; // Explicit parameters mean DECSLRM, disabled without mode 69.
-                _savedCursorCol = _cursorCol;
-                _savedCursorRow = _cursorRow;
+                SaveCursor();
                 break;
 
             case 'u': // RCP — Restore Cursor Position (ANSI.SYS)
-                _cursorCol = _savedCursorCol;
-                _cursorRow = _savedCursorRow;
+                RestoreCursor();
                 break;
 
             case '@': // ICH — Insert Characters
@@ -4896,54 +4848,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     #endregion
 
-    #region Cursor Save/Restore
-
-    private void SaveCursor()
-    {
-        _savedCursorCol = _cursorCol;
-        _savedCursorRow = _cursorRow;
-        _savedFg = _currentFg;
-        _savedBg = _currentBg;
-        _savedFgKind = _currentFgKind;
-        _savedBgKind = _currentBgKind;
-        _savedFgPaletteIndex = _currentFgPaletteIndex;
-        _savedBgPaletteIndex = _currentBgPaletteIndex;
-        _savedAttrs = _currentAttrs;
-        _savedUnderlineStyle = _currentUnderlineStyle;
-        _savedUnderlineColor = _currentUnderlineColor;
-        _savedUnderlineIdentity = _currentUnderlineIdentity;
-        _savedHasUnderlineColor = _currentHasUnderlineColor;
-        _savedDecorations = _currentDecorations;
-        _savedHyperlinkId = _currentHyperlinkId;
-        _savedUseLineDrawing = _useLineDrawing;
-        _savedDelayedWrap = _delayedWrap;
-        SavedProtection = _currentProtected;
-    }
-
-    private void RestoreCursor()
-    {
-        _cursorCol = _savedCursorCol;
-        _cursorRow = _savedCursorRow;
-        _delayedWrap = _savedDelayedWrap;
-        _currentFg = _savedFg;
-        _currentBg = _savedBg;
-        _currentFgKind = _savedFgKind;
-        _currentBgKind = _savedBgKind;
-        _currentFgPaletteIndex = _savedFgPaletteIndex;
-        _currentBgPaletteIndex = _savedBgPaletteIndex;
-        _currentAttrs = _savedAttrs;
-        _currentUnderlineStyle = _savedUnderlineStyle;
-        _currentUnderlineColor = _savedUnderlineColor;
-        _currentUnderlineIdentity = _savedUnderlineIdentity;
-        _currentHasUnderlineColor = _savedHasUnderlineColor;
-        _currentDecorations = _savedDecorations;
-        _currentHyperlinkId = _savedHyperlinkId;
-        _useLineDrawing = _savedUseLineDrawing;
-        _currentProtected = SavedProtection;
-    }
-
-    #endregion
-
     #region SGR Processing
 
     private void ProcessSgr()
@@ -5482,10 +5386,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
         ResetHorizontalMargins();
-        _useLineDrawing = false;
-        _g0IsLineDrawing = false;
-        _g1IsLineDrawing = false;
-        _shiftOut = false;
+        _charsets = new();
         _lastGraphicCodepoint = 0;
         _oscBuffer.Clear();
         _isDiscardingOscPayload = false;
@@ -5493,12 +5394,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _isDiscardingDcsPayload = false;
         _apcBuffer.Clear();
         _apcTruncated = false;
-        _savedUnderlineStyle = TerminalUnderlineStyle.None;
-        _savedUnderlineColor = 0;
-        _savedUnderlineIdentity = default;
-        _savedHasUnderlineColor = false;
-        _savedDecorations = CellDecorations.None;
-        _savedHyperlinkId = 0;
         _currentHyperlinkId = 0;
         _kittyKeyboardFlagsMain = 0;
         _kittyKeyboardFlagsAlt = 0;
@@ -5507,47 +5402,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResetAttributes();
         InitTabStops();
     }
-
-    #endregion
-
-    #region DEC Line Drawing Character Set
-
-    /// <summary>
-    /// Maps ASCII characters to DEC Special Graphics set codepoints.
-    /// Used for drawing borders and lines in TUI applications.
-    /// </summary>
-    private static int MapLineDrawing(char ch) => ch switch
-    {
-        'j' => 0x2518, // ┘ Bottom-right corner
-        'k' => 0x2510, // ┐ Top-right corner
-        'l' => 0x250C, // ┌ Top-left corner
-        'm' => 0x2514, // └ Bottom-left corner
-        'n' => 0x253C, // ┼ Crossing lines
-        'q' => 0x2500, // ─ Horizontal line
-        't' => 0x251C, // ├ Left tee
-        'u' => 0x2524, // ┤ Right tee
-        'v' => 0x2534, // ┴ Bottom tee
-        'w' => 0x252C, // ┬ Top tee
-        'x' => 0x2502, // │ Vertical line
-        'a' => 0x2592, // ▒ Checkerboard
-        'f' => 0x00B0, // ° Degree symbol
-        'g' => 0x00B1, // ± Plus/minus
-        'h' => 0x2592, // ▒ Board of squares (NL)
-        'o' => 0x23BA, // ⎺ Scan line 1
-        'p' => 0x23BB, // ⎻ Scan line 3
-        'r' => 0x23BC, // ⎼ Scan line 7
-        's' => 0x23BD, // ⎽ Scan line 9
-        '`' => 0x25C6, // ◆ Diamond
-        '~' => 0x00B7, // · Bullet (middle dot)
-        '_' => 0x0020, // (blank)
-        '0' => 0x2588, // █ Solid block
-        'y' => 0x2264, // ≤ Less-than-or-equal
-        'z' => 0x2265, // ≥ Greater-than-or-equal
-        '{' => 0x03C0, // π Pi
-        '|' => 0x2260, // ≠ Not equal
-        '}' => 0x00A3, // £ Pound sign
-        _ => ch,
-    };
 
     #endregion
 
@@ -5691,7 +5545,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _apcTruncated = false;
         _kittyClipboardProtocol.Reset();
         _screen.ClearRegisteredGlyphs();
-        _currentProtected = _primarySavedProtection = _alternateSavedProtection = false;
+        _currentProtected = false;
         _primaryProtectionMode = _alternateProtectionMode = CharacterProtectionMode.Off;
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
@@ -5713,17 +5567,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _insertMode = false;
         _lineFeedNewLineMode = false;
         _cursorStyle = 1;
-        _useLineDrawing = false;
-        _g0IsLineDrawing = false;
-        _g1IsLineDrawing = false;
-        _shiftOut = false;
+        _charsets = new();
         _lastGraphicCodepoint = 0;
-        _savedUnderlineStyle = TerminalUnderlineStyle.None;
-        _savedUnderlineColor = 0;
-        _savedUnderlineIdentity = default;
-        _savedHasUnderlineColor = false;
-        _savedDecorations = CellDecorations.None;
-        _savedHyperlinkId = 0;
+        _primarySavedCursor = _alternateSavedCursor = null;
         _currentHyperlinkId = 0;
         _kittyKeyboardFlagsMain = 0;
         _kittyKeyboardFlagsAlt = 0;
@@ -5947,10 +5793,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         _currentFg = ResolveColorIdentity(GetColorIdentity(_currentFgKind, _currentFgPaletteIndex, _currentFg), theme.DefaultForeground);
         _currentBg = ResolveColorIdentity(GetColorIdentity(_currentBgKind, _currentBgPaletteIndex, _currentBg), theme.DefaultBackground);
-        _savedFg = ResolveColorIdentity(GetColorIdentity(_savedFgKind, _savedFgPaletteIndex, _savedFg), theme.DefaultForeground);
-        _savedBg = ResolveColorIdentity(GetColorIdentity(_savedBgKind, _savedBgPaletteIndex, _savedBg), theme.DefaultBackground);
         if (_currentHasUnderlineColor) _currentUnderlineColor = ResolveColorIdentity(_currentUnderlineIdentity, _currentFg);
-        if (_savedHasUnderlineColor) _savedUnderlineColor = ResolveColorIdentity(_savedUnderlineIdentity, _savedFg);
     }
 
     private uint ResolveColorIdentity(TerminalColorIdentity identity, uint defaultColor)

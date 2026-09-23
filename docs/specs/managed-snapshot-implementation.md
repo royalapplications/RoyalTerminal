@@ -128,6 +128,16 @@ numeric ID in addition to the URI. The existing screen URL-to-token registry is
 not sufficient to retain all of that identity. Preserve identity at the domain
 boundary while keeping presentation URL access convenient.
 
+Current and saved charset state now have live representations: four designations,
+GL/GR and pending single shift, using the same compact registry as SCREEN.
+Managed printing applies Ghostty's tables after width/grapheme processing,
+including single-shift consumption by printed spacer cells. Saved cursors are
+independent per screen and retain position, logical pen, protection, pending wrap,
+origin and full charset state. Default restoration, current hyperlink preservation,
+CSI save/restore aliases and current-theme color resolution have native tests.
+The adapter still must construct/install these values from wire records; this
+runtime prerequisite does not itself expose managed snapshot restore.
+
 ## Remaining codec and integration order
 
 1. READY installation into a usable managed terminal and incremental history
@@ -144,9 +154,9 @@ boundary while keeping presentation URL access convenient.
    continuation must resume byte-for-byte across UTF-8 and control-string splits.
    A native-valid wire continuation is not proof that the current managed parser
    supports every corresponding state: the ESC/CSI/control/ignore-state cases now
-   have focused tests, as do incremental UTF-8 rejection/replay boundaries, but
-   remaining DCS transitions and complete
-   current/saved charset semantics still need integration coverage before exposure.
+   have focused tests, as do incremental UTF-8 rejection/replay boundaries,
+   DCS transitions, and current/saved charset runtime semantics. Their wire-to-live
+   installation and replay integration still need coverage before exposure.
    Native APC-to-C1 export is corrected by a hash-checked overlay and shares the
    managed canonical ESC representation; buffer/stream/snapshot round trips pass.
 3. Native-to-managed and managed-to-native differential tests, including every

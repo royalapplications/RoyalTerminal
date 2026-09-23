@@ -30,6 +30,66 @@ Tests cited elsewhere in this document describe existing coverage; they must not
 be used to mark these broader requirements complete until their specific evidence
 has been inspected.
 
+### Current/saved charsets and cursor state (2026-09-23)
+
+`ManagedCharsetState` replaces two line-drawing booleans with all four G0–G3
+designations, GL/GR and a pending single shift in the SCREEN-compatible compact
+registry. ESC `(`, `)`, `*`, `+` accept ASCII, British and DEC Special Graphics;
+unknown designations are ignored instead of resetting the slot. SI/SO, SS2/SS3,
+LS2/LS3 and LS1R/LS2R/LS3R now retain full state. The previous DEC table's `_`,
+`0`, `b`–`e`, `h` and `i` mappings were incorrect and are corrected.
+
+Ghostty `Terminal.printCell` and `charsets.zig` are authoritative: map after
+width/grapheme handling, consume single shift only when a cell is printed
+(including spacer cells), retain GR without using it in the current UTF-8 printer,
+and map values above 255 to space for British/DEC tables. This deliberately
+differs from xterm.js's ASCII-only substitution and Windows Terminal's broader
+GR/table translation in `TerminalOutput::TranslateKey`; the native differential
+tests cover Unicode, combining marks, wide edges and ignored controls.
+
+DECSC/DECRC and CSI s/u now save/restore independent state per screen: logical
+colors/attributes, position, origin, protection, pending wrap and full charset
+state. Missing saved state restores defaults. Current hyperlinks are deliberately
+not saved/restored, matching native. Logical saved colors resolve against the
+current theme when restored, so inactive pens do not need eager theme updates.
+RIS/session reset clears both saved slots. RoyalTerminal's existing DECSTR
+support remains a documented extension (Ghostty currently ignores it); it no
+longer partially corrupts a saved pen while preserving its other fields.
+
+Styled VT export restores all designations and pending single shift after its
+synthetic cursor print. Screen selection now precedes content and origin-mode
+restoration: the regression run exposed mode 1049 previously clearing alternate
+content or resetting restored origin. This is VT replay compatibility, not a
+claim that styled VT preserves every binary snapshot field. Native's current VT
+formatter omits pending single-shift emission; binary SCREEN does preserve it.
+Full formatter/native parity remains part of the outstanding audit.
+
+Validation: **2,302 passed / 16 conditional skips / 2,318 total**, zero failures
+(`charset-final.trx`), including 36 new tests with native available. Coverage
+includes every split for protocol/state cases, 2,304 printable-byte/designation/
+slot combinations, native snapshot registry comparisons, both saved slots,
+hyperlinks, theme changes, origin, held output and snapshot replay ordering.
+Preceding commit `25e4c09` CI run `35851323211` passed six native builds and Ubuntu
+build/tests; macOS/Windows jobs were still running at inspection. This change
+requires fresh CI.
+
+The new `--managed-print` Release harness was copied unchanged to an isolated
+archive of `25e4c09`; final runs were sequential after tests/builds finished.
+On this macOS arm64/.NET 10 host, median of seven warmed samples (25,000 feeds,
+zero scrollback) measured:
+
+| Workload | Before | After | Timed managed allocation |
+|---|---:|---:|---:|
+| 79 ASCII `q` cells + CR | 23.468 ms | 23.330 ms | 0 bytes |
+| 79 DEC-special `q` cells + CR | 32.386 ms | 24.518 ms | 0 bytes |
+| DECSC + DECRC pair | 0.867 ms | 1.960 ms | 0 bytes |
+
+Checksums match. Mapping after width classification avoids unnecessary Unicode
+width/grapheme work for mapped ASCII, reducing this DEC workload by about 24%.
+Complete saved-state restoration costs about 78 ns/pair versus 35 ns for the old
+incomplete implementation. This is an explicit correctness/performance tradeoff,
+not an across-the-board speedup. The harness excludes rendering and PTY IO.
+
 ### Character protection and screen-state prerequisite (2026-09-23)
 
 Review of snapshot PAGE/SCREEN fields exposed missing live character protection.

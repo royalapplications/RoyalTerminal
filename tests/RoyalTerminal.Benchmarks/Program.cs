@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--managed-print", StringComparer.Ordinal))
+{
+    ManagedPrintBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--apc-ingestion", StringComparer.Ordinal))
 {
     ApcIngestionBenchmark.Run();

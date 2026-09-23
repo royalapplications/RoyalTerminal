@@ -10,13 +10,10 @@ public sealed partial class BasicVtProcessor
     private enum CharacterProtectionMode : byte { Off, Iso, Dec }
 
     private bool _currentProtected;
-    private bool _primarySavedProtection;
-    private bool _alternateSavedProtection;
     private CharacterProtectionMode _primaryProtectionMode;
     private CharacterProtectionMode _alternateProtectionMode;
 
     private ref CharacterProtectionMode ProtectionMode => ref (_inAltScreen ? ref _alternateProtectionMode : ref _primaryProtectionMode);
-    private ref bool SavedProtection => ref (_inAltScreen ? ref _alternateSavedProtection : ref _primarySavedProtection);
 
     private void SetCharacterProtection(CharacterProtectionMode mode)
     {
