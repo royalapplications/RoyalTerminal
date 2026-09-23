@@ -5723,10 +5723,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _screen.ScrollOffset = 0;
         }
 
-        TerminalScreenAnchor? savedCursorAnchor = TrackSavedCursorForResize();
+        TerminalScreenAnchor? savedCursorAnchor = null;
         TerminalGridPosition mappedCursor;
         try
         {
+            savedCursorAnchor = TrackSavedCursorForResize();
             mappedCursor = _screen.Resize(
                 columns,
                 rows,

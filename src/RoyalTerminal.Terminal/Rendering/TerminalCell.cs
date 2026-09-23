@@ -2460,18 +2460,14 @@ public sealed partial class TerminalScreen
             }
             while (hasContinuation);
 
-            if (logicalLine.Count != 0)
-            {
-                lastDestinationColumn = Math.Min(columns - 1, MapLogicalOffsetToReflowedPosition(
-                    CollectionsMarshal.AsSpan(logicalLine), columns, logicalLine.Count).Column);
-            }
             int destinationStartRow = reflowedRows.Count;
             TerminalGridPosition? mappedLinePosition = AppendReflowedLogicalLine(
                 CollectionsMarshal.AsSpan(logicalLine),
                 columns,
                 reflowedRows,
                 trackedLogicalOffset,
-                semanticRows is null ? default : CollectionsMarshal.AsSpan(semanticRows));
+                semanticRows is null ? default : CollectionsMarshal.AsSpan(semanticRows),
+                ref lastDestinationColumn);
 
             if (mappedLinePosition is { } mappedPosition)
             {
@@ -2595,7 +2591,8 @@ public sealed partial class TerminalScreen
         int columns,
         List<TerminalRow> destination,
         int trackedLogicalOffset,
-        ReadOnlySpan<(int Start, int End, TerminalSemanticPrompt Prompt)> semanticRows)
+        ReadOnlySpan<(int Start, int End, TerminalSemanticPrompt Prompt)> semanticRows,
+        ref int lastDestinationColumn)
     {
         int destinationStart = destination.Count;
         TerminalGridPosition? mappedPosition = null;
@@ -2715,6 +2712,7 @@ public sealed partial class TerminalScreen
             }
             row.WrapsToNext = sourceIndex < logicalLine.Length;
             destination.Add(row);
+            lastDestinationColumn = Math.Min(column, columns - 1);
         }
 
         if (mappedPosition is null && trackedLogicalOffset >= 0)

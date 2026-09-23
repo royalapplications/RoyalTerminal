@@ -15,6 +15,7 @@ public sealed class SavedCursorResizeParityTests(ITestOutputHelper output)
     [InlineData("abcdefghij\u001b7\u001b[H", 12, 4)]
     [InlineData("abcdefgh\u001b7\u001b[H", 12, 4)]
     [InlineData("abcdefgh\u001b7\u001b[H", 4, 4)]
+    [InlineData("ABCDEFGH\u001b[2;8H\u001b7\u001b[H", 4, 3)]
     [InlineData("abcd\u001b7\u001b[H", 4, 4)]
     [InlineData("A界BC界D\u001b7\u001b[H", 5, 4)]
     [InlineData("A界BC\u001b[1;3H\u001b7\u001b[H", 4, 4)]

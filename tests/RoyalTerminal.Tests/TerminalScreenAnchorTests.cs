@@ -130,11 +130,13 @@ public sealed class TerminalScreenAnchorTests
         TerminalScreenAnchor blank = screen.CreateAnchor(1, 7);
         screen.Resize(4, 3);
         AssertPosition(screen, text, 1, 2);
-        AssertPosition(screen, blank, 2, 3);
+        // Ghostty clamps against the preceding full row's physical cursor
+        // before advancing the deferred newline, leaving only column zero.
+        AssertPosition(screen, blank, 2, 0);
         Assert.Equal(3, screen.TotalRows);
         screen.Resize(8, 3);
         AssertPosition(screen, text, 0, 6);
-        AssertPosition(screen, blank, 1, 3);
+        AssertPosition(screen, blank, 1, 0);
     }
 
     [Fact]
