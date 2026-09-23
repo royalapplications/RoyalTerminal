@@ -23,9 +23,30 @@ and history coordinate models differ; the snapshot-v1 contract follows Ghostty.
 Dormant charset copies are updated at screen switches, leaving the printer's
 active charset register direct. No throughput improvement is claimed.
 
+Restored storage now carries its physical-row policy through COW publication.
+Buffer routing no longer implicitly resizes those rows or trims incidental
+history (including alternate history). Explicit resize and quota-aware mutation
+remain separate operations. Differential tests require exact widths on install;
+after input, newly allocated rows may have different backing capacities, so all
+retained cells are compared with only absent capacity padded by default blanks.
+Hidden nonempty cells and resident rows are separately tested across repeated
+switches and publication with a zero host scrollback limit.
+
+The first differential runs exposed two independent existing gaps: DECRQSS lost
+curly/dotted/dashed underline variants and placed overline after blink, and buffer
+switches normalized snapshot row widths. Both are corrected. All underline
+variants now retain Ghostty's report order; underline color remains omitted from
+DECRQSS exactly as upstream (unlike full VT style formatting).
+
 These are processor assembly primitives, not yet a complete public restore:
 remaining terminal flags/metadata, continuation, export and quota-aware history
-orchestration are still open. Post-push validation is pending.
+orchestration are still open. The focused Release/native suite passes **286 tests**
+including all **46 new cases**. Full post-push Release validation through
+`acc5543`: **3,281 passed, 16 conditional skips, zero failures (3,297 total)**
+(`snapshot-processor-full.trx`), with native available on macOS arm64 and no build
+warnings/errors. All 65,536 encoded charset bit patterns are checked for normalized
+installation, and warm packed charset installation allocates zero bytes. The
+cross-platform native build matrix remains CI evidence, not local runtime sign-off.
 
 ### Cursor appearance and default policy (2026-09-23)
 
