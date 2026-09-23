@@ -7,24 +7,57 @@ public sealed partial class BasicVtProcessor
 {
     // Stable Ghostty snapshot-v1 mode order, not native packed-struct layout.
     // The first four bits are ANSI KAM/IRM/SRM/LNM; remaining bits are DEC.
-    private static ReadOnlySpan<int> SnapshotDecModes =>
-    [
-        1, 3, 4, 5, 6, 7, 8, 9, 12, 25, 40, 45, 47, 66, 67, 69,
-        1000, 1002, 1003, 1004, 1005, 1006, 1007, 1015, 1016, 1035,
-        1036, 1039, 1045, 1047, 1048, 1049, 2004, 2026, 2027, 2031,
-        2033, 2048, 5522,
-    ];
+    private static ReadOnlySpan<int> SnapshotDecModes => TerminalModeRegistry.DecModes;
 
-    internal const ulong SnapshotInitialModes = (1UL << 2) | (1UL << 9) |
-        (1UL << 13) | (1UL << 26) | (1UL << 29) | (1UL << 30);
+    internal const ulong SnapshotInitialModes = TerminalModeRegistry.InitialValues;
 
     private ulong _savedModeValues = SnapshotInitialModes;
+    private ulong _defaultModeValues = SnapshotInitialModes;
     // Protocol mode values are independent of which buffer is actually active.
     // For example, resetting 47 after setting 1049 selects primary but leaves
     // the 1049 mode value set, just as Ghostty's ModeState does.
     private byte _alternateScreenModeBits;
 
     internal ulong SnapshotSavedModes => _savedModeValues;
+    internal ulong SnapshotDefaultModes => _defaultModeValues;
+
+    /// <inheritdoc />
+    public bool TrySetDefaultMode(int mode, bool enabled, bool ansi = false)
+    {
+        if (!TerminalModeRegistry.IsDefaultConfigurable(mode, ansi)) return false;
+        TerminalModeState before = ModeState;
+        ulong bit = 1UL << TerminalModeRegistry.IndexOf(mode, ansi);
+        _defaultModeValues = enabled ? _defaultModeValues | bit : _defaultModeValues & ~bit;
+        SetPolicyModeValue(mode, enabled, ansi);
+        RaiseModeChangedIfNeeded(before);
+        return true;
+    }
+
+    private void ApplyConfiguredModeDefaults()
+    {
+        foreach (int mode in TerminalModeRegistry.AnsiModes)
+            SetPolicyModeValue(mode, (_defaultModeValues & (1UL << TerminalModeRegistry.IndexOf(mode, true))) != 0, true);
+        foreach (int mode in SnapshotDecModes)
+            if (TerminalModeRegistry.IsDefaultConfigurable(mode, false))
+                SetPolicyModeValue(mode, (_defaultModeValues & (1UL << TerminalModeRegistry.IndexOf(mode, false))) != 0, false);
+    }
+
+    private void SetPolicyModeValue(int mode, bool enabled, bool ansi)
+    {
+        if (ansi) { HandleAnsiMode(mode, enabled); return; }
+        // Do not call HandleDecMode: C mode_default writes bits only (notably
+        // no pending-wrap reset for 7 or unsolicited size report for 2048).
+        switch (mode)
+        {
+            case 1: _applicationCursorKeys = enabled; break;
+            case 7: _autoWrap = enabled; break;
+            case 25: _cursorVisible = enabled; break;
+            case 66: _applicationKeypad = enabled; break;
+            case 67: _backarrowKeyMode = enabled; break;
+            case 2004: _bracketedPaste = enabled; break;
+            default: SetExtendedDecMode(mode, enabled); break;
+        }
+    }
 
     internal ulong SnapshotCurrentModes
     {

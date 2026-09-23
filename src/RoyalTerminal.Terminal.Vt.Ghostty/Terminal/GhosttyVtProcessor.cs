@@ -19,6 +19,7 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalThemeSink,
+    ITerminalModeDefaults,
     ITerminalShellIntegrationEventSource,
     IKittyKeyboardStateSource,
     ITerminalCursorStyleSource,
@@ -796,6 +797,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         }
 
         ResetProcessVisibleNativeModes();
+        ApplyConfiguredModeDefaultsAfterSessionReset();
         ConfigureOptionalNativeFeatures();
         ApplyThemeToNative(_theme);
         SetupTerminalEffects();

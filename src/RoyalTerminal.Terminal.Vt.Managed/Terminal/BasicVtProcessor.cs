@@ -28,6 +28,7 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalThemeSink,
+    ITerminalModeDefaults,
     IKittyKeyboardStateSource,
     ITerminalCursorStyleSource,
     ITerminalFocusEventModeSource,
@@ -5409,6 +5410,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _kittyKeyboardStackAlt.Clear();
         ResetAttributes();
         InitTabStops();
+        ApplyConfiguredModeDefaults();
     }
 
     #endregion
@@ -5593,6 +5595,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _kittyKeyboardStackAlt.Clear();
         ResetAttributes();
         InitTabStops();
+        ApplyConfiguredModeDefaults();
 
         switch (screenResetMode)
         {
