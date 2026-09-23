@@ -12,6 +12,27 @@ namespace RoyalTerminal.IntegrationTests;
 public class GhosttyRenderStateExtendedTests
 {
     [GhosttyNativeFact]
+    public void OverwritingEitherHalfOfWrappedWideGlyphDirtiesPreviousSpacerRow()
+    {
+        foreach (int column in new[] { 1, 2 })
+        {
+            using GhosttyTerminal terminal = new(5, 3);
+            using GhosttyRenderState renderState = new();
+            terminal.Write("ABCD界"u8);
+            renderState.Update(terminal);
+            renderState.Clean();
+            terminal.Write(Encoding.ASCII.GetBytes($"\u001b[2;{column}HX"));
+            renderState.Update(terminal);
+            renderState.BeginRows();
+            Assert.True(renderState.MoveNextDirtyRow(out ushort row));
+            Assert.Equal((ushort)0, row);
+            Assert.True(renderState.MoveNextDirtyRow(out row));
+            Assert.Equal((ushort)1, row);
+            Assert.False(renderState.MoveNextDirtyRow(out _));
+        }
+    }
+
+    [GhosttyNativeFact]
     public void ModeOffCombiningSuffixDirtiesAndRefreshesACleanRenderSnapshot()
     {
         using GhosttyTerminal terminal = new(10, 3);

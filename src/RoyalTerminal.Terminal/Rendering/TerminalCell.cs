@@ -69,6 +69,10 @@ public struct TerminalCell
     /// <summary>Number of columns this character spans (1 for normal, 2 for wide/CJK).</summary>
     public byte Width;
 
+    /// <summary>Whether this zero-width cell pads the right edge before a wrapped wide glyph,
+    /// rather than being the trailing half of a glyph on this row.</summary>
+    public bool IsWideSpacerHead;
+
     /// <summary>Returns true if this cell has content.</summary>
     public readonly bool HasContent => Codepoint != 0 || !string.IsNullOrEmpty(Grapheme);
 
@@ -1803,7 +1807,7 @@ public sealed partial class TerminalScreen
 
             int rowStart = Math.Min(startColumn, row.Columns - 1);
             int rowEnd = Math.Min(endColumn, row.Columns - 1);
-            if (rowStart > 0 && row[rowStart].Width == 0)
+            if (rowStart > 0 && row[rowStart].Width == 0 && !row[rowStart].IsWideSpacerHead)
             {
                 rowStart--;
             }
@@ -2503,6 +2507,7 @@ public sealed partial class TerminalScreen
             TerminalRow row = TerminalRow.CreateForReflow(columns);
             int destinationRow = destination.Count - destinationStart;
             int column = 0;
+            bool wideWrap = false;
 
             while (sourceIndex < logicalLine.Length && column < columns)
             {
@@ -2562,6 +2567,7 @@ public sealed partial class TerminalScreen
 
                 if (width == 2 && column == columns - 1)
                 {
+                    wideWrap = true;
                     break;
                 }
 
@@ -2583,6 +2589,11 @@ public sealed partial class TerminalScreen
             }
 
             row.Cells[column..].Fill(TerminalCell.Empty(DefaultForeground, DefaultBackground));
+            if (wideWrap)
+            {
+                row[column].Width = 0;
+                row[column].IsWideSpacerHead = true;
+            }
             row.WrapsToNext = sourceIndex < logicalLine.Length;
             destination.Add(row);
         }
@@ -2673,7 +2684,8 @@ public sealed partial class TerminalScreen
             return 1;
         }
 
-        return sourceIndex + 1 < logicalLine.Length && logicalLine[sourceIndex + 1].Width == 0
+        return sourceIndex + 1 < logicalLine.Length && logicalLine[sourceIndex + 1].Width == 0 &&
+            !logicalLine[sourceIndex + 1].IsWideSpacerHead
             ? 2
             : 1;
     }
@@ -2706,7 +2718,7 @@ public sealed partial class TerminalScreen
     private static bool IsNormalizedWideSpacer(
         in TerminalCell head,
         in TerminalCell tail)
-        => tail.Width == 0 && tail.Codepoint == 0 && tail.Grapheme is null &&
+        => tail.Width == 0 && !tail.IsWideSpacerHead && tail.Codepoint == 0 && tail.Grapheme is null &&
            tail.Foreground == head.Foreground && tail.Background == head.Background &&
            tail.ForegroundIdentity == head.ForegroundIdentity &&
            tail.BackgroundIdentity == head.BackgroundIdentity &&

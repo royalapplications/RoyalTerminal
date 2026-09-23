@@ -1842,6 +1842,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        // Ghostty prints an empty narrow cell when a terminal cannot fit any
+        // wide glyph. Preserve normal delayed-wrap behavior for that cell.
+        if (width == 2 && _screen.Columns == 1)
+        {
+            codepoint = 0;
+            width = 1;
+        }
+
         if (ConsumeDelayedWrapBeforePrint())
         {
             ClampCursor();
@@ -1858,6 +1866,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             if (_autoWrap)
             {
+                ClearRasterGraphicsForTextMutation(_cursorRow, _cursorCol, 1);
+                ClearCellAndWideArtifacts(row, _cursorCol);
+                WriteCellFromPen(ref row[_cursorCol], 0, 0);
+                row[_cursorCol].IsWideSpacerHead = true;
+                row.IsDirty = true;
                 ResetDelayedWrap();
                 _cursorCol = 0;
                 LineFeed(wrapForced: true);
@@ -1865,7 +1878,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
             else
             {
-                width = 1;
+                return;
             }
 
             if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
@@ -1888,13 +1901,27 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ClearRasterGraphicsForTextMutation(_cursorRow, _cursorCol, width);
+        if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2 &&
+            !(_cursorCol == 0 && width == 2)) ClearPreviousWideSpacerHead();
         ClearCellAndWideArtifacts(row, _cursorCol);
         if (width == 2 && _cursorCol + 1 < row.Columns)
         {
             ClearCellAndWideArtifacts(row, _cursorCol + 1);
         }
 
-        ref var cell = ref row[_cursorCol];
+        WriteCellFromPen(ref row[_cursorCol], codepoint, (byte)width);
+        if (width == 2 && _cursorCol + 1 < row.Columns)
+        {
+            WriteCellFromPen(ref row[_cursorCol + 1], 0, 0);
+        }
+
+        row.IsDirty = true;
+        AdvanceCursorAfterGraphic(width);
+        _lastGraphicCodepoint = codepoint;
+    }
+
+    private void WriteCellFromPen(ref TerminalCell cell, int codepoint, byte width)
+    {
         cell.Codepoint = codepoint;
         cell.Grapheme = null;
         cell.Foreground = _currentFg;
@@ -1909,32 +1936,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         cell.Decorations = _currentDecorations;
         cell.HasBackground = true;
         cell.HyperlinkId = _currentHyperlinkId;
-        cell.Width = (byte)width;
-
-        if (width == 2 && _cursorCol + 1 < row.Columns)
-        {
-            ref TerminalCell spacer = ref row[_cursorCol + 1];
-            spacer.Codepoint = 0;
-            spacer.Grapheme = null;
-            spacer.Foreground = _currentFg;
-            spacer.Background = _currentBg;
-            spacer.ForegroundIdentity = cell.ForegroundIdentity;
-            spacer.BackgroundIdentity = cell.BackgroundIdentity;
-            spacer.UnderlineIdentity = cell.UnderlineIdentity;
-            spacer.Attributes = _currentAttrs;
-            spacer.UnderlineStyle = _currentUnderlineStyle;
-            spacer.UnderlineColor = _currentUnderlineColor;
-            spacer.HasUnderlineColor = _currentHasUnderlineColor;
-            spacer.Decorations = _currentDecorations;
-            spacer.HasBackground = true;
-            spacer.HyperlinkId = _currentHyperlinkId;
-            spacer.Width = 0;
-        }
-
-        row.IsDirty = true;
-
-        AdvanceCursorAfterGraphic(width);
-        _lastGraphicCodepoint = codepoint;
+        cell.Width = width;
+        cell.IsWideSpacerHead = false;
     }
 
     private bool ShouldAttemptGraphemeAppend(int codepoint)
@@ -1975,7 +1978,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         TerminalRow targetRow = _screen.GetViewportRow(targetRowIndex);
-        while (targetColIndex >= 0 && targetRow[targetColIndex].Width == 0)
+        while (targetColIndex >= 0 && targetRow[targetColIndex].Width == 0 &&
+            !targetRow[targetColIndex].IsWideSpacerHead)
         {
             targetColIndex--;
         }
@@ -2048,8 +2052,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             moved.Width = 2;
             ClearPreservedCellsForMutation(targetRow);
             ClearRasterGraphicsForTextMutation(targetRowIndex, targetColIndex, 1);
-            TerminalCell spacerHead = TerminalCell.Empty(moved.Foreground, moved.Background);
+            TerminalCell spacerHead = moved;
+            spacerHead.Codepoint = 0;
+            spacerHead.Grapheme = null;
             spacerHead.Width = 0;
+            spacerHead.IsWideSpacerHead = true;
             targetRow[targetColIndex] = spacerHead;
             targetRow.IsDirty = true;
             _cursorCol = 0;
@@ -2099,11 +2106,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             spacer.HasBackground = targetCell.HasBackground;
             spacer.HyperlinkId = targetCell.HyperlinkId;
             spacer.Width = 0;
+            spacer.IsWideSpacerHead = false;
         }
 
         if (oldWidth == 2 && newWidth == 1 && targetColIndex + 1 < targetRow.Columns)
         {
-            targetRow[targetColIndex + 1] = TerminalCell.Empty(targetCell.Foreground, targetCell.Background);
+            targetRow[targetColIndex + 1].Width = 1;
             if (targetRowIndex == _cursorRow)
             {
                 _delayedWrap = false;
@@ -2183,6 +2191,20 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         row[column] = CreateErasedCell();
+    }
+
+    private void ClearPreviousWideSpacerHead()
+        => ClearWideSpacerHeadAt(_cursorRow - 1);
+
+    private void ClearWideSpacerHeadAt(int rowIndex)
+    {
+        if (rowIndex < 0 || rowIndex >= _screen.ViewportRows) return;
+        TerminalRow previous = _screen.GetViewportRow(rowIndex);
+        if (!previous.ReadOnlyCells[^1].IsWideSpacerHead) return;
+        ref TerminalCell head = ref previous[previous.Columns - 1];
+        head.IsWideSpacerHead = false;
+        head.Width = 1;
+        previous.IsDirty = true;
     }
 
     private void ClampCursor()
@@ -2304,6 +2326,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void CopyRow(TerminalRow src, TerminalRow dst)
     {
         dst.CopyActiveFrom(src, _screen.DefaultForeground, _screen.DefaultBackground);
+        dst.WrapsToNext = false;
+        if (dst.ReadOnlyCells[^1].IsWideSpacerHead)
+        {
+            dst[dst.Columns - 1].IsWideSpacerHead = false;
+            dst[dst.Columns - 1].Width = 1;
+        }
         NormalizeRowWideCells(dst);
     }
 
@@ -5279,7 +5307,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
 
         var row = _screen.GetViewportRow(_cursorRow);
+        if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2) ClearPreviousWideSpacerHead();
         ClearPreservedCellsForMutation(row);
+        if (row.ReadOnlyCells[^1].IsWideSpacerHead)
+            row[row.Columns - 1] = CreateErasedCell();
+        row.WrapsToNext = false;
+        ResetDelayedWrap();
         for (var c = _cursorCol; c + count < _screen.Columns; c++)
             row[c] = row[c + count];
         for (var c = Math.Max(_cursorCol, _screen.Columns - count); c < _screen.Columns; c++)
@@ -5299,7 +5332,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
 
         var row = _screen.GetViewportRow(_cursorRow);
+        if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2) ClearPreviousWideSpacerHead();
         ClearPreservedCellsForMutation(row);
+        if (row.ReadOnlyCells[^1].IsWideSpacerHead)
+            row[row.Columns - 1] = CreateErasedCell();
+        row.WrapsToNext = false;
+        ResetDelayedWrap();
         for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
             row[c] = CreateErasedCell();
         NormalizeRowWideCells(row);
@@ -5356,12 +5394,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 trailing.HasBackground = cell.HasBackground;
                 trailing.HyperlinkId = cell.HyperlinkId;
                 trailing.Width = 0;
+                trailing.IsWideSpacerHead = false;
                 col++;
                 continue;
             }
 
             if (cell.Width == 0)
             {
+                if (cell.IsWideSpacerHead && col == row.Columns - 1 && row.WrapsToNext) continue;
                 bool hasWideLeader = col > 0 && row[col - 1].Width == 2;
                 if (!hasWideLeader)
                 {

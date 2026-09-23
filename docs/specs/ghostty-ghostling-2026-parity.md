@@ -22,7 +22,7 @@ The renewed review found the following missing or weakly verified requirements:
 | Parser/clipboard throughput and bounds | Split-input protocol tests, malformed UTF-8/base64 tests, limits, before/after measurements | Review added span payload scanning, bulk base64 decode, correct 64 MiB configurable clipboard bound, 65-codepoint grapheme bound and protocol fixes; measurement review pending |
 | Third IO thread and render fairness | Dedicated lifetime/flush/failure tests, renderer demand handoff, batching/backpressure throughput and latency measurements | Dedicated worker, demand handoff and bounded gather/lease path implemented; isolated PTY throughput and allocation improvements measured; platform scheduling rejection handling and final lifecycle validation remain in review |
 | Managed colors and VT formatter state | Dynamic override resets, pending-wrap and tabstop/cursor round-trip differential tests | OSC 104/110/111/112 resets and configured-vs-override state implemented; edge-cell replay, post-tabstop cursor home and CRLF replay tests pass; broader formatter audit remains open |
-| Unicode 18 grapheme behavior | Authoritative generated grapheme/Indic/emoji properties and conformance tests, not only scalar widths | Full generated properties and boundary kernel pass official conformance/native comparisons; mode2027 on/off is implemented; differential testing found an upstream dirty-mark bug and a remaining managed right-edge spacer case |
+| Unicode 18 grapheme behavior | Authoritative generated grapheme/Indic/emoji properties and conformance tests, not only scalar widths | Full generated properties and boundary kernel pass official conformance/native comparisons; mode2027 on/off is implemented; managed right-edge printing and explicit spacer identity now match focused native comparisons; native combining/spacer dirty-row defects have tested source overlays; exhaustive mode/margin transition coverage remains part of the full audit |
 | Platform renderer improvements | Per-change applicability evidence for Skia/native bridge vs upstream Metal/OpenGL, with relevant tests/measurements | Detailed inspection remains open; native dependency pin alone does not port full-app renderer behavior |
 
 Rows above are requirements to finish, not exclusions from the requested scope.
@@ -186,6 +186,47 @@ codec or formatter requirements.
 Final full unit/headless verification passes **1,777 tests**, with 16 conditional
 skips, zero failures and 1,793 total tests confirmed by TRX. An earlier partial
 601-test run was not counted as complete verification.
+
+## Wide-edge and spacer-state follow-up (2026-09-23)
+
+Native differential tests reproduced managed failures when a wide glyph arrived
+in the last column: missing wrap padding with autowrap, and incorrectly printing
+a squeezed one-cell glyph without autowrap. The managed printer now follows
+Ghostty `Terminal.print`: a distinct spacer head precedes a wrapped wide glyph,
+unfittable wide glyphs are ignored with autowrap disabled, and a one-column
+terminal receives an empty narrow cell with normal pending-wrap behavior.
+Windows Terminal `TextBuffer::FitTextIntoColumns` likewise pads the final column;
+xterm `InputHandler.print` pads on wrap and rejects unfittable wide glyphs without
+wrap. Ghostty's explicit spacer metadata is authoritative for our representation.
+
+`TerminalCell.IsWideSpacerHead` distinguishes wrap padding from same-row wide
+tails in both processors and raw native snapshots, while the cell stays within
+48 bytes. Reflow recreates heads and copies preserve them independently. Raster
+overlap does not treat a head as the trailing half of the unrelated glyph to its
+left. Grapheme widening retains head styling; narrowing retains the old tail's
+style when making it narrow, as upstream does.
+
+Overwrite, ECH/DCH, ICH, EL, IL/DL and reflow have focused regressions. Cleanup
+follows the specific upstream operation: EL/ICH and edits below a preceding row
+can retain its spacer; ECH/DCH reset their row's soft wrap; row shifting clears
+heads within moved rows. This is not a blanket normalization that destroys all
+spacers after any edit.
+
+The review also found native storage becoming narrow while a clean render
+snapshot retained a head after overwriting either half of a wrapped glyph.
+Raw-grid versus incremental-snapshot tests failed before correction. A
+full-file-hash and two-site-count guarded overlay marks the previous row dirty
+in the two `printCell` branches. It leaves ordinary trailing spacers untouched.
+The existing upstream `splitCellBoundary` dirty-row fix covers erasure, but not
+these printing branches. No upstream report or upstream fix is claimed.
+
+The initial focused run passes **112 tests** and the native integration suite
+passes **231 tests**. Host native rebuild plus five cross-builds succeeded for
+all six supported RIDs. Only macOS arm64 runtime execution was performed here.
+Final full unit/headless verification passes **1,796 tests**, with 16 conditional
+skips and zero failures (1,812 total, confirmed by TRX), including 19 new
+wide-edge/spacer cases. This closes the reproduced spacer gap, not the remaining
+snapshot, graphics, renderer/performance or exhaustive state-transition audit.
 
 ## Scope and pinned references
 

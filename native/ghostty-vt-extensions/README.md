@@ -8,9 +8,10 @@ The build generates a copy of the upstream Zig root with the exports from
 
 ## Reviewed correctness overlays
 
-The generated source copy also applies two corrections to pinned upstream
-`22391ed6491f2924361dcad1f9a9176a390fd20f`. Each checks the original file's full
-SHA-256 and exactly one matching source fragment; any upstream file change
+The generated source copy also applies three corrections to pinned upstream
+`4ae9f1a2de5484de3d6a13fe03676b8853b9c41c` (identical runtime sources to the
+previously reviewed `22391ed6491f2924361dcad1f9a9176a390fd20f`). Each checks the original file's full
+SHA-256 and the exact expected source-fragment count; any upstream file change
 fails the build until reviewed. The submodule checkout is never changed.
 
 - `Terminal.zig`: mark the cursor row dirty before the mode-2027-off width-zero
@@ -18,6 +19,11 @@ fails the build until reviewed. The submodule checkout is never changed.
   native storage retained the suffix but render state stayed clean and exposed
   only `K`. The mode-on path already marks dirty. The overlay preserves the
   intended text semantics and incremental dirty-row rendering.
+- `Terminal.zig`: mark the previous row dirty when overwriting either half of
+  a wrapped wide glyph normalizes its spacer head. Both `printCell` branches
+  changed native storage without refreshing an already-clean render snapshot.
+  Raw-grid snapshots reproduced the mismatch before correction. The overlay
+  checks exactly two replacement sites and leaves ordinary spacer tails alone.
 - `kitty/graphics_storage.zig`: use `number - 1` for the removed frame's index
   when updating `current_index`, which includes the root. Unpatched native code
   selected the red root and kept its generation after deleting displayed blue
@@ -25,7 +31,7 @@ fails the build until reviewed. The submodule checkout is never changed.
   successor and stamps changed content. Deleting another frame preserves the
   displayed frame's identity.
 
-Both were reproduced through the native C API before correction and have
+All were reproduced through the native C API before correction and have
 focused integration tests. No public upstream issue is claimed. Reassess and
 remove an overlay when its upstream fix is incorporated.
 
@@ -49,7 +55,8 @@ The two additional C exports are declared in
 
 `scripts/build-native.sh` and `scripts/build-native.ps1` build and stage this
 package. CI and release jobs also use it. Do not stage a plain upstream build:
-RoyalTerminal's native VT processor uses this extra export for idle animations.
+RoyalTerminal's native VT processor requires both additional exports for idle
+animations and virtual-placement metadata.
 
 The integration intentionally uses upstream animation state and composition,
 not a parallel implementation of animation semantics. If Ghostty adds a public
