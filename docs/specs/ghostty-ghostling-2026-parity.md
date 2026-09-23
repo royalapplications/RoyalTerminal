@@ -2,6 +2,27 @@
 
 ## Reopened completion audit
 
+### Password cursor and inactive appearance (2026-09-23)
+
+Both processors now feed their password metadata into the Skia cursor policy.
+Ghostty `renderer/cursor.zig` is authoritative: viewport exclusion wins, password
+mode uses a steady lock even with DECTCEM off or focus lost, otherwise hidden mode
+wins, an unfocused visible cursor is hollow, and focused cursors honor blinking
+and the requested shape. Poll transitions update the renderer immediately; the
+renderer reads processor metadata rather than a stale host hint after RIS.
+Composition/preedit's higher-priority block remains part of the pending IME work.
+
+The renderer requests Ghostty's U+F023 lock with cached font/glyph objects and
+anchors wide tails to their lead cell. Unlike Ghostty's embedded Nerd Fonts,
+RoyalTerminal allows hosts with no symbol font: a cell-bounded geometric lock is
+the explicit fallback, not a missing-glyph box. The icon indicates password
+metadata, not proof of OS secure input. Windows Terminal `renderer::_updateCursorInfo`
+also gates viewport visibility and blinking; xterm.js `DomRendererRowFactory`
+uses its inactive outline policy but has no local Unix password hint. We follow
+Ghostty's password override and outline behavior here. Focused policy, pixel,
+wide-tail and both-engine headless tests cover these decisions. No throughput
+improvement is claimed for this correctness work. Validation follows commit/push.
+
 ### macOS secure-input ownership (2026-09-23)
 
 The host now requests macOS secure input for a detected password hint only while
@@ -31,6 +52,10 @@ OS ownership, not the remaining password cursor glyph or broader IME work.
 Six ownership/ABI tests and three headless lifecycle/failure cases are added;
 validation follows implementation commit/push. Tests resolve native symbols but
 do not enable secure input on the developer's machine.
+The final 13-test secure-input/password subset passed at `50d17a6` (zero skips).
+Avalonia 12 raises Activated before setting IsActive; lifecycle policy observes
+the settled IsActive property instead. Earlier test attempts failed at compile
+time on inaccessible platform callbacks and are not counted as passing runs.
 
 ### Live Unix password-input detection (2026-09-23)
 

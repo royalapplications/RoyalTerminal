@@ -5060,7 +5060,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         Endpoint?.SetFocus(false);
         SendFocusEventIfNeeded(focused: false);
         EnsureCursorBlinkTimerRunning(false);
-        _renderer?.SetCursorVisible(false);
+        UpdateRendererCursorForViewport();
         _presenter?.Invalidate();
     }
 
@@ -8866,8 +8866,9 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
         bool rowVisible = (uint)cursorRow < (uint)_screen.ViewportRows;
         bool columnVisible = (uint)cursorColumn < (uint)_screen.Columns;
-        bool baseVisible = _vtProcessor.CursorVisible && rowVisible && columnVisible;
-        bool blinkPhaseActive = blinkEnabled && IsFocused;
+        bool passwordInput = _vtProcessor is ITerminalPasswordInputState { PasswordInput: true };
+        bool baseVisible = (_vtProcessor.CursorVisible || passwordInput) && rowVisible && columnVisible;
+        bool blinkPhaseActive = blinkEnabled && IsFocused && !passwordInput;
 
         if (baseVisible &&
             blinkPhaseActive &&
@@ -8882,13 +8883,18 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         EnsureCursorBlinkTimerRunning(baseVisible && blinkPhaseActive);
-        _renderer.CursorVisible = baseVisible && (!blinkPhaseActive || _cursorBlinkVisiblePhase);
+        CursorStyle? appearance = TerminalCursorAppearance.Resolve(_renderer.CursorStyle,
+            rowVisible && columnVisible, passwordInput, _vtProcessor.CursorVisible,
+            IsFocused, blinkEnabled, _cursorBlinkVisiblePhase);
+        _renderer.CursorVisible = appearance.HasValue;
+        if (appearance.HasValue) _renderer.CursorStyle = appearance.Value;
     }
 
     private bool UpdateRendererCursorStyleFromVtProcessor()
     {
         if (_renderer is null || _vtProcessor is not ITerminalCursorStyleSource cursorStyleSource)
         {
+            if (_renderer is not null) _renderer.CursorStyle = CursorStyle.Block;
             return false;
         }
 

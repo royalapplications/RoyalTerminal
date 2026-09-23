@@ -5804,6 +5804,10 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
         switch (CursorStyle)
         {
+            case CursorStyle.Lock:
+                RenderPasswordCursor(canvas, x, y, cursorWidth);
+                break;
+
             case CursorStyle.Block:
                 _cursorPaint.Style = SKPaintStyle.Fill;
                 _cursorPaint.BlendMode = SKBlendMode.SrcOver;
@@ -7030,4 +7034,6 @@ public enum CursorStyle
     BlockHollow,
     Underline,
     Bar,
+    /// <summary>Steady password-entry indicator; not proof of OS secure input.</summary>
+    Lock,
 }

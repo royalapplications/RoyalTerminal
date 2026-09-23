@@ -4874,15 +4874,19 @@ public class TerminalControlTests
 
         Assert.NotNull(control.Renderer);
         SkiaTerminalRenderer renderer = control.Renderer!;
-
-        control.WriteOutput("\x1b[6 q"u8);
-        Assert.Equal(CursorStyle.Bar, renderer.CursorStyle);
-
-        control.WriteOutput("\x1b[3 q"u8);
-        Assert.Equal(CursorStyle.Underline, renderer.CursorStyle);
-
-        control.WriteOutput("\x1b[1 q"u8);
-        Assert.Equal(CursorStyle.Block, renderer.CursorStyle);
+        Window window = new() { Content = control };
+        window.Show();
+        try
+        {
+            control.Focus();
+            control.WriteOutput("\x1b[6 q"u8);
+            Assert.Equal(CursorStyle.Bar, renderer.CursorStyle);
+            control.WriteOutput("\x1b[3 q"u8);
+            Assert.Equal(CursorStyle.Underline, renderer.CursorStyle);
+            control.WriteOutput("\x1b[1 q"u8);
+            Assert.Equal(CursorStyle.Block, renderer.CursorStyle);
+        }
+        finally { window.Close(); }
     }
 
     [AvaloniaFact]

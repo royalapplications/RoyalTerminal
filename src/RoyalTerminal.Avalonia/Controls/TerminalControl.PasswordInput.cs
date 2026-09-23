@@ -66,7 +66,11 @@ public partial class TerminalControl
         // parser's synchronization. The host flag is live, even during render holds.
         if (_screen is not null && _vtProcessor is ITerminalPasswordInputState state)
         {
-            using (_screen.Synchronization.AcquireDemand()) state.PasswordInput = value;
+            using (_screen.Synchronization.AcquireDemand())
+            {
+                state.PasswordInput = value;
+                UpdateRendererCursorForViewportLocked();
+            }
         }
         if (SetAndRaise(PasswordInputProperty, ref _passwordInput, value)) _presenter?.Invalidate();
         UpdateSecureInputPolicy();

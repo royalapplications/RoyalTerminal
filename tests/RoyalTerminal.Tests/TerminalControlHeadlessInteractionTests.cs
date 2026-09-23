@@ -31,6 +31,52 @@ public sealed class TerminalControlHeadlessInteractionTests
     [AvaloniaTheory]
     [InlineData(VtProcessorPreference.Managed)]
     [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_PasswordCursorUsesProcessorStateAndSurvivesHiddenModeAndFocusLoss(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        PasswordModeTransport transport = new() { Detected = true };
+        TerminalControl control = CreateControlWithTransport(transport, new PasswordStateProcessorFactory(), preference);
+        TextBox sibling = new();
+        Window window = new() { Width = 640, Height = 400, Content = new StackPanel { Children = { control, sibling } } };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            SkiaTerminalRenderer renderer = control.Renderer!;
+            Assert.Equal(CursorStyle.Lock, renderer.CursorStyle);
+            control.WriteOutput("\u001b[?25l"u8);
+            Assert.True(renderer.CursorVisible);
+            Assert.Equal(CursorStyle.Lock, renderer.CursorStyle);
+            sibling.Focus();
+            Assert.True(renderer.CursorVisible);
+            Assert.Equal(CursorStyle.Lock, renderer.CursorStyle);
+            transport.Detected = false;
+            control.Focus();
+            Assert.False(renderer.CursorVisible);
+            control.WriteOutput("\u001b[?25h\u001b[6 q"u8);
+            Assert.True(renderer.CursorVisible);
+            Assert.Equal(CursorStyle.Bar, renderer.CursorStyle);
+            sibling.Focus();
+            Assert.True(renderer.CursorVisible);
+            Assert.Equal(CursorStyle.BlockHollow, renderer.CursorStyle);
+            control.Focus();
+            Assert.Equal(CursorStyle.Bar, renderer.CursorStyle);
+            transport.Detected = true;
+            Assert.True(await WaitUntilAsync(() => renderer.CursorStyle == CursorStyle.Lock, TimeSpan.FromSeconds(3)));
+            int polls = transport.Polls;
+            control.WriteOutput("\u001bc"u8);
+            Assert.True(await WaitUntilAsync(() => transport.Polls > polls, TimeSpan.FromSeconds(3)));
+            Assert.True(control.PasswordInput);
+            Assert.NotEqual(CursorStyle.Lock, renderer.CursorStyle);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
     public async Task Headless_SecureInputBalancesFocusWindowDetachAndSession(VtProcessorPreference preference)
     {
         if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
