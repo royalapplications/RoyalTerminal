@@ -65,9 +65,8 @@ public sealed class TerminalControlHeadlessInteractionTests
             control.Focus();
             Assert.Equal(1, platform.Owners);
 
-            // Headless Hide posts the platform deactivation notification without
-            // detaching the control or changing the window's managed visibility.
-            window.PlatformImpl!.Hide();
+            // The headless backend posts deactivation when the window hides.
+            window.Hide();
             Dispatcher.UIThread.RunJobs();
             Assert.False(window.IsActive);
             Assert.False(control.SecureInputEnabled);
@@ -76,7 +75,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             await Task.Delay(300);
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(polls, transport.Polls);
-            window.Activate();
+            window.Show();
             Dispatcher.UIThread.RunJobs();
             Assert.True(control.SecureInputEnabled);
             Assert.Equal(1, platform.Owners);
