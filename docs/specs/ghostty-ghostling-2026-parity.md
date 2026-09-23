@@ -1598,6 +1598,50 @@ skips, zero failures (2,667 total)** (`snapshot-history-application-full.trx`). 
 no warnings/errors. Documentation CI passed; the six native builds in run
 `35871055372` were pending at inspection. Other-platform runtime sign-off remains.
 
+### Managed Kitty keyboard runtime and snapshot state
+
+The processor restore audit found that the previous managed 32-entry list did not
+match Ghostty's `kitty/key.zig.FlagStack`: the native state is an eight-slot ring
+including its current entry. `ManagedKittyKeyboardState` now packs all eight
+five-bit values and the three-bit index into eight bytes per screen. Push advances
+and overwrites, small pops clear each removed slot and wrap, zero pops do nothing,
+and a pop of eight or more clears the complete ring in constant time. No stack
+arrays or list shifts are needed. Reset still follows the existing managed DECSTR
+extension in addition to RIS/session reset.
+
+`stream.zig` is the command reference: push accepts one 0–31 flag parameter, otherwise
+defaults to zero for non-single arity; invalid single flags are ignored. Pop uses
+the single parameter literally, including zero, or defaults to one. Set ignores
+invalid flags/operations and uses its first two parameters. Native comparisons at
+every split cover omitted/extra/colon parameters, zero, 31/32/65535 boundaries and
+all three set operations. Per-screen ring state survives ordinary buffer switches
+and synchronized output. Internal SCREEN installation restores every slot and index
+without input replay, preserving subsequent operations on restored state.
+
+Reference decision: Windows Terminal uses an eight-entry vector of saved flags plus
+its current register and treats zero pop as a no-op; xterm.js uses 16 saved entries
+and treats zero as one. Neither is the same snapshot-v1 ring. RoyalTerminal follows
+Ghostty for exact managed/native runtime and SCREEN compatibility.
+
+All **44 new cases** pass, including full native slot comparisons after overflow,
+underflow, RIS, independent buffers and installation of arbitrary snapshot rings.
+The broader query/session selection passes **146 tests**, zero skips/failures
+(`keyboard-ring-focused.trx`, native available on macOS arm64). Warm packed
+push/pop/capture loops allocate zero bytes. Full processor restore remains open.
+
+A sequential Release comparison against the preceding `92e830f` binary used
+10,000 warm-up push/pop pairs and the median of seven 100,000-pair samples.
+The parser workload measured **48.454→47.268 ms**, with zero timed allocations
+in both implementations and final flags zero. The small timing difference is
+not an end-to-end speed claim; the structural gain is eliminating heap-backed
+keyboard stacks and bounding large pops independently of requested count.
+
+Full post-push Release validation through `102719a`: **2,695 passed, 16 conditional
+skips, zero failures (2,711 total)** (`keyboard-ring-full.trx`). Native was available
+on macOS arm64 and the build reports no warnings/errors. Documentation CI passed;
+native builds in run `35872036749` were pending at inspection. Full processor
+installation and other-platform runtime sign-off remain open.
+
 ## Validation requirements
 
 - Build the release native library with Zig 0.16 using `scripts/build-native.sh --release`.

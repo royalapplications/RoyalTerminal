@@ -11,6 +11,15 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
 
 ## Implemented and tested
 
+- Live Kitty keyboard state now matches Ghostty's eight-slot circular stack, packed
+  into one eight-byte value per screen instead of two heap-backed lists/current
+  registers. Push overwrites the oldest ring slot; pop clears removed slots, zero
+  is a no-op, and counts of eight or more reset all slots/index. Invalid flags and
+  set operations are ignored using Ghostty's command arity/default rules. Internal
+  SCREEN installation restores every slot and the index without replay or events;
+  native tests verify later pops/sets/screen switches, not just initial current flags.
+  This completes keyboard-state installation, not the other processor-state fields.
+
 - History lifecycle application now captures the READY terminal lineage, declared
   screens and alternate generation. It rechecks current width/presence/generation
   on each page, applies compatible pages through the atomic prepend operation, and
