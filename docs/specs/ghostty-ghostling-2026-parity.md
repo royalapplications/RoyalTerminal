@@ -890,8 +890,8 @@ restores do not pop it, and RIS resets the saved bank. Restore invokes the norma
 mode handler even when unchanged so origin homing, cursor save/restore, margin
 reset, alternate-screen clearing and size reports retain their side effects.
 Repeated synchronized-output restore does not publish a partial frame. Current
-and saved bank capture are internal prerequisites, not yet full snapshot installation
-or configurable-default-mode parity.
+and saved bank capture are internal prerequisites, not yet full snapshot installation.
+The subsequent configurable-default implementation is described below.
 
 DEC 47, 1047 and 1049 are independent protocol values, not aliases of the active
 buffer. Native differential tests exposed a second issue in the native adapter:
@@ -933,6 +933,58 @@ The complete Release suite through `5c4a881` then passed **2,521 tests,
 16 conditional skips, zero failures (2,537 total)** in `saved-modes-full2.trx`,
 including all 62 new saved-mode/column/query cases with native available. This is
 local macOS arm64 evidence, not completed platform validation or full parity.
+
+### Configurable mode reset policy
+
+Both processors now expose `ITerminalModeDefaults.TrySetDefaultMode(mode, enabled,
+ansi)`, matching Ghostty's C `mode_default` option for all four ANSI and 21 DEC
+configurable modes. The shared registry validates mode identity and eligibility
+before mutation. Transition-dependent modes, unknown integers and out-of-range
+values cannot be smuggled through native tag truncation. Setting a default replaces
+the current value even if the default was unchanged, leaves saved values intact,
+and does not execute DECSET side effects: pending wrap survives changing mode 7,
+and setting mode 2048 does not emit an unsolicited reply. Mode-change events and
+held cursor visibility continue to follow the normal publication contract.
+
+Managed state keeps an independent default bank. RIS and new-session preparation
+restore it while clearing saved modes to the built-in initial bank, matching
+Ghostty `ModeState.reset`. The history-preserving native restart cannot use RIS;
+it resets saved DEC values using raw C bit updates plus XTSAVE, restores current
+bits and then applies policy without invoking screen, resize or report effects.
+It disables DEC 40 before cleanup so resetting mode 3 cannot unexpectedly resize
+the retained grid. Lazy-created/recreated Sixel overlays inherit configured policy.
+
+Reference decision: Ghostty `modes.zig` (`defaultConfigurable`/`setDefault`/`reset`)
+and `c/terminal.zig` (`mode_default`) define the eligibility and mutation contract.
+Windows Terminal's ordinary SetMode/ResetMode dispatcher and xterm.js CoreService's
+fixed default clones are not equivalent configurable-policy APIs. RoyalTerminal
+follows Ghostty and retains its existing managed-only DECSTR extension, which also
+reapplies configured defaults. Native/managed snapshots still need full transactional
+installation, including transition-dependent default bits that the policy API
+intentionally refuses.
+
+Coverage includes every eligible mode across native current/saved/default snapshot
+banks, current-value overrides, repeated policy writes and RIS; every refused
+transition mode and integer range guards; all policies on both integrations across
+history-preserving restarts; held publication/events, pending wrap, absence of VT
+side effects and Sixel overlay recreation. Warm managed policy writes/bank reads
+allocate zero bytes. Reset applies only changed default bits; the normal unconfigured
+path skips this work. Full-suite and paired reset measurements are recorded below.
+
+Post-push Release validation through `520d267`: **2,607 passed, 16 conditional
+skips, zero failures (2,623 total)** in `mode-defaults-full2.trx`, including all
+86 new policy tests with native available on macOS arm64. Build reports no
+warnings or errors. This does not establish other-platform runtime validation.
+CI run `35867256990` passed all six native RID builds at this implementation head;
+the Ubuntu, macOS and Windows build/test jobs were still pending at inspection.
+
+A sequential Release reset microbenchmark compared `d8e7cd4` with `520d267`:
+80x24 terminal, 10,000 warm-up resets, median of seven 10,000-reset samples.
+For zero, one and ten overridden defaults, elapsed time was respectively
+41.807→57.259 ms, 30.511→37.938 ms and 30.050→39.098 ms. Both implementations
+allocated zero bytes in every timed sample. Although the new path visits fewer
+mode bits, this pair was slower and does **not** establish a performance gain;
+controlled repeated profiling remains required before making that claim.
 
 The current Ghostty version1 binary format itself omits Kitty images/placements and
 glyph glossary registrations (`snapshot/terminal.zig`, field classification). Virtual

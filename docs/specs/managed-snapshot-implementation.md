@@ -117,8 +117,8 @@ The managed runtime now has a saved-mode bank in snapshot-v1 bit order. XTSAVE
 (`CSI ? Pm s`) overwrites selected values; XTRESTORE (`CSI ? Pm r`) reuses those
 values without popping, invoking normal mode side effects. Unsaved values and RIS
 follow Ghostty `ModeState.saved = .{}` defaults. DEC 47/1047/1049 retain independent
-mode bits, separate from the active buffer. Current/saved bank capture is internal;
-configurable default banks and complete snapshot installation remain outstanding.
+mode bits, separate from the active buffer. Current/saved/default bank capture is
+internal; complete snapshot installation remains outstanding.
 Reference: Ghostty `modes.zig`, `stream.zig` and `stream_terminal.zig` define these
 commands and restored-mode effects. The checked xterm.js InputHandler and Windows
 Terminal output dispatcher register ordinary margins/cursor save but do not supply
@@ -133,12 +133,24 @@ terminal-owned column changes update the mirror, release a cleared render hold a
 report current dimensions even within a single input batch. Host cell geometry is
 kept separate from committed snapshot pixel dimensions for size-query responses.
 
+`ITerminalModeDefaults.TrySetDefaultMode` now provides matching native and managed
+embedder policy for all 25 configurable modes (four ANSI, 21 DEC). It changes both
+current and reset values, not the saved bank, and does not replay transition effects.
+Unknown/out-of-range modes and modes marked non-configurable in Ghostty's registry
+return false before mutation. Managed RIS and session reset restore policy values;
+saved values reset to the built-in bank, independently of configured defaults.
+The native history-preserving reset now clears stale saved DEC values without
+executing mode effects, reapplies configured policy and prevents DEC 40 from making
+cleanup resize the terminal. Native lazy Sixel overlays inherit the policy.
+Snapshots must still install all three banks transactionally; the public policy
+API deliberately cannot install transition-dependent default bits from a snapshot.
+
 `TerminalCell` now retains four-byte logical foreground/background/underline
 identities alongside resolved ARGB. Both VT integrations populate these from
 original styles, with focused print/erase/save/restore/wide/reflow/hold tests.
 This removes the need to guess whether identical displayed RGB values came from
-default, indexed or explicit colors. The snapshot adapter still needs to map
-these identities to its style records. Existing-cell theme resolution now uses
+default, indexed or explicit colors. The live PAGE adapter maps these identities
+to style records; complete cursor/terminal installation remains. Existing-cell theme resolution now uses
 the logical identities, with native/managed collision and underline regressions.
 Wide-edge printing, overwrite and erase paths now have focused differential
 coverage; broader state-transition coverage is still required.
