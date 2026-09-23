@@ -169,8 +169,8 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         for (int depth = 0; depth <= 8; depth++)
         {
             if (root.Parent is not PlacementKey parent) return true;
-            horizontalOffset += root.HorizontalOffset;
-            verticalOffset += root.VerticalOffset;
+            horizontalOffset = Math.Clamp(horizontalOffset + root.HorizontalOffset, int.MinValue, int.MaxValue);
+            verticalOffset = Math.Clamp(verticalOffset + root.VerticalOffset, int.MinValue, int.MaxValue);
             if (!_placements.TryGetValue(parent, out root)) return false;
         }
         root = null;

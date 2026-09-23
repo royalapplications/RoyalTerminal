@@ -981,6 +981,8 @@ public sealed partial class TerminalScreen
         IReadOnlyList<TerminalKittyImagePlacement>? placements)
     {
         _kittyAnchoredPlacements = null;
+        _kittyPlaceholderScene = null;
+        _kittyPlaceholderRuns = null;
         _kittyProjectionState = null;
         _kittyImagesById.Clear();
         if (images is not null)
@@ -1015,6 +1017,8 @@ public sealed partial class TerminalScreen
     public void ClearKittyGraphics()
     {
         _kittyAnchoredPlacements = null;
+        _kittyPlaceholderScene = null;
+        _kittyPlaceholderRuns = null;
         _kittyProjectionState = null;
         if (_kittyImagesById.Count == 0 && _kittyPlacements.Length == 0)
         {

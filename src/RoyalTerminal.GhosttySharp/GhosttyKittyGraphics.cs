@@ -285,6 +285,20 @@ public sealed class GhosttyKittyGraphicsPlacementIterator : IDisposable
     /// <summary>Gets whether the current placement is virtual.</summary>
     public bool GetIsVirtual() => GetPlacementValue<bool>(GhosttyVtNative.GhosttyKittyGraphicsPlacementData.IsVirtual);
 
+    /// <summary>
+    /// Copies the current placement's exact ID namespace and upstream-resolved
+    /// virtual root. Requires RoyalTerminal's native extension. The storage and
+    /// iterator must belong to the same terminal and remain unmutated during use.
+    /// </summary>
+    public unsafe GhosttyVtNative.RoyalKittyPlacementMetadata GetMetadata(GhosttyKittyGraphics graphics)
+    {
+        ArgumentNullException.ThrowIfNull(graphics);
+        GhosttyVtNative.RoyalKittyPlacementMetadata metadata = GhosttyVtNative.RoyalKittyPlacementMetadata.CreateSized();
+        ThrowIfFailed(GhosttyVtNative.KittyGraphicsPlacementMetadata(graphics.Handle, Handle, &metadata),
+            "ghostty_royal_kitty_graphics_placement_metadata");
+        return metadata;
+    }
+
     /// <summary>Gets the x pixel offset inside the starting cell.</summary>
     public uint GetXOffset() => GetPlacementValue<uint>(GhosttyVtNative.GhosttyKittyGraphicsPlacementData.XOffset);
 

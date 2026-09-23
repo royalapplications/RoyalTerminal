@@ -6,4 +6,5 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("RoyalTerminal.Terminal.Transport.Ssh.SshNet")]
 [assembly: InternalsVisibleTo("RoyalTerminal.Terminal.Transport.Telnet")]
 [assembly: InternalsVisibleTo("RoyalTerminal.Terminal.Vt.Managed")]
+[assembly: InternalsVisibleTo("RoyalTerminal.Terminal.Vt.Ghostty")]
 [assembly: InternalsVisibleTo("RoyalTerminal.Tests")]

@@ -13,7 +13,7 @@ The renewed review found the following missing or weakly verified requirements:
 
 | Requirement | Evidence needed for completion | Current review state |
 | --- | --- | --- |
-| Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store and live APC execution/projection are implemented with focused tests, including direct/chunked load, resize, scrollback/anchor reprojection, alternate-screen restoration, timed animation advancement and delete selector families; virtual placeholder projection, protocol-response/streaming edge cases and full native differential coverage remain open |
+| Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store, live APC and virtual-placeholder projection are implemented with focused tests, including direct/chunked load, resize, scrollback/anchor reprojection, alternate-screen restoration, timed animation advancement and delete selector families; scroll-margin clipping, protocol-response/streaming edge cases and full native differential coverage remain open |
 | Native Kitty animation playback | Animation tick in the built library, scheduling without further PTY input, deterministic frame tests | Repository-owned extension and timed refresh implemented; deterministic frame tests pass, and all six native RID variants cross-build; non-macOS runtime execution remains CI validation |
 | Synchronized output | Completed prefix visible at enable; following output frozen; release/reset/one-second timeout without additional input | Both engines now implement prefix publication, frozen presentation and idle timeout; managed copy-on-write state transfer and focused native/managed tests pass |
 | Managed snapshot and continuation features | Restore both screens, history, parser/UTF-8 continuation, modes, styles, links and saved cursors with bounded validation | Managed ground-boundary processing, bounded continuation export and replay tests pass; Ghostty-compatible CRC32C framing and style/hyperlink codecs pass upstream golden, corruption, truncation and allocation tests; complete state codecs and incremental READY/history restore remain open |
@@ -112,8 +112,7 @@ nullable row/column/high-byte inheritance, invalid marks, palette and underline
 IDs, supplementary codepoints and the complete 297-entry diacritic table (exact
 source comparison passed). The shared geometry routine matches all five upstream
 dog-image golden cases, plus pillarbox, unspecified-grid and overflow tests.
-These helpers are **not yet wired into placement publication** and do not by
-themselves make virtual images visible in either integration.
+These helpers are now wired into both integrations, as detailed below.
 
 The scanner's first Debug allocation test exposed 72 bytes per valid diacritic
 lookup. Using a once-created immutable table avoids the runtime RVA-span lookup
@@ -125,14 +124,37 @@ conditional skips, zero failures (1,767 discovered tests). Native integration
 also passes 227 tests. Earlier partial console summaries were not treated as
 whole-suite verification.
 
-Next integration requirements are immutable virtual-placement recipes, correct
-internal/external placement-key preference, live viewport re-projection and
-relative children rooted at placeholder origins. The native C iterator exposes
-the numeric placement ID but not its internal/external tag, so choosing a
-default target from that numeric ID alone would not reproduce Ghostty's
-`placeholderTarget` ordering. Native exposure must preserve that information
-or perform target lookup upstream. End-to-end Skia pixel and lifecycle tests
-remain required before closing this graphics gap.
+### Virtual-placement integration (2026-09-23)
+
+Both processors now publish immutable virtual-placement recipes, preserve
+internal/external namespaces, prefer external then lowest-ID default targets,
+and re-project against visible placeholder runs. Explicit IDs can target ordinary
+placements too. Relative children use independent minimum visible root coordinates,
+including roots whose visible fragment is entirely letterbox padding. Relative
+chains retain upstream signed-32-bit offset saturation.
+
+The new native metadata extension reads exact iterator keys and invokes upstream
+`resolveChain`; it does not guess namespaces from numeric IDs. Shared geometry
+uses Ghostty's `renderer/image.zig` and `graphics_unicode.zig` semantics. Skia
+suppresses placeholder glyphs as in `font/shaper/run.zig` while rendering their
+images below text. Windows Terminal ignores Kitty APC; xterm's image renderer
+supports the viewport-relative coordinate decision but is not a Kitty oracle.
+
+Nineteen focused tests pass with the native library available: actual Skia pixels,
+default/explicit targeting, relative chains, animation, resize, scrollback,
+synchronized output, alternate screens, erase, deletion and reset. Unrelated text
+updates retain image buffers and cached projections. One thousand unchanged
+projection reads allocate zero bytes in both engines. Three native ABI tests cover
+layout, exact metadata, disposal and invalid arguments. The native extension builds
+for all six supported RIDs; only macOS arm64 runtime execution was performed here.
+
+This closes the tested virtual-placement integration gap, not scroll-margin
+clipping, exhaustive protocol coverage or the broader parity requirements above.
+
+Final verification of this integration: the full unit/headless suite passes
+**1,770 tests**, with 16 conditional skips and zero failures (1,786 total,
+confirmed by TRX). The full native integration suite passes **230 tests**,
+with zero skips or failures. `git diff --check` passes.
 
 ## Scope and pinned references
 

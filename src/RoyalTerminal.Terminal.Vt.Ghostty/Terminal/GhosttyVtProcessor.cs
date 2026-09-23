@@ -157,6 +157,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private Dictionary<int, CachedKittyImage> _kittyNextImageCache = [];
     private readonly List<TerminalKittyImageSource> _kittyImageSources = [];
     private readonly List<TerminalKittyImagePlacement> _kittyPlacements = [];
+    private readonly List<TerminalKittyPlaceholderTarget> _kittyPlaceholderTargets = [];
+    private readonly List<TerminalKittyRelativePlacement> _kittyVirtualRelatives = [];
     private ulong _kittyGraphicsGeneration;
     private bool _kittyGraphicsSynchronized;
     private GhosttySearch? _search;
@@ -2113,6 +2115,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _kittyNextImageCache.Clear();
         _kittyImageSources.Clear();
         _kittyPlacements.Clear();
+        _kittyPlaceholderTargets.Clear();
+        _kittyVirtualRelatives.Clear();
+        bool hasVirtual = false;
         bool imagesChanged = false;
 
         _kittyPlacementIterator.SetLayer(GhosttyVtNative.GhosttyKittyPlacementLayer.All);
@@ -2132,41 +2137,30 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 continue;
             }
 
+            GhosttyVtNative.RoyalKittyPlacementMetadata metadata = _kittyPlacementIterator.GetMetadata(graphics);
+            bool virtualPlacement = (metadata.Flags & GhosttyVtNative.RoyalKittyPlacementFlags.Virtual) != 0;
+            bool virtualRoot = (metadata.Flags & GhosttyVtNative.RoyalKittyPlacementFlags.VirtualRoot) != 0;
+            hasVirtual |= virtualPlacement || virtualRoot;
+            uint requestedColumns = _kittyPlacementIterator.GetColumns();
+            uint requestedRows = _kittyPlacementIterator.GetRows();
+            _kittyPlaceholderTargets.Add(new(
+                new(metadata.ImageId, metadata.PlacementId, (metadata.Flags & GhosttyVtNative.RoyalKittyPlacementFlags.InternalId) != 0),
+                virtualPlacement, requestedColumns, requestedRows));
+            if (virtualPlacement) continue;
+
             if (!_kittyPlacementIterator.TryGetRenderInfo(
                     image,
                     _terminal,
                     out GhosttyVtNative.GhosttyKittyGraphicsPlacementRenderInfo renderInfo) ||
-                !renderInfo.ViewportVisible)
+                !renderInfo.ViewportVisible && !virtualRoot)
             {
                 continue;
             }
 
-            if (!_kittyNextImageCache.ContainsKey(imageId))
-            {
-                bool cached = _kittyImageCache.TryGetValue(imageId, out CachedKittyImage cachedImage);
-                ulong imageGeneration = contentUnchanged && cached
-                    ? cachedImage.Generation
-                    : image.GetGeneration();
-                if (!cached || imageGeneration != cachedImage.Generation)
-                {
-                    if (!TryCreateKittyImageSource(imageId, image, out TerminalKittyImageSource? source) ||
-                        source is null)
-                    {
-                        continue;
-                    }
-
-                    cachedImage = new CachedKittyImage(imageGeneration, source);
-                    imagesChanged = true;
-                }
-
-                _kittyNextImageCache.Add(imageId, cachedImage);
-                _kittyImageSources.Add(cachedImage.Source);
-            }
+            if (!CacheKittyImage(imageId, image, contentUnchanged, ref imagesChanged)) continue;
 
             int zIndex = _kittyPlacementIterator.GetZIndex();
             TerminalKittyImageLayer layer = ClassifyKittyLayer(zIndex);
-            uint requestedColumns = _kittyPlacementIterator.GetColumns();
-            uint requestedRows = _kittyPlacementIterator.GetRows();
             TerminalKittyImagePlacementScaleMode scaleMode = GetKittyScaleMode(requestedColumns, requestedRows);
             int cellWidthPx = scaleMode is TerminalKittyImagePlacementScaleMode.Columns or TerminalKittyImagePlacementScaleMode.ColumnsAndRows
                 ? Math.Max(0, _nativeCellWidthPx)
@@ -2175,7 +2169,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 ? Math.Max(0, _nativeCellHeightPx)
                 : 0;
 
-            _kittyPlacements.Add(new TerminalKittyImagePlacement(
+            TerminalKittyImagePlacement geometry = new(
                 imageId,
                 layer,
                 renderInfo.ViewportColumn,
@@ -2190,7 +2184,24 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 checked((int)renderInfo.SourceHeight),
                 cellWidthPx,
                 cellHeightPx,
-                scaleMode, zIndex));
+                scaleMode, zIndex);
+            if (virtualRoot)
+                _kittyVirtualRelatives.Add(new(new(metadata.RootImageId, metadata.RootPlacementId, metadata.RootInternal != 0),
+                    metadata.HorizontalOffset, metadata.VerticalOffset, renderInfo.GridColumns, renderInfo.GridRows, geometry));
+            else
+                _kittyPlacements.Add(geometry);
+        }
+
+        // Explicit placeholder IDs may target ordinary placements too. Retain
+        // those image payloads while any virtual placement enables the scan.
+        if (hasVirtual)
+        {
+            foreach (TerminalKittyPlaceholderTarget target in _kittyPlaceholderTargets)
+            {
+                int id = unchecked((int)target.Key.ImageId);
+                if (!_kittyNextImageCache.ContainsKey(id) && graphics.TryGetImage(target.Key.ImageId, out var image) && image.IsValid)
+                    CacheKittyImage(id, image, contentUnchanged, ref imagesChanged);
+            }
         }
 
         imagesChanged |= _kittyImageCache.Count != _kittyNextImageCache.Count;
@@ -2204,17 +2215,38 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             return order != 0 ? order : unchecked((uint)left.ImageId).CompareTo(unchecked((uint)right.ImageId));
         });
 
-        if (_kittyPlacements.Count == 0)
+        if (_kittyPlacements.Count == 0 && !hasVirtual)
         {
             _screen.ClearKittyGraphics();
             return;
         }
 
-        if (imagesChanged || !KittyPlacementsEqual(
-                _screen.GetKittyPlacements(), CollectionsMarshal.AsSpan(_kittyPlacements)))
+        uint placeholderCellWidth = (uint)Math.Max(0, _nativeCellWidthPx);
+        uint placeholderCellHeight = (uint)Math.Max(0, _nativeCellHeightPx);
+        if (imagesChanged || !_screen.MatchesKittyPlaceholderScene(_kittyPlaceholderTargets, _kittyVirtualRelatives,
+                placeholderCellWidth, placeholderCellHeight) || !KittyPlacementsEqual(
+                _screen.GetFixedKittyPlacements(), CollectionsMarshal.AsSpan(_kittyPlacements)))
         {
             _screen.ReplaceKittyGraphics(_kittyImageSources, _kittyPlacements);
+            _screen.SetKittyPlaceholderScene(_kittyPlaceholderTargets, _kittyVirtualRelatives,
+                placeholderCellWidth, placeholderCellHeight);
         }
+    }
+
+    private bool CacheKittyImage(int imageId, GhosttyKittyGraphicsImage image, bool contentUnchanged, ref bool imagesChanged)
+    {
+        if (_kittyNextImageCache.ContainsKey(imageId)) return true;
+        bool cached = _kittyImageCache.TryGetValue(imageId, out CachedKittyImage cachedImage);
+        ulong generation = contentUnchanged && cached ? cachedImage.Generation : image.GetGeneration();
+        if (!cached || generation != cachedImage.Generation)
+        {
+            if (!TryCreateKittyImageSource(imageId, image, out TerminalKittyImageSource? source) || source is null) return false;
+            cachedImage = new(generation, source);
+            imagesChanged = true;
+        }
+        _kittyNextImageCache.Add(imageId, cachedImage);
+        _kittyImageSources.Add(cachedImage.Source);
+        return true;
     }
 
     private readonly record struct CachedKittyImage(ulong Generation, TerminalKittyImageSource Source);
@@ -2232,14 +2264,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         {
             TerminalKittyImagePlacement left = previous[i];
             TerminalKittyImagePlacement right = current[i];
-            if (left.ImageId != right.ImageId || left.Layer != right.Layer || left.ZIndex != right.ZIndex ||
-                left.ViewportColumn != right.ViewportColumn || left.ViewportRow != right.ViewportRow ||
-                left.XOffsetPx != right.XOffsetPx || left.YOffsetPx != right.YOffsetPx ||
-                left.WidthPx != right.WidthPx || left.HeightPx != right.HeightPx ||
-                left.SourceX != right.SourceX || left.SourceY != right.SourceY ||
-                left.SourceWidth != right.SourceWidth || left.SourceHeight != right.SourceHeight ||
-                left.CellWidthPx != right.CellWidthPx || left.CellHeightPx != right.CellHeightPx ||
-                left.ScaleMode != right.ScaleMode)
+            if (!TerminalKittyImagePlacement.GeometryEquals(left, right))
             {
                 return false;
             }

@@ -29,7 +29,7 @@ Both were reproduced through the native C API before correction and have
 focused integration tests. No public upstream issue is claimed. Reassess and
 remove an overlay when its upstream fix is incorporated.
 
-The one additional C export is declared in
+The two additional C exports are declared in
 `include/royalterminal_ghostty_vt.h`:
 
 - `ghostty_royal_kitty_graphics_animation_tick` calls Ghostty's own
@@ -39,6 +39,13 @@ The one additional C export is declared in
   delay until the next frame, or `GHOSTTY_NO_VALUE` when no timer is needed.
   Calls must be serialized with access to the owning terminal. Reacquire image
   handles after ticking; image/storage generations identify updated pixels.
+
+- `ghostty_royal_kitty_graphics_placement_metadata` reads the current placement
+  iterator entry, retaining internal/external placement namespaces and virtual
+  root identity. Relative offsets use upstream `resolveChain`, including its
+  saturation behavior. This is read-only and allocation-free. The iterator must
+  belong to the supplied storage and have a current entry; serialize access with
+  terminal mutations. Both exports are required by the native VT integration.
 
 `scripts/build-native.sh` and `scripts/build-native.ps1` build and stage this
 package. CI and release jobs also use it. Do not stage a plain upstream build:

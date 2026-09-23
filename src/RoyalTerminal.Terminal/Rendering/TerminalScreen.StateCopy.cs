@@ -26,6 +26,8 @@ public sealed partial class TerminalScreen
         CopyRegistry(_kittyImagesById, copy._kittyImagesById);
         copy._kittyPlacements = _kittyPlacements;
         copy._kittyAnchoredPlacements = _kittyAnchoredPlacements;
+        copy._kittyPlaceholderScene = _kittyPlaceholderScene;
+        copy._kittyPlaceholderRuns = _kittyPlaceholderRuns;
         copy._kittyProjectionState = _kittyProjectionState;
         copy._trackedAnchors = new(_trackedAnchors);
         return copy;
@@ -65,6 +67,8 @@ public sealed partial class TerminalScreen
         CopyRegistry(source._kittyImagesById, _kittyImagesById);
         _kittyPlacements = source._kittyPlacements;
         _kittyAnchoredPlacements = source._kittyAnchoredPlacements;
+        _kittyPlaceholderScene = source._kittyPlaceholderScene;
+        _kittyPlaceholderRuns = source._kittyPlaceholderRuns;
         _kittyProjectionState = source._kittyProjectionState;
         _trackedAnchors = source._trackedAnchors;
         InvalidateAll();

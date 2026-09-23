@@ -179,4 +179,13 @@ public sealed class TerminalKittyImagePlacement
         order = left.ZIndex.CompareTo(right.ZIndex);
         return order != 0 ? order : unchecked((uint)left.ImageId).CompareTo(unchecked((uint)right.ImageId));
     }
+
+    internal static bool GeometryEquals(TerminalKittyImagePlacement left, TerminalKittyImagePlacement right)
+        => left.ImageId == right.ImageId && left.Layer == right.Layer && left.ZIndex == right.ZIndex &&
+           left.ViewportColumn == right.ViewportColumn && left.ViewportRow == right.ViewportRow &&
+           left.XOffsetPx == right.XOffsetPx && left.YOffsetPx == right.YOffsetPx &&
+           left.WidthPx == right.WidthPx && left.HeightPx == right.HeightPx &&
+           left.SourceX == right.SourceX && left.SourceY == right.SourceY &&
+           left.SourceWidth == right.SourceWidth && left.SourceHeight == right.SourceHeight &&
+           left.CellWidthPx == right.CellWidthPx && left.CellHeightPx == right.CellHeightPx && left.ScaleMode == right.ScaleMode;
 }

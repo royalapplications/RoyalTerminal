@@ -34,33 +34,39 @@ public sealed partial class TerminalScreen
 
     private void RefreshKittyProjection()
     {
-        if (_kittyAnchoredPlacements is not { Length: > 0 } anchored) return;
+        if (_kittyAnchoredPlacements is not { Length: > 0 } && _kittyPlaceholderScene is null) return;
         KittyProjectionState state = new(_anchorRevision, ViewportTopAbsoluteRow,
             Columns, ViewportRows, _alternateBufferActive);
-        if (_kittyProjectionState == state) return;
+        bool runsChanged = _kittyPlaceholderScene is not null && RefreshPlaceholderRuns();
+        if (_kittyProjectionState == state && !runsChanged) return;
 
-        List<TerminalKittyImagePlacement> visible = new(anchored.Length);
-        foreach (TerminalKittyAnchoredPlacement placement in anchored)
+        List<TerminalKittyImagePlacement> visible = new(_kittyAnchoredPlacements?.Length ?? 0);
+        if (_kittyPlaceholderScene is { } scene) visible.AddRange(scene.Fixed);
+        foreach (TerminalKittyAnchoredPlacement placement in _kittyAnchoredPlacements ?? [])
         {
             if (!TryResolveAnchor(placement.Anchor, out TerminalGridPosition origin)) continue;
             long column = origin.Column + placement.ColumnOffset;
             long row = origin.Row + placement.RowOffset - state.ViewportTop;
-            if (row + placement.Rows <= 0 || row >= ViewportRows ||
-                column + placement.Columns <= 0 || column >= Columns) continue;
-
-            TerminalKittyImagePlacement geometry = placement.Geometry;
-            visible.Add(new(geometry.ImageId, geometry.Layer,
-                (int)Math.Clamp(column, int.MinValue, int.MaxValue),
-                (int)Math.Clamp(row, int.MinValue, int.MaxValue),
-                geometry.XOffsetPx, geometry.YOffsetPx, geometry.WidthPx, geometry.HeightPx,
-                geometry.SourceX, geometry.SourceY, geometry.SourceWidth, geometry.SourceHeight,
-                geometry.CellWidthPx, geometry.CellHeightPx, geometry.ScaleMode, geometry.ZIndex));
+            AppendKittyProjection(visible, column, row, placement.Columns, placement.Rows, placement.Geometry);
         }
+        if (_kittyPlaceholderScene is { } placeholders) AppendPlaceholderProjection(visible, placeholders);
+        visible.Sort(TerminalKittyImagePlacement.ComparePaintOrder);
 
         // Replace the immutable projection instead of changing an array retained
         // by a previous frame or a copy-on-write screen.
         _kittyPlacements = visible.ToArray();
         _kittyProjectionState = state;
+    }
+
+    private void AppendKittyProjection(List<TerminalKittyImagePlacement> visible, long column, long row,
+        uint columns, uint rows, TerminalKittyImagePlacement geometry)
+    {
+        if (row + rows <= 0 || row >= ViewportRows || column + columns <= 0 || column >= Columns) return;
+        visible.Add(new(geometry.ImageId, geometry.Layer,
+            (int)Math.Clamp(column, int.MinValue, int.MaxValue), (int)Math.Clamp(row, int.MinValue, int.MaxValue),
+            geometry.XOffsetPx, geometry.YOffsetPx, geometry.WidthPx, geometry.HeightPx,
+            geometry.SourceX, geometry.SourceY, geometry.SourceWidth, geometry.SourceHeight,
+            geometry.CellWidthPx, geometry.CellHeightPx, geometry.ScaleMode, geometry.ZIndex));
     }
 
     private readonly record struct KittyProjectionState(

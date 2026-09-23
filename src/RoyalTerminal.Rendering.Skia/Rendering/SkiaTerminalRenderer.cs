@@ -4892,6 +4892,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private static bool IsRenderableGlyphCell(ref readonly TerminalCell cell)
     {
         return cell.Width != 0 &&
+               cell.Codepoint != 0x10EEEE && // Kitty placeholders are blank glyphs, including their diacritics.
                cell.HasContent &&
                (HasCellGrapheme(in cell) || Rune.IsValid(cell.Codepoint)) &&
                !IsCellHidden(in cell);

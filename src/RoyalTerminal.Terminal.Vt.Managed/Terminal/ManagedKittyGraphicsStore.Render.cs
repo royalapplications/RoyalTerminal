@@ -13,13 +13,27 @@ internal sealed partial class ManagedKittyGraphicsStore
         ReapPrunedPlacements(screen);
         List<TerminalKittyImageSource> images = [];
         List<TerminalKittyAnchoredPlacement> placements = [];
+        List<TerminalKittyPlaceholderTarget> targets = [];
+        List<TerminalKittyRelativePlacement> relatives = [];
         HashSet<uint> included = [];
+        bool hasVirtual = false;
+        foreach (Placement value in _placements.Values) hasVirtual |= value.Virtual;
+        Dictionary<Placement, PlacementKey>? rootKeys = hasVirtual ? new(_placements.Count) : null;
+        if (hasVirtual)
+        {
+            foreach ((PlacementKey key, Placement placement) in _placements)
+            {
+                rootKeys![placement] = key;
+                targets.Add(new(ToProjectionKey(key), placement.Virtual, placement.Options.Columns, placement.Options.Rows));
+                if (_images.TryGetValue(key.ImageId, out Image? image) && included.Add(image.Id)) images.Add(image.Source);
+            }
+        }
         foreach ((PlacementKey key, Placement placement) in _placements)
         {
-            if (!_images.TryGetValue(key.ImageId, out Image? image) ||
+            if (placement.Virtual || !_images.TryGetValue(key.ImageId, out Image? image) ||
                 !TryResolveRoot(screen, placement, out Placement? root, out long dx, out long dy) ||
-                root?.Anchor is not TerminalScreenAnchor anchor ||
-                !screen.TryResolveAnchor(anchor, out _))
+                root is null || !root.Virtual &&
+                (root.Anchor is null || !screen.TryResolveAnchor(root.Anchor, out _)))
             {
                 continue;
             }
@@ -52,10 +66,16 @@ internal sealed partial class ManagedKittyGraphicsStore
                 scaleMode is TerminalKittyImagePlacementScaleMode.Columns or TerminalKittyImagePlacementScaleMode.ColumnsAndRows ? Saturate(cellWidth) : 0,
                 scaleMode is TerminalKittyImagePlacementScaleMode.Rows or TerminalKittyImagePlacementScaleMode.ColumnsAndRows ? Saturate(cellHeight) : 0,
                 scaleMode, z);
-            placements.Add(new(anchor, dx, dy, geometry.Columns, geometry.Rows, renderGeometry));
+            if (root.Virtual)
+                relatives.Add(new(ToProjectionKey(rootKeys![root]), dx, dy, geometry.Columns, geometry.Rows, renderGeometry));
+            else
+                placements.Add(new(root.Anchor!, dx, dy, geometry.Columns, geometry.Rows, renderGeometry));
         }
         screen.ReplaceAnchoredKittyGraphics(images, placements);
+        screen.SetKittyPlaceholderScene(targets, relatives, cellWidth, cellHeight);
     }
+
+    private static TerminalKittyPlacementKey ToProjectionKey(PlacementKey key) => new(key.ImageId, key.Id, key.Internal);
 
     private static int Saturate(uint value) => (int)Math.Min(value, int.MaxValue);
 }
