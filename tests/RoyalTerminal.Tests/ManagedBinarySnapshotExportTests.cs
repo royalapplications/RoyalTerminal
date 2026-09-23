@@ -12,6 +12,36 @@ namespace RoyalTerminal.Tests;
 
 public sealed class ManagedBinarySnapshotExportTests(ITestOutputHelper output)
 {
+    [Fact]
+    public void GoldenSnapshotPreservesDormantPensLinksAndAllNormalizedRuntimeFields()
+    {
+        using ManagedTerminalSnapshot initial = ManagedTerminalSnapshot.Restore(GhosttySnapshotFramingTests.Fixture("complete-v1.hex"));
+        byte[] encoded = initial.Processor.GetBinarySnapshot();
+        using ManagedTerminalSnapshot roundtrip = ManagedTerminalSnapshot.Restore(encoded);
+        Assert.Equal(encoded, roundtrip.Processor.GetBinarySnapshot());
+        if (!GhosttyVtProcessor.IsAvailable()) return;
+        using GhosttyTerminal native = GhosttySnapshot.Decode(encoded, retainContinuation: true);
+        using ManagedTerminalSnapshot bounced = ManagedTerminalSnapshot.Restore(GhosttySnapshot.Encode(native));
+        Assert.Equal(encoded, bounced.Processor.GetBinarySnapshot());
+    }
+
+    [Fact]
+    public void ExportedBothScreenStateMatchesNativeAfterEachSwitchAndReset()
+    {
+        if (!GhosttyVtProcessor.IsAvailable()) return;
+        using BasicVtProcessor processor = new(new TerminalScreen(16, 4));
+        string[] operations = ["\u001b[31;4:3m\u001b[1\"q\u001b]8;id=one;raw\aONE\u001b7", "\u001b[?47h",
+            "\u001b[32;4:5m\u001b[0\"q\u001b]8;id=two;other\aALT\u001b7", "\u001b[?47l", "\u001b[?1049h", "\u001b[?1049l", "\u001bc"];
+        foreach (string operation in operations)
+        {
+            processor.Process(Encoding.UTF8.GetBytes(operation));
+            byte[] encoded = processor.GetBinarySnapshot();
+            using GhosttyTerminal native = GhosttySnapshot.Decode(encoded, retainContinuation: true);
+            using ManagedTerminalSnapshot bounced = ManagedTerminalSnapshot.Restore(GhosttySnapshot.Encode(native));
+            Assert.Equal(encoded, bounced.Processor.GetBinarySnapshot());
+        }
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("\u001b[31;44;1;4:3;58:5:7mhello界é")]
