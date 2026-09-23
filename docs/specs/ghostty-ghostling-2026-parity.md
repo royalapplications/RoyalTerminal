@@ -2,6 +2,34 @@
 
 ## Reopened completion audit
 
+### Shift-mouse capture and physical button state (2026-09-23)
+
+Both VT engines implement XTSHIFTESCAPE, expose its nullable application override,
+and preserve its global/reset/snapshot semantics. The control resolves Ghostty's
+four-way host policy before encoding: Disabled/Enabled permit application
+overrides, while Never/Always force selection/capture. Native input endpoints
+retain their own host policy. Physical button transitions are observed even when
+Shift selection or reporting-off suppresses the report, avoiding stale pressed
+state without encoding ignored input or advancing motion history.
+
+Reference decisions and detailed coverage are below in the Shift-mouse section.
+Post-push full Release through `beca5f2`: **3,498 unit/headless + 231 integration
+tests passed, 16 conditional skips, zero failures** (`shift-capture-full2.trx`).
+All **44 new cases** pass with native available on macOS arm64, including actual
+Shift-drag selection/reporting through both backends. Native Zig 0.16 VT/renderer
+builds and exported-symbol checks pass. Warm native state/set loops allocate zero
+bytes; this is not an end-to-end performance claim.
+
+The first full run had one unrelated font-fallback allocation assertion failure
+(6,696 bytes); its unchanged test passed in the focused rerun and final full run.
+The initial native headless fixture omitted provider registration; that setup was
+fixed, not skipped. A concurrent solution build hit an Avalonia intermediate PDB
+lock; the sequential complete solution build passes with zero warnings/errors.
+Cross-platform CI remains a separate gate.
+Broader capture-loss lifecycle, outside-viewport UI normalization, remaining
+keyboard flags, complete snapshot orchestration and IO/rendering/platform gates
+remain open.
+
 ### Stateful mouse encoding and geometry (2026-09-23)
 
 Native pointer configuration is now cached: unchanged effective modes/geometry
@@ -2042,9 +2070,7 @@ The new effective-state field avoids repeated hash-set lookups when reading mous
 state. Loaded binaries were hash-verified against the saved preceding/current
 assemblies (`9fa5d453…` / `a981cc92…`).
 
-## Validation requirements
-
-### Shift-mouse capture (September 23 follow-up)
+## Shift-mouse capture reference details (September 23 follow-up)
 
 Ghostty `Surface.mouseShiftCapture` and `stream.zig` XTSHIFTESCAPE are the
 compatibility reference: CSI > s / > 0 s disables capture, > 1 s enables it,
@@ -2065,9 +2091,11 @@ The initial 67 focused cases pass against the rebuilt native library. The host
 now observes physical button transitions before reporting/Shift suppression,
 following Ghostty's `mouseButtonCallback`; it does not encode suppressed input or
 advance motion history. Regression coverage checks suppressed releases and presses
-while reporting is off. Full-suite validation is pending after the follow-up push.
+while reporting is off. Final full-suite results are recorded at the top of this audit.
 This does not claim full mouse parity: broader capture-loss lifecycle, hyperlink
 policy and outside-viewport host normalization still require separate review.
+
+## Validation requirements
 
 - Build the release native library with Zig 0.16 using `scripts/build-native.sh --release`.
 - Build the complete .NET solution with no warnings.
