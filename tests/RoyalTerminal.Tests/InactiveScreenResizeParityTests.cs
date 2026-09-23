@@ -20,6 +20,7 @@ public sealed class InactiveScreenResizeParityTests(ITestOutputHelper output)
     [InlineData("\u001b]133;A;redraw=1\aprompt\u001b]133;B\ainput", 5, 4)]
     [InlineData("\u001b]133;A;redraw=last\aprompt\u001b]133;B\ainput", 12, 4)]
     [InlineData("abcdefghijklmno\u001b[?7l", 4, 4)]
+    [InlineData("abcdefghijklmno\u001b[?2026h", 5, 4)]
     public void BothBuffersAndSavedCursorsMatchAfterResizingWhileAlternateIsActive(string primary, int columns, int rows)
     {
         if (!Available()) return;
@@ -149,6 +150,29 @@ public sealed class InactiveScreenResizeParityTests(ITestOutputHelper output)
         native.Process("\tX"u8); managed.Process("\tX"u8);
         Compare(expected, native, actual, managed);
         Assert.Equal('X', actual.GetViewportRow(0)[columns == 8 ? 3 : 8].Codepoint);
+    }
+
+    [Fact]
+    public void SwitchingResizeContextDoesNotAllocateOrCopyRows()
+    {
+        TerminalScreen screen = new(8, 4);
+        TerminalRow primary = screen.GetViewportRow(0);
+        screen.SwitchToAlternateBuffer(clear: false);
+        TerminalRow alternate = screen.GetViewportRow(0);
+        for (int i = 0; i < 100; i++)
+        {
+            using TerminalScreen.InactiveResizeScope scope = screen.EnterInactiveResize(8, 4);
+        }
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++)
+        {
+            using TerminalScreen.InactiveResizeScope scope = screen.EnterInactiveResize(8, 4);
+        }
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Same(alternate, screen.GetViewportRow(0));
+        using (TerminalScreen.InactiveResizeScope scope = screen.EnterInactiveResize(8, 4))
+            Assert.Same(primary, screen.GetViewportRow(0));
+        Assert.Same(alternate, screen.GetViewportRow(0));
     }
 
     private bool Available()
