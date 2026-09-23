@@ -44,12 +44,13 @@ public readonly record struct TerminalPointerEncodingContext(
     int PaddingLeftPx = 0);
 
 /// <summary>
-/// Optional source for native key-sequence encoding.
+/// Optional source for backend-owned key-sequence encoding.
 /// </summary>
 public interface ITerminalKeySequenceEncoderSource
 {
     /// <summary>
     /// Tries to encode the supplied key event into terminal input bytes.
+    /// False allows the host's legacy fallback encoder to handle the key.
     /// </summary>
     bool TryEncodeKey(in TerminalKeyEncodingRequest request, out byte[] sequence);
 }

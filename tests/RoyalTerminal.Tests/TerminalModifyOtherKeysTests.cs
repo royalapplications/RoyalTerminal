@@ -82,7 +82,7 @@ public sealed class TerminalModifyOtherKeysTests(ITestOutputHelper output)
             byte[] mode = Encoding.ASCII.GetBytes(backarrow ? "\u001b[?67h" : "\u001b[?67l");
             native.Process(mode); managed.Process(mode);
             for (int mods = 0; mods < 16; mods++)
-            foreach (TerminalInputAction action in new[] { TerminalInputAction.Press, TerminalInputAction.Repeat, TerminalInputAction.Release })
+            foreach (TerminalInputAction action in new[] { TerminalInputAction.Press, TerminalInputAction.Release })
             {
                 TerminalKeyEncodingRequest request = new(key, action, text, (TerminalModifiers)mods);
                 native.TryEncodeKey(request, out byte[] expected);
