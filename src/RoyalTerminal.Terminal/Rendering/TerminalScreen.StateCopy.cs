@@ -49,10 +49,13 @@ public sealed partial class TerminalScreen
 
     /// <summary>
     /// Publishes an isolated transaction's complete state without copying its cell arrays again.
-    /// The source must be discarded by the caller after transfer; the destination keeps its lock.
+    /// The caller must hold the destination lock and discard the source after transfer.
+    /// All allocations belong to staging; publication transfers registry ownership too,
+    /// so an allocation failure cannot leave new rows with incomplete hyperlink tables.
     /// </summary>
     internal void AdoptStateFrom(TerminalScreen source)
     {
+        ArgumentNullException.ThrowIfNull(source);
         if (ReferenceEquals(this, source)) return;
         _glyphGlossary = source._glyphGlossary;
         _rows = source._rows;
@@ -65,10 +68,10 @@ public sealed partial class TerminalScreen
         _primaryRasterPlacements = source._primaryRasterPlacements;
         _alternateRasterPlacements = source._alternateRasterPlacements;
         source.CopyScalarStateTo(this);
-        CopyRegistry(source._hyperlinksById, _hyperlinksById);
-        CopyRegistry(source._hyperlinkIdsByUrl, _hyperlinkIdsByUrl);
-        _hyperlinkIdentities.CopyFrom(source._hyperlinkIdentities);
-        CopyRegistry(source._kittyImagesById, _kittyImagesById);
+        _hyperlinksById = source._hyperlinksById;
+        _hyperlinkIdsByUrl = source._hyperlinkIdsByUrl;
+        _hyperlinkIdentities = source._hyperlinkIdentities;
+        _kittyImagesById = source._kittyImagesById;
         _kittyPlacements = source._kittyPlacements;
         _kittyAnchoredPlacements = source._kittyAnchoredPlacements;
         _kittyPlaceholderScene = source._kittyPlaceholderScene;

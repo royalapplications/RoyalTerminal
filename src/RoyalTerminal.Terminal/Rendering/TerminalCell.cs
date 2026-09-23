@@ -722,10 +722,10 @@ public sealed partial class TerminalScreen
     private TerminalRowBuffer _rows;
     private TerminalRowBuffer? _primaryRows;
     private TerminalRowBuffer? _alternateRows;
-    private readonly Dictionary<int, string> _hyperlinksById = [];
-    private readonly Dictionary<string, int> _hyperlinkIdsByUrl = new(StringComparer.Ordinal);
-    private readonly TerminalHyperlinkRegistry _hyperlinkIdentities = new();
-    private readonly Dictionary<int, TerminalKittyImageSource> _kittyImagesById = [];
+    private Dictionary<int, string> _hyperlinksById = [];
+    private Dictionary<string, int> _hyperlinkIdsByUrl = new(StringComparer.Ordinal);
+    private TerminalHyperlinkRegistry _hyperlinkIdentities = new();
+    private Dictionary<int, TerminalKittyImageSource> _kittyImagesById = [];
     private Dictionary<int, TerminalRasterImageSource> _rasterImagesById = [];
     private List<TerminalRasterImagePlacement> _rasterPlacements = [];
     private Dictionary<int, TerminalRasterImageSource>? _primaryRasterImagesById;
