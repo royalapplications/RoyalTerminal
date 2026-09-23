@@ -16,7 +16,7 @@ The renewed review found the following missing or weakly verified requirements:
 | Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store, live APC and virtual-placeholder projection are implemented with focused tests; vertical clipping, top-origin history, stationary IL/DL and horizontal containment now match native cases; protocol-response/streaming edges and full differential coverage remain open |
 | Native Kitty animation playback | Animation tick in the built library, scheduling without further PTY input, deterministic frame tests | Repository-owned extension and timed refresh implemented; deterministic frame tests pass, and all six native RID variants cross-build; non-macOS runtime execution remains CI validation |
 | Synchronized output | Completed prefix visible at enable; following output frozen; release/reset/one-second timeout without additional input | Both engines now implement prefix publication, frozen presentation and idle timeout; managed copy-on-write state transfer and focused native/managed tests pass |
-| Managed snapshot and continuation features | Restore both screens, history, parser/UTF-8 continuation, modes, styles, links and saved cursors with bounded validation | Managed ground-boundary processing, bounded continuation export and replay tests pass; Ghostty-compatible CRC32C framing and style/hyperlink codecs pass upstream golden, corruption, truncation and allocation tests; complete state codecs and incremental READY/history restore remain open |
+| Managed snapshot and continuation features | Restore both screens, history, parser/UTF-8 continuation, modes, styles, links and saved cursors with bounded validation | Managed ground-boundary processing, bounded continuation export and replay tests pass; CRC32C framing, style/hyperlink and bounded PAGE/grid codecs pass upstream golden and live-native round trips; terminal/screen state codecs, managed state installation and incremental READY/history restore remain open |
 | Managed resize/reflow optimization | Baseline/after measurements plus wide/grapheme/style/link/cursor/anchor regressions | Bulk reflow copies and redundant initialization removal implemented and measured below; tracked cell identity/reflow/COW/pruning regressions pass; end-to-end Kitty anchor comparisons remain part of graphics integration |
 | Managed row allocation/recycling | Stable content/metadata after eviction and measured allocations | Evicted row storage is reused with a focused zero-allocation steady-state test |
 | Parser/clipboard throughput and bounds | Split-input protocol tests, malformed UTF-8/base64 tests, limits, before/after measurements | Review added span payload scanning, bulk base64 decode, correct 64 MiB configurable clipboard bound, 65-codepoint grapheme bound and protocol fixes; measurement review pending |
@@ -519,6 +519,51 @@ placeholder text is preserved, but the graphics are not. Native binary snapshot
 wrappers therefore must not be described as complete graphics-preserving backups.
 Managed compatible restoration will follow those documented format limits rather
 than silently claiming graphics persistence that the native wire format lacks.
+
+The next restore layer now decodes and streams complete PAGE payloads in managed
+code. `GhosttySnapshotGrid` implements all four row transport widths, trailing
+default-cell elision, row flags, background content kinds, protected/semantic cell
+bits, style/hyperlink IDs, and separate UTF-32 grapheme suffixes. It follows
+upstream's normalization of invalid scalars, reserved semantic values, incomplete
+wide pairs, misplaced spacer heads, missing suffixes and undeliverable/duplicate
+grapheme entries. Its encoder chooses the smallest admissible row width and emits
+suffixes in row-major order using one stack buffer, with no temporary per-row arrays.
+
+`GhosttySnapshotPage` assembles style and hyperlink tables, preserves arbitrary
+link bytes, resolves missing/invalid IDs to defaults, and enforces first-entry-wins
+semantics even when the first duplicate was invalid. It owns accepted payload
+data, rejects trailing bytes and checks configured cell/string/grapheme limits.
+Native capacity hints are retained as wire metadata but never drive allocations.
+No partial page escapes a failed decode. PAGE payload integrity uses the existing
+bounded, CRC-validating record reader.
+
+Evidence includes exact upstream `grid-v1`, `page-v1`, `page-empty-record-v1` and
+`complete-v1` golden round trips; every-prefix truncation tests; malformed and
+duplicate table entries; resource bounds; and 1,000 deterministic random-word
+canonicalization cases. Re-encoding warmed grids/pages to `Stream.Null` allocates
+zero bytes. Live Ghostty snapshots containing 80 styled history lines, CJK,
+combining suffixes, hyperlinks and either active screen are rewritten through the
+managed codecs, decoded by native Ghostty, then compared via styled formatters
+and cursor state. The containing terminal/screen/history records are passed
+through in this test: this is evidence for PAGE interoperability, **not** proof
+that BasicVtProcessor can yet restore the full binary snapshot.
+
+Reference choice: Ghostty's snapshot `grid.zig` and `page.zig` define the format.
+Windows Terminal `TextBuffer::SerializeTo` and xterm.js's serialize addon emit VT
+text; neither is an interchangeable binary-state format. Remaining implementation
+is explicit: terminal metadata/palette/modes, screen cursors/charsets/saved state,
+conversion/installation into both managed screens, and incremental READY/history
+coordination with parser continuation. The public managed binary restore path
+remains unavailable until those layers are complete and validated.
+
+Validation for this codec batch: **1,930 passed, 16 conditional skips, zero
+failures (1,946 total)** in `snapshot-grid-page-full.trx`, with native available
+on macOS arm64. CI run
+[`35834169770`](https://github.com/royalapplications/RoyalTerminal/actions/runs/35834169770)
+for the preceding `a4375d0` commit separately passed the macOS and Ubuntu build,
+unit-batch and startup-smoke jobs and all six native build variants. That is
+evidence for the preceding launcher/margin work, not the newly added codecs;
+Windows and later workflow stages were not yet confirmed complete at inspection.
 
 Ghostty's background search thread is part of the full Ghostty application, not the
 `libghostty-vt` C search iterator. RoyalTerminal keeps search orchestration in its
