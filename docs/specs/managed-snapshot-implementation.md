@@ -11,6 +11,16 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
 
 ## Implemented and tested
 
+- Validated history PAGEs can now be prepended atomically to either buffer without
+  copying existing cells or row metadata. The ring buffer prepends in physical
+  oldest-to-newest order; viewports retain row identity, and screen-owned tracked
+  anchors/raster placements shift by the inserted prefix. Linked pages stage their
+  registry changes separately; a late checked failure leaves rows, registries and
+  link numbering unchanged. Unlinked pages avoid that registry copy. This is the
+  storage commit primitive, not the complete incremental decoder: its caller must
+  still decide generation/width/quotas, latch dropped sequences, and update processor
+  semantic-prompt state. Stream validation already belongs to the ordered reader.
+
 - READY cell storage now stages both buffers directly without input replay, normal
   buffer switching, row resizing or incidental-history trimming. Physical widths,
   screen routing, raw links and current snapshot palette/dynamic colors survive;
@@ -221,6 +231,13 @@ runtime prerequisite does not itself expose managed snapshot restore.
    are implemented; full processor installation remains. History ingestion must remain safe if live input, reset
    or resize occurs after READY, matching upstream generation/width/limit checks
    and dropping the remaining older pages after the first gap.
+   Follow the actual upstream predicate, not a blanket resize/reset invalidation:
+   `snapshot.zig.nextPage` checks the **current** column count and ScreenSet
+   generation. Height-only resize is not inherently disqualifying; width restored
+   before the next page is consumed can remain compatible. RIS removes alternate
+   storage but resets primary contents in place without changing its generation.
+   `PageList.Limits` also applies page-granular minimum byte/line limits, even to a
+   configured zero limit; do not substitute the managed host row limit directly.
 2. Managed processor adapter and public ownership/error contracts. PAGE/grid,
    TERMINAL, SCREEN and HISTORY payload decoding/re-encoding are implemented;
    constructing semantic records from live managed state and installing them in

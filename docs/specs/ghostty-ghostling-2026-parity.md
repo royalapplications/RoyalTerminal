@@ -1512,6 +1512,52 @@ on macOS arm64. Build has no warnings/errors. All seven new staging/ownership
 cases pass. Fresh six-RID CI run `35869030082` was still pending at inspection;
 this is not cross-platform runtime sign-off or complete managed snapshot restore.
 
+### Atomic incremental-history storage
+
+`TerminalScreen.PrependSnapshotHistory` now commits one validated PAGE to the
+requested existing buffer. The ring-buffer prepend preserves existing row identity
+and mixed widths, and grows its reference storage before mutation. Capacity growth
+uses overflow-safe arithmetic. A spare-capacity ring prepend/remove loop allocates
+zero bytes. Plain pages avoid copying the global hyperlink registry; linked pages
+decode into privately copied registries so failure cannot expose half-installed
+identities. Existing row/cell storage is never cloned for this operation.
+
+Tracked cell anchors and raster placements shift only within the target buffer;
+bottom-relative viewport offsets stay unchanged. New raster placements and checked
+anchor arithmetic are prepared before row insertion. Tests cover active/dormant
+buffers, scrolled-back views, synchronized-copy isolation, circular wrap/growth,
+raw hyperlinks, and a deliberately overflowing raster anchor after decode that
+must leave published rows, registries and link numbering unchanged. Native golden
+history pages produce identical progress counts and final staged cell state.
+
+Reference: Ghostty `snapshot/history.zig.decodePage` and `PageList.PageAllocation`
+decode into detached pages before finalization, retaining existing page/pin identity.
+The existing Windows Terminal/xterm.js VT serialization comparison still applies:
+neither substitutes for binary history insertion. The storage primitive deliberately
+requires its future adapter caller to check applicability and budgets first.
+
+The renewed source audit found two important integration constraints:
+
+- `snapshot.zig.nextPage` tests current columns and ScreenSet generation, not an
+  ever-resized flag. A height-only resize, or width changed and restored before the
+  next page, need not discard primary history. RIS resets primary in place but
+  removes alternate storage. Once a page is dropped, restoring compatibility does
+  not re-enable that sequence.
+- Native byte/line limits have minimum page-granular allowances (`Limits.minMaxSize`
+  and `minMaxLines`), even when configured to zero. Complete managed reconciliation
+  must address those limits and processor semantic-prompt updates; this internal
+  storage commit is not yet that reconciler or a public restore API.
+
+Post-push Release validation: **2,628 passed, 16 conditional skips, zero failures
+(2,644 total)** through `82b728c` (`snapshot-history-storage-full.trx`). The five
+subsequent native applicability cases also pass, with production code unchanged;
+all **19 history-storage/reference tests** pass at `7f74fee`
+(`snapshot-history-storage-reference.trx`). Native was available on macOS arm64;
+build has no warnings/errors. One 80-cell history row prepended to 10,024 resident
+rows allocated **4,400 bytes**, including its new cell storage, rather than copying
+resident row metadata. Linked-page registry staging and occasional ring growth
+still allocate; this is not an allocation-free restore or end-to-end speed claim.
+
 ## Validation requirements
 
 - Build the release native library with Zig 0.16 using `scripts/build-native.sh --release`.
