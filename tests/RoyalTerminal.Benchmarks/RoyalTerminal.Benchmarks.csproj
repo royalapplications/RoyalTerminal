@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Vt.Managed\RoyalTerminal.Terminal.Vt.Managed.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp\RoyalTerminal.GhosttySharp.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp.Native.OSX\RoyalTerminal.GhosttySharp.Native.OSX.csproj" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
     <ProjectReference Include="..\..\src\RoyalTerminal.GhosttySharp.Native.Win64\RoyalTerminal.GhosttySharp.Native.Win64.csproj" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />

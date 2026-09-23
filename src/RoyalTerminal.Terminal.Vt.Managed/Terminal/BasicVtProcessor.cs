@@ -218,7 +218,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         DcsString,
         DcsEscape,
         ApcString,
-        ApcEscape,
     }
 
     private enum SgrColorKind : byte
@@ -448,9 +447,21 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 continuationStart = i;
             }
 
-            // OSC commits when ESC arrives, not after a subsequent backslash.
+            // OSC/APC commit when ESC arrives, not after a subsequent backslash.
             // Only the new ESC operation belongs to a replayable continuation.
-            if (_state == ParserState.OscString && b == 0x1B) continuationStart = i;
+            if (_state is ParserState.OscString or ParserState.ApcString && b == 0x1B) continuationStart = i;
+
+            if (_state == ParserState.ApcString && b < 0x80 && b is not (0x18 or 0x1A or 0x1B))
+            {
+                ReadOnlySpan<byte> remaining = data[i..];
+                int end = remaining.IndexOfAny((byte)0x18, (byte)0x1A, (byte)0x1B);
+                if (end < 0) end = remaining.Length;
+                int high = remaining[..end].IndexOfAnyInRange((byte)0x80, byte.MaxValue);
+                if (high >= 0) end = high;
+                AppendApcPayload(remaining[..end]);
+                i += end - 1;
+                continue;
+            }
 
             if (_state is ParserState.OscString or ParserState.DcsString &&
                 b >= 0x20)
@@ -489,6 +500,23 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 continue;
             }
 
+            if (_state == ParserState.ApcString && b is 0x90 or 0x9B or 0x9D)
+            {
+                ProcessApcString(b);
+                // Exiting APC can commit a Kitty command. Do not replay it;
+                // canonicalize the new C1 introduction into a ground-safe ESC.
+                ReadOnlySpan<byte> prefix = b switch
+                {
+                    0x90 => "\u001bP"u8,
+                    0x9B => "\u001b["u8,
+                    _ => "\u001b]"u8,
+                };
+                _continuation.Track(prefix, 0, ground: false);
+                continuationSegmentStart = i + 1;
+                continuationStart = -1;
+                continue;
+            }
+
             if (TryHandleAnywhereCancelControl(b))
             {
                 if (stopAtGround)
@@ -513,15 +541,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 if (b == 0x7F) continue;
                 if (b is >= 0x80 and <= 0x9F)
                 {
-                    switch (b)
-                    {
-                        case 0x90: EnterDcsState(); break;
-                        case 0x98: case 0x9E: case 0x9F: EnterApcState(); break;
-                        case 0x9B: EnterCsiState(); break;
-                        case 0x9D: EnterOscState(); break;
-                        case 0x9C: _state = ParserState.Ground; break;
-                        default: ProcessEscape((byte)(b - 0x40)); break;
-                    }
+                    ProcessC1(b);
                     if (stopAtGround && IsParserGround) { consumed = i + 1; break; }
                     continue;
                 }
@@ -573,9 +593,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     break;
                 case ParserState.ApcString:
                     ProcessApcString(b);
-                    break;
-                case ParserState.ApcEscape:
-                    ProcessApcEscape(b);
                     break;
             }
 
@@ -1733,6 +1750,19 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _apcTruncated = false;
     }
 
+    private void ProcessC1(byte value)
+    {
+        switch (value)
+        {
+            case 0x90: EnterDcsState(); break;
+            case 0x98: case 0x9E: case 0x9F: EnterApcState(); break;
+            case 0x9B: EnterCsiState(); break;
+            case 0x9D: EnterOscState(); break;
+            case 0x9C: _state = ParserState.Ground; break;
+            default: ProcessEscape((byte)(value - 0x40)); break;
+        }
+    }
+
     #region Ground State
 
     private void ProcessGround(byte b)
@@ -2495,6 +2525,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case (byte)'H': // HTS — Horizontal Tab Set
                 _tabStops.Add(_cursorCol);
+                _state = ParserState.Ground;
+                break;
+
+            case (byte)'Z': // DECID — Same report as primary device attributes.
+                ResponseCallback?.Invoke(GetPrimaryDeviceAttributesResponse());
                 _state = ParserState.Ground;
                 break;
 
@@ -3313,62 +3348,44 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ProcessApcString(byte b)
     {
-        if (b == 0x9C)
-        {
-            CompleteApc();
-            return;
-        }
-
         if (b == 0x1B)
         {
-            _state = ParserState.ApcEscape;
+            CompleteApc();
+            EnterCsiState();
+            _state = ParserState.Escape;
             return;
         }
 
-        AppendApcByte(b);
+        // C1 SOS/PM/APC stay in the same parser state without exit/entry actions.
+        if (b is 0x98 or 0x9E or 0x9F) return;
+        if (b is >= 0x80 and <= 0x9F)
+        {
+            CompleteApc(terminated: b == 0x9C);
+            ProcessC1(b);
+        }
+        // A0-FF are ignored by Ghostty's APC table. All ordinary payload
+        // bytes, including C0 and DEL, are handled by the bulk feed path.
     }
 
-    private void ProcessApcEscape(byte b)
+    private void AppendApcPayload(ReadOnlySpan<byte> payload)
     {
-        if (b == (byte)'\\')
-        {
-            CompleteApc();
-            return;
-        }
-
-        AppendApcByte(0x1B);
-        if (b == 0x1B)
-        {
-            _state = ParserState.ApcEscape;
-            return;
-        }
-
-        if (b == 0x9C)
-        {
-            CompleteApc();
-            return;
-        }
-
-        AppendApcByte(b);
-        _state = ParserState.ApcString;
-    }
-
-    private void AppendApcByte(byte value)
-    {
-        int limit = _apcBuffer.Count > 0 && _apcBuffer[0] == (byte)'G'
+        if (payload.IsEmpty) return;
+        byte first = _apcBuffer.Count > 0 ? _apcBuffer[0] : payload[0];
+        int limit = first == (byte)'G'
             ? _options.KittyGraphicsMaxApcBytes
             : MaxUnknownSequenceBytes;
-        if (_apcBuffer.Count < limit)
+        int count = Math.Min(payload.Length, Math.Max(0, limit - _apcBuffer.Count));
+        if (count > 0)
         {
-            _apcBuffer.Add(value);
+            int offset = _apcBuffer.Count;
+            _apcBuffer.EnsureCapacity(offset + count);
+            CollectionsMarshal.SetCount(_apcBuffer, offset + count);
+            payload[..count].CopyTo(CollectionsMarshal.AsSpan(_apcBuffer)[offset..]);
         }
-        else
-        {
-            _apcTruncated = true;
-        }
+        if (count < payload.Length) _apcTruncated = true;
     }
 
-    private void CompleteApc()
+    private void CompleteApc(bool terminated = true)
     {
         try
         {
@@ -3378,7 +3395,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     ProcessKittyApc(CollectionsMarshal.AsSpan(_apcBuffer)[1..]);
                 return;
             }
-            UnknownSequenceCallback?.Invoke(
+            if (terminated) UnknownSequenceCallback?.Invoke(
                 new TerminalUnknownSequence(
                     TerminalUnknownSequenceType.Apc,
                     _apcBuffer.ToArray(),
@@ -3675,6 +3692,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         // Ghostty dispatches a valid OSC on every exit, including CAN/SUB.
         if (_state == ParserState.OscString) HandleOscString(bellTerminator: false);
+        // Unknown APCs are suppressed on abort, but parsed Kitty commands still
+        // finalize, matching stream_terminal.apcEnd's protocol-specific policy.
+        if (_state == ParserState.ApcString) CompleteApc(terminated: false);
         AbortActiveControlString();
         return true;
     }

@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--apc-ingestion", StringComparer.Ordinal))
+{
+    ApcIngestionBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--ghostty-render-metadata", StringComparer.Ordinal))
 {
     GhosttyRenderMetadataBenchmark.Run();

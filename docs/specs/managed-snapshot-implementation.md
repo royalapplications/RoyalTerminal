@@ -46,6 +46,11 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
   dispatch a complete OSC before returning to ground. Other C0 bytes are ignored
   inside OSC, while high bytes (including raw ST) remain payload. The former
   prompt-control abort and false-ESC-as-payload behavior have been removed.
+- APC likewise commits on ESC, treats C0/DEL as payload, ignores A0–FF, and
+  follows state-specific C1 transitions. Unknown APCs report only on normal
+  termination; valid Kitty commands finalize on abort too, matching native.
+  A C1 introduction after an APC commit is retained as its canonical ESC form,
+  preventing replay from repeating the preceding Kitty operation.
 - Complete PAGE/grid payloads: four compact cell widths, canonical trailing zero
   elision, wide-pair/scalar/semantic normalization, bounded UTF-32 suffixes,
   first-entry-wins style/hyperlink tables and reference resolution. Capacity hints
@@ -134,7 +139,7 @@ boundary while keeping presentation URL access convenient.
    A native-valid wire continuation is not proof that the current managed parser
    supports every corresponding state: the ESC/CSI/control/ignore-state cases now
    have focused tests, as do incremental UTF-8 rejection/replay boundaries, but
-   remaining DCS/APC control-string transitions and complete
+   remaining DCS transitions, native APC-to-C1 continuation export and complete
    current/saved charset semantics still need integration coverage before exposure.
 3. Native-to-managed and managed-to-native differential tests, including every
    upstream complete fixture, both screens, history, pending wrap, saved cursors,

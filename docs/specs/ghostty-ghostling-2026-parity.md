@@ -737,6 +737,47 @@ The final full macOS unit/headless run passed **2,077 tests, 16 conditional skip
 real-PTY recovery cases. This is local validation, not a substitute for pending
 cross-platform runtime and complete snapshot-installation gates.
 
+### APC transition and bulk-ingestion follow-up
+
+Managed APC now uses Ghostty's `consumeApcString` byte classes: ordinary C0 and
+DEL are payload, A0–FF are ignored, CAN/SUB and state-changing C1 controls exit,
+and SOS/PM/APC C1 bytes keep the existing APC state. ESC commits immediately and
+starts a new escape operation. Unknown sequences are published only on normal
+termination; valid Kitty commands finalize on abort too, matching the actual
+`stream_terminal.apcEnd` protocol-specific behavior. The 256-byte native matrix
+compares every input split (2,048 split comparisons), events, replies, cells and
+cursors; it also exposed the missing DECID reply, now shared with primary DA.
+Six complete Kitty query exit cases cover CAN/SUB/ESC/ST/CSI/NEL. The combined
+APC/CSI/continuation suite passed **71 tests** with native available.
+
+APC payloads are now scanned in spans and copied directly into bounded storage
+rather than appended byte by byte. The checked-in `--apc-ingestion` benchmark
+measures 25 × 4 MiB feeds per sample (median of seven, Release .NET 10.0.5 ARM64,
+no concurrent builds; continuation disabled, abort/decoding outside timing).
+Against `82ad183` with the identical harness, truncated unknown ingestion improved
+**239.507 → 5.442 ms**, and Kitty buffer ingestion **262.074 → 7.241 ms**. Warm
+timed ingestion allocates zero bytes in both versions. These are ingestion-only
+measurements, not claims about decoded image upload or end-to-end rendering.
+
+Snapshot review also reproduced an upstream/native export defect: writing
+`ESC _ Ga=q,i=73,s=1,v=1,f=32;AAAA/w==` followed by raw `9B 33` exports that entire
+original sequence via `ghostty_terminal_continuation_buf` (result success), even
+though leaving APC already finalized the Kitty query. Managed export now retains
+only `ESC [ 3`, which the pure wire validator accepts and which cannot repeat the
+query. Native continuation export still needs a corresponding fix and regression;
+it is an explicit unfinished requirement, not a claimed native/managed match.
+
+Reference comparison: xterm.js also exits APC on ESC and distinguishes abort
+from termination, but its payload/control classes differ; Windows Terminal
+consumes unsupported SOS/PM/APC strings without implementing Kitty. Ghostty's
+byte table and protocol handler remain authoritative here. DCS headers/unhook,
+complete charset state, custom glyph protocol/rendering, snapshot installation
+and the broader performance/platform gates remain open.
+
+Full macOS regression after this APC batch: **2,087 passed, 16 conditional skips,
+2,103 total**, zero failures (`apc-parser-full.trx`). The benchmark project also
+builds/runs in Release with its explicit managed-engine project reference.
+
 Reference choice: Ghostty's snapshot per-record Zig codecs define the format.
 Windows Terminal `TextBuffer::SerializeTo` and xterm.js's serialize addon emit VT
 text; neither is an interchangeable binary-state format. Remaining implementation
