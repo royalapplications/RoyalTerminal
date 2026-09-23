@@ -10,6 +10,29 @@ public sealed partial class BasicVtProcessor
     private ManagedCharsetState _charsets = new();
     private SavedCursorState? _primarySavedCursor;
     private SavedCursorState? _alternateSavedCursor;
+    // 1049 clears using the dormant alternate pen before copying the entering
+    // primary cursor. Retain its logical background across screen switches.
+    private TerminalColorIdentity _alternateEraseBackground;
+
+    private void ClearAlternateBeforeCursorCopy()
+    {
+        uint background = _currentBg;
+        SgrColorKind kind = _currentBgKind;
+        int paletteIndex = _currentBgPaletteIndex;
+        _currentBg = ResolveColorIdentity(_alternateEraseBackground, _screen.DefaultBackground);
+        _currentBgKind = ToSgrKind(_alternateEraseBackground);
+        _currentBgPaletteIndex = (int)_alternateEraseBackground.Value;
+        try
+        {
+            EraseInDisplay(2);
+        }
+        finally
+        {
+            _currentBg = background;
+            _currentBgKind = kind;
+            _currentBgPaletteIndex = paletteIndex;
+        }
+    }
     private ref SavedCursorState? SavedCursor => ref (_inAltScreen ? ref _alternateSavedCursor : ref _primarySavedCursor);
 
     // Hyperlinks deliberately are not saved: Ghostty leaves the current link

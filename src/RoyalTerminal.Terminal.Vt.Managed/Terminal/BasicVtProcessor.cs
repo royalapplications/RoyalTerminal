@@ -4809,7 +4809,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void SwitchToAltScreen(bool clearAlt)
     {
-        if (_inAltScreen) return;
+        if (_inAltScreen)
+        {
+            if (clearAlt) EraseInDisplay(2);
+            return;
+        }
 
         if (_screen.ScrollOffset != 0)
         {
@@ -4829,7 +4833,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         PublishKittyGraphics();
         if (clearAlt)
         {
-            EraseInDisplay(2);
+            ClearAlternateBeforeCursorCopy();
             // Ghostty clears the destination before copying the entering cursor.
             _delayedWrap = _savedMainDelayedWrap;
         }
@@ -4840,6 +4844,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void SwitchToMainScreen(bool restoreRestartPosition = false, bool copySemanticPen = true)
     {
         if (!_inAltScreen) return;
+        _alternateEraseBackground = CurrentBackgroundIdentity;
 
         if (_screen.ScrollOffset != 0)
         {
@@ -5593,6 +5598,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _charsets = new();
         _lastGraphicCodepoint = 0;
         _primarySavedCursor = _alternateSavedCursor = null;
+        _alternateEraseBackground = default;
         _currentHyperlinkId = 0;
         _kittyKeyboardFlagsMain = 0;
         _kittyKeyboardFlagsAlt = 0;

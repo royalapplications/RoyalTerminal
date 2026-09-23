@@ -2348,6 +2348,7 @@ public sealed partial class TerminalScreen
         mappedColumn = Math.Clamp(trackedColumn, 0, columns);
 
         int nextTrackedPositionIndex = 0;
+        int lastDestinationColumn = 0;
         int rowIndex = 0;
         int sourceRowCount = _rows.Count;
         if (trimTrailingBlankRows)
@@ -2375,13 +2376,6 @@ public sealed partial class TerminalScreen
             {
                 TerminalRow row = _rows[rowIndex];
                 int endExclusive = GetReflowEndExclusive(row);
-                if (rowIndex == trackedAbsoluteRow)
-                {
-                    int clampedTrackedColumn = Math.Clamp(trackedColumn, 0, row.Columns);
-                    endExclusive = Math.Max(endExclusive, Math.Min(row.Columns, clampedTrackedColumn + 1));
-                    trackedLogicalOffset = logicalLine.Count + clampedTrackedColumn;
-                }
-
                 if (additionalTrackedPositions is not null && trackedPositionIndexes is not null)
                 {
                     while (nextTrackedPositionIndex < trackedPositionIndexes.Length)
@@ -2404,12 +2398,13 @@ public sealed partial class TerminalScreen
                         int clampedColumn = Math.Clamp(position.OldColumn, 0, row.Columns);
                         if (position.CellAnchor && clampedColumn >= endExclusive)
                         {
-                            // Ghostty PageList reflow keeps a pin in trailing
-                            // blanks on this output row rather than creating
-                            // another row solely for its old blank column.
-                            TerminalGridPosition endPosition = MapLogicalOffsetToReflowedPosition(
-                                CollectionsMarshal.AsSpan(logicalLine), columns, logicalLine.Count);
-                            int destinationColumn = endPosition.Column % columns;
+                            // Ghostty clamps before advancing a deferred newline
+                            // or pending wrap. At a full row the physical cursor
+                            // remains on the last cell, not column zero.
+                            int destinationColumn = logicalLine.Count == 0
+                                ? lastDestinationColumn
+                                : Math.Min(columns - 1, MapLogicalOffsetToReflowedPosition(
+                                    CollectionsMarshal.AsSpan(logicalLine), columns, logicalLine.Count).Column);
                             clampedColumn = Math.Min(clampedColumn, columns - 1 - destinationColumn);
                         }
                         int effectiveTrackedColumn = position.ExtendLineToColumn
@@ -2426,6 +2421,15 @@ public sealed partial class TerminalScreen
                         lineTrackedOffsets!.Add(logicalLine.Count + effectiveTrackedColumn);
                         nextTrackedPositionIndex++;
                     }
+                }
+
+                // The live cursor extends the row only after ordinary pins
+                // have been clamped, matching PageList.ReflowCursor.reflowRow.
+                if (rowIndex == trackedAbsoluteRow)
+                {
+                    int clampedTrackedColumn = Math.Clamp(trackedColumn, 0, row.Columns);
+                    endExclusive = Math.Max(endExclusive, Math.Min(row.Columns, clampedTrackedColumn + 1));
+                    trackedLogicalOffset = logicalLine.Count + clampedTrackedColumn;
                 }
 
                 if (endExclusive > 0)
@@ -2456,6 +2460,11 @@ public sealed partial class TerminalScreen
             }
             while (hasContinuation);
 
+            if (logicalLine.Count != 0)
+            {
+                lastDestinationColumn = Math.Min(columns - 1, MapLogicalOffsetToReflowedPosition(
+                    CollectionsMarshal.AsSpan(logicalLine), columns, logicalLine.Count).Column);
+            }
             int destinationStartRow = reflowedRows.Count;
             TerminalGridPosition? mappedLinePosition = AppendReflowedLogicalLine(
                 CollectionsMarshal.AsSpan(logicalLine),

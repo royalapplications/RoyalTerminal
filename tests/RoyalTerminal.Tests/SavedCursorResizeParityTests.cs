@@ -23,6 +23,9 @@ public sealed class SavedCursorResizeParityTests(ITestOutputHelper output)
     [InlineData("first\r\nsecond\r\nthird\r\nfourth\u001b[H\u001b7\u001b[4;1H", 8, 2)]
     [InlineData("\u001b[?1049habcdefgh\u001b7\u001b[H", 12, 6)]
     [InlineData("\u001b[?1049habcdefgh\u001b7\u001b[H", 4, 2)]
+    [InlineData("\u001b[?1049h\u001b[42mOLD\u001b[?1049l\u001b[?1049hNEW\u001b7", 8, 4)]
+    [InlineData("\u001b[?1049hOLD\u001b[?1049hNEW\u001b7", 8, 4)]
+    [InlineData("\u001b[?1049h\u001b[42mOLD\u001b[?1049l\u001bc\u001b[?1049hNEW\u001b7", 8, 4)]
     public void SavedCellTracksReflowAndPreservesTheSavedPen(string input, int columns, int rows)
     {
         bool available = GhosttyVtProcessor.IsAvailable();
