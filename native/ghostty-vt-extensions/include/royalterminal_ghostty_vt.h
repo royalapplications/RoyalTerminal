@@ -7,6 +7,18 @@
 extern "C" {
 #endif
 
+/** Effective mouse state consumed by the native encoder, independent of DEC
+ * mode bits. Set size before calling. tracking uses GhosttyMouseTrackingMode;
+ * format uses GhosttyMouseFormat. No allocation, mutation, or borrowed pointers.
+ * Serialize with terminal mutation. Invalid arguments leave output untouched.
+ */
+typedef struct {
+    size_t size;
+    uint32_t tracking, format;
+} RoyalMouseState;
+GHOSTTY_API GhosttyResult ghostty_royal_mouse_state(
+    GhosttyTerminal terminal, RoyalMouseState* output);
+
 /** Copied active-screen prompt policy. Set size before calling. Content uses
  * Ghostty cell semantic values. Click: 0 none, 1 absolute, 2 relative, 3 line,
  * 4 multiple, 5 conservative vertical, 6 smart vertical. Redraw: 0 all, 1 none,

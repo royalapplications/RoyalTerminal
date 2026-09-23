@@ -39,7 +39,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalPasteSequenceEncoderSource,
     ITerminalSnapshotExportSource,
     ITerminalPointerSequenceEncoderSource,
-    ITerminalMouseReportingStateSource,
+    ITerminalMouseModeStateSource,
     ITerminalSixelOptionsSink,
     ITerminalEraseDisplayOptionsSink,
     ITerminalShellIntegrationEventSource,
@@ -265,7 +265,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         Win32InputMode,
         _backarrowKeyMode);
 
-    private TerminalMouseModeState MouseModeState => _mouseModeState;
+    /// <inheritdoc />
+    public TerminalMouseModeState MouseModeState => _mouseModeState;
 
     /// <inheritdoc />
     public event EventHandler<TerminalModeState>? ModeChanged;

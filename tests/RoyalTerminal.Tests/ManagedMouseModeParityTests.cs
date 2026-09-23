@@ -26,6 +26,7 @@ public sealed class ManagedMouseModeParityTests(ITestOutputHelper output)
         output.WriteLine($"Native mouse transition differential available: {available}");
         if (!available) return;
         using GhosttyTerminal native = new(8, 3);
+        using GhosttyVtProcessor adapter = new(new TerminalScreen(8, 3));
         using BasicVtProcessor managed = new(new TerminalScreen(8, 3));
         TerminalMouseModeTracker tracker = new();
         string[] commands = [$"\u001b[?{first}h", $"\u001b[?{second}h", $"\u001b[?{first}s", $"\u001b[?{second}s",
@@ -35,6 +36,7 @@ public sealed class ManagedMouseModeParityTests(ITestOutputHelper output)
         {
             byte[] bytes = Encoding.ASCII.GetBytes(command);
             native.Write(bytes);
+            adapter.Process(bytes);
             // Feed both consumers bytewise so the UI fallback and the processor
             // preserve ordering across every possible control-sequence boundary.
             foreach (byte value in bytes)
@@ -45,6 +47,10 @@ public sealed class ManagedMouseModeParityTests(ITestOutputHelper output)
             GhosttySnapshotTerminalHeader expected = ManagedSnapshotModeInstallationTests.NativeHeader(native);
             TerminalMouseModeState state = new((TerminalMouseTrackingMode)expected.MouseEvent, (TerminalMouseEncoding)expected.MouseFormat);
             Assert.Equal(state, managed.SnapshotMouseModes);
+            Assert.Equal(state, managed.MouseModeState);
+            Assert.Equal(state, adapter.MouseModeState);
+            Assert.Equal(state, native.GetMouseModeState());
+            Assert.Equal(state.IsMouseReportingEnabled, adapter.MouseReportingEnabled);
             Assert.Equal(state, tracker.ModeState);
             Assert.Equal(expected.CurrentModes, managed.SnapshotCurrentModes);
             Assert.Equal(expected.SavedModes, managed.SnapshotSavedModes);

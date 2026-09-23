@@ -55,12 +55,14 @@ public interface ITerminalKeySequenceEncoderSource
 }
 
 /// <summary>
-/// Optional source for native mouse-sequence encoding.
+/// Optional authoritative source for mouse-sequence encoding.
 /// </summary>
 public interface ITerminalPointerSequenceEncoderSource
 {
     /// <summary>
     /// Tries to encode the supplied pointer event into terminal input bytes.
+    /// False means no bytes should be sent; callers must not re-encode the event
+    /// through a fallback, which could bypass protocol filtering or deduplication.
     /// </summary>
     bool TryEncodePointer(
         in TerminalPointerEvent pointerEvent,
@@ -77,4 +79,11 @@ public interface ITerminalMouseReportingStateSource
     /// Gets whether mouse reporting is currently enabled by terminal state.
     /// </summary>
     bool MouseReportingEnabled { get; }
+}
+
+/// <summary>Authoritative live mouse state, including restored state and effective protocol selection.</summary>
+public interface ITerminalMouseModeStateSource : ITerminalMouseReportingStateSource
+{
+    /// <summary>Gets the effective tracking/encoding flags used for input, not frozen render state or inferred mode bits.</summary>
+    TerminalMouseModeState MouseModeState { get; }
 }

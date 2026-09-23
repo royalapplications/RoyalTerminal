@@ -2225,6 +2225,69 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Headless_MouseInput_DoesNotOverrideAuthoritativeDisabledOrSuppressedEvents(bool disabled)
+    {
+        RecordingTransport transport = new();
+        NativePointerRecordingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        control.Width = 640; control.Height = 400;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            // Keep the raw tracker enabled while the authoritative processor
+            // rejects input, as can happen after snapshot installation.
+            control.WriteOutput("\u001b[?1000;1006h"u8);
+            Dispatcher.UIThread.RunJobs();
+            NativePointerRecordingVtProcessor processor = factory.LastProcessor!;
+            if (disabled) processor.MouseModeState = default;
+            else processor.SuppressPointer = true;
+            transport.Inputs.Clear();
+            Point point = await GetCellInteractionPointAsync(control, window, column: 3, row: 2);
+            RaiseMousePressReleaseSequence(control, window, point);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(transport.Inputs);
+            if (disabled) Assert.Empty(processor.PointerEvents);
+            else Assert.NotEmpty(processor.PointerEvents);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_MouseInput_UsesAuthoritativePixelEncodingWithFractionalCells()
+    {
+        RecordingTransport transport = new();
+        NativePointerRecordingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        control.Width = 640; control.Height = 400;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            Assert.NotNull(control.Renderer);
+            control.Renderer!.SetCellSize(control.Renderer.CellWidth, 15.5f);
+            control.WriteOutput("\u001b[?1000;1006h"u8); // Tracker incorrectly says cell SGR.
+            Dispatcher.UIThread.RunJobs();
+            NativePointerRecordingVtProcessor processor = factory.LastProcessor!;
+            processor.MouseModeState = new(TerminalMouseTrackingMode.PressRelease, TerminalMouseEncoding.SgrPixels);
+            transport.Inputs.Clear();
+            Point point = await GetCellInteractionPointAsync(control, window, column: 3, row: control.Rows - 1);
+            RaiseMousePressReleaseSequence(control, window, point);
+            Dispatcher.UIThread.RunJobs();
+            Assert.NotEmpty(processor.PointerEvents);
+            Assert.InRange(Math.Abs(processor.PointerEvents[0].Y - point.Y), 0, 1.0);
+            Assert.Contains(transport.Inputs, static bytes => bytes.Length == 1 && bytes[0] == NativePointerRecordingVtProcessor.EncodedPointerByte);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
     [AvaloniaFact]
     public async Task Headless_MouseInput_EncodesSgrReleaseToTransport_WhenMode1006Enabled()
     {
@@ -4068,9 +4131,13 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    private sealed class NativePointerRecordingVtProcessor : IVtProcessor, ITerminalPointerSequenceEncoderSource
+    private sealed class NativePointerRecordingVtProcessor : IVtProcessor, ITerminalPointerSequenceEncoderSource, ITerminalMouseModeStateSource
     {
         public const byte EncodedPointerByte = 0x4E;
+
+        public TerminalMouseModeState MouseModeState { get; set; } = new(TerminalMouseTrackingMode.PressRelease, TerminalMouseEncoding.Sgr);
+        public bool MouseReportingEnabled => MouseModeState.IsMouseReportingEnabled;
+        public bool SuppressPointer { get; set; }
 
         public List<TerminalPointerEvent> PointerEvents { get; } = [];
         public List<TerminalPointerEncodingContext> Contexts { get; } = [];
@@ -4112,6 +4179,7 @@ public sealed class TerminalControlHeadlessInteractionTests
         {
             PointerEvents.Add(pointerEvent);
             Contexts.Add(context);
+            if (SuppressPointer) { sequence = []; return false; }
             sequence = [EncodedPointerByte];
             return true;
         }

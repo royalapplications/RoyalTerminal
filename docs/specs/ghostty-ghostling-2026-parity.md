@@ -2,6 +2,31 @@
 
 ## Reopened completion audit
 
+### Authoritative mouse state and input routing (2026-09-23)
+
+Both processors now expose effective tracking/encoding via the optional
+`ITerminalMouseModeStateSource` contract. The native extension copies exactly the
+flags consumed by Ghostty `c/mouse_encode.zig:setopt_from_terminal`, rather than
+ORing DEC mode bits like upstream's boolean query. Snapshot-restored flags and
+mixed enable/reset commands can disagree with those independent bits. Live input
+state remains live during synchronized-output holds.
+
+The control respects authoritative reporting-off and encoder suppression instead
+of retrying through its fallback tracker. Fractional-cell coordinate conversion
+now uses the authoritative encoding, preserving raw SGR-pixel coordinates even
+when the tracker still thinks cell encoding is active. Fallback remains only for
+processors that do not implement the corresponding capabilities. Ghostty's
+encoder, Windows Terminal `TerminalInput::HandleMouse`, and xterm.js
+`MouseService._triggerMouseEvent` all apply filtering before emission; xterm.js
+also chooses pixel/cell handling from its active encoding service. The chosen
+behavior is to never override the owning encoder's no-output result.
+
+ABI guards, all tracking/format snapshot combinations, all 64 ordered mode pairs,
+live hold/session-reset behavior, and headless routing/pixel tests are added.
+Post-push native rebuild and validation are pending. This does not yet close
+mouse-shift policy, encoder lifetime/deduplication, keyboard flags or the broader
+snapshot/orchestration/performance requirements.
+
 ### Raw metadata and active status display (2026-09-23)
 
 The shared optional `ITerminalMetadata` contract exposes owned host setters and

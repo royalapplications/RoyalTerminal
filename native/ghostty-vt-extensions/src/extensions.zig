@@ -1,5 +1,27 @@
 // Appended to upstream src/lib_vt.zig by build.zig. Names are deliberately
 // prefixed to keep these extensions separate from Ghostty's public API.
+const RoyalMouseState = extern struct {
+    size: usize = @sizeOf(RoyalMouseState),
+    tracking: u32 = 0,
+    format: u32 = 0,
+};
+
+// These are the same effective flags consumed by mouse_encode.setopt_from_terminal,
+// not the independent DEC mode bits (which can disagree after mixed resets).
+export fn ghostty_royal_mouse_state(
+    handle: @import("terminal/c/terminal.zig").Terminal,
+    output: ?*RoyalMouseState,
+) callconv(.c) c_int {
+    const result = output orelse return -2;
+    if (result.size < @sizeOf(RoyalMouseState)) return -2;
+    const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
+    result.* = .{
+        .tracking = @intFromEnum(t.flags.mouse_event),
+        .format = @intFromEnum(t.flags.mouse_format),
+    };
+    return 0;
+}
+
 const RoyalPromptState = extern struct {
     size: usize = @sizeOf(RoyalPromptState),
     seen: u32 = 0,

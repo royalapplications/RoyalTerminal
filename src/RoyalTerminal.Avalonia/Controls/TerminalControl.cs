@@ -7122,9 +7122,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         FlushPendingTransportResize();
 
-        if (_vtProcessor is ITerminalPointerSequenceEncoderSource nativeEncoder &&
-            TryEncodePointerWithNativeEncoder(nativeEncoder, pointerEvent, out byte[] nativeEncoded))
+        if (_vtProcessor is ITerminalPointerSequenceEncoderSource nativeEncoder)
         {
+            // Suppression by the authoritative encoder is not a request to
+            // retry through the byte-stream tracker (e.g. duplicate motion).
+            if (!TryEncodePointerWithNativeEncoder(nativeEncoder, pointerEvent, out byte[] nativeEncoded)) return false;
             TerminalSessionService.SendInput(nativeEncoded);
             return true;
         }
@@ -7193,7 +7195,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         encoded = [];
 
-        if (!_mouseModeTracker.ModeState.IsMouseReportingEnabled ||
+        TerminalMouseModeState mouseState = GetMouseModeStateForInput();
+        if (!mouseState.IsMouseReportingEnabled ||
             !TryResolvePointerCell(pointerEvent.X, pointerEvent.Y, out int column, out int row))
         {
             return false;
@@ -7201,7 +7204,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (!TerminalMouseProtocolEncoder.TryEncode(
                 pointerEvent,
-                _mouseModeTracker.ModeState,
+                mouseState,
                 column,
                 row,
                 Math.Max(1, (int)Math.Floor(pointerEvent.X) + 1),
@@ -7231,7 +7234,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     private bool ShouldScalePointerForNativeMouseEncoding()
     {
         return HasFractionalRendererCellMetrics() &&
-               _mouseModeTracker.ModeState.Encoding != TerminalMouseEncoding.SgrPixels;
+               GetMouseModeStateForInput().Encoding != TerminalMouseEncoding.SgrPixels;
     }
 
     private static bool IsWholePixelMetric(float value)
@@ -7241,11 +7244,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool IsMouseReportingActiveForInput()
     {
-        if (_vtProcessor is ITerminalMouseReportingStateSource nativeSource &&
-            nativeSource.MouseReportingEnabled)
+        if (_vtProcessor is ITerminalMouseReportingStateSource nativeSource)
         {
-            return TerminalSessionService.InputSink is not null ||
-                HasTransportOrDirectPtyInputPath();
+            return nativeSource.MouseReportingEnabled &&
+                (TerminalSessionService.InputSink is not null || HasTransportOrDirectPtyInputPath());
         }
 
         if (!_mouseModeTracker.ModeState.IsMouseReportingEnabled)
@@ -7255,6 +7257,15 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         return TerminalSessionService.InputSink is not null
             || HasTransportOrDirectPtyInputPath();
+    }
+
+    private TerminalMouseModeState GetMouseModeStateForInput()
+    {
+        if (_vtProcessor is ITerminalMouseModeStateSource source) return source.MouseModeState;
+        TerminalMouseModeState fallback = _mouseModeTracker.ModeState;
+        return _vtProcessor is ITerminalMouseReportingStateSource { MouseReportingEnabled: false }
+            ? fallback with { TrackingMode = TerminalMouseTrackingMode.None }
+            : fallback;
     }
 
     private bool IsBracketedPasteActiveForInput()

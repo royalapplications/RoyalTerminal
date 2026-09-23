@@ -29,7 +29,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalKeySequenceEncoderSource,
     ITerminalPasteSequenceEncoderSource,
     ITerminalPointerSequenceEncoderSource,
-    ITerminalMouseReportingStateSource,
+    ITerminalMouseModeStateSource,
     ITerminalSessionHistoryController,
     ITerminalViewportScrollSource,
     ITerminalSelectionExportSource,
@@ -146,7 +146,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     private bool _backarrowKeyMode;
     private bool _alternateScreen;
     private bool _bracketedPaste;
-    private bool _mouseReportingEnabled;
+    private TerminalMouseModeState _mouseModeState;
     private bool _win32InputMode;
     private bool _focusEventMode;
     private int _kittyKeyboardFlags;
@@ -311,7 +311,10 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     }
 
     /// <inheritdoc />
-    public bool MouseReportingEnabled => _mouseReportingEnabled;
+    public bool MouseReportingEnabled => _mouseModeState.IsMouseReportingEnabled;
+
+    /// <inheritdoc />
+    public TerminalMouseModeState MouseModeState => _mouseModeState;
 
     /// <inheritdoc />
     public TerminalModeState ModeState => new(
@@ -1605,7 +1608,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         // substitute for the actual active-screen key after mixed switches.
         _alternateScreen = _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate;
         _bracketedPaste = _terminal.GetMode(GhosttyVtNative.ModeBracketedPaste);
-        _mouseReportingEnabled = _terminal.GetMouseTracking();
+        _mouseModeState = _terminal.GetMouseModeState();
         _focusEventMode = _terminal.GetMode(GhosttyVtNative.ModeFocusEvent);
         _kittyKeyboardFlags = (int)_terminal.GetKittyKeyboardFlags();
         _scrollbar = _terminal.GetScrollbar();
@@ -1624,7 +1627,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _backarrowKeyMode = false;
         _alternateScreen = false;
         _bracketedPaste = false;
-        _mouseReportingEnabled = false;
+        _mouseModeState = default;
         _win32InputMode = false;
         _focusEventMode = false;
         _kittyKeyboardFlags = 0;
