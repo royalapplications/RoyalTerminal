@@ -2365,6 +2365,48 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed, false)]
+    [InlineData(VtProcessorPreference.Managed, true)]
+    [InlineData(VtProcessorPreference.Native, false)]
+    [InlineData(VtProcessorPreference.Native, true)]
+    public async Task Headless_ShiftDrag_SelectsOrReportsAccordingToTerminalRequest(VtProcessorPreference preference, bool capture)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport, preference: preference);
+        control.Width = 640; control.Height = 400;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("alpha beta gamma\u001b[?1003;1006h"u8);
+            if (capture) control.WriteOutput("\u001b[>1s"u8);
+            Dispatcher.UIThread.RunJobs();
+            transport.Inputs.Clear();
+            Point start = await GetCellInteractionPointAsync(control, window, column: 1, row: 0);
+            Point end = await GetCellInteractionPointAsync(control, window, column: 5, row: 0);
+            RaiseMouseDragReleaseSequence(control, window, start, end, KeyModifiers.Shift);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(!capture, control.HasSelection);
+            Assert.Equal(capture, transport.Inputs.Count != 0);
+            if (capture)
+            {
+                Assert.Equal(3, transport.Inputs.Count);
+                Assert.StartsWith("\u001b[<4;", Encoding.ASCII.GetString(transport.Inputs[0]));
+                Assert.EndsWith("m", Encoding.ASCII.GetString(transport.Inputs[^1]));
+            }
+            else
+            {
+                Assert.Equal((1, 0), control.Renderer!.SelectionStart);
+                Assert.Equal((5, 0), control.Renderer.SelectionEnd);
+            }
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
     [AvaloniaFact]
     public async Task Headless_MouseInput_FromTopLevelRouting_EncodesToTransport_WhenMouseModeEnabled()
     {
