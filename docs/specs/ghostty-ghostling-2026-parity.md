@@ -8,7 +8,7 @@ Both engines expose the terminal's requested pointer shape. Managed parsing
 accepts all 34 W3C names and 22 xterm/foot aliases from Ghostty `terminal/mouse.zig`,
 case-sensitively, with canonical OSC 22 selection and the native 2,047-byte payload
 limit. Unknown names are ignored. Shape is global and live during render holds;
-Ghostty's `fullReset` deliberately leaves the separate `mouse_shape` field intact,
+Ghostty's `fullReset` leaves the separate `mouse_shape` field intact,
 so both engines retain it through RIS, DECSTR and session reset. Snapshot header
 byte 37 installs it directly, including native unknown-value normalization.
 
@@ -31,7 +31,12 @@ is `Avalonia.Base/Input/Cursor.cs` at tag 12.1.1.
 Differential tests cover every name/alias at every split, reset/hold semantics,
 all 256 snapshot wire values, and allocation-free warm parsing. Headless tests
 cover every mapping through both real backends, cache reuse, hyperlink precedence,
-hold updates and detach/reattach. Validation is pending after the push. Password
+hold updates and detach/reattach. All **99 focused cases** (70 new) pass after
+the native rebuild, with native available on macOS arm64. The complete Release
+build has zero warnings/errors. Post-push full Release through `65f29af`:
+**3,623 unit/headless + 231 integration tests passed, 16 conditional skips,
+zero failures** (`mouse-shape-full.trx`). Platform runtime sign-off is separate.
+Password
 input state and complete snapshot orchestration remain open.
 
 ### modifyOtherKeys mode 2 (2026-09-23)
