@@ -23,8 +23,24 @@ after restore, bytewise continued OSC input, resets and host configuration chang
 Additional tests cover absence versus black, query suppression/cursor fallback,
 and recoloring logical cells without changing truecolor cells or the current pen.
 
-Validation is pending after the implementation push. This is a prerequisite, not
-the complete managed snapshot restore/export orchestrator; that remains open.
+Post-push focused Release validation passes all 27 cases, including the seven new
+snapshot-color cases and both existing mode-allocation checks; native is available.
+The first full run used Debug: 2,700 passed, 16 skipped and two allocation checks
+failed (504,000 and 72,000 bytes). Both checks pass in Release; the Debug failures
+are recorded rather than presented as a clean run. The complete post-push Release
+suite through `51a7645` passes **2,702 tests, 16 conditional skips, zero failures
+(2,718 total)** (`snapshot-colors-release-full.trx`). Native differential tests
+executed on macOS arm64. Documentation CI passed; all six native build jobs were
+still in progress at inspection, so cross-platform runtime sign-off remains open.
+This is a prerequisite, not the complete managed snapshot restore/export
+orchestrator; that remains open.
+
+The continued color audit also identifies managed OSC 21 as missing. Its port must
+include Ghostty's strict keys, ordered batched requests, all-or-nothing request
+count rejection, matching BEL/ST responses, optional-color queries without cursor
+fallback, and shared native-compatible color parsing (X11 names and `rgbi:` among
+other formats). The current managed OSC color parser only accepts a smaller theme
+parser subset. These are outstanding implementation requirements, not exclusions.
 
 The complete upstream review is **in progress**. The prior API inventory and green
 test suite establish the implemented C surface, but do not establish full native
