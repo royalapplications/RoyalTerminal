@@ -2,6 +2,34 @@
 
 ## Reopened completion audit
 
+### Native allocation model and key registry follow-up (2026-09-23)
+
+The native snapshot allocation model now accounts for runtime standard pages,
+pooled allocation minima, row/cell alignment, Zig packed-RGB style layout,
+grapheme/string bitmaps, hyperlink maps and minimum byte/line quotas. All 14
+focused cases pass against native restore boundaries, including zero quotas,
+independent capacity hints and widths 1 through 32768. This is semantic native
+allocation accounting, not a CLR memory estimate. It is not yet wired into live
+managed retention: page ownership, mutation, reflow and pruning accounting remain
+required before claiming exact quota parity.
+
+The next implementation batch completes mappings for Ghostty's Kitty keypad
+registry, adds the ScrollLock alias and rejects malformed/unknown managed key IDs
+even when callers supply text or layout scalars. Legacy keypad navigation follows
+Ghostty's cursor mode independently of keypad application mode; keypad Enter uses
+the application-keypad table, not ordinary Enter's IME handling. The reference
+decision follows `input/kitty.zig`, `function_keys.zig` and `key_encode.zig`;
+Windows Terminal's virtual-key translation and xterm.js's browser keyCode mapping
+are host adapters rather than interchangeable string-ID registries. Added native
+differential matrices cover flags, modes, modifiers, actions and text/composition.
+Validation for this batch is pending after commit/push; no performance gain is
+claimed.
+
+Windows ARM64 CI runs 35901210398 and 35902114973 fail before compilation with a
+missing cached Zig build.exe. CI and release Windows jobs now disable restored
+Zig build caches while leaving compiler installation unchanged. This is a cache
+failure mitigation pending a fresh run, not completed Windows platform sign-off.
+
 ### Legacy input and lifecycle follow-up (2026-09-23)
 
 The managed processor now implements Ghostty's legacy key pipeline rather than
@@ -635,7 +663,7 @@ The renewed review found the following missing or weakly verified requirements:
 | Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store, live APC and virtual-placeholder projection are implemented with focused tests; vertical clipping, top-origin history, stationary IL/DL and horizontal containment now match native cases; protocol-response/streaming edges and full differential coverage remain open |
 | Native Kitty animation playback | Animation tick in the built library, scheduling without further PTY input, deterministic frame tests | Repository-owned extension and timed refresh implemented; deterministic frame tests pass, and all six native RID variants cross-build; non-macOS runtime execution remains CI validation |
 | Synchronized output | Completed prefix visible at enable; following output frozen; release/reset/one-second timeout without additional input | Both engines now implement prefix publication, frozen presentation and idle timeout; managed copy-on-write state transfer and focused native/managed tests pass |
-| Managed snapshot and continuation features | Restore both screens, history, parser/UTF-8 continuation, modes, styles, links and saved cursors with bounded validation | Ordered wire decoding, all payload codecs and non-executing continuation validation pass golden/native tests; ESC/CSI replay, bounded parameters and colon SGR now have focused native comparisons. Managed state installation, remaining runtime semantics and incremental READY/history reconciliation remain open |
+| Managed snapshot and continuation features | Restore/export both screens, history, continuation, modes, styles, links and saved cursors with bounded validation | Public transactional restore, READY/incremental history, state installation and streaming binary export pass native comparisons. Native allocation/minimum quota calculations pass focused boundary tests; integration with live managed page retention, broader differential and performance validation remain open |
 | Managed resize/reflow optimization | Baseline/after measurements plus wide/grapheme/style/link/cursor/anchor regressions | Bulk reflow copies and redundant initialization removal implemented and measured below; tracked cell identity/reflow/COW/pruning regressions pass; end-to-end Kitty anchor comparisons remain part of graphics integration |
 | Managed row allocation/recycling | Stable content/metadata after eviction and measured allocations | Evicted row storage is reused with a focused zero-allocation steady-state test |
 | Parser/clipboard throughput and bounds | Split-input protocol tests, malformed UTF-8/base64 tests, limits, before/after measurements | Review added span payload scanning, bulk base64 decode, correct 64 MiB configurable clipboard bound, 65-codepoint grapheme bound and protocol fixes; measurement review pending |

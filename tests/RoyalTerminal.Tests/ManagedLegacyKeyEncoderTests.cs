@@ -14,7 +14,9 @@ public sealed class ManagedLegacyKeyEncoderTests(ITestOutputHelper output)
     {
         foreach (string key in new[] { "Up", "Down", "Left", "Right", "Home", "End", "Insert", "Delete", "PageUp", "PageDown", "Apps",
             "F1", "F2", "F3", "F4", "F5", "F12", "F13", "F16", "F20", "F21", "F24", "F25",
-            "NumPad0", "NumPad9", "Decimal", "Divide", "Multiply", "Subtract", "Add", "Back", "Return", "Escape", "Tab" }) yield return [key];
+            "NumPad0", "NumPad9", "Decimal", "Divide", "Multiply", "Subtract", "Add", "Back", "Return", "Escape", "Tab",
+            "ScrollLock", "NumPadEnter", "NumPadEqual", "Separator", "NumPadLeft", "NumPadRight", "NumPadUp", "NumPadDown",
+            "NumPadPageUp", "NumPadPageDown", "NumPadHome", "NumPadEnd", "NumPadInsert", "NumPadDelete", "NumPadBegin" }) yield return [key];
     }
 
     [Theory]
@@ -60,6 +62,9 @@ public sealed class ManagedLegacyKeyEncoderTests(ITestOutputHelper output)
     [InlineData("Back", "IME", 0U)]
     [InlineData("Escape", "IME", 0U)]
     [InlineData("LeftShift", "preedit", 0U)]
+    [InlineData("NumPadEnter", "IME", 0U)]
+    [InlineData("NumPadEqual", "=", 0U)]
+    [InlineData("Separator", ",", 0U)]
     public void TextLayoutCompositionAndConsumedModifiersMatchNative(string key, string? text, uint unshifted)
     {
         if (!GhosttyVtProcessor.IsAvailable()) return;
@@ -77,6 +82,35 @@ public sealed class ManagedLegacyKeyEncoderTests(ITestOutputHelper output)
                 Compare(managed, native, request, modes);
                 Compare(managed, native, request with { IsComposing = true }, modes);
                 Compare(managed, native, request with { Action = TerminalInputAction.Release }, modes);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("Unknown")]
+    [InlineData("F01")]
+    [InlineData("F+1")]
+    [InlineData("F 1")]
+    [InlineData("F1 ")]
+    [InlineData("F0")]
+    [InlineData("F26")]
+    [InlineData("a")]
+    [InlineData("NumPad10")]
+    public void UnknownKeyIdsCannotEncodeSuppliedTextOrLayout(string key)
+    {
+        using BasicVtProcessor managed = new(new TerminalScreen(8, 3));
+        using GhosttyVtProcessor? native = GhosttyVtProcessor.IsAvailable() ? new(new TerminalScreen(8, 3)) : null;
+        for (int flags = 0; flags <= 31; flags++)
+        {
+            byte[] mode = Encoding.ASCII.GetBytes($"\u001b[={flags}u");
+            managed.Process(mode); native?.Process(mode);
+            foreach (string? text in new[] { null, "x" })
+            {
+                TerminalKeyEncodingRequest request = new(key, TerminalInputAction.Press, text, TerminalModifiers.Control,
+                    UnshiftedCodepoint: 'x');
+                Assert.False(managed.TryEncodeKey(request, out byte[] bytes));
+                Assert.Empty(bytes);
+                if (native is not null) Compare(managed, native, request, flags);
             }
         }
     }

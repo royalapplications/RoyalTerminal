@@ -12,6 +12,28 @@ namespace RoyalTerminal.Terminal;
 // equivalent to report-all, and special finals use a different event encoding.
 internal static class ManagedKittyKeyEncoder
 {
+    // Match the native adapter's accepted IDs even for keys without Kitty codes.
+    // Arbitrary names must not bypass the registry through supplied text/scalars.
+    internal static bool IsSupportedKey(string? key) => PhysicalCodepoint(key) != 0 || Lookup(key).Code != 0 || key is
+        "Apps" or "Fn" or "FnLock" or "BrowserBack" or "BrowserFavorites" or "BrowserForward" or
+        "BrowserHome" or "BrowserRefresh" or "BrowserSearch" or "BrowserStop" or "Eject" or
+        "LaunchApplication1" or "LaunchApp1" or "LaunchApplication2" or "LaunchApp2" or "LaunchMail" or
+        "MediaPlayPause" or "SelectMedia" or "MediaSelect" or "MediaStop" or "MediaNextTrack" or "MediaTrackNext" or
+        "MediaPreviousTrack" or "MediaTrackPrevious" or "Power" or "Sleep" or "VolumeDown" or "AudioVolumeDown" or
+        "VolumeMute" or "AudioVolumeMute" or "VolumeUp" or "AudioVolumeUp" or "WakeUp" or "Copy" or "Cut" or "Paste";
+
+    internal static int FunctionNumber(string? key)
+    {
+        // int.TryParse also accepts F01, F+1 and whitespace, unlike the key registry.
+        if (key is { Length: 2 } && key[0] == 'F' && key[1] is >= '1' and <= '9') return key[1] - '0';
+        if (key is { Length: 3 } && key[0] == 'F' && key[1] is '1' or '2' && key[2] is >= '0' and <= '9')
+        {
+            int number = (key[1] - '0') * 10 + key[2] - '0';
+            if (number <= 25) return number;
+        }
+        return 0;
+    }
+
     internal static bool TryEncode(in TerminalKeyEncodingRequest request, int flags, out byte[] sequence)
     {
         sequence = [];
@@ -140,13 +162,14 @@ internal static class ManagedKittyKeyEncoder
             "Space" => 32, "OemMinus" => '-', "OemPlus" => '=', "OemOpenBrackets" => '[', "OemCloseBrackets" => ']',
             "OemBackslash" or "OemPipe" => '\\', "OemSemicolon" => ';', "OemQuotes" => '\'', "OemTilde" => '`',
             "OemComma" => ',', "OemPeriod" => '.', "Oem2" => '/',
-            "Decimal" => '.', "Divide" => '/', "Multiply" => '*', "Subtract" => '-', "Add" => '+', _ => 0,
+            "Decimal" => '.', "Divide" => '/', "Multiply" => '*', "Subtract" => '-', "Add" => '+', "NumPadEqual" => '=', _ => 0,
         };
     }
 
     private static Entry Lookup(string? key)
     {
-        if (key is { Length: > 1 } && key[0] == 'F' && int.TryParse(key.AsSpan(1), out int function) && function is >= 1 and <= 25)
+        int function = FunctionNumber(key);
+        if (function != 0)
         {
             if (function >= 13) return new(57376 + function - 13, 'u');
             return function switch
@@ -164,9 +187,14 @@ internal static class ManagedKittyKeyEncoder
             "Insert" => new(2, '~'), "Delete" => new(3, '~'), "Left" => new(1, 'D'), "Right" => new(1, 'C'),
             "Up" => new(1, 'A'), "Down" => new(1, 'B'), "PageUp" => new(5, '~'), "PageDown" => new(6, '~'),
             "Home" => new(1, 'H'), "End" => new(1, 'F'), "CapsLock" => new(57358, 'u', true),
-            "Scroll" => new(57359, 'u'), "NumLock" => new(57360, 'u', true), "PrintScreen" => new(57361, 'u'), "Pause" => new(57362, 'u'),
+            "Scroll" or "ScrollLock" => new(57359, 'u'), "NumLock" => new(57360, 'u', true), "PrintScreen" => new(57361, 'u'), "Pause" => new(57362, 'u'),
             "Decimal" => new(57409, 'u'), "Divide" => new(57410, 'u'), "Multiply" => new(57411, 'u'),
-            "Subtract" => new(57412, 'u'), "Add" => new(57413, 'u'), "Separator" => new(57416, 'u'),
+            "Subtract" => new(57412, 'u'), "Add" => new(57413, 'u'), "NumPadEnter" => new(57414, 'u'),
+            "NumPadEqual" => new(57415, 'u'), "Separator" => new(57416, 'u'),
+            "NumPadLeft" => new(57417, 'u'), "NumPadRight" => new(57418, 'u'), "NumPadUp" => new(57419, 'u'),
+            "NumPadDown" => new(57420, 'u'), "NumPadPageUp" => new(57421, 'u'), "NumPadPageDown" => new(57422, 'u'),
+            "NumPadHome" => new(57423, 'u'), "NumPadEnd" => new(57424, 'u'), "NumPadInsert" => new(57425, 'u'),
+            "NumPadDelete" => new(57426, 'u'), "NumPadBegin" => new(57427, 'u'),
             "LeftShift" => new(57441, 'u', true), "RightShift" => new(57447, 'u', true),
             "LeftCtrl" => new(57442, 'u', true), "RightCtrl" => new(57448, 'u', true),
             "LeftAlt" => new(57443, 'u', true), "RightAlt" => new(57449, 'u', true),

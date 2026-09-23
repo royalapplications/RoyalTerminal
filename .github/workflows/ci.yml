@@ -349,6 +349,10 @@ jobs:
         with:
           version: 0.16.0
           cache-key: ${{ matrix.arch }}
+          # A restored Windows cache referenced a missing build.exe before
+          # compilation (runs 35901210398 and 35902114973). Leave compiler
+          # installation unchanged; rebuild artifacts instead of restoring them.
+          use-cache: false
 
       - name: Build libghostty-vt
         working-directory: native/ghostty-vt-extensions

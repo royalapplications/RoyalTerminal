@@ -10,6 +10,9 @@ namespace RoyalTerminal.Terminal;
 /// <param name="KeyId">
 /// Stable key identity supplied by the UI layer.
 /// Current producers use <c>Avalonia.Input.Key.ToString()</c>.
+/// Extended keypad identities use NumPadEnter, NumPadEqual, NumPadLeft/Right/Up/Down,
+/// NumPadPageUp/PageDown, NumPadHome/End, NumPadInsert/Delete and NumPadBegin;
+/// Separator identifies the keypad separator. Unsupported IDs produce no bytes.
 /// </param>
 /// <param name="Action">Press, repeat or release action.</param>
 /// <param name="Text">Optional text payload associated with the key event.</param>

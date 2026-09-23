@@ -83,15 +83,19 @@ internal static class ManagedLegacyKeyEncoder
     {
         sequence = [];
         int modifier = Modifier(mods);
-        char cursor = key switch { "Up" => 'A', "Down" => 'B', "Right" => 'C', "Left" => 'D', "Home" => 'H', "End" => 'F', _ => '\0' };
+        char cursor = key switch { "Up" or "NumPadUp" => 'A', "Down" or "NumPadDown" => 'B',
+            "Right" or "NumPadRight" => 'C', "Left" or "NumPadLeft" => 'D', "Home" or "NumPadHome" => 'H',
+            "End" or "NumPadEnd" => 'F', "NumPadBegin" => 'E', _ => '\0' };
         if (cursor != 0)
         {
             sequence = mods == 0 ? [(byte)27, (byte)(cursorApplication ? 'O' : '['), (byte)cursor]
                 : Numeric("\u001b["u8, 1, modifier, (byte)cursor);
             return true;
         }
-        int tilde = key switch { "Insert" => 2, "Delete" => 3, "PageUp" => 5, "PageDown" => 6, "Apps" => 29, _ => 0 };
-        if (key.Length > 1 && key[0] == 'F' && int.TryParse(key.AsSpan(1), out int function) && function is >= 1 and <= 25)
+        int tilde = key switch { "Insert" or "NumPadInsert" => 2, "Delete" or "NumPadDelete" => 3,
+            "PageUp" or "NumPadPageUp" => 5, "PageDown" or "NumPadPageDown" => 6, "Apps" => 29, _ => 0 };
+        int function = ManagedKittyKeyEncoder.FunctionNumber(key);
+        if (function != 0)
         {
             if (function <= 4 && mods == 0) { sequence = [(byte)27, (byte)'O', (byte)('P' + function - 1)]; return true; }
             if (function is 1 or 2 or 4) { sequence = Numeric("\u001b["u8, 1, modifier, (byte)('P' + function - 1)); return true; }
@@ -107,12 +111,12 @@ internal static class ManagedLegacyKeyEncoder
             sequence = Numeric("\u001b["u8, tilde, mods == 0 ? null : modifier, (byte)'~');
             return true;
         }
-        char keypad = key switch { "Decimal" => 'n', "Divide" => 'o', "Multiply" => 'j', "Subtract" => 'm', "Add" => 'k', _ => '\0' };
+        char keypad = key switch { "Decimal" => 'n', "Divide" => 'o', "Multiply" => 'j', "Subtract" => 'm', "Add" => 'k', "NumPadEnter" => 'M', _ => '\0' };
         if (key.Length == 7 && key.StartsWith("NumPad", StringComparison.Ordinal) && key[6] is >= '0' and <= '9')
             keypad = (char)('p' + key[6] - '0');
         if (keypad != 0)
         {
-            sequence = !keypadApplication ? [(byte)ManagedKittyKeyEncoder.PhysicalCodepoint(key)]
+            sequence = !keypadApplication ? [key == "NumPadEnter" ? (byte)13 : (byte)ManagedKittyKeyEncoder.PhysicalCodepoint(key)]
                 : mods == 0 ? [(byte)27, (byte)'O', (byte)keypad]
                 : Numeric("\u001bO"u8, modifier, null, (byte)keypad);
             return true;

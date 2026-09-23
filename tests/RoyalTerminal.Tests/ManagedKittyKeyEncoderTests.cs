@@ -14,7 +14,9 @@ public sealed class ManagedKittyKeyEncoderTests(ITestOutputHelper output)
     {
         foreach (string key in new[] { "A", "D1", "Space", "Oem2", "Return", "Back", "Tab", "Escape", "Up", "Home", "Insert", "Delete",
             "PageDown", "F1", "F2", "F3", "F4", "F5", "F12", "F13", "F24", "NumPad0", "NumPad9", "Decimal", "Divide", "Add",
-            "LeftShift", "RightShift", "LeftCtrl", "RightCtrl", "LeftAlt", "RightAlt", "LWin", "RWin", "CapsLock", "NumLock", "Scroll", "Pause" })
+            "LeftShift", "RightShift", "LeftCtrl", "RightCtrl", "LeftAlt", "RightAlt", "LWin", "RWin", "CapsLock", "NumLock", "Scroll", "Pause",
+            "ScrollLock", "NumPadEnter", "NumPadEqual", "Separator", "NumPadLeft", "NumPadRight", "NumPadUp", "NumPadDown",
+            "NumPadPageUp", "NumPadPageDown", "NumPadHome", "NumPadEnd", "NumPadInsert", "NumPadDelete", "NumPadBegin" })
             yield return [key];
     }
 
@@ -58,6 +60,9 @@ public sealed class ManagedKittyKeyEncoderTests(ITestOutputHelper output)
     [InlineData("Back", "IME", 0U)]
     [InlineData("LeftShift", "preedit", 0U)]
     [InlineData("A", null, 233U)]
+    [InlineData("NumPadEnter", "IME", 0U)]
+    [InlineData("NumPadEqual", "=", 0U)]
+    [InlineData("Separator", ",", 0U)]
     public void LayoutAlternatesConsumedModifiersAndCompositionMatchNative(string key, string? text, uint unshifted)
     {
         if (!GhosttyVtProcessor.IsAvailable()) return;
