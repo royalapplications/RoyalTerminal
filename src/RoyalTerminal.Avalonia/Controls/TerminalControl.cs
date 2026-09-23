@@ -5748,10 +5748,14 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _activeTransportId = options.TransportId;
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        void StartPasswordInputMonitoring()
         {
             if (sessionGeneration == _transportSessionGeneration) UpdatePasswordInputMonitoring();
-        });
+        }
+        // StartPty is intentionally synchronous. Transport startup can resume on
+        // a pool thread, so never await the UI thread that may be waiting for us.
+        if (Dispatcher.UIThread.CheckAccess()) StartPasswordInputMonitoring();
+        else Dispatcher.UIThread.Post(StartPasswordInputMonitoring);
     }
 
     private void PrepareTerminalForSessionStart(bool preserveScrollback)
