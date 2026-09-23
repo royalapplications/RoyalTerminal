@@ -28,6 +28,83 @@ namespace RoyalTerminal.Tests;
 
 public sealed class TerminalControlHeadlessInteractionTests
 {
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_PasswordModePollingUpdatesBothEnginesAndStopsWithFocusAndSession(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        PasswordModeTransport transport = new() { Detected = true };
+        PasswordStateProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, preference);
+        TextBox sibling = new();
+        StackPanel panel = new() { Children = { control, sibling } };
+        Window window = new() { Width = 640, Height = 400, Content = panel };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Assert.True(control.PasswordInput);
+            Assert.True(((ITerminalPasswordInputState)factory.Processor!).PasswordInput);
+            transport.Detected = false;
+            Assert.True(await WaitUntilAsync(() => !control.PasswordInput, TimeSpan.FromSeconds(3)));
+            Assert.False(((ITerminalPasswordInputState)factory.Processor!).PasswordInput);
+
+            sibling.Focus();
+            int polls = transport.Polls;
+            transport.Detected = true;
+            await Task.Delay(300);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(polls, transport.Polls);
+            Assert.False(control.PasswordInput);
+            control.Focus();
+            Assert.True(control.PasswordInput);
+
+            panel.Children.Remove(control);
+            polls = transport.Polls;
+            await Task.Delay(300);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(polls, transport.Polls);
+            panel.Children.Insert(0, control);
+            control.Focus();
+            transport.Available = false;
+            Assert.True(await WaitUntilAsync(() => !control.PasswordInput, TimeSpan.FromSeconds(3)));
+            transport.Available = true;
+            Assert.True(await WaitUntilAsync(() => control.PasswordInput, TimeSpan.FromSeconds(3)));
+            control.StopPty();
+            Assert.False(control.PasswordInput);
+            Assert.False(((ITerminalPasswordInputState)factory.Processor!).PasswordInput);
+            polls = transport.Polls;
+            await Task.Delay(300);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(polls, transport.Polls);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    private sealed class PasswordModeTransport : RecordingTransport, ITerminalPasswordInputSource
+    {
+        public bool SupportsPasswordInputDetection => true;
+        public bool Detected { get; set; }
+        public bool Available { get; set; } = true;
+        public int Polls { get; private set; }
+        public bool TryGetPasswordInput(out bool passwordInput)
+        {
+            Polls++;
+            passwordInput = Available && IsRunning && Detected;
+            return Available && IsRunning;
+        }
+    }
+
+    private sealed class PasswordStateProcessorFactory : IVtProcessorFactory
+    {
+        public IVtProcessor? Processor { get; private set; }
+        public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
+            => Processor = preference == VtProcessorPreference.Native ? new GhosttyVtProcessor(screen) : new BasicVtProcessor(screen);
+    }
+
     [AvaloniaFact]
     public async Task Headless_KittyRepeatStateClearsOnFocusLossDetachAndSessionRestart()
     {

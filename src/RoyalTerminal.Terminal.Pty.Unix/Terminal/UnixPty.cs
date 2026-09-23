@@ -19,9 +19,10 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
-public sealed class UnixPty : IPty, ITerminalOutputLeaseSource
+public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswordInputSource
 {
     private int _masterFd = -1;
+    private readonly object _descriptorSync = new();
     private int _childPid = -1;
     private readonly object _childProcessSync = new();
     private string? _slavePtyPath;
@@ -50,6 +51,20 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource
 
     /// <summary>The child process ID.</summary>
     public int ChildPid => _childPid;
+
+    /// <inheritdoc />
+    public bool SupportsPasswordInputDetection => true;
+
+    /// <inheritdoc />
+    public bool TryGetPasswordInput(out bool passwordInput)
+    {
+        lock (_descriptorSync)
+        {
+            passwordInput = false;
+            // Closing under the same lock prevents a probe reaching a recycled fd.
+            return IsRunning && UnixPtyInputMode.TryGetPasswordInput(_masterFd, out passwordInput);
+        }
+    }
 
     /// <summary>
     /// Spawns a shell process with a PTY.
@@ -526,10 +541,13 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource
             return;
         }
 
-        int fd = Interlocked.Exchange(ref _masterFd, -1);
-        if (fd >= 0)
+        lock (_descriptorSync)
         {
-            try { PosixClose(fd); } catch { }
+            int fd = Interlocked.Exchange(ref _masterFd, -1);
+            if (fd >= 0)
+            {
+                try { PosixClose(fd); } catch { }
+            }
         }
         _slavePtyPath = null;
 

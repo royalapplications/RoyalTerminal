@@ -42,7 +42,7 @@ namespace RoyalTerminal.Avalonia.Controls;
 /// - Focus management
 /// - Content scaling (DPI awareness)
 /// </summary>
-public class TerminalControl : TemplatedControl, ILogicalScrollable
+public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 {
     private const float RendererBackgroundOpacity = 0.82f;
     private const bool RendererBackgroundOpacityCells = true;
@@ -2164,11 +2164,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         EnsurePresenter();
         UpdateTimedRefreshTimer();
         UpdateTerminalMouseCursorOnUiThread();
+        UpdatePasswordInputMonitoring();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        _passwordInputTimer?.Stop();
         ResetKeyboardInputState();
         _terminalMouseCursorAttached = false;
         if (_terminalMouseCursors is { } cursors)
@@ -2517,6 +2519,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         endpoint.SetFocus(IsFocused);
+        UpdatePasswordInputMonitoring();
     }
 
     /// <summary>
@@ -2524,6 +2527,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void DetachEndpoint()
     {
+        StopPasswordInputMonitoring();
         TerminalSessionService.DetachEndpoint();
         _mouseModeTracker.Reset();
         ResetPointerButtons();
@@ -5008,6 +5012,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnGotFocus(FocusChangedEventArgs e)
     {
         base.OnGotFocus(e);
+        UpdatePasswordInputMonitoring();
         SuppressReservedAncestorKeyBindings();
         Endpoint?.SetFocus(true);
         SendFocusEventIfNeeded(focused: true);
@@ -5019,6 +5024,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
+        _passwordInputTimer?.Stop();
         ResetKeyboardInputState();
         RestoreReservedAncestorKeyBindings();
         _suppressNextScrollbackEscapeKeyUp = false;
@@ -5740,6 +5746,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _activeTransportId = options.TransportId;
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (sessionGeneration == _transportSessionGeneration) UpdatePasswordInputMonitoring();
+        });
     }
 
     private void PrepareTerminalForSessionStart(bool preserveScrollback)
@@ -5955,6 +5965,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             ResetPendingTransportOutputQueue();
             ResetKeyboardInputState();
             _activeTransportId = null;
+            StopPasswordInputMonitoring();
             _mouseModeTracker.Reset();
             ResetPointerButtons();
             StopMouseSelectionDrag();
@@ -6347,6 +6358,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             {
                 DisposeOutputWorker();
                 _activeTransportId = null;
+                StopPasswordInputMonitoring();
             }
             // Write exit message to screen
             string msg = $"\r\n[Process exited with code {exitCode}]\r\n";

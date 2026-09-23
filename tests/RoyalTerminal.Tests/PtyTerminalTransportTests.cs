@@ -10,6 +10,32 @@ namespace RoyalTerminal.Tests;
 public sealed class PtyTerminalTransportTests
 {
     [Fact]
+    public async Task PasswordInputDetectionFollowsPtyLifetimeAndCapability()
+    {
+        FakePty pty = new() { SupportsPasswordInputDetection = true, PasswordInput = true };
+        using PtyTerminalTransport transport = new(new FakePtyFactory(pty), new StaticShellProfileCatalog("/bin/sh"));
+        Assert.False(transport.SupportsPasswordInputDetection);
+        Assert.False(transport.TryGetPasswordInput(out bool detected));
+        Assert.False(detected);
+        await transport.StartAsync(new PtyTransportOptions(new TerminalCommandSpec("/bin/sh", []), null, null,
+            new TerminalSessionDimensions(80, 24, 640, 480)));
+        Assert.True(transport.SupportsPasswordInputDetection);
+        Assert.True(transport.TryGetPasswordInput(out detected));
+        Assert.True(detected);
+        pty.PasswordInput = false;
+        Assert.True(transport.TryGetPasswordInput(out detected));
+        Assert.False(detected);
+        pty.SupportsPasswordInputDetection = false;
+        Assert.False(transport.SupportsPasswordInputDetection);
+        Assert.False(transport.TryGetPasswordInput(out detected));
+        Assert.False(detected);
+        await transport.StopAsync();
+        Assert.False(transport.SupportsPasswordInputDetection);
+        Assert.False(transport.TryGetPasswordInput(out detected));
+        Assert.False(detected);
+    }
+
+    [Fact]
     public async Task StartAsync_UsesCommandFileName_WhenProvided()
     {
         FakePty pty = new();
@@ -198,8 +224,15 @@ public sealed class PtyTerminalTransportTests
         }
     }
 
-    private sealed class FakePty : IPty
+    private sealed class FakePty : IPty, ITerminalPasswordInputSource
     {
+        public bool SupportsPasswordInputDetection { get; set; }
+        public bool PasswordInput { get; set; }
+        public bool TryGetPasswordInput(out bool passwordInput)
+        {
+            passwordInput = SupportsPasswordInputDetection && IsRunning && PasswordInput;
+            return SupportsPasswordInputDetection && IsRunning;
+        }
         public event Action<byte[], int>? DataReceived;
         public event Action<int>? ProcessExited;
 

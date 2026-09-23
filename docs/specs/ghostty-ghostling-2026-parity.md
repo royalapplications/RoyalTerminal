@@ -2,6 +2,27 @@
 
 ## Reopened completion audit
 
+### Live Unix password-input detection (2026-09-23)
+
+Unix PTYs now expose a thread-safe optional input-mode source. `tcgetattr` reads
+the supported Darwin/Linux x64/arm64 ABI without heap allocation, and descriptor
+closure shares its probe lock so a recycled fd cannot be queried. PTY transports
+forward the capability; unsupported sources do not acquire a polling timer.
+The control polls at Ghostty's 200 ms cadence only while focused and attached,
+queries outside the processor lock, then updates both engine implementations under
+the screen's demand lock. A read-only control property exposes the hint to hosts.
+Focus gain refreshes immediately; focus loss/detach stop polling; stop/exit clear
+the hint. Failure/unavailable probes resolve to false, not a stale password hint.
+
+Reference decision: Ghostty `termio/Exec.zig::termiosTimer/focusGained` and
+`pty.zig::getMode` use `ICANON && !ECHO`; raw no-echo mode is not password input.
+Windows Terminal's ConPTY path and xterm.js's browser core do not expose the same
+Unix termios capability. No Windows password detection or text-based guessing is
+introduced. This is metadata detection, **not** macOS secure-input activation or
+the renderer lock glyph; those remain separate completion items. Seven Unix
+ABI/lifetime/allocation cases, one transport-capability case and two real-engine
+headless focus/session cases are added; validation follows commit/push.
+
 ### Native allocation model and key registry follow-up (2026-09-23)
 
 The native snapshot allocation model now accounts for runtime standard pages,

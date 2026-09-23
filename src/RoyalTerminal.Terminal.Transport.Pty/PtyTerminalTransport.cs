@@ -7,7 +7,7 @@ namespace RoyalTerminal.Terminal.Transport.Pty;
 /// <summary>
 /// Terminal transport that wraps an <see cref="IPty"/> instance.
 /// </summary>
-public sealed class PtyTerminalTransport : ITerminalPtyTransport, ITerminalOutputLeaseSource
+public sealed class PtyTerminalTransport : ITerminalPtyTransport, ITerminalOutputLeaseSource, ITerminalPasswordInputSource
 {
     private readonly IPtyFactory _ptyFactory;
     private readonly IShellProfileCatalog _shellProfileCatalog;
@@ -50,6 +50,17 @@ public sealed class PtyTerminalTransport : ITerminalPtyTransport, ITerminalOutpu
 
     /// <inheritdoc />
     public IPty Pty => _pty ?? throw new InvalidOperationException("PTY transport is not running.");
+
+    /// <inheritdoc />
+    public bool SupportsPasswordInputDetection =>
+        (_pty as ITerminalPasswordInputSource)?.SupportsPasswordInputDetection == true;
+
+    /// <inheritdoc />
+    public bool TryGetPasswordInput(out bool passwordInput)
+    {
+        passwordInput = false;
+        return _pty is ITerminalPasswordInputSource source && source.TryGetPasswordInput(out passwordInput);
+    }
 
     /// <inheritdoc />
     public ValueTask StartAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
