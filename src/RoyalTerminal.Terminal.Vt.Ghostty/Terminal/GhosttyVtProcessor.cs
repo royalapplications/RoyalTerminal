@@ -772,7 +772,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         TerminalModeState before = ModeState;
         ResetSessionInputState();
         bool wasAlternateScreenSave = _terminal.GetMode(GhosttyVtNative.ModeAltScreenSave);
-        bool wasAlternateScreen = IsNativeAlternateScreenActive(wasAlternateScreenSave);
+        bool wasAlternateScreen = _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate;
 
         if (wasAlternateScreen)
         {
@@ -804,14 +804,6 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         RefreshStateAndScreenFromNative();
         SyncSixelOverlayRasterGraphics();
         RaiseModeChangedIfNeeded(before);
-    }
-
-    private bool IsNativeAlternateScreenActive(bool altScreenSave)
-    {
-        return _alternateScreen ||
-            _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate ||
-            _terminal.GetMode(GhosttyVtNative.ModeAltScreen) ||
-            altScreenSave;
     }
 
     private static byte[] BuildAlternateScreenRestartResetSequence(int cursorRow, int cursorColumn)
@@ -1593,10 +1585,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _applicationCursorKeys = _terminal.GetMode(GhosttyVtNative.ModeDecckm);
         _applicationKeypad = _terminal.GetMode(GhosttyVtNative.ModeKeypadKeys);
         _backarrowKeyMode = _terminal.GetMode(GhosttyVtNative.ModeBackarrowKeyMode);
-        _alternateScreen =
-            _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate ||
-            _terminal.GetMode(GhosttyVtNative.ModeAltScreen) ||
-            _terminal.GetMode(GhosttyVtNative.ModeAltScreenSave);
+        // DEC 47/1047/1049 are independent saved protocol bits, not a
+        // substitute for the actual active-screen key after mixed switches.
+        _alternateScreen = _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate;
         _bracketedPaste = _terminal.GetMode(GhosttyVtNative.ModeBracketedPaste);
         _mouseReportingEnabled = _terminal.GetMouseTracking();
         _focusEventMode = _terminal.GetMode(GhosttyVtNative.ModeFocusEvent);
