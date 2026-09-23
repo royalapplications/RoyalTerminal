@@ -35,6 +35,14 @@ xterm.js's unhandled browser fallback is retained only for non-authoritative
 sources. Four new real-engine adapter cases cover direct/proxied suppression,
 IME Back, releases and separate committed text; validation follows commit/push.
 
+The Avalonia byte-input adapter now preserves physical keypad Enter/Equal and
+NumLock-off navigation identities for both down and up, including repeats.
+Ghostty GTK's KP key map and Windows Terminal's separate keypad Return handling
+establish the distinction; xterm.js and Ghostling's simpler logical-key adapters
+do not provide the complete Kitty keypad identity. Fifteen adapter cases exercise
+both engines, NumLock on/off, ordinary Enter, and application-keypad Enter. This
+does not infer layout-derived unshifted scalars or consumed modifiers.
+
 Windows ARM64 CI runs 35901210398 and 35902114973 fail before compilation with a
 missing cached Zig build.exe. CI and release Windows jobs now disable restored
 Zig build caches while leaving compiler installation unchanged. This is a cache

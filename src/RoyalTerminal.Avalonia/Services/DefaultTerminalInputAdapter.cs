@@ -283,7 +283,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
             return null;
         if (!nativeEncoder.TryEncodeKey(
                 new TerminalKeyEncodingRequest(
-                    e.Key.ToString(),
+                    TerminalKeyEncodingIdentity.Get(e),
                     action,
                     text,
                     ConvertTerminalModifiers(e.KeyModifiers)),

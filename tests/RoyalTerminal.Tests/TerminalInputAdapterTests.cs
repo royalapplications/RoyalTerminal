@@ -13,6 +13,57 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalInputAdapterTests
 {
     [Theory]
+    [InlineData(PhysicalKey.NumPadEnter, Key.Enter, 57414)]
+    [InlineData(PhysicalKey.NumPadEqual, Key.OemPlus, 57415)]
+    [InlineData(PhysicalKey.NumPad0, Key.Insert, 57425)]
+    [InlineData(PhysicalKey.NumPad1, Key.End, 57424)]
+    [InlineData(PhysicalKey.NumPad2, Key.Down, 57420)]
+    [InlineData(PhysicalKey.NumPad3, Key.PageDown, 57422)]
+    [InlineData(PhysicalKey.NumPad4, Key.Left, 57417)]
+    [InlineData(PhysicalKey.NumPad5, Key.Clear, 57427)]
+    [InlineData(PhysicalKey.NumPad6, Key.Right, 57418)]
+    [InlineData(PhysicalKey.NumPad7, Key.Home, 57423)]
+    [InlineData(PhysicalKey.NumPad8, Key.Up, 57419)]
+    [InlineData(PhysicalKey.NumPad9, Key.PageUp, 57421)]
+    [InlineData(PhysicalKey.NumPadDecimal, Key.Delete, 57426)]
+    [InlineData(PhysicalKey.NumPad0, Key.NumPad0, 57399)]
+    [InlineData(PhysicalKey.Enter, Key.Enter, 13)]
+    public async Task PhysicalKeypadIdentityReachesBothEngines(PhysicalKey physical, Key logical, int code)
+    {
+        foreach (bool native in new[] { false, true })
+        {
+            if (native && !GhosttyVtProcessor.IsAvailable()) continue;
+            using IVtProcessor processor = native ? new GhosttyVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3)) :
+                new BasicVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3));
+            DefaultTerminalInputAdapter adapter = new();
+            TerminalSessionService session = new();
+            FakeTransport transport = new();
+            Action<byte[], int> onData = (_, _) => { };
+            Action<int> onExit = _ => { };
+            await session.StartSessionAsync(new StaticTransportFactory(transport), new FakeTransportOptions(TerminalTransportIds.Pipe),
+                processor, onData, onExit, _ => { }, () => { }, _ => { });
+            try
+            {
+                processor.Process("\u001b[=11u"u8);
+                KeyEventArgs args = new() { Key = logical, PhysicalKey = physical };
+                Assert.True(adapter.HandleKeyDown(args, session, processor));
+                Assert.Equal($"\u001b[{code}u", Encoding.UTF8.GetString(transport.LastInput!));
+                Assert.True(adapter.HandleKeyDown(args, session, processor));
+                Assert.Equal($"\u001b[{code};1:2u", Encoding.UTF8.GetString(transport.LastInput!));
+                Assert.True(adapter.HandleKeyUp(args, session));
+                Assert.Equal($"\u001b[{code};1:3u", Encoding.UTF8.GetString(transport.LastInput!));
+                if (physical == PhysicalKey.NumPadEnter)
+                {
+                    processor.Process("\u001b[=0u\u001b[?1035l\u001b[?66h"u8);
+                    Assert.True(adapter.HandleKeyDown(args, session, processor));
+                    Assert.Equal("\u001bOM", Encoding.UTF8.GetString(transport.LastInput!));
+                }
+            }
+            finally { await session.StopSessionAsync(processor, onData, onExit); }
+        }
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]
