@@ -4,7 +4,7 @@ Status: **incomplete**. The implemented framing, metadata and continuation piece
 do not yet constitute an import/export API for a managed terminal.
 
 The compatibility target is Ghostty's version 1 `GHOSTSNP` wire format at
-`22391ed6491f`, rather than a separate RoyalTerminal-only dump. Upstream
+`4ae9f1a2de5484de3d6a13fe03676b8853b9c41c`, rather than a separate RoyalTerminal-only dump. Upstream
 `src/terminal/snapshot/main.zig` and the per-record codecs are the authoritative
 format definitions. Windows Terminal and xterm.js do not offer this same wire
 contract; their screen/serialization mechanisms are not interchangeable codecs.
@@ -25,6 +25,19 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
 - Managed parser ground checks, bounded continuation capture, streaming export
   and processing through the next ground boundary. The export cap defaults to
   64 KiB, independently of OSC/clipboard limits.
+- Complete PAGE/grid payloads: four compact cell widths, canonical trailing zero
+  elision, wide-pair/scalar/semantic normalization, bounded UTF-32 suffixes,
+  first-entry-wins style/hyperlink tables and reference resolution. Capacity hints
+  are metadata, not allocation requests. Golden and native round trips cover both
+  screens and styled history; streaming re-encoding allocates zero bytes when warm.
+- Complete TERMINAL payloads: all 103 header bytes, current/saved/default modes,
+  per-axis margin normalization, screen routing, input/cursor policies, dynamic
+  colors, source scrollback policies, tab bits, original/sparse override palettes,
+  and arbitrary-byte PWD/title. Strings have an aggregate byte limit checked before
+  copying; dimensions are bounded before constructing state. Reserved values use
+  upstream defaults, including optional booleans and absent colors. Golden bytes,
+  truncations, limits, native installation and malformed semantic headers have
+  focused coverage. Warm streaming re-encoding allocates zero bytes.
 
 Tests read the pinned upstream golden fixtures and check every truncation boundary,
 malformed fields, byte-for-byte re-encoding and allocation-free borrowed reads.
@@ -57,20 +70,18 @@ boundary while keeping presentation URL access convenient.
 
 ## Remaining codec and integration order
 
-1. PAGE/grid codecs: dimension and allocation limits, first-entry-wins table
-   semantics, reference remapping, four compact cell widths, canonical trailing
-   zero elision, malformed wide-pair normalization, and bounded suffix decoding.
-2. SCREEN/current and saved cursor state, pen, charsets, mouse/keyboard state and
-   both primary/alternate grids; TERMINAL modes, tab stops, theme overrides,
-   dimensions, title/PWD and remaining format-defined terminal state.
-3. Complete snapshot encoder/decoder with strict record ordering. READY exposes
+1. SCREEN/current and saved cursor state, pen, charsets, keyboard stack and both
+   primary/alternate grids. PAGE/grid and TERMINAL decoding/re-encoding are now
+   implemented; constructing those semantic records from live managed state still
+   belongs to the adapter, rather than replaying their original bytes.
+2. Complete snapshot encoder/decoder with strict record ordering. READY exposes
    a usable terminal before optional HISTORY, whose pages arrive newest first.
    Incremental history ingestion must remain safe if live input, reset or resize
    occurs after READY, matching upstream's reconciliation rules.
-4. Managed processor adapter and public ownership/error contracts. A partial
+3. Managed processor adapter and public ownership/error contracts. A partial
    decode must not overwrite the caller's existing terminal on failure. Parser
    continuation must resume byte-for-byte across UTF-8 and control-string splits.
-5. Native-to-managed and managed-to-native differential tests, including every
+4. Native-to-managed and managed-to-native differential tests, including every
    upstream complete fixture, both screens, history, pending wrap, saved cursors,
    palette/RGB identity, malformed inputs and streaming IO failures. Benchmark
    sparse/plain/styled/grapheme-heavy histories separately from renderer work.

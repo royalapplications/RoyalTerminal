@@ -548,11 +548,34 @@ and cursor state. The containing terminal/screen/history records are passed
 through in this test: this is evidence for PAGE interoperability, **not** proof
 that BasicVtProcessor can yet restore the full binary snapshot.
 
-Reference choice: Ghostty's snapshot `grid.zig` and `page.zig` define the format.
+`GhosttySnapshotTerminalHeader` and `GhosttySnapshotTerminalState` now decode and
+re-encode the complete TERMINAL payload: geometry/pixel dimensions, per-axis
+margins, routing, previous codepoint, cursor/mouse/input policies, all three
+43-bit mode sets, optional dynamic colors, scrollback policies, packed tab stops,
+original palette plus sparse overrides, and arbitrary-byte PWD/title. Invalid
+semantic fields normalize exactly as upstream; structural dimensions/screen
+counts fail. Source policies never determine allocation, and the combined string
+limit is checked before copying. Unused tab bits and reserved mode bits are
+cleared; present black, absent color, finite zero and unlimited remain distinct.
+
+Evidence: the upstream header and complete golden fixtures round-trip exactly;
+every payload/header truncation, trailing bytes, sparse palette boundaries and
+configured resource limits are checked. Native snapshots with custom palettes,
+tabs, margins, saved modes and either active screen retain every terminal-wide
+field after managed rewriting and native restoration. One hundred deterministic
+malformed semantic headers produce identical native terminal state whether
+decoded directly or normalized first by managed code. Warm streaming writes
+allocate zero bytes. All **56 snapshot tests pass** (`snapshot-terminal-all.trx`),
+with native available on macOS arm64. SCREEN/PAGE/history records in these new
+terminal tests are passed through; this does not prove managed installation.
+The full follow-up macOS suite passed **1,939 tests, 16 conditional skips, zero
+failures (1,955 total)** in `snapshot-terminal-full.trx`.
+
+Reference choice: Ghostty's snapshot `grid.zig`, `page.zig` and `terminal.zig` define the format.
 Windows Terminal `TextBuffer::SerializeTo` and xterm.js's serialize addon emit VT
 text; neither is an interchangeable binary-state format. Remaining implementation
-is explicit: terminal metadata/palette/modes, screen cursors/charsets/saved state,
-conversion/installation into both managed screens, and incremental READY/history
+is explicit: screen cursors/charsets/saved state, constructing semantic records
+from live managed state, conversion/installation into both managed screens, and incremental READY/history
 coordination with parser continuation. The public managed binary restore path
 remains unavailable until those layers are complete and validated.
 
@@ -564,6 +587,12 @@ for the preceding `a4375d0` commit separately passed the macOS and Ubuntu build,
 unit-batch and startup-smoke jobs and all six native build variants. That is
 evidence for the preceding launcher/margin work, not the newly added codecs;
 Windows and later workflow stages were not yet confirmed complete at inspection.
+
+Follow-up CI run
+[`35835433632`](https://github.com/royalapplications/RoyalTerminal/actions/runs/35835433632)
+at `28f71ac` passed Ubuntu build/unit/startup smoke and all six native builds;
+macOS/Windows build-test jobs were still pending at inspection. These results
+cover the PAGE/grid commit, not the subsequent TERMINAL codec work.
 
 Ghostty's background search thread is part of the full Ghostty application, not the
 `libghostty-vt` C search iterator. RoyalTerminal keeps search orchestration in its
