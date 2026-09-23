@@ -38,6 +38,9 @@ internal static class ManagedModifyOtherKeysEncoder
                 Rune.DecodeFromUtf16(request.Text, out Rune rune, out int consumed) != OperationStatus.Done ||
                 consumed != request.Text.Length) return false;
             codepoint = rune.Value;
+            // Unlike PC-style special keys, printable mode-2 keys use only
+            // modifiers not consumed by the keyboard layout to produce text.
+            mods &= ~request.ConsumedModifiers;
             // The C encoder's default macOS policy treats Option as text input.
             if (OperatingSystem.IsMacOS()) mods &= ~TerminalModifiers.Alt;
             if (mods == TerminalModifiers.None) return false;

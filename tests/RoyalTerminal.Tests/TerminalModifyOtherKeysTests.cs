@@ -128,6 +128,29 @@ public sealed class TerminalModifyOtherKeysTests(ITestOutputHelper output)
         Assert.Equal("\u001b[27;5;97~", Encoding.ASCII.GetString(bytes));
     }
 
+    [Fact]
+    public void ModeTwoPrintableKeysUseUnconsumedModifiersButSpecialKeysUseAllModifiers()
+    {
+        if (!Available()) return;
+        using BasicVtProcessor managed = new(new TerminalScreen(8, 3));
+        using GhosttyVtProcessor native = new(new TerminalScreen(8, 3));
+        managed.Process("\u001b[>4;2m"u8); native.Process("\u001b[>4;2m"u8);
+        foreach (string key in new[] { "A", "Return", "Tab", "Back" })
+        for (int mods = 0; mods < 16; mods++)
+        for (int consumed = 0; consumed < 16; consumed++)
+        {
+            TerminalKeyEncodingRequest request = new(key, TerminalInputAction.Repeat, key == "A" ? "A" : null,
+                (TerminalModifiers)mods, ConsumedModifiers: (TerminalModifiers)consumed);
+            if (managed.TryEncodeKey(request, out byte[] actual))
+            {
+                Assert.True(native.TryEncodeKey(request, out byte[] expected));
+                Assert.Equal(expected, actual);
+            }
+        }
+        Assert.False(managed.TryEncodeKey(new("A", TerminalInputAction.Press, "A", TerminalModifiers.Shift,
+            ConsumedModifiers: TerminalModifiers.Shift), out _));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

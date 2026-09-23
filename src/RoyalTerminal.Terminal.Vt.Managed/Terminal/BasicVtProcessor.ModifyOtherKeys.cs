@@ -12,7 +12,8 @@ public sealed partial class BasicVtProcessor
     public bool TryEncodeKey(in TerminalKeyEncodingRequest request, out byte[] sequence)
     {
         sequence = [];
-        if (request.Action is not (TerminalInputAction.Press or TerminalInputAction.Repeat or TerminalInputAction.Release) ||
+        if (string.IsNullOrEmpty(request.KeyId) ||
+            request.Action is not (TerminalInputAction.Press or TerminalInputAction.Repeat or TerminalInputAction.Release) ||
             request.UnshiftedCodepoint != 0 && !System.Text.Rune.IsValid(request.UnshiftedCodepoint)) return false;
         // Kitty takes precedence over the legacy extension.
         if (KittyKeyboardFlags != 0) return ManagedKittyKeyEncoder.TryEncode(request, KittyKeyboardFlags, out sequence);

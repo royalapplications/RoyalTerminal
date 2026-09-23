@@ -4,7 +4,7 @@
 
 ### Public restore, Kitty encoding and pointer lifecycle (2026-09-23)
 
-Implementation batch, validation pending at its first push:
+Implemented and pushed before validation, then corrected against the native oracle:
 
 - `ManagedTerminalSnapshot.Restore` provides transactional memory/stream restore;
   `ManagedTerminalSnapshotDecoder.Ready/Next` publishes resident state before
@@ -50,6 +50,23 @@ host selection coordinates remain distinct from encoded terminal coordinates.
 No throughput improvements are claimed for these correctness/API additions.
 Full rendering/performance review, managed binary export/native quota parity,
 remaining input/OS integration and platform runtime gates are still open.
+
+Post-push full Release through `a3565d8`: **3,695 unit/headless + 231 integration
+tests passed, 16 conditional skips, zero failures** (`restore-kitty-full2.trx`).
+This adds **72 cases**, including 38-key Kitty matrices spanning all 31 flag values,
+64 modifier combinations and three actions, plus layout/IME differentials. Native
+is available on macOS arm64; both native libraries rebuild successfully at latest
+verified upstream `622b4eecd7d2ce1a10930537c17f0d61abdba817`. The two new upstream
+commits after `4ae9f1a2d` only update contributor lists; Ghostling remains
+`63842bf8e5e481160f81d348da9ff6fd27986798`.
+
+Initial validation found a ref-struct span capture compile error, missing keypad
+base-layout alternates, two test setup errors (same clamped motion cell and the
+fixture's inactive primary history), and two old UI assertions expecting clamped
+outside coordinates. Those are corrected; the raw SGR-pixel assertion now runs
+through both backends. The final full run passes without excluding those tests.
+Cross-platform CI at `35897093967` was queued at inspection; earlier superseded
+runs were cancelled, not successful platform sign-off.
 
 ### OSC 22 pointer shape (2026-09-23)
 
