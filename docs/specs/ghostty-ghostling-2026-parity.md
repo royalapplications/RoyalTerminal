@@ -133,7 +133,7 @@ IDs rather than treating the URL alone as a link identity.
 
 Still open: full live managed snapshot installation/export and incremental
 READY/history reconciliation; prompt click/navigation/selection host consumers;
-inactive-screen resize; formatter and
+broader simultaneous-axis/standalone-notification resize coverage; formatter and
 remaining graphics/protocol edges; the complete renderer/per-change performance
 audit and third-IO-worker platform/lifecycle sign-off. Local native rebuild and
 focused/full tests have passed; fresh platform CI is still required.
@@ -171,7 +171,8 @@ pending wrap, wide tails, blank pins, history and the active alternate screen;
 all 17 saved-cursor cases pass with native available. The full unit/headless
 suite on `9adaaa9` passes **2,415 / 16 conditional skips / zero failures**
 (`saved-cursor-full.trx`). The Release benchmark project builds with zero warnings
-and errors. Inactive-screen resize remains a separate open item.
+and errors. The following inactive-buffer section supersedes the earlier
+inactive-screen gap; broader resize-policy coverage remains part of the audit.
 
 The differential also exposed two adjacent discrepancies now corrected:
 ordinary blank pins clamp against the reflow cursor before its deferred newline
@@ -197,7 +198,7 @@ part of the outstanding performance audit.
 
 ### Current/saved charsets and cursor state (2026-09-23)
 
-Inactive-buffer resize implementation is now under validation. The managed
+Inactive-buffer resize is implemented and locally validated. The managed
 processor resizes primary first and alternate second, without publishing a
 temporary screen switch. A stack-only scope reuses the existing screen resize,
 tracked-anchor and raster machinery while preserving active geometry/buffer
@@ -207,9 +208,36 @@ Primary prompt redraw also runs while that screen is hidden. Ghostty
 `Terminal.resize`/`Screen.resize` define this policy; xterm.js `BufferSet.resize`
 also resizes both buffers, whereas Windows Terminal `PageManager::_getBuffer`
 lazily normalizes inactive pages without reflow. RoyalTerminal intentionally
-follows Ghostty. New differential tests switch back into both buffers after
-resizing and compare contents, cursor, wrap/prompt markers and pens. This section
-records implementation intent; post-push validation is required before closure.
+follows Ghostty. Differential tests switch back into both buffers after resizing
+and compare contents, cursor, wrap/prompt markers and pens, including held output.
+
+Height shrink retires unpinned text-free bottom rows before creating history,
+using remapped pin coordinates after column reflow. A no-scrollback alternate
+buffer retains the remaining bottom active rows and resets offscreen saved pins;
+it no longer unconditionally retains the top rows. No-reflow shrinking discards
+truncated columns, including dormant alternate content; the explicit Windows
+PTY mirror preservation path remains separate. Native comparisons cover both
+engines' no-reflow control behavior and active/dormant alternate height changes.
+
+`BasicVtProcessorOptions.ResizePullScrollback` exposes the previously implicit
+policy. Its default matches `GhosttyVtProcessor.ConfigureOptionalNativeFeatures`:
+true on Windows and false elsewhere, unlike standalone lib-VT's true default.
+The false policy tracks the old active-area top and pads the bottom as needed,
+so history is not silently pulled into the viewport during a widen/grow cycle.
+The existing tests that intentionally exercise history pulling now request it
+explicitly; both option values have a dedicated test. Height-only resizes retain
+custom tab stops, while column changes recreate defaults. Pixel-only resizes
+update metrics and end synchronized output without resetting grid state.
+
+All **23 new resize tests** and the complete unit/headless suite pass on macOS:
+**2,439 passed / 16 conditional skips / zero failures / 2,455 total** at
+`a19bcd9` (`inactive-resize-full2.trx`). The preceding focused native differential
+run passed 68 tests. A warmed 1,000-iteration buffer-context test allocates zero
+bytes and preserves row identity: the scope does not copy the dormant screen.
+Actual resizing necessarily processes both existing buffers; this is a parity
+correction, not a claim of lower end-to-end resize time. Fresh platform CI remains
+pending. Broader simultaneous-axis cases, pull-enabled history differentials and
+legacy standalone `NotifyResize` coverage remain in the full resize audit.
 
 `ManagedCharsetState` replaces two line-drawing booleans with all four G0–G3
 designations, GL/GR and a pending single shift in the SCREEN-compatible compact

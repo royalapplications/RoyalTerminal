@@ -124,7 +124,8 @@ metadata, including owned history snapshots. The adapter must still map these
 live values to/from SCREEN/PAGE. Wrap-continuation storage, prompt-seen/click
 policy, managed redraw behavior and blank-cursor/trailing-blank reflow corrections
 are now implemented and pass native differential and full-suite validation.
-Host click/navigation/selection consumers and inactive-screen resize remain open.
+Host click/navigation/selection consumers remain open. Both existing buffers now
+participate in processor-owned resize, with native differential coverage.
 A complete adapter must implement and test
 these runtime semantics, not merely deserialize values silently dropped later.
 Wide spacer-head
@@ -148,8 +149,10 @@ origin and full charset state. Default restoration, current hyperlink preservati
 CSI save/restore aliases and current-theme color resolution have native tests.
 Active-screen resize temporarily tracks the saved cell, remaps its coordinates
 and pending-wrap state, and preserves the rest of the saved pen. Deferred-wrap
-blank-pin clamping follows native PageList behavior. Inactive-screen resize is
-still separate work; this is not a claim that both dormant screens reflow yet.
+blank-pin clamping follows native PageList behavior. Dormant primary state now
+reflows before the alternate is resized without reflow, preserving screen-owned
+anchors and remapping each screen's current/saved cursors. Native comparisons
+cover return to either buffer after width/height changes and held-output release.
 The adapter still must construct/install these values from wire records; this
 runtime prerequisite does not itself expose managed snapshot restore.
 
