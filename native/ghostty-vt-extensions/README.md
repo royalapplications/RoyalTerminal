@@ -57,8 +57,11 @@ The first five were reproduced through the native C API before correction and
 have focused tests. No public upstream issue is claimed. Reassess and
 remove an overlay when its upstream fix is incorporated.
 
-The nine additional C exports are declared in
+The ten additional C exports are declared in
 `include/royalterminal_ghostty_vt.h`:
+
+- `ghostty_royal_modify_other_keys_2` copies the live legacy keyboard extension
+  flag for host input routing, including synchronized-output holds and snapshots.
 
 - `ghostty_royal_mouse_shift_capture_set` sets or clears the nullable application
   Shift capture override without replaying terminal input.

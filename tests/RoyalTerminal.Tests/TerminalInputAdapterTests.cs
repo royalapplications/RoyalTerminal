@@ -12,6 +12,40 @@ namespace RoyalTerminal.Tests;
 
 public sealed class TerminalInputAdapterTests
 {
+    [Theory]
+    [InlineData(false, Key.A, "A", KeyModifiers.Shift, "\u001b[27;2;65~")]
+    [InlineData(true, Key.A, "A", KeyModifiers.Shift, "\u001b[27;2;65~")]
+    [InlineData(false, Key.C, "c", KeyModifiers.Control, "\u001b[27;5;99~")]
+    [InlineData(true, Key.C, "c", KeyModifiers.Control, "\u001b[27;5;99~")]
+    [InlineData(false, Key.Space, " ", KeyModifiers.Shift, "\u001b[27;2;32~")]
+    [InlineData(true, Key.Space, " ", KeyModifiers.Shift, "\u001b[27;2;32~")]
+    [InlineData(false, Key.Tab, null, KeyModifiers.Shift, "\u001b[27;2;9~")]
+    [InlineData(true, Key.Tab, null, KeyModifiers.Shift, "\u001b[27;2;9~")]
+    public async Task ModifyOtherKeysRoutesThroughLiveSessionState(bool native, Key key, string? text, KeyModifiers modifiers, string expected)
+    {
+        if (native && !GhosttyVtProcessor.IsAvailable()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3)) :
+            new BasicVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3));
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService session = new();
+        FakeTransport transport = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+        await session.StartSessionAsync(new StaticTransportFactory(transport), new FakeTransportOptions(TerminalTransportIds.Pipe),
+            processor, onData, onExit, _ => { }, () => { }, _ => { });
+        try
+        {
+            processor.Process("\u001b[>4;2m"u8);
+            Assert.True(Assert.IsAssignableFrom<ITerminalModifyOtherKeysStateSource>(session.ModeSource).ModifyOtherKeys2);
+            KeyEventArgs args = new() { Key = key, KeySymbol = text, KeyModifiers = modifiers };
+            Assert.True(adapter.HandleKeyDown(args, session, vtProcessor: null));
+            Assert.Equal(expected, Encoding.UTF8.GetString(transport.LastInput!));
+            processor.Process("\u001b[>m"u8);
+            Assert.False(((ITerminalModifyOtherKeysStateSource)session.ModeSource!).ModifyOtherKeys2);
+        }
+        finally { await session.StopSessionAsync(processor, onData, onExit); }
+    }
+
     [Fact]
     public void HandleKeyDown_ReturnsInputSinkAcceptance()
     {

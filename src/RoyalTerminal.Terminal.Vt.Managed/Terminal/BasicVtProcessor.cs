@@ -41,6 +41,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseModeStateSource,
     ITerminalMouseShiftCaptureState,
+    ITerminalModifyOtherKeysStateSource,
+    ITerminalKeySequenceEncoderSource,
     ITerminalPointerButtonStateSink,
     ITerminalSixelOptionsSink,
     ITerminalEraseDisplayOptionsSink,
@@ -3796,6 +3798,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             {
                 MouseShiftCaptureOverride = p0 == 1;
             }
+            else if (finalByte is 'm' or 'n')
+            {
+                SetModifyKeyFormat(finalByte);
+            }
             return;
         }
 
@@ -5268,6 +5274,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _title.Set([]);
         _workingDirectory.Set([]);
         MouseShiftCaptureOverride = null;
+        ModifyOtherKeys2 = false;
         _params.Clear();
         _currentParam = 0;
         _hasParam = false;

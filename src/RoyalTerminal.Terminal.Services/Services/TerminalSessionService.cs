@@ -417,6 +417,7 @@ public sealed class TerminalSessionService : ITerminalSessionService, ITerminalO
 
     private sealed class VtProcessorModeSource : ITerminalModeSource,
         IKittyKeyboardStateSource,
+        ITerminalModifyOtherKeysStateSource,
         ITerminalKeySequenceEncoderSource,
         ITerminalMouseReportingStateSource,
         IDisposable
@@ -435,6 +436,8 @@ public sealed class TerminalSessionService : ITerminalSessionService, ITerminalO
         public int KittyKeyboardFlags => _vtProcessor is IKittyKeyboardStateSource kitty
             ? kitty.KittyKeyboardFlags
             : 0;
+
+        public bool ModifyOtherKeys2 => _vtProcessor is ITerminalModifyOtherKeysStateSource { ModifyOtherKeys2: true };
 
         public bool MouseReportingEnabled => _vtProcessor is ITerminalMouseReportingStateSource mouse
             ? mouse.MouseReportingEnabled

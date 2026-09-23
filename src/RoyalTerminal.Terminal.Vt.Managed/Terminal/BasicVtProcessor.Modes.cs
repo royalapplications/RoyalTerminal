@@ -39,6 +39,7 @@ public sealed partial class BasicVtProcessor
         // managed enums. Neither field is derived from the restored mode bank.
         _mouseModeState = new((TerminalMouseTrackingMode)header.MouseEvent, (TerminalMouseEncoding)header.MouseFormat);
         MouseShiftCaptureOverride = header.MouseShiftCapture;
+        ModifyOtherKeys2 = header.ModifyOtherKeys2;
     }
 
     /// <inheritdoc />

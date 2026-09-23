@@ -76,7 +76,10 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter
                 return true;
             }
 
-            if (!ShouldPreferTextInputForKeyDown(e, modeState, kittyKeyboardFlags) &&
+            bool modifyOtherKeys2 = (vtProcessor as ITerminalModifyOtherKeysStateSource ??
+                sessionService.ModeSource as ITerminalModifyOtherKeysStateSource)?.ModifyOtherKeys2 == true;
+            if ((!ShouldPreferTextInputForKeyDown(e, modeState, kittyKeyboardFlags) ||
+                 (modifyOtherKeys2 && e.KeyModifiers != KeyModifiers.None)) &&
                 TrySendNativeKeySequence(
                     e,
                     sessionService,

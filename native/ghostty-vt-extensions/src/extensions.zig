@@ -7,6 +7,16 @@ const RoyalMouseState = extern struct {
     shift_capture: u32 = 0,
 };
 
+export fn ghostty_royal_modify_other_keys_2(
+    handle: @import("terminal/c/terminal.zig").Terminal,
+    output: ?*u8,
+) callconv(.c) c_int {
+    const result = output orelse return -2;
+    const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
+    result.* = @intFromBool(t.flags.modify_other_keys_2);
+    return 0;
+}
+
 // These are the same effective flags consumed by mouse_encode.setopt_from_terminal,
 // not the independent DEC mode bits (which can disagree after mixed resets).
 export fn ghostty_royal_mouse_state(

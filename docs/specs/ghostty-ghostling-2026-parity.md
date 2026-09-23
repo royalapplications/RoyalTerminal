@@ -2,6 +2,32 @@
 
 ## Reopened completion audit
 
+### modifyOtherKeys mode 2 (2026-09-23)
+
+Ghostty `stream.zig` and `stream_terminal.zig` are authoritative for CSI > m/n:
+resource 4/value 2 enables the flag; supported other forms reset it, unsupported
+resources/arity are ignored, CSI > n resets irrespective of numeric parameters,
+and colon separators are accepted for CSI m but not CSI n. State is global,
+survives DECSTR/buffer switching, clears on RIS/session reset and installs from
+snapshot header byte 33 without replay. Both engines expose it through a focused
+capability, also forwarded through the session mode source.
+
+Managed encoding adds Ghostty's CSI-27 mode-2 extension before legacy Ctrl/C0
+conversion, including full modifier combinations, scalar text rules, special
+Back/Tab/Return/Escape mappings and DECBKM exceptions. Kitty still takes priority.
+Unchanged legacy/Kitty mappings remain delegated to the existing host fallback;
+this is not a claim that the complete managed key encoder is now ported.
+The native encoder already implements the byte protocol, but the host previously
+bypassed it for Shift text input. Routing now consults live mode-2 state first.
+macOS Option remains text input under the C encoder's default host policy.
+
+Windows Terminal `terminalInput.cpp` and xterm.js `input/Keyboard.ts` retain
+different legacy Tab/Return mappings; Ghostty's mode-2 extension is the selected
+behavior, not their legacy defaults. Tests cover parser input splits, every
+modifier/Backarrow combination, Unicode, special keys, hold/reset/snapshot state,
+native ABI guards and both backends through session input routing. Validation is
+pending after the implementation push. Broader keyboard/IME parity remains open.
+
 ### Shift-mouse capture and physical button state (2026-09-23)
 
 Both VT engines implement XTSHIFTESCAPE, expose its nullable application override,

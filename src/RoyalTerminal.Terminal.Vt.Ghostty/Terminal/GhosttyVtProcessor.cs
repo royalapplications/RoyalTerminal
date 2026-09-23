@@ -31,6 +31,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseModeStateSource,
     ITerminalMouseShiftCaptureState,
+    ITerminalModifyOtherKeysStateSource,
     ITerminalPointerButtonStateSink,
     ITerminalSessionHistoryController,
     ITerminalViewportScrollSource,
@@ -319,6 +320,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public TerminalMouseModeState MouseModeState => _mouseModeState;
+
+    /// <inheritdoc />
+    public bool ModifyOtherKeys2 { get; private set; }
 
     private bool? _mouseShiftCaptureOverride;
 
@@ -828,7 +832,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         ApplyConfiguredModeDefaultsAfterSessionReset();
         // Mode reset above clears mode 12; reselect the retained cursor policy
         // afterwards, matching native fullReset without discarding history.
-        _terminal.Write("\u001b[0 q\u001b[0$}"u8);
+        _terminal.Write("\u001b[0 q\u001b[0$}\u001b[>m"u8);
         ConfigureOptionalNativeFeatures();
         ApplyThemeToNative(_theme);
         SetupTerminalEffects();
@@ -1629,6 +1633,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         TerminalMouseInputState mouse = _terminal.GetMouseInputState();
         _mouseModeState = mouse.Modes;
         _mouseShiftCaptureOverride = mouse.ShiftCaptureOverride;
+        ModifyOtherKeys2 = _terminal.GetModifyOtherKeys2();
         _focusEventMode = _terminal.GetMode(GhosttyVtNative.ModeFocusEvent);
         _kittyKeyboardFlags = (int)_terminal.GetKittyKeyboardFlags();
         _scrollbar = _terminal.GetScrollbar();
@@ -1649,6 +1654,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _bracketedPaste = false;
         _mouseModeState = default;
         _mouseShiftCaptureOverride = null;
+        ModifyOtherKeys2 = false;
         _win32InputMode = false;
         _focusEventMode = false;
         _kittyKeyboardFlags = 0;
