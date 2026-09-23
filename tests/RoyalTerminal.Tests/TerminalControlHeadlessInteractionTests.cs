@@ -46,7 +46,8 @@ public sealed class TerminalControlHeadlessInteractionTests
         {
             await StabilizeWindowAsync(window, control);
             await control.StartSessionAsync(new FakeTransportOptions("fake"));
-            window.PlatformImpl!.Activated?.Invoke();
+            window.Activate();
+            Dispatcher.UIThread.RunJobs();
             control.Focus();
             Assert.True(control.AutoSecureInput);
             Assert.True(control.PasswordInput);
@@ -56,14 +57,18 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(control.PasswordInput);
             Assert.False(control.SecureInputEnabled);
             Assert.Equal(0, platform.Owners);
-            control.AutoSecureInput = true;
+            control.ClearValue(TerminalControl.AutoSecureInputProperty);
+            Assert.True(control.AutoSecureInput);
             Assert.Equal(1, platform.Owners);
             sibling.Focus();
             Assert.Equal(0, platform.Owners);
             control.Focus();
             Assert.Equal(1, platform.Owners);
 
-            window.PlatformImpl.Deactivated?.Invoke();
+            // Headless Hide posts the platform deactivation notification without
+            // detaching the control or changing the window's managed visibility.
+            window.PlatformImpl!.Hide();
+            Dispatcher.UIThread.RunJobs();
             Assert.False(window.IsActive);
             Assert.False(control.SecureInputEnabled);
             Assert.Equal(0, platform.Owners);
@@ -71,7 +76,8 @@ public sealed class TerminalControlHeadlessInteractionTests
             await Task.Delay(300);
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(polls, transport.Polls);
-            window.PlatformImpl.Activated?.Invoke();
+            window.Activate();
+            Dispatcher.UIThread.RunJobs();
             Assert.True(control.SecureInputEnabled);
             Assert.Equal(1, platform.Owners);
 
@@ -108,7 +114,8 @@ public sealed class TerminalControlHeadlessInteractionTests
         {
             await StabilizeWindowAsync(window, control);
             await control.StartSessionAsync(new FakeTransportOptions("fake"));
-            window.PlatformImpl!.Activated?.Invoke();
+            window.Activate();
+            Dispatcher.UIThread.RunJobs();
             control.Focus();
             Assert.True(control.SecureInputEnabled);
             platform.DisableFailures = 1;
