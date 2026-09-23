@@ -14,6 +14,8 @@
 
   <ItemGroup>
     <PackageReference Include="SkiaSharp" />
+    <!-- The built-in PNG callback also runs in non-Avalonia Linux consumers. -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
     <Compile Include="..\Shared\BoundedSkiaPngDecoder.cs" Link="Imaging\BoundedSkiaPngDecoder.cs" />
   </ItemGroup>
 
