@@ -12,6 +12,26 @@ namespace RoyalTerminal.Tests;
 
 public sealed class TerminalPointerEncoderParityTests(ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CaptureLossClearsHeldButtonsAndMotionWithoutChangingModes(bool native)
+    {
+        if (native && !Available()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(new TerminalScreen(8, 3)) : new BasicVtProcessor(new TerminalScreen(8, 3));
+        ITerminalPointerSequenceEncoderSource encoder = (ITerminalPointerSequenceEncoderSource)processor;
+        TerminalPointerEncodingContext context = new(80, 60, 10, 20);
+        processor.Process("\u001b[?1003;1006h"u8);
+        TerminalPointerEvent motion = Pointer(TerminalPointerEventKind.Move, 1, 1);
+        Assert.True(encoder.TryEncodePointer(motion, context, out _));
+        Assert.False(encoder.TryEncodePointer(motion, context, out _));
+        ((ITerminalPointerButtonStateSink)processor).ObservePointerButton(Pointer(TerminalPointerEventKind.Button, 1, 1, TerminalMouseButton.Left));
+        Assert.True(encoder.TryEncodePointer(motion with { X = -10 }, context, out _));
+        ((ITerminalPointerStateResetSink)processor).ResetPointerState();
+        Assert.False(encoder.TryEncodePointer(motion with { X = -10 }, context, out _));
+        Assert.True(encoder.TryEncodePointer(motion, context, out _));
+    }
+
     public static IEnumerable<object[]> Modes()
     {
         for (int tracking = 0; tracking <= 4; tracking++)

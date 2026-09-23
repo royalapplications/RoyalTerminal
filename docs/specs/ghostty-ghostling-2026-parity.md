@@ -2,6 +2,55 @@
 
 ## Reopened completion audit
 
+### Public restore, Kitty encoding and pointer lifecycle (2026-09-23)
+
+Implementation batch, validation pending at its first push:
+
+- `ManagedTerminalSnapshot.Restore` provides transactional memory/stream restore;
+  `ManagedTerminalSnapshotDecoder.Ready/Next` publishes resident state before
+  streamed history. The caller owns the returned terminal independently of the
+  decoder and stream. Exact memory restores reject trailing data; stream restores
+  stop at FINISH. Every record, including dropped pages, spends the public decode
+  budgets. Errors poison the decoder without destroying an already returned terminal.
+- Assembly installs colors, mode/default banks, cursor policy, geometry, both
+  screen states, metadata and password state, then replays and verifies continuation
+  once. Retention can be disabled after replay. History targets the live COW screen
+  during render holds and updates semantic prompt-seen only after successful prepend.
+  Managed row quotas deliberately use RoyalTerminal's host contract, including no
+  additional alternate history; they do **not** emulate native PageList allocation
+  capacity/minimum-byte accounting. READY overlap is preserved. Exact native quota
+  parity and a public managed binary exporter remain open.
+- Both engines expose host password-input metadata, including snapshot and reset
+  semantics. Ghostty `termio/Exec.zig` derives this from canonical/no-echo termios;
+  `Surface.passwordInput` separately integrates OS secure input. This batch adds
+  the terminal flag, not platform termios notification or OS secure-input support.
+- Managed Kitty encoding ports all five progressive flag combinations, functional
+  key mappings, repeat/release events, modifier locks, layout alternates, associated
+  text and composition handling. The public key request now carries layout-derived
+  unshifted scalars and consumed modifiers; native forwards these unchanged. New
+  differential tests compare all 31 flag values, 64 modifier combinations and three
+  actions, plus IME/layout cases. Avalonia repeat/layout event production and legacy
+  non-Kitty encoder parity remain separate from the encoding API implementation.
+- Pointer capture loss clears both processors' physical/deduplication state without
+  synthesizing PTY input. Outside drag/release reports retain raw pixel coordinates,
+  independently of selection hit-testing. An additional worker failure/reschedule
+  test exercises concurrent flush waiters and disposal; it is not platform sign-off.
+
+Reference decisions: Ghostty `snapshot/snapshot.zig` and `c/snapshot.zig` define
+restore ownership/order and continuation verification. xterm.js SerializeAddon
+emits replayable VT, not this binary wire format; Windows Terminal cursor restore
+does not supply a corresponding binary snapshot API. Ghostty `input/key_encode.zig`
+and `input/kitty.zig` are the byte oracle. Windows Terminal `terminalInput.cpp`
+also distinguishes Kitty repeat/release and associated text but uses different
+functional-key/legacy fallback rules; xterm.js `input/Keyboard.ts` provides the
+legacy comparison, not a replacement for Ghostty's progressive-flag behavior.
+Pointer reports follow Ghostty `Surface.mouseReport`/`input/mouse_encode.zig`;
+host selection coordinates remain distinct from encoded terminal coordinates.
+
+No throughput improvements are claimed for these correctness/API additions.
+Full rendering/performance review, managed binary export/native quota parity,
+remaining input/OS integration and platform runtime gates are still open.
+
 ### OSC 22 pointer shape (2026-09-23)
 
 Both engines expose the terminal's requested pointer shape. Managed parsing

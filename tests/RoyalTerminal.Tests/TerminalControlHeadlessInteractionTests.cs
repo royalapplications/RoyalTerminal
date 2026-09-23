@@ -2289,6 +2289,30 @@ public sealed class TerminalControlHeadlessInteractionTests
         finally { await CleanupWindowAsync(window, control.StopPty); }
     }
 
+    [AvaloniaFact]
+    public async Task Headless_MouseDragAndReleasePreserveOutsidePixelCoordinates()
+    {
+        RecordingTransport transport = new();
+        NativePointerRecordingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        control.Width = 640; control.Height = 400;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            NativePointerRecordingVtProcessor processor = factory.LastProcessor!;
+            processor.MouseModeState = new(TerminalMouseTrackingMode.AnyMotion, TerminalMouseEncoding.SgrPixels);
+            Point start = await GetCellInteractionPointAsync(control, window, column: 1, row: 1);
+            Point end = new(-23, -37);
+            RaiseMouseDragReleaseSequence(control, window, start, end, KeyModifiers.None);
+            Assert.Contains(processor.PointerEvents, e => e.Kind == TerminalPointerEventKind.Move && e.X == -23 && e.Y == -37);
+            Assert.Contains(processor.PointerEvents, e => e.Kind == TerminalPointerEventKind.Button && e.Action == TerminalInputAction.Release && e.X == -23 && e.Y == -37);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
     [AvaloniaTheory]
     [MemberData(nameof(TerminalMouseShiftCaptureTests.Policies), MemberType = typeof(TerminalMouseShiftCaptureTests))]
     public async Task Headless_ShiftMouse_RespectsHostAndApplicationPolicy(

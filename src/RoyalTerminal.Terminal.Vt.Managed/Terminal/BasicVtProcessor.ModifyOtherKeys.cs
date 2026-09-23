@@ -12,9 +12,11 @@ public sealed partial class BasicVtProcessor
     public bool TryEncodeKey(in TerminalKeyEncodingRequest request, out byte[] sequence)
     {
         sequence = [];
-        // Kitty takes precedence over the legacy extension. Other keys continue
-        // through the host's existing legacy/Kitty fallback encoder.
-        return ModifyOtherKeys2 && KittyKeyboardFlags == 0 &&
+        if (request.Action is not (TerminalInputAction.Press or TerminalInputAction.Repeat or TerminalInputAction.Release) ||
+            request.UnshiftedCodepoint != 0 && !System.Text.Rune.IsValid(request.UnshiftedCodepoint)) return false;
+        // Kitty takes precedence over the legacy extension.
+        if (KittyKeyboardFlags != 0) return ManagedKittyKeyEncoder.TryEncode(request, KittyKeyboardFlags, out sequence);
+        return ModifyOtherKeys2 &&
             ManagedModifyOtherKeysEncoder.TryEncode(request, _backarrowKeyMode, out sequence);
     }
 

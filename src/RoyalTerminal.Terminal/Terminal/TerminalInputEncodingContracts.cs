@@ -11,16 +11,20 @@ namespace RoyalTerminal.Terminal;
 /// Stable key identity supplied by the UI layer.
 /// Current producers use <c>Avalonia.Input.Key.ToString()</c>.
 /// </param>
-/// <param name="Action">Press or release action.</param>
+/// <param name="Action">Press, repeat or release action.</param>
 /// <param name="Text">Optional text payload associated with the key event.</param>
 /// <param name="Modifiers">Normalized modifier flags.</param>
 /// <param name="IsComposing">Whether IME composition is active.</param>
+/// <param name="UnshiftedCodepoint">Layout-derived Unicode scalar, or zero for the physical-key fallback.</param>
+/// <param name="ConsumedModifiers">Modifiers consumed in producing Text; ignored when Text is empty.</param>
 public readonly record struct TerminalKeyEncodingRequest(
     string KeyId,
     TerminalInputAction Action,
     string? Text,
     TerminalModifiers Modifiers,
-    bool IsComposing = false);
+    bool IsComposing = false,
+    uint UnshiftedCodepoint = 0,
+    TerminalModifiers ConsumedModifiers = TerminalModifiers.None);
 
 /// <summary>
 /// Geometry context for encoding pointer events into terminal mouse protocol bytes.

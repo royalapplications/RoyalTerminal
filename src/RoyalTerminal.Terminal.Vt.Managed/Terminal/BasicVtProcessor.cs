@@ -5285,6 +5285,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _workingDirectory.Set([]);
         MouseShiftCaptureOverride = null;
         ModifyOtherKeys2 = false;
+        PasswordInput = false;
         _params.Clear();
         _currentParam = 0;
         _hasParam = false;

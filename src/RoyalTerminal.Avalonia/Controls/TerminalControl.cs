@@ -2473,6 +2473,12 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         return new Point(x, y);
     }
 
+    private Point TranslateUnclampedPointerPoint(Point controlPoint)
+    {
+        Rect contentRect = GetTerminalContentRect(Bounds.Size);
+        return new Point(controlPoint.X - contentRect.X, controlPoint.Y - contentRect.Y);
+    }
+
     private static double GetMaxContentCoordinate(double length)
     {
         return length > 0d ? Math.BitDecrement(length) : 0d;
@@ -3489,10 +3495,13 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // Preserve tracked button state when move events omit button flags.
         SyncPointerButtonState(props, preserveWhenNoButtons: true);
         TerminalMouseButton button = GetPrimaryPressedMouseButton(props);
+        // Selection/cell hit-testing use their own clamped point. Protocol encoding
+        // must retain outside coordinates, especially raw SGR-pixel drags/releases.
+        Point reportPoint = TranslateUnclampedPointerPoint(controlPoint);
         _ = SendPointerEvent(new TerminalPointerEvent(
             Kind: TerminalPointerEventKind.Move,
-            X: point.X,
-            Y: point.Y,
+            X: reportPoint.X,
+            Y: reportPoint.Y,
             Button: button,
             Action: TerminalInputAction.Press,
             Modifiers: ConvertTerminalModifiers(e.KeyModifiers)));
@@ -3553,10 +3562,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (useContentPoint)
         {
+            Point reportPoint = TranslateUnclampedPointerPoint(controlPoint);
             SendPointerEvent(new TerminalPointerEvent(
                 Kind: TerminalPointerEventKind.Button,
-                X: point.X,
-                Y: point.Y,
+                X: reportPoint.X,
+                Y: reportPoint.Y,
                 Button: button,
                 Action: TerminalInputAction.Release,
                 Modifiers: ConvertTerminalModifiers(e.KeyModifiers)));
@@ -4905,6 +4915,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnPointerCaptureLost(e);
         StopMouseSelectionDrag();
+        ResetPointerButtons();
     }
 
     private void HandlePointerWheelChangedCore(PointerWheelEventArgs e)
@@ -8297,6 +8308,10 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void ResetPointerButtons()
     {
+        if (_vtProcessor is ITerminalPointerStateResetSink reset && _screen is not null)
+        {
+            lock (_screen.SyncRoot) reset.ResetPointerState();
+        }
         _leftPointerDown = false;
         _middlePointerDown = false;
         _rightPointerDown = false;

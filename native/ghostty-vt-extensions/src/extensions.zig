@@ -8,6 +8,26 @@ const RoyalMouseState = extern struct {
     shape: u32 = 8,
 };
 
+export fn ghostty_royal_password_input_get(
+    handle: @import("terminal/c/terminal.zig").Terminal,
+    output: ?*u8,
+) callconv(.c) c_int {
+    const result = output orelse return -2;
+    const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
+    result.* = @intFromBool(t.flags.password_input);
+    return 0;
+}
+
+export fn ghostty_royal_password_input_set(
+    handle: @import("terminal/c/terminal.zig").Terminal,
+    value: u8,
+) callconv(.c) c_int {
+    if (value > 1) return -2;
+    const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
+    t.flags.password_input = value == 1;
+    return 0;
+}
+
 export fn ghostty_royal_modify_other_keys_2(
     handle: @import("terminal/c/terminal.zig").Terminal,
     output: ?*u8,

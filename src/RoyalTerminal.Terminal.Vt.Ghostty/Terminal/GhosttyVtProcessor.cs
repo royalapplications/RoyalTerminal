@@ -833,6 +833,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _terminal.SetTitleBytes([]);
         _terminal.SetWorkingDirectoryBytes([]);
         _terminal.SetMouseShiftCapture(null);
+        _terminal.PasswordInput = false;
         ApplyConfiguredModeDefaultsAfterSessionReset();
         // Mode reset above clears mode 12; reselect the retained cursor policy
         // afterwards, matching native fullReset without discarding history.
@@ -2444,7 +2445,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (string.IsNullOrEmpty(request.KeyId) ||
+        if (request.Action is not (TerminalInputAction.Press or TerminalInputAction.Repeat or TerminalInputAction.Release) ||
+            request.UnshiftedCodepoint != 0 && !Rune.IsValid(request.UnshiftedCodepoint) ||
+            string.IsNullOrEmpty(request.KeyId) ||
             !TryMapKeyId(request.KeyId, out GhosttyVtNative.GhosttyVtKey key))
         {
             sequence = [];
@@ -2455,10 +2458,11 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _keyEvent.SetAction(MapKeyAction(request.Action));
         _keyEvent.SetKey(key);
         _keyEvent.SetModifiers(MapModifiers(request.Modifiers));
-        _keyEvent.SetConsumedModifiers(GhosttyVtNative.GhosttyVtMods.None);
+        _keyEvent.SetConsumedModifiers(MapModifiers(request.ConsumedModifiers));
         _keyEvent.SetComposing(request.IsComposing);
         _keyEvent.SetText(request.Text);
-        _keyEvent.SetUnshiftedCodepoint(TryGetUnshiftedCodepoint(request.KeyId, out uint codepoint) ? codepoint : 0);
+        _keyEvent.SetUnshiftedCodepoint(request.UnshiftedCodepoint != 0 ? request.UnshiftedCodepoint :
+            TryGetUnshiftedCodepoint(request.KeyId, out uint codepoint) ? codepoint : 0);
 
         sequence = _keyEncoder.Encode(_keyEvent);
         return sequence.Length > 0;
@@ -3251,9 +3255,12 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private static GhosttyVtNative.GhosttyVtKeyAction MapKeyAction(TerminalInputAction action)
     {
-        return action == TerminalInputAction.Release
-            ? GhosttyVtNative.GhosttyVtKeyAction.Release
-            : GhosttyVtNative.GhosttyVtKeyAction.Press;
+        return action switch
+        {
+            TerminalInputAction.Release => GhosttyVtNative.GhosttyVtKeyAction.Release,
+            TerminalInputAction.Repeat => GhosttyVtNative.GhosttyVtKeyAction.Repeat,
+            _ => GhosttyVtNative.GhosttyVtKeyAction.Press,
+        };
     }
 
     private static GhosttyVtNative.GhosttyVtMods MapModifiers(TerminalModifiers modifiers)
@@ -3263,6 +3270,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         if ((modifiers & TerminalModifiers.Control) != 0) result |= GhosttyVtNative.GhosttyVtMods.Ctrl;
         if ((modifiers & TerminalModifiers.Alt) != 0) result |= GhosttyVtNative.GhosttyVtMods.Alt;
         if ((modifiers & TerminalModifiers.Meta) != 0) result |= GhosttyVtNative.GhosttyVtMods.Super;
+        if ((modifiers & TerminalModifiers.CapsLock) != 0) result |= GhosttyVtNative.GhosttyVtMods.CapsLock;
+        if ((modifiers & TerminalModifiers.NumLock) != 0) result |= GhosttyVtNative.GhosttyVtMods.NumLock;
         return result;
     }
 

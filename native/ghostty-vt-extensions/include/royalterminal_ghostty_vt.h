@@ -22,6 +22,14 @@ typedef struct {
 GHOSTTY_API GhosttyResult ghostty_royal_modify_other_keys_2(
     GhosttyTerminal terminal, uint8_t* output);
 
+/** Copies/sets host-reported password-input metadata (0 or 1). Does not enable
+ * OS secure input. Invalid arguments leave state/output untouched. Serialize
+ * with all terminal access. No allocation or VT replay. */
+GHOSTTY_API GhosttyResult ghostty_royal_password_input_get(
+    GhosttyTerminal terminal, uint8_t* output);
+GHOSTTY_API GhosttyResult ghostty_royal_password_input_set(
+    GhosttyTerminal terminal, uint8_t value);
+
 GHOSTTY_API GhosttyResult ghostty_royal_mouse_state(
     GhosttyTerminal terminal, RoyalMouseState* output);
 

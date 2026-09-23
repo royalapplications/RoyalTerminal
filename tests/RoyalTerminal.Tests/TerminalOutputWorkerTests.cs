@@ -152,4 +152,28 @@ public class TerminalOutputWorkerTests
             Assert.Contains("own drain", exception.Message, StringComparison.Ordinal);
         }
     }
+
+    [Fact]
+    public async Task FailureWithPendingRescheduleWakesEveryFlusherAndAllowsConcurrentDisposal()
+    {
+        using ManualResetEventSlim entered = new(false);
+        using ManualResetEventSlim release = new(false);
+        InvalidOperationException failure = new("drain failure with pending wakeup");
+        using TerminalOutputWorker worker = new(() =>
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(5));
+            throw failure;
+        });
+        worker.Schedule();
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
+        worker.Schedule();
+        Task[] waiters = new Task[4];
+        for (int i = 0; i < waiters.Length; i++)
+            waiters[i] = Task.Run(() => Assert.Same(failure, Assert.Throws<InvalidOperationException>(worker.Flush)));
+        release.Set();
+        await Task.WhenAll(waiters).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Same(failure, Assert.Throws<InvalidOperationException>(worker.Schedule));
+        await Task.WhenAll(Task.Run(worker.Dispose), Task.Run(worker.Dispose)).WaitAsync(TimeSpan.FromSeconds(5));
+    }
 }

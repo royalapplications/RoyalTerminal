@@ -3,14 +3,47 @@
 
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal.Snapshots;
+using RoyalTerminal.Terminal.Theming;
 
 namespace RoyalTerminal.Terminal;
 
 public sealed partial class BasicVtProcessor
 {
+    internal void InstallSnapshot(GhosttySnapshotReadyState ready, TerminalTheme theme, bool retainContinuation)
+    {
+        InstallSnapshotColors(ready.Terminal, theme);
+        InstallSnapshotModes(ready.Terminal.Header);
+        InstallSnapshotCursorPolicy(ready.Terminal.Header);
+        InstallSnapshotGeometry(ready.Terminal);
+        foreach (GhosttySnapshotScreen screen in ready.Screens) InstallSnapshotScreenState(screen.State);
+        InstallSnapshotMetadata(ready.Terminal);
+        PasswordInput = ready.Terminal.Header.PasswordInput;
+        if (!ready.Continuation.IsEmpty) Process(ready.Continuation);
+        if (!_continuation.GetBytes().SequenceEqual(ready.Continuation))
+            throw new InvalidDataException("Snapshot continuation did not recreate the same parser state.");
+        if (!retainContinuation) _continuation.Disable();
+    }
+
+    internal GhosttySnapshotHistoryProgress ApplySnapshotHistory(GhosttySnapshotHistoryApplication application,
+        in GhosttySnapshotHistoryPage history)
+    {
+        // Use the live COW screen during output holds, not the frozen published view.
+        TerminalRowBuffer? rows = _screen.GetSnapshotRows(history.Key);
+        long historyRows = rows is null ? long.MaxValue : (long)rows.Count - _screen.ViewportRows;
+        int limit = history.Key == 0 ? _screen.ScrollbackLimit : 0;
+        bool fits = historyRows <= (long)limit - history.Page.Grid.Rows;
+        GhosttySnapshotHistoryProgress progress = application.Apply(_screen, history, fits);
+        if (progress.ContainsPrompt)
+        {
+            if (history.Key == 0) _primaryPromptPolicy.Seen = true;
+            else _alternatePromptPolicy.Seen = true;
+        }
+        return progress;
+    }
+
     // Assembly primitives for a fresh, unpublished processor whose screen was
     // staged by GhosttySnapshotLiveScreen. They do not replay VT or publish state.
-    // Continuation, remaining runtime flags and public restoration are separate.
+    // Public restoration composes these before publishing its owned result.
     internal void InstallSnapshotGeometry(GhosttySnapshotTerminalState terminal)
     {
         GhosttySnapshotTerminalHeader header = terminal.Header;

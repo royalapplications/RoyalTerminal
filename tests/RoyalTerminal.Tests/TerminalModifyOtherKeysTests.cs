@@ -121,7 +121,8 @@ public sealed class TerminalModifyOtherKeysTests(ITestOutputHelper output)
         using BasicVtProcessor managed = new(new TerminalScreen(8, 3));
         managed.Process("\u001b[>4;2m\u001b[>1u"u8);
         Assert.True(managed.ModifyOtherKeys2);
-        Assert.False(managed.TryEncodeKey(new("A", TerminalInputAction.Press, "a", TerminalModifiers.Control), out _));
+        Assert.True(managed.TryEncodeKey(new("A", TerminalInputAction.Press, "a", TerminalModifiers.Control), out byte[] kitty));
+        Assert.Equal("\u001b[97;5u", Encoding.ASCII.GetString(kitty));
         managed.Process("\u001b[<u"u8);
         Assert.True(managed.TryEncodeKey(new("A", TerminalInputAction.Press, "a", TerminalModifiers.Control), out byte[] bytes));
         Assert.Equal("\u001b[27;5;97~", Encoding.ASCII.GetString(bytes));

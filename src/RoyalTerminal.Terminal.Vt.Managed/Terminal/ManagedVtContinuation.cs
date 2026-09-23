@@ -11,6 +11,12 @@ internal sealed class ManagedVtContinuation(int maximumBytes)
     private readonly List<byte> _bytes = [];
     private bool _broken;
 
+    internal void Disable()
+    {
+        maximumBytes = 0;
+        Reset();
+    }
+
     internal void Track(ReadOnlySpan<byte> input, int newStart, bool ground)
     {
         if (maximumBytes == 0) return;
