@@ -1798,7 +1798,26 @@ triggering resize, buffer switching, erase, replies or synchronized-output holds
 This follows `snapshot/terminal.zig` decode; it is a prerequisite, not the complete
 processor restoration API. Tests cover every bit, arbitrary defaults through RIS,
 all 64 ordered mouse-mode pairs, save/restore, bytewise input, pointer encoding and
-warm allocation behavior. Post-push validation is pending for this batch.
+warm allocation behavior. The first differential run exposed Ghostty's additional
+RIS step: selecting the default cursor overwrites mode 12 after mode-bank reset.
+Installation now retains the normalized default blink policy (null means true)
+and RIS reapplies it; all three nullable-policy representations are covered.
+Complete cursor shape/per-screen state installation remains a separate open item.
+
+Post-push Release validation through `e02a8c6`: **3,140 passed, 16 conditional
+skips, zero failures (3,156 total)** (`mouse-mode-full.trx`). All **165 new cases**
+pass with native available on macOS arm64; build output has no warnings/errors.
+The initial 43 failures were the single cursor-policy discrepancy described above,
+not accepted as a validation pass. Cross-platform runtime sign-off remains open.
+
+Sequential before/after Release microbenchmarks used 10,000 warmup pairs and
+seven samples of 100,000 `1000;1006` enable/disable pairs plus reporting-state
+reads. Two paired runs measured median **36.453→19.328 ms** and
+**42.565→31.916 ms**, zero timed allocations in both versions. Host timing varied;
+these are limited workload observations, not an end-to-end speed guarantee.
+The new effective-state field avoids repeated hash-set lookups when reading mouse
+state. Loaded binaries were hash-verified against the saved preceding/current
+assemblies (`9fa5d453…` / `a981cc92…`).
 
 ## Validation requirements
 
