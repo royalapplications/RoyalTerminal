@@ -290,7 +290,7 @@ public class TerminalQueryTests
     }
 
     [Fact]
-    public void BasicVtProcessor_C1Csi_Dsr6_SendsCursorPositionReport()
+    public void BasicVtProcessor_GroundC1Csi_IsInvalidUtf8NotCursorQuery()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -301,12 +301,14 @@ public class TerminalQueryTests
         processor.Process("\x1b[4;5H"u8);
         processor.Process([0x9B, (byte)'6', (byte)'n']);
 
-        Assert.NotNull(response);
-        Assert.Equal("\x1b[4;5R", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Null(response);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(3)[4].Codepoint);
+        Assert.Equal('6', screen.GetViewportRow(3)[5].Codepoint);
+        Assert.Equal('n', screen.GetViewportRow(3)[6].Codepoint);
     }
 
     [Fact]
-    public void BasicVtProcessor_C1Osc_TitleBelTerminator_InvokesTitleCallback()
+    public void BasicVtProcessor_GroundC1Osc_WithBellDoesNotSetTitle()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -316,11 +318,12 @@ public class TerminalQueryTests
         byte[] payload = [0x9D, (byte)'2', (byte)';', (byte)'c', (byte)'1', (byte)'-', (byte)'t', (byte)'i', (byte)'t', (byte)'l', (byte)'e', 0x07];
         processor.Process(payload);
 
-        Assert.Equal("c1-title", title);
+        Assert.Null(title);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(0)[0].Codepoint);
     }
 
     [Fact]
-    public void BasicVtProcessor_C1Osc_TitleStTerminator_InvokesTitleCallback()
+    public void BasicVtProcessor_GroundC1Osc_WithRawStDoesNotSetTitle()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -330,11 +333,13 @@ public class TerminalQueryTests
         byte[] payload = [0x9D, (byte)'2', (byte)';', (byte)'c', (byte)'1', (byte)'-', (byte)'s', (byte)'t', 0x9C];
         processor.Process(payload);
 
-        Assert.Equal("c1-st", title);
+        Assert.Null(title);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(0)[8].Codepoint);
     }
 
     [Fact]
-    public void BasicVtProcessor_C1Osc_TitleStTerminator_AllowsFollowingPrintableData()
+    public void BasicVtProcessor_GroundC1Osc_PrintsFollowingDataLiterally()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -348,13 +353,15 @@ public class TerminalQueryTests
         ];
         processor.Process(payload);
 
-        Assert.Equal("x", title);
+        Assert.Null(title);
         TerminalRow row = screen.GetViewportRow(0);
-        Assert.Equal('A', row[0].Codepoint);
+        Assert.Equal(0xFFFD, row[0].Codepoint);
+        Assert.Equal(0xFFFD, row[4].Codepoint);
+        Assert.Equal('A', row[5].Codepoint);
     }
 
     [Fact]
-    public void BasicVtProcessor_C1Dcs_DecrqssMargins_ReturnsResponse()
+    public void BasicVtProcessor_GroundC1Dcs_IsInvalidUtf8NotQuery()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -363,8 +370,9 @@ public class TerminalQueryTests
 
         processor.Process([0x90, (byte)'$', (byte)'q', (byte)'r', 0x9C]);
 
-        Assert.NotNull(response);
-        Assert.Equal("\x1bP1$r1;24r\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Null(response);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(0)[4].Codepoint);
     }
 
     [Fact]
@@ -660,7 +668,7 @@ public class TerminalQueryTests
     }
 
     [Fact]
-    public void BasicVtProcessor_UnterminatedOsc_AbortsOnPromptControlBytes_AndRendersFollowingPrompt()
+    public void BasicVtProcessor_UnterminatedOsc_IgnoresPromptControlsUntilTerminated()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -671,7 +679,11 @@ public class TerminalQueryTests
         processor.Process("\r\n$ ready\r\n"u8);
 
         Assert.Null(title);
-        Assert.Contains("$ ready", ReadAsciiPrefix(screen, 1, 16));
+        Assert.Equal(0, processor.CursorCol);
+        Assert.Equal(0, processor.CursorRow);
+        processor.Process("\x1b\\X"u8);
+        Assert.Equal("broken-title$ ready", title);
+        Assert.Equal('X', screen.GetViewportRow(0)[0].Codepoint);
     }
 
     [Fact]

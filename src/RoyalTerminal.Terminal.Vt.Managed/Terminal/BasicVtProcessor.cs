@@ -129,7 +129,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private readonly BasicVtProcessorOptions _options;
     private readonly TerminalShellIntegrationParser _shellIntegrationParser = new();
     private readonly KittyClipboardProtocol _kittyClipboardProtocol;
-    private bool _controlStringUsesEightBitTerminator;
     private bool _isDiscardingOscPayload;
     private bool _isDiscardingDcsPayload;
     private bool _apcTruncated;
@@ -216,7 +215,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         CsiIntermediate,
         CsiIgnore,
         OscString,
-        OscEscape,
         DcsString,
         DcsEscape,
         ApcString,
@@ -450,17 +448,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 continuationStart = i;
             }
 
+            // OSC commits when ESC arrives, not after a subsequent backslash.
+            // Only the new ESC operation belongs to a replayable continuation.
+            if (_state == ParserState.OscString && b == 0x1B) continuationStart = i;
+
             if (_state is ParserState.OscString or ParserState.DcsString &&
-                b >= 0x20 && !(b == 0x9C && _controlStringUsesEightBitTerminator))
+                b >= 0x20)
             {
                 ReadOnlySpan<byte> remaining = data[i..];
                 int count = remaining.IndexOfAnyInRange((byte)0, (byte)0x1F);
                 if (count < 0) count = remaining.Length;
-                if (_controlStringUsesEightBitTerminator)
-                {
-                    int terminator = remaining[..count].IndexOf((byte)0x9C);
-                    if (terminator >= 0) count = terminator;
-                }
                 AppendControlStringPayload(remaining[..count]);
                 i += count - 1;
                 continue;
@@ -567,9 +564,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     break;
                 case ParserState.OscString:
                     ProcessOscString(b);
-                    break;
-                case ParserState.OscEscape:
-                    ProcessOscEscape(b);
                     break;
                 case ParserState.DcsString:
                     ProcessDcsString(b);
@@ -1718,18 +1712,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _csiColonSeparators = 0;
     }
 
-    private void EnterOscState(bool eightBit = false)
+    private void EnterOscState()
     {
         _state = ParserState.OscString;
-        _controlStringUsesEightBitTerminator = eightBit;
         _oscBuffer.Clear();
         _isDiscardingOscPayload = false;
     }
 
-    private void EnterDcsState(bool eightBit = false)
+    private void EnterDcsState()
     {
         _state = ParserState.DcsString;
-        _controlStringUsesEightBitTerminator = eightBit;
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
     }
@@ -1757,7 +1749,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 if (_utf8Remaining == 0)
                 {
                     // UTF-8 encoded C1 controls are ignored in ground state. This
-                    // matches Ghostty: only their single-byte forms are controls.
+                    // matches Ghostty; raw high bytes in ground are UTF-8 input.
                     if (_utf8Codepoint is < 0x80 or > 0x9F)
                     {
                         PutChar(_utf8Codepoint);
@@ -1766,12 +1758,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
             else
             {
-                // Replace the invalid prefix and retry this byte as UTF-8. A
-                // rejected C1 byte is not a legacy raw C1 command in this path.
+                // Replace the invalid prefix and retry this byte as UTF-8.
                 _utf8Remaining = 0;
                 PutChar(0xFFFD);
                 if (b >= 0x80) ProcessUtf8Lead(b);
-                else if (b == 0x7F) PutChar(b); // Ghostty's decoded-scalar path prints DEL.
                 else ProcessGround(b);
             }
             return;
@@ -1781,26 +1771,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             case 0x1B: // ESC
                 _state = ParserState.Escape;
-                break;
-
-            case 0x9B: // C1 CSI
-                EnterCsiState();
-                break;
-
-            case 0x9D: // C1 OSC
-                EnterOscState(eightBit: true);
-                break;
-
-            case 0x90: // C1 DCS
-                EnterDcsState(eightBit: true);
-                break;
-
-            case 0x9F: // C1 APC
-                EnterApcState();
-                break;
-
-            case 0x9C: // C1 ST
-                _state = ParserState.Ground;
                 break;
 
             case (byte)'\n': // LF
@@ -1851,7 +1821,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             default:
-                if (b < 0x20 || b == 0x7F)
+                if (b < 0x20)
                 {
                     // Other C0 control characters — ignore
                 }
@@ -2666,66 +2636,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        if (b == 0x9C && _controlStringUsesEightBitTerminator) // Legacy 8-bit ST
-        {
-            HandleOscString(bellTerminator: false);
-            _state = ParserState.Ground;
-            return;
-        }
-
-        if (b == 0x1B) // Potential ST (ESC \)
-        {
-            _state = ParserState.OscEscape;
-            return;
-        }
-
-        if (TryAbortBrokenControlStringOnControl(b))
-        {
-            return;
-        }
-
-        AppendOscByteOrDiscard(b);
-    }
-
-    private void ProcessOscEscape(byte b)
-    {
-        if (b == (byte)'\\')
-        {
-            HandleOscString(bellTerminator: false);
-            _state = ParserState.Ground;
-            return;
-        }
-
-        if (TryAbortBrokenControlStringOnControl(b))
-        {
-            return;
-        }
-
-        // False alarm: preserve ESC as payload and continue OSC parsing.
-        AppendOscByteOrDiscard(0x1B);
-
         if (b == 0x1B)
         {
-            _state = ParserState.OscEscape;
-            return;
-        }
-
-        if (b == 0x07)
-        {
-            HandleOscString(bellTerminator: true);
-            _state = ParserState.Ground;
-            return;
-        }
-
-        if (b == 0x9C && _controlStringUsesEightBitTerminator)
-        {
             HandleOscString(bellTerminator: false);
-            _state = ParserState.Ground;
+            EnterCsiState(); // Clear metadata for the new ESC operation.
+            _state = ParserState.Escape;
             return;
         }
 
-        AppendOscByteOrDiscard(b);
-        _state = ParserState.OscString;
+        // Ordinary C0 bytes are ignored inside OSC, not executed or retained.
+        if (b >= 0x20) AppendOscByteOrDiscard(b);
     }
 
     private void HandleOscString(bool bellTerminator)
@@ -3356,17 +3276,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        // In UTF-8 control strings high bytes are payload, including 0x9C
-        // (the continuation byte in Ü). Explicit C1 introducers retain the
-        // existing eight-bit compatibility mode.
-        if (b == 0x9C && _controlStringUsesEightBitTerminator)
-        {
-            HandleDcsString();
-            _state = ParserState.Ground;
-            return;
-        }
-
-        if (TryAbortBrokenControlStringOnControl(b))
+        if (TryAbortBrokenDcsOnControl(b))
         {
             return;
         }
@@ -3383,7 +3293,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        if (TryAbortBrokenControlStringOnControl(b))
+        if (TryAbortBrokenDcsOnControl(b))
         {
             return;
         }
@@ -3394,13 +3304,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (b == 0x1B)
         {
             _state = ParserState.DcsEscape;
-            return;
-        }
-
-        if (b == 0x9C && _controlStringUsesEightBitTerminator)
-        {
-            HandleDcsString();
-            _state = ParserState.Ground;
             return;
         }
 
@@ -3770,15 +3673,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
+        // Ghostty dispatches a valid OSC on every exit, including CAN/SUB.
+        if (_state == ParserState.OscString) HandleOscString(bellTerminator: false);
         AbortActiveControlString();
         return true;
     }
 
-    private bool TryAbortBrokenControlStringOnControl(byte b)
+    private bool TryAbortBrokenDcsOnControl(byte b)
     {
-        if (_state is not ParserState.OscString and
-            not ParserState.OscEscape and
-            not ParserState.DcsString and
+        if (_state is not ParserState.DcsString and
             not ParserState.DcsEscape)
         {
             return false;
@@ -3796,7 +3699,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        // Recover from malformed OSC/DCS strings in binary streams so shell
+        // Legacy recovery from malformed DCS strings in binary streams so shell
         // prompt control bytes can return the parser to ground.
         AbortActiveControlString();
         ProcessGround(b);

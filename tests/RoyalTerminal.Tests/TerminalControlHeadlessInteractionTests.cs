@@ -678,20 +678,34 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    [AvaloniaFact]
-    public async Task Headless_ManagedPty_CtrlC_RecoversVisibleScreenAfterUnterminatedOscFlood()
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_Pty_CtrlC_AndExplicitStRecoverVisibleScreenAfterOscFlood(VtProcessorPreference preference)
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
 
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+
         const string readyMarker = "__ROYALTERMINAL_OSC_READY__";
+        const string hiddenMarker = "__ROYALTERMINAL_OSC_STILL_PENDING__";
         const string visibleRecoveryMarker = "__ROYALTERMINAL_OSC_VISIBLE_RECOVERY__";
 
-        TerminalControl control = new()
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            new DefaultVtProcessorFactory(new INativeVtProcessorProvider[] { new GhosttyVtProcessorProvider() }),
+            new DefaultPtyFactory(),
+            new NullSshCredentialProvider(),
+            new RejectAllSshHostKeyValidator(),
+            transportFactory: null)
         {
-            VtProcessorPreference = VtProcessorPreference.Managed,
+            VtProcessorPreference = preference,
         };
         Window window = new()
         {
@@ -733,14 +747,24 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(oscFloodSeen, $"Did not observe OSC flood output before interrupt. Output: {SnapshotOutput(outputSync, output)}");
 
             control.SendInput(new byte[] { 0x03 });
-            control.SendInput(UnixPtyTestCommands.PrintMarker(visibleRecoveryMarker));
+            control.SendInput(UnixPtyTestCommands.PrintMarker(hiddenMarker));
+            bool outputResumed = await WaitUntilAsync(
+                () => ContainsOutput(outputSync, output, hiddenMarker),
+                TimeSpan.FromSeconds(5));
+            Assert.True(outputResumed, "Ctrl+C must interrupt the producer even while OSC parsing remains pending.");
+            await StabilizeWindowAsync(window, control);
+            Assert.False(ContainsScreenText(control, hiddenMarker));
+
+            // Ctrl+C/newlines do not terminate OSC in Ghostty. Explicit ST
+            // recovery must work through the real PTY for both engines.
+            control.SendInput("printf '\\033\\134'; " + UnixPtyTestCommands.PrintMarker(visibleRecoveryMarker));
 
             bool visibleRecoverySeen = await WaitUntilAsync(
                 () => ContainsScreenText(control, visibleRecoveryMarker),
                 TimeSpan.FromSeconds(5));
             Assert.True(
                 visibleRecoverySeen,
-                $"Did not observe visible post-interrupt marker on the managed VT screen. Output: {SnapshotOutput(outputSync, output)}");
+                $"Did not observe visible post-ST marker on the {preference} VT screen. Output: {SnapshotOutput(outputSync, output)}");
         }
         finally
         {

@@ -495,7 +495,7 @@ that the open requirements above have already reached full parity.
 | Clipboard write | Emits multi-MIME normalized writes and consumes the structured reply |
 | Clipboard read | Emits a normalized read request and encodes the returned content as OSC 52 |
 | Kitty clipboard | Implements bounded, strict OSC 5522 read/write/alias transactions, MIME listing and chunking, session grants, and one-time paste-event grants |
-| Unknown APC | Supports ESC APC and C1 APC forms with the same 4096-byte bounded payload policy |
+| Unknown APC | Supports ESC APC and C1 APC introductions from non-ground parser headers with a 4096-byte bounded payload policy; ground raw C1 is invalid UTF-8 |
 | Mode queries | Handles private and ANSI DECRQM, retains full integer mode values rather than truncating to a byte, and includes current visibility-reporting (2033) and paste-event (5522) state |
 | Device reports | Matches Ghostty color-scheme (`CSI ? 996 n`) and visibility (`CSI ? 998 n`) responses; mode 2033 emits its immediate visibility report |
 | In-band resize | Mode 2048 reports committed geometry immediately when enabled and after pixel-aware resizes, using Ghostty's floor-to-cell geometry |
@@ -503,7 +503,7 @@ that the open requirements above have already reached full parity.
 | Permanent modes | Reports DECECM 117 as permanently reset, matching Ghostty's current DECRQM behavior |
 | Title privacy | CSI 21 t is disabled by default and requires an explicit managed option, matching the native wrapper's opt-in policy |
 | Unicode | Cell-width overrides are updated to Unicode 18; an exhaustive scalar-value parity test compares managed widths to the pinned native library |
-| UTF-8 C1 | UTF-8-encoded U+0080..U+009F values are ignored in ground state, matching Ghostty; managed standalone single-byte C1 commands remain a legacy compatibility divergence requiring resolution |
+| UTF-8 C1 | UTF-8-encoded U+0080..U+009F values are ignored in ground state, matching Ghostty; standalone raw C1 bytes are invalid UTF-8 and replaced, not dispatched as commands |
 | Print throughput | Contiguous printable ASCII is processed as a run, avoiding a parser-state dispatch for every ordinary byte |
 | Paste | The shared interface supports terminal-aware encoding; the managed engine continues to produce the same bracketed-paste protocol directly |
 
@@ -680,15 +680,15 @@ Reference: Ghostty `UTF8Decoder.zig`/`stream.zig` specify replacement plus retry
 xterm.js `TextDecoder.ts` instead discards certain invalid prefixes, and Windows
 Terminal `til/u8u16convert.h` retains partial input around the Windows UTF-8
 conversion API. Ghostty is authoritative for this parity target. Existing managed
-standalone raw C1 command support is still a documented divergence, not evidence
-of complete byte-stream parity. No shell startup or PowerShell behavior is changed.
+standalone raw C1 command support was still divergent at this stage; the following
+ground/OSC pass resolves it. No shell startup or PowerShell behavior is changed.
 
 The UTF-8 suite passed **31 tests**, including all **2,304** combinations of nine
 lead-byte boundary classes and every second byte, plus every split of malformed,
 valid-boundary, control-interrupted and new-lead sequences. The differential matrix
 reproduced and fixed DEL handling on the decoder's retry path: unlike DEL in an
 unfinished ESC/CSI header, this decoded scalar is printed by Ghostty. Ground-state
-standalone DEL/C1 compatibility policy remains separately unaudited. Native was
+standalone DEL/C1 policy was still unaudited at this stage. Native was
 available in `utf8-boundary-matrix.trx`; a warmed 1,000-iteration malformed-input
 loop allocated zero bytes. The first combined parser/replay suite passed 89 tests
 before the broader matrix and DEL regression were added.
@@ -698,6 +698,44 @@ total)** with zero failures (`utf8-parser-full.trx`). CI run `35840483213` at
 preceding commit `fa116746a549dc992228b2aa9b80a49c1ca75f47` passed all six native
 builds; its macOS/Linux/Windows build-and-test jobs were still pending when checked.
 Those checks do not validate this later UTF-8 commit.
+
+The following ground/OSC pass resolves the earlier raw C1/DEL divergence. All
+**256 ground-byte cases** now match native cells/cursor effects: raw C1 bytes are
+invalid UTF-8, encoded C1 remains ignored, and ground DEL is printed. Header C1
+transitions and ignored ESC/CSI DEL remain state-specific. The former eight-bit
+OSC/DCS terminator mode was removed; high payload bytes retain UTF-8 semantics.
+
+OSC now dispatches immediately on ESC or CAN/SUB, ignores other embedded C0
+controls, and processes the byte following ESC as a new escape operation rather
+than appending a false terminator to the payload. This supersedes the prior
+managed prompt-control abort policy. Only the new ESC remains in continuation,
+so replay cannot repeat already-committed effects. Eleven native differential
+cases compare title effects, query bytes, cells and cursors at every input split;
+a dedicated continuation test checks the exact commit/replay boundary. The
+combined parser/query/regression suite passed **170 tests** with native available
+(`control-string-focused.trx`).
+
+Reference decision: Ghostty `stream.zig`, `parse_table.zig` and `Parser.zig`
+define these byte-stream and exit-action rules. xterm.js also ignores ordinary
+C0 inside OSC and starts ESC processing at OSC termination, but aborts OSC on
+CAN/SUB rather than dispatching it. Windows Terminal likewise ignores invalid
+OSC controls but waits for the second ST byte before dispatch; a non-ST escape
+continues as a new escape operation. RoyalTerminal follows Ghostty's immediate
+dispatch because native/managed snapshot continuation must share the same commit
+boundary. DCS/APC transitions and complete charset/save state remain open.
+
+The first full regression run exposed one old headless test requiring automatic
+OSC recovery from Ctrl+C and prompt newlines. That behavior contradicts Ghostty,
+so its replacement checks both processors through the real Unix PTY: Ctrl+C stops
+the producer, a subsequent marker remains inside OSC, and explicit ST makes the
+next marker visible. Both managed and explicitly registered native cases passed
+in `osc-pty-recovery.trx`. Applications must terminate OSC (or reset the parser),
+not rely on managed-only prompt-byte recovery. No Ctrl+C transport behavior changed.
+
+The final full macOS unit/headless run passed **2,077 tests, 16 conditional skips
+(2,093 total)** with zero failures (`control-string-final.trx`), including both
+real-PTY recovery cases. This is local validation, not a substitute for pending
+cross-platform runtime and complete snapshot-installation gates.
 
 Reference choice: Ghostty's snapshot per-record Zig codecs define the format.
 Windows Terminal `TextBuffer::SerializeTo` and xterm.js's serialize addon emit VT

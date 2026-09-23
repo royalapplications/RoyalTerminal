@@ -111,14 +111,15 @@ public sealed class ManagedGhosttyRegressionTests
     }
 
     [Fact]
-    public void C0ControlsAndDeleteDoNotBecomePrintableCells()
+    public void C0ControlsAreIgnoredButGroundDeleteIsPrintedLikeGhostty()
     {
         TerminalScreen screen = new(16, 2, 0);
         using BasicVtProcessor processor = new(screen);
         processor.Process([0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
             0x18, 0x19, 0x1A, 0x1C, 0x1D, 0x1E, 0x1F, 0x7F, (byte)'X']);
-        Assert.Equal('X', screen.GetViewportRow(0)[0].Codepoint);
-        Assert.Equal(1, processor.CursorCol);
+        Assert.Equal(0x7F, screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal('X', screen.GetViewportRow(0)[1].Codepoint);
+        Assert.Equal(2, processor.CursorCol);
     }
 
     [Fact]

@@ -38,8 +38,14 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
   scalars, surrogates and values beyond U+10FFFF, and emits U+FFFD before retrying
   an offending byte. Interrupted scalars are committed before CAN/SUB or other
   control effects, while a new unfinished scalar replaces the replay fragment.
-  Existing standalone raw C1 support remains a separate compatibility policy;
-  rejected UTF-8 bytes do not accidentally invoke that policy.
+  Standalone raw C1 bytes now follow Ghostty's UTF-8-only ground-state policy
+  (replacement, not command dispatch), and ground DEL is printed. Header C1
+  transitions remain distinct, as in the upstream parser table.
+- OSC now commits on ESC immediately and retains only that ESC as continuation;
+  replay cannot repeat the committed title/clipboard/query effect. CAN/SUB also
+  dispatch a complete OSC before returning to ground. Other C0 bytes are ignored
+  inside OSC, while high bytes (including raw ST) remain payload. The former
+  prompt-control abort and false-ESC-as-payload behavior have been removed.
 - Complete PAGE/grid payloads: four compact cell widths, canonical trailing zero
   elision, wide-pair/scalar/semantic normalization, bounded UTF-32 suffixes,
   first-entry-wins style/hyperlink tables and reference resolution. Capacity hints
@@ -128,7 +134,7 @@ boundary while keeping presentation URL access convenient.
    A native-valid wire continuation is not proof that the current managed parser
    supports every corresponding state: the ESC/CSI/control/ignore-state cases now
    have focused tests, as do incremental UTF-8 rejection/replay boundaries, but
-   remaining control-string transitions, the raw C1 compatibility policy and complete
+   remaining DCS/APC control-string transitions and complete
    current/saved charset semantics still need integration coverage before exposure.
 3. Native-to-managed and managed-to-native differential tests, including every
    upstream complete fixture, both screens, history, pending wrap, saved cursors,

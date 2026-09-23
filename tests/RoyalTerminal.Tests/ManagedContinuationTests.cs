@@ -20,6 +20,7 @@ public sealed class ManagedContinuationTests
     public void Continuation_ReplaysEveryInputSplitWithoutRepeatingCompletedWork(string prefix, string tail)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(prefix);
+        byte[] expected = prefix.EndsWith('\x1b') ? new byte[] { 0x1B } : bytes;
         for (int split = 0; split <= bytes.Length; split++)
         {
             TerminalScreen sourceScreen = new(20, 3, 0);
@@ -31,10 +32,10 @@ public sealed class ManagedContinuationTests
             source.Process(bytes.AsSpan(0, split));
             source.Process(bytes.AsSpan(split));
             Assert.False(source.IsParserGround);
-            Assert.Equal(bytes, source.GetContinuation());
+            Assert.Equal(expected, source.GetContinuation());
             using MemoryStream stream = new();
             source.WriteContinuationTo(stream);
-            Assert.Equal(bytes, stream.ToArray());
+            Assert.Equal(expected, stream.ToArray());
             replay.Process(source.GetContinuation());
             Assert.Equal(source.GetContinuation(), replay.GetContinuation());
             source.Process(Encoding.UTF8.GetBytes(tail));
@@ -127,12 +128,13 @@ public sealed class ManagedContinuationTests
     }
 
     [Fact]
-    public void EightBitControlString_PreservesItsOriginalTerminatorPolicy()
+    public void GroundEightBitControlsAreInvalidUtf8NotReplayFragments()
     {
         using BasicVtProcessor processor = new(new TerminalScreen(8, 2, 0));
         processor.Process(new byte[] { 0x9D, (byte)'2', (byte)';', (byte)'A' });
-        Assert.Equal(new byte[] { 0x9D, (byte)'2', (byte)';', (byte)'A' }, processor.GetContinuation());
+        Assert.True(processor.IsParserGround);
+        Assert.Empty(processor.GetContinuation());
         Assert.True(processor.ProcessUntilGround(new byte[] { 0x9C, (byte)'X' }, out int consumed));
-        Assert.Equal(1, consumed);
+        Assert.Equal(0, consumed);
     }
 }
