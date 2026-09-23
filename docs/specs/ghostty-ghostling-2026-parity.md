@@ -2,6 +2,30 @@
 
 ## Reopened completion audit
 
+### Snapshot color-state installation (2026-09-23)
+
+The unpublished managed processor can now install TERMINAL colors without
+collapsing defaults and overrides into the rendered theme. Original palette
+entries, sparse override identity (including equal-valued overrides), nullable
+dynamic defaults and dynamic overrides remain independently available for
+subsequent export. OSC resets expose the original defaults; later host theme
+changes replace defaults while retaining application overrides. Missing native
+defaults use host colors only for rendering, not for OSC query responses. Cursor
+queries fall back to foreground when no cursor color is present.
+
+Reference decision: follow Ghostty `snapshot/terminal.zig`,
+`stream_terminal.zig:colorOperation` and `Terminal.zig:colorForXterm`. Windows
+Terminal `AdaptDispatch::ResetColorTableEntry` and xterm.js
+`InputHandler.restoreIndexedColor` also restore configured colors, but do not
+define Ghostty's nullable snapshot fields. The new tests compare all 256 original
+and current entries and override bits plus dynamic metadata with native snapshots
+after restore, bytewise continued OSC input, resets and host configuration changes.
+Additional tests cover absence versus black, query suppression/cursor fallback,
+and recoloring logical cells without changing truecolor cells or the current pen.
+
+Validation is pending after the implementation push. This is a prerequisite, not
+the complete managed snapshot restore/export orchestrator; that remains open.
+
 The complete upstream review is **in progress**. The prior API inventory and green
 test suite establish the implemented C surface, but do not establish full native
 and managed feature or performance parity. The [308-commit source inventory](ghostty-upstream-inventory-2026.md)

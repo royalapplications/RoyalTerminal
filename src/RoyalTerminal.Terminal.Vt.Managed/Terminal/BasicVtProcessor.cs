@@ -3283,14 +3283,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         if (value == "?")
         {
-            uint queryColor = selectorCode switch
-            {
-                10 => _screen.DefaultForeground,
-                11 => _screen.DefaultBackground,
-                12 => _theme.CursorColor,
-                _ => _screen.DefaultForeground,
-            };
-            SendOscColorResponse(selectorCode.ToString(), queryColor);
+            // A restored native terminal can have no configured dynamic color.
+            // Rendering fallbacks must not invent a protocol query response.
+            uint? color = _colors.GetDynamic(selectorCode) ?? (selectorCode == 12 ? _colors.GetDynamic(10) : null);
+            if (color is uint queryColor)
+                SendOscColorResponse(selectorCode.ToString(), queryColor);
             return;
         }
 
