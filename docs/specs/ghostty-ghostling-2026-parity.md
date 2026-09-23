@@ -151,8 +151,29 @@ managed-only expectations. These were corrected against native comparisons:
 wide-tail cursor pins stay on the tail, and LF does not erase an existing wrap
 link. The expanded focused suite passes **170/170**, including original-byte
 hyperlinks and native policy/viewport differentials. Full-suite and platform CI
-validation of these follow-up corrections remain pending. Prompt redraw clears
+validation initially exposed old URL-coalescing, trailing-blank and selection
+expectations. Corrected tests retain real-content pruning coverage and exercise
+rectangular selection with explicitly registered native and managed providers.
+The complete suite on `fff6a85` passes **2,398 tests / 16 conditional skips / zero
+failures**. Platform CI validation remains pending. Prompt redraw clears
 with the default pen, matching native's temporarily detached resize cursor pen.
+
+### Saved cursor resize tracking
+
+Managed resize now temporarily tracks the active screen's DECSC cell through
+reflow, then updates only its coordinates and pending-wrap flag. Ghostty
+`Screen.resize` is the compatibility target: a saved pending-wrap cursor moves
+one column forward and clears pending wrap when its tracked cell is no longer
+at the right edge; a pin outside the active area resets to the top-left.
+The pin is released even when resize fails and does not follow ordinary output
+between DECSC and resize. Existing logical colors, protection and charsets remain
+in the saved pen. xterm.js `Buffer.resize` adjusts saved Y during history trim
+and bounds saved X; Windows Terminal `AdaptDispatch::SaveCursorState` uses
+screen-specific coordinates and restores pen/origin/delayed wrap. Their coordinate
+policies differ, so this managed implementation deliberately follows Ghostty's
+cell-pin behavior. New native differential cases cover width/height changes,
+pending wrap, wide tails, blank pins, history and the active alternate screen;
+validation is pending. Inactive-screen resize remains a separate open item.
 
 ### Current/saved charsets and cursor state (2026-09-23)
 

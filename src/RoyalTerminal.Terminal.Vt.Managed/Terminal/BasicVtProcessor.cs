@@ -5717,6 +5717,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _screen.ScrollOffset = 0;
         }
 
+        TerminalScreenAnchor? savedCursorAnchor = TrackSavedCursorForResize();
         TerminalGridPosition mappedCursor;
         try
         {
@@ -5727,9 +5728,19 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 alternateScreen ? null : new TerminalGridPosition(resizeCursorCol, _cursorRow),
                 trackedAbsolutePositions,
                 preserveViewportTopOnRowsIncrease && !alternateScreen);
+
+            if (alternateScreen)
+            {
+                _screen.PadBottomViewportToPreserveTop(alternateViewportTop);
+            }
+            if (savedCursorAnchor is not null)
+            {
+                RemapSavedCursorAfterResize(savedCursorAnchor);
+            }
         }
         finally
         {
+            if (savedCursorAnchor is not null) _screen.ReleaseAnchor(savedCursorAnchor);
             if (!alternateScreen && restoreScrollOffset != 0)
             {
                 _screen.ScrollOffset = restoreScrollOffset;
@@ -5738,7 +5749,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         if (alternateScreen)
         {
-            _screen.PadBottomViewportToPreserveTop(alternateViewportTop);
             _cursorCol = previousCursorCol;
             _cursorRow = previousCursorRow;
             _delayedWrap = previousDelayedWrap;

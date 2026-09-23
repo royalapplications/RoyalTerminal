@@ -60,6 +60,41 @@ public sealed partial class BasicVtProcessor
         _currentDecorations = saved.Decorations;
     }
 
+    // Ghostty Screen.resize temporarily tracks the saved cursor's actual cell,
+    // not its next-print position. It does not track DECSC across ordinary output.
+    private TerminalScreenAnchor? TrackSavedCursorForResize()
+    {
+        if (SavedCursor is not { } saved ||
+            (uint)saved.Column >= (uint)_screen.Columns ||
+            (uint)saved.Row >= (uint)_screen.ViewportRows)
+        {
+            return null;
+        }
+
+        return _screen.CreateAnchor(
+            _screen.TotalRows - _screen.ViewportRows + saved.Row, saved.Column);
+    }
+
+    private void RemapSavedCursorAfterResize(TerminalScreenAnchor anchor)
+    {
+        if (SavedCursor is not { } saved) return;
+        int activeTop = _screen.TotalRows - _screen.ViewportRows;
+        if (!_screen.TryResolveAnchor(anchor, out TerminalGridPosition position) ||
+            position.Row < activeTop || position.Row >= _screen.TotalRows)
+        {
+            SavedCursor = saved with { Column = 0, Row = 0, PendingWrap = false };
+            return;
+        }
+
+        bool advance = saved.PendingWrap && position.Column != _screen.Columns - 1;
+        SavedCursor = saved with
+        {
+            Column = position.Column + (advance ? 1 : 0),
+            Row = position.Row - activeTop,
+            PendingWrap = saved.PendingWrap && !advance,
+        };
+    }
+
     private static SgrColorKind ToSgrKind(TerminalColorIdentity identity) => identity.Kind switch
     {
         TerminalColorKind.Palette => SgrColorKind.Palette,
