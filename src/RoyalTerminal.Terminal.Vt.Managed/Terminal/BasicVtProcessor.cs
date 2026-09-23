@@ -168,6 +168,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private int _cursorStyle = 1;      // DECSCUSR (CSI Ps SP q), default blinking block
     private int _widthPx;
     private int _heightPx;
+    private int _reportCellWidthPx;
+    private int _reportCellHeightPx;
     private int _kittyKeyboardFlagsMain;
     private int _kittyKeyboardFlagsAlt;
     private readonly List<int> _kittyKeyboardStackMain = [];
@@ -4225,24 +4227,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             case 14: // CSI 14 t — text area size in pixels
             {
-                string response = $"\x1b[4;{Math.Max(0, _heightPx)};{Math.Max(0, _widthPx)}t";
+                string response = $"\x1b[4;{(long)_reportCellHeightPx * _screen.ViewportRows};{(long)_reportCellWidthPx * _screen.Columns}t";
                 ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
                 break;
             }
 
             case 16: // CSI 16 t — cell size in pixels
             {
-                int cellWidth = _screen.Columns > 0 && _widthPx > 0
-                    ? _widthPx / _screen.Columns
-                    : 8;
-                int cellHeight = _screen.ViewportRows > 0 && _heightPx > 0
-                    ? _heightPx / _screen.ViewportRows
-                    : 16;
-
-                if (cellWidth <= 0) cellWidth = 8;
-                if (cellHeight <= 0) cellHeight = 16;
-
-                string response = $"\x1b[6;{cellHeight};{cellWidth}t";
+                string response = $"\x1b[6;{_reportCellHeightPx};{_reportCellWidthPx}t";
                 ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
                 break;
             }
@@ -4302,17 +4294,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         if (!_extendedDecModesEnabled.Contains(2048) ||
             _screen.Columns <= 0 ||
-            _screen.ViewportRows <= 0 ||
-            _widthPx <= 0 ||
-            _heightPx <= 0)
+            _screen.ViewportRows <= 0)
         {
             return;
         }
 
-        int cellWidth = Math.Max(1, _widthPx / _screen.Columns);
-        int cellHeight = Math.Max(1, _heightPx / _screen.ViewportRows);
-        long reportWidth = (long)_screen.Columns * cellWidth;
-        long reportHeight = (long)_screen.ViewportRows * cellHeight;
+        long reportWidth = (long)_screen.Columns * _reportCellWidthPx;
+        long reportHeight = (long)_screen.ViewportRows * _reportCellHeightPx;
         string response = $"\x1b[48;{_screen.ViewportRows};{_screen.Columns};{reportHeight};{reportWidth}t";
         ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
     }
@@ -5661,6 +5649,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// </summary>
     public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
     {
+        UpdateReportCellSize(columns, rows, widthPx, heightPx);
         _widthPx = Math.Max(0, widthPx);
         _heightPx = Math.Max(0, heightPx);
         NotifyResize(columns, rows);
@@ -5708,6 +5697,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(rows, 1);
+        if (reportSize) UpdateReportCellSize(columns, rows, widthPx, heightPx);
         EndRenderHold();
         SetExtendedDecMode(2026, false);
         _widthPx = Math.Max(0, widthPx);

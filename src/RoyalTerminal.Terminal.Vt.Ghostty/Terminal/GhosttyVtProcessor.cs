@@ -1382,6 +1382,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private void RefreshStateAndScreenFromNative()
     {
+        // Terminal-owned resize (e.g. DECCOLM) clears the native hold without
+        // passing through the mode-set callback. Observe that committed state.
+        if (_renderHeld && !_terminal.GetMode(GhosttyVtNative.ModeSynchronizedOutput)) _renderHeld = false;
         if (_renderHeld)
         {
             TimeSpan elapsed = _timeProvider.GetElapsedTime(_renderHoldStartedTimestamp);
@@ -2870,8 +2873,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
             *size = new GhosttyVtNative.GhosttySizeReportSize
             {
-                Rows = checked((ushort)_screen.ViewportRows),
-                Columns = checked((ushort)_screen.Columns),
+                Rows = _terminal.GetRows(),
+                Columns = _terminal.GetColumns(),
                 CellWidth = checked((uint)Math.Max(_sizeReportCellWidthPx, 0)),
                 CellHeight = checked((uint)Math.Max(_sizeReportCellHeightPx, 0)),
             };

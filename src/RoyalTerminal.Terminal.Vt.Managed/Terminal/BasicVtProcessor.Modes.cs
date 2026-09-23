@@ -80,4 +80,12 @@ public sealed partial class BasicVtProcessor
         EraseInDisplay(2);
         HomeCursor();
     }
+
+    private void UpdateReportCellSize(int columns, int rows, int widthPx, int heightPx)
+    {
+        // Host cell geometry remains stable across VT-requested column changes.
+        // Unknown geometry is zero, not an invented font size.
+        _reportCellWidthPx = widthPx > 0 && columns > 0 ? Math.Max(1, widthPx / columns) : 0;
+        _reportCellHeightPx = heightPx > 0 && rows > 0 ? Math.Max(1, heightPx / rows) : 0;
+    }
 }
