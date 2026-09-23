@@ -1529,6 +1529,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             reflowOnResize: false);
 
         _sixelOverlayScreen = overlayScreen;
+        ConfigureOverlayModeDefaults(overlayProcessor);
         _sixelOverlayProcessor = overlayProcessor;
         return overlayProcessor;
     }

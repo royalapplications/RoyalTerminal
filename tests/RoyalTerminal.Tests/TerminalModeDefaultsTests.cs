@@ -192,6 +192,25 @@ public sealed class TerminalModeDefaultsTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void LazilyCreatedSixelOverlayInheritsPolicyAndRetainsItAfterRecreation()
+    {
+        if (!Available()) return;
+        TerminalScreen screen = new(4, 4, 0);
+        using GhosttyVtProcessor processor = new(screen);
+        Assert.True(processor.TrySetDefaultMode(7, false));
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            processor.SixelGraphicsEnabled = true;
+            processor.NotifyResize(4, 4, 40, 40);
+            processor.Process("\u001b[HABCDE\u001bPq#1;2;100;0;0#1@\u001b\\"u8);
+            ReadOnlySpan<TerminalRasterImagePlacement> placements = screen.GetRasterImagePlacements();
+            Assert.Equal(1, placements.Length);
+            Assert.Equal(3, placements[0].AnchorColumn);
+            processor.SixelGraphicsEnabled = false;
+        }
+    }
+
+    [Fact]
     public void ManagedPolicyAndResetReadsDoNotAllocateAfterWarmup()
     {
         using BasicVtProcessor managed = new(new TerminalScreen(12, 4));

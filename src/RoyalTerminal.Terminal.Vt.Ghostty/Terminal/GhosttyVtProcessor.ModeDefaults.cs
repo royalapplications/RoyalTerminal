@@ -52,4 +52,15 @@ public sealed partial class GhosttyVtProcessor
             _terminal.SetMode(GhosttyVtNative.CreateMode((ushort)mode, ansi: true),
                 (_defaultModeValues & (1UL << TerminalModeRegistry.IndexOf(mode, true))) != 0);
     }
+
+    private void ConfigureOverlayModeDefaults(BasicVtProcessor overlay)
+    {
+        foreach (int mode in TerminalModeRegistry.AnsiModes)
+            overlay.TrySetDefaultMode(mode,
+                (_defaultModeValues & (1UL << TerminalModeRegistry.IndexOf(mode, true))) != 0, ansi: true);
+        foreach (int mode in TerminalModeRegistry.DecModes)
+            if (TerminalModeRegistry.IsDefaultConfigurable(mode, false))
+                overlay.TrySetDefaultMode(mode,
+                    (_defaultModeValues & (1UL << TerminalModeRegistry.IndexOf(mode, false))) != 0);
+    }
 }
