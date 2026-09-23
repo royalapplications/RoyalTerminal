@@ -163,6 +163,20 @@ public sealed class GhosttySnapshotLivePageTests
     }
 
     [Fact]
+    public void NativeHyperlinkBudgetRequiresPageSplitInsteadOfSilentDataLoss()
+    {
+        TerminalScreen owner = new(900, 1);
+        TerminalRow row = new(900);
+        for (int column = 0; column < row.Columns; column++)
+        {
+            TerminalCell cell = TerminalCell.Empty(); cell.Codepoint = 'x';
+            cell.HyperlinkId = owner.RegisterHyperlink("link"u8, [], (uint)column);
+            row[column] = cell;
+        }
+        Assert.Throws<InvalidDataException>(() => GhosttySnapshotLivePage.Capture([row], owner, 900));
+    }
+
+    [Fact]
     public void InvalidGeometryAndBudgetsFailBeforeCellAllocation()
     {
         TerminalScreen owner = new(1, 1);

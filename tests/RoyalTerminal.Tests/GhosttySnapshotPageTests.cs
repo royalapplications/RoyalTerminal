@@ -49,6 +49,29 @@ public sealed class GhosttySnapshotPageTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void DenseNativePagesRetainAllocationSensitiveStylesLinksAndLongGraphemes()
+    {
+        bool available = GhosttyVtProcessor.IsAvailable();
+        output.WriteLine($"Native snapshot differential available: {available}");
+        if (!available) return;
+        using GhosttyTerminal terminal = new(80, 24);
+        terminal.SetScrollbackMaxBytes(4 * 1024 * 1024);
+        terminal.SetScrollbackMaxLines(1000);
+        string cluster = "a" + new string('\u0301', 64);
+        string uri = "https://example.com/" + new string('x', 200);
+        for (int row = 0; row < 128; row++)
+        {
+            terminal.Write(Encoding.UTF8.GetBytes($"\u001b]8;id={row};{uri}\u001b\\\u001b[38;5;{row};48;2;1;2;3;4:3m"));
+            terminal.Write(Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat(cluster, 40))));
+            terminal.Write("\u001b]8;;\u001b\\\u001b[0m\r\n"u8);
+        }
+        using GhosttyTerminal restored = GhosttySnapshot.Decode(RewritePages(GhosttySnapshot.Encode(terminal), out _, true));
+        AssertStyledEqual(terminal, restored);
+        terminal.Write("next"u8); restored.Write("next"u8);
+        AssertStyledEqual(terminal, restored);
+    }
+
+    [Fact]
     public void CompleteGoldenSnapshotPagesCanBeReframedWithValidChecksums()
     {
         byte[] fixture = GhosttySnapshotFramingTests.Fixture("complete-v1.hex");
