@@ -65,7 +65,7 @@ The ten additional C exports are declared in
 
 - `ghostty_royal_mouse_shift_capture_set` sets or clears the nullable application
   Shift capture override without replaying terminal input.
-- `ghostty_royal_mouse_state` copies the nullable Shift capture override and effective tracking/format flags consumed
+- `ghostty_royal_mouse_state` copies the requested mouse shape, nullable Shift capture override and effective tracking/format flags consumed
   by `mouse_encode.setopt_from_terminal`, without allocation or mutation. The
   upstream boolean terminal query ORs independent mode bits; mixed mode resets
   and decoded snapshots can legitimately disagree with those bits. The adapter

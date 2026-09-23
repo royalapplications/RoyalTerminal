@@ -41,6 +41,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseModeStateSource,
     ITerminalMouseShiftCaptureState,
+    ITerminalMouseShapeSource,
     ITerminalModifyOtherKeysStateSource,
     ITerminalKeySequenceEncoderSource,
     ITerminalPointerButtonStateSink,
@@ -275,6 +276,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public bool? MouseShiftCaptureOverride { get; set; }
+
+    /// <inheritdoc />
+    public TerminalMouseShape MouseShape { get; private set; } = TerminalMouseShape.Text;
 
     /// <inheritdoc />
     public void ObservePointerButton(in TerminalPointerEvent pointerEvent) => _mouseEncoder.ObserveButton(pointerEvent);
@@ -2696,6 +2700,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ReadOnlySpan<byte> rawPayload = CollectionsMarshal.AsSpan(_oscBuffer);
+        if (rawPayload.StartsWith("22;"u8))
+        {
+            if (TerminalMouseShapeNames.TryParse(rawPayload[3..], out TerminalMouseShape shape)) MouseShape = shape;
+            _oscBuffer.Clear();
+            return;
+        }
         if (rawPayload.StartsWith("0;"u8) || rawPayload.StartsWith("2;"u8))
         {
             SetOscTitle(rawPayload[2..]);
@@ -3584,7 +3594,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (separator < 0) return MaxOscBufferBytes;
         ReadOnlySpan<byte> selector = combined[..separator];
         // Title/PWD parsers reserve one byte of their fixed capture for NUL.
-        if (selector is [(byte)'0'] or [(byte)'1'] or [(byte)'2'] or [(byte)'7'] || selector.SequenceEqual("1337"u8))
+        if (selector is [(byte)'0'] or [(byte)'1'] or [(byte)'2'] or [(byte)'7'] || selector.SequenceEqual("1337"u8) || selector.SequenceEqual("22"u8))
             return 2047 + separator + 1;
         if (selector.SequenceEqual("9"u8)) return 2048 + separator + 1;
         return TryOscColorOperation(selector, out _) ? 2048 + separator + 1 : MaxOscBufferBytes;

@@ -40,4 +40,6 @@ public static class TerminalMouseCapturePolicy
 /// <summary>Effective terminal mouse input state, independent of the DEC mode bank.</summary>
 /// <param name="Modes">Tracking and encoding modes.</param>
 /// <param name="ShiftCaptureOverride">Application capture override, or null to use host policy.</param>
-public readonly record struct TerminalMouseInputState(TerminalMouseModeState Modes, bool? ShiftCaptureOverride);
+/// <param name="Shape">Application-requested mouse pointer shape.</param>
+public readonly record struct TerminalMouseInputState(TerminalMouseModeState Modes, bool? ShiftCaptureOverride,
+    TerminalMouseShape Shape = TerminalMouseShape.Text);

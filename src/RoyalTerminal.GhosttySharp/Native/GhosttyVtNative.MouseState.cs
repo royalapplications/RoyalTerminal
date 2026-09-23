@@ -20,6 +20,8 @@ public static partial class GhosttyVtNative
         public uint Format;
         /// <summary>Shift capture override: 0 default, 1 false, 2 true.</summary>
         public uint ShiftCapture;
+        /// <summary>Requested mouse shape, in GhosttyMouseShape registry order.</summary>
+        public uint Shape;
         /// <summary>Initializes the required size field.</summary>
         public static RoyalMouseState CreateSized() => new() { Size = (nuint)Unsafe.SizeOf<RoyalMouseState>() };
     }

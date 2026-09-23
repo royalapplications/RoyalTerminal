@@ -31,6 +31,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalPointerSequenceEncoderSource,
     ITerminalMouseModeStateSource,
     ITerminalMouseShiftCaptureState,
+    ITerminalMouseShapeSource,
     ITerminalModifyOtherKeysStateSource,
     ITerminalPointerButtonStateSink,
     ITerminalSessionHistoryController,
@@ -320,6 +321,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public TerminalMouseModeState MouseModeState => _mouseModeState;
+
+    /// <inheritdoc />
+    public TerminalMouseShape MouseShape { get; private set; } = TerminalMouseShape.Text;
 
     /// <inheritdoc />
     public bool ModifyOtherKeys2 { get; private set; }
@@ -1633,6 +1637,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         TerminalMouseInputState mouse = _terminal.GetMouseInputState();
         _mouseModeState = mouse.Modes;
         _mouseShiftCaptureOverride = mouse.ShiftCaptureOverride;
+        MouseShape = mouse.Shape;
         ModifyOtherKeys2 = _terminal.GetModifyOtherKeys2();
         _focusEventMode = _terminal.GetMode(GhosttyVtNative.ModeFocusEvent);
         _kittyKeyboardFlags = (int)_terminal.GetKittyKeyboardFlags();

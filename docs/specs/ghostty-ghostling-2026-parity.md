@@ -2,6 +2,38 @@
 
 ## Reopened completion audit
 
+### OSC 22 pointer shape (2026-09-23)
+
+Both engines expose the terminal's requested pointer shape. Managed parsing
+accepts all 34 W3C names and 22 xterm/foot aliases from Ghostty `terminal/mouse.zig`,
+case-sensitively, with canonical OSC 22 selection and the native 2,047-byte payload
+limit. Unknown names are ignored. Shape is global and live during render holds;
+Ghostty's `fullReset` deliberately leaves the separate `mouse_shape` field intact,
+so both engines retain it through RIS, DECSTR and session reset. Snapshot header
+byte 37 installs it directly, including native unknown-value normalization.
+
+Native state copies reuse the effective mouse query, avoiding another per-frame
+interop call. The control publishes cursor changes only on the UI thread, caches
+standard cursors per attached control and releases them on detach. Hyperlink hover
+temporarily takes precedence and restores the requested cursor on exit. Ghostty's
+`Surface` follows this same override model; its GTK runtime supports the full CSS
+registry while AppKit ignores some shapes. Windows Terminal/xterm.js do not offer
+this OSC 22 registry in the inspected handlers, so Ghostty is the reference.
+
+Avalonia 12.1.1's standard cursor registry cannot represent every W3C shape.
+Documented host fallbacks retain exact terminal state: context-menu→Arrow;
+vertical-text→Ibeam; cell/zoom-in/zoom-out→Cross; grab/grabbing→Hand;
+no-drop/not-allowed→No; diagonal bidirectional resize→the matching corner cursor.
+Other shapes map to their corresponding standard cursors. This is a platform
+presentation limitation, not lossy VT/snapshot state. The official API inspected
+is `Avalonia.Base/Input/Cursor.cs` at tag 12.1.1.
+
+Differential tests cover every name/alias at every split, reset/hold semantics,
+all 256 snapshot wire values, and allocation-free warm parsing. Headless tests
+cover every mapping through both real backends, cache reuse, hyperlink precedence,
+hold updates and detach/reattach. Validation is pending after the push. Password
+input state and complete snapshot orchestration remain open.
+
 ### modifyOtherKeys mode 2 (2026-09-23)
 
 Ghostty `stream.zig` and `stream_terminal.zig` are authoritative for CSI > m/n:

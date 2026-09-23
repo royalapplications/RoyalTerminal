@@ -15,6 +15,7 @@ extern "C" {
 typedef struct {
     size_t size;
     uint32_t tracking, format, shift_capture; /** shift_capture: 0 default, 1 false, 2 true. */
+    uint32_t shape; /** W3C shape registry, matching GhosttyMouseShape (0-33). */
 } RoyalMouseState;
 /** Copies modifyOtherKeys mode-2 state as 0 or 1. Invalid arguments leave output
  * untouched. No allocation; serialize with terminal mutation. */

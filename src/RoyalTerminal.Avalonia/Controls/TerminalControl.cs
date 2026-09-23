@@ -207,6 +207,8 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             (o, v) => o.ScrollToBottomOnInput = v);
 
     private bool _scrollToBottomOnInput = true;
+    private TerminalMouseCursorCache? _terminalMouseCursors;
+    private bool _terminalMouseCursorAttached;
 
     /// <summary>Host Shift-mouse policy for VT transport backends. Native input endpoints own their policy.</summary>
     public static readonly DirectProperty<TerminalControl, TerminalMouseShiftCapturePolicy> MouseShiftCapturePolicyProperty =
@@ -1636,6 +1638,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         _vtProcessor = CreateConfiguredVtProcessor();
         _vtProcessorHasProcessedOutput = false;
         NotifyVtProcessorOfCurrentSize();
+        if (Dispatcher.UIThread.CheckAccess()) UpdateTerminalMouseCursorOnUiThread();
 
         return _vtProcessor;
     }
@@ -2151,6 +2154,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _terminalMouseCursorAttached = true;
 
         _containingScrollViewer = null;
         AttachTopLevelScaling();
@@ -2159,11 +2163,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         // Create the presenter here as a fallback so rendering always works.
         EnsurePresenter();
         UpdateTimedRefreshTimer();
+        UpdateTerminalMouseCursorOnUiThread();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        _terminalMouseCursorAttached = false;
+        if (_terminalMouseCursors is { } cursors)
+        {
+            if (cursors.Owns(Cursor)) SetCurrentValue(CursorProperty, null);
+            cursors.Dispose();
+            _terminalMouseCursors = null;
+        }
         _containingScrollViewer = null;
         CancelPendingTransportResize();
         StopMouseSelectionDrag();
@@ -2791,6 +2803,7 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void ApplyOutputProcessResultOnUiThread(TerminalOutputProcessResult result)
     {
+        UpdateTerminalMouseCursorOnUiThread();
         if (result.ResetMouseSelection)
         {
             ApplyMouseModeSelectionResetOnUiThread();
@@ -7672,6 +7685,19 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _presenter?.Invalidate(fullRedraw: invalidateViewportRows, dirtyRowsOnly: false);
+        if (Dispatcher.UIThread.CheckAccess()) UpdateTerminalMouseCursorOnUiThread();
+    }
+
+    private void UpdateTerminalMouseCursorOnUiThread()
+    {
+        // Processing may run on the IO worker; only UI publication touches
+        // Avalonia/native cursor objects, using the latest live terminal state.
+        if (!_terminalMouseCursorAttached || _screen is null || _vtProcessor is not ITerminalMouseShapeSource source) return;
+        TerminalMouseShape shape;
+        bool overLink;
+        lock (_screen.SyncRoot) { shape = source.MouseShape; overLink = _hoveredLinkUrl is not null; }
+        Cursor cursor = (_terminalMouseCursors ??= new()).Get(shape, overLink);
+        if (!ReferenceEquals(Cursor, cursor)) SetCurrentValue(CursorProperty, cursor);
     }
 
     private void UpdateRendererParityStateLocked()

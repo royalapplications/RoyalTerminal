@@ -11,14 +11,14 @@ public sealed partial class GhosttyTerminal
     /// <summary>Copies effective mouse encoder state, independent of DEC mode bits. Serialize with terminal mutation.</summary>
     public TerminalMouseModeState GetMouseModeState() => GetMouseInputState().Modes;
 
-    /// <summary>Copies effective mouse modes and application capture policy. Serialize with terminal mutation.</summary>
+    /// <summary>Copies effective mouse modes, application capture policy and pointer shape. Serialize with terminal mutation.</summary>
     public unsafe TerminalMouseInputState GetMouseInputState()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         GhosttyVtNative.RoyalMouseState state = GhosttyVtNative.RoyalMouseState.CreateSized();
         ThrowIfFailed(GhosttyVtNative.MouseState(_handle, &state), "ghostty_royal_mouse_state");
         return new(new((TerminalMouseTrackingMode)state.Tracking, (TerminalMouseEncoding)state.Format),
-            state.ShiftCapture == 0 ? null : state.ShiftCapture == 2);
+            state.ShiftCapture == 0 ? null : state.ShiftCapture == 2, (TerminalMouseShape)state.Shape);
     }
 
     /// <summary>Sets the application Shift capture override without replaying VT; null restores host policy.</summary>

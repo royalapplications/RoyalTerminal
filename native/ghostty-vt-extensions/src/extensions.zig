@@ -5,6 +5,7 @@ const RoyalMouseState = extern struct {
     tracking: u32 = 0,
     format: u32 = 0,
     shift_capture: u32 = 0,
+    shape: u32 = 8,
 };
 
 export fn ghostty_royal_modify_other_keys_2(
@@ -30,6 +31,7 @@ export fn ghostty_royal_mouse_state(
         .tracking = @intCast(@intFromEnum(t.flags.mouse_event)),
         .format = @intCast(@intFromEnum(t.flags.mouse_format)),
         .shift_capture = @intCast(@intFromEnum(t.flags.mouse_shift_capture)),
+        .shape = @intCast(@intFromEnum(t.mouse_shape)),
     };
     return 0;
 }

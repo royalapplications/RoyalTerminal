@@ -2408,6 +2408,65 @@ public sealed class TerminalControlHeadlessInteractionTests
         finally { await CleanupWindowAsync(window, control.StopPty); }
     }
 
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_OscMouseShapes_MapEveryShapeAndRestoreAfterHyperlinksAndReattach(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        RecordingTransport transport = new();
+        DefaultVtProcessorFactory factory = new(new INativeVtProcessorProvider[] { new GhosttyVtProcessorProvider() });
+        TerminalControl control = CreateControlWithTransport(transport, factory, preference);
+        control.Width = 640; control.Height = 400;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            string[] names = ["default", "context-menu", "help", "pointer", "progress", "wait", "cell", "crosshair", "text", "vertical-text", "alias", "copy", "move", "no-drop", "not-allowed", "grab", "grabbing", "all-scroll", "col-resize", "row-resize", "n-resize", "e-resize", "s-resize", "w-resize", "ne-resize", "nw-resize", "se-resize", "sw-resize", "ew-resize", "ns-resize", "nesw-resize", "nwse-resize", "zoom-in", "zoom-out"];
+            string[] expected = ["Arrow", "Arrow", "Help", "Hand", "AppStarting", "Wait", "Cross", "Cross", "Ibeam", "Ibeam", "DragLink", "DragCopy", "DragMove", "No", "No", "Hand", "Hand", "SizeAll", "SizeWestEast", "SizeNorthSouth", "TopSide", "RightSide", "BottomSide", "LeftSide", "TopRightCorner", "TopLeftCorner", "BottomRightCorner", "BottomLeftCorner", "SizeWestEast", "SizeNorthSouth", "TopRightCorner", "TopLeftCorner", "Cross", "Cross"];
+            for (int i = 0; i < names.Length; i++)
+            {
+                byte[] command = Encoding.ASCII.GetBytes("\u001b]22;" + names[i] + "\u0007");
+                control.WriteOutput(command);
+                Assert.Equal(expected[i], control.Cursor?.ToString());
+                Cursor? cursor = control.Cursor;
+                control.WriteOutput(command);
+                Assert.Same(cursor, control.Cursor);
+            }
+            control.SetHoveredLinkUrl("https://example.com");
+            Assert.Equal("Hand", control.Cursor?.ToString());
+            control.WriteOutput("\u001b[?2026h\u001b]22;crosshair\u0007"u8);
+            Assert.Equal("Hand", control.Cursor?.ToString());
+            control.SetHoveredLinkUrl(null);
+            Assert.Equal("Cross", control.Cursor?.ToString());
+            Cursor? previous = control.Cursor;
+            window.Content = null;
+            Assert.Null(control.Cursor);
+            window.Content = control;
+            await StabilizeWindowAsync(window, control);
+            Assert.Equal("Cross", control.Cursor?.ToString());
+            Assert.NotSame(previous, control.Cursor);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaFact]
+    public void Headless_MouseCursorCache_ReusesNativeCursorWithoutWarmAllocations()
+    {
+        using TerminalMouseCursorCache cache = new();
+        Cursor cross = cache.Get(TerminalMouseShape.Crosshair, false);
+        Cursor hand = cache.Get(TerminalMouseShape.Text, true);
+        for (int i = 0; i < 1000; i++) _ = cache.Get(TerminalMouseShape.Crosshair, false);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++) _ = cache.Get(TerminalMouseShape.Crosshair, false);
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Same(cross, cache.Get(TerminalMouseShape.Cell, false));
+        Assert.Same(hand, cache.Get(TerminalMouseShape.Pointer, false));
+        Assert.True(cache.Owns(hand)); Assert.False(cache.Owns(null));
+    }
+
     [AvaloniaFact]
     public async Task Headless_MouseInput_FromTopLevelRouting_EncodesToTransport_WhenMouseModeEnabled()
     {

@@ -40,6 +40,7 @@ public sealed partial class BasicVtProcessor
         _mouseModeState = new((TerminalMouseTrackingMode)header.MouseEvent, (TerminalMouseEncoding)header.MouseFormat);
         MouseShiftCaptureOverride = header.MouseShiftCapture;
         ModifyOtherKeys2 = header.ModifyOtherKeys2;
+        MouseShape = (TerminalMouseShape)header.MouseShape;
     }
 
     /// <inheritdoc />
