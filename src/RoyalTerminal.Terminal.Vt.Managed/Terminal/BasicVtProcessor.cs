@@ -31,6 +31,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalModeDefaults,
     IKittyKeyboardStateSource,
     ITerminalCursorStyleSource,
+    ITerminalCursorDefaults,
     ITerminalFocusEventModeSource,
     ITerminalSessionHistoryController,
     ITerminalSelectionExportSource,
@@ -164,7 +165,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private bool _sendReceiveMode = true; // SRM (ANSI mode 12)
     private bool _insertMode;          // IRM (ANSI mode 4)
     private bool _lineFeedNewLineMode; // LNM (ANSI mode 20)
-    private int _cursorStyle = 1;      // DECSCUSR (CSI Ps SP q), default blinking block
     private int _widthPx;
     private int _heightPx;
     private int _reportCellWidthPx;
@@ -246,10 +246,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     public bool MouseReportingEnabled => MouseModeState.IsMouseReportingEnabled;
 
     /// <inheritdoc />
-    public TerminalCursorStyle CursorStyle => MapCursorStyle(_renderHold?.CursorStyle ?? _cursorStyle);
+    public TerminalCursorStyle CursorStyle => _renderHold?.CursorStyle ?? ActiveCursorStyle;
 
     /// <inheritdoc />
-    public bool CursorBlinking => IsCursorStyleBlinking(_renderHold?.CursorStyle ?? _cursorStyle);
+    public bool CursorBlinking => _renderHold?.CursorBlinking ?? _extendedDecModesEnabled.Contains(12);
 
     /// <inheritdoc />
     public int KittyKeyboardFlags => ActiveKittyKeyboard.Current;
@@ -3628,7 +3628,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             "m" => $"{BuildCurrentSgrState()}m",
             "r" => $"{_scrollTop + 1};{_scrollBottom + 1}r",
             "s" when _extendedDecModesEnabled.Contains(69) => $"{_scrollLeft + 1};{RightMargin + 1}s",
-            " q" => $"{_cursorStyle} q",
+            " q" => $"{CursorStyleReport} q",
             _ => null,
         };
 
@@ -3813,7 +3813,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // CSI <space> q — Set cursor style (DECSCUSR)
         if (_intermediateChar == ' ' && finalByte == 'q')
         {
-            SetCursorStyle(Math.Max(0, p0));
+            if (_params.Count <= 1) SetCursorStyle(p0);
             return;
         }
 
@@ -4360,31 +4360,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
     }
 
-    private void SetCursorStyle(int styleParameter)
-    {
-        _cursorStyle = styleParameter switch
-        {
-            <= 0 => 1,
-            > 6 => 6,
-            _ => styleParameter,
-        };
-    }
-
-    private static TerminalCursorStyle MapCursorStyle(int styleParameter)
-    {
-        return styleParameter switch
-        {
-            3 or 4 => TerminalCursorStyle.Underline,
-            5 or 6 => TerminalCursorStyle.Bar,
-            _ => TerminalCursorStyle.Block,
-        };
-    }
-
-    private static bool IsCursorStyleBlinking(int styleParameter)
-    {
-        return styleParameter is 1 or 3 or 5;
-    }
-
     #endregion
 
     #region DEC Private Modes
@@ -4571,6 +4546,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _savedMainCursorRow = _cursorRow;
         _savedMainDelayedWrap = _delayedWrap;
         _alternateSemanticPen = _primarySemanticPen;
+        _alternateCursorStyle = _primaryCursorStyle;
         _alternateHyperlinkImplicitCounter = _primaryHyperlinkImplicitCounter;
         _currentHyperlinkId = 0;
         _inAltScreen = true;
@@ -4601,6 +4577,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         if (copySemanticPen)
         {
+            _primaryCursorStyle = _alternateCursorStyle;
             _primarySemanticPen = _alternateSemanticPen;
             _primaryHyperlinkImplicitCounter = _alternateHyperlinkImplicitCounter;
         }
@@ -5154,7 +5131,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResetSavedAndScreenModes();
         _insertMode = false;
         _lineFeedNewLineMode = false;
-        _cursorStyle = 1;
         ResetDelayedWrap();
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
@@ -5173,6 +5149,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResetAttributes();
         InitTabStops();
         ApplyConfiguredModeDefaults();
+        SetCursorStyle(0);
     }
 
     #endregion
@@ -5314,7 +5291,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResetSavedAndScreenModes();
         _insertMode = false;
         _lineFeedNewLineMode = false;
-        _cursorStyle = 1;
+        _primaryCursorStyle = _alternateCursorStyle = TerminalCursorStyle.Block;
         _charsets = new();
         _lastGraphicCodepoint = 0;
         _primarySavedCursor = _alternateSavedCursor = null;
@@ -5330,7 +5307,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         // Ghostty fullReset selects the configured cursor after modes.reset;
         // this policy takes precedence over the restored default mode bank.
-        SetExtendedDecMode(12, _defaultCursorBlink);
+        SetCursorStyle(0);
 
         switch (screenResetMode)
         {
@@ -5662,7 +5639,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _screen = _publishedScreen.CreateStateCopy();
         _renderHold = new(
             _options.TimeProvider.GetTimestamp(),
-            _cursorCol, _cursorRow, _cursorVisible, _cursorStyle, _inAltScreen);
+            _cursorCol, _cursorRow, _cursorVisible, ActiveCursorStyle, _extendedDecModesEnabled.Contains(12), _inAltScreen);
     }
 
     private bool EndRenderHold()
@@ -5680,7 +5657,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         int CursorColumn,
         int CursorRow,
         bool CursorVisible,
-        int CursorStyle,
+        TerminalCursorStyle CursorStyle,
+        bool CursorBlinking,
         bool AlternateScreen);
 
     private void RaiseModeChangedIfNeeded(TerminalModeState before)

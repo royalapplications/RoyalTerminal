@@ -23,6 +23,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalShellIntegrationEventSource,
     IKittyKeyboardStateSource,
     ITerminalCursorStyleSource,
+    ITerminalCursorDefaults,
     ITerminalFocusEventModeSource,
     ITerminalKeySequenceEncoderSource,
     ITerminalPasteSequenceEncoderSource,
@@ -801,6 +802,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
         ResetProcessVisibleNativeModes();
         ApplyConfiguredModeDefaultsAfterSessionReset();
+        // Mode reset above clears mode 12; reselect the retained cursor policy
+        // afterwards, matching native fullReset without discarding history.
+        _terminal.Write("\u001b[0 q"u8);
         ConfigureOptionalNativeFeatures();
         ApplyThemeToNative(_theme);
         SetupTerminalEffects();

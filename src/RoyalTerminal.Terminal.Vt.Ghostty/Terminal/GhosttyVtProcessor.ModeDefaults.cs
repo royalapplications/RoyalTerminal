@@ -55,6 +55,8 @@ public sealed partial class GhosttyVtProcessor
 
     private void ConfigureOverlayModeDefaults(BasicVtProcessor overlay)
     {
+        overlay.SetDefaultCursorStyle(_defaultCursorStyle);
+        overlay.SetDefaultCursorBlink(_defaultCursorBlink);
         foreach (int mode in TerminalModeRegistry.AnsiModes)
             overlay.TrySetDefaultMode(mode,
                 (_defaultModeValues & (1UL << TerminalModeRegistry.IndexOf(mode, true))) != 0, ansi: true);

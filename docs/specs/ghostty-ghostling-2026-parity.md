@@ -2,6 +2,33 @@
 
 ## Reopened completion audit
 
+### Cursor appearance and default policy (2026-09-23)
+
+Ghostty `Terminal.setCursorStyle`, `cursor.zig`, `dcs.zig` and
+`switchScreenMode` are the reference: shape belongs to each screen, mode 12 owns
+blink state, and terminal-wide default-selection state determines whether later
+host policy changes apply immediately. Screen modes 47/1047 copy shape both ways;
+1049 copies it on entry but retains the primary shape on return. DECSC/DECRC does
+not save shape or blink. Default selection and RIS restore configured shape and
+blink, including hollow blocks; DECRQSS reports the resolved shape/blink pair.
+Invalid DECSCUSR values and extra parameters are ignored, not clamped.
+
+The managed processor now represents these states separately, captures both shape
+and blink in synchronized-output publication, and installs snapshot policy and
+per-screen shapes without replay or overwriting restored mode bits. Both engines
+expose `ITerminalCursorDefaults` with matching default-shape/default-blink setters;
+the native adapter forwards these to the existing C API and configures its lazy
+Sixel overlay. History-preserving session reset reapplies cursor defaults after
+resetting mode bits. Snapshot-only null blink policy is retained and resolves to
+blinking; the C API's bool policy remains bool (clearing it means false upstream).
+
+Reference comparison: Windows Terminal rejects invalid cursor styles and selects
+its configured shape for zero; xterm.js also returns zero to host configuration
+but derives blink from odd/even for unsupported nonzero styles. RoyalTerminal
+follows Ghostty's complete rejection and per-screen copy rules. Existing managed
+DECSTR reset support remains an explicit extension rather than native parity.
+Post-push validation is pending. Full processor restoration remains open.
+
 ### Legacy color operations and native host report policy (2026-09-23)
 
 Managed OSC 4 now skips empty tokens, retains valid operations before the first
