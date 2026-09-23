@@ -24,8 +24,8 @@ export fn ghostty_royal_prompt_state(
         .clear_eol = @intFromBool(s.cursor.semantic_content_clear_eol),
         .click = switch (s.semantic_prompt.click) {
             .none => 0,
-            .click_events => |v| 1 + @as(u32, @intFromEnum(v)),
-            .cl => |v| 3 + @as(u32, @intFromEnum(v)),
+            .click_events => |v| 1 + @as(u32, @intCast(@intFromEnum(v))),
+            .cl => |v| 3 + @as(u32, @intCast(@intFromEnum(v))),
         },
         .redraw = @intFromEnum(t.flags.shell_redraws_prompt),
         .implicit_id = s.cursor.hyperlink_implicit_id,
