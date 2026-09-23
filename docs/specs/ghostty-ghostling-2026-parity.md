@@ -25,8 +25,34 @@ Windows Terminal `terminalInput.cpp` and xterm.js `input/Keyboard.ts` retain
 different legacy Tab/Return mappings; Ghostty's mode-2 extension is the selected
 behavior, not their legacy defaults. Tests cover parser input splits, every
 modifier/Backarrow combination, Unicode, special keys, hold/reset/snapshot state,
-native ABI guards and both backends through session input routing. Validation is
-pending after the implementation push. Broader keyboard/IME parity remains open.
+native ABI guards and both backends through session input routing. All **55
+focused cases**, including the text-lifetime tests below, pass against the rebuilt
+native library. Post-push full Release through `199c337`: **3,553 unit/headless +
+231 integration tests passed, 16 conditional skips, zero failures**
+(`modify-other-keys-full.trx`). Native VT/renderer rebuilds and symbol checks pass
+on macOS arm64; the complete solution Release build has zero warnings/errors.
+At inspection CI run `35892233269` passed native macOS arm64 and both Linux
+architectures; Windows arm64/x64 and macOS x64 were still running. This is not
+complete platform sign-off. Broader keyboard/IME and
+repeat-event parity remain open; the public input contract currently has only
+press/release actions.
+
+Reviewing `c/key_event.zig:set_utf8` exposed a borrowed-pointer lifetime bug: the
+old wrapper retained neither the temporary UTF-8 array nor its pin after setting
+the native event. The event now owns a reusable pinned-object-heap buffer, and
+the encoder keeps that owner alive through both native encode calls. Forced
+compacting-GC tests cover Unicode, large growth, shorter replacement, embedded
+NUL, replacement encoding of invalid UTF-16, empty/reset and disposal. Warm
+updates reuse capacity without managed allocation.
+
+Two sequential fixed-JIT Release benchmark pairs used 20,000 warmups and seven
+samples of 100,000 setter calls. ASCII medians changed **1.849→1.157 ms** and
+**1.476→1.070 ms**; `é😀` changed **1.840→1.502 ms** and **1.719→1.449 ms**.
+Timed allocations fell from **3,200,000 to zero bytes** for each workload.
+Only setter work was timed; the unsafe baseline pointer was not dereferenced.
+Bindings were hash-verified (`c3483499…` before, `a34c82cc…` after), and both
+used native library `064222fc…`. This narrow comparison establishes neither
+end-to-end keyboard latency nor complete managed/native performance parity.
 
 ### Shift-mouse capture and physical button state (2026-09-23)
 
