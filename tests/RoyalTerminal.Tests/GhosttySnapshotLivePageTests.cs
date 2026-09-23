@@ -126,7 +126,6 @@ public sealed class GhosttySnapshotLivePageTests
     [Theory]
     [InlineData("wrong")]
     [InlineData("a\u0000")]
-    [InlineData("a\uD800")]
     public void InvalidLiveGraphemesAreRejected(string grapheme)
     {
         TerminalRow row = new(1);
@@ -134,6 +133,10 @@ public sealed class GhosttySnapshotLivePageTests
         Assert.Throws<InvalidDataException>(() => GhosttySnapshotLivePage.Capture([row], new(1, 1), 1));
         Assert.Equal(grapheme, row[0].Grapheme);
     }
+
+    [Fact]
+    public void InvalidUtf16IsRejectedWithoutTestAttributeStringNormalization()
+        => InvalidLiveGraphemesAreRejected(new string(['a', '\uD800']));
 
     [Theory]
     [InlineData(0)] // Orphan wide tail.

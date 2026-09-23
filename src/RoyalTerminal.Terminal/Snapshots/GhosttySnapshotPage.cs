@@ -29,8 +29,42 @@ internal sealed class GhosttySnapshotPage
         byte[] header = new byte[20];
         BinaryPrimitives.WriteUInt16LittleEndian(header, checked((ushort)grid.Columns));
         BinaryPrimitives.WriteUInt16LittleEndian(header.AsSpan(2), checked((ushort)grid.Rows));
+        // Ghostty's decoder uses these hints as fixed allocation capacities and
+        // drops entries that do not fit. Derive them from owned data, never from
+        // untrusted source hints (page.zig exactRowCapacity / RefCountedSet).
+        int styleCapacity = SetCapacity(styles.Count);
+        int linkedCells = 0;
+        long graphemeBytes = 0;
+        for (int row = 0; row < grid.Rows; row++)
+        for (int column = 0; column < grid.Columns; column++)
+        {
+            if ((grid.Cells[row * grid.Columns + column] >> 48) != 0) linkedCells++;
+            int suffixLength = grid.Suffix(row, column).Length;
+            // Native appends suffix scalars incrementally. Reserve both old and
+            // new 16-byte-aligned slices during growth, not just final storage.
+            graphemeBytes += 2L * ((suffixLength * 4L + 15) & ~15L);
+        }
+        // A conservative upper bound for Set.Item across supported desktop
+        // targets (48 bytes on 64-bit), plus the 16-cells-per-entry map budget.
+        int linkBytes = Math.Max(SetCapacity(hyperlinks.Count), (linkedCells + 15) / 16) * 64;
+        long stringBytes = 0;
+        foreach (byte[] bytes in hyperlinks.Values)
+        {
+            GhosttySnapshotHyperlink link = GhosttySnapshotHyperlink.Read(bytes, out _);
+            stringBytes += (link.Uri.Length + 31L) & ~31L;
+            stringBytes += (link.ExplicitId.Length + 31L) & ~31L;
+        }
+        if (styleCapacity > ushort.MaxValue || linkBytes > ushort.MaxValue ||
+            graphemeBytes > uint.MaxValue || stringBytes > uint.MaxValue)
+            throw new InvalidDataException("Split the snapshot PAGE before its native capacity fields overflow.");
+        BinaryPrimitives.WriteUInt16LittleEndian(header.AsSpan(8), (ushort)styleCapacity);
+        BinaryPrimitives.WriteUInt16LittleEndian(header.AsSpan(10), (ushort)linkBytes);
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(12), (uint)graphemeBytes);
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(16), (uint)stringBytes);
         return new(header, grid, styles, hyperlinks);
     }
+
+    private static int SetCapacity(int count) => count == 0 ? 0 : ((count + 1) * 16 + 12) / 13;
     internal bool TryGetStyle(ushort id, out GhosttySnapshotStyle style) => _styles.TryGetValue(id, out style);
     internal bool TryGetHyperlink(ushort id, out GhosttySnapshotHyperlink hyperlink)
     {
