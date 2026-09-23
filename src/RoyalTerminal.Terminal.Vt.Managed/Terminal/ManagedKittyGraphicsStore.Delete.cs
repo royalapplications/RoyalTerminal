@@ -7,6 +7,15 @@ namespace RoyalTerminal.Terminal;
 
 internal sealed partial class ManagedKittyGraphicsStore
 {
+    internal bool ClearScreen(TerminalScreen screen, uint cellWidth, uint cellHeight)
+    {
+        bool changed = DeleteVisible(screen, cellWidth, cellHeight, deleteUnused: true);
+        // Unlike protocol d=A, ED2 also discards images that had no placements.
+        foreach (Image image in _images.Values)
+            if (image.PlacementCount == 0) changed |= RemoveImage(screen, image.Id);
+        return changed;
+    }
+
     internal bool DeleteById(TerminalScreen screen, uint imageId, uint placementId, bool deleteUnused)
     {
         if (imageId == 0) return false;

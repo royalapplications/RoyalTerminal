@@ -25,6 +25,8 @@ public sealed partial class TerminalScreen
         CopyRegistry(_hyperlinkIdsByUrl, copy._hyperlinkIdsByUrl);
         CopyRegistry(_kittyImagesById, copy._kittyImagesById);
         copy._kittyPlacements = _kittyPlacements;
+        copy._kittyAnchoredPlacements = _kittyAnchoredPlacements;
+        copy._kittyProjectionState = _kittyProjectionState;
         copy._trackedAnchors = new(_trackedAnchors);
         return copy;
 
@@ -62,6 +64,8 @@ public sealed partial class TerminalScreen
         CopyRegistry(source._hyperlinkIdsByUrl, _hyperlinkIdsByUrl);
         CopyRegistry(source._kittyImagesById, _kittyImagesById);
         _kittyPlacements = source._kittyPlacements;
+        _kittyAnchoredPlacements = source._kittyAnchoredPlacements;
+        _kittyProjectionState = source._kittyProjectionState;
         _trackedAnchors = source._trackedAnchors;
         InvalidateAll();
     }
@@ -80,6 +84,7 @@ public sealed partial class TerminalScreen
         destination.DefaultBackground = DefaultBackground;
         destination._nextHyperlinkId = _nextHyperlinkId;
         destination._nextRasterImageId = _nextRasterImageId;
+        destination._anchorRevision = _anchorRevision;
     }
 
     private TerminalRowBuffer CopyRows(TerminalRowBuffer rows)

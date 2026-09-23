@@ -102,7 +102,8 @@ public sealed class TerminalKittyImagePlacement
         int sourceHeight,
         int cellWidthPx = 0,
         int cellHeightPx = 0,
-        TerminalKittyImagePlacementScaleMode scaleMode = TerminalKittyImagePlacementScaleMode.None)
+        TerminalKittyImagePlacementScaleMode scaleMode = TerminalKittyImagePlacementScaleMode.None,
+        int zIndex = 0)
     {
         ArgumentOutOfRangeException.ThrowIfEqual(imageId, 0);
         ImageId = imageId;
@@ -120,6 +121,7 @@ public sealed class TerminalKittyImagePlacement
         CellWidthPx = Math.Max(0, cellWidthPx);
         CellHeightPx = Math.Max(0, cellHeightPx);
         ScaleMode = scaleMode;
+        ZIndex = zIndex;
     }
 
     /// <summary>Referenced image id.</summary>
@@ -166,4 +168,15 @@ public sealed class TerminalKittyImagePlacement
 
     /// <summary>Destination scaling behavior for placement-time cell metrics.</summary>
     public TerminalKittyImagePlacementScaleMode ScaleMode { get; }
+
+    /// <summary>Protocol z-index, ordering images within a rendering layer.</summary>
+    public int ZIndex { get; }
+
+    internal static int ComparePaintOrder(TerminalKittyImagePlacement left, TerminalKittyImagePlacement right)
+    {
+        int order = ((byte)left.Layer).CompareTo((byte)right.Layer);
+        if (order != 0) return order;
+        order = left.ZIndex.CompareTo(right.ZIndex);
+        return order != 0 ? order : unchecked((uint)left.ImageId).CompareTo(unchecked((uint)right.ImageId));
+    }
 }

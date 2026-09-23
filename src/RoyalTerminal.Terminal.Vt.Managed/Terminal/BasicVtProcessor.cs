@@ -5109,6 +5109,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
         }
 
+        if (mode is 2 or 22)
+        {
+            _kittyStore.ClearScreen(_screen, (uint)GetEffectiveCellWidthPx(), (uint)GetEffectiveCellHeightPx());
+            AdvanceKittyAnimations();
+            PublishKittyGraphics();
+        }
         _screen.InvalidateAll();
     }
 
@@ -5343,11 +5349,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void SoftReset()
     {
         EndRenderHold();
-        _primaryKittyStore.Clear(_screen);
-        _alternateKittyStore?.Clear(_screen);
-        _kittyStore = _primaryKittyStore;
-        _animationNextTickDelay = null;
-        _screen.ClearKittyGraphics();
         _cursorVisible = true;
         _originMode = false;
         _autoWrap = true;
@@ -5515,6 +5516,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         TerminalModeState before = ModeState;
         EndRenderHold();
+        _primaryKittyStore.Clear(_screen);
+        _alternateKittyStore?.Clear(_screen);
+        _kittyStore = _primaryKittyStore;
+        _animationNextTickDelay = null;
+        _screen.ClearKittyGraphics();
         bool restorePrimaryAfterAlternateRestart =
             screenResetMode == SessionScreenResetMode.PreserveScrollback &&
             (_inAltScreen || _screen.AlternateBufferActive);
@@ -5648,6 +5654,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _screen.Resize(columns, rows, reflowOnResize: !_inAltScreen);
         }
         ApplyResizeState(columns, rows);
+        if (_kittyStore.PlacementCount > 0) PublishKittyGraphics();
     }
 
     /// <summary>

@@ -13,6 +13,7 @@ public sealed partial class TerminalScreen
     // Do not attach identities to reusable TerminalRow objects. A state copy
     // shares the identities, but owns independent positions until publication.
     private Dictionary<TerminalScreenAnchor, TrackedCell> _trackedAnchors = [];
+    private long _anchorRevision;
 
     /// <summary>Tracks a valid cell in the active buffer. Caller holds the screen lock.</summary>
     internal TerminalScreenAnchor CreateAnchor(int absoluteRow, int column)
@@ -20,6 +21,7 @@ public sealed partial class TerminalScreen
         ValidateAnchorPosition(absoluteRow, column);
         TerminalScreenAnchor token = new();
         _trackedAnchors.Add(token, new(absoluteRow, column, _alternateBufferActive));
+        _anchorRevision++;
         return token;
     }
 
@@ -48,16 +50,23 @@ public sealed partial class TerminalScreen
         }
 
         cell = new(absoluteRow, column, cell.Alternate);
+        _anchorRevision++;
         return true;
     }
 
     /// <summary>Releases an identity; a subsequent move cannot resurrect it.</summary>
-    internal bool ReleaseAnchor(TerminalScreenAnchor token) => _trackedAnchors.Remove(token);
+    internal bool ReleaseAnchor(TerminalScreenAnchor token)
+    {
+        if (!_trackedAnchors.Remove(token)) return false;
+        _anchorRevision++;
+        return true;
+    }
 
     /// <summary>Tracks an in-place vertical row copy, pruning cells scrolled outside its region.</summary>
     internal void ShiftAnchorsInViewportRows(int startViewportRow, int endViewportRow, int rowDelta)
     {
         if (_trackedAnchors.Count == 0 || rowDelta == 0) return;
+        _anchorRevision++;
         int start = GetAbsoluteRowForViewportRow(Math.Clamp(startViewportRow, 0, ViewportRows - 1));
         int end = GetAbsoluteRowForViewportRow(Math.Clamp(endViewportRow, 0, ViewportRows - 1));
         foreach ((TerminalScreenAnchor token, TrackedCell original) in _trackedAnchors)
@@ -80,6 +89,7 @@ public sealed partial class TerminalScreen
     private void ShiftAnchorsAfterTopRowsRemoved(int count)
     {
         if (count <= 0) return;
+        _anchorRevision++;
         foreach ((TerminalScreenAnchor token, TrackedCell original) in _trackedAnchors)
         {
             if (original.Alternate != _alternateBufferActive || original.Row < 0) continue;
@@ -90,6 +100,7 @@ public sealed partial class TerminalScreen
 
     private void PruneAnchorsFromRow(int firstRow, bool alternate)
     {
+        _anchorRevision++;
         foreach ((TerminalScreenAnchor token, TrackedCell original) in _trackedAnchors)
         {
             if (original.Alternate != alternate || original.Row < firstRow) continue;
@@ -99,6 +110,7 @@ public sealed partial class TerminalScreen
 
     private void ClampActiveAnchorsToColumns()
     {
+        _anchorRevision++;
         foreach ((TerminalScreenAnchor token, TrackedCell original) in _trackedAnchors)
         {
             if (original.Alternate != _alternateBufferActive || original.Row < 0) continue;
@@ -124,6 +136,7 @@ public sealed partial class TerminalScreen
         int offset,
         int removedRows)
     {
+        _anchorRevision++;
         for (int i = 0; i < identities.Count; i++)
         {
             ReflowAnchorPosition mapped = positions[offset + i];

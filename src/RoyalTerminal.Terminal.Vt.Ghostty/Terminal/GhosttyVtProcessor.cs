@@ -2123,7 +2123,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 _kittyImageSources.Add(cachedImage.Source);
             }
 
-            TerminalKittyImageLayer layer = ClassifyKittyLayer(_kittyPlacementIterator.GetZIndex());
+            int zIndex = _kittyPlacementIterator.GetZIndex();
+            TerminalKittyImageLayer layer = ClassifyKittyLayer(zIndex);
             uint requestedColumns = _kittyPlacementIterator.GetColumns();
             uint requestedRows = _kittyPlacementIterator.GetRows();
             TerminalKittyImagePlacementScaleMode scaleMode = GetKittyScaleMode(requestedColumns, requestedRows);
@@ -2149,7 +2150,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 checked((int)renderInfo.SourceHeight),
                 cellWidthPx,
                 cellHeightPx,
-                scaleMode));
+                scaleMode, zIndex));
         }
 
         imagesChanged |= _kittyImageCache.Count != _kittyNextImageCache.Count;
@@ -2157,6 +2158,11 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _kittyNextImageCache.Clear();
         _kittyGraphicsGeneration = generation;
         _kittyGraphicsSynchronized = true;
+        _kittyPlacements.Sort(static (left, right) =>
+        {
+            int order = left.ZIndex.CompareTo(right.ZIndex);
+            return order != 0 ? order : unchecked((uint)left.ImageId).CompareTo(unchecked((uint)right.ImageId));
+        });
 
         if (_kittyPlacements.Count == 0)
         {
@@ -2186,7 +2192,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         {
             TerminalKittyImagePlacement left = previous[i];
             TerminalKittyImagePlacement right = current[i];
-            if (left.ImageId != right.ImageId || left.Layer != right.Layer ||
+            if (left.ImageId != right.ImageId || left.Layer != right.Layer || left.ZIndex != right.ZIndex ||
                 left.ViewportColumn != right.ViewportColumn || left.ViewportRow != right.ViewportRow ||
                 left.XOffsetPx != right.XOffsetPx || left.YOffsetPx != right.YOffsetPx ||
                 left.WidthPx != right.WidthPx || left.HeightPx != right.HeightPx ||

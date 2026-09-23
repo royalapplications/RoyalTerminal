@@ -7,20 +7,19 @@ namespace RoyalTerminal.Terminal;
 
 internal sealed partial class ManagedKittyGraphicsStore
 {
-    /// <summary>Publishes visible, pin-backed placements using the active viewport.</summary>
+    /// <summary>Publishes immutable placement recipes for viewport and anchor projection.</summary>
     internal void Publish(TerminalScreen screen, uint cellWidth, uint cellHeight)
     {
         ReapPrunedPlacements(screen);
         List<TerminalKittyImageSource> images = [];
-        List<TerminalKittyImagePlacement> placements = [];
+        List<TerminalKittyAnchoredPlacement> placements = [];
         HashSet<uint> included = [];
-        int viewportTop = screen.ViewportTopAbsoluteRow;
         foreach ((PlacementKey key, Placement placement) in _placements)
         {
             if (!_images.TryGetValue(key.ImageId, out Image? image) ||
                 !TryResolveRoot(screen, placement, out Placement? root, out long dx, out long dy) ||
                 root?.Anchor is not TerminalScreenAnchor anchor ||
-                !screen.TryResolveAnchor(anchor, out TerminalGridPosition origin))
+                !screen.TryResolveAnchor(anchor, out _))
             {
                 continue;
             }
@@ -30,15 +29,6 @@ internal sealed partial class ManagedKittyGraphicsStore
                 (uint)image.Animation.CurrentImage.Height, cellWidth, cellHeight);
             if (geometry.SourceWidth == 0 || geometry.SourceHeight == 0 ||
                 geometry.Width == 0 || geometry.Height == 0) continue;
-
-            long column = (long)origin.Column + dx;
-            long row = (long)origin.Row + dy - viewportTop;
-            long bottom = row + (long)((geometry.OffsetY + (ulong)geometry.Height + Math.Max(1u, cellHeight) - 1) /
-                Math.Max(1u, cellHeight));
-            long right = column + (long)((geometry.OffsetX + (ulong)geometry.Width + Math.Max(1u, cellWidth) - 1) /
-                Math.Max(1u, cellWidth));
-            if (bottom <= 0 || row >= screen.ViewportRows || right <= 0 || column >= screen.Columns)
-                continue;
 
             if (included.Add(image.Id)) images.Add(image.Source);
             int z = placement.Options.Z;
@@ -52,20 +42,20 @@ internal sealed partial class ManagedKittyGraphicsStore
                 (false, true) => TerminalKittyImagePlacementScaleMode.Rows,
                 _ => TerminalKittyImagePlacementScaleMode.None,
             };
-            placements.Add(new(
+            TerminalKittyImagePlacement renderGeometry = new(
                 unchecked((int)image.Id), layer,
-                Saturate(column), Saturate(row),
+                0, 0,
                 Saturate(geometry.OffsetX), Saturate(geometry.OffsetY),
                 Saturate(geometry.Width), Saturate(geometry.Height),
                 Saturate(geometry.SourceX), Saturate(geometry.SourceY),
                 Saturate(geometry.SourceWidth), Saturate(geometry.SourceHeight),
                 scaleMode is TerminalKittyImagePlacementScaleMode.Columns or TerminalKittyImagePlacementScaleMode.ColumnsAndRows ? Saturate(cellWidth) : 0,
                 scaleMode is TerminalKittyImagePlacementScaleMode.Rows or TerminalKittyImagePlacementScaleMode.ColumnsAndRows ? Saturate(cellHeight) : 0,
-                scaleMode));
+                scaleMode, z);
+            placements.Add(new(anchor, dx, dy, geometry.Columns, geometry.Rows, renderGeometry));
         }
-        screen.ReplaceKittyGraphics(images, placements);
+        screen.ReplaceAnchoredKittyGraphics(images, placements);
     }
 
     private static int Saturate(uint value) => (int)Math.Min(value, int.MaxValue);
-    private static int Saturate(long value) => (int)Math.Clamp(value, int.MinValue, int.MaxValue);
 }

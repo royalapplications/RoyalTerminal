@@ -12,7 +12,7 @@ The renewed review found the following missing or weakly verified requirements:
 
 | Requirement | Evidence needed for completion | Current review state |
 | --- | --- | --- |
-| Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store and live APC execution/projection are implemented with focused tests, including direct/chunked load, resize, alternate-screen restoration, timed animation advancement and delete selector families; virtual placeholder projection, viewport-scroll reprojection and full native differential coverage remain open |
+| Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store and live APC execution/projection are implemented with focused tests, including direct/chunked load, resize, scrollback/anchor reprojection, alternate-screen restoration, timed animation advancement and delete selector families; virtual placeholder projection, protocol-response/streaming edge cases and full native differential coverage remain open |
 | Native Kitty animation playback | Animation tick in the built library, scheduling without further PTY input, deterministic frame tests | Repository-owned extension and timed refresh implemented; deterministic frame tests pass, and all six native RID variants cross-build; non-macOS runtime execution remains CI validation |
 | Synchronized output | Completed prefix visible at enable; following output frozen; release/reset/one-second timeout without additional input | Both engines now implement prefix publication, frozen presentation and idle timeout; managed copy-on-write state transfer and focused native/managed tests pass |
 | Managed snapshot and continuation features | Restore both screens, history, parser/UTF-8 continuation, modes, styles, links and saved cursors with bounded validation | Managed ground-boundary processing, bounded continuation export and replay tests pass; Ghostty-compatible CRC32C framing and style/hyperlink codecs pass upstream golden, corruption, truncation and allocation tests; complete state codecs and incremental READY/history restore remain open |
@@ -28,6 +28,38 @@ Rows above are requirements to finish, not exclusions from the requested scope.
 Tests cited elsewhere in this document describe existing coverage; they must not
 be used to mark these broader requirements complete until their specific evidence
 has been inspected.
+
+### Graphics viewport and lifecycle review (2026-09-23)
+
+Managed image projection now retains immutable tracked-anchor recipes, including
+offscreen placements. The screen resolves them against its own anchor state and
+viewport on demand, matching Ghostty's `computeViewportPos` in
+`src/terminal/c/kitty_graphics.zig`. Text output, history pruning, in-place row
+movement and scrollback navigation no longer require another graphics command
+to update placement positions. Synchronized-output screen copies share immutable
+recipes and keep independent anchor positions. A cached projection is reused
+until anchor revision or viewport geometry changes; 1,000 unchanged reads allocate
+zero bytes in the focused allocation test.
+
+The review also found and fixed dropped within-layer z-order in both integrations.
+Snapshots now retain the exact signed z value and sort by z and then unsigned
+image ID, following `src/renderer/image.zig`. A real Skia pixel test exercises
+overlapping images through both processors, including an ID above `int.MaxValue`
+and a placement update that changes only z.
+
+Managed reset/erase integration now clears both stores on RIS, keeps the active
+store on DECSTR, recalculates placement sizes on pixel-only resize, and handles
+ED2 by clearing visible placements and unplaced data while retaining graphics
+wholly in history. Native/managed tests exercise each case. For DECSTR graphics,
+the chosen behavior follows Ghostty (graphics survive); xterm's image addon resets
+its storage on DECSTR. Windows Terminal ignores Kitty APC strings, so it is not
+an image-storage reference. xterm's renderer confirms viewport-relative rendering
+from buffer content (`ydisp`), rather than retaining display-time row coordinates.
+
+The combined graphics, renderer, anchor and synchronized-output run passes
+118 tests on macOS arm64, with native Ghostty confirmed available in the test
+output. This closes those specific regressions, not the remaining graphics or
+whole-project parity requirements above.
 
 ## Scope and pinned references
 

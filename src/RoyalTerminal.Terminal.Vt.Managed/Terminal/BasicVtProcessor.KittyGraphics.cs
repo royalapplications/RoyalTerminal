@@ -236,6 +236,7 @@ public sealed partial class BasicVtProcessor
 
     private bool AdvanceKittyAnimations()
     {
+        _kittyStore.ReapPrunedPlacements(_screen);
         long now = _options.TimeProvider.GetTimestamp();
         long milliseconds = Math.Max(0, (long)_options.TimeProvider.GetElapsedTime(0, now).TotalMilliseconds);
         long? nextDelay = null;

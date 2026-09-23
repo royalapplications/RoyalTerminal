@@ -728,7 +728,7 @@ public sealed partial class TerminalScreen
     public TerminalStateSynchronization Synchronization { get; } = new();
 
     /// <summary>Gets whether the current viewport snapshot includes Kitty image placements.</summary>
-    public bool HasKittyGraphics => _kittyPlacements.Length > 0;
+    public bool HasKittyGraphics => !GetKittyPlacements().IsEmpty;
 
     /// <summary>Gets whether the current screen includes protocol-neutral raster image placements.</summary>
     public bool HasRasterGraphics => _rasterPlacements.Count > 0;
@@ -941,7 +941,11 @@ public sealed partial class TerminalScreen
     }
 
     /// <summary>Gets the current Kitty image placement snapshot.</summary>
-    public ReadOnlySpan<TerminalKittyImagePlacement> GetKittyPlacements() => _kittyPlacements;
+    public ReadOnlySpan<TerminalKittyImagePlacement> GetKittyPlacements()
+    {
+        RefreshKittyProjection();
+        return _kittyPlacements;
+    }
 
     /// <summary>Attempts to resolve a Kitty image payload by image id.</summary>
     public bool TryGetKittyImageSource(int imageId, out TerminalKittyImageSource? source)
@@ -960,6 +964,8 @@ public sealed partial class TerminalScreen
         IReadOnlyList<TerminalKittyImageSource>? images,
         IReadOnlyList<TerminalKittyImagePlacement>? placements)
     {
+        _kittyAnchoredPlacements = null;
+        _kittyProjectionState = null;
         _kittyImagesById.Clear();
         if (images is not null)
         {
@@ -983,6 +989,7 @@ public sealed partial class TerminalScreen
             }
 
             _kittyPlacements = copy;
+            Array.Sort(_kittyPlacements, TerminalKittyImagePlacement.ComparePaintOrder);
         }
 
         InvalidateViewport();
@@ -991,6 +998,8 @@ public sealed partial class TerminalScreen
     /// <summary>Clears the current Kitty image snapshot.</summary>
     public void ClearKittyGraphics()
     {
+        _kittyAnchoredPlacements = null;
+        _kittyProjectionState = null;
         if (_kittyImagesById.Count == 0 && _kittyPlacements.Length == 0)
         {
             return;
@@ -1422,6 +1431,7 @@ public sealed partial class TerminalScreen
         _primaryScrollOffset = 0;
         _viewportTop = 0;
         _trackedAnchors.Clear();
+        _anchorRevision++;
         ClearHyperlinks();
         ClearRasterGraphics();
         ClearKittyGraphics();
