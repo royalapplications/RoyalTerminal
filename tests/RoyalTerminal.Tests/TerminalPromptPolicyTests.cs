@@ -49,7 +49,7 @@ public sealed class TerminalPromptPolicyTests(ITestOutputHelper output)
         TerminalScreen expected = new(8, 6), actual = new(8, 6);
         using GhosttyVtProcessor native = new(expected);
         using BasicVtProcessor managed = new(actual);
-        byte[] bytes = Encoding.UTF8.GetBytes($"out\r\n\u001b]133;A;redraw={redraw}\aprompt\r\nnext\u001b]133;B\acmd");
+        byte[] bytes = Encoding.UTF8.GetBytes($"out\r\n\u001b]133;A;redraw={redraw}\aprompt\r\nnext\u001b]133;B\acmd\u001b[44m");
         native.Process(bytes);
         managed.Process(bytes);
         expected.Resize(12, 6, reflowOnResize: false);
@@ -63,7 +63,8 @@ public sealed class TerminalPromptPolicyTests(ITestOutputHelper output)
             TerminalRow a = actual.GetViewportRow(row), e = expected.GetViewportRow(row);
             Assert.Equal(e.SemanticPrompt, a.SemanticPrompt);
             for (int column = 0; column < 12; column++)
-                Assert.Equal((e[column].Codepoint, e[column].SemanticContent), (a[column].Codepoint, a[column].SemanticContent));
+                Assert.Equal((e[column].Codepoint, e[column].SemanticContent, e[column].BackgroundIdentity),
+                    (a[column].Codepoint, a[column].SemanticContent, a[column].BackgroundIdentity));
         }
     }
 

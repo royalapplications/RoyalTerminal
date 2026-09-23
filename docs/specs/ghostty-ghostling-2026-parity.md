@@ -143,6 +143,17 @@ audit and third-IO-worker platform/lifecycle sign-off. The new source changes
 and written tests must pass native rebuild, focused/full tests and fresh CI
 before the corresponding gaps can be marked verified.
 
+Post-push validation: native extension build succeeds after an explicit signed
+C-enum conversion correction (`a6f44f3`); native integration passes **228/228**.
+The focused suite then exposed lib-VT's construction default (`redraw=0`, unlike
+the full-app/RIS default), actual-cell pending-wrap cursor mapping, and two old
+managed-only expectations. These were corrected against native comparisons:
+wide-tail cursor pins stay on the tail, and LF does not erase an existing wrap
+link. The expanded focused suite passes **170/170**, including original-byte
+hyperlinks and native policy/viewport differentials. Full-suite and platform CI
+validation of these follow-up corrections remain pending. Prompt redraw clears
+with the default pen, matching native's temporarily detached resize cursor pen.
+
 ### Current/saved charsets and cursor state (2026-09-23)
 
 `ManagedCharsetState` replaces two line-drawing booleans with all four G0–G3

@@ -77,7 +77,7 @@ public class TerminalReflowOptimizationTests
     }
 
     [Fact]
-    public void BulkReflowMapsCursorInsideWidePairAfterThePair()
+    public void BulkReflowKeepsCursorOnItsTrackedWideTail()
     {
         TerminalScreen screen = new(8, 2);
         TerminalRow row = screen.GetRow(0);
@@ -90,7 +90,7 @@ public class TerminalReflowOptimizationTests
         TerminalGridPosition cursor = screen.Resize(
             4, 2, reflowOnResize: true, trackedViewportPosition: new TerminalGridPosition(2, 0));
 
-        Assert.Equal(new TerminalGridPosition(3, 0), cursor);
+        Assert.Equal(new TerminalGridPosition(2, 0), cursor);
         Assert.Equal(2, screen.GetRow(0)[1].Width);
         Assert.Equal(0, screen.GetRow(0)[2].Width);
     }

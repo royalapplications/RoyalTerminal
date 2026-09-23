@@ -12,7 +12,9 @@ public sealed partial class BasicVtProcessor : ITerminalPromptStateSource
     private ref SemanticPen CurrentSemanticPen => ref (_inAltScreen ? ref _alternateSemanticPen : ref _primarySemanticPen);
     private PromptPolicy _primaryPromptPolicy;
     private PromptPolicy _alternatePromptPolicy;
-    private TerminalPromptRedraw _promptRedraw;
+    // The embedding VT API disables redraw at construction; RIS restores the
+    // terminal's full-app default. An explicit OSC option overrides either.
+    private TerminalPromptRedraw _promptRedraw = TerminalPromptRedraw.None;
     private ref PromptPolicy CurrentPromptPolicy => ref (_inAltScreen ? ref _alternatePromptPolicy : ref _primaryPromptPolicy);
 
     /// <inheritdoc />
@@ -117,7 +119,9 @@ public sealed partial class BasicVtProcessor : ITerminalPromptStateSource
         {
             TerminalRow row = _screen.GetRow(index);
             ClearPreservedCellsForMutation(row);
-            row.Cells.Fill(CreateErasedCell());
+            // Native resize temporarily detaches the cursor pen before this
+            // clear, so prompt blanks use default colors, not the active SGR.
+            row.Cells.Fill(TerminalCell.Empty(_screen.DefaultForeground, _screen.DefaultBackground));
             row.IsDirty = true;
         }
     }

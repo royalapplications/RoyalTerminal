@@ -81,8 +81,8 @@ public sealed class TerminalSemanticContentTests(ITestOutputHelper output)
             managed.Process(bytes.AsSpan(split));
             // The visible bridge and owned native grid snapshot must agree too.
             AssertScreens(nativeScreen, managedScreen, $"{Convert.ToHexString(bytes)} split {split}");
-            Assert.Equal(native.CursorCol, managed.CursorCol);
-            Assert.Equal(native.CursorRow, managed.CursorRow);
+            Assert.True(native.CursorCol == managed.CursorCol && native.CursorRow == managed.CursorRow,
+                $"{Convert.ToHexString(bytes)} cursor native {native.CursorCol},{native.CursorRow} managed {managed.CursorCol},{managed.CursorRow}");
         }
     }
 
@@ -175,8 +175,8 @@ public sealed class TerminalSemanticContentTests(ITestOutputHelper output)
             native.NotifyResize(columns, 8, columns * 8, 128);
             managed.ResizeScreen(columns, 8, columns * 8, 128, reflowOnResize: true);
             AssertScreens(expected, actual, $"reflow {columns} {Convert.ToHexString(bytes)}");
-            Assert.Equal(native.CursorCol, managed.CursorCol);
-            Assert.Equal(native.CursorRow, managed.CursorRow);
+            Assert.True(native.CursorCol == managed.CursorCol && native.CursorRow == managed.CursorRow,
+                $"{Convert.ToHexString(bytes)} cursor native {native.CursorCol},{native.CursorRow} managed {managed.CursorCol},{managed.CursorRow}");
         }
     }
 

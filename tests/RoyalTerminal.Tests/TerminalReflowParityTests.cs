@@ -19,8 +19,11 @@ public sealed class TerminalReflowParityTests(ITestOutputHelper output)
     [InlineData("abc\u001b[44m\u001b[K\u001b[0m", 4)]
     [InlineData("abc\r\n\r\nlast", 4)]
     [InlineData("12345678", 4)]
+    [InlineData("12345678", 16)]
+    [InlineData("12345678", 6)]
     [InlineData("123456789", 16)]
     [InlineData("界界界", 4)]
+    [InlineData("A界B\u001b[1;3H", 4)]
     public void BlankCursorAndTrailingRowsMatchNativeViewport(string input, int columns)
     {
         bool available = GhosttyVtProcessor.IsAvailable();

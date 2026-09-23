@@ -826,31 +826,39 @@ public class TerminalScreenTests
         Assert.Equal("PROMPT  ", ReadAscii(screen.GetViewportRow(2), 8));
     }
 
-    [Fact]
-    public void BasicVtProcessor_ExplicitLineFeedClearsStaleWrapMetadataAfterReflow()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExplicitLineFeedPreservesExistingWrapMetadataAfterReflow(bool native)
     {
         TerminalScreen screen = new(20, 5, scrollbackLimit: 20);
-        using BasicVtProcessor processor = new(screen);
+        if (native && !GhosttyVtProcessor.IsAvailable()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(screen) : new BasicVtProcessor(screen);
 
         processor.Process(Encoding.UTF8.GetBytes("ABCDEFGHIJKLMNO\r\nTAIL\r\n"));
-        processor.ResizeScreen(columns: 10, rows: 5, widthPx: 100, heightPx: 80, reflowOnResize: true);
+        if (processor is BasicVtProcessor managed)
+            managed.ResizeScreen(columns: 10, rows: 5, widthPx: 100, heightPx: 80, reflowOnResize: true);
+        else
+        {
+            screen.Resize(10, 5, reflowOnResize: false);
+            processor.NotifyResize(10, 5, 100, 80);
+        }
 
         Assert.True(screen.GetRow(0).WrapsToNext);
 
         screen.ScrollOffset = 1;
         processor.Process(Encoding.UTF8.GetBytes("\x1b[1;1Hshort\r\nnext"));
 
-        Assert.False(screen.GetRow(0).WrapsToNext);
+        Assert.True(screen.GetRow(0).WrapsToNext);
 
-        ITerminalSnapshotExportSource exporter = processor;
+        ITerminalSnapshotExportSource exporter = (ITerminalSnapshotExportSource)processor;
         Assert.True(
             exporter.TryExportSnapshot(
                 TerminalSnapshotExportFormat.PlainText,
                 new TerminalSnapshotExportOptions(Unwrap: true, TrimTrailingWhitespace: true),
                 out string snapshot));
 
-        Assert.Contains($"shortFGHIJ{Environment.NewLine}nextO", snapshot, StringComparison.Ordinal);
-        Assert.DoesNotContain("shortFGHIJnextO", snapshot, StringComparison.Ordinal);
+        Assert.Contains("shortFGHIJnextO", snapshot, StringComparison.Ordinal);
     }
 
     [Fact]

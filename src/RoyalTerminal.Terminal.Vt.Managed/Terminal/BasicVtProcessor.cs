@@ -5705,7 +5705,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         int previousCursorCol = _cursorCol;
         int previousCursorRow = _cursorRow;
         bool previousDelayedWrap = _delayedWrap;
-        int resizeCursorCol = _delayedWrap ? _screen.Columns : _cursorCol;
+        // Ghostty pins the actual cell, including a pending-wrap cursor.
+        // Pending wrap survives independently; it is not an end-column pin.
+        int resizeCursorCol = _cursorCol;
         int alternateViewportTop = alternateScreen
             ? Math.Max(0, _screen.TotalRows - _screen.ViewportRows)
             : 0;
@@ -5798,7 +5800,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         _cursorCol = Math.Clamp(mappedCursor.Column, 0, safeColumns - 1);
-        _delayedWrap = false;
+        _delayedWrap = restoreDelayedWrapAtEnd;
     }
 
     /// <inheritdoc />
