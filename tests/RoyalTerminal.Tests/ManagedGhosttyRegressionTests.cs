@@ -152,7 +152,11 @@ public sealed class ManagedGhosttyRegressionTests
     {
         using BasicVtProcessor processor = new(new TerminalScreen(8, 2, 0));
         string? clipboard = null;
-        processor.ClipboardWriteCallback = (_, value) => clipboard = value;
+        processor.ClipboardWriteCallback = value =>
+        {
+            clipboard = Encoding.UTF8.GetString(Assert.Single(value.Contents).Data);
+            return TerminalClipboardWriteResult.Success;
+        };
         string expected = new('a', 16_384);
         string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(expected));
         processor.Process(Encoding.UTF8.GetBytes($"\u001b]52;c;{encoded}\u0007"));
