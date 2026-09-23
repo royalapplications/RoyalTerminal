@@ -1,5 +1,9 @@
 # Ghostty upstream change inventory (2026-09-22)
 
+The user's revised [native-first delivery scope](ghostty-update-delivery-scope-2026.md)
+defers exhaustive managed/per-renderer ports; this inventory remains the follow-up
+review input and is not an assertion that all 308 changes have managed equivalents.
+
 This inventory defines the review input; inclusion here does **not** establish a
 completed managed port. Each entry is a non-merge commit touching the terminal,
 VT ABI, renderer, termio, SIMD, Unicode, or font paths between the original

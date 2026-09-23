@@ -1,5 +1,9 @@
 # Managed Ghostty snapshot compatibility work
 
+Exact managed quota parity is a documented follow-up under the user's revised
+[native-first delivery scope](ghostty-update-delivery-scope-2026.md), not a claim
+made by this update.
+
 Status: **public restore and export implemented; exact native quota parity incomplete**.
 `ManagedTerminalSnapshot.Restore` supports transactional memory/stream imports;
 `ManagedTerminalSnapshotDecoder.Ready/Next` supports live incremental history.

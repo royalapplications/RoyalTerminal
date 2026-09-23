@@ -1,5 +1,11 @@
 # Ghostty and Ghostling parity update (2026-09-22)
 
+> **Scope revised by the user on 2026-09-23:** prioritize the native update, keep
+> implemented managed improvements, and document deferred parity work. The
+> [native-first delivery scope](ghostty-update-delivery-scope-2026.md) supersedes
+> this historical audit's full-parity completion requirements. Open entries below
+> remain open; they are not claims of completed ports.
+
 ## Reopened completion audit
 
 ### Password cursor and inactive appearance (2026-09-23)
