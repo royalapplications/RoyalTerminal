@@ -134,11 +134,13 @@ internal static class ManagedKittyKeyEncoder
     {
         if (key is { Length: 1 } && key[0] is >= 'A' and <= 'Z') return key[0] + 32;
         if (key is { Length: 2 } && key[0] == 'D' && key[1] is >= '0' and <= '9') return key[1];
+        if (key is { Length: 7 } && key.StartsWith("NumPad", StringComparison.Ordinal) && key[6] is >= '0' and <= '9') return key[6];
         return key switch
         {
             "Space" => 32, "OemMinus" => '-', "OemPlus" => '=', "OemOpenBrackets" => '[', "OemCloseBrackets" => ']',
             "OemBackslash" or "OemPipe" => '\\', "OemSemicolon" => ';', "OemQuotes" => '\'', "OemTilde" => '`',
-            "OemComma" => ',', "OemPeriod" => '.', "Oem2" => '/', _ => 0,
+            "OemComma" => ',', "OemPeriod" => '.', "Oem2" => '/',
+            "Decimal" => '.', "Divide" => '/', "Multiply" => '*', "Subtract" => '-', "Add" => '+', _ => 0,
         };
     }
 

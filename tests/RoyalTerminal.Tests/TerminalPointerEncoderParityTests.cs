@@ -26,7 +26,7 @@ public sealed class TerminalPointerEncoderParityTests(ITestOutputHelper output)
         Assert.True(encoder.TryEncodePointer(motion, context, out _));
         Assert.False(encoder.TryEncodePointer(motion, context, out _));
         ((ITerminalPointerButtonStateSink)processor).ObservePointerButton(Pointer(TerminalPointerEventKind.Button, 1, 1, TerminalMouseButton.Left));
-        Assert.True(encoder.TryEncodePointer(motion with { X = -10 }, context, out _));
+        Assert.True(encoder.TryEncodePointer(motion with { X = -10, Y = 25 }, context, out _));
         ((ITerminalPointerStateResetSink)processor).ResetPointerState();
         Assert.False(encoder.TryEncodePointer(motion with { X = -10 }, context, out _));
         Assert.True(encoder.TryEncodePointer(motion, context, out _));

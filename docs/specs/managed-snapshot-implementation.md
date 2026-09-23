@@ -4,7 +4,7 @@ Status: **incomplete**. The implemented framing, metadata and continuation piece
 do not yet constitute an import/export API for a managed terminal.
 
 The compatibility target is Ghostty's version 1 `GHOSTSNP` wire format at
-`4ae9f1a2de5484de3d6a13fe03676b8853b9c41c`, rather than a separate RoyalTerminal-only dump. Upstream
+`622b4eecd7d2ce1a10930537c17f0d61abdba817`, rather than a separate RoyalTerminal-only dump. Upstream
 `src/terminal/snapshot/main.zig` and the per-record codecs are the authoritative
 format definitions. Windows Terminal and xterm.js do not offer this same wire
 contract; their screen/serialization mechanisms are not interchangeable codecs.

@@ -1303,7 +1303,7 @@ requirements in the matrix above.
 
 This update moves the `external/ghostty` submodule from
 `a60cd15bb5a197d8e2596e86442031cbece06bcc` to the then-current Ghostty `main`
-commit `4ae9f1a2de5484de3d6a13fe03676b8853b9c41c` (verified 2026-09-23).
+commit `622b4eecd7d2ce1a10930537c17f0d61abdba817` (verified 2026-09-23).
 The preceding reviewed head, `22391ed6491f2924361dcad1f9a9176a390fd20f`, has
 identical runtime sources: the intervening commits update `.github/VOUCHED.td`
 and remove `CLAUDE.md` only.

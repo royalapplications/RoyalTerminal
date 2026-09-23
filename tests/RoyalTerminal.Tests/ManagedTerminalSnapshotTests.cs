@@ -106,6 +106,8 @@ public sealed class ManagedTerminalSnapshotTests(ITestOutputHelper output)
     public void HistoryDuringSynchronizedOutputIsPublishedWithTheLiveScreen()
     {
         List<SnapshotTestRecord> records = SnapshotTestRecords.Fixture();
+        records[0].Payload[21] = 0; // History below belongs to primary, which must be the visible screen.
+        records[0].Payload[22] = 0;
         records[5] = new(GhosttySnapshotRecordTag.Continuation, []);
         using ManagedTerminalSnapshotDecoder decoder = new(SnapshotTestRecords.Encode(records));
         using ManagedTerminalSnapshot restored = decoder.Ready();

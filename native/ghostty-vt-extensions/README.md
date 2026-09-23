@@ -9,7 +9,7 @@ The build generates a copy of the upstream Zig root with the exports from
 ## Reviewed correctness overlays
 
 The generated source copy also applies six corrections to pinned upstream
-`4ae9f1a2de5484de3d6a13fe03676b8853b9c41c` (identical runtime sources to the
+`622b4eecd7d2ce1a10930537c17f0d61abdba817` (identical runtime sources to the
 previously reviewed `22391ed6491f2924361dcad1f9a9176a390fd20f`). Each checks the original file's full
 SHA-256 and the exact expected source-fragment count; any upstream file change
 fails the build until reviewed. The submodule checkout is never changed.
