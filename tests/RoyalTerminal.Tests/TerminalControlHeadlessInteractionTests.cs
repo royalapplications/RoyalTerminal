@@ -646,14 +646,14 @@ public sealed class TerminalControlHeadlessInteractionTests
             await StabilizeWindowAsync(window, control);
             control.StartPty(shell: "/bin/sh", workingDirectory: Environment.CurrentDirectory);
 
-            control.SendInput($"echo {readyMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(readyMarker));
             bool readySeen = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, readyMarker),
                 TimeSpan.FromSeconds(5));
             Assert.True(readySeen, $"Did not observe PTY ready marker. Output: {SnapshotOutput(outputSync, output)}");
 
             control.SendInput(
-                "while :; do printf 'busy-output\\n'; done\n");
+                "while :; do printf 'busy-%s\\n' output; done\n");
 
             bool floodSeen = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, floodNeedle),
@@ -662,7 +662,7 @@ public sealed class TerminalControlHeadlessInteractionTests
 
             Stopwatch interruptLatency = Stopwatch.StartNew();
             control.SendInput(new byte[] { 0x03 });
-            control.SendInput($"echo {postInterruptMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(postInterruptMarker));
 
             bool interrupted = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, postInterruptMarker),
@@ -720,7 +720,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             await StabilizeWindowAsync(window, control);
             control.StartPty(shell: "/bin/sh", workingDirectory: Environment.CurrentDirectory);
 
-            control.SendInput($"echo {readyMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(readyMarker));
             bool readySeen = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, readyMarker),
                 TimeSpan.FromSeconds(5));
@@ -733,7 +733,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(oscFloodSeen, $"Did not observe OSC flood output before interrupt. Output: {SnapshotOutput(outputSync, output)}");
 
             control.SendInput(new byte[] { 0x03 });
-            control.SendInput($"printf '{visibleRecoveryMarker}\\n'\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(visibleRecoveryMarker));
 
             bool visibleRecoverySeen = await WaitUntilAsync(
                 () => ContainsScreenText(control, visibleRecoveryMarker),
@@ -2893,7 +2893,9 @@ public sealed class TerminalControlHeadlessInteractionTests
         byte expectedInputByte)
     {
         const string readyMarker = "__ROYALTERMINAL_KEYDOWN_CTRL_READY__";
-        const string floodNeedle = "Build step";
+        // The shell command itself contains "Build step". Require rendered
+        // escape bytes so Ctrl+Z cannot race ahead of foreground job creation.
+        const string floodNeedle = "\u001b[32mINFO\u001b[0m Build step";
 
         TerminalControl control = new()
         {
@@ -2937,12 +2939,13 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(shell is not null, $"Expected a job-control capable shell for {controlCharacterLabel} managed PTY test.");
             control.StartPty(shell: shell, workingDirectory: Environment.CurrentDirectory, arguments: arguments);
 
-            control.SendInput($"echo {readyMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(readyMarker));
             bool readySeen = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, readyMarker),
                 TimeSpan.FromSeconds(5));
             Assert.True(readySeen, $"Did not observe PTY ready marker. Output: {SnapshotOutput(outputSync, output)}");
 
+            string startupOutput = SnapshotOutput(outputSync, output);
             control.SendInput(BuildAnsiFloodCommand(launchAsChildJob: physicalKey == PhysicalKey.Z));
 
             bool floodSeen = await WaitUntilAsync(
@@ -2968,7 +2971,7 @@ public sealed class TerminalControlHeadlessInteractionTests
                 $"Did not observe expected PTY input byte 0x{expectedInputByte:X2} after {controlCharacterLabel}. Inputs: {SnapshotInputs(inputSync, inputs)}");
 
             Stopwatch postInterruptLatency = Stopwatch.StartNew();
-            control.SendInput($"echo {postInterruptMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(postInterruptMarker));
 
             bool interrupted = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, postInterruptMarker),
@@ -2979,7 +2982,7 @@ public sealed class TerminalControlHeadlessInteractionTests
                 totalLatency.Elapsed < TimeSpan.FromSeconds(3),
                 $"Expected managed PTY {controlCharacterLabel} keydown interrupt to be prompt under ANSI flood. " +
                 $"Total={totalLatency.Elapsed}, KeyDispatch={keyDispatchLatency.Elapsed}, InputObserved={inputObservationLatency.Elapsed}, " +
-                $"PostInterrupt={postInterruptLatency.Elapsed}.");
+                $"PostInterrupt={postInterruptLatency.Elapsed}. Startup={startupOutput}");
         }
         finally
         {
@@ -3038,7 +3041,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(shell is not null, $"Expected a job-control capable shell for repeated {controlCharacterLabel} managed PTY test.");
             control.StartPty(shell: shell, workingDirectory: Environment.CurrentDirectory, arguments: arguments);
 
-            control.SendInput($"echo {readyMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(readyMarker));
             bool readySeen = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, readyMarker),
                 TimeSpan.FromSeconds(5));

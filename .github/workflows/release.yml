@@ -34,6 +34,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Build macOS PTY launcher
+        if: matrix.arch == 'arm64'
+        run: bash scripts/build-unix-pty.sh
+
+      - name: Upload macOS PTY launcher
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unix-pty-launcher
+          path: src/RoyalTerminal.Terminal.Pty.Unix/runtimes/osx/native/royalterminal-pty-spawn
+
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
@@ -381,6 +392,12 @@ jobs:
           echo "VERSION=${version}" >> "$GITHUB_OUTPUT"
 
       # Download native artifacts into package runtime directories
+      - name: Download macOS PTY launcher
+        uses: actions/download-artifact@v8
+        with:
+          name: unix-pty-launcher
+          path: src/RoyalTerminal.Terminal.Pty.Unix/runtimes/osx/native/
+
       - name: Download macOS arm64
         uses: actions/download-artifact@v8
         with:

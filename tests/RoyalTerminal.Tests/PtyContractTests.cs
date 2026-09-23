@@ -211,19 +211,20 @@ public class PtyContractTests
 
         pty.Start(shell: "/bin/sh", columns: 80, rows: 24, workingDirectory: Environment.CurrentDirectory);
 
-        pty.Write($"echo {readyMarker}\n");
-        Assert.True(
-            sawReady.Wait(TimeSpan.FromSeconds(5)),
-            "Did not observe Unix PTY readiness marker before starting busy loop.");
+        pty.Write(UnixPtyTestCommands.PrintMarker(readyMarker));
+        bool ready = sawReady.Wait(TimeSpan.FromSeconds(5));
+        string readinessOutput;
+        lock (output) readinessOutput = output.ToString();
+        Assert.True(ready, $"Did not observe Unix PTY readiness marker before starting busy loop. Output: {readinessOutput}");
 
-        pty.Write("while :; do printf 'busy-output\\n'; done\n");
+        pty.Write("while :; do printf 'busy-%s\\n' output; done\n");
         Assert.True(
             sawFlood.Wait(TimeSpan.FromSeconds(5)),
             "Did not observe Unix PTY flood output before sending Ctrl+C.");
 
         Stopwatch interruptLatency = Stopwatch.StartNew();
         pty.Write(new byte[] { 0x03 }, 0, 1);
-        pty.Write($"echo {postInterruptMarker}\n");
+        pty.Write(UnixPtyTestCommands.PrintMarker(postInterruptMarker));
 
         bool interrupted = sawPostInterrupt.Wait(TimeSpan.FromSeconds(3));
         if (!interrupted)

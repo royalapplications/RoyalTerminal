@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.Terminal;
 using Xunit;
@@ -11,6 +12,89 @@ namespace RoyalTerminal.Tests;
 [Collection("PtyContractTests")]
 public sealed class UnixPtyGatherTests
 {
+    [Fact]
+    public void RepeatedStartupExecutesWithPreparedEnvironment()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        for (int iteration = 0; iteration < 20; iteration++)
+        {
+            using UnixPty pty = new();
+            using ManualResetEventSlim received = new(false);
+            StringBuilder output = new();
+            string expected = $"royal-test:{iteration}:é";
+            pty.DataReceived += (bytes, count) =>
+            {
+                lock (output)
+                {
+                    output.Append(Encoding.UTF8.GetString(bytes, 0, count));
+                    if (output.ToString().Contains(expected, StringComparison.Ordinal)) received.Set();
+                }
+            };
+            pty.Start(shell: "sh", arguments: ["-c", "printf '%s:%s:é' \"$TERM\" \"$ROYALTERMINAL_ITERATION\""],
+                environment: new Dictionary<string, string>
+                {
+                    ["PATH"] = "/bin:/usr/bin", ["TERM"] = "royal-test",
+                    ["ROYALTERMINAL_ITERATION"] = iteration.ToString(CultureInfo.InvariantCulture),
+                });
+            Assert.True(received.Wait(TimeSpan.FromSeconds(5)), $"Startup {iteration} did not execute the command.");
+        }
+    }
+
+    [Theory]
+    [InlineData("/bin/sh")]
+    [InlineData("/royalterminal-nonexistent-executable")]
+    public unsafe void StartPreservesCallingThreadSignalMask(string executable)
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        nint library = NativeLibrary.Load(OperatingSystem.IsMacOS() ? "libSystem.dylib" : "libc.so.6");
+        try
+        {
+            var mask = (delegate* unmanaged[Cdecl]<int, void*, void*, int>)NativeLibrary.GetExport(library, "pthread_sigmask");
+            ulong* before = stackalloc ulong[16];
+            ulong* after = stackalloc ulong[16];
+            new Span<ulong>(before, 16).Clear();
+            new Span<ulong>(after, 16).Clear();
+            int setMask = OperatingSystem.IsMacOS() ? 3 : 2;
+            Assert.Equal(0, mask(setMask, null, before));
+            if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+            using UnixPty pty = new();
+            if (executable == "/bin/sh") pty.Start(shell: executable, arguments: ["-c", "exit 0"]);
+            else Assert.Throws<IOException>(() =>
+            {
+                if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                    pty.Start(shell: executable, arguments: ["-c", "exit 0"]);
+            });
+            Assert.Equal(0, mask(setMask, null, after));
+            Assert.True(new ReadOnlySpan<ulong>(before, 16).SequenceEqual(new ReadOnlySpan<ulong>(after, 16)));
+        }
+        finally
+        {
+            NativeLibrary.Free(library);
+        }
+    }
+
+    [Fact]
+    public void ImmediateInterruptAndStopDoNotReachParentSignalHandlers()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        int parentSignals = 0;
+        void RecordSignal(PosixSignalContext context)
+        {
+            Interlocked.Increment(ref parentSignals);
+            context.Cancel = true;
+        }
+        using PosixSignalRegistration interrupt = PosixSignalRegistration.Create(PosixSignal.SIGINT, RecordSignal);
+        using PosixSignalRegistration hangup = PosixSignalRegistration.Create(PosixSignal.SIGHUP, RecordSignal);
+        for (int i = 0; i < 25; i++)
+        {
+            using UnixPty pty = new();
+            pty.Start(shell: "/bin/sh", arguments: ["-c", "sleep 0.02"]);
+            pty.Write("\u0003");
+            pty.Stop();
+        }
+        Assert.Equal(0, Volatile.Read(ref parentSignals));
+    }
+
     [Fact]
     public void LeasedOutput_PreservesOrderAndFinalPartialBatch()
     {

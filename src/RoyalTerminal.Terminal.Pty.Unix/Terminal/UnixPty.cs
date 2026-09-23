@@ -2,8 +2,8 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia — Unix pseudo-terminal (PTY) for macOS/Linux.
 // Spawns a shell process with a real PTY via POSIX interop so terminal features
-// work properly. Fork-safe: all native memory is pre-allocated before fork, and
-// only raw function-pointer calls are made in the child process (no .NET runtime usage).
+// work properly. Native posix_spawn performs all child setup without returning
+// into the managed runtime between process creation and exec.
 
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -14,7 +14,7 @@ namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// Unix PTY that spawns a child shell process (e.g., /bin/zsh, /bin/bash)
-/// and provides read/write streams via POSIX interop. Uses forkpty() on macOS/Linux.
+/// and provides read/write streams via POSIX interop. Uses posix_spawn on macOS/Linux.
 /// Architecturally mirrors <see cref="WindowsPty"/> for Windows ConPTY.
 /// </summary>
 [SupportedOSPlatform("linux")]
@@ -60,7 +60,7 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource
     /// <param name="workingDirectory">Working directory for the shell.</param>
     /// <param name="environment">Additional environment variables.</param>
     /// <param name="arguments">Optional command arguments passed to the shell/program.</param>
-    public unsafe void Start(
+    public void Start(
         string? shell = null,
         int columns = 80,
         int rows = 24,
@@ -78,117 +78,8 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource
 
         shell ??= DetectShell();
 
-        // ---- Pre-allocate all native data BEFORE fork ----
-        // After fork(), the child must NOT use .NET runtime (GC, marshaling, etc.)
-        // We resolve function pointers and allocate C strings here, then use only
-        // raw calli in the child.
-
-        var nativeShell = AllocNativeString(shell);
-        var nativeCwd = workingDirectory is not null ? AllocNativeString(workingDirectory) : IntPtr.Zero;
-        var nativeTermName = AllocNativeString("TERM");
-        var nativeTermValue = AllocNativeString("xterm-256color");
-
-        // Build argv: { shell_path, arg1, arg2, ..., NULL }
-        int argumentCount = arguments?.Count ?? 0;
-        int argvLength = argumentCount + 2;
-        var argv = (byte**)Marshal.AllocHGlobal(argvLength * IntPtr.Size);
-        argv[0] = (byte*)nativeShell;
-        IntPtr[] nativeArguments = argumentCount == 0
-            ? Array.Empty<IntPtr>()
-            : new IntPtr[argumentCount];
-        for (int i = 0; i < argumentCount; i++)
-        {
-            string argument = arguments![i] ?? string.Empty;
-            IntPtr nativeArgument = AllocNativeString(argument);
-            nativeArguments[i] = nativeArgument;
-            argv[i + 1] = (byte*)nativeArgument;
-        }
-
-        argv[argvLength - 1] = null;
-
-        // Build env key=value pairs for additional environment variables
-        int environmentCount = environment?.Count ?? 0;
-        (IntPtr key, IntPtr val)[] envPairs = environmentCount == 0
-            ? Array.Empty<(IntPtr key, IntPtr val)>()
-            : new (IntPtr key, IntPtr val)[environmentCount];
-        if (environment is not null)
-        {
-            int envIndex = 0;
-            foreach (var (key, value) in environment)
-            {
-                envPairs[envIndex++] = (AllocNativeString(key), AllocNativeString(value));
-            }
-        }
-
-        // Resolve raw function pointers from libc.
-        // On Linux, soname availability can vary by distro/container image,
-        // so probe a small set of common candidates.
-        var libc = LoadLibcHandle();
-        var pSignal = (delegate* unmanaged[Cdecl]<int, nint, nint>)
-            NativeLibrary.GetExport(libc, "signal");
-        var pChdir = (delegate* unmanaged[Cdecl]<byte*, int>)
-            NativeLibrary.GetExport(libc, "chdir");
-        var pSetenv = (delegate* unmanaged[Cdecl]<byte*, byte*, int, int>)
-            NativeLibrary.GetExport(libc, "setenv");
-        var pExecvp = (delegate* unmanaged[Cdecl]<byte*, byte**, int>)
-            NativeLibrary.GetExport(libc, "execvp");
-        var pExit = (delegate* unmanaged[Cdecl]<int, void>)
-            NativeLibrary.GetExport(libc, "_exit");
-        int[] signalsToReset = GetSignalsToResetForExec();
-
-        // ---- Fork ----
-        var winSize = new WinSize
-        {
-            ws_col = (ushort)columns,
-            ws_row = (ushort)rows,
-        };
-
-        _childPid = ForkPty(out _masterFd, ref winSize);
-
-        if (_childPid < 0)
-        {
-            FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, nativeArguments, envPairs);
-            throw new InvalidOperationException($"forkpty failed: {Marshal.GetLastPInvokeError()}");
-        }
-
-        if (_childPid == 0)
-        {
-            // ---- CHILD PROCESS ----
-            // Only raw native calls via resolved function pointers.
-            // No .NET runtime: no GC, no P/Invoke marshaling, no allocations.
-
-            // Child processes inherit ignored signal dispositions across exec.
-            // Reset the standard terminal-control signals so interactive shells
-            // and shell builtins receive Ctrl+C/Ctrl+Z the same way they do in
-            // native terminals such as Ghostty/xterm.
-            for (int i = 0; i < signalsToReset.Length; i++)
-            {
-                pSignal(signalsToReset[i], 0);
-            }
-
-            if (nativeCwd != IntPtr.Zero)
-                pChdir((byte*)nativeCwd);
-
-            // Set TERM environment variable
-            pSetenv((byte*)nativeTermName, (byte*)nativeTermValue, 1);
-
-            // Set additional environment variables
-            for (int i = 0; i < envPairs.Length; i++)
-            {
-                (IntPtr key, IntPtr val) pair = envPairs[i];
-                pSetenv((byte*)pair.key, (byte*)pair.val, 1);
-            }
-
-            // Replace this process with the shell
-            pExecvp((byte*)nativeShell, argv);
-
-            // If exec failed, exit immediately
-            pExit(127);
-        }
-
-        // ---- PARENT PROCESS ----
-        // Free the native memory (child has its own copy after fork)
-        FreeNative(nativeShell, nativeCwd, nativeTermName, nativeTermValue, argv, nativeArguments, envPairs);
+        (_childPid, _masterFd) = UnixPtyProcess.Start(shell, columns, rows,
+            workingDirectory, environment, arguments);
         _slavePtyPath = TryGetSlavePtyPath(_masterFd);
         try
         {
@@ -667,29 +558,6 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource
 
     #region Helpers
 
-    private static nint LoadLibcHandle()
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            return NativeLibrary.Load("libSystem.dylib");
-        }
-
-        // Linux fallback order:
-        // - libc.so.6: glibc soname
-        // - libc.so: common linker name
-        // - libc: generic probe used by DllImport
-        string[] candidates = ["libc.so.6", "libc.so", "libc"];
-        foreach (string candidate in candidates)
-        {
-            if (NativeLibrary.TryLoad(candidate, out nint handle))
-            {
-                return handle;
-            }
-        }
-
-        throw new DllNotFoundException(
-            "Unable to load libc for UnixPty. Tried: libc.so.6, libc.so, libc.");
-    }
 
     private static string DetectShell()
     {
@@ -702,67 +570,6 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource
         return "/bin/sh";
     }
 
-    private static int[] GetSignalsToResetForExec()
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            return
-            [
-                1,  // SIGHUP
-                2,  // SIGINT
-                3,  // SIGQUIT
-                13, // SIGPIPE
-                15, // SIGTERM
-                18, // SIGTSTP
-                20, // SIGCHLD
-                21, // SIGTTIN
-                22, // SIGTTOU
-            ];
-        }
-
-        return
-        [
-            1,  // SIGHUP
-            2,  // SIGINT
-            3,  // SIGQUIT
-            13, // SIGPIPE
-            15, // SIGTERM
-            17, // SIGCHLD
-            20, // SIGTSTP
-            21, // SIGTTIN
-            22, // SIGTTOU
-        ];
-    }
-
-    private static IntPtr AllocNativeString(string s)
-    {
-        var bytes = Encoding.UTF8.GetBytes(s);
-        var ptr = Marshal.AllocHGlobal(bytes.Length + 1);
-        Marshal.Copy(bytes, 0, ptr, bytes.Length);
-        Marshal.WriteByte(ptr + bytes.Length, 0); // null terminator
-        return ptr;
-    }
-
-    private static unsafe void FreeNative(
-        IntPtr shell, IntPtr cwd, IntPtr termName, IntPtr termValue,
-        byte** argv, IntPtr[] nativeArguments, (IntPtr key, IntPtr val)[] envPairs)
-    {
-        Marshal.FreeHGlobal(shell);
-        if (cwd != IntPtr.Zero) Marshal.FreeHGlobal(cwd);
-        Marshal.FreeHGlobal(termName);
-        Marshal.FreeHGlobal(termValue);
-        for (int i = 0; i < nativeArguments.Length; i++)
-        {
-            Marshal.FreeHGlobal(nativeArguments[i]);
-        }
-        Marshal.FreeHGlobal((IntPtr)argv);
-        for (int i = 0; i < envPairs.Length; i++)
-        {
-            (IntPtr key, IntPtr val) pair = envPairs[i];
-            Marshal.FreeHGlobal(pair.key);
-            Marshal.FreeHGlobal(pair.val);
-        }
-    }
 
     private bool TryResizeWithStty(int columns, int rows)
     {
@@ -872,30 +679,6 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource
         public int Offset;
     }
 
-    private static int ForkPty(out int masterFd, ref WinSize winSize)
-    {
-        unsafe
-        {
-            fixed (int* masterPtr = &masterFd)
-            fixed (WinSize* wsPtr = &winSize)
-            {
-                return forkpty(masterPtr, null, null, wsPtr);
-            }
-        }
-    }
-
-    [DllImport("libSystem.dylib", EntryPoint = "forkpty", SetLastError = true)]
-    private static extern unsafe int forkpty_macos(int* amaster, byte* name, void* termp, WinSize* winp);
-
-    [DllImport("libutil.so.1", EntryPoint = "forkpty", SetLastError = true)]
-    private static extern unsafe int forkpty_linux(int* amaster, byte* name, void* termp, WinSize* winp);
-
-    private static unsafe int forkpty(int* amaster, byte* name, void* termp, WinSize* winp)
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            return forkpty_macos(amaster, name, termp, winp);
-        return forkpty_linux(amaster, name, termp, winp);
-    }
 
     [DllImport("libc", EntryPoint = "read", SetLastError = true)]
     private static extern unsafe nint PosixRead(int fd, byte* buf, nuint count);

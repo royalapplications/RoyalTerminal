@@ -314,6 +314,45 @@ startup behavior remain open IO-validation concerns, not resolved by this patch.
 Windows-only test bodies are platform-guarded on this macOS host; these counts
 do not establish Windows runtime coverage.
 
+## Unix launch and IO validation follow-up
+
+The incomplete test runs above exposed a real launch bug, not just a runner
+quirk. With 25 immediate start/interrupt/stop cycles, the old managed `forkpty`
+path invoked parent SIGINT/SIGHUP registrations 40 times in child processes.
+Resetting masks alone removed that signal leak but still intermittently hung
+before exec: returning into a multithreaded managed runtime after fork is unsafe.
+
+Unix launch now uses `posix_spawn`, with parent-prepared UTF-8 argv/environment,
+default child signal dispositions and an empty child mask. Parent signal masks,
+environment and cwd remain unchanged. On macOS, a small independent native
+launcher establishes the controlling terminal after Darwin applies SETSID, then
+uses libc `execvp`; an exec-close status pipe reports errors synchronously and
+failed children are reaped. This preserves PATH lookup, argument boundaries,
+working directories and no-shebang script fallback without a wrapper shell.
+Linux uses session creation followed by a slave-open spawn action. No child
+executes managed code. The separate Unix package builds/packages the universal
+macOS launcher; CI/release carry that artifact and reject packages missing it.
+
+Ghostty `pty.zig` supplies the session/controlling-terminal contract; node-pty's
+native launcher and Apple's spawn ordering explain the Darwin-specific step.
+xterm.js's demo uses node-pty (`demo/server/server.ts`); Windows Terminal uses
+ConPTY and its close/join ordering remains unchanged. No PowerShell behavior is
+modified. PTY tests now require markers produced by commands, not echoed command
+text; the Ctrl+Z test also waits for actual ANSI flood output before interrupting.
+Direct foreground-job and headless Ctrl+Z regressions pass without relaxing the
+existing latency budget.
+
+Two monolithic macOS runs completed normally: first 1,840 passed/16 skipped,
+then **1,842 passed/16 skipped (1,858 total)** after adding argv tests. Reports:
+`pty-launcher-full.trx` and `pty-launcher-final.trx` under
+`/private/tmp/royalterminal-launcher-validation`. Signal isolation, repeated
+startup, failure/reuse, Unicode environment, script fallback and argument
+validation have focused xUnit coverage. A fresh NuGet-only consumer, restored
+from the generated packages into an isolated cache, successfully starts zsh
+with its `monitor` job-control option enabled. These macOS results do not
+establish Linux or Windows runtime coverage or complete the remaining parity
+requirements in the matrix above.
+
 ## Scope and pinned references
 
 This update moves the `external/ghostty` submodule from
