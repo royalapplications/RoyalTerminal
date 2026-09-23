@@ -30,7 +30,7 @@ public partial class TerminalControl
 
     private void UpdatePasswordInputMonitoring()
     {
-        if (!IsFocused || TopLevel.GetTopLevel(this) is null ||
+        if (!IsFocused || TopLevel.GetTopLevel(this) is not Window { IsActive: true } ||
             ResolvePasswordInputSource() is not { SupportsPasswordInputDetection: true })
         {
             _passwordInputTimer?.Stop();
@@ -69,6 +69,7 @@ public partial class TerminalControl
             using (_screen.Synchronization.AcquireDemand()) state.PasswordInput = value;
         }
         if (SetAndRaise(PasswordInputProperty, ref _passwordInput, value)) _presenter?.Invalidate();
+        UpdateSecureInputPolicy();
     }
 
     private void StopPasswordInputMonitoring()

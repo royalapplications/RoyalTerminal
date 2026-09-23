@@ -2,6 +2,36 @@
 
 ## Reopened completion audit
 
+### macOS secure-input ownership (2026-09-23)
+
+The host now requests macOS secure input for a detected password hint only while
+the terminal is focused and its containing window is active. `AutoSecureInput`
+defaults to true (matching Ghostty's macos-auto-secure-input), with an explicit
+opt-out for accessibility tools. `SecureInputEnabled` reports this control's
+successfully acquired ownership, not global OS state. Both native and managed VT
+processors use the same host policy. Unsupported platforms do not invoke Carbon
+or schedule retries. An injectable, control-exclusive scope preserves existing
+constructor compatibility and lets headless tests avoid real OS state changes.
+
+Apple's SDK `CarbonEventsCore.h` documents a per-process reference count and
+non-thread-safe calls. Each control owns at most one balanced enable/disable pair
+on the UI thread; no shared mutable singleton or cross-control disable is needed.
+Failed enables do not create ownership. Failed disables retain ownership and are
+retried, including after detach, without issuing a second enable. Deactivation,
+focus loss, opt-out, detach, close and session termination release the scope;
+reactivation reacquires only when the full policy still applies. Termios polling
+also stops while the window is inactive.
+
+References: Ghostty `Features/Secure Input/SecureInput.swift`,
+`SurfaceView_AppKit.passwordInput/focusDidChange`, and `Config.macos-auto-secure-input`;
+Apple's installed SDK secure-event-input contract is the ABI/lifetime authority.
+Windows Terminal's ConPTY and xterm.js's browser input do not expose this macOS
+privilege, so unsupported-platform behavior remains a no-op. This adds automatic
+OS ownership, not the remaining password cursor glyph or broader IME work.
+Six ownership/ABI tests and three headless lifecycle/failure cases are added;
+validation follows implementation commit/push. Tests resolve native symbols but
+do not enable secure input on the developer's machine.
+
 ### Live Unix password-input detection (2026-09-23)
 
 Unix PTYs now expose a thread-safe optional input-mode source. `tcgetattr` reads

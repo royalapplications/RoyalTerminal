@@ -1140,7 +1140,30 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         ISshCredentialProvider sshCredentialProvider,
         ISshHostKeyValidator sshHostKeyValidator,
         ITerminalTransportFactory? transportFactory)
+        : this(terminalSessionService, terminalInputAdapter, terminalSelectionService, terminalScrollService,
+            vtProcessorFactory, ptyFactory, sshCredentialProvider, sshHostKeyValidator, transportFactory,
+            TerminalSecureInputScopeFactory.Create())
     {
+    }
+
+    /// <summary>
+    /// Initializes a terminal control with explicit transport dependencies and a
+    /// caller-provided, control-exclusive secure-input scope. The control balances
+    /// the scope on focus/window/session changes; callers must not share it.
+    /// </summary>
+    public TerminalControl(
+        ITerminalSessionService terminalSessionService,
+        ITerminalInputAdapter terminalInputAdapter,
+        ITerminalSelectionService terminalSelectionService,
+        ITerminalScrollService terminalScrollService,
+        IVtProcessorFactory vtProcessorFactory,
+        IPtyFactory ptyFactory,
+        ISshCredentialProvider sshCredentialProvider,
+        ISshHostKeyValidator sshHostKeyValidator,
+        ITerminalTransportFactory? transportFactory,
+        ITerminalSecureInputScope secureInputScope)
+    {
+        _secureInputScope = secureInputScope ?? throw new ArgumentNullException(nameof(secureInputScope));
         TerminalSessionService = terminalSessionService ?? throw new ArgumentNullException(nameof(terminalSessionService));
         TerminalInputAdapter = terminalInputAdapter ?? throw new ArgumentNullException(nameof(terminalInputAdapter));
         TerminalSelectionService = terminalSelectionService ?? throw new ArgumentNullException(nameof(terminalSelectionService));
@@ -2154,6 +2177,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        AttachSecureInputWindow();
         _terminalMouseCursorAttached = true;
 
         _containingScrollViewer = null;
@@ -2170,6 +2194,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        DetachSecureInputWindow();
         _passwordInputTimer?.Stop();
         ResetKeyboardInputState();
         _terminalMouseCursorAttached = false;
@@ -5015,6 +5040,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnGotFocus(e);
         UpdatePasswordInputMonitoring();
+        UpdateSecureInputPolicy();
         SuppressReservedAncestorKeyBindings();
         Endpoint?.SetFocus(true);
         SendFocusEventIfNeeded(focused: true);
@@ -5027,6 +5053,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         base.OnLostFocus(e);
         _passwordInputTimer?.Stop();
+        UpdateSecureInputPolicy();
         ResetKeyboardInputState();
         RestoreReservedAncestorKeyBindings();
         _suppressNextScrollbackEscapeKeyUp = false;

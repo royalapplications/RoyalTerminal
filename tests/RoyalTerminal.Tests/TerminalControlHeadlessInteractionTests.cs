@@ -29,6 +29,116 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalControlHeadlessInteractionTests
 {
     [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_SecureInputBalancesFocusWindowDetachAndSession(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        FakeSecureInputPlatform platform = new();
+        PasswordModeTransport transport = new() { Detected = true };
+        TerminalControl control = CreateControlWithTransport(transport, new PasswordStateProcessorFactory(), preference,
+            new TerminalSecureInputScope(platform));
+        TextBox sibling = new();
+        StackPanel panel = new() { Children = { control, sibling } };
+        Window window = new() { Width = 640, Height = 400, Content = panel };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            window.PlatformImpl!.Activated?.Invoke();
+            control.Focus();
+            Assert.True(control.AutoSecureInput);
+            Assert.True(control.PasswordInput);
+            Assert.True(control.SecureInputEnabled);
+            Assert.Equal(1, platform.Owners);
+            control.AutoSecureInput = false;
+            Assert.True(control.PasswordInput);
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            control.AutoSecureInput = true;
+            Assert.Equal(1, platform.Owners);
+            sibling.Focus();
+            Assert.Equal(0, platform.Owners);
+            control.Focus();
+            Assert.Equal(1, platform.Owners);
+
+            window.PlatformImpl.Deactivated?.Invoke();
+            Assert.False(window.IsActive);
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            int polls = transport.Polls;
+            await Task.Delay(300);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(polls, transport.Polls);
+            window.PlatformImpl.Activated?.Invoke();
+            Assert.True(control.SecureInputEnabled);
+            Assert.Equal(1, platform.Owners);
+
+            panel.Children.Remove(control);
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            panel.Children.Insert(0, control);
+            control.Focus();
+            Assert.True(control.SecureInputEnabled);
+            control.StopPty();
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Assert.True(await WaitUntilAsync(() => control.SecureInputEnabled, TimeSpan.FromSeconds(3)));
+            window.Close();
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            Assert.Equal(platform.EnableCalls, platform.DisableCalls);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_SecureInputFailuresRetryWithoutLosingOwnership()
+    {
+        FakeSecureInputPlatform platform = new();
+        PasswordModeTransport transport = new() { Detected = true };
+        TerminalControl control = CreateControlWithTransport(transport, new PasswordStateProcessorFactory(),
+            VtProcessorPreference.Managed, new TerminalSecureInputScope(platform));
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            window.PlatformImpl!.Activated?.Invoke();
+            control.Focus();
+            Assert.True(control.SecureInputEnabled);
+            platform.DisableFailures = 1;
+            control.AutoSecureInput = false;
+            Assert.True(control.SecureInputEnabled);
+            Assert.Equal(1, platform.Owners);
+            Assert.True(await WaitUntilAsync(() => !control.SecureInputEnabled, TimeSpan.FromSeconds(3)));
+            Assert.Equal(0, platform.Owners);
+            platform.EnableFailures = 1;
+            control.AutoSecureInput = true;
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            Assert.True(await WaitUntilAsync(() => control.SecureInputEnabled, TimeSpan.FromSeconds(3)));
+            Assert.Equal(1, platform.Owners);
+
+            // Detach must retain a failed-release scope long enough to retry,
+            // but may not resurrect it after the control has left the window.
+            platform.DisableFailures = 3;
+            window.Content = null;
+            Assert.True(await WaitUntilAsync(() => !control.SecureInputEnabled, TimeSpan.FromSeconds(3)));
+            Assert.Equal(0, platform.Owners);
+            int enables = platform.EnableCalls;
+            await Task.Delay(300);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(enables, platform.EnableCalls);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaTheory]
     [InlineData(VtProcessorPreference.Managed, false)]
     [InlineData(VtProcessorPreference.Native, false)]
     [InlineData(VtProcessorPreference.Managed, true)]
@@ -2986,7 +3096,8 @@ public sealed class TerminalControlHeadlessInteractionTests
     private static TerminalControl CreateControlWithTransport(
         ITerminalTransport transport,
         IVtProcessorFactory? vtProcessorFactory = null,
-        VtProcessorPreference preference = VtProcessorPreference.Auto)
+        VtProcessorPreference preference = VtProcessorPreference.Auto,
+        ITerminalSecureInputScope? secureInputScope = null)
     {
         CompositeTerminalTransportFactory factory = new(
             new ITerminalTransportProvider[]
@@ -3003,7 +3114,8 @@ public sealed class TerminalControlHeadlessInteractionTests
             new DefaultPtyFactory(),
             new NullSshCredentialProvider(),
             new RejectAllSshHostKeyValidator(),
-            factory)
+            factory,
+            secureInputScope ?? new TerminalSecureInputScope(new FakeSecureInputPlatform()))
         {
             Background = Brushes.Transparent,
         };
