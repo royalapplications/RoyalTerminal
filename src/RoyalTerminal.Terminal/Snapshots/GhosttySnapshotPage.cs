@@ -22,6 +22,7 @@ internal sealed class GhosttySnapshotPage
     internal GhosttySnapshotGrid Grid { get; }
     internal int StyleCount => _styles.Count;
     internal int HyperlinkCount => _hyperlinks.Count;
+    internal GhosttySnapshotPageCapacity Capacity => GhosttySnapshotPageCapacity.Read(_header);
 
     internal static GhosttySnapshotPage FromOwnedGrid(GhosttySnapshotGrid grid,
         Dictionary<ushort, GhosttySnapshotStyle> styles, Dictionary<ushort, byte[]> hyperlinks)
