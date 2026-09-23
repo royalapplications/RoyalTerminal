@@ -571,11 +571,40 @@ terminal tests are passed through; this does not prove managed installation.
 The full follow-up macOS suite passed **1,939 tests, 16 conditional skips, zero
 failures (1,955 total)** in `snapshot-terminal-full.trx`.
 
-Reference choice: Ghostty's snapshot `grid.zig`, `page.zig` and `terminal.zig` define the format.
+SCREEN and HISTORY payload codecs now complete the fixed-state wire layers.
+The screen codec owns cursor pens/flags/charsets, saved cursor, protected mode,
+the entire eight-slot Kitty keyboard stack, semantic click state, hyperlink
+counter and optional byte-preserving cursor hyperlink. Advisory history extents
+are never allocation requests. Unknown semantic state normalizes as upstream;
+any nonzero saved-cursor presence byte consumes its 23-byte suffix. Malformed
+final cursor links degrade to absent links, while valid/null links must exhaust
+the record. Structural header/saved-state truncations and invalid routing/counts
+remain fatal. Current cursor installation clamps to its physical page width;
+saved cursor installation uses terminal width, with pending wrap retained only
+at the corresponding edge. HISTORY validates exactly six bytes and permits
+empty page sequences. Full record routing and managed installation remain open.
+
+Evidence: exact screen/saved-cursor/history and complete golden fixtures;
+every charset bit pattern; structural truncations and discardable link tails;
+limits, absent/implicit/explicit links, independent counters, semantic-click
+registry cases and wide-row cursor clamping. Live snapshots with both screens,
+saved cursor, pen, charset, keyboard stack and links round-trip through managed
+SCREEN rewriting and native restoration, and still compare byte-for-byte after
+subsequent printing and cursor/screen restoration. One hundred malformed SCREEN
+records normalize identically to direct native decoding. Warm SCREEN encoding
+and HISTORY header encoding/decoding allocate zero bytes. These tests restore
+native Ghostty, not BasicVtProcessor.
+The focused snapshot suite passed **77 tests, zero failures/skips** in
+`snapshot-screen-history.trx`, with the native library available on macOS arm64.
+The full unit/headless run passed **1,960 tests, 16 conditional skips, zero
+failures (1,976 total)** in `snapshot-screen-history-full.trx`.
+
+Reference choice: Ghostty's snapshot per-record Zig codecs define the format.
 Windows Terminal `TextBuffer::SerializeTo` and xterm.js's serialize addon emit VT
 text; neither is an interchangeable binary-state format. Remaining implementation
-is explicit: screen cursors/charsets/saved state, constructing semantic records
-from live managed state, conversion/installation into both managed screens, and incremental READY/history
+is explicit: strict record sequencing and continuation validation, constructing
+semantic records from live managed state, conversion/installation into both
+managed screens, and incremental READY/history
 coordination with parser continuation. The public managed binary restore path
 remains unavailable until those layers are complete and validated.
 

@@ -38,6 +38,18 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
   upstream defaults, including optional booleans and absent colors. Golden bytes,
   truncations, limits, native installation and malformed semantic headers have
   focused coverage. Warm streaming re-encoding allocates zero bytes.
+- Complete SCREEN payloads: current and saved cursor pens/flags/charsets, cursor
+  style and independent implicit hyperlink counter, protected mode, all eight
+  Kitty keyboard stack entries, semantic-click state, advisory history extent
+  and optional arbitrary-byte cursor hyperlink. All nonzero saved-cursor presence
+  bytes consume the suffix. Malformed final hyperlinks are discarded at the
+  record boundary as upstream permits; valid links and null markers reject
+  trailing bytes. Cursor installation helpers distinguish physical page width
+  from terminal width. Native differential cases cover later printing/restore
+  and 100 malformed semantic records; all 65,536 charset words are checked.
+- The fixed HISTORY header, including zero-page sequences and key/count/resource
+  validation. This routes a later sequence, not a request to allocate its declared
+  number of pages. Complete sequence routing is still required below.
 
 Tests read the pinned upstream golden fixtures and check every truncation boundary,
 malformed fields, byte-for-byte re-encoding and allocation-free borrowed reads.
@@ -70,18 +82,20 @@ boundary while keeping presentation URL access convenient.
 
 ## Remaining codec and integration order
 
-1. SCREEN/current and saved cursor state, pen, charsets, keyboard stack and both
-   primary/alternate grids. PAGE/grid and TERMINAL decoding/re-encoding are now
-   implemented; constructing those semantic records from live managed state still
-   belongs to the adapter, rather than replaying their original bytes.
-2. Complete snapshot encoder/decoder with strict record ordering. READY exposes
+1. Complete snapshot encoder/decoder with strict record ordering. READY exposes
    a usable terminal before optional HISTORY, whose pages arrive newest first.
    Incremental history ingestion must remain safe if live input, reset or resize
-   occurs after READY, matching upstream's reconciliation rules.
-3. Managed processor adapter and public ownership/error contracts. A partial
+   occurs after READY, matching upstream's reconciliation rules. The complete
+   decoder must validate continuation's minimal, unfinished, side-effect-free
+   shape before replay, not just accept a well-framed byte string.
+2. Managed processor adapter and public ownership/error contracts. PAGE/grid,
+   TERMINAL, SCREEN and HISTORY payload decoding/re-encoding are implemented;
+   constructing semantic records from live managed state and installing them in
+   both managed screens still belong to the adapter, rather than replaying their
+   original bytes. A partial
    decode must not overwrite the caller's existing terminal on failure. Parser
    continuation must resume byte-for-byte across UTF-8 and control-string splits.
-4. Native-to-managed and managed-to-native differential tests, including every
+3. Native-to-managed and managed-to-native differential tests, including every
    upstream complete fixture, both screens, history, pending wrap, saved cursors,
    palette/RGB identity, malformed inputs and streaming IO failures. Benchmark
    sparse/plain/styled/grapheme-heavy histories separately from renderer work.
