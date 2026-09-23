@@ -7120,6 +7120,11 @@ public class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
+        // Press/release handlers also call this while starting text selection.
+        // An authoritative off state must gate transport input itself, not only
+        // the selection/reporting decision made by those handlers.
+        if (_vtProcessor is ITerminalMouseReportingStateSource { MouseReportingEnabled: false }) return false;
+
         FlushPendingTransportResize();
 
         if (_vtProcessor is ITerminalPointerSequenceEncoderSource nativeEncoder)
