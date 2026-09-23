@@ -67,19 +67,25 @@ public sealed class InactiveScreenResizeParityTests(ITestOutputHelper output)
             native.NotifyResize(width, height, width * 8, height * 16);
             managed.ResizeScreen(width, height, width * 8, height * 16, reflowOnResize: true);
             output.WriteLine($"Resized to {width}x{height}: native cursor {native.CursorCol},{native.CursorRow}; managed {managed.CursorCol},{managed.CursorRow}");
-            native.TryExportSnapshot(TerminalSnapshotExportFormat.PlainText, new(Unwrap: false, TrimTrailingWhitespace: true), out string nativeText);
-            managed.TryExportSnapshot(TerminalSnapshotExportFormat.PlainText, new(Unwrap: false, TrimTrailingWhitespace: true), out string managedText);
-            output.WriteLine($"Native: {nativeText.Replace("\n", "|")}; managed: {managedText.Replace("\n", "|")}");
-            for (int y = 0; y < height; y++)
-            {
-                TerminalRow er = expected.GetViewportRow(y), ar = actual.GetViewportRow(y);
-                output.WriteLine($"Row {y}: native [{string.Concat(er.ReadOnlyCells.ToArray().Select(c => (char)(c.Codepoint == 0 ? '.' : c.Codepoint)))}] {er.WrapsToNext}/{er.IsWrapContinuation}; managed [{string.Concat(ar.ReadOnlyCells.ToArray().Select(c => (char)(c.Codepoint == 0 ? '.' : c.Codepoint)))}] {ar.WrapsToNext}/{ar.IsWrapContinuation}");
-            }
             Compare(expected, native, actual, managed);
         }
         native.Process("\u001b[?47h\u001b8X"u8);
         managed.Process("\u001b[?47h\u001b8X"u8);
         Compare(expected, native, actual, managed);
+    }
+
+    [Fact]
+    public void HeightGrowthCanExplicitlyPullOrPreserveHistory()
+    {
+        foreach (bool pull in new[] { false, true })
+        {
+            TerminalScreen screen = new(8, 4);
+            using BasicVtProcessor processor = new(screen, new BasicVtProcessorOptions { ResizePullScrollback = pull });
+            processor.Process("one\r\ntwo\r\nthree\r\nfour\r\nfive"u8);
+            processor.ResizeScreen(8, 6, 64, 96, reflowOnResize: true);
+            Assert.Equal(pull ? 'o' : 't', screen.GetViewportRow(0)[0].Codepoint);
+            Assert.Equal(pull ? 4 : 3, processor.CursorRow);
+        }
     }
 
     [Fact]
