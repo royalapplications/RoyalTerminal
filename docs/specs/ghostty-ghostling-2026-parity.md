@@ -26,8 +26,39 @@ native encoder across all 25 mode/format combinations and six geometry contexts,
 with mixed press/release/drag/scroll/duplicate events. Dedicated tests cover
 zero-allocation duplicate suppression, pixel repeats, resize/session invalidation
 and invalid geometry. Old managed one-based-pixel/clamping assertions are updated
-to the native reference; legacy boundary acceptance remains covered. Implementation
-is awaiting the requested post-push validation and performance measurements.
+to the native reference; legacy boundary acceptance remains covered. Far-negative
+cell releases remain valid independently of pixel integer limits, and a current
+drag button is honored even if its initial press was outside this surface.
+
+Post-push full Release validation through `3332b76`: **3,454 unit/headless + 231
+integration tests passed, 16 conditional skips, zero failures**
+(`pointer-encoder-full.trx`). All **37 new cases** pass with native available on
+macOS arm64. The complete solution builds with zero warnings/errors. Earlier
+focused validation passed 131 cases before the final six boundary cases were
+added. No native library source changed in this batch.
+
+Two sequential Release benchmark pairs used 20,000 warmups and seven samples of
+100,000 SGR motion events. Default-runtime timings varied during tiered JIT
+optimization, so the table reports repeated fixed-JIT runs with
+`DOTNET_TieredCompilation=0` on both sides. Assemblies were hash-verified; both
+native-adapter runs used the same `fcce428d…` library. Timings are medians, not an
+end-to-end latency claim.
+
+| Workload | Baseline → current, run 1 | Baseline → current, run 2 | Timed allocations |
+| --- | --- | --- | --- |
+| Managed repeated same cell | 2.513 → 1.952 ms | 2.417 → 1.991 ms | 4,000,000 → 0 bytes |
+| Native repeated same cell | 13.643 → 5.253 ms | 14.508 → 5.198 ms | 4,000,000 → 0 bytes |
+| Managed alternating cells | 2.363 → 4.001 ms | 2.415 → 4.331 ms | 4,000,000 bytes, unchanged |
+| Native alternating cells | 14.056 → 13.237 ms | 14.277 → 13.154 ms | 4,000,000 bytes, unchanged |
+
+Repeated motion previously emitted 100,000 duplicate reports; now it emits none
+after warmup. Alternating cells still emit 100,000 reports. **Managed moving-cell
+encoding regressed by roughly 16–19 ns/event** with the additional geometry,
+filtering and state checks; no blanket managed throughput improvement is claimed.
+Baseline/current managed hashes: `c2a3572b…` / `8d589bd3…`; native adapter:
+`b8ae95ee…` / `0a14d4f7…`. Remaining mouse capture policy, input lifecycle,
+keyboard flags, full snapshot orchestration and IO/rendering/platform review are
+not closed by this encoder batch.
 
 ### Authoritative mouse state and input routing (2026-09-23)
 
@@ -62,11 +93,13 @@ runtime sign-off is still a separate gate.
 
 This does not yet close mouse-shift policy, encoder lifetime/deduplication,
 keyboard flags or broader snapshot/orchestration/performance requirements.
-Follow-up source evidence: native `setopt_from_terminal` and size setters reset
+Follow-up source evidence (addressed by the subsequent encoder batch above):
+native `setopt_from_terminal` and size setters reset
 last-cell tracking, and the adapter invokes them for every pointer event. Native
 pixel reporting uses rounded terminal-space coordinates (not clamped one-based
 cells); managed pointer normalization currently differs. These are outstanding
-encoder issues, not covered by the state-source/routing completion claim.
+encoder issues in that earlier batch, not covered by its state-source/routing
+completion claim.
 
 ### Raw metadata and active status display (2026-09-23)
 
