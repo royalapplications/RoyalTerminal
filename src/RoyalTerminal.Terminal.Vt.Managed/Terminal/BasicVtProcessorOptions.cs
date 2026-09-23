@@ -27,6 +27,13 @@ public sealed record BasicVtProcessorOptions
     public bool ScrollOnEraseInDisplay { get; init; }
 
     /// <summary>
+    /// Allows resize to pull history back into the live viewport. The default
+    /// matches the native host policy: enabled on Windows, disabled elsewhere.
+    /// Set true for Ghostty lib-VT's standalone default behavior.
+    /// </summary>
+    public bool ResizePullScrollback { get; init; } = OperatingSystem.IsWindows();
+
+    /// <summary>
     /// Gets whether CSI 21 t may report the current window title. This is disabled by
     /// default because a title report can expose host-controlled text to the child.
     /// </summary>

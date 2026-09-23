@@ -5732,6 +5732,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         bool alternateScreen = _inAltScreen;
         bool gridSizeChanged = columns != _screen.Columns || rows != _screen.ViewportRows;
+        bool discardHiddenCells = columns < _screen.Columns &&
+            (alternateScreen || (!reflowOnResize || !_autoWrap) && !preserveViewportTopOnRowsIncrease);
         int previousCursorCol = _cursorCol;
         int previousCursorRow = _cursorRow;
         bool previousDelayedWrap = _delayedWrap;
@@ -5748,10 +5750,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         TerminalScreenAnchor? savedCursorAnchor = null;
+        TerminalScreenAnchor? activeTopAnchor = null;
         TerminalGridPosition mappedCursor;
         try
         {
             savedCursorAnchor = TrackSavedCursorForResize();
+            if (!alternateScreen && !_options.ResizePullScrollback && !preserveViewportTopOnRowsIncrease)
+                activeTopAnchor = _screen.CreateAnchor(_screen.TotalRows - _screen.ViewportRows, 0);
             mappedCursor = _screen.Resize(
                 columns,
                 rows,
@@ -5759,6 +5764,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 alternateScreen ? null : new TerminalGridPosition(resizeCursorCol, _cursorRow),
                 trackedAbsolutePositions,
                 preserveViewportTopOnRowsIncrease && !alternateScreen);
+
+            if (discardHiddenCells) _screen.DiscardHiddenCells();
+            if (activeTopAnchor is not null && _screen.TryResolveAnchor(activeTopAnchor, out TerminalGridPosition activeTop))
+            {
+                int previousTop = _screen.TotalRows - _screen.ViewportRows;
+                _screen.PadBottomViewportToPreserveTop(activeTop.Row);
+                int mappedRow = mappedCursor.Row - (_screen.TotalRows - _screen.ViewportRows - previousTop);
+                mappedCursor = mappedRow < 0 ? new(0, 0) : mappedCursor with { Row = mappedRow };
+            }
 
             if (alternateScreen)
             {
@@ -5772,6 +5786,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         finally
         {
             if (savedCursorAnchor is not null) _screen.ReleaseAnchor(savedCursorAnchor);
+            if (activeTopAnchor is not null) _screen.ReleaseAnchor(activeTopAnchor);
             if (!alternateScreen && restoreScrollOffset != 0)
             {
                 _screen.ScrollOffset = restoreScrollOffset;
