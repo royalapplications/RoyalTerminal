@@ -14,9 +14,14 @@ public static partial class GhosttyVtNative
     /// <summary>
     /// Checks whether <c>libghostty-vt</c> is available at runtime.
     /// </summary>
+    /// <remarks>
+    /// CI uses the same availability policy as interactive hosts. Set
+    /// <c>ROYALTERMINAL_DISABLE_GHOSTTY_PROBE</c> to <c>1</c> or <c>true</c>
+    /// to explicitly report the native backend as unavailable.
+    /// </remarks>
     public static bool IsAvailable()
     {
-        if (ShouldSkipNativeAvailabilityProbe())
+        if (ShouldSkipNativeAvailabilityProbe(Environment.GetEnvironmentVariable("ROYALTERMINAL_DISABLE_GHOSTTY_PROBE")))
         {
             return false;
         }
@@ -24,22 +29,10 @@ public static partial class GhosttyVtNative
         return s_nativeLibraryHandle != nint.Zero;
     }
 
-    private static bool ShouldSkipNativeAvailabilityProbe()
+    internal static bool ShouldSkipNativeAvailabilityProbe(string? disableProbe)
     {
-        string? disableProbe = Environment.GetEnvironmentVariable("ROYALTERMINAL_DISABLE_GHOSTTY_PROBE");
-        if (string.Equals(disableProbe, "1", StringComparison.Ordinal) ||
-            string.Equals(disableProbe, "true", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        bool runningInCi =
-            string.Equals(Environment.GetEnvironmentVariable("CI"), "1", StringComparison.Ordinal) ||
-            string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "1", StringComparison.Ordinal) ||
-            string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
-
-        return runningInCi && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux());
+        return string.Equals(disableProbe, "1", StringComparison.Ordinal) ||
+            string.Equals(disableProbe, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static nint LoadNativeLibraryHandle()
