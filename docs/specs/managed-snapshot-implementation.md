@@ -11,6 +11,13 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
 
 ## Implemented and tested
 
+- PAGE-to-live-cell conversion and live PAGE capture preserve physical row widths,
+  logical styles, independent wide-tail styles, wrap/protection/prompt metadata,
+  grapheme suffixes and raw hyperlink identities. Capture canonicalizes inline
+  backgrounds to effective style backgrounds (Ghostty `Style.bg` precedence), so
+  live round trips are semantic, not byte-identical. Decode requires an unpublished
+  hyperlink owner; this is not yet an atomic READY-state installation API.
+
 - The 10-byte envelope and 10-byte tag/length/CRC32C record header, including
   rejection of unknown tags, oversize payloads and non-empty checkpoints.
 - Borrowed in-memory record payloads and a pooled streaming reader. Reader state

@@ -22,6 +22,15 @@ internal sealed class GhosttySnapshotPage
     internal GhosttySnapshotGrid Grid { get; }
     internal int StyleCount => _styles.Count;
     internal int HyperlinkCount => _hyperlinks.Count;
+
+    internal static GhosttySnapshotPage FromOwnedGrid(GhosttySnapshotGrid grid,
+        Dictionary<ushort, GhosttySnapshotStyle> styles, Dictionary<ushort, byte[]> hyperlinks)
+    {
+        byte[] header = new byte[20];
+        BinaryPrimitives.WriteUInt16LittleEndian(header, checked((ushort)grid.Columns));
+        BinaryPrimitives.WriteUInt16LittleEndian(header.AsSpan(2), checked((ushort)grid.Rows));
+        return new(header, grid, styles, hyperlinks);
+    }
     internal bool TryGetStyle(ushort id, out GhosttySnapshotStyle style) => _styles.TryGetValue(id, out style);
     internal bool TryGetHyperlink(ushort id, out GhosttySnapshotHyperlink hyperlink)
     {

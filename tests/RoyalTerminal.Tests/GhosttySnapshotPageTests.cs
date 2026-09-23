@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Text;
+using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
 using RoyalTerminal.Terminal;
@@ -13,9 +14,11 @@ namespace RoyalTerminal.Tests;
 public sealed class GhosttySnapshotPageTests(ITestOutputHelper output)
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void NativeSnapshotPagesRoundTripThroughManagedCodecs(bool alternate)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void NativeSnapshotPagesRoundTripThroughManagedCodecs(bool alternate, bool liveCells)
     {
         bool available = GhosttyVtProcessor.IsAvailable();
         output.WriteLine($"Native snapshot differential available: {available}");
@@ -27,12 +30,15 @@ public sealed class GhosttySnapshotPageTests(ITestOutputHelper output)
             terminal.Write(Encoding.UTF8.GetBytes($"\u001b[38;5;{row}mrow{row}:界a\u0301\r\n"));
         terminal.Write("\u001b]8;id=sample;https://example.com\u001b\\linked\u001b]8;;\u001b\\"u8);
         if (alternate) terminal.Write("\u001b[?1049h\u001b[44mALT"u8);
-        byte[] encoded = RewritePages(GhosttySnapshot.Encode(terminal), out int pages);
+        byte[] encoded = RewritePages(GhosttySnapshot.Encode(terminal), out int pages, liveCells);
         Assert.True(pages > 0);
         using GhosttyTerminal restored = GhosttySnapshot.Decode(encoded);
         Assert.Equal(terminal.GetActiveScreen(), restored.GetActiveScreen());
         Assert.Equal((terminal.GetCursorX(), terminal.GetCursorY()), (restored.GetCursorX(), restored.GetCursorY()));
         Assert.Equal(terminal.GetCursorPendingWrap(), restored.GetCursorPendingWrap());
+        AssertStyledEqual(terminal, restored);
+        terminal.Write("\u001b[0m\r\nnext:界"u8);
+        restored.Write("\u001b[0m\r\nnext:界"u8);
         AssertStyledEqual(terminal, restored);
         if (alternate)
         {
@@ -164,7 +170,7 @@ public sealed class GhosttySnapshotPageTests(ITestOutputHelper output)
         return output.ToArray();
     }
 
-    private static byte[] RewritePages(byte[] snapshot, out int pages)
+    private static byte[] RewritePages(byte[] snapshot, out int pages, bool liveCells = false)
     {
         using GhosttySnapshotRecordReader reader = new(snapshot, 16 * 1024 * 1024);
         reader.ReadEnvelope();
@@ -177,6 +183,12 @@ public sealed class GhosttySnapshotPageTests(ITestOutputHelper output)
             if (tag == GhosttySnapshotRecordTag.Page)
             {
                 GhosttySnapshotPage page = GhosttySnapshotPage.Read(payload, 1_000_000, 1_000_000, 4 * 1024 * 1024);
+                if (liveCells)
+                {
+                    TerminalScreen owner = new(page.Grid.Columns, 1);
+                    TerminalRow[] rows = GhosttySnapshotLivePage.Decode(page, owner);
+                    page = GhosttySnapshotLivePage.Capture(rows, owner, 1_000_000);
+                }
                 using MemoryStream rewritten = new();
                 page.WritePayloadTo(rewritten);
                 GhosttySnapshotFraming.WriteRecord(result, tag, rewritten.GetBuffer().AsSpan(0, (int)rewritten.Length));

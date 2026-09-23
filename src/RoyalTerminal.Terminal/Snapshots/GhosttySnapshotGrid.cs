@@ -26,6 +26,10 @@ internal sealed class GhosttySnapshotGrid
     internal int Rows => _rows.Length;
     internal ReadOnlySpan<byte> RowFlags => _rows;
     internal ReadOnlySpan<ulong> Cells => _cells;
+
+    // Adapter-created arrays are already validated and exclusively owned.
+    internal static GhosttySnapshotGrid FromOwnedCells(int columns, byte[] rows, ulong[] cells,
+        Dictionary<int, uint[]> suffixes) => new(columns, rows, cells, suffixes);
     internal ReadOnlySpan<uint> Suffix(int row, int column)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(row);
