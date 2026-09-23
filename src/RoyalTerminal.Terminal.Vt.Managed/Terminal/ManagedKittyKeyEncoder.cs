@@ -176,11 +176,12 @@ internal static class ManagedKittyKeyEncoder
 
     private ref struct Writer(Span<byte> buffer)
     {
+        private readonly Span<byte> _buffer = buffer;
         internal int Length { get; private set; }
-        internal void Add(byte value) => buffer[Length++] = value;
+        internal void Add(byte value) => _buffer[Length++] = value;
         internal void Number(int value)
         {
-            if (!Utf8Formatter.TryFormat(value, buffer[Length..], out int written)) throw new InvalidOperationException("Key encoding capacity exceeded.");
+            if (!Utf8Formatter.TryFormat(value, _buffer[Length..], out int written)) throw new InvalidOperationException("Key encoding capacity exceeded.");
             Length += written;
         }
     }
