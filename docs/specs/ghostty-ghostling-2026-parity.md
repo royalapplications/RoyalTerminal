@@ -2,9 +2,47 @@
 
 ## Reopened completion audit
 
+### Legacy input and lifecycle follow-up (2026-09-23)
+
+The managed processor now implements Ghostty's legacy key pipeline rather than
+only mode-2 extensions: PC keys, modified F3, F1–F25, keypad/1035/application
+policies, DECBKM, mode 2, C0 exceptions, fixterms, Unicode Alt prefixes,
+consumed modifiers, IME suppression and native-default macOS Option/Command
+behavior. `input/key_encode.zig` and `function_keys.zig` are the byte oracle;
+Windows Terminal `_encodeRegular` and xterm.js `Keyboard.ts` have distinct legacy
+policies, so Ghostty's deliberately different Ctrl+I/M/[ rules are retained.
+All **56 new legacy differential cases** pass, covering 32 mode combinations,
+64 modifier combinations, press/repeat/release, and text/layout/IME matrices.
+No throughput gain is claimed for this correctness addition.
+
+Transport Stop/Dispose failure now still clears service ownership and joins the
+session output worker before queued leases are discarded. Two headless tests
+verify clean restart and rejection of stale callbacks after either failure.
+Ghostty `termio/Thread.zig` requires joining before deinit; xterm's WriteBuffer
+checks disposal before queued callbacks, and Windows Terminal owns connection
+shutdown separately. This is lifecycle hardening, not six-platform sign-off.
+
+Avalonia has no repeat flag in KeyEventArgs. The surface-owned adapter now tracks
+physical down/up identities (logical fallback for synthetic events), supplies
+Repeat to both input endpoints and VT encoders, and clears state on focus loss,
+detach and session boundaries. The reset hook also clears Windows AltGr state
+and forwards through the app decorator. Ghostty consumes explicit repeat actions;
+Windows Terminal similarly tracks repeats before Kitty encoding. xterm's browser
+keyboard path is not a source for native physical-key lifecycle. **76 input
+adapter/headless focused cases** pass, including six new cases covering both
+engines, physical identity changes and focus/detach/restart. Layout-derived
+unshifted scalars, consumed-modifier and full IME event production remain open;
+the adapter does not invent layout data from physical US key positions.
+
+Full post-push Release through `d71eaf8`: **3,774 unit/headless + 231 integration
+passed, 16 conditional skips, zero failures** (`export-legacy-lifecycle-full.trx`).
+This includes 20 binary export, 56 legacy and two shutdown-failure cases. Native
+VT and renderer rebuild with Zig 0.16 on macOS arm64. Repeat routing was added
+after this full run and has focused validation; a new full run is required.
+
 ### Managed binary export (2026-09-23)
 
-Implementation pending post-push validation: `BasicVtProcessor.GetBinarySnapshot`
+Implemented and validated: `BasicVtProcessor.GetBinarySnapshot`
 and `WriteBinarySnapshotTo` capture live (not frozen render) terminal/processor
 state without VT replay or screen switches. The stream remains caller-owned;
 an IO/encoding failure can leave a prefix without FINISH. Invalid or unavailable
@@ -26,6 +64,8 @@ at a time. A single row exceeding wire or configured capacity is rejected.
 Managed export has no native page-byte policy, so bytes are unlimited in the
 header and the managed row policy is written explicitly. Exact native quota
 parity, wider differential coverage and performance measurements remain open.
+All 20 focused export cases pass with native available, including both-screen
+switch/reset capture and the complete upstream-compatible normalized fixture.
 
 ### Public restore, Kitty encoding and pointer lifecycle (2026-09-23)
 

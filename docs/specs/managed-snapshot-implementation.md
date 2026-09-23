@@ -1,6 +1,6 @@
 # Managed Ghostty snapshot compatibility work
 
-Status: **public restore implemented; export and exact native quota parity incomplete**.
+Status: **public restore and export implemented; exact native quota parity incomplete**.
 `ManagedTerminalSnapshot.Restore` supports transactional memory/stream imports;
 `ManagedTerminalSnapshotDecoder.Ready/Next` supports live incremental history.
 It installs complete processor state, verifies continuation replay, applies history
@@ -9,6 +9,14 @@ untrusted input, including discarded pages. History uses the managed host's row
 limit, not native page-allocation byte/minimum-line accounting. See the main parity
 report for current validation evidence. The chronological notes below describe
 individual component milestones and their then-outstanding integration work.
+
+`BasicVtProcessor.GetBinarySnapshot/WriteBinarySnapshotTo` now construct live
+semantic records, including both screen pens/cursors, mode banks, raw metadata,
+continuation and streamed history. Native-capacity page planning splits dense
+links and mixed widths without copying all cells. Twenty export tests pass,
+including canonical native round trips, the complete fixture, failure bounds,
+render holds and caller-owned streams. Snapshot version 1 still intentionally
+omits raster/image storage. These APIs require serialized access to processor state.
 
 The compatibility target is Ghostty's version 1 `GHOSTSNP` wire format at
 `622b4eecd7d2ce1a10930537c17f0d61abdba817`, rather than a separate RoyalTerminal-only dump. Upstream
@@ -264,21 +272,7 @@ runtime prerequisite does not itself expose managed snapshot restore.
    storage but resets primary contents in place without changing its generation.
    `PageList.Limits` also applies page-granular minimum byte/line limits, even to a
    configured zero limit; do not substitute the managed host row limit directly.
-2. Public managed binary export. PAGE/grid,
-   TERMINAL, SCREEN and HISTORY payload decoding/re-encoding are implemented;
-   constructing semantic records from live managed state and installing them in
-   both managed screens still belong to the adapter, rather than replaying their
-   original bytes. A partial
-   decode must not overwrite the caller's existing terminal on failure. Parser
-   continuation must resume byte-for-byte across UTF-8 and control-string splits.
-   A native-valid wire continuation is not proof that the current managed parser
-   supports every corresponding state: the ESC/CSI/control/ignore-state cases now
-   have focused tests, as do incremental UTF-8 rejection/replay boundaries,
-   DCS transitions, and current/saved charset runtime semantics. Their wire-to-live
-   installation and replay integration still need coverage before exposure.
-   Native APC-to-C1 export is corrected by a hash-checked overlay and shares the
-   managed canonical ESC representation; buffer/stream/snapshot round trips pass.
-3. Native-to-managed and managed-to-native differential tests, including every
+2. Expand native-to-managed and managed-to-native differential tests, including every
    upstream complete fixture, both screens, history, pending wrap, saved cursors,
    palette/RGB identity, malformed inputs and streaming IO failures. Benchmark
    sparse/plain/styled/grapheme-heavy histories separately from renderer work.

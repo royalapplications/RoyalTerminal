@@ -87,10 +87,8 @@ public sealed class TerminalModifyOtherKeysTests(ITestOutputHelper output)
                 TerminalKeyEncodingRequest request = new(key, action, text, (TerminalModifiers)mods);
                 native.TryEncodeKey(request, out byte[] expected);
                 bool encoded = managed.TryEncodeKey(request, out byte[] actual);
-                // This capability handles mode-2 extensions, not all unchanged
-                // legacy keys. Those continue through the UI fallback path.
-                if (encoded) Assert.Equal(expected, actual);
-                if (expected.AsSpan().StartsWith("\u001b[27;"u8)) Assert.True(encoded, $"Missing {key}, {mods}, {text}, {action}");
+                Assert.Equal(expected.Length != 0, encoded);
+                Assert.Equal(expected, actual);
                 Assert.False(managed.TryEncodeKey(request with { IsComposing = true }, out _));
             }
         }
