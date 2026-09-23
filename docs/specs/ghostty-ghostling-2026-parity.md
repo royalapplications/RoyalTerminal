@@ -27,7 +27,15 @@ its configured shape for zero; xterm.js also returns zero to host configuration
 but derives blink from odd/even for unsupported nonzero styles. RoyalTerminal
 follows Ghostty's complete rejection and per-screen copy rules. Existing managed
 DECSTR reset support remains an explicit extension rather than native parity.
-Post-push validation is pending. Full processor restoration remains open.
+Post-push validation through `e199639`: **340 focused tests** pass, including all
+**95 new cursor cases**; full Release passes **3,235 tests, 16 conditional skips,
+zero failures (3,251 total)** (`cursor-parity-full.trx`). Native differential
+tests ran on macOS arm64. The warm managed policy/read loop allocates zero bytes;
+this correctness refactor makes no throughput claim. Build output has no warnings
+or errors. All six native build jobs in CI run `35880301513` were in progress at
+inspection, not completed platform validation. Full processor restoration remains
+open, including geometry, parser/runtime state, history quotas and public
+restore/export orchestration.
 
 ### Legacy color operations and native host report policy (2026-09-23)
 
