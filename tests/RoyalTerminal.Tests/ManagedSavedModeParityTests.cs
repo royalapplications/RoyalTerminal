@@ -125,6 +125,32 @@ public sealed class ManagedSavedModeParityTests(ITestOutputHelper output)
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ColumnModePublishesNativeAndManagedGridWithoutHostResizeReports(bool held)
+    {
+        if (!Available()) return;
+        TerminalScreen expected = new(12, 4), actual = new(12, 4);
+        using GhosttyVtProcessor native = new(expected);
+        using BasicVtProcessor managed = new(actual);
+        native.NotifyResize(12, 4, 120, 64); managed.NotifyResize(12, 4, 120, 64);
+        List<byte> expectedReplies = [], actualReplies = [];
+        native.ResponseCallback = data => expectedReplies.AddRange(data);
+        managed.ResponseCallback = data => actualReplies.AddRange(data);
+        byte[] input = Encoding.ASCII.GetBytes("\u001b[?2048h\u001b[?40h" +
+            (held ? "\u001b[?2026h" : "") + "\u001b[?3h\u001b[1;130HXYZ\u001b[14t\u001b[18t");
+        native.Process(input); managed.Process(input);
+        Assert.Equal(expectedReplies, actualReplies);
+        Assert.Equal(132, expected.Columns); Assert.Equal(expected.Columns, actual.Columns);
+        Assert.Equal((native.CursorCol, native.CursorRow), (managed.CursorCol, managed.CursorRow));
+        for (int column = 129; column < 132; column++)
+        {
+            Assert.Equal('X' + column - 129, expected.GetViewportRow(0)[column].Codepoint);
+            Assert.Equal(expected.GetViewportRow(0)[column].Codepoint, actual.GetViewportRow(0)[column].Codepoint);
+        }
+    }
+
+    [Theory]
     [InlineData("\u001b[?$p")]
     [InlineData("\u001b[$p")]
     [InlineData("\u001b[?7;25$p")]

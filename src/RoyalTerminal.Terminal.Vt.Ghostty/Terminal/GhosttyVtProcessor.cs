@@ -1633,9 +1633,18 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void SyncScreenFromNative()
     {
+        int nativeColumns = _renderState.GetColumns();
+        int nativeRows = _renderState.GetRows();
+        bool gridChanged = nativeColumns != _screen.Columns || nativeRows != _screen.ViewportRows;
+        if (gridChanged)
+        {
+            // DECCOLM can change native geometry without a host NotifyResize.
+            // Resize the mirror before copying so right-hand cells aren't clipped.
+            _screen.Resize(nativeColumns, nativeRows, reflowOnResize: false);
+        }
         GhosttyVtNative.GhosttyRenderStateDirty dirty = _renderState.GetDirty();
         bool forceFullScreenSyncAfterResize = _forceFullScreenSyncAfterResize;
-        bool fullRefresh = forceFullScreenSyncAfterResize ||
+        bool fullRefresh = gridChanged || forceFullScreenSyncAfterResize ||
             dirty == GhosttyVtNative.GhosttyRenderStateDirty.Full ||
             _renderState.GetColumns() != _screen.Columns ||
             _renderState.GetRows() != _screen.ViewportRows;

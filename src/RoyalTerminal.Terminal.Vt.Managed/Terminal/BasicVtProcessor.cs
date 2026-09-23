@@ -5699,6 +5699,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         bool reflowOnResize,
         Span<TerminalGridPosition> trackedAbsolutePositions,
         bool preserveViewportTopOnRowsIncrease = false)
+        => ResizeScreenCore(columns, rows, widthPx, heightPx, reflowOnResize,
+            trackedAbsolutePositions, preserveViewportTopOnRowsIncrease, reportSize: true);
+
+    private void ResizeScreenCore(int columns, int rows, int widthPx, int heightPx,
+        bool reflowOnResize, Span<TerminalGridPosition> trackedAbsolutePositions,
+        bool preserveViewportTopOnRowsIncrease, bool reportSize)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(rows, 1);
@@ -5720,7 +5726,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             ApplyResizeState(columns, rows);
         }
         PublishKittyGraphics();
-        EmitInBandSizeReport();
+        if (reportSize) EmitInBandSizeReport();
     }
 
     private void ResizeActiveScreenBuffer(int columns, int rows, bool reflowOnResize,
