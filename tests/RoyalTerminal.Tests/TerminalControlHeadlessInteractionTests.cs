@@ -2374,7 +2374,8 @@ public sealed class TerminalControlHeadlessInteractionTests
     {
         if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
         RecordingTransport transport = new();
-        TerminalControl control = CreateControlWithTransport(transport, preference: preference);
+        DefaultVtProcessorFactory factory = new(new INativeVtProcessorProvider[] { new GhosttyVtProcessorProvider() });
+        TerminalControl control = CreateControlWithTransport(transport, factory, preference);
         control.Width = 640; control.Height = 400;
         Window window = new() { Width = 640, Height = 400, Content = control };
         window.Show();
