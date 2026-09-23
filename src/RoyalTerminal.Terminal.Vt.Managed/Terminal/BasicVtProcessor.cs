@@ -102,6 +102,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private CellAttributes _currentAttrs;
     private TerminalUnderlineStyle _currentUnderlineStyle;
     private uint _currentUnderlineColor;
+    private TerminalColorIdentity _currentUnderlineIdentity;
     private bool _currentHasUnderlineColor;
     private CellDecorations _currentDecorations;
     private int _currentHyperlinkId;
@@ -145,6 +146,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private CellAttributes _savedAttrs;
     private TerminalUnderlineStyle _savedUnderlineStyle;
     private uint _savedUnderlineColor;
+    private TerminalColorIdentity _savedUnderlineIdentity;
     private bool _savedHasUnderlineColor;
     private CellDecorations _savedDecorations;
     private int _savedHyperlinkId;
@@ -1897,6 +1899,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         cell.Grapheme = null;
         cell.Foreground = _currentFg;
         cell.Background = _currentBg;
+        cell.ForegroundIdentity = GetColorIdentity(_currentFgKind, _currentFgPaletteIndex, _currentFg);
+        cell.BackgroundIdentity = GetColorIdentity(_currentBgKind, _currentBgPaletteIndex, _currentBg);
+        cell.UnderlineIdentity = _currentUnderlineIdentity;
         cell.Attributes = _currentAttrs;
         cell.UnderlineStyle = _currentUnderlineStyle;
         cell.UnderlineColor = _currentUnderlineColor;
@@ -1913,6 +1918,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             spacer.Grapheme = null;
             spacer.Foreground = _currentFg;
             spacer.Background = _currentBg;
+            spacer.ForegroundIdentity = cell.ForegroundIdentity;
+            spacer.BackgroundIdentity = cell.BackgroundIdentity;
+            spacer.UnderlineIdentity = cell.UnderlineIdentity;
             spacer.Attributes = _currentAttrs;
             spacer.UnderlineStyle = _currentUnderlineStyle;
             spacer.UnderlineColor = _currentUnderlineColor;
@@ -2080,6 +2088,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             spacer.Grapheme = null;
             spacer.Foreground = targetCell.Foreground;
             spacer.Background = targetCell.Background;
+            spacer.ForegroundIdentity = targetCell.ForegroundIdentity;
+            spacer.BackgroundIdentity = targetCell.BackgroundIdentity;
+            spacer.UnderlineIdentity = targetCell.UnderlineIdentity;
             spacer.Attributes = targetCell.Attributes;
             spacer.UnderlineStyle = targetCell.UnderlineStyle;
             spacer.UnderlineColor = targetCell.UnderlineColor;
@@ -2159,7 +2170,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             ref TerminalCell left = ref row[column - 1];
             if (left.Width == 2)
             {
-                left = TerminalCell.Empty(_currentFg, _currentBg);
+                left = CreateErasedCell();
             }
         }
         else if (existing.Width == 2 && column + 1 < row.Columns)
@@ -2167,11 +2178,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             ref TerminalCell right = ref row[column + 1];
             if (right.Width == 0)
             {
-                right = TerminalCell.Empty(_currentFg, _currentBg);
+                right = CreateErasedCell();
             }
         }
 
-        row[column] = TerminalCell.Empty(_currentFg, _currentBg);
+        row[column] = CreateErasedCell();
     }
 
     private void ClampCursor()
@@ -2246,7 +2257,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (_scrollTop == 0 && _scrollBottom == _screen.ViewportRows - 1 && !_inAltScreen)
         {
             // Whole-screen scroll — push to scrollback
-            _screen.AddRow();
+            TerminalRow added = _screen.AddRow();
+            if (_currentBgKind != SgrColorKind.Default)
+                added.Clear(_screen.DefaultForeground, _currentBg, CurrentBackgroundIdentity);
             _screen.InvalidateViewport();
         }
         else
@@ -2263,7 +2276,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
             if (_scrollBottom < _screen.ViewportRows)
             {
-                _screen.GetViewportRow(_scrollBottom).Clear(_currentFg, _currentBg);
+                _screen.GetViewportRow(_scrollBottom).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
             }
             _screen.InvalidateViewport();
         }
@@ -2283,7 +2296,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
         if (_scrollTop < _screen.ViewportRows)
         {
-            _screen.GetViewportRow(_scrollTop).Clear(_currentFg, _currentBg);
+            _screen.GetViewportRow(_scrollTop).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
         }
         _screen.InvalidateViewport();
     }
@@ -4824,6 +4837,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _savedAttrs = _currentAttrs;
         _savedUnderlineStyle = _currentUnderlineStyle;
         _savedUnderlineColor = _currentUnderlineColor;
+        _savedUnderlineIdentity = _currentUnderlineIdentity;
         _savedHasUnderlineColor = _currentHasUnderlineColor;
         _savedDecorations = _currentDecorations;
         _savedHyperlinkId = _currentHyperlinkId;
@@ -4845,6 +4859,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _currentAttrs = _savedAttrs;
         _currentUnderlineStyle = _savedUnderlineStyle;
         _currentUnderlineColor = _savedUnderlineColor;
+        _currentUnderlineIdentity = _savedUnderlineIdentity;
         _currentHasUnderlineColor = _savedHasUnderlineColor;
         _currentDecorations = _savedDecorations;
         _currentHyperlinkId = _savedHyperlinkId;
@@ -4973,6 +4988,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                         if (_params[i + 1] == 5 && i + 2 < _params.Count)
                         {
                             _currentUnderlineColor = PaletteColor(_params[i + 2]);
+                            _currentUnderlineIdentity = TerminalColorIdentity.Palette((byte)Math.Clamp(_params[i + 2], 0, 255));
                             _currentHasUnderlineColor = true;
                             i += 2;
                         }
@@ -4982,6 +4998,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                                                      ((uint)_params[i + 2] << 16) |
                                                      ((uint)_params[i + 3] << 8) |
                                                      (uint)_params[i + 4];
+                            _currentUnderlineIdentity = TerminalColorIdentity.Rgb(_currentUnderlineColor);
                             _currentHasUnderlineColor = true;
                             i += 4;
                         }
@@ -4990,6 +5007,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
                 case 59:
                     _currentUnderlineColor = 0;
+                    _currentUnderlineIdentity = default;
                     _currentHasUnderlineColor = false;
                     break;
             }
@@ -5005,6 +5023,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _currentAttrs = CellAttributes.None;
         _currentUnderlineStyle = TerminalUnderlineStyle.None;
         _currentUnderlineColor = 0;
+        _currentUnderlineIdentity = default;
         _currentHasUnderlineColor = false;
         _currentDecorations = CellDecorations.None;
     }
@@ -5016,6 +5035,20 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _currentFgKind = SgrColorKind.Palette;
         _currentFgPaletteIndex = paletteIndex;
     }
+
+    private static TerminalColorIdentity GetColorIdentity(SgrColorKind kind, int paletteIndex, uint rgb)
+        => kind switch
+        {
+            SgrColorKind.Palette => TerminalColorIdentity.Palette((byte)paletteIndex),
+            SgrColorKind.Rgb => TerminalColorIdentity.Rgb(rgb),
+            _ => default,
+        };
+
+    private TerminalColorIdentity CurrentBackgroundIdentity
+        => GetColorIdentity(_currentBgKind, _currentBgPaletteIndex, _currentBg);
+
+    private TerminalCell CreateErasedCell()
+        => TerminalCell.Empty(_currentFg, _currentBg, CurrentBackgroundIdentity);
 
     private void SetBackgroundPalette(int paletteIndex)
     {
@@ -5049,7 +5082,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 0: // From cursor to end
                 EraseInLine(0);
                 for (var r = _cursorRow + 1; r < _screen.ViewportRows; r++)
-                    _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                    _screen.GetViewportRow(r).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
                 if (_cursorRow + 1 < _screen.ViewportRows)
                 {
                     _screen.ClearRasterGraphicsInViewportRectangle(
@@ -5062,7 +5095,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case 1: // From start to cursor
                 for (var r = 0; r < _cursorRow && r < _screen.ViewportRows; r++)
-                    _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                    _screen.GetViewportRow(r).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
                 if (_cursorRow > 0)
                 {
                     _screen.ClearRasterGraphicsInViewportRectangle(
@@ -5076,7 +5109,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     var rowToCursor = _screen.GetViewportRow(_cursorRow);
                     ClearPreservedCellsForMutation(rowToCursor);
                     for (var c = 0; c <= _cursorCol && c < _screen.Columns; c++)
-                        rowToCursor[c] = TerminalCell.Empty(_currentFg, _currentBg);
+                        rowToCursor[c] = CreateErasedCell();
                     NormalizeRowWideCells(rowToCursor);
                     rowToCursor.IsDirty = true;
                 }
@@ -5087,12 +5120,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 {
                     _screen.MoveViewportToScrollbackAndClear();
                     for (var r = 0; r < _screen.ViewportRows; r++)
-                        _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                        _screen.GetViewportRow(r).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
                 }
                 else
                 {
                     for (var r = 0; r < _screen.ViewportRows; r++)
-                        _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                        _screen.GetViewportRow(r).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
                     _screen.ClearRasterGraphics();
                 }
                 break;
@@ -5129,7 +5162,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             case 0: // From cursor to end of line
                 for (var c = Math.Max(0, _cursorCol); c < _screen.Columns; c++)
-                    row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+                    row[c] = CreateErasedCell();
                 row.WrapsToNext = false;
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
@@ -5140,7 +5173,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case 1: // From start to cursor
                 for (var c = 0; c <= _cursorCol && c < _screen.Columns; c++)
-                    row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+                    row[c] = CreateErasedCell();
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
@@ -5149,7 +5182,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 2: // Entire line
-                row.Clear(_currentFg, _currentBg);
+                row.Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
@@ -5180,7 +5213,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             // Clear the line at cursor
             if (_cursorRow < _screen.ViewportRows)
             {
-                _screen.GetViewportRow(_cursorRow).Clear(_currentFg, _currentBg);
+                _screen.GetViewportRow(_cursorRow).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
@@ -5209,7 +5242,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             // Clear the bottom row of the scroll region
             if (_scrollBottom < _screen.ViewportRows)
             {
-                _screen.GetViewportRow(_scrollBottom).Clear(_currentFg, _currentBg);
+                _screen.GetViewportRow(_scrollBottom).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _scrollBottom,
                     _scrollBottom,
@@ -5230,7 +5263,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         for (var c = _screen.Columns - 1; c >= _cursorCol + count; c--)
             row[c] = row[c - count];
         for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
-            row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+            row[c] = CreateErasedCell();
         NormalizeRowWideCells(row);
         row.IsDirty = true;
         _screen.ClearRasterGraphicsInViewportRectangle(
@@ -5250,7 +5283,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         for (var c = _cursorCol; c + count < _screen.Columns; c++)
             row[c] = row[c + count];
         for (var c = Math.Max(_cursorCol, _screen.Columns - count); c < _screen.Columns; c++)
-            row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+            row[c] = CreateErasedCell();
         NormalizeRowWideCells(row);
         row.IsDirty = true;
         _screen.ClearRasterGraphicsInViewportRectangle(
@@ -5268,7 +5301,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         var row = _screen.GetViewportRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
         for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
-            row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+            row[c] = CreateErasedCell();
         NormalizeRowWideCells(row);
         row.IsDirty = true;
         _screen.ClearRasterGraphicsInViewportRectangle(
@@ -5312,6 +5345,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 trailing.Grapheme = null;
                 trailing.Foreground = cell.Foreground;
                 trailing.Background = cell.Background;
+                trailing.ForegroundIdentity = cell.ForegroundIdentity;
+                trailing.BackgroundIdentity = cell.BackgroundIdentity;
+                trailing.UnderlineIdentity = cell.UnderlineIdentity;
                 trailing.Attributes = cell.Attributes;
                 trailing.UnderlineStyle = cell.UnderlineStyle;
                 trailing.UnderlineColor = cell.UnderlineColor;
@@ -5381,6 +5417,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _apcTruncated = false;
         _savedUnderlineStyle = TerminalUnderlineStyle.None;
         _savedUnderlineColor = 0;
+        _savedUnderlineIdentity = default;
         _savedHasUnderlineColor = false;
         _savedDecorations = CellDecorations.None;
         _savedHyperlinkId = 0;
@@ -5597,6 +5634,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _lastGraphicCodepoint = 0;
         _savedUnderlineStyle = TerminalUnderlineStyle.None;
         _savedUnderlineColor = 0;
+        _savedUnderlineIdentity = default;
         _savedHasUnderlineColor = false;
         _savedDecorations = CellDecorations.None;
         _savedHyperlinkId = 0;
@@ -5820,62 +5858,24 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ApplyEffectiveTheme(TerminalTheme theme)
     {
 
-        TerminalTheme previousTheme = _theme;
-        Dictionary<uint, uint> colorRemap = BuildColorRemap(previousTheme, theme);
-
         _theme = theme;
         _screen.ApplyTheme(theme, invalidateRows: true);
 
-        _currentFg = RemapColor(_currentFg, colorRemap);
-        _currentBg = RemapColor(_currentBg, colorRemap);
-        _savedFg = RemapColor(_savedFg, colorRemap);
-        _savedBg = RemapColor(_savedBg, colorRemap);
+        _currentFg = ResolveColorIdentity(GetColorIdentity(_currentFgKind, _currentFgPaletteIndex, _currentFg), theme.DefaultForeground);
+        _currentBg = ResolveColorIdentity(GetColorIdentity(_currentBgKind, _currentBgPaletteIndex, _currentBg), theme.DefaultBackground);
+        _savedFg = ResolveColorIdentity(GetColorIdentity(_savedFgKind, _savedFgPaletteIndex, _savedFg), theme.DefaultForeground);
+        _savedBg = ResolveColorIdentity(GetColorIdentity(_savedBgKind, _savedBgPaletteIndex, _savedBg), theme.DefaultBackground);
+        if (_currentHasUnderlineColor) _currentUnderlineColor = ResolveColorIdentity(_currentUnderlineIdentity, _currentFg);
+        if (_savedHasUnderlineColor) _savedUnderlineColor = ResolveColorIdentity(_savedUnderlineIdentity, _savedFg);
     }
 
-    private static Dictionary<uint, uint> BuildColorRemap(TerminalTheme previousTheme, TerminalTheme nextTheme)
-    {
-        Dictionary<uint, uint> remap = new(capacity: 258);
-        HashSet<uint> ambiguousSources = new();
-
-        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultForeground, nextTheme.DefaultForeground);
-        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultBackground, nextTheme.DefaultBackground);
-
-        for (int i = 0; i < 256; i++)
+    private uint ResolveColorIdentity(TerminalColorIdentity identity, uint defaultColor)
+        => identity.Kind switch
         {
-            AddColorRemap(remap, ambiguousSources, previousTheme.Palette[i], nextTheme.Palette[i]);
-        }
-
-        return remap;
-    }
-
-    private static void AddColorRemap(
-        IDictionary<uint, uint> remap,
-        ISet<uint> ambiguousSources,
-        uint source,
-        uint target)
-    {
-        if (source == target || ambiguousSources.Contains(source))
-        {
-            return;
-        }
-
-        if (!remap.TryGetValue(source, out uint existing))
-        {
-            remap[source] = target;
-            return;
-        }
-
-        if (existing != target)
-        {
-            remap.Remove(source);
-            ambiguousSources.Add(source);
-        }
-    }
-
-    private static uint RemapColor(uint color, IReadOnlyDictionary<uint, uint> remap)
-    {
-        return remap.TryGetValue(color, out uint mapped) ? mapped : color;
-    }
+            TerminalColorKind.Palette => PaletteColor((int)identity.Value),
+            TerminalColorKind.Rgb => 0xFF000000u | identity.Value,
+            _ => defaultColor,
+        };
 
     /// <inheritdoc />
     public void Dispose()

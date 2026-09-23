@@ -19,14 +19,14 @@ public readonly record struct TerminalGridPosition(int Column, int Row);
 /// </summary>
 public struct TerminalCell
 {
-    /// <summary>UTF-32 codepoint for this cell. 0 for empty cells.</summary>
-    public int Codepoint;
-
     /// <summary>
     /// Optional grapheme text for this cell.
     /// When null, rendering/copy should use <see cref="Codepoint"/>.
     /// </summary>
     public string? Grapheme;
+
+    /// <summary>UTF-32 codepoint for this cell. 0 for empty cells.</summary>
+    public int Codepoint;
 
     /// <summary>Foreground color as packed ARGB.</summary>
     public uint Foreground;
@@ -34,14 +34,26 @@ public struct TerminalCell
     /// <summary>Background color as packed ARGB.</summary>
     public uint Background;
 
+    /// <summary>Unresolved SGR foreground identity, retained for protocols and state serialization.</summary>
+    public TerminalColorIdentity ForegroundIdentity;
+
+    /// <summary>Unresolved SGR background identity, retained independently of the displayed ARGB.</summary>
+    public TerminalColorIdentity BackgroundIdentity;
+
+    /// <summary>Unresolved SGR underline identity; default means no explicit underline color.</summary>
+    public TerminalColorIdentity UnderlineIdentity;
+
+    /// <summary>Optional explicit underline color as packed ARGB.</summary>
+    public uint UnderlineColor;
+
+    /// <summary>Hyperlink token id for OSC8 links. Zero means no hyperlink.</summary>
+    public int HyperlinkId;
+
     /// <summary>Cell attribute flags.</summary>
     public CellAttributes Attributes;
 
     /// <summary>Underline rendering style for this cell.</summary>
     public TerminalUnderlineStyle UnderlineStyle;
-
-    /// <summary>Optional explicit underline color as packed ARGB.</summary>
-    public uint UnderlineColor;
 
     /// <summary>Whether <see cref="UnderlineColor"/> should be used.</summary>
     public bool HasUnderlineColor;
@@ -54,11 +66,6 @@ public struct TerminalCell
     /// </summary>
     public bool HasBackground;
 
-    /// <summary>
-    /// Hyperlink token id for OSC8 links. Zero means no hyperlink.
-    /// </summary>
-    public int HyperlinkId;
-
     /// <summary>Number of columns this character spans (1 for normal, 2 for wide/CJK).</summary>
     public byte Width;
 
@@ -66,12 +73,17 @@ public struct TerminalCell
     public readonly bool HasContent => Codepoint != 0 || !string.IsNullOrEmpty(Grapheme);
 
     /// <summary>Creates a default empty cell with the given colors.</summary>
-    public static TerminalCell Empty(uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E) => new()
+    public static TerminalCell Empty(uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E)
+        => Empty(fg, bg, default);
+
+    /// <summary>Creates an erased cell retaining the original background color identity.</summary>
+    public static TerminalCell Empty(uint fg, uint bg, TerminalColorIdentity backgroundIdentity) => new()
     {
         Codepoint = 0,
         Grapheme = null,
         Foreground = fg,
         Background = bg,
+        BackgroundIdentity = backgroundIdentity,
         Attributes = CellAttributes.None,
         UnderlineStyle = TerminalUnderlineStyle.None,
         UnderlineColor = 0,
@@ -360,6 +372,10 @@ public sealed class TerminalRow
 
     /// <summary>Clear all cells to the default state.</summary>
     public void Clear(uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E)
+        => Clear(fg, bg, default);
+
+    /// <summary>Clears all cells while retaining the original background color identity.</summary>
+    public void Clear(uint fg, uint bg, TerminalColorIdentity backgroundIdentity)
     {
         if (_sharedCells)
         {
@@ -370,7 +386,7 @@ public sealed class TerminalRow
 
         ResizePreservedStorage(_columns, fg, bg);
         for (var i = 0; i < _columns; i++)
-            _cells[i] = TerminalCell.Empty(fg, bg);
+            _cells[i] = TerminalCell.Empty(fg, bg, backgroundIdentity);
         WrapsToNext = false;
         IsTransientResizeRow = false;
         IsDirty = true;
@@ -2712,6 +2728,9 @@ public sealed partial class TerminalScreen
         in TerminalCell tail)
         => tail.Width == 0 && tail.Codepoint == 0 && tail.Grapheme is null &&
            tail.Foreground == head.Foreground && tail.Background == head.Background &&
+           tail.ForegroundIdentity == head.ForegroundIdentity &&
+           tail.BackgroundIdentity == head.BackgroundIdentity &&
+           tail.UnderlineIdentity == head.UnderlineIdentity &&
            tail.Attributes == head.Attributes && tail.UnderlineStyle == head.UnderlineStyle &&
            tail.UnderlineColor == head.UnderlineColor && tail.HasUnderlineColor == head.HasUnderlineColor &&
            tail.Decorations == head.Decorations && tail.HasBackground == head.HasBackground &&
@@ -2723,6 +2742,9 @@ public sealed partial class TerminalScreen
         Grapheme = null,
         Foreground = source.Foreground,
         Background = source.Background,
+        ForegroundIdentity = source.ForegroundIdentity,
+        BackgroundIdentity = source.BackgroundIdentity,
+        UnderlineIdentity = source.UnderlineIdentity,
         Attributes = source.Attributes,
         UnderlineStyle = source.UnderlineStyle,
         UnderlineColor = source.UnderlineColor,

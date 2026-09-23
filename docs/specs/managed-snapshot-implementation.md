@@ -32,13 +32,14 @@ They do not assert that a fully decoded managed terminal already exists.
 
 ## Required storage changes before a complete adapter
 
-`TerminalCell` currently stores resolved ARGB values. `BasicVtProcessor` retains
-color kind and palette index only in its current/saved pen. A snapshot cannot
-recover whether an already printed RGB value came from the default color, an
-indexed palette entry, or an explicit RGB escape. Guessing from value equality is
-incorrect: explicit RGB may equal a palette color while only the indexed cell
-should change after an OSC palette update. The screen model needs persistent
-logical color metadata, and every print/erase/copy/reflow path must preserve it.
+`TerminalCell` now retains four-byte logical foreground/background/underline
+identities alongside resolved ARGB. Both VT integrations populate these from
+original styles, with focused print/erase/save/restore/wide/reflow/hold tests.
+This removes the need to guess whether identical displayed RGB values came from
+default, indexed or explicit colors. The snapshot adapter still needs to map
+these identities to its style records. Remaining legacy existing-cell theme
+remapping and wide-boundary normalization paths need review before claiming all
+state transitions preserve native semantics.
 
 The wire format also preserves protected cells, semantic cell content, row semantic
 prompt and wrap-continuation flags. The current managed model lacks some of these

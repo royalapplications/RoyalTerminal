@@ -1835,6 +1835,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 targetCell.UnderlineStyle = MapUnderlineStyleFromStyle(style);
                 targetCell.HasUnderlineColor = TryResolveUnderlineColor(style.UnderlineColor, palette, out uint underline);
                 targetCell.UnderlineColor = underline;
+                targetCell.ForegroundIdentity = MapColorIdentity(style.ForegroundColor);
+                targetCell.BackgroundIdentity = MapColorIdentity(style.BackgroundColor);
+                targetCell.UnderlineIdentity = MapColorIdentity(style.UnderlineColor);
                 targetCell.Decorations = MapDecorationsFromStyle(style);
             }
 
@@ -1847,6 +1850,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 byte index = 0;
                 GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.ColorPalette, &index);
                 targetCell.Background = GhosttyTerminal.ToArgb(palette[index]);
+                targetCell.BackgroundIdentity = TerminalColorIdentity.Palette(index);
                 targetCell.HasBackground = true;
             }
             else if (content == GhosttyVtNative.GhosttyCellContentTag.BackgroundColorRgb)
@@ -1854,6 +1858,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 GhosttyVtNative.GhosttyColorRgb background = default;
                 GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.ColorRgb, &background);
                 targetCell.Background = GhosttyTerminal.ToArgb(background);
+                targetCell.BackgroundIdentity = TerminalColorIdentity.Rgb(targetCell.Background);
                 targetCell.HasBackground = true;
             }
 
@@ -1958,6 +1963,27 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         target.UnderlineStyle = MapUnderlineStyleFromStyle(style);
         target.HasUnderlineColor = TryResolveUnderlineColor(style.UnderlineColor, palette, out uint underlineColor);
         target.UnderlineColor = underlineColor;
+        target.ForegroundIdentity = MapColorIdentity(style.ForegroundColor);
+        target.BackgroundIdentity = MapColorIdentity(style.BackgroundColor);
+        target.UnderlineIdentity = MapColorIdentity(style.UnderlineColor);
+        // Erased cells may encode the background in their raw content instead of a style.
+        if (codepoint == 0 && target.HasBackground && target.BackgroundIdentity.Kind == TerminalColorKind.Default)
+        {
+            GhosttyVtNative.GhosttyCellContentTag content = default;
+            GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.ContentTag, &content);
+            if (content == GhosttyVtNative.GhosttyCellContentTag.BackgroundColorPalette)
+            {
+                byte index = 0;
+                GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.ColorPalette, &index);
+                target.BackgroundIdentity = TerminalColorIdentity.Palette(index);
+            }
+            else if (content == GhosttyVtNative.GhosttyCellContentTag.BackgroundColorRgb)
+            {
+                GhosttyVtNative.GhosttyColorRgb rgb = default;
+                GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.ColorRgb, &rgb);
+                target.BackgroundIdentity = TerminalColorIdentity.Rgb(GhosttyTerminal.ToArgb(rgb));
+            }
+        }
         target.Decorations = MapDecorationsFromStyle(style);
         target.HyperlinkId = TryResolveHyperlinkId(rowIndex, columnIndex, rawCell, target.Width);
     }
@@ -1968,6 +1994,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         target.Grapheme = null;
         target.Foreground = _screen.DefaultForeground;
         target.Background = _screen.DefaultBackground;
+        target.ForegroundIdentity = default;
+        target.BackgroundIdentity = default;
+        target.UnderlineIdentity = default;
         target.Attributes = CellAttributes.None;
         target.UnderlineStyle = TerminalUnderlineStyle.None;
         target.UnderlineColor = 0;
@@ -1977,6 +2006,14 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         target.HyperlinkId = 0;
         target.Width = 1;
     }
+
+    private static TerminalColorIdentity MapColorIdentity(in GhosttyVtNative.GhosttyStyleColor color)
+        => color.Tag switch
+        {
+            GhosttyVtNative.GhosttyStyleColorTag.Palette => TerminalColorIdentity.Palette(color.Value.Palette),
+            GhosttyVtNative.GhosttyStyleColorTag.Rgb => TerminalColorIdentity.Rgb(GhosttyTerminal.ToArgb(color.Value.Rgb)),
+            _ => default,
+        };
 
     private void TrimTrailingWhitespaceForReflow(TerminalRow row)
     {

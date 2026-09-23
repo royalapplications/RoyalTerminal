@@ -62,9 +62,7 @@ The combined graphics, renderer, anchor and synchronized-output run passes
 output. This closes those specific regressions, not the remaining graphics or
 whole-project parity requirements above.
 
-## Scope and pinned references
-
-### Graphics protocol differential follow-up (2026-09-23)
+## Graphics protocol differential follow-up (2026-09-23)
 
 Eight command conversations initially disagreed with the actual native library.
 The managed processor now matches native replies for animation frame numbers,
@@ -91,7 +89,52 @@ skips or failures. This includes the dedicated output-worker, gather/ring and
 session transport regression tests; it does not substitute for the remaining
 platform/performance audit.
 
-## Dependency revision
+## Virtual-placeholder prerequisites (2026-09-23)
+
+Both processors now preserve original foreground, background and underline color
+identities separately from resolved ARGB. This is required by Ghostty
+`graphics_unicode.IncompletePlacement.colorToId`: palette index 42 encodes ID 42,
+not that palette entry's RGB. Default, palette zero and explicit RGB black remain
+distinct. Native synchronization retains style identities and raw erased-cell
+backgrounds; managed SGR/save/restore, erasure, row movement, wide spacers, reflow
+and held-screen copies preserve the metadata. Windows Terminal `TextColor` and
+xterm.js `AttributeData` likewise retain color representation before resolving
+it for display. The new identity is four bytes; grouping the cell fields keeps
+`TerminalCell` within a 48-byte budget, enforced by a regression test.
+
+The review additionally corrected managed whole-screen scroll blanks to retain
+the active background and changed live/saved pen theme resolution to use logical
+color kind rather than ambiguous RGB matching. Existing-cell theme remapping
+still has a legacy RGB-heuristic path and needs a separate compatibility review.
+
+The shared placeholder scanner ports Ghostty's contiguous-run rules, including
+nullable row/column/high-byte inheritance, invalid marks, palette and underline
+IDs, supplementary codepoints and the complete 297-entry diacritic table (exact
+source comparison passed). The shared geometry routine matches all five upstream
+dog-image golden cases, plus pillarbox, unspecified-grid and overflow tests.
+These helpers are **not yet wired into placement publication** and do not by
+themselves make virtual images visible in either integration.
+
+The scanner's first Debug allocation test exposed 72 bytes per valid diacritic
+lookup. Using a once-created immutable table avoids the runtime RVA-span lookup
+allocation; explicit binary search also avoids a boxed comparison value. Three
+warm allocation regressions (zero/one/three diacritics) now pass with zero bytes
+over 1,000 scans of 80 cells. The combined focused run passes 41 tests.
+The subsequent full run is confirmed by a TRX report: **1,751 passed**, 16
+conditional skips, zero failures (1,767 discovered tests). Native integration
+also passes 227 tests. Earlier partial console summaries were not treated as
+whole-suite verification.
+
+Next integration requirements are immutable virtual-placement recipes, correct
+internal/external placement-key preference, live viewport re-projection and
+relative children rooted at placeholder origins. The native C iterator exposes
+the numeric placement ID but not its internal/external tag, so choosing a
+default target from that numeric ID alone would not reproduce Ghostty's
+`placeholderTarget` ordering. Native exposure must preserve that information
+or perform target lookup upstream. End-to-end Skia pixel and lifecycle tests
+remain required before closing this graphics gap.
+
+## Scope and pinned references
 
 This update moves the `external/ghostty` submodule from
 `a60cd15bb5a197d8e2596e86442031cbece06bcc` to the then-current Ghostty `main`
