@@ -25,6 +25,15 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
 - Managed parser ground checks, bounded continuation capture, streaming export
   and processing through the next ground boundary. The export cap defaults to
   64 KiB, independently of OSC/clipboard limits.
+- Managed ESC/CSI replay now preserves unfinished state across executable C0 and
+  ignored DEL bytes, executes the controls once and omits their bytes from exported
+  continuation. A later ESC replaces the replay prefix. CSI-ignore state discards
+  malformed sequences through their final byte. Parameters are bounded to 24
+  entries and numeric values saturate at 16 bits; colon separator identity supports
+  underline variants and palette/RGB foreground/background/underline groups.
+  Header C1 transitions and ground-boundary processing have focused coverage.
+  A warmed 100,000-BEL run allocates zero bytes and leaves a four-byte continuation
+  within an eight-byte cap. Retention processes spans without an omission-index list.
 - Complete PAGE/grid payloads: four compact cell widths, canonical trailing zero
   elision, wide-pair/scalar/semantic normalization, bounded UTF-32 suffixes,
   first-entry-wins style/hyperlink tables and reference resolution. Capacity hints
@@ -111,8 +120,9 @@ boundary while keeping presentation URL access convenient.
    decode must not overwrite the caller's existing terminal on failure. Parser
    continuation must resume byte-for-byte across UTF-8 and control-string splits.
    A native-valid wire continuation is not proof that the current managed parser
-   supports every corresponding state: its CSI/control/ignore-state handling and
-   current/saved charset semantics need integration coverage before exposure.
+   supports every corresponding state: the ESC/CSI/control/ignore-state cases now
+   have focused tests, but remaining control-string/UTF-8 transitions and complete
+   current/saved charset semantics still need integration coverage before exposure.
 3. Native-to-managed and managed-to-native differential tests, including every
    upstream complete fixture, both screens, history, pending wrap, saved cursors,
    palette/RGB identity, malformed inputs and streaming IO failures. Benchmark

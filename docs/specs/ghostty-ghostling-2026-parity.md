@@ -16,7 +16,7 @@ The renewed review found the following missing or weakly verified requirements:
 | Managed Kitty graphics, relative placements, animation, validation, deletion and file-medium changes | Native/managed protocol and pixel/placement differential tests for the upstream graphics changes | Command parsing, bounded image loading, PNG/media providers, tracked anchors, graphics store, live APC and virtual-placeholder projection are implemented with focused tests; vertical clipping, top-origin history, stationary IL/DL and horizontal containment now match native cases; protocol-response/streaming edges and full differential coverage remain open |
 | Native Kitty animation playback | Animation tick in the built library, scheduling without further PTY input, deterministic frame tests | Repository-owned extension and timed refresh implemented; deterministic frame tests pass, and all six native RID variants cross-build; non-macOS runtime execution remains CI validation |
 | Synchronized output | Completed prefix visible at enable; following output frozen; release/reset/one-second timeout without additional input | Both engines now implement prefix publication, frozen presentation and idle timeout; managed copy-on-write state transfer and focused native/managed tests pass |
-| Managed snapshot and continuation features | Restore both screens, history, parser/UTF-8 continuation, modes, styles, links and saved cursors with bounded validation | Managed ground-boundary processing, bounded continuation export and replay tests pass; CRC32C framing, style/hyperlink and bounded PAGE/grid codecs pass upstream golden and live-native round trips; terminal/screen state codecs, managed state installation and incremental READY/history restore remain open |
+| Managed snapshot and continuation features | Restore both screens, history, parser/UTF-8 continuation, modes, styles, links and saved cursors with bounded validation | Ordered wire decoding, all payload codecs and non-executing continuation validation pass golden/native tests; ESC/CSI replay, bounded parameters and colon SGR now have focused native comparisons. Managed state installation, remaining runtime semantics and incremental READY/history reconciliation remain open |
 | Managed resize/reflow optimization | Baseline/after measurements plus wide/grapheme/style/link/cursor/anchor regressions | Bulk reflow copies and redundant initialization removal implemented and measured below; tracked cell identity/reflow/COW/pruning regressions pass; end-to-end Kitty anchor comparisons remain part of graphics integration |
 | Managed row allocation/recycling | Stable content/metadata after eviction and measured allocations | Evicted row storage is reused with a focused zero-allocation steady-state test |
 | Parser/clipboard throughput and bounds | Split-input protocol tests, malformed UTF-8/base64 tests, limits, before/after measurements | Review added span payload scanning, bulk base64 decode, correct 64 MiB configurable clipboard bound, 65-codepoint grapheme bound and protocol fixes; measurement review pending |
@@ -632,6 +632,42 @@ This is wire interoperability, not BasicVtProcessor restoration: valid native pa
 tails still need managed replay/state coverage and installation of decoded metadata.
 The complete macOS unit/headless regression passed **1,984 tests, 16 conditional
 skips, zero failures (2,000 total)** in `snapshot-sequence-full.trx`.
+
+The managed replay review then found actual runtime parser gaps: executable C0
+bytes aborted unfinished CSI, invalid parameters could become printed text,
+decimal accumulation could overflow and colon-separated SGR was unsupported.
+The parser now keeps ESC/CSI state across C0 execution and DEL, discards malformed
+CSI through its final byte, restarts at a newer ESC, bounds parameter storage at
+Ghostty's 24 entries and saturates numbers to u16. Unsupported intermediates no
+longer accidentally dispatch ordinary cursor/margin commands. C1 transitions in
+an unfinished header enter their corresponding state; existing legacy ground-state
+C1 behavior is not changed by this batch. DECSTR remains the documented managed
+extension rather than adopting Ghostty's ignored-reset behavior.
+
+SGR retains colon separators rather than flattening them into semicolons. It
+supports all six underline styles, defaulted/explicit color-space fields, indexed
+and direct foreground/background/underline colors, malformed-group consumption
+and upstream eight-bit truncation of out-of-range color components. This replaces
+the previous intentional indexed-color clamping policy: indices 999 and 1000 now
+resolve to 231 and 232, verified against native, and DECRQSS reports those effective
+indices so replay reproduces the rendered colors. Repeated
+executed controls are omitted from continuation using span segments, without an
+unbounded index list. A warmed 100,000-BEL continuation run allocates zero bytes;
+the cap applies to retained replay bytes, not already-committed effects.
+
+Ghostty's `parse_table.zig`, `Parser.zig`, `sgr.zig` and `stream_continuation.zig`
+define these choices. xterm's `EscapeSequenceParser` also keeps ESC/CSI state on
+EXECUTE and ignores DEL; Windows Terminal's `_ActionExecute` performs immediate
+control effects. The focused CSI/continuation/snapshot suite passed **160 tests**
+in `csi-snapshot-parity.trx`, with native available; cases compare every input split
+for colors/styles, malformed headers, parameter bounds, large decimals, C0/C1
+controls and ESC restart. This does not close remaining DCS/OSC/UTF-8/charset
+runtime parity or prove complete managed snapshot installation.
+
+The final full macOS unit/headless run passed **2,032 tests, 16 conditional skips
+(2,048 total)** with zero failures in `csi-parser-final.trx`. This includes the
+updated DECRQSS effective-color policy regression and native comparisons for the
+same out-of-range palette indices. Cross-platform runtime validation remains open.
 
 Reference choice: Ghostty's snapshot per-record Zig codecs define the format.
 Windows Terminal `TextBuffer::SerializeTo` and xterm.js's serialize addon emit VT

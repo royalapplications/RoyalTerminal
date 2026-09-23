@@ -115,7 +115,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     // Parser state machine
     private ParserState _state = ParserState.Ground;
-    private readonly List<int> _params = [];
+    private readonly List<int> _params = new(24);
+    private uint _csiColonSeparators;
+    private int _intermediateCount;
     private int _currentParam;
     private bool _hasParam;
     private char _csiPrivateMarker;
@@ -210,6 +212,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         CsiEntry,
         CsiParam,
         CsiIntermediate,
+        CsiIgnore,
         OscString,
         OscEscape,
         DcsString,
@@ -432,6 +435,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         TerminalModeState before = ModeState;
         int continuationStart = -1;
+        int continuationSegmentStart = 0;
 
         for (var i = 0; i < data.Length; i++)
         {
@@ -488,6 +492,45 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 continue;
             }
 
+            if (_state is ParserState.Escape or ParserState.EscapeIntermediate or
+                ParserState.CsiEntry or ParserState.CsiParam or ParserState.CsiIntermediate or ParserState.CsiIgnore)
+            {
+                if (b == 0x1B)
+                {
+                    EnterCsiState(); // Clear stale parameters/intermediates, then start ESC.
+                    _state = ParserState.Escape;
+                    continuationStart = i;
+                    continue;
+                }
+                if (b == 0x7F) continue;
+                if (b is >= 0x80 and <= 0x9F)
+                {
+                    switch (b)
+                    {
+                        case 0x90: EnterDcsState(); break;
+                        case 0x98: case 0x9E: case 0x9F: EnterApcState(); break;
+                        case 0x9B: EnterCsiState(); break;
+                        case 0x9D: EnterOscState(); break;
+                        case 0x9C: _state = ParserState.Ground; break;
+                        default: ProcessEscape((byte)(b - 0x40)); break;
+                    }
+                    if (stopAtGround && IsParserGround) { consumed = i + 1; break; }
+                    continue;
+                }
+                if (b < 0x20)
+                {
+                    ProcessGround(b); // Immediate C0 effect; preserve the unfinished parser state.
+                    // Its effect is already captured. Retain the preceding
+                    // segment but omit this byte, without an unbounded index list.
+                    _continuation.Track(data[continuationSegmentStart..i],
+                        continuationStart < continuationSegmentStart ? -1 : continuationStart - continuationSegmentStart,
+                        ground: false);
+                    continuationSegmentStart = i + 1;
+                    if (stopAtGround && IsParserGround) { consumed = i + 1; break; }
+                    continue;
+                }
+            }
+
             switch (_state)
             {
                 case ParserState.Ground:
@@ -507,6 +550,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     break;
                 case ParserState.CsiIntermediate:
                     ProcessCsiIntermediate(b);
+                    break;
+                case ParserState.CsiIgnore:
+                    if (b is >= 0x40 and <= 0x7E) _state = ParserState.Ground;
                     break;
                 case ParserState.OscString:
                     ProcessOscString(b);
@@ -536,7 +582,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         if (consumed == 0) consumed = data.Length;
-        _continuation.Track(data[..consumed], continuationStart, IsParserGround);
+        _continuation.Track(data[continuationSegmentStart..consumed],
+            continuationStart < continuationSegmentStart ? -1 : continuationStart - continuationSegmentStart, IsParserGround);
         RaiseModeChangedIfNeeded(before);
     }
 
@@ -1656,6 +1703,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _hasParam = false;
         _csiPrivateMarker = '\0';
         _intermediateChar = '\0';
+        _intermediateCount = 0;
+        _csiColonSeparators = 0;
     }
 
     private void EnterOscState(bool eightBit = false)
@@ -2381,6 +2430,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ProcessEscape(byte b)
     {
+        if (b is >= 0x20 and <= 0x2F)
+        {
+            _intermediateChar = (char)b;
+            _intermediateCount = 1;
+            _state = ParserState.EscapeIntermediate;
+            return;
+        }
+        if (b >= 0x80) return;
         switch (b)
         {
             case (byte)'[': // CSI
@@ -2395,24 +2452,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 EnterDcsState();
                 break;
 
+            case (byte)'X': // SOS
+            case (byte)'^': // PM
             case (byte)'_': // APC
                 EnterApcState();
                 break;
 
-            case (byte)'(': // Designate G0 charset
-                _intermediateChar = '(';
-                _state = ParserState.EscapeIntermediate;
-                break;
-
-            case (byte)')': // Designate G1 charset
-                _intermediateChar = ')';
-                _state = ParserState.EscapeIntermediate;
-                break;
-
-            case (byte)'*': // Designate G2 charset
-            case (byte)'+': // Designate G3 charset
-                _state = ParserState.EscapeIntermediate;
-                break;
 
             case (byte)'7': // DECSC — Save cursor
                 SaveCursor();
@@ -2475,6 +2520,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ProcessEscapeIntermediate(byte b)
     {
+        if (b is >= 0x20 and <= 0x2F) { _intermediateCount = Math.Min(5, _intermediateCount + 1); return; }
+        if (b >= 0x80) return;
+        if (_intermediateCount > 1) { _state = ParserState.Ground; return; }
         // Designate character set
         if (_intermediateChar == '(')
         {
@@ -2508,21 +2556,24 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
         else if (b == (byte)';')
         {
-            _params.Add(0);
+            AddCsiParameter(colon: false);
             _state = ParserState.CsiParam;
         }
-        else if (b == (byte)'?' || b == (byte)'>' || b == (byte)'!' || b == (byte)'=' || b == (byte)'<')
+        else if (b is >= 0x3C and <= 0x3F)
         {
             _csiPrivateMarker = (char)b;
             _state = ParserState.CsiParam;
         }
+        else if (b is >= 0x20 and <= 0x2F)
+        {
+            _intermediateChar = (char)b;
+            _intermediateCount = 1;
+            _state = ParserState.CsiIntermediate;
+        }
+        else if (b == ':') _state = ParserState.CsiIgnore;
         else if (b is >= 0x40 and <= 0x7E)
         {
             ExecuteCsi((char)b);
-        }
-        else
-        {
-            _state = ParserState.Ground;
         }
     }
 
@@ -2530,36 +2581,32 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         if (b is >= (byte)'0' and <= (byte)'9')
         {
-            _currentParam = _currentParam * 10 + (b - '0');
+            _currentParam = Math.Min(ushort.MaxValue, _currentParam * 10 + (b - '0'));
             _hasParam = true;
         }
-        else if (b == (byte)';')
+        else if (b is (byte)';' or (byte)':')
         {
-            _params.Add(_hasParam ? _currentParam : 0);
-            _currentParam = 0;
-            _hasParam = false;
+            AddCsiParameter(colon: b == ':');
         }
         else if (b is >= 0x20 and <= 0x2F)
         {
             if (_hasParam)
             {
-                _params.Add(_currentParam);
-                _currentParam = 0;
-                _hasParam = false;
+                AddCsiParameter(colon: false, final: true);
             }
+            if (_state == ParserState.CsiIgnore) return;
             _intermediateChar = (char)b;
+            _intermediateCount = 1;
             _state = ParserState.CsiIntermediate;
         }
         else if (b is >= 0x40 and <= 0x7E)
         {
             if (_hasParam)
-                _params.Add(_currentParam);
+                AddCsiParameter(colon: false, final: true);
+            if (_state == ParserState.CsiIgnore) { _state = ParserState.Ground; return; }
             ExecuteCsi((char)b);
         }
-        else
-        {
-            _state = ParserState.Ground;
-        }
+        else if (b is >= 0x3C and <= 0x3F) _state = ParserState.CsiIgnore;
     }
 
     private void ProcessCsiIntermediate(byte b)
@@ -2570,12 +2617,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
         else if (b is >= 0x20 and <= 0x2F)
         {
-            // More intermediates — ignore
+            _intermediateCount = Math.Min(5, _intermediateCount + 1);
         }
-        else
-        {
-            _state = ParserState.Ground;
-        }
+        else if (b is >= 0x30 and <= 0x3F) _state = ParserState.CsiIgnore;
     }
 
     private void ProcessOscString(byte b)
@@ -3751,6 +3795,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _hasParam = false;
         _csiPrivateMarker = '\0';
         _intermediateChar = '\0';
+        _intermediateCount = 0;
+        _csiColonSeparators = 0;
         _utf8Codepoint = 0;
         _utf8Remaining = 0;
         _oscBuffer.Clear();
@@ -3876,6 +3922,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ExecuteCsi(char finalByte)
     {
         _state = ParserState.Ground;
+        if (_intermediateCount > 1) return;
+        if (_csiColonSeparators != 0 && finalByte != 'm') return;
+        if (_csiPrivateMarker != '\0' && _intermediateChar != '\0' &&
+            !(_csiPrivateMarker == '?' && _intermediateChar == '$' && finalByte == 'p')) return;
 
         var p0 = _params.Count > 0 ? _params[0] : 0;
         var p1 = _params.Count > 1 ? _params[1] : 0;
@@ -3911,7 +3961,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         // CSI ! p — Soft terminal reset (DECSTR)
-        if (_csiPrivateMarker == '!' && finalByte == 'p')
+        if (_csiPrivateMarker == '\0' && _intermediateChar == '!' && finalByte == 'p')
         {
             SoftReset();
             return;
@@ -3970,6 +4020,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             HandleAnsiModeQuery();
             return;
         }
+
+        if (_intermediateChar != '\0') return;
 
         ResetDelayedWrapForCsi(finalByte);
 
@@ -4955,6 +5007,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         for (var i = 0; i < _params.Count; i++)
         {
             var p = _params[i];
+            if (ProcessSgrParameterGroup(ref i)) continue;
 
             switch (p)
             {
@@ -5019,65 +5072,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     SetBackgroundPalette(p - 92);
                     break;
 
-                // 256-color and truecolor
-                case 38:
-                    if (i + 1 < _params.Count)
-                    {
-                        if (_params[i + 1] == 5 && i + 2 < _params.Count)
-                        {
-                            SetForegroundPalette(_params[i + 2]);
-                            i += 2;
-                        }
-                        else if (_params[i + 1] == 2 && i + 4 < _params.Count)
-                        {
-                            _currentFg = 0xFF000000 | ((uint)_params[i + 2] << 16) |
-                                         ((uint)_params[i + 3] << 8) | (uint)_params[i + 4];
-                            _currentFgKind = SgrColorKind.Rgb;
-                            i += 4;
-                        }
-                    }
-                    break;
-
-                case 48:
-                    if (i + 1 < _params.Count)
-                    {
-                        if (_params[i + 1] == 5 && i + 2 < _params.Count)
-                        {
-                            SetBackgroundPalette(_params[i + 2]);
-                            i += 2;
-                        }
-                        else if (_params[i + 1] == 2 && i + 4 < _params.Count)
-                        {
-                            _currentBg = 0xFF000000 | ((uint)_params[i + 2] << 16) |
-                                         ((uint)_params[i + 3] << 8) | (uint)_params[i + 4];
-                            _currentBgKind = SgrColorKind.Rgb;
-                            i += 4;
-                        }
-                    }
-                    break;
-
-                case 58:
-                    if (i + 1 < _params.Count)
-                    {
-                        if (_params[i + 1] == 5 && i + 2 < _params.Count)
-                        {
-                            _currentUnderlineColor = PaletteColor(_params[i + 2]);
-                            _currentUnderlineIdentity = TerminalColorIdentity.Palette((byte)Math.Clamp(_params[i + 2], 0, 255));
-                            _currentHasUnderlineColor = true;
-                            i += 2;
-                        }
-                        else if (_params[i + 1] == 2 && i + 4 < _params.Count)
-                        {
-                            _currentUnderlineColor = 0xFF000000 |
-                                                     ((uint)_params[i + 2] << 16) |
-                                                     ((uint)_params[i + 3] << 8) |
-                                                     (uint)_params[i + 4];
-                            _currentUnderlineIdentity = TerminalColorIdentity.Rgb(_currentUnderlineColor);
-                            _currentHasUnderlineColor = true;
-                            i += 4;
-                        }
-                    }
-                    break;
 
                 case 59:
                     _currentUnderlineColor = 0;
@@ -5717,6 +5711,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _utf8Remaining = 0;
         _continuation.Reset();
         _params.Clear();
+        _currentParam = 0;
+        _hasParam = false;
+        _csiColonSeparators = 0;
+        _intermediateCount = 0;
         _csiPrivateMarker = '\0';
         _intermediateChar = '\0';
         _oscBuffer.Clear();
