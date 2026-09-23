@@ -48,7 +48,10 @@ table for protocol numeric prefixes corrected that regression. The subsequent
 Release/macOS arm64 medians were **8.764 ms versus 9.183 ms**, and **0 versus
 1,333,320 allocated bytes**. This isolated result is not an end-to-end rendering
 or parser throughput claim. Names and intensity parsing also have a tested
-zero-allocation warm path. Full Release validation follows.
+zero-allocation warm path. The full post-push Release unit/headless suite through
+`f93439a` passes **2,822 tests, 16 conditional skips, zero failures (2,838 total)**
+(`kitty-colors-full.trx`), with native color differentials running on macOS arm64.
+This does not establish cross-platform runtime completion.
 
 The same audit found remaining pre-existing legacy color-operation differences:
 OSC 4 should stop at an invalid pair and skip empty tokens; dynamic OSC 10-12
