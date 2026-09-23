@@ -100,6 +100,44 @@ public sealed class GhosttySnapshotHistoryStorageTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void UnlinkedHistoryInsertionDoesNotCopyExistingRowMetadata()
+    {
+        TerminalScreen screen = new(80, 24, 10000);
+        for (int i = 0; i < 10000; i++) screen.AddRow();
+        GhosttySnapshotPage page = GhosttySnapshotLivePage.Capture([new TerminalRow(80)], screen, 80);
+        new TerminalScreen(80, 24).PrependSnapshotHistory(0, page);
+        TerminalRow previousFirst = screen.GetRow(0);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        screen.PrependSnapshotHistory(0, page);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.InRange(allocated, 1, 10000); // One decoded row, not 10,024 metadata copies.
+        Assert.Same(previousFirst, screen.GetRow(1));
+        output.WriteLine($"History prepend allocation with 10,024 existing rows: {allocated}");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RasterAndTrackedAnchorsShiftOnlyInTheirOwningBufferAndCopy(bool dormant)
+    {
+        TerminalScreen source = new(4, 2);
+        source.ReplaceRasterImage(new TerminalRasterImageSource(1, TerminalRasterImageProtocol.Sixel, 1, 1, [0, 0, 0, 255]),
+            new TerminalRasterImagePlacement(1, TerminalRasterImageLayer.AboveText, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1));
+        TerminalScreenAnchor anchor = source.CreateAnchor(0, 0);
+        if (dormant) source.SwitchToAlternateBuffer(clear: true);
+        TerminalScreen copy = source.CreateStateCopy();
+        GhosttySnapshotPage page = GhosttySnapshotLivePage.Capture([Row('H')], copy, 1);
+        copy.PrependSnapshotHistory(0, page);
+        if (dormant) { source.SwitchToPrimaryBuffer(); copy.SwitchToPrimaryBuffer(); }
+        Assert.Equal(0, source.GetRasterImagePlacements()[0].AnchorRow);
+        Assert.Equal(1, copy.GetRasterImagePlacements()[0].AnchorRow);
+        Assert.True(source.TryResolveAnchor(anchor, out TerminalGridPosition original));
+        Assert.True(copy.TryResolveAnchor(anchor, out TerminalGridPosition moved));
+        Assert.Equal(0, original.Row);
+        Assert.Equal(1, moved.Row);
+    }
+
+    [Fact]
     public void NativeGoldenHistoryPagesJoinStagedRowsInTheSameOrder()
     {
         bool available = GhosttyVtProcessor.IsAvailable();
