@@ -129,7 +129,7 @@ public sealed class TerminalModifyOtherKeysTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void ModeTwoPrintableKeysUseUnconsumedModifiersButSpecialKeysUseAllModifiers()
+    public void ModeTwoUsesAllModifiersEvenWhenConsumedByTheKeyboardLayout()
     {
         if (!Available()) return;
         using BasicVtProcessor managed = new(new TerminalScreen(8, 3));
@@ -147,8 +147,9 @@ public sealed class TerminalModifyOtherKeysTests(ITestOutputHelper output)
                 Assert.Equal(expected, actual);
             }
         }
-        Assert.False(managed.TryEncodeKey(new("A", TerminalInputAction.Press, "A", TerminalModifiers.Shift,
-            ConsumedModifiers: TerminalModifiers.Shift), out _));
+        Assert.True(managed.TryEncodeKey(new("A", TerminalInputAction.Press, "A", TerminalModifiers.Shift,
+            ConsumedModifiers: TerminalModifiers.Shift), out byte[] shifted));
+        Assert.Equal("\u001b[27;2;65~", Encoding.ASCII.GetString(shifted));
     }
 
     [Theory]
