@@ -8,7 +8,7 @@ The build generates a copy of the upstream Zig root with the exports from
 
 ## Reviewed correctness overlays
 
-The generated source copy also applies four corrections to pinned upstream
+The generated source copy also applies six corrections to pinned upstream
 `4ae9f1a2de5484de3d6a13fe03676b8853b9c41c` (identical runtime sources to the
 previously reviewed `22391ed6491f2924361dcad1f9a9176a390fd20f`). Each checks the original file's full
 SHA-256 and the exact expected source-fragment count; any upstream file change
@@ -40,12 +40,33 @@ fails the build until reviewed. The submodule checkout is never changed.
   Only export changes; tracking limits and the input feed path remain unchanged.
   Buffer/callback exports and snapshot round trips are tested at every split.
 
-All were reproduced through the native C API before correction and have
-focused integration tests. No public upstream issue is claimed. Reassess and
+- `Terminal.zig`: dirty semantic prompt rows after OSC 133 and implicit
+  newline continuations. After publishing a clean frame, OSC `133;P` changed
+  native row storage but left render-state row metadata stale. The same occurred
+  for input/prompt newline continuation markers. Marking the affected cursor row
+  at the mutation sites preserves incremental render updates without scanning
+  the grid or forcing a full refresh. Focused tests cover metadata-only changes,
+  newline continuations, and synchronized-output release.
+
+- `Screen.zig`: mark the next row dirty when `cursorResetWrap` clears its
+  wrap-continuation marker. Source inspection found this metadata mutation also
+  bypassed dirty publication. A focused clean-frame EL regression is written;
+  validation of this sixth overlay is deferred until after the requested push.
+
+The first five were reproduced through the native C API before correction and
+have focused tests. No public upstream issue is claimed. Reassess and
 remove an overlay when its upstream fix is incorporated.
 
-The five additional C exports are declared in
+The seven additional C exports are declared in
 `include/royalterminal_ghostty_vt.h`:
+
+- `ghostty_royal_prompt_state` copies live cursor classification, prompt-seen,
+  click/redraw policies and implicit hyperlink counter without modifying state.
+- `ghostty_royal_grid_ref_hyperlink` copies original URI and explicit ID bytes,
+  or the numeric implicit ID. Capacity probing writes only metadata; a short
+  buffer leaves both byte buffers untouched. The host resolves identities with
+  borrowed spans and copies bytes only for a new registry entry. These two new
+  exports have ABI/buffer/lifetime regressions awaiting post-push validation.
 
 - `ghostty_royal_kitty_graphics_animation_tick` calls Ghostty's own
   `ImageStorage.animationTick`. The public C API exposes the current animation
@@ -75,7 +96,7 @@ The five additional C exports are declared in
 `scripts/build-native.sh` and `scripts/build-native.ps1` build and stage this
 package. CI and release jobs also use it. Do not stage a plain upstream build:
 RoyalTerminal's native VT processor requires these exports for idle animations,
-virtual-placement metadata and glyph publication.
+virtual-placement metadata, glyph publication and exact hyperlink identity.
 
 The integration intentionally uses upstream animation state and composition,
 not a parallel implementation of animation semantics. If Ghostty adds a public

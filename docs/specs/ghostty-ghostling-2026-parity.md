@@ -30,6 +30,119 @@ Tests cited elsewhere in this document describe existing coverage; they must not
 be used to mark these broader requirements complete until their specific evidence
 has been inspected.
 
+### Live semantic cell and row metadata (2026-09-23)
+
+Both native extraction paths now retain OSC 133 cell classification and physical
+row prompt markers. Managed printing records output/input/prompt in the existing
+cell metadata byte, keeping the 48-byte cell size. Row markers share a byte with
+the copy-on-write flag instead of increasing every row object's allocation.
+State copies, row reuse, history snapshots and synchronized-output publication
+preserve the classifications. Erased cells become output; EL2 retains its row
+marker, while an unprotected full-row display erase clears it.
+
+The managed live cursor now implements OSC 133 A/N/L fresh-line behavior,
+P prompt kinds, B/I input lifetimes, C output and D completion. Options use the
+first matching key, including invalid-first values, as Ghostty does. Malformed
+command suffixes and L options are ignored. Explicit newlines end I input;
+soft wraps (including right margins and late variation selectors) do not.
+Prompt/B-input newlines mark continuations; C at column zero removes Fish's
+tentative continuation marker. Legacy screen switches copy the semantic pen;
+1049 exit retains the primary pen, and DECSC/DECRC do not restore this state.
+
+Reference decisions: Ghostty `osc/parsers/semantic_prompt.zig`,
+`Terminal.semanticPrompt/index/printWrap`, `Screen.cursorSetSemanticContent`
+and `PageList.ReflowCursor` define the behavior. Windows Terminal's
+`AdaptDispatch::DoFinalTermAction` handles A/B/C/D command marks; xterm.js
+`InputHandler` has no built-in OSC 133 registration and permits external handlers.
+RoyalTerminal follows Ghostty's richer cell/row semantics. PowerShell's
+[ConsoleHost prompt loop](https://github.com/PowerShell/PowerShell/blob/master/src/Microsoft.PowerShell.ConsoleHost/host/msh/ConsoleHost.cs)
+evaluates `prompt`, writes the returned text and then invokes line reading;
+RoyalTerminal's existing PowerShell bootstrap emits markers through Console.Write
+around this workflow. Marker handling must consume protocol bytes without
+printing them; no shell-startup or bootstrap change is made in this batch.
+
+Native testing reproduced a further upstream dirty-publication defect: after a
+clean frame, OSC P or an implicit prompt/input newline changed live row markers
+without dirtying the render snapshot. A fifth hash-checked source correction
+marks the affected cursor row after semantic commands and implicit continuations.
+It does not force full-grid scans or full repaint, and does not modify the
+submodule checkout. Metadata-only changes and hold/release have focused tests.
+
+Reflow carries source row markers with linear, coalesced metadata runs. Empty
+marked rows remain meaningful. Valid wide tails are copied with their own pen:
+Ghostty can print a late-selector tail with different background, protection and
+semantic content. The old managed reflow discarded a final tail or regenerated
+it from the head. A native-owned snapshot regression now covers this case;
+malformed tails containing text are still normalized.
+
+This is live cell/row and cursor-semantic groundwork, **not complete shell or
+snapshot parity**. Remaining requirements include wrap-continuation row storage,
+prompt-seen/click/redraw policy and their navigation/selection/resize consumers,
+ED2's prompt-scroll heuristic, formatter integration, and managed snapshot
+installation. The reflow investigation also exposed existing blank-cursor and
+trailing-blank viewport differences: native includes the cursor's blank cell and
+defers trailing empty rows, while managed reflow can retain bottom blanks and
+shift content into history. The new reflow tests isolate physical row metadata
+with the cursor on existing content; they do not prove those cursor/viewport
+policies equivalent. These gaps remain part of the full goal.
+
+The earlier semantic-only working tree passed **2,349 unit/headless tests with
+16 conditional skips**, plus **228 native integration tests** (external SSH
+excluded). These counts predate the implementation below and do not validate it.
+The previous pushed commit `b862691` completed all six native-build jobs, all
+three OS build/test jobs, macOS integration, and NuGet packing. Fresh validation
+is explicitly deferred until after implementation is committed and pushed, per
+the user's requested sequence. No performance improvement is claimed for the
+unvalidated extension of this batch.
+
+### Wrap, resize, prompt policy and hyperlink implementation (2026-09-23)
+
+Implementation added, with regression tests written but **not yet executed**:
+
+- Independent packed wrap-continuation row storage, preserved by row copies,
+  synchronized publication and native extraction. Implicit wrap sets the target
+  marker; EL/DCH/ECH clear the next continuation when breaking a wrap. Full-width
+  row shifts reset moved wrap metadata. A sixth source overlay dirties the next
+  native row when `Screen.cursorResetWrap` clears its continuation flag.
+- Reflow includes the cursor's actual blank cell, maps ordinary cursor positions
+  as cells rather than end-of-line offsets, and discards trailing unpinned blank
+  rows before padding the target viewport. Pinned blank rows remain. The explicit
+  ConPTY preserve-viewport policy remains separate. Printed spaces, wide spacers
+  and background-only cells are meaningful, following Ghostty `Cell.isEmpty`.
+  The native bridge no longer deletes trailing styles/spaces after resize.
+- Managed OSC 133 retains screen-specific prompt-seen/click policy and global
+  `redraw=0/1/last`, with first-option precedence and click-events priority.
+  Resize clears the requested prompt cell range without removing rows/metadata;
+  primary ED2 applies the upstream bottom-row prompt-scroll heuristic. A read-only
+  native extension exposes the same live policy through `ITerminalPromptStateSource`.
+- Owned arbitrary-byte hyperlink identity, distinguishing explicit IDs and
+  per-cursor implicit counters. Byte-span registry lookup avoids decoding and
+  allocating on repeat native extraction. COW snapshots share immutable values,
+  not mutable registry chains. Native extraction includes linked spacer cells;
+  managed OSC 8 parses original bytes, handles option precedence, and ends links
+  on screen switches. Styled export preserves explicit IDs and implicit link
+  boundaries; its string return type is not a binary snapshot byte-preservation
+  guarantee. Late-selector tails retain their independent current pen through
+  printing, normalization and reflow.
+
+Reference decisions: Ghostty `PageList.ReflowCursor`, `Screen.cursorResetWrap`,
+`Screen.clearPromptForRedraw`, `Terminal.eraseDisplay`, `Screen.startHyperlink`
+and `osc/parsers/hyperlink.zig` define the compatibility target. Windows Terminal
+`TextBuffer::Reflow` also includes cursor column plus one and stops after the
+last written/cursor row; xterm.js `BufferReflow` trims empty continuation rows
+and optionally skips cursor-line reflow. RoyalTerminal follows Ghostty's cursor
+reflow policy, retaining its explicit ConPTY policy for repaint interoperability.
+WT `AdaptDispatch::AddHyperlink` and xterm.js `InputHandler` retain application
+IDs rather than treating the URL alone as a link identity.
+
+Still open: full live managed snapshot installation/export and incremental
+READY/history reconciliation; prompt click/navigation/selection host consumers;
+inactive-screen resize and saved-cursor mapping differentials; formatter and
+remaining graphics/protocol edges; the complete renderer/per-change performance
+audit and third-IO-worker platform/lifecycle sign-off. The new source changes
+and written tests must pass native rebuild, focused/full tests and fresh CI
+before the corresponding gaps can be marked verified.
+
 ### Current/saved charsets and cursor state (2026-09-23)
 
 `ManagedCharsetState` replaces two line-drawing booleans with all four G0–G3

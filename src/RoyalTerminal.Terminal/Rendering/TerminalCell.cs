@@ -86,6 +86,13 @@ public struct TerminalCell
         set => _metadata = (byte)(value ? _metadata | 2 : _metadata & ~2);
     }
 
+    /// <summary>Shell-integration classification assigned when this cell was printed.</summary>
+    public TerminalSemanticContent SemanticContent
+    {
+        readonly get => (TerminalSemanticContent)((_metadata >> 2) & 3);
+        set => _metadata = (byte)((_metadata & ~12) | (((byte)value & 3) << 2));
+    }
+
     /// <summary>Returns true if this cell has content.</summary>
     public readonly bool HasContent => Codepoint != 0 || !string.IsNullOrEmpty(Grapheme);
 
@@ -186,7 +193,12 @@ public sealed class TerminalRow
 {
     private TerminalCell[] _cells;
     private int _columns;
-    private bool _sharedCells;
+    private byte _rowMetadata;
+    private bool CellsAreShared
+    {
+        get => (_rowMetadata & 1) != 0;
+        set => _rowMetadata = (byte)(value ? _rowMetadata | 1 : _rowMetadata & ~1);
+    }
 
     /// <summary>Whether this row has been modified since last render.</summary>
     public bool IsDirty { get; set; } = true;
@@ -196,6 +208,23 @@ public sealed class TerminalRow
     /// Explicit line feeds keep this false.
     /// </summary>
     public bool WrapsToNext { get; set; }
+
+    /// <summary>
+    /// Whether this physical row continues a soft-wrapped predecessor. This is
+    /// retained independently of the predecessor, which may leave scrollback.
+    /// </summary>
+    public bool IsWrapContinuation
+    {
+        get => (_rowMetadata & 8) != 0;
+        set => _rowMetadata = (byte)(value ? _rowMetadata | 8 : _rowMetadata & ~8);
+    }
+
+    /// <summary>Shell prompt marker; it can be present even on an otherwise empty row.</summary>
+    public TerminalSemanticPrompt SemanticPrompt
+    {
+        get => (TerminalSemanticPrompt)((_rowMetadata >> 1) & 3);
+        set => _rowMetadata = (byte)((_rowMetadata & ~6) | (((byte)value & 3) << 1));
+    }
 
     /// <summary>
     /// True when this row was appended only to preserve a Windows PTY live viewport during resize.
@@ -249,9 +278,11 @@ public sealed class TerminalRow
     {
         _cells = source._cells;
         _columns = source._columns;
-        _sharedCells = source._sharedCells = true;
+        CellsAreShared = source.CellsAreShared = true;
         IsDirty = source.IsDirty;
         WrapsToNext = source.WrapsToNext;
+        IsWrapContinuation = source.IsWrapContinuation;
+        SemanticPrompt = source.SemanticPrompt;
         IsTransientResizeRow = source.IsTransientResizeRow;
     }
 
@@ -295,6 +326,8 @@ public sealed class TerminalRow
         }
 
         WrapsToNext = source.WrapsToNext;
+        IsWrapContinuation = source.IsWrapContinuation;
+        SemanticPrompt = source.SemanticPrompt;
         IsTransientResizeRow = source.IsTransientResizeRow;
         IsDirty = true;
     }
@@ -315,6 +348,8 @@ public sealed class TerminalRow
         }
 
         WrapsToNext = source.WrapsToNext;
+        IsWrapContinuation = source.IsWrapContinuation;
+        SemanticPrompt = source.SemanticPrompt;
         IsTransientResizeRow = source.IsTransientResizeRow;
         IsDirty = true;
     }
@@ -403,17 +438,19 @@ public sealed class TerminalRow
     /// <summary>Clears all cells while retaining the original background color identity.</summary>
     public void Clear(uint fg, uint bg, TerminalColorIdentity backgroundIdentity)
     {
-        if (_sharedCells)
+        if (CellsAreShared)
         {
             // Every cell is overwritten, so no old payload needs copying.
             _cells = new TerminalCell[_columns];
-            _sharedCells = false;
+            CellsAreShared = false;
         }
 
         ResizePreservedStorage(_columns, fg, bg);
         for (var i = 0; i < _columns; i++)
             _cells[i] = TerminalCell.Empty(fg, bg, backgroundIdentity);
         WrapsToNext = false;
+        IsWrapContinuation = false;
+        SemanticPrompt = TerminalSemanticPrompt.None;
         IsTransientResizeRow = false;
         IsDirty = true;
     }
@@ -444,7 +481,7 @@ public sealed class TerminalRow
 
         int previousLength = _cells.Length;
         Array.Resize(ref _cells, columns);
-        _sharedCells = false;
+        CellsAreShared = false;
         for (int i = previousLength; i < _cells.Length; i++)
         {
             _cells[i] = TerminalCell.Empty(defaultFg, defaultBg);
@@ -454,13 +491,13 @@ public sealed class TerminalRow
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void EnsureWritableCells()
     {
-        if (!_sharedCells)
+        if (!CellsAreShared)
         {
             return;
         }
 
         _cells = (TerminalCell[])_cells.Clone();
-        _sharedCells = false;
+        CellsAreShared = false;
     }
 }
 
@@ -687,6 +724,7 @@ public sealed partial class TerminalScreen
     private TerminalRowBuffer? _alternateRows;
     private readonly Dictionary<int, string> _hyperlinksById = [];
     private readonly Dictionary<string, int> _hyperlinkIdsByUrl = new(StringComparer.Ordinal);
+    private readonly TerminalHyperlinkRegistry _hyperlinkIdentities = new();
     private readonly Dictionary<int, TerminalKittyImageSource> _kittyImagesById = [];
     private Dictionary<int, TerminalRasterImageSource> _rasterImagesById = [];
     private List<TerminalRasterImagePlacement> _rasterPlacements = [];
@@ -948,6 +986,31 @@ public sealed partial class TerminalScreen
 
         return _hyperlinksById.TryGetValue(hyperlinkId, out url);
     }
+
+    /// <summary>
+    /// Registers an owned OSC 8 identity without coalescing distinct IDs by URL.
+    /// A nonempty explicit ID takes precedence over the numeric implicit ID.
+    /// Re-registering an existing identity is allocation-free.
+    /// </summary>
+    public int RegisterHyperlink(ReadOnlySpan<byte> uri, ReadOnlySpan<byte> explicitId, uint implicitId)
+    {
+        if (uri.IsEmpty) throw new ArgumentException("A hyperlink URI cannot be empty.", nameof(uri));
+        if (_hyperlinkIdentities.TryFind(uri, explicitId, implicitId, out int token)) return token;
+        token = _nextHyperlinkId;
+        if (token == int.MaxValue)
+        {
+            token = 1;
+            while (_hyperlinksById.ContainsKey(token)) token++;
+        }
+        TerminalHyperlink value = _hyperlinkIdentities.Add(token, uri, explicitId, implicitId);
+        _hyperlinksById.Add(token, value.Uri);
+        _nextHyperlinkId = token + 1;
+        return token;
+    }
+
+    /// <summary>Gets the owned protocol identity, when registered with its original bytes.</summary>
+    public bool TryGetHyperlink(int hyperlinkId, out TerminalHyperlink? hyperlink)
+        => _hyperlinkIdentities.TryGet(hyperlinkId, out hyperlink);
 
     /// <summary>Gets the current Kitty image placement snapshot.</summary>
     public ReadOnlySpan<TerminalKittyImagePlacement> GetKittyPlacements()
@@ -1567,6 +1630,7 @@ public sealed partial class TerminalScreen
 
     private void ClearHyperlinks()
     {
+        _hyperlinkIdentities.Clear();
         _hyperlinksById.Clear();
         _hyperlinkIdsByUrl.Clear();
         _nextHyperlinkId = 1;
@@ -2026,6 +2090,7 @@ public sealed partial class TerminalScreen
                     trackedAbsoluteRow,
                     trackedColumn,
                     reflowAnchors,
+                    trimTrailingBlankRows: !preserveViewportTopOnRowsIncrease,
                     out mappedAbsoluteRow,
                     out mappedColumn);
             }
@@ -2268,11 +2333,13 @@ public sealed partial class TerminalScreen
         int trackedAbsoluteRow,
         int trackedColumn,
         List<ReflowAnchorPosition>? additionalTrackedPositions,
+        bool trimTrailingBlankRows,
         out int mappedAbsoluteRow,
         out int mappedColumn)
     {
         List<TerminalRow> reflowedRows = new(_rows.Count);
         List<TerminalCell> logicalLine = new(Math.Max(Columns, columns));
+        List<(int Start, int End, TerminalSemanticPrompt Prompt)>? semanticRows = null;
         ReflowAnchorProcessingIndex[]? trackedPositionIndexes =
             CreateReflowAnchorProcessingOrder(additionalTrackedPositions);
         List<int>? lineTrackedIndexes = trackedPositionIndexes is null ? null : new List<int>();
@@ -2282,9 +2349,23 @@ public sealed partial class TerminalScreen
 
         int nextTrackedPositionIndex = 0;
         int rowIndex = 0;
-        while (rowIndex < _rows.Count)
+        int sourceRowCount = _rows.Count;
+        if (trimTrailingBlankRows)
+        {
+            int lastPinnedRow = trackedAbsoluteRow;
+            if (additionalTrackedPositions is not null)
+                foreach (ReflowAnchorPosition pin in additionalTrackedPositions)
+                    lastPinnedRow = Math.Max(lastPinnedRow, pin.OldAbsoluteRow);
+            // Ghostty defers empty rows and never writes the trailing suffix.
+            // Keep pinned rows; the target viewport is padded after reflow.
+            while (sourceRowCount > lastPinnedRow + 1 &&
+                   GetReflowEndExclusive(_rows[sourceRowCount - 1]) == 0)
+                sourceRowCount--;
+        }
+        while (rowIndex < sourceRowCount)
         {
             logicalLine.Clear();
+            semanticRows?.Clear();
             lineTrackedIndexes?.Clear();
             lineTrackedOffsets?.Clear();
             int trackedLogicalOffset = -1;
@@ -2297,7 +2378,7 @@ public sealed partial class TerminalScreen
                 if (rowIndex == trackedAbsoluteRow)
                 {
                     int clampedTrackedColumn = Math.Clamp(trackedColumn, 0, row.Columns);
-                    endExclusive = Math.Max(endExclusive, clampedTrackedColumn);
+                    endExclusive = Math.Max(endExclusive, Math.Min(row.Columns, clampedTrackedColumn + 1));
                     trackedLogicalOffset = logicalLine.Count + clampedTrackedColumn;
                 }
 
@@ -2349,11 +2430,28 @@ public sealed partial class TerminalScreen
 
                 if (endExclusive > 0)
                 {
+                    // Adjacent equal markers form one run. In particular,
+                    // ordinary output keeps the original bulk-copy fast path.
+                    if (row.SemanticPrompt != TerminalSemanticPrompt.None || semanticRows is { Count: > 0 })
+                    {
+                        semanticRows ??= new();
+                        if (semanticRows.Count == 0 && logicalLine.Count > 0)
+                            semanticRows.Add((0, logicalLine.Count, TerminalSemanticPrompt.None));
+                        if (semanticRows.Count > 0 && semanticRows[^1].Prompt == row.SemanticPrompt)
+                        {
+                            var previous = semanticRows[^1];
+                            semanticRows[^1] = (previous.Start, logicalLine.Count + endExclusive, previous.Prompt);
+                        }
+                        else
+                        {
+                            semanticRows.Add((logicalLine.Count, logicalLine.Count + endExclusive, row.SemanticPrompt));
+                        }
+                    }
                     ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells[..endExclusive];
                     logicalLine.AddRange(cells);
                 }
 
-                hasContinuation = row.WrapsToNext && rowIndex + 1 < _rows.Count;
+                hasContinuation = row.WrapsToNext && rowIndex + 1 < sourceRowCount;
                 rowIndex++;
             }
             while (hasContinuation);
@@ -2363,10 +2461,14 @@ public sealed partial class TerminalScreen
                 CollectionsMarshal.AsSpan(logicalLine),
                 columns,
                 reflowedRows,
-                trackedLogicalOffset);
+                trackedLogicalOffset,
+                semanticRows is null ? default : CollectionsMarshal.AsSpan(semanticRows));
 
             if (mappedLinePosition is { } mappedPosition)
             {
+                if (trackedColumn < Columns)
+                    mappedPosition = MapLogicalCellOffsetToReflowedPosition(
+                        CollectionsMarshal.AsSpan(logicalLine), columns, trackedLogicalOffset);
                 mappedAbsoluteRow = destinationStartRow + mappedPosition.Row;
                 mappedColumn = mappedPosition.Column;
             }
@@ -2462,46 +2564,29 @@ public sealed partial class TerminalScreen
         {
             if (IsReflowLineEndCell(in cells[i]))
             {
-                return i + 1;
+                // A trailing spacer belongs to the final wide cell. Its pen
+                // need not equal the head's (a late selector can change it).
+                return Math.Min(cells.Length, i + Math.Max(1, (int)cells[i].Width));
             }
         }
 
-        return 0;
+        return row.SemanticPrompt != TerminalSemanticPrompt.None && row.Columns > 0 ? 1 : 0;
     }
 
     private static bool IsReflowLineEndCell(ref readonly TerminalCell cell)
     {
-        if (cell.Width == 0)
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrEmpty(cell.Grapheme))
-        {
-            return !IsAsciiSpaceGrapheme(cell.Grapheme);
-        }
-
-        return cell.Codepoint != 0 && cell.Codepoint != ' ';
-    }
-
-    private static bool IsAsciiSpaceGrapheme(string grapheme)
-    {
-        for (int i = 0; i < grapheme.Length; i++)
-        {
-            if (grapheme[i] != ' ')
-            {
-                return false;
-            }
-        }
-
-        return true;
+        // Ghostty Cell.isEmpty retains printed spaces, wide spacers and
+        // background-only cells. A literal space is not an unwritten cell.
+        return cell.Width != 1 || cell.HasContent ||
+            cell.BackgroundIdentity.Kind != TerminalColorKind.Default;
     }
 
     private TerminalGridPosition? AppendReflowedLogicalLine(
         ReadOnlySpan<TerminalCell> logicalLine,
         int columns,
         List<TerminalRow> destination,
-        int trackedLogicalOffset)
+        int trackedLogicalOffset,
+        ReadOnlySpan<(int Start, int End, TerminalSemanticPrompt Prompt)> semanticRows)
     {
         int destinationStart = destination.Count;
         TerminalGridPosition? mappedPosition = null;
@@ -2515,15 +2600,20 @@ public sealed partial class TerminalScreen
         }
 
         int sourceIndex = 0;
+        int semanticIndex = 0;
         while (sourceIndex < logicalLine.Length)
         {
             TerminalRow row = TerminalRow.CreateForReflow(columns);
+            row.SemanticPrompt = semanticRows.IsEmpty ? TerminalSemanticPrompt.None : semanticRows[semanticIndex].Prompt;
             int destinationRow = destination.Count - destinationStart;
+            row.IsWrapContinuation = destinationRow > 0;
             int column = 0;
             bool wideWrap = false;
 
             while (sourceIndex < logicalLine.Length && column < columns)
             {
+                while (semanticIndex + 1 < semanticRows.Length && sourceIndex >= semanticRows[semanticIndex + 1].Start)
+                    row.SemanticPrompt = semanticRows[++semanticIndex].Prompt;
                 if (mappedPosition is null && trackedLogicalOffset >= 0 && trackedLogicalOffset <= sourceIndex)
                 {
                     mappedPosition = new TerminalGridPosition(column, destinationRow);
@@ -2533,7 +2623,8 @@ public sealed partial class TerminalScreen
                 // runs can be copied without Ghostty's native style-id remapping. Keep
                 // malformed wide pairs and row-edge spacers on the scalar path.
                 int runLength = GetReflowCopyRunLength(
-                    logicalLine[sourceIndex..], columns - column);
+                    logicalLine[sourceIndex..], semanticRows.IsEmpty ? columns - column
+                        : Math.Min(columns - column, semanticRows[semanticIndex].End - sourceIndex));
                 if (runLength > 0)
                 {
                     logicalLine.Slice(sourceIndex, runLength).CopyTo(row.Cells[column..]);
@@ -2589,7 +2680,8 @@ public sealed partial class TerminalScreen
 
                 if (width == 2 && column + 1 < columns)
                 {
-                    row[column + 1] = CreateWideSpacer(cell);
+                    row[column + 1] = sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1])
+                        ? logicalLine[sourceIndex + 1] : CreateWideSpacer(cell);
                 }
 
                 sourceIndex += sourceStep;
@@ -2601,6 +2693,11 @@ public sealed partial class TerminalScreen
                 }
             }
 
+            // Native reflow copies the next source row's metadata before
+            // consuming a pending wrap. Preserve that overwrite at exact row
+            // boundaries, without rescanning the logical line for each marker.
+            while (semanticIndex + 1 < semanticRows.Length && sourceIndex >= semanticRows[semanticIndex + 1].Start)
+                row.SemanticPrompt = semanticRows[++semanticIndex].Prompt;
             row.Cells[column..].Fill(TerminalCell.Empty(DefaultForeground, DefaultBackground));
             if (wideWrap)
             {
@@ -2717,7 +2814,7 @@ public sealed partial class TerminalScreen
             }
 
             if (cell.Width != 2 || length + 1 >= limit ||
-                !IsNormalizedWideSpacer(in cell, in cells[length + 1]))
+                !IsNormalizedWideSpacer(in cells[length + 1]))
             {
                 break;
             }
@@ -2728,18 +2825,10 @@ public sealed partial class TerminalScreen
         return length;
     }
 
-    private static bool IsNormalizedWideSpacer(
-        in TerminalCell head,
-        in TerminalCell tail)
-        => tail.Width == 0 && !tail.IsWideSpacerHead && tail.Codepoint == 0 && tail.Grapheme is null &&
-           tail.Foreground == head.Foreground && tail.Background == head.Background &&
-           tail.ForegroundIdentity == head.ForegroundIdentity &&
-           tail.BackgroundIdentity == head.BackgroundIdentity &&
-           tail.UnderlineIdentity == head.UnderlineIdentity &&
-           tail.Attributes == head.Attributes && tail.UnderlineStyle == head.UnderlineStyle &&
-           tail.UnderlineColor == head.UnderlineColor && tail.HasUnderlineColor == head.HasUnderlineColor &&
-           tail.Decorations == head.Decorations && tail.HasBackground == head.HasBackground &&
-           tail.HyperlinkId == head.HyperlinkId && tail.IsProtected == head.IsProtected;
+    // A late variation selector can print the tail with a different current pen
+    // (including OSC 133 classification). Such pairs are valid, not malformed.
+    private static bool IsNormalizedWideSpacer(in TerminalCell tail)
+        => tail.Width == 0 && !tail.IsWideSpacerHead && tail.Codepoint == 0 && tail.Grapheme is null;
 
     private static TerminalCell CreateWideSpacer(TerminalCell source) => new()
     {
@@ -2758,6 +2847,7 @@ public sealed partial class TerminalScreen
         HasBackground = source.HasBackground,
         HyperlinkId = source.HyperlinkId,
         IsProtected = source.IsProtected,
+        SemanticContent = source.SemanticContent,
         Width = 0,
     };
 

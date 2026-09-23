@@ -81,7 +81,20 @@ public sealed partial class BasicVtProcessor
     {
         // A spacer head cannot survive removing its row's wrap marker.
         if (row.ReadOnlyCells[^1].IsWideSpacerHead) row[row.Columns - 1] = CreateErasedCell();
+        ResetRowSoftWrap(row);
+    }
+
+    private void ResetRowSoftWrap(TerminalRow row)
+    {
+        if (!row.WrapsToNext) return;
         row.WrapsToNext = false;
+        int absoluteRow = _screen.GetAbsoluteRowForViewportRow(_cursorRow);
+        if (absoluteRow + 1 < _screen.TotalRows)
+        {
+            TerminalRow next = _screen.GetRow(absoluteRow + 1);
+            next.IsWrapContinuation = false;
+            next.IsDirty = true;
+        }
     }
 
     private void ErasePreviousWideSpacerHead()

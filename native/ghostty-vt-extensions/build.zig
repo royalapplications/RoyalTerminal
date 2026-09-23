@@ -23,7 +23,7 @@ pub fn build(b: *std.Build) !void {
     // root would silently omit them.
     const sources = b.addWriteFiles();
     _ = sources.addCopyDirectory(ghostty.path("src"), "src", .{
-        .exclude_extensions = &.{ "terminal/Terminal.zig", "terminal/kitty/graphics_storage.zig", "terminal/stream_continuation.zig" },
+        .exclude_extensions = &.{ "terminal/Terminal.zig", "terminal/Screen.zig", "terminal/kitty/graphics_storage.zig", "terminal/stream_continuation.zig" },
     });
     try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "3305a832a49891b2e84d0efa4ace415d0d5e709d9c3c8f7e061228a3e1f18035", &.{
         .{
@@ -35,7 +35,19 @@ pub fn build(b: *std.Build) !void {
             .after = "                    if (head_cell.wide == .spacer_head) {\n                        head_cell.wide = .narrow;\n                        if (self.screens.active.cursor.page_pin.up(1)) |previous| previous.markDirty();\n                    }",
             .count = 2,
         },
+        .{
+            .before = "    cmd: osc.Command.SemanticPrompt,\n) !void {\n    switch (cmd.action)",
+            .after = "    cmd: osc.Command.SemanticPrompt,\n) !void {\n    defer self.screens.active.cursorMarkDirty();\n    switch (cmd.action)",
+        },
+        .{
+            .before = "            screen.cursor.page_row.semantic_prompt = .prompt_continuation;",
+            .after = "            screen.cursor.page_row.semantic_prompt = .prompt_continuation;\n            screen.cursorMarkDirty();",
+        },
     });
+    try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "3a74c3603c57db299f266c9df7f5650ae0d621c98fb57f3867b654ed9841a76b", &.{.{
+        .before = "        next_row.rowAndCell().row.wrap_continuation = false;",
+        .after = "        next_row.rowAndCell().row.wrap_continuation = false;\n        next_row.markDirty();",
+    }});
     try addOverlay(b, sources, ghostty, "terminal/kitty/graphics_storage.zig", "a2c29c02531f00b939485a9e45eeb8198d55648f116282c31e37bed84677328d", &.{.{
         .before = "        const removed_idx: u32 = if (number == 1) 0 else number - 2;",
         .after = "        const removed_idx: u32 = number - 1;",

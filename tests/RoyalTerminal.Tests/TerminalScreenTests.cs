@@ -438,7 +438,7 @@ public class TerminalScreenTests
     }
 
     [Fact]
-    public void TerminalScreen_ResizeWithReflow_TrimsTrailingStyledSpaces()
+    public void TerminalScreen_ResizeWithReflow_PreservesPrintedStyledSpaces()
     {
         TerminalScreen screen = new(12, 3);
         TerminalRow first = screen.GetViewportRow(0);
@@ -456,9 +456,11 @@ public class TerminalScreenTests
 
         screen.Resize(4, 3, reflowOnResize: true);
 
-        Assert.False(screen.GetRow(0).WrapsToNext);
+        Assert.True(screen.GetRow(0).WrapsToNext);
         Assert.Equal("DIR ", ReadAscii(screen.GetRow(0), 4));
-        Assert.Equal("NEXT", ReadAscii(screen.GetRow(1), 4));
+        Assert.Equal("    ", ReadAscii(screen.GetRow(1), 4));
+        Assert.Equal("    ", ReadAscii(screen.GetRow(2), 4));
+        Assert.Equal("NEXT", ReadAscii(screen.GetRow(3), 4));
     }
 
     [Fact]

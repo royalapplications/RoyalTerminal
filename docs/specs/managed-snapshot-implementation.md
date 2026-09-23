@@ -116,17 +116,28 @@ budget, both native extraction paths retain it, and managed DECSCA/SPA/EPA,
 selective ED/EL and ISO ECH respect current/most-recent screen protection modes.
 SGR does not reset the protection pen; save/restore, reflow and synchronized-output
 publication preserve it. See the main parity report for source decisions and tests.
-Semantic content/prompt and wrap-continuation storage remain missing. A complete
-adapter must implement their runtime semantics and tests,
-not merely deserialize values that are then silently dropped. Wide spacer-head
+Cell semantic content, row prompt markers and the cursor's semantic/clear-EOL
+pen now have live storage and native differential coverage. OSC 133 transitions,
+newlines/soft wraps, screen switches, COW publication, row reuse and physical
+reflow marker mapping are implemented. Both native extraction paths retain this
+metadata, including owned history snapshots. The adapter must still map these
+live values to/from SCREEN/PAGE. Wrap-continuation storage, prompt-seen/click
+policy, managed redraw behavior and blank-cursor/trailing-blank reflow corrections
+are now implemented with tests awaiting the requested post-push validation.
+Host click/navigation/selection consumers and inactive-screen resize remain open.
+A complete adapter must implement and test
+these runtime semantics, not merely deserialize values silently dropped later.
+Wide spacer-head
 and spacer-tail distinctions are now explicit in `TerminalCell.IsWideSpacerHead`
 without increasing the 48-byte cell budget; the complete codec still needs to
 preserve them through export/import.
 
 Hyperlink IDs on the wire include an explicit arbitrary-byte ID or an implicit
-numeric ID in addition to the URI. The existing screen URL-to-token registry is
-not sufficient to retain all of that identity. Preserve identity at the domain
-boundary while keeping presentation URL access convenient.
+numeric ID in addition to the URI. The new owned byte-identity registry and native
+copying extension retain both forms without coalescing solely by URL. Managed OSC
+8 uses the original payload bytes, and presentation URL access remains available.
+This live storage prerequisite now has written tests; binary snapshot construction
+and installation must still map these identities to/from wire tables.
 
 Current and saved charset state now have live representations: four designations,
 GL/GR and pending single shift, using the same compact registry as SCREEN.

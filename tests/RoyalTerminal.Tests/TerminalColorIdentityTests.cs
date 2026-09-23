@@ -78,7 +78,10 @@ public sealed class TerminalColorIdentityTests
         TerminalScreen screen = new(8, 3);
         using BasicVtProcessor processor = new(screen);
         processor.Process(Encoding.UTF8.GetBytes("\u001b[38;5;9;48;2;1;2;3;58;5;2mAB界CD"));
-        screen.GetRow(0)[3].ForegroundIdentity = default; // Force the scalar spacer-normalization path.
+        screen.GetRow(0)[3].ForegroundIdentity = default;
+        // Different pens are valid after a late variation selector. A tail
+        // containing text is genuinely malformed and needs normalization.
+        screen.GetRow(0)[3].Grapheme = "stale";
         screen.Resize(4, 3);
         screen.Resize(8, 3);
         for (int column = 0; column < 6; column++)

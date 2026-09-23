@@ -1,5 +1,84 @@
 // Appended to upstream src/lib_vt.zig by build.zig. Names are deliberately
 // prefixed to keep these extensions separate from Ghostty's public API.
+const RoyalPromptState = extern struct {
+    size: usize = @sizeOf(RoyalPromptState),
+    seen: u32 = 0,
+    content: u32 = 0,
+    clear_eol: u32 = 0,
+    click: u32 = 0,
+    redraw: u32 = 0,
+    implicit_id: u32 = 0,
+};
+
+export fn ghostty_royal_prompt_state(
+    handle: @import("terminal/c/terminal.zig").Terminal,
+    output: ?*RoyalPromptState,
+) callconv(.c) c_int {
+    const result = output orelse return -2;
+    if (result.size < @sizeOf(RoyalPromptState)) return -2;
+    const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
+    const s = t.screens.active;
+    result.* = .{
+        .seen = @intFromBool(s.semantic_prompt.seen),
+        .content = @intFromEnum(s.cursor.semantic_content),
+        .clear_eol = @intFromBool(s.cursor.semantic_content_clear_eol),
+        .click = switch (s.semantic_prompt.click) {
+            .none => 0,
+            .click_events => |v| 1 + @as(u32, @intFromEnum(v)),
+            .cl => |v| 3 + @as(u32, @intFromEnum(v)),
+        },
+        .redraw = @intFromEnum(t.flags.shell_redraws_prompt),
+        .implicit_id = s.cursor.hyperlink_implicit_id,
+    };
+    return 0;
+}
+
+const RoyalHyperlinkMetadata = extern struct {
+    size: usize = @sizeOf(RoyalHyperlinkMetadata),
+    uri_len: usize = 0,
+    id_len: usize = 0,
+    implicit_id: u32 = 0,
+};
+
+// A borrowed grid reference is consumed within this call; only copied bytes
+// escape. Probe and copy must be serialized with mutations of its terminal.
+export fn ghostty_royal_grid_ref_hyperlink(
+    reference: ?*const @import("terminal/c/grid_ref.zig").CGridRef,
+    output: ?*RoyalHyperlinkMetadata,
+    uri_buffer: ?[*]u8,
+    uri_capacity: usize,
+    id_buffer: ?[*]u8,
+    id_capacity: usize,
+) callconv(.c) c_int {
+    const ref = reference orelse return -2;
+    if (ref.size < @sizeOf(@import("terminal/c/grid_ref.zig").CGridRef)) return -2;
+    const result = output orelse return -2;
+    if (result.size < @sizeOf(RoyalHyperlinkMetadata)) return -2;
+    const pin = ref.toPin() orelse return -2;
+    const p = pin.node.page();
+    if (pin.x >= p.size.cols or pin.y >= p.size.rows) return -2;
+    const cell = pin.rowAndCell().cell;
+    result.* = .{};
+    if (!cell.hyperlink) return 0;
+    const link_id = p.lookupHyperlink(cell) orelse return 0;
+    const link = p.hyperlink_set.get(p.memory, link_id);
+    const uri = link.uri.slice(p.memory);
+    const id: []const u8 = switch (link.id) {
+        .explicit => |v| v.slice(p.memory),
+        .implicit => |v| value: {
+            result.implicit_id = v;
+            break :value &.{};
+        },
+    };
+    result.uri_len = uri.len;
+    result.id_len = id.len;
+    if (uri_capacity < uri.len or id_capacity < id.len) return -3;
+    if ((uri.len > 0 and uri_buffer == null) or (id.len > 0 and id_buffer == null)) return -2;
+    if (uri.len > 0) @memcpy(uri_buffer.?[0..uri.len], uri);
+    if (id.len > 0) @memcpy(id_buffer.?[0..id.len], id);
+    return 0;
+}
+
 export fn ghostty_royal_kitty_graphics_animation_tick(
     graphics: ?*anyopaque,
     now_ms: u64,

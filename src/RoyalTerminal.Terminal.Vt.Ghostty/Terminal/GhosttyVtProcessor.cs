@@ -37,8 +37,12 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalResizeReflowPolicySink,
     ITerminalEffectSource,
     ITerminalUnicodeWidthProvider,
+    ITerminalPromptStateSource,
     ITerminalTimedRefreshSource
 {
+    /// <inheritdoc />
+    public TerminalPromptState PromptState => _terminal.GetPromptState();
+
     private const int MaxShellIntegrationOscBufferBytes = 4096;
 
     private static readonly GhosttyVtNative.GhosttyMode s_wraparoundMode =
@@ -166,7 +170,6 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     private bool _sixelGraphicsEnabled;
     private TerminalScreen? _sixelOverlayScreen;
     private BasicVtProcessor? _sixelOverlayProcessor;
-    private bool _trimTrailingWhitespaceAfterResize;
     private bool _forceFullScreenSyncAfterResize;
     private bool _localReflowOnResize = true;
     private bool _renderHeld;
@@ -955,7 +958,6 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _renderState.Dispose();
         _terminal.Dispose();
         _unsupportedWindowsSequenceSanitizer.Reset();
-        _trimTrailingWhitespaceAfterResize = false;
         _forceFullScreenSyncAfterResize = false;
         ResetManagedState();
     }
@@ -1489,7 +1491,6 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private void PrepareResizeSync()
     {
-        _trimTrailingWhitespaceAfterResize = true;
         _forceFullScreenSyncAfterResize = true;
     }
 
@@ -1634,7 +1635,6 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     {
         _win32InputModeTracker.Reset();
         _unsupportedWindowsSequenceSanitizer.Reset();
-        _trimTrailingWhitespaceAfterResize = false;
         _forceFullScreenSyncAfterResize = false;
         _win32InputMode = false;
         _pressedMouseButtons = 0;
@@ -1643,7 +1643,6 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     private unsafe void SyncScreenFromNative()
     {
         GhosttyVtNative.GhosttyRenderStateDirty dirty = _renderState.GetDirty();
-        bool trimTrailingWhitespaceAfterResize = _trimTrailingWhitespaceAfterResize;
         bool forceFullScreenSyncAfterResize = _forceFullScreenSyncAfterResize;
         bool fullRefresh = forceFullScreenSyncAfterResize ||
             dirty == GhosttyVtNative.GhosttyRenderStateDirty.Full ||
@@ -1652,11 +1651,6 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         bool syncKittyGraphics = _kittyGraphicsSupported;
         if (!fullRefresh && dirty == GhosttyVtNative.GhosttyRenderStateDirty.False && !syncKittyGraphics)
         {
-            if (trimTrailingWhitespaceAfterResize)
-            {
-                _trimTrailingWhitespaceAfterResize = false;
-            }
-
             if (forceFullScreenSyncAfterResize)
             {
                 _forceFullScreenSyncAfterResize = false;
@@ -1681,7 +1675,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             int rowIndex = 0;
             while (rowIndex < renderedRows && _renderState.MoveNextRow())
             {
-                PopulateCurrentRenderRow(rowIndex, trimTrailingWhitespaceAfterResize, colors, palette);
+                PopulateCurrentRenderRow(rowIndex, colors, palette);
                 rowIndex++;
             }
 
@@ -1696,18 +1690,13 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             {
                 if (dirtyRow < renderedRows)
                 {
-                    PopulateCurrentRenderRow(dirtyRow, trimTrailingWhitespaceAfterResize, colors, palette);
+                    PopulateCurrentRenderRow(dirtyRow, colors, palette);
                 }
             }
         }
 
         SyncKittyGraphicsFromNative(fullRefresh || dirty != GhosttyVtNative.GhosttyRenderStateDirty.False);
         _renderState.Clean();
-        if (trimTrailingWhitespaceAfterResize)
-        {
-            _trimTrailingWhitespaceAfterResize = false;
-        }
-
         if (forceFullScreenSyncAfterResize)
         {
             _forceFullScreenSyncAfterResize = false;
@@ -1716,12 +1705,12 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void PopulateCurrentRenderRow(
         int rowIndex,
-        bool trimTrailingWhitespaceAfterResize,
         in GhosttyVtNative.GhosttyRenderStateColors colors,
         ReadOnlySpan<GhosttyVtNative.GhosttyColorRgb> palette)
     {
         TerminalRow row = _screen.GetViewportRow(rowIndex);
         row.WrapsToNext = _renderState.GetCurrentRowWrap();
+        PopulateRowSemantics(row, _renderState.GetCurrentRowRaw());
         ReadOnlySpan<ulong> rawCells = _renderState.GetCurrentRowRawCells();
         _renderState.BeginCurrentRowCells();
 
@@ -1742,11 +1731,6 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         for (; columnIndex < row.Columns; columnIndex++)
         {
             ClearCell(ref row[columnIndex]);
-        }
-
-        if (trimTrailingWhitespaceAfterResize && !row.WrapsToNext)
-        {
-            TrimTrailingWhitespaceForReflow(row);
         }
 
         row.IsDirty = true;
@@ -1797,7 +1781,13 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
             if (!rowWrapResolved)
             {
-                target.WrapsToNext = TryGetGridReferenceRowWrap(reference, out bool wrapsToNext) && wrapsToNext;
+                if (GhosttyVtNative.GridRefRow(in reference, out ulong rawRow) == GhosttyVtNative.GhosttyResult.Success)
+                {
+                    bool wrapsToNext = false;
+                    GhosttyVtNative.RowGet(rawRow, GhosttyVtNative.GhosttyRowData.Wrap, &wrapsToNext);
+                    target.WrapsToNext = wrapsToNext;
+                    PopulateRowSemantics(target, rawRow);
+                }
                 rowWrapResolved = true;
             }
 
@@ -1830,6 +1820,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             bool isProtected = false;
             GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.Protected, &isProtected);
             targetCell.IsProtected = isProtected;
+            targetCell.SemanticContent = GetCellSemanticContent(rawCell);
 
             targetCell.Grapheme = BuildGridReferenceGrapheme(in reference);
             if (GhosttyVtNative.GridRefStyle(in reference, out GhosttyVtNative.GhosttyStyle style) ==
@@ -1872,9 +1863,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
             bool hasHyperlink = false;
             GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.HasHyperlink, &hasHyperlink);
-            if (hasHyperlink && targetCell.Width > 0 && _terminal.GetHyperlinkUri(in reference) is { } uri &&
-                !string.IsNullOrWhiteSpace(uri))
-                targetCell.HyperlinkId = snapshot.RegisterHyperlink(uri);
+            if (hasHyperlink)
+                targetCell.HyperlinkId = RegisterNativeHyperlink(snapshot, in reference);
         }
     }
 
@@ -1901,25 +1891,21 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         }
     }
 
-    private static unsafe bool TryGetGridReferenceRowWrap(
-        GhosttyVtNative.GhosttyGridRef reference,
-        out bool wrapsToNext)
+    private static unsafe void PopulateRowSemantics(TerminalRow target, ulong rawRow)
     {
-        wrapsToNext = false;
-        if (GhosttyVtNative.GridRefRow(in reference, out ulong rawRow) != GhosttyVtNative.GhosttyResult.Success)
-        {
-            return false;
-        }
+        bool continuation = false;
+        GhosttyVtNative.RowGet(rawRow, GhosttyVtNative.GhosttyRowData.WrapContinuation, &continuation);
+        target.IsWrapContinuation = continuation;
+        GhosttyVtNative.GhosttyRowSemanticPrompt prompt = default;
+        GhosttyVtNative.RowGet(rawRow, GhosttyVtNative.GhosttyRowData.SemanticPrompt, &prompt);
+        target.SemanticPrompt = (TerminalSemanticPrompt)prompt;
+    }
 
-        bool value = false;
-        if (GhosttyVtNative.RowGet(rawRow, GhosttyVtNative.GhosttyRowData.Wrap, &value) !=
-            GhosttyVtNative.GhosttyResult.Success)
-        {
-            return false;
-        }
-
-        wrapsToNext = value;
-        return true;
+    private static unsafe TerminalSemanticContent GetCellSemanticContent(ulong rawCell)
+    {
+        GhosttyVtNative.GhosttyCellSemanticContent content = default;
+        GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.SemanticContent, &content);
+        return (TerminalSemanticContent)content;
     }
 
     private unsafe void PopulateCell(
@@ -1950,6 +1936,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         bool isProtected = false;
         GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.Protected, &isProtected);
         target.IsProtected = isProtected;
+        target.SemanticContent = GetCellSemanticContent(rawCell);
 
         if (_renderState.TryGetCurrentCellForegroundColor(out GhosttyVtNative.GhosttyColorRgb foreground))
         {
@@ -2019,6 +2006,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         target.Width = 1;
         target.IsWideSpacerHead = false;
         target.IsProtected = false;
+        target.SemanticContent = TerminalSemanticContent.Output;
     }
 
     private static TerminalColorIdentity MapColorIdentity(in GhosttyVtNative.GhosttyStyleColor color)
@@ -2029,54 +2017,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             _ => default,
         };
 
-    private void TrimTrailingWhitespaceForReflow(TerminalRow row)
-    {
-        for (int column = row.Columns - 1; column >= 0; column--)
-        {
-            if (!IsTrailingReflowWhitespace(in row[column]))
-            {
-                return;
-            }
-
-            ClearCell(ref row[column]);
-        }
-    }
-
-    private static bool IsTrailingReflowWhitespace(ref readonly TerminalCell cell)
-    {
-        if (cell.Width == 0)
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrEmpty(cell.Grapheme))
-        {
-            return IsAsciiWhitespaceGrapheme(cell.Grapheme);
-        }
-
-        return cell.Codepoint is 0 or ' ';
-    }
-
-    private static bool IsAsciiWhitespaceGrapheme(string grapheme)
-    {
-        for (int i = 0; i < grapheme.Length; i++)
-        {
-            if (grapheme[i] != ' ')
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     private unsafe int TryResolveHyperlinkId(int rowIndex, int columnIndex, ulong rawCell, int width)
     {
-        if (width <= 0)
-        {
-            return 0;
-        }
-
         bool hasHyperlink = false;
         GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.HasHyperlink, &hasHyperlink);
         if (!hasHyperlink)
@@ -2091,13 +2033,26 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             return 0;
         }
 
-        string? uri = _terminal.GetHyperlinkUri(in reference);
-        if (string.IsNullOrWhiteSpace(uri))
-        {
-            return 0;
-        }
+        return RegisterNativeHyperlink(_screen, in reference);
+    }
 
-        return _screen.RegisterHyperlink(uri);
+    private int RegisterNativeHyperlink(TerminalScreen screen, in GhosttyVtNative.GhosttyGridRef reference)
+    {
+        Span<byte> uri = stackalloc byte[512];
+        Span<byte> id = stackalloc byte[128];
+        if (_terminal.TryReadHyperlink(in reference, uri, id, out int uriLength, out int idLength, out uint implicitId))
+            return uriLength == 0 ? 0 : screen.RegisterHyperlink(uri[..uriLength], id[..idLength], implicitId);
+
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(checked(uriLength + idLength));
+        try
+        {
+            uri = buffer.AsSpan(0, uriLength);
+            id = buffer.AsSpan(uriLength, idLength);
+            if (!_terminal.TryReadHyperlink(in reference, uri, id, out int writtenUri, out int writtenId, out implicitId))
+                throw new InvalidOperationException("A grid hyperlink changed during extraction.");
+            return writtenUri == 0 ? 0 : screen.RegisterHyperlink(uri[..writtenUri], id[..writtenId], implicitId);
+        }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
     }
 
     private void SyncKittyGraphicsFromNative(bool geometryDirty)

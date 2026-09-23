@@ -106,6 +106,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private bool _currentHasUnderlineColor;
     private CellDecorations _currentDecorations;
     private int _currentHyperlinkId;
+    private uint _primaryHyperlinkImplicitCounter;
+    private uint _alternateHyperlinkImplicitCounter;
     private TerminalTheme _theme;
     private readonly ManagedTerminalColors _colors;
     private readonly ManagedVtContinuation _continuation;
@@ -849,7 +851,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         builder.Append("\x1b[0m");
 
         SnapshotCellStyleKey? currentStyle = null;
-        string? currentHyperlink = null;
+        int currentHyperlink = 0;
 
         if (options.Selection is TerminalSelectionRange selection)
         {
@@ -1079,7 +1081,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         int endColumn,
         in TerminalSnapshotExportOptions options,
         ref SnapshotCellStyleKey? currentStyle,
-        ref string? currentHyperlink)
+        ref int currentHyperlink)
     {
         int exportEnd = GetSnapshotRowEndColumn(row, startColumn, endColumn, options.TrimTrailingWhitespace, visual: true);
         if (exportEnd < startColumn)
@@ -1101,13 +1103,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 continue;
             }
 
-            string? desiredHyperlink = ResolveSnapshotHyperlink(cell, options.Extras.IncludeHyperlinks);
-            if (!string.Equals(currentHyperlink, desiredHyperlink, StringComparison.Ordinal))
+            int desiredHyperlink = options.Extras.IncludeHyperlinks ? cell.HyperlinkId : 0;
+            if (currentHyperlink != desiredHyperlink)
             {
                 CloseStyledHyperlink(builder, ref currentHyperlink);
-                if (!string.IsNullOrEmpty(desiredHyperlink))
+                if (desiredHyperlink != 0)
                 {
-                    builder.Append("\x1b]8;;").Append(desiredHyperlink).Append("\x1b\\");
+                    AppendStyledHyperlink(builder, desiredHyperlink);
                     currentHyperlink = desiredHyperlink;
                 }
             }
@@ -1385,13 +1387,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         if (options.Extras.IncludeHyperlinks)
         {
-            builder.Append("\x1b]8;;");
-            if (_screen.TryGetHyperlinkUrl(_currentHyperlinkId, out string? url))
-            {
-                builder.Append(url);
-            }
-
-            builder.Append("\x1b\\");
+            AppendStyledHyperlink(builder, _currentHyperlinkId);
         }
     }
 
@@ -1420,7 +1416,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // including wide characters and graphemes, using normal parser behavior.
         builder.Append("\x1b(B\x0F");
         SnapshotCellStyleKey? style = null;
-        string? hyperlink = null;
+        int hyperlink = 0;
         AppendStyledSnapshotRow(builder, row, cursorColumn, CursorRightLimit,
             options with { TrimTrailingWhitespace = false }, ref style, ref hyperlink);
         CloseStyledHyperlink(builder, ref hyperlink);
@@ -1635,15 +1631,25 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             : TerminalUnderlineStyle.None;
     }
 
-    private static void CloseStyledHyperlink(StringBuilder builder, ref string? currentHyperlink)
+    private void AppendStyledHyperlink(StringBuilder builder, int token)
     {
-        if (string.IsNullOrEmpty(currentHyperlink))
+        builder.Append("\x1b]8;");
+        if (_screen.TryGetHyperlink(token, out TerminalHyperlink? link) && link!.IsExplicit)
+            builder.Append("id=").Append(Encoding.UTF8.GetString(link.ExplicitId));
+        builder.Append(';');
+        if (_screen.TryGetHyperlinkUrl(token, out string? url)) builder.Append(url);
+        builder.Append("\x1b\\");
+    }
+
+    private static void CloseStyledHyperlink(StringBuilder builder, ref int currentHyperlink)
+    {
+        if (currentHyperlink == 0)
         {
             return;
         }
 
         builder.Append("\x1b]8;;\x1b\\");
-        currentHyperlink = null;
+        currentHyperlink = 0;
     }
 
     private static void AppendRgbParameters(List<int> parameters, bool foreground, uint argb)
@@ -1957,7 +1963,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 row[_cursorCol].IsWideSpacerHead = atScreenEdge;
                 row.IsDirty = true;
                 ResetDelayedWrap();
-                LineFeed(wrapForced: atScreenEdge);
+                LineFeed(wrapForced: atScreenEdge, softWrap: true);
                 _cursorCol = _scrollLeft;
                 ClampCursor();
             }
@@ -2024,6 +2030,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         cell.Width = width;
         cell.IsWideSpacerHead = false;
         cell.IsProtected = _currentProtected;
+        cell.SemanticContent = CurrentSemanticPen.Content;
     }
 
     private bool ShouldAttemptGraphemeAppend(int codepoint)
@@ -2132,13 +2139,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             // Ghostty moves the entire styled grapheme to the next line.
             if (!_autoWrap || _screen.Columns < 2) return true;
             TerminalCell moved = targetCell;
+            int movedCodepoint = moved.Codepoint;
             Span<char> widenedSuffix = stackalloc char[2];
             int widenedLength = new Rune(codepoint).EncodeToUtf16(widenedSuffix);
-            moved.Grapheme = string.Concat(currentText, widenedSuffix[..widenedLength]);
-            moved.Width = 2;
+            string widenedText = string.Concat(currentText, widenedSuffix[..widenedLength]);
             ClearPreservedCellsForMutation(targetRow);
             ClearRasterGraphicsForTextMutation(targetRowIndex, targetColIndex, 1);
-            TerminalCell spacerHead = moved;
+            TerminalCell spacerHead = targetCell;
+            if (targetCell.Grapheme is null) WriteCellFromPen(ref spacerHead, 0, 0);
             spacerHead.Codepoint = 0;
             spacerHead.Grapheme = null;
             bool atScreenEdge = targetColIndex == _screen.Columns - 1;
@@ -2147,18 +2155,17 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             targetRow[targetColIndex] = spacerHead;
             targetRow.IsDirty = true;
             _delayedWrap = false;
-            LineFeed(wrapForced: atScreenEdge);
+            LineFeed(wrapForced: atScreenEdge, softWrap: true);
             _cursorCol = _scrollLeft;
+            WriteCellFromPen(ref moved, movedCodepoint, 2);
+            moved.Grapheme = widenedText;
             TerminalRow destination = _screen.GetViewportRow(_cursorRow);
             ClearPreservedCellsForMutation(destination);
             ClearRasterGraphicsForTextMutation(_cursorRow, _scrollLeft, 2);
             ClearCellAndWideArtifacts(destination, _scrollLeft);
             ClearCellAndWideArtifacts(destination, _scrollLeft + 1);
             destination[_scrollLeft] = moved;
-            moved.Codepoint = 0;
-            moved.Grapheme = null;
-            moved.Width = 0;
-            destination[_scrollLeft + 1] = moved;
+            WriteCellFromPen(ref destination[_scrollLeft + 1], 0, 0);
             destination.IsDirty = true;
             AdvanceCursorAfterGraphic(2);
             return true;
@@ -2175,26 +2182,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         targetCell.Grapheme = string.Concat(currentText, suffix[..suffixLength]);
         targetCell.Width = (byte)newWidth;
 
-        if (newWidth == 2)
+        if (newWidth == 2 && oldWidth == 1)
         {
             ref TerminalCell spacer = ref targetRow[targetColIndex + 1];
-            spacer.Codepoint = 0;
-            spacer.Grapheme = null;
-            spacer.Foreground = targetCell.Foreground;
-            spacer.Background = targetCell.Background;
-            spacer.ForegroundIdentity = targetCell.ForegroundIdentity;
-            spacer.BackgroundIdentity = targetCell.BackgroundIdentity;
-            spacer.UnderlineIdentity = targetCell.UnderlineIdentity;
-            spacer.Attributes = targetCell.Attributes;
-            spacer.UnderlineStyle = targetCell.UnderlineStyle;
-            spacer.UnderlineColor = targetCell.UnderlineColor;
-            spacer.HasUnderlineColor = targetCell.HasUnderlineColor;
-            spacer.Decorations = targetCell.Decorations;
-            spacer.HasBackground = targetCell.HasBackground;
-            spacer.HyperlinkId = targetCell.HyperlinkId;
-            spacer.IsProtected = targetCell.IsProtected;
-            spacer.Width = 0;
-            spacer.IsWideSpacerHead = false;
+            WriteCellFromPen(ref spacer, 0, 0);
         }
 
         if (oldWidth == 2 && newWidth == 1 && targetColIndex + 1 < targetRow.Columns)
@@ -2229,7 +2220,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        LineFeed(wrapForced: _cursorCol == _screen.Columns - 1);
+        LineFeed(wrapForced: _cursorCol == _screen.Columns - 1, softWrap: true);
         _cursorCol = _scrollLeft;
         return true;
     }
@@ -2310,11 +2301,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
     }
 
-    private void LineFeed(bool wrapForced)
+    private void LineFeed(bool wrapForced, bool softWrap = false)
     {
         if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
         {
-            _screen.GetViewportRow(_cursorRow).WrapsToNext = wrapForced;
+            if (wrapForced) _screen.GetViewportRow(_cursorRow).WrapsToNext = true;
         }
 
         if (_cursorRow == _scrollBottom && CursorInsideHorizontalMargins)
@@ -2325,6 +2316,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         else if (_cursorRow < _screen.ViewportRows - 1 && _cursorRow != _scrollBottom)
         {
             _cursorRow++;
+        }
+        AdvanceSemanticLine(softWrap || wrapForced);
+        if (wrapForced)
+        {
+            TerminalRow row = _screen.GetViewportRow(_cursorRow);
+            row.IsWrapContinuation = true;
+            row.IsDirty = true;
         }
     }
 
@@ -2449,8 +2447,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void CopyRow(TerminalRow src, TerminalRow dst)
     {
+        src.WrapsToNext = false;
+        src.IsWrapContinuation = false;
         dst.CopyActiveFrom(src, _screen.DefaultForeground, _screen.DefaultBackground);
         dst.WrapsToNext = false;
+        dst.IsWrapContinuation = false;
         if (dst.ReadOnlyCells[^1].IsWideSpacerHead)
         {
             dst[dst.Columns - 1].IsWideSpacerHead = false;
@@ -2702,7 +2703,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        string oscPayload = Encoding.UTF8.GetString(CollectionsMarshal.AsSpan(_oscBuffer));
+        ReadOnlySpan<byte> rawPayload = CollectionsMarshal.AsSpan(_oscBuffer);
+        if (rawPayload.StartsWith("8;"u8))
+        {
+            HandleOscHyperlink(rawPayload[2..]);
+            _oscBuffer.Clear();
+            return;
+        }
+        string oscPayload = Encoding.UTF8.GetString(rawPayload);
         _oscBuffer.Clear();
 
         int separator = oscPayload.IndexOf(';');
@@ -2716,6 +2724,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        if (selectorCode == 133) HandleSemanticPrompt(value.AsSpan());
         _shellIntegrationParser.TryHandleOsc(selectorCode, value);
 
         switch (selectorCode)
@@ -2751,10 +2760,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case 12:
                 HandleOscDynamicColor(selectorCode, value);
-                break;
-
-            case 8:
-                HandleOscHyperlink(value);
                 break;
 
             case 7:
@@ -3180,24 +3185,34 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         return true;
     }
 
-    private void HandleOscHyperlink(string value)
+    private void HandleOscHyperlink(ReadOnlySpan<byte> value)
     {
-        int separator = value.IndexOf(';');
-        if (separator < 0)
+        int separator = value.IndexOf((byte)';');
+        if (separator < 0) return;
+        ReadOnlySpan<byte> uri = value[(separator + 1)..];
+        ReadOnlySpan<byte> options = value[..separator];
+        ReadOnlySpan<byte> id = default;
+        while (!options.IsEmpty)
         {
+            int colon = options.IndexOf((byte)':');
+            ReadOnlySpan<byte> item = colon < 0 ? options : options[..colon];
+            int equals = item.IndexOf((byte)'=');
+            // Ghostty stops at a malformed option, and the last nonempty ID wins.
+            if (equals < 0) break;
+            if (item[..equals].SequenceEqual("id"u8) && equals + 1 < item.Length)
+                id = item[(equals + 1)..];
+            if (colon < 0) break;
+            options = options[(colon + 1)..];
+        }
+        if (uri.IsEmpty)
+        {
+            // An ID on a close is invalid and must not close the active link.
+            if (id.IsEmpty) _currentHyperlinkId = 0;
             return;
         }
-
-        string uri = separator + 1 < value.Length
-            ? value[(separator + 1)..]
-            : string.Empty;
-        if (string.IsNullOrEmpty(uri))
-        {
-            _currentHyperlinkId = 0;
-            return;
-        }
-
-        _currentHyperlinkId = _screen.RegisterHyperlink(uri);
+        ref uint counter = ref (_inAltScreen ? ref _alternateHyperlinkImplicitCounter : ref _primaryHyperlinkImplicitCounter);
+        _currentHyperlinkId = _screen.RegisterHyperlink(uri, id, counter);
+        if (id.IsEmpty) counter = unchecked(counter + 1);
     }
 
     private void HandleOscPalette(string value)
@@ -4773,7 +4788,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 }
                 else
                 {
-                    SwitchToMainScreen();
+                    SwitchToMainScreen(copySemanticPen: false);
                     RestoreCursor();
                 }
                 break;
@@ -4804,6 +4819,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _savedMainCursorCol = _cursorCol;
         _savedMainCursorRow = _cursorRow;
         _savedMainDelayedWrap = _delayedWrap;
+        _alternateSemanticPen = _primarySemanticPen;
+        _alternateHyperlinkImplicitCounter = _primaryHyperlinkImplicitCounter;
+        _currentHyperlinkId = 0;
         _inAltScreen = true;
         _screen.SwitchToAlternateBuffer(clear: false);
         _kittyStore = _alternateKittyStore ??= new ManagedKittyGraphicsStore(_options.KittyGraphicsStorageLimitBytes);
@@ -4819,7 +4837,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // Scrolling margins are terminal-wide and survive screen switches.
     }
 
-    private void SwitchToMainScreen(bool restoreRestartPosition = false)
+    private void SwitchToMainScreen(bool restoreRestartPosition = false, bool copySemanticPen = true)
     {
         if (!_inAltScreen) return;
 
@@ -4828,7 +4846,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _screen.ScrollOffset = 0;
         }
 
+        if (copySemanticPen)
+        {
+            _primarySemanticPen = _alternateSemanticPen;
+            _primaryHyperlinkImplicitCounter = _alternateHyperlinkImplicitCounter;
+        }
         _screen.SwitchToPrimaryBuffer();
+        _currentHyperlinkId = 0;
         _kittyStore = _primaryKittyStore;
         AdvanceKittyAnimations();
         PublishKittyGraphics();
@@ -5043,7 +5067,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 2: // Entire display
-                if (ScrollOnEraseInDisplay && !_inAltScreen)
+                if (!_inAltScreen && (ScrollOnEraseInDisplay ||
+                    _screen.GetViewportRow(_screen.ViewportRows - 1).SemanticPrompt != TerminalSemanticPrompt.None))
                 {
                     _screen.MoveViewportToScrollbackAndClear();
                     for (var r = 0; r < _screen.ViewportRows; r++)
@@ -5095,7 +5120,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 0: // From cursor to end of line
                 for (var c = Math.Max(0, _cursorCol); c < _screen.Columns; c++)
                     row[c] = CreateErasedCell();
-                row.WrapsToNext = false;
+                ResetRowSoftWrap(row);
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
@@ -5114,7 +5139,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 2: // Entire line
+                TerminalSemanticPrompt prompt = row.SemanticPrompt;
+                bool continuation = row.IsWrapContinuation;
+                ResetRowSoftWrap(row);
                 row.Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
+                row.SemanticPrompt = prompt;
+                row.IsWrapContinuation = continuation;
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
@@ -5246,7 +5276,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ClearPreservedCellsForMutation(row);
         if (row.ReadOnlyCells[^1].IsWideSpacerHead)
             row[row.Columns - 1] = CreateErasedCell();
-        row.WrapsToNext = false;
+        ResetRowSoftWrap(row);
         ResetDelayedWrap();
         for (var c = _cursorCol; c + count <= RightMargin; c++)
             row[c] = row[c + count];
@@ -5276,7 +5306,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ClearPreservedCellsForMutation(row);
         if (row.ReadOnlyCells[^1].IsWideSpacerHead)
             row[row.Columns - 1] = CreateErasedCell();
-        row.WrapsToNext = false;
+        ResetRowSoftWrap(row);
         ResetDelayedWrap();
         for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
             row[c] = CreateErasedCell();
@@ -5321,19 +5351,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
                 trailing.Codepoint = 0;
                 trailing.Grapheme = null;
-                trailing.Foreground = cell.Foreground;
-                trailing.Background = cell.Background;
-                trailing.ForegroundIdentity = cell.ForegroundIdentity;
-                trailing.BackgroundIdentity = cell.BackgroundIdentity;
-                trailing.UnderlineIdentity = cell.UnderlineIdentity;
-                trailing.Attributes = cell.Attributes;
-                trailing.UnderlineStyle = cell.UnderlineStyle;
-                trailing.UnderlineColor = cell.UnderlineColor;
-                trailing.HasUnderlineColor = cell.HasUnderlineColor;
-                trailing.Decorations = cell.Decorations;
-                trailing.HasBackground = cell.HasBackground;
-                trailing.HyperlinkId = cell.HyperlinkId;
-                trailing.IsProtected = cell.IsProtected;
+                // A late width selector prints the tail using the current
+                // pen. Keep its independent style, link and protection.
                 trailing.Width = 0;
                 trailing.IsWideSpacerHead = false;
                 col++;
@@ -5547,6 +5566,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _screen.ClearRegisteredGlyphs();
         _currentProtected = false;
         _primaryProtectionMode = _alternateProtectionMode = CharacterProtectionMode.Off;
+        _primarySemanticPen = _alternateSemanticPen = default;
+        _primaryHyperlinkImplicitCounter = _alternateHyperlinkImplicitCounter = 0;
+        _primaryPromptPolicy = _alternatePromptPolicy = default;
+        _promptRedraw = TerminalPromptRedraw.All;
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
         ResetHorizontalMargins();
@@ -5678,6 +5701,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _heightPx = Math.Max(0, heightPx);
 
         bool alternateScreen = _inAltScreen;
+        bool gridSizeChanged = columns != _screen.Columns || rows != _screen.ViewportRows;
         int previousCursorCol = _cursorCol;
         int previousCursorRow = _cursorRow;
         bool previousDelayedWrap = _delayedWrap;
@@ -5724,6 +5748,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ApplyResizeState(columns, rows);
+        if (gridSizeChanged) ClearPromptForRedraw();
         PublishKittyGraphics();
         EmitInBandSizeReport();
     }

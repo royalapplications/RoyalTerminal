@@ -7,6 +7,32 @@
 extern "C" {
 #endif
 
+/** Copied active-screen prompt policy. Set size before calling. Content uses
+ * Ghostty cell semantic values. Click: 0 none, 1 absolute, 2 relative, 3 line,
+ * 4 multiple, 5 conservative vertical, 6 smart vertical. Redraw: 0 all, 1 none,
+ * 2 last. implicit_id is the cursor's next generated OSC 8 ID.
+ */
+typedef struct {
+    size_t size;
+    uint32_t seen, content, clear_eol, click, redraw, implicit_id;
+} RoyalPromptState;
+GHOSTTY_API GhosttyResult ghostty_royal_prompt_state(
+    GhosttyTerminal terminal, RoyalPromptState* output);
+
+/** Exact OSC 8 identity. Zero uri_len means no link; zero id_len means an
+ * implicit ID. Set size. Probe with zero-capacity buffers: OUT_OF_SPACE fills
+ * lengths and leaves both buffers unchanged. Copy does not append NUL bytes.
+ * Serialize probe/copy with terminal mutation; a stale grid reference is invalid.
+ */
+typedef struct {
+    size_t size, uri_len, id_len;
+    uint32_t implicit_id;
+} RoyalHyperlinkMetadata;
+GHOSTTY_API GhosttyResult ghostty_royal_grid_ref_hyperlink(
+    const GhosttyGridRef* reference, RoyalHyperlinkMetadata* output,
+    uint8_t* uri_buffer, size_t uri_capacity,
+    uint8_t* id_buffer, size_t id_capacity);
+
 /**
  * Advances the active storage's Kitty animations on the caller's monotonic
  * millisecond clock. Serialize with all access to the owning terminal.

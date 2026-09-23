@@ -24,6 +24,7 @@ public sealed partial class TerminalScreen
         CopyScalarStateTo(copy);
         CopyRegistry(_hyperlinksById, copy._hyperlinksById);
         CopyRegistry(_hyperlinkIdsByUrl, copy._hyperlinkIdsByUrl);
+        copy._hyperlinkIdentities.CopyFrom(_hyperlinkIdentities);
         CopyRegistry(_kittyImagesById, copy._kittyImagesById);
         copy._kittyPlacements = _kittyPlacements;
         copy._kittyAnchoredPlacements = _kittyAnchoredPlacements;
@@ -66,6 +67,7 @@ public sealed partial class TerminalScreen
         source.CopyScalarStateTo(this);
         CopyRegistry(source._hyperlinksById, _hyperlinksById);
         CopyRegistry(source._hyperlinkIdsByUrl, _hyperlinkIdsByUrl);
+        _hyperlinkIdentities.CopyFrom(source._hyperlinkIdentities);
         CopyRegistry(source._kittyImagesById, _kittyImagesById);
         _kittyPlacements = source._kittyPlacements;
         _kittyAnchoredPlacements = source._kittyAnchoredPlacements;
