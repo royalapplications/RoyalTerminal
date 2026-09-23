@@ -3837,6 +3837,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // DEC private mode families: CSI ? ...
         if (_csiPrivateMarker == '?')
         {
+            if (finalByte is 's' or 'r')
+            {
+                SaveOrRestoreDecModes(restore: finalByte == 'r');
+                return;
+            }
             if (finalByte is 'J' or 'K' && _params.Count <= 1)
             {
                 if (finalByte == 'J') EraseInDisplay(p0, selective: true);
@@ -4385,10 +4390,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             25 => _cursorVisible ? 1 : 2,
             66 => _applicationKeypad ? 1 : 2,
             67 => _backarrowKeyMode ? 1 : 2,
-            47 => _inAltScreen ? 1 : 2,
-            1047 => _inAltScreen ? 1 : 2,
+            47 => (_alternateScreenModeBits & 1) != 0 ? 1 : 2,
+            1047 => (_alternateScreenModeBits & 2) != 0 ? 1 : 2,
             1048 => _saveCursorMode ? 1 : 2,
-            1049 => _inAltScreen ? 1 : 2,
+            1049 => (_alternateScreenModeBits & 4) != 0 ? 1 : 2,
             2004 => _bracketedPaste ? 1 : 2,
             9001 => _win32InputMode ? 1 : 2,
             _ => 0,
@@ -4700,6 +4705,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 47: // Use alternate screen buffer (no clear)
+                _alternateScreenModeBits = (byte)(set ? _alternateScreenModeBits | 1 : _alternateScreenModeBits & ~1);
                 if (set && !_inAltScreen)
                     SwitchToAltScreen(clearAlt: false);
                 else if (!set && _inAltScreen)
@@ -4759,6 +4765,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 1047: // Use alternate screen buffer
+                _alternateScreenModeBits = (byte)(set ? _alternateScreenModeBits | 2 : _alternateScreenModeBits & ~2);
                 if (set && !_inAltScreen)
                     SwitchToAltScreen(clearAlt: false);
                 else if (!set && _inAltScreen)
@@ -4782,6 +4789,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 1049: // Save cursor + switch to alt screen + clear
+                _alternateScreenModeBits = (byte)(set ? _alternateScreenModeBits | 4 : _alternateScreenModeBits & ~4);
                 if (set)
                 {
                     SaveCursor();
@@ -5405,6 +5413,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _sendReceiveMode = true;
         ResetExtendedDecModesToDefaults();
         _sixelDisplayMode = false;
+        ResetSavedAndScreenModes();
         _insertMode = false;
         _lineFeedNewLineMode = false;
         _cursorStyle = 1;
@@ -5594,6 +5603,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _sendReceiveMode = true;
         ResetExtendedDecModesToDefaults();
         _sixelDisplayMode = false;
+        ResetSavedAndScreenModes();
         _insertMode = false;
         _lineFeedNewLineMode = false;
         _cursorStyle = 1;
