@@ -23,7 +23,7 @@ pub fn build(b: *std.Build) !void {
     // root would silently omit them.
     const sources = b.addWriteFiles();
     _ = sources.addCopyDirectory(ghostty.path("src"), "src", .{
-        .exclude_extensions = &.{ "terminal/Terminal.zig", "terminal/kitty/graphics_storage.zig" },
+        .exclude_extensions = &.{ "terminal/Terminal.zig", "terminal/kitty/graphics_storage.zig", "terminal/stream_continuation.zig" },
     });
     try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "3305a832a49891b2e84d0efa4ace415d0d5e709d9c3c8f7e061228a3e1f18035", &.{
         .{
@@ -39,6 +39,10 @@ pub fn build(b: *std.Build) !void {
     try addOverlay(b, sources, ghostty, "terminal/kitty/graphics_storage.zig", "a2c29c02531f00b939485a9e45eeb8198d55648f116282c31e37bed84677328d", &.{.{
         .before = "        const removed_idx: u32 = if (number == 1) 0 else number - 2;",
         .after = "        const removed_idx: u32 = number - 1;",
+    }});
+    try addOverlay(b, sources, ghostty, "terminal/stream_continuation.zig", "a86feef9e53dc62349e64ddb6d25f1d6d971b9813578a24e915e39daeb39a9a2", &.{.{
+        .before = "        var scanner: BoundaryScanner = .init();\n        for (self.bytes.items) |c| {\n            if (scanner.next(c) == .omittable) continue;\n            try writer.writeByte(c);\n        }\n",
+        .after = @embedFile("src/continuation_write.zig.inc"),
     }});
     const upstream = try std.Io.Dir.cwd().readFileAlloc(
         b.graph.io,

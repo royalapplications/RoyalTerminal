@@ -8,7 +8,7 @@ The build generates a copy of the upstream Zig root with the exports from
 
 ## Reviewed correctness overlays
 
-The generated source copy also applies three corrections to pinned upstream
+The generated source copy also applies four corrections to pinned upstream
 `4ae9f1a2de5484de3d6a13fe03676b8853b9c41c` (identical runtime sources to the
 previously reviewed `22391ed6491f2924361dcad1f9a9176a390fd20f`). Each checks the original file's full
 SHA-256 and the exact expected source-fragment count; any upstream file change
@@ -30,6 +30,15 @@ fails the build until reviewed. The submodule checkout is never changed.
   frame 2 from red/blue/white/green frames. Correct behavior selects the white
   successor and stamps changed content. Deleting another frame preserves the
   displayed frame's identity.
+- `stream_continuation.zig`: canonicalize export after an APC-to-C1 DCS/CSI/OSC
+  transition commits the preceding APC. Unpatched export retained the entire
+  Kitty query, causing snapshot validation to reject the exported continuation
+  and allowing direct replay to repeat the query. The overlay scans for the last
+  committed transition before writing to a non-rewindable writer, emits the new
+  introducer as ESC plus its 7-bit final, and preserves omission of already
+  executed C0 controls. Ordinary C1 payload bytes in OSC/DCS remain untouched.
+  Only export changes; tracking limits and the input feed path remain unchanged.
+  Buffer/callback exports and snapshot round trips are tested at every split.
 
 All were reproduced through the native C API before correction and have
 focused integration tests. No public upstream issue is claimed. Reassess and

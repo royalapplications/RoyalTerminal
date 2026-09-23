@@ -764,8 +764,8 @@ Snapshot review also reproduced an upstream/native export defect: writing
 original sequence via `ghostty_terminal_continuation_buf` (result success), even
 though leaving APC already finalized the Kitty query. Managed export now retains
 only `ESC [ 3`, which the pure wire validator accepts and which cannot repeat the
-query. Native continuation export still needs a corresponding fix and regression;
-it is an explicit unfinished requirement, not a claimed native/managed match.
+query. Native export was still defective at this stage; the correction and
+validation are recorded in the following subsection.
 
 Reference comparison: xterm.js also exits APC on ESC and distinguishes abort
 from termination, but its payload/control classes differ; Windows Terminal
@@ -777,6 +777,39 @@ and the broader performance/platform gates remain open.
 Full macOS regression after this APC batch: **2,087 passed, 16 conditional skips,
 2,103 total**, zero failures (`apc-parser-full.trx`). The benchmark project also
 builds/runs in Release with its explicit managed-engine project reference.
+
+### Native continuation export correction
+
+The APC-to-C1 defect above is now corrected in a fourth narrowly scoped,
+full-file-hash and replacement-count guarded native overlay. Four focused cases
+failed against the unpatched binary; after rebuilding they export `ESC P`,
+`ESC [` or `ESC ]` plus only the pending suffix, not the committed APC. An embedded
+BEL in the new CSI is still omitted. Direct buffer and callback-stream exports,
+native snapshot decode/re-export and subsequent terminal state agree across every
+input split. Three additional cases preserve literal C1 bytes in uncommitted
+OSC/DCS payloads and CSI headers. An additional chained-APC case verifies that
+export removes multiple committed prefixes. The final combined snapshot suite
+passed **109 tests** (`native-continuation-final-focused.trx`).
+
+The correction only changes export; continuation retention limits and the native
+input-tracking path are unchanged. The extra boundary scan runs only when retained
+bytes contain a possible C1 DCS/CSI/OSC introducer. Native snapshot validation is
+not weakened. The source submodule remains unmodified, and future upstream source
+changes invalidate the overlay until reviewed. Windows Terminal's text-buffer
+serialization and xterm.js's serialize addon emit terminal text, not Ghostty's
+binary parser continuation; Ghostty's replay-without-effects contract is the
+reference for this correction. This does not complete the managed snapshot
+installation or remaining parser/renderer/platform audit.
+
+The rebuilt macOS arm64 library passed **228 native integration tests**, zero
+failures/skips (SSH integration excluded), and the full macOS unit/headless suite
+passed **2,094 tests with 16 conditional skips (2,110 total)**. The chained-APC
+test was added afterward and passed in the 109-case focused run; production code
+was unchanged. Generated native binaries remain uncommitted release artifacts.
+
+Host macOS arm64 plus cross-builds for macOS x64, Linux arm64/x64 and Windows
+arm64/x64 all succeeded with the overlay; the resulting binary architecture was
+checked for each cross-target. Runtime validation here remains macOS arm64 only.
 
 Reference choice: Ghostty's snapshot per-record Zig codecs define the format.
 Windows Terminal `TextBuffer::SerializeTo` and xterm.js's serialize addon emit VT

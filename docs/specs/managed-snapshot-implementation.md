@@ -139,8 +139,10 @@ boundary while keeping presentation URL access convenient.
    A native-valid wire continuation is not proof that the current managed parser
    supports every corresponding state: the ESC/CSI/control/ignore-state cases now
    have focused tests, as do incremental UTF-8 rejection/replay boundaries, but
-   remaining DCS transitions, native APC-to-C1 continuation export and complete
+   remaining DCS transitions and complete
    current/saved charset semantics still need integration coverage before exposure.
+   Native APC-to-C1 export is corrected by a hash-checked overlay and shares the
+   managed canonical ESC representation; buffer/stream/snapshot round trips pass.
 3. Native-to-managed and managed-to-native differential tests, including every
    upstream complete fixture, both screens, history, pending wrap, saved cursors,
    palette/RGB identity, malformed inputs and streaming IO failures. Benchmark
