@@ -24,9 +24,26 @@ status-display behavior are the parity target, not those hosts' string models.
 Focused tests cover host ownership, short destinations, raw/invalid UTF-8,
 canonical selectors, every split, capture limits in scalar/bulk input, callbacks,
 status/REP/control behavior, session resets and side-effect-free restoration.
-This batch is awaiting post-push validation. Full snapshot orchestration,
-remaining keyboard/mouse consumers, quota policy and platform sign-off remain
-open; these primitives do not establish full terminal parity.
+The **103 new focused cases** pass with the native library available on macOS
+arm64. The first full run exposed an old test that incorrectly expected a 16 KiB
+title; it now checks that large allocating OSC 52 payloads remain supported,
+while a separate regression requires rejection of oversized fixed title captures
+without changing the prior title. Post-push full Release validation through
+`25b8399`: **3,385 unit/headless tests and 231 integration tests passed**, with
+**16 conditional skips, zero failures** (`metadata-full.trx` in each project's
+results directory). The complete Release solution builds with zero warnings and
+errors. This local macOS arm64 result is not cross-platform runtime sign-off.
+
+Two sequential, hash-verified Release microbenchmark pairs measured 100,000
+unobserved OSC 2 updates (100-byte titles), after 20,000 warmups, using seven
+samples: median **46.587→32.951 ms** and **46.889→33.553 ms**; timed allocations
+fell from **45,600,000 to 0 bytes**. The raw buffer reuses capacity and skips
+string decoding when no title callback is subscribed. This narrow measurement
+does not imply an equivalent gain with callbacks, rendering or transport work.
+Baseline/current assembly hashes start `bde54cd9…` / `86317076…`.
+
+Full snapshot orchestration, remaining keyboard/mouse consumers, quota policy
+and platform sign-off remain open; these primitives do not establish full parity.
 
 ### Snapshot geometry and current/saved processor registers (2026-09-23)
 
