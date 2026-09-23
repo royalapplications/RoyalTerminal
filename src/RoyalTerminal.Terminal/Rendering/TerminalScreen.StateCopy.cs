@@ -97,6 +97,8 @@ public sealed partial class TerminalScreen
         destination._nextRasterImageId = _nextRasterImageId;
         destination._anchorRevision = _anchorRevision;
         destination.GlyphRevision = GlyphRevision;
+        destination._snapshotLineage = _snapshotLineage;
+        destination._snapshotAlternateGeneration = _snapshotAlternateGeneration;
     }
 
     private TerminalRowBuffer CopyRows(TerminalRowBuffer rows)

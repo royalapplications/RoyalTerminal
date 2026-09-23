@@ -9,6 +9,20 @@ namespace RoyalTerminal.Avalonia.Rendering;
 
 public sealed partial class TerminalScreen
 {
+    // Allocate a lineage only when a decoder tracks this terminal. COW publication
+    // preserves it; a separately restored terminal receives a different identity.
+    private object? _snapshotLineage;
+    private ulong _snapshotAlternateGeneration;
+
+    internal object SnapshotLineage => _snapshotLineage ??= new object();
+
+    internal ulong GetSnapshotGeneration(int key) => key switch
+    {
+        0 => 0, // Ghostty resets primary contents in place, retaining its ScreenSet slot.
+        1 => _snapshotAlternateGeneration,
+        _ => throw new ArgumentOutOfRangeException(nameof(key)),
+    };
+
     /// <summary>
     /// Creates unpublished storage with no throwaway viewport. The snapshot adapter
     /// must install both row sets before handing this object to any live consumer.

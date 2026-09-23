@@ -1399,6 +1399,7 @@ public sealed partial class TerminalScreen
             return;
         }
 
+        if (_alternateRows is not null) _snapshotAlternateGeneration = unchecked(_snapshotAlternateGeneration + 1);
         _alternateRows = null;
         _alternateRasterImagesById = null;
         _alternateRasterPlacements = null;
@@ -1510,6 +1511,7 @@ public sealed partial class TerminalScreen
 
         _rows = CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
         _primaryRows = null;
+        if (_alternateRows is not null) _snapshotAlternateGeneration = unchecked(_snapshotAlternateGeneration + 1);
         _alternateRows = null;
         _primaryRasterImagesById = null;
         _primaryRasterPlacements = null;
