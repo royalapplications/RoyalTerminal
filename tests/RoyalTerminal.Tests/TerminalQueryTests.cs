@@ -595,7 +595,7 @@ public class TerminalQueryTests
         processor.Process("\x1b]4;1;?\x07"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1b]4;1;rgb:cdcd/0000/0000\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1b]4;1;rgb:cdcd/0000/0000\x07", System.Text.Encoding.ASCII.GetString(response));
     }
 
     [Fact]

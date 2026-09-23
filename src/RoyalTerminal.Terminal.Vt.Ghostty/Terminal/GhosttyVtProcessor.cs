@@ -2531,8 +2531,12 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                 return;
             }
 
-            byte[] response = new byte[length];
-            Marshal.Copy(data, response, 0, response.Length);
+            ReadOnlySpan<byte> nativeReply = new((void*)data, length);
+            bool eightBit = _theme.OscColorReportFormat == TerminalOscColorReportFormat.Bit8;
+            int responseLength = eightBit ? GhosttyOscColorReports.GetEightBitLength(nativeReply) : length;
+            byte[] response = new byte[responseLength];
+            if (responseLength != length) GhosttyOscColorReports.WriteEightBit(nativeReply, response);
+            else nativeReply.CopyTo(response);
             ResponseCallback(response);
         }
         catch

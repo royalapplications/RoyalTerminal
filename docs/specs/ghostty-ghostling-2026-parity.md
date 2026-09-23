@@ -2,6 +2,36 @@
 
 ## Reopened completion audit
 
+### Legacy color operations and native host report policy (2026-09-23)
+
+Managed OSC 4 now skips empty tokens, retains valid operations before the first
+invalid pair, preserves ordered set/query behavior, and handles Ghostty's signed
+zero/plus/interior-underscore index syntax. OSC 10-12 accepts successive dynamic
+color values, stops at invalid colors and skips empty parameters. OSC 110-112
+rejects nonempty arguments. OSC 104 skips malformed indexes and resets the entire
+palette when no target is accepted; valid unsupported special targets 256-260
+instead suppress that fallback. All recognized legacy color payloads now have
+the same 2,048-byte streaming capture limit as native, including split prefixes.
+Replies are batched per OSC and preserve BEL versus ST. Canonical selectors are
+required, and unsupported native special colors remain no-ops.
+
+Reference decision: follow Ghostty `osc/parsers/color.zig` and
+`stream_terminal.zig:colorOperation`. Windows Terminal also restores configured
+colors; xterm.js's invalid-only palette reset and dynamic reset argument behavior
+differ, so those are not the compatibility target. Focused native differentials
+cover these deliberate choices and both complete color state and reply bytes.
+
+The native adapter now honors the host's eight-bit OSC color-report option, which
+managed already exposed. A bounded span formatter rewrites only complete native
+OSC 4/10/11/12 report batches, preserving terminators/order and leaving Kitty,
+clipboard/title/device replies and incomplete/malformed batches untouched.
+It allocates no intermediate buffers; the callback allocates the exact final byte
+array. The default sixteen-bit path stays a direct copy. This is an explicit
+host policy applied above libghostty-vt, not a change to the native core ABI.
+
+Implementation and regression tests are pushed before validation as requested.
+Full snapshot orchestration and the broader renderer/IO/platform gates remain open.
+
 ### Kitty color protocol and shared VT color parsing (2026-09-23)
 
 Managed OSC 21 now parses a bounded ordered batch before applying any changes.
@@ -53,15 +83,8 @@ zero-allocation warm path. The full post-push Release unit/headless suite throug
 (`kitty-colors-full.trx`), with native color differentials running on macOS arm64.
 This does not establish cross-platform runtime completion.
 
-The same audit found remaining pre-existing legacy color-operation differences:
-OSC 4 should stop at an invalid pair and skip empty tokens; dynamic OSC 10-12
-should support successive color parameters; nonempty OSC 110-112 reset arguments
-must be rejected; OSC 104 invalid-only lists and valid-but-unsupported special
-entries need distinct handling. Legacy color operations also need native fixed
-capture limits and matching reply terminators. Managed host-configured eight-bit
-OSC reports intentionally differ from libghostty-vt's fixed sixteen-bit reports;
-the native adapter's corresponding host policy remains to be reconciled. These
-items are outstanding requirements, not exclusions from full parity.
+The same audit identified pre-existing legacy color-operation differences and a
+native host report-policy gap; the subsequent implementation is described above.
 
 ### Snapshot color-state installation (2026-09-23)
 

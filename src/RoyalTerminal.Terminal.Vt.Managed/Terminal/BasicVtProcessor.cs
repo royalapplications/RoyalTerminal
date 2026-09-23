@@ -2702,11 +2702,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ReadOnlySpan<byte> rawPayload = CollectionsMarshal.AsSpan(_oscBuffer);
-        if (rawPayload.StartsWith("21;"u8))
+        int colorSeparator = rawPayload.IndexOf((byte)';');
+        ReadOnlySpan<byte> colorSelector = colorSeparator < 0 ? rawPayload : rawPayload[..colorSeparator];
+        if (TryOscColorOperation(colorSelector, out int colorOperation))
         {
-            string colors = Encoding.UTF8.GetString(rawPayload[3..]);
+            string colors = colorSeparator < 0 ? string.Empty : Encoding.UTF8.GetString(rawPayload[(colorSeparator + 1)..]);
             _oscBuffer.Clear();
-            HandleKittyColors(colors.AsSpan(), bellTerminator);
+            if (colorOperation == 21) HandleKittyColors(colors.AsSpan(), bellTerminator);
+            else HandleOscColors(colorOperation, colors.AsSpan(), bellTerminator);
             return;
         }
         if (rawPayload.StartsWith("8;"u8))
@@ -2738,33 +2741,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 1:
             case 2:
                 TitleCallback?.Invoke(value);
-                break;
-
-            case 4:
-                HandleOscPalette(value);
-                break;
-
-            case 104:
-                HandleOscPaletteReset(value);
-                break;
-
-            case 110:
-            case 111:
-            case 112:
-                _colors.SetDynamic(selectorCode - 100, null);
-                ApplyEffectiveTheme(_colors.GetEffectiveTheme());
-                break;
-
-            case 10:
-                HandleOscDynamicColor(selectorCode, value);
-                break;
-
-            case 11:
-                HandleOscDynamicColor(selectorCode, value);
-                break;
-
-            case 12:
-                HandleOscDynamicColor(selectorCode, value);
                 break;
 
             case 7:
@@ -3220,111 +3196,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (id.IsEmpty) counter = unchecked(counter + 1);
     }
 
-    private void HandleOscPalette(string value)
-    {
-        string[] parts = value.Split(';', StringSplitOptions.TrimEntries);
-        if (parts.Length < 2)
-        {
-            return;
-        }
-
-        bool changed = false;
-        for (int i = 0; i + 1 < parts.Length; i += 2)
-        {
-            if (!int.TryParse(parts[i], out int colorIndex))
-            {
-                continue;
-            }
-
-            if ((uint)colorIndex >= 256)
-            {
-                continue;
-            }
-            string colorSpec = parts[i + 1];
-            if (colorSpec == "?")
-            {
-                uint color = _colors.GetPalette(colorIndex);
-                string rgb = FormatRgbColor(color);
-                string response = $"\x1b]4;{colorIndex};{rgb}\x1b\\";
-                ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
-                continue;
-            }
-
-            if (!TryParseOscColorSpec(colorSpec, out uint parsedColor))
-            {
-                continue;
-            }
-
-            _colors.SetPalette(colorIndex, parsedColor);
-            changed = true;
-        }
-
-        if (changed)
-        {
-            ApplyEffectiveTheme(_colors.GetEffectiveTheme());
-        }
-    }
-
-    private void HandleOscPaletteReset(string value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            _colors.ResetPalette(null);
-        }
-        else
-        {
-            foreach (Range part in value.AsSpan().Split(';'))
-            {
-                if (int.TryParse(value.AsSpan(part), NumberStyles.None, CultureInfo.InvariantCulture, out int index) &&
-                    (uint)index < 256)
-                {
-                    _colors.ResetPalette(index);
-                }
-            }
-        }
-
-        ApplyEffectiveTheme(_colors.GetEffectiveTheme());
-    }
-
-    private void HandleOscDynamicColor(int selectorCode, string value)
-    {
-        if (value == "?")
-        {
-            // A restored native terminal can have no configured dynamic color.
-            // Rendering fallbacks must not invent a protocol query response.
-            uint? color = _colors.GetDynamic(selectorCode) ?? (selectorCode == 12 ? _colors.GetDynamic(10) : null);
-            if (color is uint queryColor)
-                SendOscColorResponse(selectorCode.ToString(), queryColor);
-            return;
-        }
-
-        if (!TryParseOscColorSpec(value, out uint parsedColor))
-        {
-            return;
-        }
-
-        _colors.SetDynamic(selectorCode, parsedColor);
-        ApplyEffectiveTheme(_colors.GetEffectiveTheme());
-    }
-
-    private void SendOscColorResponse(string selector, uint argbColor)
-    {
-        string rgb = FormatRgbColor(argbColor);
-        string response = $"\x1b]{selector};{rgb}\x1b\\";
-        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
-    }
-
-    private string FormatRgbColor(uint argbColor)
-    {
-        int red = (int)((argbColor >> 16) & 0xFF);
-        int green = (int)((argbColor >> 8) & 0xFF);
-        int blue = (int)(argbColor & 0xFF);
-
-        return _theme.OscColorReportFormat == TerminalOscColorReportFormat.Bit8
-            ? $"rgb:{red:x2}/{green:x2}/{blue:x2}"
-            : $"rgb:{red * 0x101:x4}/{green * 0x101:x4}/{blue * 0x101:x4}";
-    }
-
     private void ProcessDcsString(byte b)
     {
         if (b == 0x1B)
@@ -3699,16 +3570,19 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private int GetOscBufferLimit(ReadOnlySpan<byte> incoming)
     {
-        // The native OSC 21 capture is fixed-size (2048 payload bytes), not
+        // Native color OSC captures are fixed-size (2048 payload bytes), not
         // allocating like clipboard strings. Recognize prefixes split anywhere
         // across bytewise or bulk input before retaining a large incoming span.
         ReadOnlySpan<byte> retained = CollectionsMarshal.AsSpan(_oscBuffer);
-        if (retained.Length >= 3) return retained.StartsWith("21;"u8) ? 2051 : MaxOscBufferBytes;
-        if (incoming.Length < 3 - retained.Length) return MaxOscBufferBytes;
-        Span<byte> prefix = stackalloc byte[3];
-        retained.CopyTo(prefix);
-        incoming[..(3 - retained.Length)].CopyTo(prefix[retained.Length..]);
-        return prefix.SequenceEqual("21;"u8) ? 2051 : MaxOscBufferBytes;
+        Span<byte> prefix = stackalloc byte[4];
+        int retainedLength = Math.Min(prefix.Length, retained.Length);
+        retained[..retainedLength].CopyTo(prefix);
+        int added = Math.Min(prefix.Length - retainedLength, incoming.Length);
+        incoming[..added].CopyTo(prefix[retainedLength..]);
+        ReadOnlySpan<byte> combined = prefix[..(retainedLength + added)];
+        int separator = combined.IndexOf((byte)';');
+        return separator >= 0 && TryOscColorOperation(combined[..separator], out _)
+            ? 2048 + separator + 1 : MaxOscBufferBytes;
     }
 
     private bool TryHandleAnywhereCancelControl(byte b)
@@ -5356,9 +5230,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         index = Math.Clamp(index, 0, 255);
         return _theme.Palette[index];
     }
-
-    private static bool TryParseOscColorSpec(string value, out uint color)
-        => ManagedColorParser.TryParse(value.AsSpan(), out color);
 
     #endregion
 

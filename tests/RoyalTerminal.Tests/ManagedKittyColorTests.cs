@@ -105,7 +105,7 @@ public sealed class ManagedKittyColorTests(ITestOutputHelper output)
         return available;
     }
 
-    private static void Compare(string input, bool everySplit)
+    internal static void Compare(string input, bool everySplit)
     {
         byte[] bytes = Encoding.Latin1.GetBytes(input);
         using GhosttyTerminal native = new(8, 2);
