@@ -16,8 +16,8 @@ export fn ghostty_royal_mouse_state(
     if (result.size < @sizeOf(RoyalMouseState)) return -2;
     const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
     result.* = .{
-        .tracking = @intFromEnum(t.flags.mouse_event),
-        .format = @intFromEnum(t.flags.mouse_format),
+        .tracking = @intCast(@intFromEnum(t.flags.mouse_event)),
+        .format = @intCast(@intFromEnum(t.flags.mouse_format)),
     };
     return 0;
 }
