@@ -13,6 +13,7 @@ public sealed partial class BasicVtProcessor
 
     private ulong _savedModeValues = SnapshotInitialModes;
     private ulong _defaultModeValues = SnapshotInitialModes;
+    private bool _defaultCursorBlink;
     // Protocol mode values are independent of which buffer is actually active.
     // For example, resetting 47 after setting 1049 selects primary but leaves
     // the 1049 mode value set, just as Ghostty's ModeState does.
@@ -34,6 +35,8 @@ public sealed partial class BasicVtProcessor
             SetPolicyModeValue(SnapshotDecModes[i], (values & (1UL << (i + 4))) != 0, ansi: false);
         _savedModeValues = header.SavedModes;
         _defaultModeValues = header.DefaultModes;
+        // Null means the emulator's blinking default, not "leave mode 12 alone".
+        _defaultCursorBlink = header.CursorDefaultBlink ?? true;
         // The header validates these enum registries, whose values match the
         // managed enums. Neither field is derived from the restored mode bank.
         _mouseModeState = new((TerminalMouseTrackingMode)header.MouseEvent, (TerminalMouseEncoding)header.MouseFormat);

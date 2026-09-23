@@ -93,6 +93,26 @@ public sealed class ManagedSnapshotModeInstallationTests(ITestOutputHelper outpu
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
+    [Theory]
+    [InlineData((byte)0)]
+    [InlineData((byte)1)]
+    [InlineData((byte)2)]
+    public void RisCursorBlinkPolicyOverridesTheDefaultModeBank(byte policy)
+    {
+        if (!Available()) return;
+        foreach (ulong defaults in new[] { 0UL, GhosttySnapshotTerminalHeader.ModeMask })
+        {
+            List<SnapshotTestRecord> records = Records(0, 0, defaults);
+            records[0].Payload[31] = policy;
+            using GhosttyTerminal native = GhosttySnapshot.Decode(SnapshotTestRecords.Encode(records));
+            GhosttySnapshotTerminalHeader header = NativeHeader(native);
+            using BasicVtProcessor managed = new(new TerminalScreen(header.Columns, header.Rows));
+            managed.InstallSnapshotModes(header);
+            native.Write("\u001bc"u8); managed.Process("\u001bc"u8);
+            AssertBanks(native, managed);
+        }
+    }
+
     private static GhosttySnapshotTerminalHeader Header(ulong current, ulong saved, ulong defaults)
         => GhosttySnapshotTerminalHeader.Read(Records(current, saved, defaults)[0].Payload, 100);
 
@@ -103,7 +123,7 @@ public sealed class ManagedSnapshotModeInstallationTests(ITestOutputHelper outpu
         BinaryPrimitives.WriteUInt64LittleEndian(terminal.AsSpan(39), current);
         BinaryPrimitives.WriteUInt64LittleEndian(terminal.AsSpan(47), saved);
         BinaryPrimitives.WriteUInt64LittleEndian(terminal.AsSpan(55), defaults);
-        terminal[31] = 0; // No cursor blink policy overriding the restored bank at RIS.
+        terminal[31] = 0; // Null policy selects the emulator's blinking default at RIS.
         terminal[34] = terminal[35] = 0;
         for (int i = 0; i < records.Count; i++)
             if (records[i].Tag == GhosttySnapshotRecordTag.Continuation) records[i] = new(records[i].Tag, []);

@@ -5328,6 +5328,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         InitTabStops();
         ApplyConfiguredModeDefaults();
 
+        // Ghostty fullReset selects the configured cursor after modes.reset;
+        // this policy takes precedence over the restored default mode bank.
+        SetExtendedDecMode(12, _defaultCursorBlink);
+
         switch (screenResetMode)
         {
             case SessionScreenResetMode.ClearViewport:
