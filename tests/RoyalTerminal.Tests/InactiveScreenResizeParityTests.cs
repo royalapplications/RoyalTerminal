@@ -66,6 +66,7 @@ public sealed class InactiveScreenResizeParityTests(ITestOutputHelper output)
             expected.Resize(width, height, reflowOnResize: false);
             native.NotifyResize(width, height, width * 8, height * 16);
             managed.ResizeScreen(width, height, width * 8, height * 16, reflowOnResize: true);
+            output.WriteLine($"Resized to {width}x{height}: native cursor {native.CursorCol},{native.CursorRow}; managed {managed.CursorCol},{managed.CursorRow}");
             Compare(expected, native, actual, managed);
         }
         native.Process("\u001b[?47h\u001b8X"u8);

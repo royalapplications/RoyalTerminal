@@ -2081,6 +2081,13 @@ public sealed partial class TerminalScreen
         int mappedAbsoluteRow = trackedAbsoluteRow;
         int mappedColumn = Math.Clamp(trackedColumn, 0, columns);
 
+        // Ghostty shrinks height before narrowing columns and after widening
+        // them. Retire blank, unpinned bottom rows before creating history.
+        bool trimBottom = trackedViewportPosition.HasValue &&
+            !preserveViewportTopOnRowsIncrease && viewportRows < oldViewportRows;
+        if (trimBottom && columns <= oldColumns)
+            TrimUnpinnedBlankRowsForHeightShrink(oldViewportRows - viewportRows, trackedAbsoluteRow);
+
         if (columns != oldColumns)
         {
             if (reflowOnResize)
@@ -2099,6 +2106,9 @@ public sealed partial class TerminalScreen
                 ResizeRows(columns);
             }
         }
+
+        if (trimBottom && columns > oldColumns)
+            TrimUnpinnedBlankRowsForHeightShrink(oldViewportRows - viewportRows, mappedAbsoluteRow);
 
         Columns = columns;
         ViewportRows = viewportRows;

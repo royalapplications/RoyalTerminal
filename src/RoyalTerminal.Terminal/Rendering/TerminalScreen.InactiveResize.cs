@@ -5,6 +5,26 @@ namespace RoyalTerminal.Avalonia.Rendering;
 
 public sealed partial class TerminalScreen
 {
+    private void TrimUnpinnedBlankRowsForHeightShrink(int limit, int cursorAbsoluteRow)
+    {
+        while (limit-- > 0 && _rows.Count > 1)
+        {
+            int last = _rows.Count - 1;
+            if (last == cursorAbsoluteRow || RowHasContent(_rows[last])) break;
+            bool pinned = false;
+            foreach (TrackedCell cell in _trackedAnchors.Values)
+            {
+                if (cell.Alternate == _alternateBufferActive && cell.Row == last)
+                {
+                    pinned = true;
+                    break;
+                }
+            }
+            if (pinned) break;
+            _rows.RemoveRange(last, 1);
+        }
+    }
+
     /// <summary>
     /// Temporarily exposes an existing dormant buffer to the same resize machinery.
     /// Caller holds the screen lock, must dispose the scope, and must not publish
