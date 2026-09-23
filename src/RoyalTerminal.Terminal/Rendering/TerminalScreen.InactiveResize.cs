@@ -5,19 +5,34 @@ namespace RoyalTerminal.Avalonia.Rendering;
 
 public sealed partial class TerminalScreen
 {
-    private void TrimUnpinnedBlankRowsForHeightShrink(int limit, int cursorAbsoluteRow)
+    private void TrimUnpinnedBlankRowsForHeightShrink(int limit, int cursorAbsoluteRow,
+        IReadOnlyList<ReflowAnchorPosition>? remappedPins = null)
     {
         while (limit-- > 0 && _rows.Count > 1)
         {
             int last = _rows.Count - 1;
             if (last == cursorAbsoluteRow || RowHasContent(_rows[last])) break;
             bool pinned = false;
-            foreach (TrackedCell cell in _trackedAnchors.Values)
+            if (remappedPins is not null)
             {
-                if (cell.Alternate == _alternateBufferActive && cell.Row == last)
+                foreach (ReflowAnchorPosition pin in remappedPins)
                 {
-                    pinned = true;
-                    break;
+                    if ((pin.IsMapped ? pin.NewAbsoluteRow : pin.OldAbsoluteRow) == last)
+                    {
+                        pinned = true;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                foreach (TrackedCell cell in _trackedAnchors.Values)
+                {
+                    if (cell.Alternate == _alternateBufferActive && cell.Row == last)
+                    {
+                        pinned = true;
+                        break;
+                    }
                 }
             }
             if (pinned) break;

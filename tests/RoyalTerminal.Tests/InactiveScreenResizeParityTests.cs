@@ -88,6 +88,28 @@ public sealed class InactiveScreenResizeParityTests(ITestOutputHelper output)
         }
     }
 
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(false, 4)]
+    [InlineData(true, 1)]
+    [InlineData(true, 4)]
+    public void AlternateHeightShrinkRetainsBottomContentAndRemapsSavedPins(bool inactive, int savedRow)
+    {
+        if (!Available()) return;
+        TerminalScreen expected = new(8, 4), actual = new(8, 4);
+        using GhosttyVtProcessor native = new(expected);
+        using BasicVtProcessor managed = new(actual);
+        byte[] input = Encoding.UTF8.GetBytes($"\u001b[?47hfirst\r\nsecond\r\nthird\r\nfourth\u001b[{savedRow};2H\u001b7\u001b[4;2H" +
+            (inactive ? "\u001b[?47l" : ""));
+        native.Process(input); managed.Process(input);
+        expected.Resize(8, 2, reflowOnResize: false);
+        native.NotifyResize(8, 2, 64, 32);
+        managed.ResizeScreen(8, 2, 64, 32, reflowOnResize: true);
+        byte[] restore = Encoding.ASCII.GetBytes((inactive ? "\u001b[?47h" : "") + "\u001b8X");
+        native.Process(restore); managed.Process(restore);
+        Compare(expected, native, actual, managed);
+    }
+
     [Fact]
     public void InactiveResizeScopeRestoresTheVisibleBufferOnFailure()
     {

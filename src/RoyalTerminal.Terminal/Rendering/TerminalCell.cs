@@ -2108,7 +2108,7 @@ public sealed partial class TerminalScreen
         }
 
         if (trimBottom && columns > oldColumns)
-            TrimUnpinnedBlankRowsForHeightShrink(oldViewportRows - viewportRows, mappedAbsoluteRow);
+            TrimUnpinnedBlankRowsForHeightShrink(oldViewportRows - viewportRows, mappedAbsoluteRow, reflowAnchors);
 
         Columns = columns;
         ViewportRows = viewportRows;
@@ -2131,7 +2131,17 @@ public sealed partial class TerminalScreen
         {
             if (_rows.Count > ViewportRows)
             {
-                _rows.RemoveRange(ViewportRows, _rows.Count - ViewportRows);
+                if (trackedViewportPosition.HasValue)
+                {
+                    // Native no-scrollback screens erase the history created
+                    // by shrinking: retain the bottom active rows, not the top.
+                    removedRows = _rows.Count - ViewportRows;
+                    _rows.RemoveFirst(removedRows);
+                }
+                else
+                {
+                    _rows.RemoveRange(ViewportRows, _rows.Count - ViewportRows);
+                }
             }
         }
         else
@@ -2224,7 +2234,9 @@ public sealed partial class TerminalScreen
             row.IsDirty = true;
         }
 
-        return GetViewportPositionForAbsoluteRow(mappedAbsoluteRow, mappedColumn);
+        return trackedViewportPosition.HasValue && mappedAbsoluteRow < _rows.Count - ViewportRows
+            ? new TerminalGridPosition(0, 0)
+            : GetViewportPositionForAbsoluteRow(mappedAbsoluteRow, mappedColumn);
     }
 
     private int CalculateWindowsPtyResizeViewportTop(

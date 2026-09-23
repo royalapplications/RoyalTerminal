@@ -5734,15 +5734,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         bool gridSizeChanged = columns != _screen.Columns || rows != _screen.ViewportRows;
         bool discardHiddenCells = columns < _screen.Columns &&
             (alternateScreen || (!reflowOnResize || !_autoWrap) && !preserveViewportTopOnRowsIncrease);
-        int previousCursorCol = _cursorCol;
-        int previousCursorRow = _cursorRow;
         bool previousDelayedWrap = _delayedWrap;
         // Ghostty pins the actual cell, including a pending-wrap cursor.
         // Pending wrap survives independently; it is not an end-column pin.
         int resizeCursorCol = _cursorCol;
-        int alternateViewportTop = alternateScreen
-            ? Math.Max(0, _screen.TotalRows - _screen.ViewportRows)
-            : 0;
         int restoreScrollOffset = alternateScreen ? 0 : _screen.ScrollOffset;
         if (_screen.ScrollOffset != 0)
         {
@@ -5761,7 +5756,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 columns,
                 rows,
                 reflowOnResize && _autoWrap && !alternateScreen,
-                alternateScreen ? null : new TerminalGridPosition(resizeCursorCol, _cursorRow),
+                new TerminalGridPosition(resizeCursorCol, _cursorRow),
                 trackedAbsolutePositions,
                 preserveViewportTopOnRowsIncrease && !alternateScreen);
 
@@ -5774,10 +5769,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 mappedCursor = mappedRow < 0 ? new(0, 0) : mappedCursor with { Row = mappedRow };
             }
 
-            if (alternateScreen)
-            {
-                _screen.PadBottomViewportToPreserveTop(alternateViewportTop);
-            }
             if (savedCursorAnchor is not null)
             {
                 RemapSavedCursorAfterResize(savedCursorAnchor);
@@ -5793,17 +5784,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
         }
 
-        if (alternateScreen)
-        {
-            _cursorCol = previousCursorCol;
-            _cursorRow = previousCursorRow;
-            _delayedWrap = previousDelayedWrap;
-        }
-        else
-        {
-            SetCursorFromMappedResize(columns, mappedCursor, previousDelayedWrap);
-            _cursorRow = mappedCursor.Row;
-        }
+        SetCursorFromMappedResize(columns, mappedCursor, previousDelayedWrap);
+        _cursorRow = mappedCursor.Row;
 
         _cursorCol = Math.Clamp(_cursorCol, 0, columns - 1);
         _cursorRow = Math.Clamp(_cursorRow, 0, rows - 1);
