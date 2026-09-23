@@ -201,6 +201,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     // UTF-8 multi-byte decoding state
     private int _utf8Codepoint;
     private int _utf8Remaining;
+    private byte _utf8NextMinimum;
+    private byte _utf8NextMaximum;
     private int _lastGraphicCodepoint;
     private byte[]? _enquiryResponse;
 
@@ -443,7 +445,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             // Only the final unfinished fragment needs retaining. Record starts
             // without rescanning ordinary text or copying completed commands.
-            if (IsParserGround || (_state == ParserState.Ground && _utf8Remaining > 0 && (b & 0xC0) != 0x80))
+            if (IsParserGround || (_state == ParserState.Ground && _utf8Remaining > 0 && !IsUtf8Continuation(b)))
             {
                 continuationStart = i;
             }
@@ -478,6 +480,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
                 ProcessPrintableAscii(data[i..end]);
                 i = end - 1;
+                continue;
+            }
+
+            // Finish/reject a partial scalar before interpreting controls, including
+            // CAN/SUB. Ghostty emits U+FFFD for the interrupted scalar first.
+            if (_state == ParserState.Ground && _utf8Remaining > 0)
+            {
+                ProcessGround(b);
+                if (stopAtGround && IsParserGround) { consumed = i + 1; break; }
                 continue;
             }
 
@@ -1737,10 +1748,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // Handle UTF-8 continuation bytes first
         if (_utf8Remaining > 0)
         {
-            if ((b & 0xC0) == 0x80) // Valid continuation byte
+            if (IsUtf8Continuation(b))
             {
                 _utf8Codepoint = (_utf8Codepoint << 6) | (b & 0x3F);
                 _utf8Remaining--;
+                _utf8NextMinimum = 0x80;
+                _utf8NextMaximum = 0xBF;
                 if (_utf8Remaining == 0)
                 {
                     // UTF-8 encoded C1 controls are ignored in ground state. This
@@ -1753,9 +1766,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
             else
             {
-                // Invalid continuation — reset and process this byte normally
+                // Replace the invalid prefix and retry this byte as UTF-8. A
+                // rejected C1 byte is not a legacy raw C1 command in this path.
                 _utf8Remaining = 0;
-                ProcessGround(b);
+                PutChar(0xFFFD);
+                if (b >= 0x80) ProcessUtf8Lead(b);
+                else if (b == 0x7F) PutChar(b); // Ghostty's decoded-scalar path prints DEL.
+                else ProcessGround(b);
             }
             return;
         }
@@ -1846,25 +1863,43 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     else
                         PutChar(b);
                 }
-                else if ((b & 0xE0) == 0xC0)
-                {
-                    _utf8Codepoint = b & 0x1F;
-                    _utf8Remaining = 1;
-                }
-                else if ((b & 0xF0) == 0xE0)
-                {
-                    _utf8Codepoint = b & 0x0F;
-                    _utf8Remaining = 2;
-                }
-                else if ((b & 0xF8) == 0xF0)
-                {
-                    _utf8Codepoint = b & 0x07;
-                    _utf8Remaining = 3;
-                }
                 else
                 {
+                    ProcessUtf8Lead(b);
                 }
                 break;
+        }
+    }
+
+    private bool IsUtf8Continuation(byte value) => value >= _utf8NextMinimum && value <= _utf8NextMaximum;
+
+    private void ProcessUtf8Lead(byte value)
+    {
+        _utf8NextMinimum = 0x80;
+        _utf8NextMaximum = 0xBF;
+        if (value is >= 0xC2 and <= 0xDF)
+        {
+            _utf8Codepoint = value & 0x1F;
+            _utf8Remaining = 1;
+        }
+        else if (value is >= 0xE0 and <= 0xEF)
+        {
+            _utf8Codepoint = value & 0x0F;
+            _utf8Remaining = 2;
+            if (value == 0xE0) _utf8NextMinimum = 0xA0; // No overlong scalars.
+            if (value == 0xED) _utf8NextMaximum = 0x9F; // No UTF-16 surrogates.
+        }
+        else if (value is >= 0xF0 and <= 0xF4)
+        {
+            _utf8Codepoint = value & 7;
+            _utf8Remaining = 3;
+            if (value == 0xF0) _utf8NextMinimum = 0x90;
+            if (value == 0xF4) _utf8NextMaximum = 0x8F; // U+10FFFF upper bound.
+        }
+        else
+        {
+            _utf8Codepoint = 0;
+            PutChar(0xFFFD);
         }
     }
 

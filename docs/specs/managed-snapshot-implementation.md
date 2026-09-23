@@ -34,6 +34,12 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
   Header C1 transitions and ground-boundary processing have focused coverage.
   A warmed 100,000-BEL run allocates zero bytes and leaves a four-byte continuation
   within an eight-byte cap. Retention processes spans without an omission-index list.
+- Managed incremental UTF-8 validates lead/continuation ranges, rejects overlong
+  scalars, surrogates and values beyond U+10FFFF, and emits U+FFFD before retrying
+  an offending byte. Interrupted scalars are committed before CAN/SUB or other
+  control effects, while a new unfinished scalar replaces the replay fragment.
+  Existing standalone raw C1 support remains a separate compatibility policy;
+  rejected UTF-8 bytes do not accidentally invoke that policy.
 - Complete PAGE/grid payloads: four compact cell widths, canonical trailing zero
   elision, wide-pair/scalar/semantic normalization, bounded UTF-32 suffixes,
   first-entry-wins style/hyperlink tables and reference resolution. Capacity hints
@@ -121,7 +127,8 @@ boundary while keeping presentation URL access convenient.
    continuation must resume byte-for-byte across UTF-8 and control-string splits.
    A native-valid wire continuation is not proof that the current managed parser
    supports every corresponding state: the ESC/CSI/control/ignore-state cases now
-   have focused tests, but remaining control-string/UTF-8 transitions and complete
+   have focused tests, as do incremental UTF-8 rejection/replay boundaries, but
+   remaining control-string transitions, the raw C1 compatibility policy and complete
    current/saved charset semantics still need integration coverage before exposure.
 3. Native-to-managed and managed-to-native differential tests, including every
    upstream complete fixture, both screens, history, pending wrap, saved cursors,

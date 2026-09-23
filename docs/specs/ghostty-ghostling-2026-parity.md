@@ -503,7 +503,7 @@ that the open requirements above have already reached full parity.
 | Permanent modes | Reports DECECM 117 as permanently reset, matching Ghostty's current DECRQM behavior |
 | Title privacy | CSI 21 t is disabled by default and requires an explicit managed option, matching the native wrapper's opt-in policy |
 | Unicode | Cell-width overrides are updated to Unicode 18; an exhaustive scalar-value parity test compares managed widths to the pinned native library |
-| UTF-8 C1 | UTF-8-encoded U+0080..U+009F values are ignored in ground state, matching Ghostty; single-byte C1 controls retain their control meaning |
+| UTF-8 C1 | UTF-8-encoded U+0080..U+009F values are ignored in ground state, matching Ghostty; managed standalone single-byte C1 commands remain a legacy compatibility divergence requiring resolution |
 | Print throughput | Contiguous printable ASCII is processed as a run, avoiding a parser-state dispatch for every ordinary byte |
 | Paste | The shared interface supports terminal-aware encoding; the managed engine continues to produce the same bracketed-paste protocol directly |
 
@@ -668,6 +668,36 @@ The final full macOS unit/headless run passed **2,032 tests, 16 conditional skip
 (2,048 total)** with zero failures in `csi-parser-final.trx`. This includes the
 updated DECRQSS effective-color policy regression and native comparisons for the
 same out-of-range palette indices. Cross-platform runtime validation remains open.
+
+The next parser pass replaces silent dropping of interrupted UTF-8 and acceptance
+of overlong scalars with Ghostty's incremental error-replacement behavior. Lead
+ranges C2–DF/E0–EF/F0–F4 and constrained second-byte ranges reject overlong values,
+surrogates and values above U+10FFFF immediately. An invalid prefix produces
+U+FFFD, then retries the offending byte, preserving a subsequent valid scalar or
+control sequence. CAN/SUB no longer discard a pending scalar without replacement.
+Only a new incomplete scalar remains in continuation after prior output commits.
+Reference: Ghostty `UTF8Decoder.zig`/`stream.zig` specify replacement plus retry;
+xterm.js `TextDecoder.ts` instead discards certain invalid prefixes, and Windows
+Terminal `til/u8u16convert.h` retains partial input around the Windows UTF-8
+conversion API. Ghostty is authoritative for this parity target. Existing managed
+standalone raw C1 command support is still a documented divergence, not evidence
+of complete byte-stream parity. No shell startup or PowerShell behavior is changed.
+
+The UTF-8 suite passed **31 tests**, including all **2,304** combinations of nine
+lead-byte boundary classes and every second byte, plus every split of malformed,
+valid-boundary, control-interrupted and new-lead sequences. The differential matrix
+reproduced and fixed DEL handling on the decoder's retry path: unlike DEL in an
+unfinished ESC/CSI header, this decoded scalar is printed by Ghostty. Ground-state
+standalone DEL/C1 compatibility policy remains separately unaudited. Native was
+available in `utf8-boundary-matrix.trx`; a warmed 1,000-iteration malformed-input
+loop allocated zero bytes. The first combined parser/replay suite passed 89 tests
+before the broader matrix and DEL regression were added.
+
+The subsequent full macOS run passed **2,063 tests, 16 conditional skips (2,079
+total)** with zero failures (`utf8-parser-full.trx`). CI run `35840483213` at
+preceding commit `fa116746a549dc992228b2aa9b80a49c1ca75f47` passed all six native
+builds; its macOS/Linux/Windows build-and-test jobs were still pending when checked.
+Those checks do not validate this later UTF-8 commit.
 
 Reference choice: Ghostty's snapshot per-record Zig codecs define the format.
 Windows Terminal `TextBuffer::SerializeTo` and xterm.js's serialize addon emit VT
