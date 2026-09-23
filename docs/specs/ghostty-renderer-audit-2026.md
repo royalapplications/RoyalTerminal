@@ -53,13 +53,66 @@ an applicable feature from the user's requested scope.
 | Upstream changes | Current execution evidence and required disposition |
 |---|---|
 | [`ca8868a29`](https://github.com/ghostty-org/ghostty/commit/ca8868a29) allocation-free whole-grapheme font selection | Audit found the span overload resolved only the **first rune**. A correction now checks every substantive cluster component and discovers candidates lazily, with no cluster-key/candidate-list allocation. Deterministic tests use the pinned JetBrains Mono/Noto Emoji font fixtures and a controlled matcher; validation is recorded below when completed. |
-| [`6f02d9aad`](https://github.com/ghostty-org/ghostty/commit/6f02d9aad) rasterize downloaded glyf directly into output bitmap, and associated APC glyph limits | RoyalTerminal has no corresponding downloaded-glyph glossary/raster pipeline in its managed Skia renderer. Updating libvt does not add this rendering feature to either processor's presentation. It requires explicit protocol/model/raster integration before claiming glyph parity. |
+| [`6f02d9aad`](https://github.com/ghostty-org/ghostty/commit/6f02d9aad) rasterize downloaded glyf directly into output bitmap, and associated APC glyph limits | Bounded managed outline decoding and direct reusable Skia paths are implemented and tested below. Live glossary/protocol integration, native extraction, placement, cache invalidation and terminal-row drawing remain open; these foundations alone do not enable the feature in either processor's presentation. |
 | [`5beb94c16`](https://github.com/ghostty-org/ghostty/commit/5beb94c16) / `88abb77b1` apply font-thicken to IME preedit | No `font-thicken` setting or matching preedit glyph raster path exists in the current RoyalTerminal renderer. The upstream fix cannot be applied merely by updating the library. Any new thickness option must affect ordinary and preedit text consistently and have rendering tests. |
 | [`6688aa072`](https://github.com/ghostty-org/ghostty/commit/6688aa072), [`97f57edcc`](https://github.com/ghostty-org/ghostty/commit/97f57edcc), [`72cf50855`](https://github.com/ghostty-org/ghostty/commit/72cf50855) idle DisplayLink, unfocused dirty redraws, lock-order fix | There is no Ghostty DisplayLink in RoyalTerminal. The equivalent obligations belong to Avalonia presentation scheduling: idle work must stop, dirty unfocused surfaces must still present, and stopping presentation must not invert terminal/render locks. The third-thread/presentation audit and tests must establish these obligations. |
 | [`c4e16970a`](https://github.com/ghostty-org/ghostty/commit/c4e16970a), [`4b4a5b241`](https://github.com/ghostty-org/ghostty/commit/4b4a5b241), [`a177ba90a`](https://github.com/ghostty-org/ghostty/commit/a177ba90a) hidden GPU resources, Metal callback teardown, DisplayLink failure | Ghostty-specific objects are absent. RoyalTerminal still needs its own renderer detach/dispose/visibility ownership review; the absence of those object types does not prove equivalent lifecycle behavior. |
 | [`de1336fad`](https://github.com/ghostty-org/ghostty/commit/de1336fad), [`131b293db`](https://github.com/ghostty-org/ghostty/commit/131b293db), [`c454a3bf4`](https://github.com/ghostty-org/ghostty/commit/c454a3bf4) Metal/font warmup | No matching Ghostty command queue/pipeline/font warmup code runs here. Skia/Avalonia owns those GPU resources. Cold-start profiling is required before adding an equivalent warmup to the actual renderer. |
 | [`a925a97e3`](https://github.com/ghostty-org/ghostty/commit/a925a97e3), [`4ff699343`](https://github.com/ghostty-org/ghostty/commit/4ff699343), [`22391ed64`](https://github.com/ghostty-org/ghostty/commit/22391ed64), related GTK/EGL/export changes | RoyalTerminal does not export Ghostty's DMA-BUF/GTK frames or call its OpenGL presentation code. These are not fixes executed by the libvt pin. RoyalTerminal interop descriptor/ownership/synchronization tests remain necessary for its separate external-target bridge. |
 | [`afc79b8cc`](https://github.com/ghostty-org/ghostty/commit/afc79b8cc), [`daeed25b3`](https://github.com/ghostty-org/ghostty/commit/daeed25b3), [`d166c05ed`](https://github.com/ghostty-org/ghostty/commit/d166c05ed), [`28b5bf905`](https://github.com/ghostty-org/ghostty/commit/28b5bf905) CoreText emoji lookup/OOM/display names and embedded emoji fonts | Skia font-manager calls, not Ghostty CoreText wrappers, execute here; RoyalTerminal does not ship Ghostty's embedded Noto emoji asset. Font availability and cluster coverage therefore need RoyalTerminal-specific testing, not assumed equivalence. |
+
+## Downloaded-glyph implementation foundation (2026-09-23)
+
+`TerminalGlyphDecoder` and `TerminalGlyphOutline` provide renderer-independent,
+owned, read-only outline data. They follow the pinned Ghostty `glyf.zig` decoder
+and `glyph/request.zig` resource limits: 64 KiB decoded payload, at most 5,461
+12-byte points per allocation, monotonic contour ends, bounded repeat expansion,
+signed/short/unchanged deltas, quadratic controls and full Int32 accumulation.
+Composite records and hinting instructions produce the corresponding protocol
+rejection categories; malformed records never return partial outlines. Bounding
+box hints are not trusted, zero-contour header-only records and trailing bytes
+match upstream. Validation precedes persistent allocations, and a warmed 1,000
+malformed-record loop allocates zero bytes.
+
+The decoder's result/reason agrees with native registration for every byte value
+at every position in Ghostty's triangle fixture, every truncation, multi-contour
+errors, short-vector records, empty records and both sides of the compressed-point
+and payload limits. Native availability was confirmed, not inferred from a green
+test that could skip its body. These checks validate acceptance/errors; they do
+not yet compare extracted native point arrays.
+
+`SkiaTerminalGlyphPath` preserves contour winding and uses native quadratic path
+segments, including implied midpoints and first/last off-curve cases. A cached path
+can draw directly into the destination canvas with a caller-provided foreground
+and placement transform, avoiding an intermediate bitmap/copy. Real Skia pixel
+tests cover a Y-flipped triangle, contour rotation, all-off-curve contours, holes
+and empty/degenerate outlines. Repeated drawing allocates zero managed bytes;
+this is not a claim about GPU/native allocations or end-to-end terminal speed.
+All 19 focused decoder/path tests pass (`glyph-path-final.trx`).
+The full macOS unit/headless run passes **2,143 / 16 conditional skips / 2,159
+total**, zero failures (`glyph-foundation-full.trx`).
+
+Reference decision: the pinned Ghostty implementation is authoritative for this
+new protocol; Windows Terminal's SOS/PM/APC path ignores these strings and xterm.js
+has no corresponding `25a1` handler. Ghostling has no glyph example. Neither is a
+substitute for Ghostty's glossary semantics. The protocol summary is vendored in
+`external/ghostty/src/terminal/apc/glyph.zig`, referencing the pinned Rio spec.
+
+Important upstream boundary: at the pinned revision, `Terminal.glyphProtocol`
+stores the glossary and sets a dirty flag, but production `Terminal.printCell`
+does not consult it for width. Source references to `glyf_rasterize.rasterize`
+are currently in rasterizer tests, not the application renderer. The protocol's
+documented width/render intentions must not be reported as already wired upstream
+application behavior. Integration work must distinguish that intended contract
+from the observable current libvt behavior and test any chosen divergence.
+
+Still required before claiming feature parity: bounded APC request/options/base64
+handling; session-owned FIFO glossary and reset/disable/synchronized-output rules;
+native glossary/outline extraction; system-font query coverage; width/layout
+overrides; Ghostty-compatible sizing/alignment/padding; renderer cache ownership,
+row invalidation and drawing in both engines; end-to-end differential/pixel tests.
+The path helper is not yet wired into live terminal rendering. This remains an
+explicit implementation requirement, not a scope exclusion.
 
 ## Whole-cluster fallback risk and implementation contract
 

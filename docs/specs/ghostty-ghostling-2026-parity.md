@@ -30,6 +30,14 @@ Tests cited elsewhere in this document describe existing coverage; they must not
 be used to mark these broader requirements complete until their specific evidence
 has been inspected.
 
+### Downloaded glyph foundation (2026-09-23)
+
+The [renderer audit](ghostty-renderer-audit-2026.md) now records implemented bounded
+managed glyf decoding and direct Skia path construction. Native registration
+acceptance/error differentials and real pixel/zero-managed-allocation tests pass.
+The 19-test foundation is not live protocol support: managed glossary/APC handling,
+native extraction, sizing/layout and both engines' row rendering remain required.
+
 ### DCS parser review (2026-09-23)
 
 The managed parser now separates DCS entry, parameters, intermediates, ignored
