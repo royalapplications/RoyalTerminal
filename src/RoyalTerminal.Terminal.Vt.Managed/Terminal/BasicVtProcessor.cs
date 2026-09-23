@@ -165,10 +165,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private bool _sendReceiveMode = true; // SRM (ANSI mode 12)
     private bool _insertMode;          // IRM (ANSI mode 4)
     private bool _lineFeedNewLineMode; // LNM (ANSI mode 20)
-    private int _widthPx;
-    private int _heightPx;
-    private int _reportCellWidthPx;
-    private int _reportCellHeightPx;
+    private uint _widthPx;
+    private uint _heightPx;
+    private uint _reportCellWidthPx;
+    private uint _reportCellHeightPx;
     private readonly HashSet<int> _extendedDecModesEnabled = [];
     private TerminalMouseModeState _mouseModeState;
 
@@ -180,7 +180,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private int _utf8Remaining;
     private byte _utf8NextMinimum;
     private byte _utf8NextMaximum;
-    private int _lastGraphicCodepoint;
+    private int _lastGraphicCodepoint = -1;
     private byte[]? _enquiryResponse;
 
     private enum ParserState
@@ -3467,14 +3467,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private int GetEffectiveCellWidthPx()
     {
         return _screen.Columns > 0 && _widthPx > 0
-            ? Math.Max(1, _widthPx / _screen.Columns)
+            ? (int)Math.Clamp(_widthPx / (uint)_screen.Columns, 1U, int.MaxValue)
             : 1;
     }
 
     private int GetEffectiveCellHeightPx()
     {
         return _screen.ViewportRows > 0 && _heightPx > 0
-            ? Math.Max(1, _heightPx / _screen.ViewportRows)
+            ? (int)Math.Clamp(_heightPx / (uint)_screen.ViewportRows, 1U, int.MaxValue)
             : 1;
     }
 
@@ -4029,7 +4029,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case 'b': // REP — Repeat preceding graphic character
             {
-                if (_lastGraphicCodepoint == 0)
+                if (_lastGraphicCodepoint < 0)
                 {
                     break;
                 }
@@ -4546,6 +4546,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _savedMainCursorRow = _cursorRow;
         _savedMainDelayedWrap = _delayedWrap;
         _alternateSemanticPen = _primarySemanticPen;
+        _primaryCharsets = _charsets;
         _alternateCursorStyle = _primaryCursorStyle;
         _alternateHyperlinkImplicitCounter = _primaryHyperlinkImplicitCounter;
         _currentHyperlinkId = 0;
@@ -4582,6 +4583,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _primaryHyperlinkImplicitCounter = _alternateHyperlinkImplicitCounter;
         }
         _screen.SwitchToPrimaryBuffer();
+        _alternateCharsets = _charsets;
         _currentHyperlinkId = 0;
         _kittyStore = _primaryKittyStore;
         AdvanceKittyAnimations();
@@ -5136,7 +5138,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _scrollBottom = _screen.ViewportRows - 1;
         ResetHorizontalMargins();
         _charsets = new();
-        _lastGraphicCodepoint = 0;
+        _lastGraphicCodepoint = -1;
         _oscBuffer.Clear();
         _isDiscardingOscPayload = false;
         _dcsBuffer.Clear();
@@ -5292,8 +5294,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _insertMode = false;
         _lineFeedNewLineMode = false;
         _primaryCursorStyle = _alternateCursorStyle = TerminalCursorStyle.Block;
-        _charsets = new();
-        _lastGraphicCodepoint = 0;
+        _charsets = _primaryCharsets = _alternateCharsets = new();
+        _lastGraphicCodepoint = -1;
         _primarySavedCursor = _alternateSavedCursor = null;
         _alternateEraseBackground = default;
         _savedAlternateCursorCol = _savedAlternateCursorRow = 0;
@@ -5364,9 +5366,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// </summary>
     public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
     {
-        UpdateReportCellSize(columns, rows, widthPx, heightPx);
-        _widthPx = Math.Max(0, widthPx);
-        _heightPx = Math.Max(0, heightPx);
+        _widthPx = (uint)Math.Max(0, widthPx);
+        _heightPx = (uint)Math.Max(0, heightPx);
+        UpdateReportCellSize(columns, rows, _widthPx, _heightPx);
         NotifyResize(columns, rows);
         EmitInBandSizeReport();
     }
@@ -5403,10 +5405,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         bool reflowOnResize,
         Span<TerminalGridPosition> trackedAbsolutePositions,
         bool preserveViewportTopOnRowsIncrease = false)
-        => ResizeScreenCore(columns, rows, widthPx, heightPx, reflowOnResize,
+        => ResizeScreenCore(columns, rows, (uint)Math.Max(0, widthPx), (uint)Math.Max(0, heightPx), reflowOnResize,
             trackedAbsolutePositions, preserveViewportTopOnRowsIncrease, reportSize: true);
 
-    private void ResizeScreenCore(int columns, int rows, int widthPx, int heightPx,
+    private void ResizeScreenCore(int columns, int rows, uint widthPx, uint heightPx,
         bool reflowOnResize, Span<TerminalGridPosition> trackedAbsolutePositions,
         bool preserveViewportTopOnRowsIncrease, bool reportSize)
     {
@@ -5415,8 +5417,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (reportSize) UpdateReportCellSize(columns, rows, widthPx, heightPx);
         EndRenderHold();
         SetExtendedDecMode(2026, false);
-        _widthPx = Math.Max(0, widthPx);
-        _heightPx = Math.Max(0, heightPx);
+        _widthPx = widthPx;
+        _heightPx = heightPx;
 
         int oldColumns = _screen.Columns;
         int oldRows = _screen.ViewportRows;

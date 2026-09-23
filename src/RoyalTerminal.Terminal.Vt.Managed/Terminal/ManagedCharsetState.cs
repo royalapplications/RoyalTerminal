@@ -14,6 +14,9 @@ internal struct ManagedCharsetState
     public ManagedCharsetState() => _bits = 2 << 10; // UTF-8 sets; GL=G0, GR=G2.
     internal readonly ushort Bits => _bits;
 
+    internal static ManagedCharsetState FromSnapshot(Snapshots.GhosttySnapshotCharset state)
+        => new() { _bits = state.Bits };
+
     internal void Designate(int slot, byte final)
     {
         int set = final switch { (byte)'B' => 1, (byte)'A' => 2, (byte)'0' => 3, _ => -1 };

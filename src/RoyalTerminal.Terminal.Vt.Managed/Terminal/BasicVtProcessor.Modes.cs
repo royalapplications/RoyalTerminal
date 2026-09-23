@@ -144,11 +144,11 @@ public sealed partial class BasicVtProcessor
         HomeCursor();
     }
 
-    private void UpdateReportCellSize(int columns, int rows, int widthPx, int heightPx)
+    private void UpdateReportCellSize(int columns, int rows, uint widthPx, uint heightPx)
     {
         // Host cell geometry remains stable across VT-requested column changes.
         // Unknown geometry is zero, not an invented font size.
-        _reportCellWidthPx = widthPx > 0 && columns > 0 ? Math.Max(1, widthPx / columns) : 0;
-        _reportCellHeightPx = heightPx > 0 && rows > 0 ? Math.Max(1, heightPx / rows) : 0;
+        _reportCellWidthPx = widthPx > 0 && columns > 0 ? Math.Max(1U, widthPx / (uint)columns) : 0;
+        _reportCellHeightPx = heightPx > 0 && rows > 0 ? Math.Max(1U, heightPx / (uint)rows) : 0;
     }
 }

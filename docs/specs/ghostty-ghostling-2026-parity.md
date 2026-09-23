@@ -2,6 +2,31 @@
 
 ## Reopened completion audit
 
+### Snapshot geometry and current/saved processor registers (2026-09-23)
+
+New unpublished installation primitives assign exact tab stops, unsigned 32-bit
+pixel geometry, scroll margins, nullable previous character and active-screen
+routing without resizing or executing VT commands. SCREEN installation resolves
+logical pens, preserves all charset slots (including arbitrary pending single
+shift), restores independent saved cursors, protection modes, semantic pens/click
+policies, hyperlink counters/current links, shapes and Kitty keyboard rings.
+Prompt-seen state is derived from resident rows/cells and the current semantic
+pen, not omitted history. Inactive cursor coordinates and alternate erase
+background survive for subsequent resize and 1049 entry behavior.
+
+Ghostty `snapshot/terminal.zig`, `snapshot/screen.zig`, `saveCursor`,
+`restoreCursor` and `switchScreen` are the references: current coordinates clamp
+to their physical page row, while saved coordinates clamp to terminal geometry;
+pending wrap is retained only at the corresponding edge. Windows Terminal and
+xterm.js save position, character maps and attributes, but their save policies
+and history coordinate models differ; the snapshot-v1 contract follows Ghostty.
+Dormant charset copies are updated at screen switches, leaving the printer's
+active charset register direct. No throughput improvement is claimed.
+
+These are processor assembly primitives, not yet a complete public restore:
+remaining terminal flags/metadata, continuation, export and quota-aware history
+orchestration are still open. Post-push validation is pending.
+
 ### Cursor appearance and default policy (2026-09-23)
 
 Ghostty `Terminal.setCursorStyle`, `cursor.zig`, `dcs.zig` and

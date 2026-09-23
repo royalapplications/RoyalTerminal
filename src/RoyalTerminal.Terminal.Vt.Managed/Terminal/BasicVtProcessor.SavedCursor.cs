@@ -7,6 +7,10 @@ namespace RoyalTerminal.Terminal;
 
 public sealed partial class BasicVtProcessor
 {
+    private ManagedCharsetState _primaryCharsets = new();
+    private ManagedCharsetState _alternateCharsets = new();
+    // The active register stays direct in the printer hot path. Dormant copies
+    // are updated only at screen switches and raw snapshot installation.
     private ManagedCharsetState _charsets = new();
     private SavedCursorState? _primarySavedCursor;
     private SavedCursorState? _alternateSavedCursor;
