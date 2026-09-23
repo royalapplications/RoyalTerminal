@@ -86,9 +86,11 @@ public sealed class ManagedSnapshotProcessorStateTests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void CurrentAndSavedCursorCoordinatesClampAgainstTheirDifferentExtents(bool alternate)
+    [InlineData(false, 2)]
+    [InlineData(true, 2)]
+    [InlineData(false, 5)]
+    [InlineData(true, 5)]
+    public void CurrentAndSavedCursorCoordinatesClampAgainstTheirDifferentExtents(bool alternate, int physicalWidth)
     {
         if (!Available()) return;
         List<SnapshotTestRecord> records = SnapshotTestRecords.Fixture();
@@ -97,6 +99,13 @@ public sealed class ManagedSnapshotProcessorStateTests(ITestOutputHelper output)
         {
             SnapshotTestRecord record = records[i];
             if (record.Tag == GhosttySnapshotRecordTag.Continuation) records[i] = new(record.Tag, []);
+            if (record.Tag == GhosttySnapshotRecordTag.Page && physicalWidth != 2)
+            {
+                TerminalRow[] rows = [new(physicalWidth), new(physicalWidth), new(physicalWidth)];
+                using MemoryStream payload = new();
+                GhosttySnapshotLivePage.Capture(rows, new TerminalScreen(2, 3), 100).WritePayloadTo(payload);
+                records[i] = new(record.Tag, payload.ToArray());
+            }
             if (record.Tag != GhosttySnapshotRecordTag.Screen) continue;
             BinaryPrimitives.WriteUInt16LittleEndian(record.Payload.AsSpan(12), ushort.MaxValue);
             BinaryPrimitives.WriteUInt16LittleEndian(record.Payload.AsSpan(14), ushort.MaxValue);
@@ -111,6 +120,7 @@ public sealed class ManagedSnapshotProcessorStateTests(ITestOutputHelper output)
         using GhosttyTerminal native = GhosttySnapshot.Decode(SnapshotTestRecords.Encode(records));
         using BasicVtProcessor managed = Stage(Read(native), out TerminalScreen screen);
         Compare(native, managed, screen);
+        Assert.Equal(physicalWidth - 1, managed.CursorCol);
         foreach (string command in new[] { "\u001b8X", "\u001b[?47h\u001b8Y", "\u001b[?47l\u001b8Z" })
         {
             byte[] bytes = Encoding.ASCII.GetBytes(command);
@@ -151,6 +161,27 @@ public sealed class ManagedSnapshotProcessorStateTests(ITestOutputHelper output)
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 1000; i++) _ = ManagedCharsetState.FromSnapshot(state);
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void SgrStatusReportsPreserveUnderlineVariantsAndNativeAttributeOrder(int underline)
+    {
+        if (!Available()) return;
+        using GhosttyVtProcessor native = new(new TerminalScreen(8, 3));
+        using BasicVtProcessor managed = new(new TerminalScreen(8, 3));
+        byte[]? expected = null, actual = null;
+        native.ResponseCallback = bytes => expected = bytes; managed.ResponseCallback = bytes => actual = bytes;
+        // Ghostty's DECRQSS omits underline color even though VT style export
+        // includes it. Preserve that distinction rather than inventing a reply.
+        byte[] sequence = Encoding.ASCII.GetBytes($"\u001b[1;2;3;4:{underline};5;7;8;9;53;38:5:20;48:2::1:2:3;58:5:4m\u001bP$qm\u001b\\");
+        native.Process(sequence); managed.Process(sequence);
+        Assert.Equal(expected, actual);
     }
 
     [Fact]

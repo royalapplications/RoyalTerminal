@@ -3652,20 +3652,20 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if ((_currentAttrs & CellAttributes.Bold) != 0) parameters.Add("1");
         if ((_currentAttrs & CellAttributes.Dim) != 0) parameters.Add("2");
         if ((_currentAttrs & CellAttributes.Italic) != 0) parameters.Add("3");
-        if (_currentUnderlineStyle == TerminalUnderlineStyle.Double)
+        if (_currentUnderlineStyle > TerminalUnderlineStyle.Single)
         {
-            parameters.Add("4:2");
+            parameters.Add($"4:{(int)_currentUnderlineStyle}");
         }
         else if (_currentUnderlineStyle != TerminalUnderlineStyle.None ||
                  (_currentAttrs & CellAttributes.Underline) != 0)
         {
             parameters.Add("4");
         }
+        if ((_currentDecorations & CellDecorations.Overline) != 0) parameters.Add("53");
         if ((_currentAttrs & CellAttributes.Blink) != 0) parameters.Add("5");
         if ((_currentAttrs & CellAttributes.Inverse) != 0) parameters.Add("7");
         if ((_currentAttrs & CellAttributes.Hidden) != 0) parameters.Add("8");
         if ((_currentAttrs & CellAttributes.Strikethrough) != 0) parameters.Add("9");
-        if ((_currentDecorations & CellDecorations.Overline) != 0) parameters.Add("53");
 
         AppendSgrColor(
             parameters,
