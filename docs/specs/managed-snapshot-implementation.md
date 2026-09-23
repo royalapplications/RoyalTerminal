@@ -11,6 +11,16 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
 
 ## Implemented and tested
 
+- History lifecycle application now captures the READY terminal lineage, declared
+  screens and alternate generation. It rechecks current width/presence/generation
+  on each page, applies compatible pages through the atomic prepend operation, and
+  permanently drops each sequence after its first gap. COW copies/publication retain
+  lineage; unrelated replacement state does not. RIS retains primary eligibility
+  but invalidates removed/recreated alternate storage, matching native tests.
+  The adapter must explicitly supply the current quota decision; native-compatible
+  byte/line accounting is **not** implemented by this lifecycle component. Applied
+  pages report row/cell prompt markers for the future processor-state update.
+
 - Validated history PAGEs can now be prepended atomically to either buffer without
   copying existing cells or row metadata. The ring buffer prepends in physical
   oldest-to-newest order; viewports retain row identity, and screen-owned tracked
@@ -18,7 +28,7 @@ contract; their screen/serialization mechanisms are not interchangeable codecs.
   registry changes separately; a late checked failure leaves rows, registries and
   link numbering unchanged. Unlinked pages avoid that registry copy. This is the
   storage commit primitive, not the complete incremental decoder: its caller must
-  still decide generation/width/quotas, latch dropped sequences, and update processor
+  still provide quota decisions and update processor
   semantic-prompt state. Stream validation already belongs to the ordered reader.
 
 - READY cell storage now stages both buffers directly without input replay, normal
@@ -227,10 +237,11 @@ runtime prerequisite does not itself expose managed snapshot restore.
 ## Remaining codec and integration order
 
 1. READY installation into a usable managed terminal and incremental history
-   reconciliation. The ordered wire reader and unpublished two-buffer cell staging
-   are implemented; full processor installation remains. History ingestion must remain safe if live input, reset
-   or resize occurs after READY, matching upstream generation/width/limit checks
-   and dropping the remaining older pages after the first gap.
+   reconciliation. The ordered wire reader, unpublished two-buffer cell staging,
+   atomic history prepend and lifecycle/gap application are implemented. Full
+   processor installation, quota accounting and orchestration remain. The lifecycle
+   component handles live changes after READY; its caller must supply the current
+   quota decision rather than treating every structurally valid page as applicable.
    Follow the actual upstream predicate, not a blanket resize/reset invalidation:
    `snapshot.zig.nextPage` checks the **current** column count and ScreenSet
    generation. Height-only resize is not inherently disqualifying; width restored

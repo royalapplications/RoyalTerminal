@@ -1558,6 +1558,46 @@ rows allocated **4,400 bytes**, including its new cell storage, rather than copy
 resident row metadata. Linked-page registry staging and occasional ring growth
 still allocate; this is not an allocation-free restore or end-to-end speed claim.
 
+### Incremental-history lifecycle application
+
+`GhosttySnapshotHistoryApplication` captures terminal lineage, declared keys and
+alternate generation at READY. Per-page eligibility checks current columns, buffer
+presence and generation. A rejected page permanently disables only its own sequence;
+other screens continue. History application failures poison the session. Structural
+validation and source ownership remain in `GhosttySnapshotStateReader`; quota
+approval is an explicit required argument, not an implicit unlimited policy.
+
+The managed screen retains lineage through synchronized-output copies and ownership
+publication. A separately installed terminal has a different lineage. Alternate
+removal advances its generation, while no-op removal and ordinary screen switching
+do not. As in Ghostty, RIS leaves primary's logical screen identity intact. Identity
+allocation is lazy, so ordinary processors without snapshot tracking pay no extra
+allocation for the lineage. Repeated dropped-page decisions allocate zero bytes.
+
+Native comparisons verify height-only resize, incompatible width, width restored
+before/after the first drop, primary RIS, crafted alternate history, and alternate
+removal/recreation followed by unaffected primary history. Other tests cover COW
+publication, unrelated replacement state, explicit quota rejection, undeclared
+routes/failure state and prompt detection on rows or cells. Prompt progress is emitted
+only for installed pages; the processor adapter still must consume that signal.
+
+Reference decision: Ghostty `snapshot.zig.nextPage`, `ScreenSet.remove` and
+`Terminal.fullReset` define this contract. xterm.js `BufferSet.reset` replaces both
+buffers, whereas Ghostty retains primary identity; RoyalTerminal follows Ghostty for
+binary snapshot history, not xterm's different reset ownership. Windows Terminal's
+VT text serialization does not provide this incremental binary contract.
+
+The focused snapshot-history/storage/publication suite passes **69 tests**, zero
+skips/failures (`snapshot-history-application-focused.trx`) at `92e830f`, native
+available on macOS arm64. This closes lifecycle eligibility, not the outstanding
+byte/line quota accounting, processor-state installation or public restore API.
+
+Full post-push Release validation through `92e830f`: **2,651 passed, 16 conditional
+skips, zero failures (2,667 total)** (`snapshot-history-application-full.trx`). All
+18 new lifecycle/prompt tests pass, with native available on macOS arm64. Build has
+no warnings/errors. Documentation CI passed; the six native builds in run
+`35871055372` were pending at inspection. Other-platform runtime sign-off remains.
+
 ## Validation requirements
 
 - Build the release native library with Zig 0.16 using `scripts/build-native.sh --release`.
