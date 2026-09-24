@@ -803,11 +803,11 @@ public class TerminalScreenTests
                 out string snapshot));
 
         string savedGamesLine = snapshot
-            .Split(Environment.NewLine)
+            .Split('\n') // Snapshot export uses Ghostty's LF contract, including on Windows.
             .Single(line => line.Contains("Saved Games", StringComparison.Ordinal));
         Assert.DoesNotContain("Searches", savedGamesLine, StringComparison.Ordinal);
-        Assert.DoesNotContain(Environment.NewLine + "hotos", snapshot, StringComparison.Ordinal);
-        Assert.DoesNotContain(Environment.NewLine + "usic", snapshot, StringComparison.Ordinal);
+        Assert.DoesNotContain("\nhotos", snapshot, StringComparison.Ordinal);
+        Assert.DoesNotContain("\nusic", snapshot, StringComparison.Ordinal);
     }
 
     [Fact]

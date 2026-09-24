@@ -963,7 +963,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             SnapshotCellStyleKey style = CreateSnapshotStyleKey(cell);
             if (currentStyle is null || currentStyle.Value != style)
             {
-                builder.Append(BuildStyledSgrSequence(cell));
+                ManagedSgrFormatter.Append(builder, cell);
                 currentStyle = style;
             }
 
@@ -1133,44 +1133,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             : null;
     }
 
-    private string BuildStyledSgrSequence(TerminalCell cell)
-    {
-        List<int> parameters = [0];
-
-        if ((cell.Attributes & CellAttributes.Bold) != 0) parameters.Add(1);
-        if ((cell.Attributes & CellAttributes.Dim) != 0) parameters.Add(2);
-        if ((cell.Attributes & CellAttributes.Italic) != 0) parameters.Add(3);
-
-        TerminalUnderlineStyle underlineStyle = GetEffectiveUnderlineStyle(cell);
-        if (underlineStyle == TerminalUnderlineStyle.Double)
-        {
-            parameters.Add(21);
-        }
-        else if (underlineStyle != TerminalUnderlineStyle.None)
-        {
-            parameters.Add(4);
-        }
-
-        if ((cell.Attributes & CellAttributes.Blink) != 0) parameters.Add(5);
-        if ((cell.Attributes & CellAttributes.Inverse) != 0) parameters.Add(7);
-        if ((cell.Attributes & CellAttributes.Hidden) != 0) parameters.Add(8);
-        if ((cell.Attributes & CellAttributes.Strikethrough) != 0) parameters.Add(9);
-        if ((cell.Decorations & CellDecorations.Overline) != 0) parameters.Add(53);
-
-        AppendRgbParameters(parameters, foreground: true, cell.Foreground);
-        AppendRgbParameters(parameters, foreground: false, cell.Background);
-
-        if (cell.HasUnderlineColor)
-        {
-            parameters.Add(58);
-            parameters.Add(2);
-            parameters.Add((int)((cell.UnderlineColor >> 16) & 0xFF));
-            parameters.Add((int)((cell.UnderlineColor >> 8) & 0xFF));
-            parameters.Add((int)(cell.UnderlineColor & 0xFF));
-        }
-
-        return $"\x1b[{string.Join(';', parameters)}m";
-    }
 
     private void AppendStyledVtExtras(StringBuilder builder, in TerminalSnapshotExportOptions options)
     {
@@ -1226,9 +1188,17 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         if (options.Extras.IncludeStyle)
         {
-            builder.Append("\x1b[")
-                .Append(BuildCurrentSgrState())
-                .Append('m');
+            TerminalCell pen = new()
+            {
+                ForegroundIdentity = GetColorIdentity(_currentFgKind, _currentFgPaletteIndex, _currentFg),
+                BackgroundIdentity = GetColorIdentity(_currentBgKind, _currentBgPaletteIndex, _currentBg),
+                UnderlineIdentity = _currentUnderlineIdentity,
+                HasUnderlineColor = _currentHasUnderlineColor,
+                Attributes = _currentAttrs,
+                UnderlineStyle = _currentUnderlineStyle,
+                Decorations = _currentDecorations,
+            };
+            ManagedSgrFormatter.Append(builder, pen);
         }
 
         if (options.Extras.IncludeHyperlinks)
@@ -1498,14 +1468,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         currentHyperlink = 0;
     }
 
-    private static void AppendRgbParameters(List<int> parameters, bool foreground, uint argb)
-    {
-        parameters.Add(foreground ? 38 : 48);
-        parameters.Add(2);
-        parameters.Add((int)((argb >> 16) & 0xFF));
-        parameters.Add((int)((argb >> 8) & 0xFF));
-        parameters.Add((int)(argb & 0xFF));
-    }
 
     private static string ToCssColor(uint argb)
     {
@@ -1547,6 +1509,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     }
 
     private readonly record struct SnapshotCellStyleKey(
+        TerminalColorIdentity ForegroundIdentity,
+        TerminalColorIdentity BackgroundIdentity,
+        TerminalColorIdentity UnderlineIdentity,
         uint Foreground,
         uint Background,
         CellAttributes Attributes,
@@ -1559,6 +1524,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private static SnapshotCellStyleKey CreateSnapshotStyleKey(TerminalCell cell)
     {
         return new SnapshotCellStyleKey(
+            cell.ForegroundIdentity,
+            cell.BackgroundIdentity,
+            cell.UnderlineIdentity,
             cell.Foreground,
             cell.Background,
             cell.Attributes,
