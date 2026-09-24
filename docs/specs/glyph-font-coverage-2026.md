@@ -37,3 +37,33 @@ This does not add COLR formats, downloaded fonts, a new native C ABI, or Ghostty
 CoreText/GPU renderer. Coverage is for a scalar in the current regular/fallback
 font configuration, not proof of arbitrary multi-scalar shaping or identical
 pixels. Dynamic OS font installation requires a renderer/font refresh.
+
+## Delivered status
+
+| Feature | Status and boundary |
+| --- | --- |
+| Host coverage contract | Implemented as optional caller-owned `ITerminalGlyphCoverageSource` / `ITerminalGlyphCoverageSink`; no Avalonia or Skia types in the contract |
+| Managed query replies | Implemented: empty, `system`, `glossary`, `system,glossary`; source failure preserves the core reply |
+| Native adapter replies | Implemented by augmenting complete canonical query replies only; ordinary PTY/paste/other replies are unchanged; no C ABI/binary change |
+| Shared Skia host | Configured regular system/file font plus normal fallback; verifies glyph presence and rejects LastResort placeholders |
+| Ownership/performance | Lazy independent resources, serialized query/dispose, 4,096 scalar-result cap and bounded fallback caches; cached queries allocate zero managed bytes in the focused test |
+| Host lifecycle | Font/renderer and engine changes rebind the source; invalid scalars are rejected before font discovery; disposed sources return false |
+| Explicit exclusions | COLR/downloaded-font support, arbitrary multi-scalar/style coverage guarantees, automatic OS-font-install detection and Ghostty CoreText/GPU raster parity |
+
+## Validation
+
+At code commit `e6aaca3`, full local Release validation with CI flags and
+`ROYALTERMINAL_REQUIRE_NATIVE_TESTS=1` passed **3,978 unit/headless + 240 native
+integration = 4,218 tests**, with **16 conditional unit skips and zero failures**.
+Both projects wrote `glyph-font-coverage-release.trx`.
+The final focused glyph suite passed **151 tests with zero skips/failures**
+(`glyph-font-coverage-focused.trx`); the full solution Release build passed with
+**zero warnings and errors**.
+
+The focused suite covers both adapters' four coverage states, caller ownership,
+clear/reset, bytewise split APCs, synchronized-output working/published glossary
+separation, malformed/unrelated native reply pass-through, invalid scalars,
+provider exceptions, configured-file fallback, LastResort exclusion, bounded
+caches, allocation-free warmed lookups, concurrent disposal and headless host
+font/engine replacement. Cross-platform CI status is tracked separately in the PR.
+No throughput or renderer-speed improvement is claimed for this capability.
