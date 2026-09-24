@@ -15,6 +15,67 @@ public sealed class TerminalInputAdapterTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task ImeTextOnlyKeyPathPreservesKittyPressRepeatReleaseAndCommit(bool native)
+    {
+        if (native && !GhosttyVtProcessor.IsAvailable()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3)) :
+            new BasicVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3));
+        DefaultTerminalInputAdapter adapter = new(new DefaultTerminalKeyboardInputNormalizer(),
+            new PlainKeyboardLayout(), new TextOnlyKeySource());
+        TerminalSessionService session = new();
+        FakeTransport transport = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+        await session.StartSessionAsync(new StaticTransportFactory(transport), new FakeTransportOptions(TerminalTransportIds.Pipe),
+            processor, onData, onExit, _ => { }, () => { }, _ => { });
+        try
+        {
+            processor.Process("\u001b[=11u"u8);
+            Assert.True(adapter.HandleTextInput(new() { Text = "a" }, session));
+            Assert.Equal("\u001b[97u", Encoding.UTF8.GetString(transport.LastInput!));
+            Assert.True(adapter.HandleTextInput(new() { Text = "a" }, session));
+            Assert.Equal("\u001b[97;1:2u", Encoding.UTF8.GetString(transport.LastInput!));
+            Assert.True(adapter.HandleKeyUp(new() { Key = Key.A, PhysicalKey = PhysicalKey.A }, session));
+            Assert.Equal("\u001b[97;1:3u", Encoding.UTF8.GetString(transport.LastInput!));
+            adapter.SetComposing(true);
+            adapter.SetComposing(false);
+            Assert.True(adapter.HandleTextInput(new() { Text = "a" }, session));
+            Assert.Equal("a", Encoding.UTF8.GetString(transport.LastInput!));
+        }
+        finally { await session.StopSessionAsync(processor, onData, onExit); }
+    }
+
+    [Fact]
+    public void DeadKeyIsNotHandledBeforePlatformCompositionAndReleaseIsSuppressed()
+    {
+        DefaultTerminalInputAdapter adapter = new(new PlainKeyboardLayout(dead: true));
+        TerminalSessionService session = new();
+        FakeEndpoint endpoint = new();
+        session.AttachEndpoint(endpoint);
+        KeyEventArgs key = new() { Key = Key.E, PhysicalKey = PhysicalKey.E, KeyModifiers = KeyModifiers.Alt };
+        Assert.False(adapter.HandleKeyDown(key, session, null));
+        Assert.Null(endpoint.LastKeyEvent);
+        Assert.True(adapter.HandleKeyUp(key, session));
+        Assert.Null(endpoint.LastKeyEvent);
+    }
+
+    private sealed class PlainKeyboardLayout(bool dead = false) : ITerminalKeyboardLayout
+    {
+        public TerminalKeyboardLayoutInfo GetInfo(KeyEventArgs key) => new('a', TerminalModifiers.None, dead);
+    }
+
+    private sealed class TextOnlyKeySource : ITerminalTextInputKeySource
+    {
+        public bool TryGetKey(string text, out KeyEventArgs? key)
+        {
+            key = new() { Key = Key.A, PhysicalKey = PhysicalKey.A, KeySymbol = text };
+            return true;
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task CompositionSuppressesRawKeysAndLateReleaseButCommitsText(bool native)
     {
         if (native && !GhosttyVtProcessor.IsAvailable()) return;

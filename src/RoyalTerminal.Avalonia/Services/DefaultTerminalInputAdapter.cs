@@ -16,6 +16,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
 {
     private readonly ITerminalKeyboardInputNormalizer _keyboardInputNormalizer;
     private readonly ITerminalKeyboardLayout _keyboardLayout;
+    private readonly ITerminalTextInputKeySource? _textInputKeys;
     private readonly HashSet<int> _pressedKeys = [];
     private readonly HashSet<int> _compositionKeys = [];
     private readonly HashSet<int> _layoutEncodedKeys = [];
@@ -41,10 +42,12 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
     public DefaultTerminalInputAdapter(ITerminalKeyboardLayout keyboardLayout)
         : this(TerminalKeyboardInputNormalizerFactory.Create(), keyboardLayout ?? throw new ArgumentNullException(nameof(keyboardLayout))) { }
 
-    internal DefaultTerminalInputAdapter(ITerminalKeyboardInputNormalizer keyboardInputNormalizer, ITerminalKeyboardLayout? keyboardLayout = null)
+    internal DefaultTerminalInputAdapter(ITerminalKeyboardInputNormalizer keyboardInputNormalizer, ITerminalKeyboardLayout? keyboardLayout = null,
+        ITerminalTextInputKeySource? textInputKeys = null)
     {
         _keyboardInputNormalizer = keyboardInputNormalizer ?? throw new ArgumentNullException(nameof(keyboardInputNormalizer));
         _keyboardLayout = keyboardLayout ?? new TerminalKeyboardLayout();
+        _textInputKeys = textInputKeys ?? (OperatingSystem.IsMacOS() ? new MacOsTextInputKeySource() : null);
     }
 
     /// <inheritdoc />
@@ -52,6 +55,12 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
     {
         if (!_isComposing) _compositionCommitPending = false;
         int identity = KeyIdentity(e);
+        if (!_isComposing && _keyboardLayout.GetInfo(e).IsDeadKey)
+        {
+            _compositionKeys.Add(identity);
+            _compositionCommitPending = true;
+            return false; // Let the platform input context start composition.
+        }
         bool reportsModifierEvents = (ResolveKittyKeyboardFlags(sessionService, vtProcessor) & 10) == 10;
         if (_isComposing && (!reportsModifierEvents || e.Key is not (Key.LeftShift or Key.RightShift or Key.LeftCtrl or Key.RightCtrl or
             Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin))) _compositionKeys.Add(identity);
@@ -226,6 +235,11 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
         bool compositionCommit = _compositionCommitPending;
         _compositionCommitPending = false;
 
+        if (!compositionCommit && !_isComposing && (ResolveKittyKeyboardFlags(sessionService, null) != 0 ||
+            ResolveModeState(sessionService, null).ApplicationKeypad) &&
+            _textInputKeys?.TryGetKey(e.Text, out KeyEventArgs? key) == true && key is not null &&
+            HandleKeyDown(key, sessionService, null)) return true;
+
         ITerminalInputSink? inputSink = sessionService.InputSink;
         if (inputSink is not null)
         {
@@ -339,7 +353,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
         TerminalKeyboardLayoutInfo layout = _keyboardLayout.GetInfo(e);
         if (!nativeEncoder.TryEncodeKey(
                 new TerminalKeyEncodingRequest(
-                    TerminalKeyEncodingIdentity.Get(e),
+                    TerminalKeyEncodingIdentity.Get(e, layout.UnshiftedCodepoint != 0),
                     action,
                     text,
                     ConvertTerminalModifiers(e.KeyModifiers),

@@ -33,6 +33,12 @@ Reference decisions:
   framework's client contract. Empty IBus HidePreedit and null IMM/macOS preedit
   both end composition. Platform candidate coordinates remain logical Avalonia
   coordinates, avoiding double application of display scaling.
+  Avalonia.Native gives modified key-down events to the control before its IME,
+  so composing/dead keys remain unhandled on macOS. Unmodified printable keys
+  can arrive only as TextInput: a synchronous, character-matched current NSEvent
+  bridge preserves Kitty press/repeat/release and application-keypad encoding.
+  It reads an existing NSApp only; no Cocoa application is created in headless
+  hosts, and asynchronous commits/paste are not fabricated into key events.
 - Ghostty `PageList.Limits` and snapshot decoder: page-size-aligned byte charge,
   one-page minimum history, viewport minimum bytes, full-page history admission,
   and no reopening gaps. Quotas are independent of parser resource bounds.

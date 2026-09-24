@@ -3174,7 +3174,9 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             if (TerminalInputAdapter is ITerminalCompositionInputAdapter)
                 TerminalInputAdapter.HandleKeyDown(e, TerminalSessionService, _vtProcessor);
-            e.Handled = true;
+            // Avalonia.Native offers modified keys to managed code BEFORE the
+            // input context. Handling them here prevents the IME from seeing them.
+            e.Handled = !OperatingSystem.IsMacOS();
             return;
         }
         if (e.Key == Key.Escape && HasRendererSelection())

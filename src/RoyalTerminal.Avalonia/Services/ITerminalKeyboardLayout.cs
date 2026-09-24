@@ -16,4 +16,5 @@ public interface ITerminalKeyboardLayout
 /// <summary>Layout-derived encoding metadata; zero/None mean unavailable, never US-layout guesses.</summary>
 /// <param name="UnshiftedCodepoint">Unicode scalar produced without modifiers.</param>
 /// <param name="ConsumedModifiers">Modifiers used to produce the event's text, not shortcut modifiers.</param>
-public readonly record struct TerminalKeyboardLayoutInfo(uint UnshiftedCodepoint, TerminalModifiers ConsumedModifiers);
+/// <param name="IsDeadKey">The key starts platform composition and must remain unhandled for the IME.</param>
+public readonly record struct TerminalKeyboardLayoutInfo(uint UnshiftedCodepoint, TerminalModifiers ConsumedModifiers, bool IsDeadKey = false);

@@ -126,6 +126,9 @@ public sealed class TerminalCompositionTests
     [Fact]
     public void LayoutMetadataDistinguishesTextModifiersFromShortcuts()
     {
+        KeyEventArgs azerty = new() { PhysicalKey = PhysicalKey.Q, Key = Key.A, KeySymbol = "a" };
+        Assert.Equal("Q", TerminalKeyEncodingIdentity.Get(azerty, hasLayoutCodepoint: true));
+        Assert.Equal("A", TerminalKeyEncodingIdentity.Get(azerty));
         static string Translate(KeyEventArgs _, KeyModifiers modifiers) => (modifiers & (KeyModifiers.Control | KeyModifiers.Alt)) ==
             (KeyModifiers.Control | KeyModifiers.Alt) ? "€" : (modifiers & KeyModifiers.Shift) != 0 ? "É" : "é";
         Assert.Equal(new TerminalKeyboardLayoutInfo('é', TerminalModifiers.Shift), TerminalKeyboardLayout.Resolve(
@@ -147,5 +150,11 @@ public sealed class TerminalCompositionTests
         Assert.InRange(result.UnshiftedCodepoint, 0U, 0x10FFFFU);
         Assert.Equal(ushort.MaxValue, MacOsKeyboardLayout.ScanCode(PhysicalKey.None));
         Assert.Equal((ushort)0, MacOsKeyboardLayout.ScanCode(PhysicalKey.A));
+        Assert.False(new MacOsTextInputKeySource().TryGetKey("a", out _)); // No NSApp is created in headless hosts.
+        KeyEventArgs key = Assert.IsType<KeyEventArgs>(MacOsTextInputKeySource.CreateKey(0, 1U << 17, "A"));
+        Assert.Equal(PhysicalKey.A, key.PhysicalKey);
+        Assert.Equal(KeyModifiers.Shift, key.KeyModifiers);
+        Assert.Equal("A", key.KeySymbol);
+        Assert.Null(MacOsTextInputKeySource.CreateKey(ushort.MaxValue, 0, "a"));
     }
 }

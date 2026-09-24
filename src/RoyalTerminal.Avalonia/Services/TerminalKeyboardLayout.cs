@@ -12,9 +12,9 @@ internal sealed class TerminalKeyboardLayout : ITerminalKeyboardLayout
     public TerminalKeyboardLayoutInfo GetInfo(KeyEventArgs key)
     {
         if (OperatingSystem.IsWindows())
-            return Resolve(key, WindowsKeyboardLayoutTextInputProbe.Translate);
+            return Resolve(key, WindowsKeyboardLayoutTextInputProbe.Translate) with { IsDeadKey = WindowsKeyboardLayoutTextInputProbe.IsDeadKey(key) };
         if (OperatingSystem.IsMacOS() && global::Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
-            return Resolve(key, MacOsKeyboardLayout.Translate);
+            return Resolve(key, MacOsKeyboardLayout.Translate) with { IsDeadKey = MacOsKeyboardLayout.IsDeadKey(key) };
         // Avalonia's Wayland/X11 event has no native keymap or consumed mask.
         // Hosts with that metadata can inject ITerminalKeyboardLayout. Do not
         // manufacture an unshifted symbol by applying US physical-key rules.

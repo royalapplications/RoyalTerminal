@@ -113,8 +113,17 @@ internal sealed partial class WindowsKeyboardLayoutTextInputProbe : IWindowsKeyb
         }
     }
 
-    internal static unsafe string? Translate(KeyEventArgs key, KeyModifiers modifiers)
+    internal static string? Translate(KeyEventArgs key, KeyModifiers modifiers) => Translate(key, modifiers, out _);
+
+    internal static bool IsDeadKey(KeyEventArgs key)
     {
+        Translate(key, key.KeyModifiers, out bool dead);
+        return dead;
+    }
+
+    private static unsafe string? Translate(KeyEventArgs key, KeyModifiers modifiers, out bool dead)
+    {
+        dead = false;
         ushort vk = WindowsKeyboardLayoutTextInputProbeKeyMap.GetVirtualKey(key.Key);
         if (vk == 0) return null;
         nint layout = GetKeyboardLayout(0);
@@ -128,6 +137,7 @@ internal sealed partial class WindowsKeyboardLayoutTextInputProbe : IWindowsKeyb
         {
             int count = ToUnicodeEx(vk, MapVirtualKeyEx(vk, MapVkToVsc, layout), keys, chars,
                 text.Length, ToUnicodeExDoNotChangeKeyboardState, layout);
+            dead = count < 0;
             return count > 0 && count <= text.Length ? new string(text[..count]) : null;
         }
     }

@@ -11,8 +11,17 @@ internal static partial class MacOsKeyboardLayout
     private const string Carbon = "/System/Library/Frameworks/Carbon.framework/Carbon";
     private const string CoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
 
-    internal static unsafe string? Translate(KeyEventArgs key, KeyModifiers modifiers)
+    internal static string? Translate(KeyEventArgs key, KeyModifiers modifiers) => Translate(key, modifiers, 1, out _);
+
+    internal static bool IsDeadKey(KeyEventArgs key)
     {
+        Translate(key, key.KeyModifiers, 0, out bool dead);
+        return dead;
+    }
+
+    private static unsafe string? Translate(KeyEventArgs key, KeyModifiers modifiers, uint options, out bool isDead)
+    {
+        isDead = false;
         ushort code = ScanCode(key.PhysicalKey);
         if (code == ushort.MaxValue) return null;
         nint source = TISCopyCurrentKeyboardLayoutInputSource();
@@ -34,7 +43,8 @@ internal static partial class MacOsKeyboardLayout
             fixed (char* output = buffer)
             {
                 int status = UCKeyTranslate(CFDataGetBytePtr(data), code, 0, flags,
-                    LMGetKbdType(), 1, &dead, (nuint)buffer.Length, &count, output);
+                    LMGetKbdType(), options, &dead, (nuint)buffer.Length, &count, output);
+                isDead = status == 0 && dead != 0;
                 return status == 0 && count > 0 && count <= (nuint)buffer.Length ? new string(buffer[..(int)count]) : null;
             }
         }
@@ -62,6 +72,12 @@ internal static partial class MacOsKeyboardLayout
         PhysicalKey.Backslash => 0x2A, PhysicalKey.Comma => 0x2B, PhysicalKey.Slash => 0x2C, PhysicalKey.N => 0x2D,
         PhysicalKey.M => 0x2E, PhysicalKey.Period => 0x2F, PhysicalKey.Space => 0x31, PhysicalKey.Backquote => 0x32,
         PhysicalKey.IntlBackslash => 0x0A, PhysicalKey.IntlYen => 0x5D, PhysicalKey.IntlRo => 0x5E,
+        PhysicalKey.NumPad0 => 0x52, PhysicalKey.NumPad1 => 0x53, PhysicalKey.NumPad2 => 0x54,
+        PhysicalKey.NumPad3 => 0x55, PhysicalKey.NumPad4 => 0x56, PhysicalKey.NumPad5 => 0x57,
+        PhysicalKey.NumPad6 => 0x58, PhysicalKey.NumPad7 => 0x59, PhysicalKey.NumPad8 => 0x5B,
+        PhysicalKey.NumPad9 => 0x5C, PhysicalKey.NumPadAdd => 0x45, PhysicalKey.NumPadComma => 0x5F,
+        PhysicalKey.NumPadDecimal => 0x41, PhysicalKey.NumPadDivide => 0x4B, PhysicalKey.NumPadEqual => 0x51,
+        PhysicalKey.NumPadMultiply => 0x43, PhysicalKey.NumPadSubtract => 0x4E,
         _ => ushort.MaxValue,
     };
 

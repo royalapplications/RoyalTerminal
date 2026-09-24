@@ -9,7 +9,7 @@ namespace RoyalTerminal.Avalonia.Services;
 // Avalonia's logical Enter/navigation keys otherwise erase Ghostty's Kitty distinction.
 internal static class TerminalKeyEncodingIdentity
 {
-    internal static string Get(KeyEventArgs e) => (e.PhysicalKey, e.Key) switch
+    internal static string Get(KeyEventArgs e, bool hasLayoutCodepoint = false) => (e.PhysicalKey, e.Key) switch
     {
         (PhysicalKey.NumPadEnter, _) => "NumPadEnter",
         (PhysicalKey.NumPadEqual, _) => "NumPadEqual",
@@ -24,6 +24,10 @@ internal static class TerminalKeyEncodingIdentity
         (PhysicalKey.NumPad8, Key.Up) => "NumPadUp",
         (PhysicalKey.NumPad9, Key.PageUp) => "NumPadPageUp",
         (PhysicalKey.NumPadDecimal, Key.Delete) => "NumPadDelete",
-        _ => e.Key.ToString(),
+        // With an authoritative layout scalar, retain the physical identity
+        // separately for Kitty's base-layout alternate. Without one preserve
+        // the logical fallback; a US position is not a substitute for layout.
+        _ => hasLayoutCodepoint && e.PhysicalKey.ToQwertyKey() is { } physical && physical != Key.None
+            ? physical.ToString() : e.Key.ToString(),
     };
 }
