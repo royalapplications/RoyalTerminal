@@ -746,25 +746,18 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         if (options.Selection is TerminalSelectionRange selection)
         {
-            TerminalSelectionRange normalized = selection.Normalize();
-            int viewportTopAbsoluteRow = GetViewportTopAbsoluteRow();
-            bool unwrapRows = options.Unwrap && !normalized.Rectangle;
-            for (int viewportRow = normalized.StartRow; viewportRow <= normalized.EndRow; viewportRow++)
+            ManagedSnapshotSelection range = ManagedSnapshotSelection.Create(_screen, selection, options.Unwrap);
+            for (int absoluteRow = range.FirstRow; absoluteRow <= range.LastRow; absoluteRow++)
             {
-                int absoluteRow = viewportTopAbsoluteRow + viewportRow;
-                if ((uint)absoluteRow >= (uint)_screen.TotalRows)
-                {
-                    continue;
-                }
-
-                if (!TryGetSelectionColumnRange(normalized, viewportRow, out int rowStart, out int rowEnd))
+                TerminalRow row = _screen.GetRow(absoluteRow);
+                if (!range.TryGetColumns(row, absoluteRow, out int rowStart, out int rowEnd))
                 {
                     continue;
                 }
 
                 AppendStyledSnapshotRow(
                     builder,
-                    _screen.GetRow(absoluteRow),
+                    row,
                     rowStart,
                     rowEnd,
                     options,
@@ -772,10 +765,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     ref currentHyperlink);
 
                 if (ShouldAppendSnapshotLineBreak(
-                    _screen.GetRow(absoluteRow),
-                    unwrapRows,
-                    viewportRow,
-                    normalized.EndRow))
+                    row,
+                    range.Unwrap,
+                    absoluteRow,
+                    range.LastRow))
                 {
                     builder.Append("\r\n");
                 }
@@ -826,25 +819,17 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         if (options.Selection is TerminalSelectionRange selection)
         {
-            TerminalSelectionRange normalized = selection.Normalize();
-            int viewportTopAbsoluteRow = GetViewportTopAbsoluteRow();
-            bool unwrapRows = options.Unwrap && !normalized.Rectangle;
-            for (int viewportRow = normalized.StartRow; viewportRow <= normalized.EndRow; viewportRow++)
+            ManagedSnapshotSelection range = ManagedSnapshotSelection.Create(_screen, selection, options.Unwrap);
+            for (int absoluteRow = range.FirstRow; absoluteRow <= range.LastRow; absoluteRow++)
             {
-                int absoluteRow = viewportTopAbsoluteRow + viewportRow;
-                if ((uint)absoluteRow >= (uint)_screen.TotalRows)
-                {
-                    continue;
-                }
-
-                if (!TryGetSelectionColumnRange(normalized, viewportRow, out int rowStart, out int rowEnd))
-                {
-                    continue;
-                }
-
                 TerminalRow row = _screen.GetRow(absoluteRow);
+                if (!range.TryGetColumns(row, absoluteRow, out int rowStart, out int rowEnd))
+                {
+                    continue;
+                }
+
                 AppendHtmlSnapshotRow(builder, row, rowStart, rowEnd, options);
-                if (ShouldAppendSnapshotLineBreak(row, unwrapRows, viewportRow, normalized.EndRow))
+                if (ShouldAppendSnapshotLineBreak(row, range.Unwrap, absoluteRow, range.LastRow))
                 {
                     builder.Append('\n');
                 }
@@ -876,38 +861,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     }
 
 
-    private bool TryGetSelectionColumnRange(
-        in TerminalSelectionRange selection,
-        int row,
-        out int rowStart,
-        out int rowEnd)
-    {
-        if (selection.Rectangle)
-        {
-            rowStart = Math.Min(selection.StartColumn, selection.EndColumn);
-            rowEnd = Math.Max(selection.StartColumn, selection.EndColumn);
-        }
-        else
-        {
-            rowStart = row == selection.StartRow ? selection.StartColumn : 0;
-            rowEnd = row == selection.EndRow ? selection.EndColumn : _screen.Columns - 1;
-        }
-
-        if (rowEnd < 0 || rowStart >= _screen.Columns)
-        {
-            return false;
-        }
-
-        rowStart = Math.Max(0, rowStart);
-        rowEnd = Math.Min(_screen.Columns - 1, rowEnd);
-        return rowEnd >= rowStart;
-    }
-
-    private int GetViewportTopAbsoluteRow()
-    {
-        return Math.Max(0, _screen.TotalRows - _screen.ViewportRows - _screen.ScrollOffset);
-    }
-
     private static bool ShouldAppendSnapshotLineBreak(
         TerminalRow row,
         bool unwrap,
@@ -934,8 +887,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         for (int col = Math.Max(0, startColumn); col <= exportEnd; col++)
         {
-            ref TerminalCell cell = ref row[col];
-            if (cell.Width == 0)
+            ref readonly TerminalCell cell = ref row.ReadOnlyCells[col];
+            if (cell.Width == 0 || cell.IsWideSpacerHead)
             {
                 continue;
             }
@@ -983,8 +936,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         for (int col = Math.Max(0, startColumn); col <= exportEnd; col++)
         {
-            ref TerminalCell cell = ref row[col];
-            if (cell.Width == 0)
+            ref readonly TerminalCell cell = ref row.ReadOnlyCells[col];
+            if (cell.Width == 0 || cell.IsWideSpacerHead)
             {
                 continue;
             }
@@ -1043,8 +996,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         for (int col = clampedEnd; col >= clampedStart; col--)
         {
-            TerminalCell cell = row[col];
-            if (cell.Width == 0)
+            ref readonly TerminalCell cell = ref row.ReadOnlyCells[col];
+            if (cell.Width == 0 || cell.IsWideSpacerHead)
             {
                 continue;
             }
