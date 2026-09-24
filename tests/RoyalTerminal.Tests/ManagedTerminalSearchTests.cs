@@ -105,7 +105,7 @@ public sealed class ManagedTerminalSearchTests
         processor.Process("needle\r\nneedle\r\nneedle"u8);
         processor.PopulateSearchMatches("needle", matches);
         Assert.Equal(3, matches.Count);
-        processor.Process("\u001b[?1049halt"u8);
+        processor.Process("\u001b[?1049h\u001b[Halt"u8);
         processor.PopulateSearchMatches("needle", matches);
         Assert.Empty(matches);
         processor.PopulateSearchMatches("alt", matches);
@@ -113,7 +113,7 @@ public sealed class ManagedTerminalSearchTests
         processor.Process("\u001b[?1049l"u8);
         processor.PopulateSearchMatches("needle", matches);
         Assert.Equal(3, matches.Count);
-        processor.NotifyResize(4, 2, 40, 40);
+        processor.ResizeScreen(4, 2, 40, 40, reflowOnResize: true);
         processor.PopulateSearchMatches("needle", matches);
         Assert.NotEmpty(matches);
         Assert.All(matches, match => Assert.True(match.EndAbsoluteRow > match.AbsoluteRow));
@@ -123,6 +123,47 @@ public sealed class ManagedTerminalSearchTests
         processor.Process("\u001bc"u8);
         processor.PopulateSearchMatches("five", matches);
         Assert.Empty(matches);
+    }
+
+    [Fact]
+    public void SearchAcrossHistoryAndViewportMatchesNativeWhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable()) return;
+        Random random = new(14097);
+        string[] tokens = ["a", "b", "c", " ", "界", "😀", "e\u0301", "\r\n"];
+        string[] needles = ["a", "ab", "ba", "界", "😀", "\u0301", "c界", "b a"];
+        for (int sample = 0; sample < 20; sample++)
+        {
+            StringBuilder text = new("\u001b[?2027h");
+            for (int i = 0; i < 150; i++) text.Append(tokens[random.Next(tokens.Length)]);
+            byte[] bytes = Encoding.UTF8.GetBytes(text.ToString());
+            using BasicVtProcessor managed = new(new TerminalScreen(7, 3, 200));
+            using GhosttyVtProcessor native = new(new TerminalScreen(7, 3, 200));
+            managed.Process(bytes);
+            native.Process(bytes);
+            List<TerminalSearchMatch> actual = [];
+            List<TerminalSearchMatch> expected = [];
+            foreach (string needle in needles)
+            {
+                managed.PopulateSearchMatches(needle, actual);
+                native.PopulateSearchMatches(needle, expected);
+                Assert.Equal(expected, actual);
+            }
+        }
+    }
+
+    [Fact]
+    public void NativeWrappedRangeClipsToEffectiveHistoryLimitWhenAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable()) return;
+        TerminalScreen screen = new(4, 2, 20);
+        using GhosttyVtProcessor processor = new(screen);
+        processor.Process("abcdefghi"u8);
+        screen.ScrollbackLimit = 0;
+        processor.SetViewportOffsetRows(processor.ViewportScrollState.OffsetRows);
+        List<TerminalSearchMatch> matches = [];
+        processor.PopulateSearchMatches("abcdefghi", matches);
+        Assert.Equal(new TerminalSearchMatch(0, 0, 0) { EndAbsoluteRow = 1 }, Assert.Single(matches));
     }
 
     [Fact]

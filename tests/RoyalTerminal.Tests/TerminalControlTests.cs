@@ -4908,15 +4908,18 @@ public class TerminalControlTests
         Assert.False(control.Renderer.BackgroundOpacityEnabled);
     }
 
-    [AvaloniaFact]
-    public void Control_SearchLifecycle_WrappedMatchCountsOnceAndUsesAsciiFolding()
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public void Control_SearchLifecycle_WrappedMatchCountsOnceAndUsesAsciiFolding(VtProcessorPreference preference)
     {
-        TerminalControl control = new()
-        {
-            VtProcessorPreference = VtProcessorPreference.Managed,
-            Columns = 4,
-            Rows = 5,
-        };
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]),
+            preference);
+        control.Columns = 4;
+        control.Rows = 5;
         ArrangeControlToGrid(control, columns: 4, rows: 5);
         control.WriteOutput("xxABCDEF\r\nabcdef"u8);
         control.StartSearch("abcdef");
@@ -4924,8 +4927,27 @@ public class TerminalControlTests
         Assert.Equal(1, control.SearchSelected);
         Assert.True(control.SelectNextSearchMatch());
         Assert.Equal(0, control.SearchSelected);
+        SkiaTerminalRenderer renderer = control.Renderer!;
+        renderer.SearchSelectedHighlightColor = SKColors.Red;
+        renderer.SearchHighlightColor = SKColors.Lime;
+        renderer.CursorVisible = false;
+        using SKBitmap bitmap = new((int)Math.Ceiling(4 * renderer.CellWidth), (int)Math.Ceiling(5 * renderer.CellHeight));
+        using SKCanvas canvas = new(bitmap);
+        renderer.RenderFull(canvas, control.Screen!);
+        AssertCellContainsColor(2, 0, SKColors.Red);
+        AssertCellContainsColor(0, 1, SKColors.Red);
+        AssertCellContainsColor(0, 2, SKColors.Lime);
+        AssertCellContainsColor(0, 3, SKColors.Lime);
         control.EndSearch();
         Assert.Equal(0, control.SearchTotal);
+
+        void AssertCellContainsColor(int column, int row, SKColor expected)
+        {
+            for (int y = (int)(row * renderer.CellHeight); y < (int)((row + 1) * renderer.CellHeight); y++)
+            for (int x = (int)(column * renderer.CellWidth); x < (int)((column + 1) * renderer.CellWidth); x++)
+                if (bitmap.GetPixel(x, y) == expected) return;
+            Assert.Fail($"Cell ({column}, {row}) did not contain {expected}.");
+        }
     }
 
     [AvaloniaFact]

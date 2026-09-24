@@ -84,6 +84,10 @@ internal sealed class ManagedTerminalSearch
                 {
                     foreach (char character in cell.Grapheme) Feed(character, lastPoint, destination);
                 }
+                else if ((uint)cell.Codepoint < 0x80)
+                {
+                    Feed((char)cell.Codepoint, lastPoint, destination);
+                }
                 else
                 {
                     Rune rune = Rune.TryCreate(cell.Codepoint, out Rune valid) ? valid : Rune.ReplacementChar;
