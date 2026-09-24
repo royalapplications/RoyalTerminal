@@ -42,6 +42,16 @@ transplanted.
 
 ## Validation and performance
 
+At code commit `19e6eef`, the full local Release solution run passed **3,956
+unit/headless + 240 required-native integration = 4,196 tests**, with **16
+conditional unit skips and zero failures**. Both test projects write
+`managed-search-release.trx`. CI flags and `ROYALTERMINAL_REQUIRE_NATIVE_TESTS=1`
+were enabled. The focused search suite passed 38 cases before the final direct
+ASCII-cell fast path; the full run includes that fast path and all focused cases.
+Fresh cross-platform CI is tracked in the PR; local results do not imply that it
+has completed. A separate full solution Release build passed with **zero warnings
+and zero errors**. The native dependency/binary implementation is unchanged.
+
 Focused coverage includes direct expected results, native comparisons (including
 160 seeded history/viewport queries), mutation/lifecycle cases and headless Skia
 pixels for selected/unselected wrapped matches with both engine adapters.

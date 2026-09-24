@@ -39,10 +39,12 @@ renderer parity.
 
 ## Deferred work and explicit limitations
 
-September 24 follow-up: IME/layout and snapshot quota admission are now being
-implemented separately. See the [follow-up scope and validation](ime-layout-snapshot-quotas-2026.md)
-for the current implementation and remaining platform/allocator boundaries. The
-table below records the original native-first delivery boundary.
+September 24 follow-ups: IME/layout and snapshot quota admission are implemented;
+see the [scope and validation](ime-layout-snapshot-quotas-2026.md) for the remaining
+platform/allocator boundaries. [Managed search](managed-search-parity-2026.md)
+now has streaming literal matching and logical multi-row ranges in both adapters;
+incremental history caching/background search remain deferred. The table below
+records the original native-first delivery boundary, not the updated follow-ups.
 
 | Area | Current boundary | Follow-up acceptance evidence |
 | --- | --- | --- |
