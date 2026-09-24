@@ -54,6 +54,11 @@ solution Release build: **zero warnings and errors**.
 Platform CI is tracked separately in the PR;
 these local macOS results are not full Linux/Windows sign-off.
 
+Subsequent CI `36012473893` passed Linux/macOS managed jobs and all six native
+builds. Windows failed a PowerShell-table regression expectation still splitting
+LF snapshots by `Environment.NewLine`; the [styled-SGR follow-up](managed-styled-sgr-parity-2026.md)
+corrects that test without changing PowerShell/PTY/reflow behavior.
+
 ## Font-coverage CI follow-up
 
 CI 36007943014 at `f0acddb` failed one Linux configured-file font fallback test;

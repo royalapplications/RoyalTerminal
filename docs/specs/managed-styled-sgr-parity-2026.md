@@ -37,6 +37,18 @@ Full row/blank/selection equivalence, byte-for-byte output, HTML presentation,
 per-cell protection and native SIMD implementation details remain follow-ups.
 No new public settings, ABI or native binary change is needed.
 
+## Isolated allocation/throughput check
+
+On macOS ARM64, .NET 10 Release, 100,000 warmed style appends into a reused
+256-character builder, three runs compared the previous `938ebc6` implementation
+against the new helper. The fixture uses bold/italic/single underline and three
+RGB colors, so both outputs have equivalent SGR meaning. Old: **30.877–30.950 ms
+and 73,600,000 allocated bytes**. New: **22.740–23.211 ms and zero allocated bytes**.
+That is about 25% less helper elapsed time and 736 fewer allocated bytes per
+style. New output uses 68 rather than 56 characters because style attributes are
+separate sequences. Output transmission and whole export costs are not measured;
+this is **not** a whole-terminal or renderer throughput claim.
+
 ## Previous Windows CI failure
 
 CI `36012473893` at `938ebc6` passed all six native builds and Linux/macOS managed
@@ -53,5 +65,11 @@ is not a byte-for-byte replay of PowerShell's original console stream.
 
 ## Validation
 
-Implementation is committed/pushed before validation; final results are recorded
-after the tests and build complete. Platform CI status remains separate.
+At code commit `3b71a81`, full local Release validation with CI flags and
+`ROYALTERMINAL_REQUIRE_NATIVE_TESTS=1` passed **4,031 unit/headless + 240 native
+integration = 4,271 tests**, with **16 conditional unit skips and zero failures**.
+Both projects wrote `styled-sgr-release.trx`. The final focused suite passed
+**48 tests, zero skips/failures** (`styled-sgr-focused.trx`); the full solution
+Release build completed with **zero warnings and errors**. Implementation was
+committed/pushed before validation. Fresh platform CI results are tracked separately in PR #116;
+the local run is not a claim of Linux/Windows or six-architecture runtime sign-off.

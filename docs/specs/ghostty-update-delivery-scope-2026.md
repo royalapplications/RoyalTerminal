@@ -47,7 +47,9 @@ incremental history caching/background search remain deferred. [Glyph font
 coverage](glyph-font-coverage-2026.md) now connects both adapters to the shared
 host's configured font/fallback coverage with bounded, owned caches. [Plain-text
 formatting](managed-plain-formatter-2026.md) now ports deferred blanks, ASCII-only
-trim, wide selections and LF output, while styled/HTML equivalence remains deferred.
+trim, wide selections and LF output. [Styled-VT SGR export](managed-styled-sgr-parity-2026.md)
+now retains all underline styles and default/palette/RGB color identities,
+including the active pen. Full styled/HTML equivalence remains deferred.
 The table below
 records the original native-first delivery boundary, not the updated follow-ups.
 
