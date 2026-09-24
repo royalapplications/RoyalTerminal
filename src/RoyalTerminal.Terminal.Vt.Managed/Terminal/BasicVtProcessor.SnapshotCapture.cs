@@ -71,7 +71,7 @@ public sealed partial class BasicVtProcessor
         Dynamic(header[79..], _colors.GetSnapshotDynamic(12));
         // Preserve the explicit logical-page policy independently of the
         // managed host's hard row cap. Alignment is selected by the decoder.
-        GhosttySnapshotScrollbackQuota? quota = _screen.SnapshotScrollbackQuota;
+        GhosttySnapshotScrollbackQuota? quota = _publishedScreen.SnapshotScrollbackQuota;
         BinaryPrimitives.WriteUInt64LittleEndian(header[87..], quota?.MaximumBytes ?? ulong.MaxValue);
         BinaryPrimitives.WriteUInt64LittleEndian(header[95..], quota is null ? (ulong)_screen.ScrollbackLimit : quota.MaximumRows ?? ulong.MaxValue);
         output.Write(header);

@@ -11,6 +11,21 @@ namespace RoyalTerminal.Tests;
 
 public sealed class ManagedSnapshotQuotaTests
 {
+    [Fact]
+    public void HostQuotaChangesDuringHoldApplyImmediatelyAndSurvivePublication()
+    {
+        using BasicVtProcessor source = new(new TerminalScreen(80, 4, 5000));
+        for (int i = 0; i < 1200; i++) source.Process("\r\n"u8);
+        using ManagedTerminalSnapshotDecoder decoder = new(InflatePageCapacities(source.GetBinarySnapshot()));
+        using ManagedTerminalSnapshot restored = decoder.Ready();
+        restored.Processor.Process("\u001b[?2026h"u8);
+        GhosttySnapshotScrollbackQuota changed = new() { MaximumBytes = 0 };
+        restored.Screen.SnapshotScrollbackQuota = changed;
+        Assert.Equal(0, decoder.Next()!.Value.RowsApplied);
+        restored.Processor.Process("\u001b[?2026l"u8);
+        Assert.Same(changed, restored.Screen.SnapshotScrollbackQuota);
+    }
+
     [Theory]
     [InlineData(4096)]
     [InlineData(16384)]

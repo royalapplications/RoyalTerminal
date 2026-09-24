@@ -28,9 +28,11 @@ public sealed partial class BasicVtProcessor
         in GhosttySnapshotHistoryPage history)
     {
         // Use the live COW screen during output holds, not the frozen published view.
+        // Admission policy belongs to the host, not the frozen terminal frame.
+        _screen.SnapshotScrollbackQuota = _publishedScreen.SnapshotScrollbackQuota;
         TerminalRowBuffer? rows = _screen.GetSnapshotRows(history.Key);
         long historyRows = rows is null ? long.MaxValue : (long)rows.Count - _screen.ViewportRows;
-        int limit = history.Key == 0 ? _screen.ScrollbackLimit : 0;
+        int limit = history.Key == 0 ? _publishedScreen.ScrollbackLimit : 0;
         bool fits = historyRows <= (long)limit - history.Page.Grid.Rows &&
             _screen.FitsSnapshotHistoryQuota(history.Key, history.Page);
         GhosttySnapshotHistoryProgress progress = application.Apply(_screen, history, fits);

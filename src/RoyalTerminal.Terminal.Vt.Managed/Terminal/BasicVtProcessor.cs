@@ -5689,6 +5689,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private bool EndRenderHold()
     {
         if (_renderHold is null) return false;
+        // Host admission policy can change while the terminal frame is frozen.
+        _screen.SnapshotScrollbackQuota = _publishedScreen.SnapshotScrollbackQuota;
         _publishedScreen.AdoptStateFrom(_screen);
         _screen = _publishedScreen;
         _renderHold = null;
