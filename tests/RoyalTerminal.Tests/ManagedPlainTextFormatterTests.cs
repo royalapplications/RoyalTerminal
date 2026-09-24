@@ -121,10 +121,12 @@ public sealed class ManagedPlainTextFormatterTests
         TerminalScreen screen = new(8, 3, 100);
         using IVtProcessor processor = native ? new GhosttyVtProcessor(screen) : new BasicVtProcessor(screen);
         processor.Process("zero\r\none\r\ntwo\r\nthree\r\nfour"u8);
-        screen.ScrollOffset = 2;
+        if (processor is ITerminalViewportScrollSource scroll) scroll.ScrollViewportToTop();
+        else screen.ScrollOffset = 2;
         ITerminalSelectionExportSource selection = (ITerminalSelectionExportSource)processor;
         Assert.Equal("zero\none", selection.ReadSelection(new(0, 0, 7, 1)));
-        screen.ScrollOffset = 0;
+        if (processor is ITerminalViewportScrollSource resetScroll) resetScroll.ScrollViewportToBottom();
+        else screen.ScrollOffset = 0;
         processor.Process("\u001b[?2026h\u001b[HNEW\u001b[K"u8);
         Assert.Equal("NEW", selection.ReadSelection(new(0, 0, 7, 0)));
         processor.Process("\u001b[?2026l"u8);
