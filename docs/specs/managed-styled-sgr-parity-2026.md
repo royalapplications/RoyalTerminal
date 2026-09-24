@@ -33,8 +33,10 @@ culture independence and warmed helper allocation.
 ## Boundaries
 
 This implements the SGR subtask, not complete styled VT/HTML formatter parity.
-Full row/blank/selection equivalence, byte-for-byte output, HTML presentation,
-per-cell protection and native SIMD implementation details remain follow-ups.
+The subsequent [rich selection follow-up](managed-rich-selection-parity-2026.md)
+implements viewport clamping and whole-glyph selection boundaries. Full row/blank
+equivalence, byte-for-byte output, HTML presentation, per-cell protection and
+native SIMD implementation details remain follow-ups.
 No new public settings, ABI or native binary change is needed.
 
 ## Isolated allocation/throughput check

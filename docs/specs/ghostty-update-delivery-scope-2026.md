@@ -49,7 +49,9 @@ host's configured font/fallback coverage with bounded, owned caches. [Plain-text
 formatting](managed-plain-formatter-2026.md) now ports deferred blanks, ASCII-only
 trim, wide selections and LF output. [Styled-VT SGR export](managed-styled-sgr-parity-2026.md)
 now retains all underline styles and default/palette/RGB color identities,
-including the active pen. Full styled/HTML equivalence remains deferred.
+including the active pen. [Styled-VT / HTML selection boundaries](managed-rich-selection-parity-2026.md)
+now clamp to the scrolled viewport, retain whole wide glyphs and preserve COW
+row sharing. Full styled/HTML blank-row and presentation equivalence remains deferred.
 The table below
 records the original native-first delivery boundary, not the updated follow-ups.
 

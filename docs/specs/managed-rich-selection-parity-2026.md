@@ -43,6 +43,22 @@ Native/ghostling dependency pins, ABI and native binaries are unchanged.
 
 ## Validation
 
-Implementation and focused regression tests are committed/pushed before running
-validation. Results and the final-head platform CI gate will be recorded here
-and in PR #116 after those runs complete.
+At code commit `0369f56`, full local Release validation with CI flags and
+`ROYALTERMINAL_REQUIRE_NATIVE_TESTS=1` passed **4,069 unit/headless + 240 native
+integration = 4,309 tests**, with **16 conditional unit skips and zero failures**.
+Both projects wrote `rich-selection-release.trx`. The focused suite passed
+**38 tests, zero skips/failures** (`rich-selection-focused.trx`). Implementation
+was committed/pushed before validation. The full solution Release build completed
+with **zero warnings and errors**. Final-head platform CI is tracked
+separately in PR #116; the local run is not multi-platform runtime sign-off.
+
+## Isolated row-access allocation profile
+
+.NET 10 Release on macOS ARM64, 10,000 shared rows of 120 cells, with setup and
+state-copy creation outside the measured traversal: the previous mutable-indexer
+access allocated **57,840,000–57,843,560 bytes** over three warmed runs; the new
+read-only access allocated **zero bytes**, with identical checksums. This isolates
+the exact cell access pattern changed in the formatter, not whole-export work.
+String/HTML formatting still allocates; no whole-export or renderer speedup is
+claimed. Focused tests also assert storage identity for every row after both
+selected and full-screen exports, including the visual-trimming scan.
