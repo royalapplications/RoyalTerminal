@@ -9,6 +9,7 @@ using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.Terminal.Glyphs;
 using RoyalTerminal.Terminal.Theming;
 
 namespace RoyalTerminal.Terminal;
@@ -41,6 +42,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalScreenSnapshotSource,
     ITerminalSnapshotExportSource,
     ITerminalSearchSource,
+    ITerminalGlyphCoverageSink,
     ITerminalSixelOptionsSink,
     ITerminalResizeReflowPolicySink,
     ITerminalEffectSource,
@@ -48,6 +50,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalPromptStateSource,
     ITerminalTimedRefreshSource
 {
+    /// <inheritdoc />
+    public ITerminalGlyphCoverageSource? GlyphCoverageSource { get; set; }
+
     /// <inheritdoc />
     public TerminalPromptState PromptState => _terminal.GetPromptState();
 
@@ -2586,6 +2591,11 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             }
 
             ReadOnlySpan<byte> nativeReply = new((void*)data, length);
+            if (TerminalGlyphCoverageResponse.Augment(nativeReply, GlyphCoverageSource) is { } glyphReply)
+            {
+                ResponseCallback(glyphReply);
+                return;
+            }
             bool eightBit = _theme.OscColorReportFormat == TerminalOscColorReportFormat.Bit8;
             int responseLength = eightBit ? GhosttyOscColorReports.GetEightBitLength(nativeReply) : length;
             byte[] response = new byte[responseLength];

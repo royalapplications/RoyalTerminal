@@ -11,6 +11,14 @@ namespace RoyalTerminal.Avalonia.Rendering;
 
 public sealed partial class SkiaTerminalRenderer
 {
+    private readonly SkiaTerminalGlyphCoverageSource _glyphCoverageSource;
+
+    /// <summary>
+    /// Gets this renderer's separately synchronized font coverage source for VT
+    /// queries. It is owned by the renderer and returns false after disposal.
+    /// </summary>
+    public RoyalTerminal.Terminal.ITerminalGlyphCoverageSource GlyphCoverageSource => _glyphCoverageSource;
+
     private readonly Dictionary<uint, (TerminalGlyphRegistration Entry, SKPath Path)> _registeredGlyphBindings = [];
     private readonly List<uint> _staleGlyphBindings = [];
     private TerminalScreen? _registeredGlyphScreen;

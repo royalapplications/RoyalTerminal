@@ -37,6 +37,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalSessionHistoryController,
     ITerminalSelectionExportSource,
     ITerminalSearchSource,
+    ITerminalGlyphCoverageSink,
     ITerminalPasteSequenceEncoderSource,
     ITerminalSnapshotExportSource,
     ITerminalPointerSequenceEncoderSource,
@@ -98,6 +99,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private TerminalScreen _screen;
     private readonly ManagedTerminalSearch _search = new();
+
+    /// <inheritdoc />
+    public ITerminalGlyphCoverageSource? GlyphCoverageSource { get; set; }
     private readonly TerminalScreen _publishedScreen;
     private RenderHoldState? _renderHold;
     private int _cursorCol;
@@ -3291,7 +3295,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             if (_apcGlyphRecognized)
             {
                 if (_apcGlyphEnabled && !_apcTruncated &&
-                    ManagedGlyphProtocol.Execute(CollectionsMarshal.AsSpan(_apcBuffer)[5..], _screen.GlyphGlossary, ResponseCallback))
+                    ManagedGlyphProtocol.Execute(CollectionsMarshal.AsSpan(_apcBuffer)[5..], _screen.GlyphGlossary, ResponseCallback, GlyphCoverageSource))
                     _screen.NotifyGlyphGlossaryChanged();
                 return;
             }

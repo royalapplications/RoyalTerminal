@@ -393,6 +393,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         TerminalFontRenderingSettings? fontRenderingSettings = null)
     {
         _fontSize = fontSize;
+        _glyphCoverageSource = new(fontFamily, fontSource, fontFilePath);
         _fontRenderingSettings = NormalizeFontRenderingSettings(fontRenderingSettings);
         _glyphCache = new GlyphCache(
             fontFamily,
@@ -6417,6 +6418,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _glyphCoverageSource.Dispose();
         ClearRegisteredGlyphCache();
         _registeredGlyphScreen = null;
 

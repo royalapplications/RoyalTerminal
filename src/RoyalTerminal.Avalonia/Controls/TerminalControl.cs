@@ -1360,6 +1360,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
         lock (_screen.SyncRoot)
         {
+            ApplyGlyphCoverageSource(_vtProcessor);
             _screen.InvalidateAll();
             UpdateRendererParityStateLocked();
         }
@@ -1691,6 +1692,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         Debug.Assert(_screen is not null, nameof(_screen) + " != null");
         IVtProcessor processor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
+        ApplyGlyphCoverageSource(processor);
         ApplySixelGraphicsSettingToProcessor(processor);
         ApplyEraseDisplayOptionsToProcessor(processor, _activeTransportId);
         AttachShellIntegrationEventSource(processor);
@@ -1712,6 +1714,12 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             source.ShellIntegrationEventReceived += OnVtProcessorShellIntegrationEventReceived;
         }
+    }
+
+    private void ApplyGlyphCoverageSource(IVtProcessor? processor)
+    {
+        if (processor is ITerminalGlyphCoverageSink sink)
+            sink.GlyphCoverageSource = _renderer?.GlyphCoverageSource;
     }
 
     private void DetachShellIntegrationEventSource(IVtProcessor? processor)

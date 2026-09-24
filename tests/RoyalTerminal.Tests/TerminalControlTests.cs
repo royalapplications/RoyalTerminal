@@ -4911,6 +4911,32 @@ public class TerminalControlTests
     [AvaloniaTheory]
     [InlineData(VtProcessorPreference.Managed)]
     [InlineData(VtProcessorPreference.Native)]
+    public void Control_GlyphCoverageTracksFontChangesAndProcessorReplacement(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        TerminalControl control = CreateControlWithTransport(new FakeTransport(),
+            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]), preference);
+        control.WriteOutput("ready"u8);
+        ITerminalGlyphCoverageSink sink = Assert.IsAssignableFrom<ITerminalGlyphCoverageSink>(control.ActiveVtProcessor);
+        ITerminalGlyphCoverageSource original = control.Renderer!.GlyphCoverageSource;
+        Assert.Same(original, sink.GlyphCoverageSource);
+        Assert.True(original.HasSystemGlyph('A'));
+        control.FontFamilyName = "monospace";
+        Assert.NotSame(original, sink.GlyphCoverageSource);
+        Assert.Same(control.Renderer.GlyphCoverageSource, sink.GlyphCoverageSource);
+        control.FontSource = TerminalFontSource.File;
+        control.FontFilePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Fonts", "NotoEmoji-Regular.ttf");
+        Assert.Same(control.Renderer.GlyphCoverageSource, sink.GlyphCoverageSource);
+        Assert.True(sink.GlyphCoverageSource!.HasSystemGlyph(0x1F600));
+        control.VtProcessorPreference = preference == VtProcessorPreference.Managed && GhosttyVtProcessor.IsAvailable()
+            ? VtProcessorPreference.Native : VtProcessorPreference.Managed;
+        ITerminalGlyphCoverageSink replacement = Assert.IsAssignableFrom<ITerminalGlyphCoverageSink>(control.ActiveVtProcessor);
+        Assert.Same(control.Renderer.GlyphCoverageSource, replacement.GlyphCoverageSource);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
     public void Control_SearchLifecycle_WrappedMatchCountsOnceAndUsesAsciiFolding(VtProcessorPreference preference)
     {
         if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;

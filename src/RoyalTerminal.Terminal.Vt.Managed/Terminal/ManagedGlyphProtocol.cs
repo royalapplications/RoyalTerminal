@@ -11,9 +11,10 @@ namespace RoyalTerminal.Terminal;
 internal static class ManagedGlyphProtocol
 {
     // Returns whether this is a mutation request, matching Ghostty's dirty flag
-    // even for a rejected registration. Queries report glossary coverage only,
-    // as libvt does; font coverage belongs to the host renderer, not the parser.
-    internal static bool Execute(ReadOnlySpan<byte> command, TerminalGlyphGlossary glossary, Action<byte[]>? reply)
+    // even for a rejected registration. Font coverage belongs to the optional
+    // host source, not the parser or the session glossary.
+    internal static bool Execute(ReadOnlySpan<byte> command, TerminalGlyphGlossary glossary, Action<byte[]>? reply,
+        ITerminalGlyphCoverageSource? coverageSource = null)
     {
         if (command.IsEmpty || command.Length > 1 && command[1] != ';') return false;
         ReadOnlySpan<byte> options = command.Length > 1 ? command[2..] : [];
@@ -24,7 +25,7 @@ internal static class ManagedGlyphProtocol
                 return false;
             case (byte)'q':
                 if (Option(options, "cp"u8, out ReadOnlySpan<byte> cpText) && Unsigned(cpText, 16, 0x1FFFFF, out uint cp))
-                    Send($"q;cp={cp:x};status={(glossary.TryGet(cp, out _) ? "glossary" : "")}", reply);
+                    reply?.Invoke(TerminalGlyphCoverageResponse.Format(cp, glossary.TryGet(cp, out _), coverageSource));
                 return false;
             case (byte)'c':
                 string? clearError = null;
