@@ -102,6 +102,22 @@ public sealed class ManagedStyledSgrFormatterTests
     }
 
     [Fact]
+    public void EmptyTrimmedScreenStillRestoresRequestedCurrentStyle()
+    {
+        using BasicVtProcessor source = new(new(8, 3));
+        Write(source, "\u001b[4:4;58;5;42m");
+        Assert.True(source.TryExportSnapshot(TerminalSnapshotExportFormat.StyledVt,
+            new(TrimTrailingWhitespace: true, Extras: new(IncludeStyle: true)), out string snapshot));
+        TerminalScreen screen = new(8, 3);
+        using BasicVtProcessor target = new(screen);
+        Write(target, snapshot + "X");
+        TerminalCell cell = screen.GetRow(0).ReadOnlyCells[0];
+        Assert.Equal(TerminalUnderlineStyle.Dotted, cell.UnderlineStyle);
+        Assert.True(cell.HasUnderlineColor);
+        Assert.Equal(TerminalColorIdentity.Palette(42), cell.UnderlineIdentity);
+    }
+
+    [Fact]
     public void WarmStyleEmissionDoesNotAllocateWithReusableBuilder()
     {
         TerminalCell cell = new() { ForegroundIdentity = TerminalColorIdentity.Palette(255),

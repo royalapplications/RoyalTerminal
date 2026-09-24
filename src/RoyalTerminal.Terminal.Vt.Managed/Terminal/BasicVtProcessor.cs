@@ -786,10 +786,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             int lastRowIndex = options.TrimTrailingWhitespace
                 ? GetSnapshotLastRowIndex(visual: true)
                 : _screen.TotalRows - 1;
-            if (lastRowIndex < 0)
-            {
-                return string.Empty;
-            }
+            // No visible cells still permits requested cursor/pen/mode extras.
 
             for (int absoluteRow = 0; absoluteRow <= lastRowIndex; absoluteRow++)
             {

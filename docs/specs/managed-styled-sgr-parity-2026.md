@@ -20,7 +20,8 @@ uses Ghostty's `4:2m`. Byte-for-byte matching of whole snapshots is not claimed.
 - Default, palette and RGB identities survive for foreground/background/underline
   colors. Equal displayed RGB values no longer collapse distinct style transitions.
 - Current-pen restoration includes underline color, even after pending-wrap cell
-  replay. DECRPSS's separate current-SGR response is deliberately unchanged.
+  replay or on a completely empty trimmed screen. DECRPSS's separate current-SGR
+  response is deliberately unchanged.
 - Shared allocation-free style append helper writes invariant protocol numbers
   directly to the output builder, without temporary parameter lists/style strings.
 
