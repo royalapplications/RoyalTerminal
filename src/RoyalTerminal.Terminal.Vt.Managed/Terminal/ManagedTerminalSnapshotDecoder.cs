@@ -52,6 +52,11 @@ public sealed class ManagedTerminalSnapshotDecoder : IDisposable
         {
             GhosttySnapshotReadyState ready = _reader.ReadReady();
             TerminalScreen screen = GhosttySnapshotLiveScreen.Stage(ready, _options.Theme, _options.ScrollbackLimit);
+            screen.SnapshotScrollbackQuota = _options.ScrollbackQuota ?? new()
+            {
+                MaximumBytes = ready.Terminal.Header.MaximumScrollbackBytes,
+                MaximumRows = ready.Terminal.Header.MaximumScrollbackRows,
+            };
             BasicVtProcessorOptions policy = _options.ProcessorOptions;
             // Verify even when the caller does not want ongoing retention. Retention can
             // be disabled after replay without changing parser state or replaying again.

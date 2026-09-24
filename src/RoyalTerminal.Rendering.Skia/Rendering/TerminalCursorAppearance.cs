@@ -7,9 +7,10 @@ namespace RoyalTerminal.Avalonia.Rendering;
 internal static class TerminalCursorAppearance
 {
     internal static CursorStyle? Resolve(CursorStyle requested, bool inViewport, bool passwordInput,
-        bool visible, bool focused, bool blinking, bool blinkVisible)
+        bool visible, bool focused, bool blinking, bool blinkVisible, bool preedit = false)
     {
         if (!inViewport) return null;
+        if (preedit) return CursorStyle.Block;
         if (passwordInput) return CursorStyle.Lock;
         if (!visible) return null;
         if (!focused) return CursorStyle.BlockHollow;

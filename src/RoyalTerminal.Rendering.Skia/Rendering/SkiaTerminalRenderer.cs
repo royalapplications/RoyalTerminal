@@ -737,7 +737,21 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                         rowTextHighlights);
                 }
 
-                RenderRowText(canvas, screen, terminalRow, y, row, rowOverlays, rowTextHighlights);
+                if (TryGetPreeditRange(screen.Columns, row, out var preeditRange))
+                {
+                    // Preserve cell backgrounds/images, but replace text in the
+                    // composing range without changing terminal or snapshot state.
+                    canvas.Save();
+                    canvas.ClipRect(new SKRect(preeditRange.Start * _cellWidth, y,
+                        (preeditRange.End + 1) * _cellWidth, y + _cellHeight), SKClipOperation.Difference);
+                    RenderRowText(canvas, screen, terminalRow, y, row, rowOverlays, rowTextHighlights);
+                    canvas.Restore();
+                    canvas.Save();
+                    canvas.ClipRect(new SKRect(0, y, screen.Columns * _cellWidth, y + _cellHeight));
+                    RenderPreedit(canvas, screen.DefaultForeground, y, preeditRange);
+                    canvas.Restore();
+                }
+                else RenderRowText(canvas, screen, terminalRow, y, row, rowOverlays, rowTextHighlights);
                 terminalRow.IsDirty = false;
             }
         }
@@ -760,7 +774,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         TrimBitmapCache(_rasterBitmapCache, ref _rasterBitmapCacheBytes, imageFrameId);
 
         // Render cursor
-        if (CursorVisible)
+        if (CursorVisible && Preedit is not { Count: > 0 })
             RenderCursor(canvas, screen);
 
         canvas.Restore();

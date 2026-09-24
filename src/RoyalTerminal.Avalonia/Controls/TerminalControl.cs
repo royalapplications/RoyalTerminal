@@ -1079,6 +1079,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         FocusableProperty.OverrideDefaultValue<TerminalControl>(true);
         BackgroundProperty.OverrideDefaultValue<TerminalControl>(Brushes.Transparent);
+        TextInputMethodClientRequestedEvent.AddClassHandler<TerminalControl>((control, args) => control.ProvideTextInputMethodClient(args));
     }
 
     public TerminalControl()
@@ -1306,6 +1307,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void ApplyPaddingSettings()
     {
+        NotifyCompositionCursorChanged();
         InvalidateMeasure();
         InvalidateArrange();
         _presenter?.Invalidate(fullRedraw: true);
@@ -1398,6 +1400,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         renderer.CursorRow = previous.CursorRow;
         renderer.CursorVisible = previous.CursorVisible;
         renderer.CursorStyle = previous.CursorStyle;
+        renderer.Preedit = previous.Preedit;
         renderer.CursorColor = previous.CursorColor;
         renderer.CursorTextColor = previous.CursorTextColor;
         renderer.SelectionColor = previous.SelectionColor;
@@ -2532,6 +2535,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void AttachEndpoint(ITerminalEndpoint endpoint)
     {
+        ResetKeyboardInputState();
         StopPasswordInputMonitoring();
         _mouseModeTracker.Reset();
         ResetPointerButtons();
@@ -2553,6 +2557,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void DetachEndpoint()
     {
+        ResetKeyboardInputState();
         StopPasswordInputMonitoring();
         TerminalSessionService.DetachEndpoint();
         _mouseModeTracker.Reset();
@@ -3165,6 +3170,13 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void HandleKeyDownCore(KeyEventArgs e)
     {
+        if (_isComposing)
+        {
+            if (TerminalInputAdapter is ITerminalCompositionInputAdapter)
+                TerminalInputAdapter.HandleKeyDown(e, TerminalSessionService, _vtProcessor);
+            e.Handled = true;
+            return;
+        }
         if (e.Key == Key.Escape && HasRendererSelection())
         {
             ClearSelection();
@@ -3262,6 +3274,13 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void HandleKeyUpCore(KeyEventArgs e)
     {
+        if (_isComposing)
+        {
+            if (TerminalInputAdapter is ITerminalCompositionInputAdapter)
+                TerminalInputAdapter.HandleKeyUp(e, TerminalSessionService);
+            e.Handled = true;
+            return;
+        }
         if (TryHandleSuppressedScrollbackEscapeKeyUp(e))
         {
             return;
@@ -3313,6 +3332,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             CompleteAcceptedKeyboardInput();
             e.Handled = true;
         }
+        if (!string.IsNullOrEmpty(e.Text)) SetCompositionText(null);
     }
 
     private void CompleteAcceptedKeyboardInput(Key? key = null)
@@ -5066,6 +5086,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void ResetKeyboardInputState()
     {
+        _textInputMethodClient?.Reset();
         if (TerminalInputAdapter is IResettableTerminalInputAdapter resettable) resettable.ResetInputState();
     }
 
@@ -8867,8 +8888,9 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         bool rowVisible = (uint)cursorRow < (uint)_screen.ViewportRows;
         bool columnVisible = (uint)cursorColumn < (uint)_screen.Columns;
         bool passwordInput = _vtProcessor is ITerminalPasswordInputState { PasswordInput: true };
-        bool baseVisible = (_vtProcessor.CursorVisible || passwordInput) && rowVisible && columnVisible;
-        bool blinkPhaseActive = blinkEnabled && IsFocused && !passwordInput;
+        bool preedit = _renderer.Preedit is { Count: > 0 };
+        bool baseVisible = (_vtProcessor.CursorVisible || passwordInput || preedit) && rowVisible && columnVisible;
+        bool blinkPhaseActive = blinkEnabled && IsFocused && !passwordInput && !preedit;
 
         if (baseVisible &&
             blinkPhaseActive &&
@@ -8885,9 +8907,10 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         EnsureCursorBlinkTimerRunning(baseVisible && blinkPhaseActive);
         CursorStyle? appearance = TerminalCursorAppearance.Resolve(_renderer.CursorStyle,
             rowVisible && columnVisible, passwordInput, _vtProcessor.CursorVisible,
-            IsFocused, blinkEnabled, _cursorBlinkVisiblePhase);
+            IsFocused, blinkEnabled, _cursorBlinkVisiblePhase, preedit);
         _renderer.CursorVisible = appearance.HasValue;
         if (appearance.HasValue) _renderer.CursorStyle = appearance.Value;
+        NotifyCompositionCursorChanged();
     }
 
     private bool UpdateRendererCursorStyleFromVtProcessor()

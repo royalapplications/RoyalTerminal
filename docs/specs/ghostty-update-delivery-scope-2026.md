@@ -39,6 +39,11 @@ renderer parity.
 
 ## Deferred work and explicit limitations
 
+September 24 follow-up: IME/layout and snapshot quota admission are now being
+implemented separately. See the [follow-up scope and validation](ime-layout-snapshot-quotas-2026.md)
+for the current implementation and remaining platform/allocator boundaries. The
+table below records the original native-first delivery boundary.
+
 | Area | Current boundary | Follow-up acceptance evidence |
 | --- | --- | --- |
 | Managed snapshot quotas | Restore/export and incremental history work; native allocation calculations are tested but live retention uses the managed host's row policy | Native-equivalent byte/minimum-line quotas through mutation, COW, reflow, pruning and live incremental restore |
@@ -49,9 +54,9 @@ renderer parity.
 | macOS IO QoS | The managed runtime rejects user-initiated QoS with EPERM; existing scheduling is preserved | A supported scheduling implementation plus measured benefit; current code makes no successful-QoS claim |
 | Platform coverage | Six native cross-builds; runtime CI on the three configured managed runners | Dedicated runtime/interactive IME/GPU/PTY validation on additional architectures where required for product support |
 
-The incomplete IME experiment was removed before delivery. No unvalidated preedit
-implementation is included in the release branch. The first follow-ups should be
-shared-host IME/layout and exact managed snapshot quotas, not more API-count claims.
+The incomplete IME experiment was removed before the original native-first
+delivery. The separately requested follow-up now implements reviewed composition
+handling and quota admission; it does not claim exact mutable allocator parity.
 
 ## Validation and release gate
 

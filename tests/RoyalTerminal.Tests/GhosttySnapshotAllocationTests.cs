@@ -96,6 +96,8 @@ public sealed class GhosttySnapshotAllocationTests(ITestOutputHelper output)
             wire.ReadReady();
             using GhosttySnapshotDecoder decoder = new(source);
             using GhosttyTerminal native = decoder.Ready();
+            using ManagedTerminalSnapshotDecoder managedDecoder = new(source, new() { ScrollbackLimit = 5000 });
+            using ManagedTerminalSnapshot managed = managedDecoder.Ready();
             ulong currentBytes = residentBytes, currentRows = residentRows;
             bool apply = true;
             while (wire.ReadNextHistoryPage() is { } history)
@@ -104,11 +106,13 @@ public sealed class GhosttySnapshotAllocationTests(ITestOutputHelper output)
                 ulong nextRows = currentRows + (ulong)history.Page.Grid.Rows;
                 apply &= allocation.Fits(80, 4, nextBytes, nextRows, bytes, rows);
                 Assert.True(decoder.Next());
+                Assert.Equal(apply ? history.Page.Grid.Rows : 0, managedDecoder.Next()!.Value.RowsApplied);
                 Assert.True(decoder.GetProgressRows() == (apply ? (nuint)history.Page.Grid.Rows : 0),
                     $"capacity={history.Page.Capacity}, limits={bytes}/{rows}, accounted={nextBytes}/{nextRows}, pool={allocation.StandardPageBytes}, expectedApply={apply}, nativeRows={decoder.GetProgressRows()}");
                 if (apply) { currentBytes = nextBytes; currentRows = nextRows; }
             }
             Assert.False(decoder.Next());
+            Assert.Null(managedDecoder.Next());
         }
     }
 

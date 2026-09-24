@@ -21,6 +21,13 @@ public sealed record ManagedTerminalSnapshotOptions
     public int ScrollbackLimit { get; init; } = 10_000;
 
     /// <summary>
+    /// Overrides the snapshot's native logical byte/row quotas. Null restores source quotas.
+    /// Use an instance with null byte/row limits to disable source quotas. The host row cap
+    /// remains independent. Capacities are accounted, never trusted as allocation requests.
+    /// </summary>
+    public GhosttySnapshotScrollbackQuota? ScrollbackQuota { get; init; }
+
+    /// <summary>
     /// Host parser/graphics policy, not snapshot state. Continuation retention is enlarged to
     /// hold the restored fragment when enabled; zero disables subsequent retention, not replay.
     /// </summary>
@@ -37,5 +44,6 @@ public sealed record ManagedTerminalSnapshotOptions
         ArgumentOutOfRangeException.ThrowIfNegative(ScrollbackLimit);
         ArgumentOutOfRangeException.ThrowIfNegative(ProcessorOptions.ContinuationMaxBytes);
         DecodeLimits.Validate();
+        ScrollbackQuota?.Validate();
     }
 }

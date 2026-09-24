@@ -13,6 +13,72 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalInputAdapterTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompositionSuppressesRawKeysAndLateReleaseButCommitsText(bool native)
+    {
+        if (native && !GhosttyVtProcessor.IsAvailable()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3)) :
+            new BasicVtProcessor(new RoyalTerminal.Avalonia.Rendering.TerminalScreen(8, 3));
+        DefaultTerminalInputAdapter adapter = new();
+        TerminalSessionService session = new();
+        FakeTransport transport = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+        await session.StartSessionAsync(new StaticTransportFactory(transport), new FakeTransportOptions(TerminalTransportIds.Pipe),
+            processor, onData, onExit, _ => { }, () => { }, _ => { });
+        try
+        {
+            processor.Process("\u001b[=11u"u8);
+            adapter.SetComposing(true);
+            KeyEventArgs key = new() { Key = Key.Enter, PhysicalKey = PhysicalKey.Enter };
+            Assert.True(adapter.HandleKeyDown(key, session, processor));
+            Assert.Null(transport.LastInput);
+            adapter.SetComposing(false); // Some IMEs clear preedit before committing.
+            Assert.True(adapter.HandleTextInput(new() { Text = "日本" }, session));
+            Assert.Equal("日本", Encoding.UTF8.GetString(transport.LastInput!));
+            Assert.True(adapter.HandleKeyUp(key, session));
+            Assert.Equal("日本", Encoding.UTF8.GetString(transport.LastInput!));
+            adapter.ResetInputState();
+            Assert.True(adapter.HandleKeyDown(key, session, processor));
+            Assert.Equal("\u001b[13u", Encoding.UTF8.GetString(transport.LastInput!));
+        }
+        finally { await session.StopSessionAsync(processor, onData, onExit); }
+    }
+
+    [Fact]
+    public async Task InjectedLayoutMetadataReachesEncoderOnPressAndRelease()
+    {
+        DefaultTerminalInputAdapter adapter = new(new TestKeyboardLayout());
+        FakeVtProcessor processor = new() { EncodedKeySequence = [27] };
+        processor.SetKittyKeyboardFlags(11);
+        TerminalSessionService session = new();
+        FakeTransport transport = new();
+        Action<byte[], int> onData = (_, _) => { };
+        Action<int> onExit = _ => { };
+        await session.StartSessionAsync(new StaticTransportFactory(transport), new FakeTransportOptions(TerminalTransportIds.Pipe),
+            processor, onData, onExit, _ => { }, () => { }, _ => { });
+        try
+        {
+            KeyEventArgs key = new() { Key = Key.A, PhysicalKey = PhysicalKey.A, KeySymbol = "Ä", KeyModifiers = KeyModifiers.Shift };
+            Assert.True(adapter.HandleKeyDown(key, session, processor));
+            Assert.True(adapter.HandleKeyUp(key, session));
+            Assert.Equal(2, processor.EncodedKeyRequests.Count);
+            foreach (TerminalKeyEncodingRequest request in processor.EncodedKeyRequests)
+            {
+                Assert.Equal((uint)'ä', request.UnshiftedCodepoint);
+                Assert.Equal(TerminalModifiers.Shift, request.ConsumedModifiers);
+            }
+        }
+        finally { await session.StopSessionAsync(processor, onData, onExit); }
+    }
+
+    private sealed class TestKeyboardLayout : ITerminalKeyboardLayout
+    {
+        public TerminalKeyboardLayoutInfo GetInfo(KeyEventArgs key) => new('ä', TerminalModifiers.Shift);
+    }
+
+    [Theory]
     [InlineData(PhysicalKey.NumPadEnter, Key.Enter, 57414)]
     [InlineData(PhysicalKey.NumPadEqual, Key.OemPlus, 57415)]
     [InlineData(PhysicalKey.NumPad0, Key.Insert, 57425)]

@@ -191,6 +191,8 @@ public readonly record struct TerminalHighlightSpan(
 /// </summary>
 public sealed class TerminalRow
 {
+    internal RoyalTerminal.Terminal.Snapshots.GhosttySnapshotPageAllocation? SnapshotAllocation { get; set; }
+    internal bool SnapshotAllocationUnmodified { get; set; }
     private TerminalCell[] _cells;
     private int _columns;
     private byte _rowMetadata;
@@ -276,6 +278,8 @@ public sealed class TerminalRow
 
     private TerminalRow(TerminalRow source)
     {
+        SnapshotAllocation = source.SnapshotAllocation;
+        SnapshotAllocationUnmodified = source.SnapshotAllocationUnmodified;
         _cells = source._cells;
         _columns = source._columns;
         CellsAreShared = source.CellsAreShared = true;
@@ -473,6 +477,7 @@ public sealed class TerminalRow
 
     private void ResizePreservedStorage(int columns, uint defaultFg, uint defaultBg)
     {
+        SnapshotAllocationUnmodified = false;
         if (columns == _cells.Length)
         {
             EnsureWritableCells();
@@ -491,6 +496,7 @@ public sealed class TerminalRow
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void EnsureWritableCells()
     {
+        SnapshotAllocationUnmodified = false;
         if (!CellsAreShared)
         {
             return;

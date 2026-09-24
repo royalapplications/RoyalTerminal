@@ -21,6 +21,7 @@ internal static class GhosttySnapshotLivePage
         GhosttySnapshotGrid grid = page.Grid;
         TerminalTheme theme = hyperlinkOwner.Theme;
         TerminalRow[] rows = new TerminalRow[grid.Rows];
+        GhosttySnapshotPageAllocation allocation = new(page.Capacity);
         Dictionary<ushort, TerminalCell> styles = new(page.StyleCount);
         Dictionary<ushort, int> links = new(page.HyperlinkCount);
         Span<char> textScratch = stackalloc char[128];
@@ -79,6 +80,8 @@ internal static class GhosttySnapshotLivePage
                 }
                 row[column] = cell;
             }
+            row.SnapshotAllocation = allocation;
+            row.SnapshotAllocationUnmodified = true;
             rows[rowIndex] = row;
         }
         return rows;

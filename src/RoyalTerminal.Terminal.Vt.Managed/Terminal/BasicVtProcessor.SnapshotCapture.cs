@@ -69,10 +69,11 @@ public sealed partial class BasicVtProcessor
         Dynamic(header[63..], _colors.GetSnapshotDynamic(11));
         Dynamic(header[71..], _colors.GetSnapshotDynamic(10));
         Dynamic(header[79..], _colors.GetSnapshotDynamic(12));
-        // Managed storage has no native page-byte policy. Export the host row
-        // limit, leaving bytes unlimited instead of inventing allocator sizes.
-        BinaryPrimitives.WriteUInt64LittleEndian(header[87..], ulong.MaxValue);
-        BinaryPrimitives.WriteUInt64LittleEndian(header[95..], (ulong)_screen.ScrollbackLimit);
+        // Preserve the explicit logical-page policy independently of the
+        // managed host's hard row cap. Alignment is selected by the decoder.
+        GhosttySnapshotScrollbackQuota? quota = _screen.SnapshotScrollbackQuota;
+        BinaryPrimitives.WriteUInt64LittleEndian(header[87..], quota?.MaximumBytes ?? ulong.MaxValue);
+        BinaryPrimitives.WriteUInt64LittleEndian(header[95..], quota is null ? (ulong)_screen.ScrollbackLimit : quota.MaximumRows ?? ulong.MaxValue);
         output.Write(header);
         byte[] tabs = new byte[(_screen.Columns + 7) / 8];
         foreach (int stop in _tabStops)

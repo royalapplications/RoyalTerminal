@@ -31,7 +31,8 @@ public sealed partial class BasicVtProcessor
         TerminalRowBuffer? rows = _screen.GetSnapshotRows(history.Key);
         long historyRows = rows is null ? long.MaxValue : (long)rows.Count - _screen.ViewportRows;
         int limit = history.Key == 0 ? _screen.ScrollbackLimit : 0;
-        bool fits = historyRows <= (long)limit - history.Page.Grid.Rows;
+        bool fits = historyRows <= (long)limit - history.Page.Grid.Rows &&
+            _screen.FitsSnapshotHistoryQuota(history.Key, history.Page);
         GhosttySnapshotHistoryProgress progress = application.Apply(_screen, history, fits);
         if (progress.ContainsPrompt)
         {

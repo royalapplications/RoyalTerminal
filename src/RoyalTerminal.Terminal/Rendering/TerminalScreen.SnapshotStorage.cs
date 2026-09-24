@@ -9,6 +9,31 @@ namespace RoyalTerminal.Avalonia.Rendering;
 
 public sealed partial class TerminalScreen
 {
+    private GhosttySnapshotScrollbackQuota? _snapshotScrollbackQuota;
+
+    /// <summary>
+    /// Live incremental-history admission policy. Null disables logical page quotas.
+    /// Changing this does not evict resident rows or reopen a previously dropped history gap.
+    /// Serialize changes with screen/processor access, as for ScrollbackLimit.
+    /// </summary>
+    public GhosttySnapshotScrollbackQuota? SnapshotScrollbackQuota
+    {
+        get => _snapshotScrollbackQuota;
+        set { value?.Validate(); _snapshotScrollbackQuota = value; }
+    }
+
+    internal bool FitsSnapshotHistoryQuota(int key, GhosttySnapshotPage page)
+    {
+        if (_snapshotScrollbackQuota is not { } quota) return true;
+        TerminalRowBuffer? rows = GetSnapshotRows(key);
+        if (rows is null || Columns is < 1 or > ushort.MaxValue || ViewportRows is < 1 or > ushort.MaxValue) return false;
+        GhosttySnapshotAllocation allocation = new(quota.PageAlignment);
+        ulong bytes = quota.MaximumBytes.HasValue
+            ? GhosttySnapshotLiveAllocation.Add(GhosttySnapshotLiveAllocation.Measure(this, rows, allocation), allocation.AllocatedBytes(page.Capacity))
+            : 0;
+        return allocation.Fits(Columns, ViewportRows, bytes, (ulong)rows.Count + (ulong)page.Grid.Rows,
+            quota.MaximumBytes, quota.MaximumRows);
+    }
     // Allocate a lineage only when a decoder tracks this terminal. COW publication
     // preserves it; a separately restored terminal receives a different identity.
     private object? _snapshotLineage;

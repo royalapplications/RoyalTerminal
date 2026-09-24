@@ -100,6 +100,7 @@ public sealed partial class TerminalScreen
         destination._snapshotLineage = _snapshotLineage;
         destination._snapshotAlternateGeneration = _snapshotAlternateGeneration;
         destination._snapshotRowGeometry = _snapshotRowGeometry;
+        destination._snapshotScrollbackQuota = _snapshotScrollbackQuota;
     }
 
     private TerminalRowBuffer CopyRows(TerminalRowBuffer rows)

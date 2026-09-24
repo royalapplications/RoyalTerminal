@@ -12,32 +12,53 @@ namespace RoyalTerminal.Avalonia.Services;
 /// <summary>
 /// Default implementation for terminal keyboard and mouse input mapping.
 /// </summary>
-public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResettableTerminalInputAdapter
+public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResettableTerminalInputAdapter, ITerminalCompositionInputAdapter
 {
     private readonly ITerminalKeyboardInputNormalizer _keyboardInputNormalizer;
+    private readonly ITerminalKeyboardLayout _keyboardLayout;
     private readonly HashSet<int> _pressedKeys = [];
+    private readonly HashSet<int> _compositionKeys = [];
+    private bool _isComposing;
+    private bool _compositionCommitPending;
+
+    /// <inheritdoc />
+    public void SetComposing(bool composing)
+    {
+        _isComposing = composing;
+        if (composing) _compositionCommitPending = true;
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DefaultTerminalInputAdapter"/> class.
     /// </summary>
     public DefaultTerminalInputAdapter()
-        : this(TerminalKeyboardInputNormalizerFactory.Create())
+        : this(TerminalKeyboardInputNormalizerFactory.Create(), new TerminalKeyboardLayout())
     {
     }
 
-    internal DefaultTerminalInputAdapter(ITerminalKeyboardInputNormalizer keyboardInputNormalizer)
+    /// <summary>Creates an adapter with host-provided keyboard layout metadata.</summary>
+    public DefaultTerminalInputAdapter(ITerminalKeyboardLayout keyboardLayout)
+        : this(TerminalKeyboardInputNormalizerFactory.Create(), keyboardLayout ?? throw new ArgumentNullException(nameof(keyboardLayout))) { }
+
+    internal DefaultTerminalInputAdapter(ITerminalKeyboardInputNormalizer keyboardInputNormalizer, ITerminalKeyboardLayout? keyboardLayout = null)
     {
         _keyboardInputNormalizer = keyboardInputNormalizer ?? throw new ArgumentNullException(nameof(keyboardInputNormalizer));
+        _keyboardLayout = keyboardLayout ?? new TerminalKeyboardLayout();
     }
 
     /// <inheritdoc />
     public bool HandleKeyDown(KeyEventArgs e, ITerminalSessionService sessionService, IVtProcessor? vtProcessor)
     {
+        if (!_isComposing) _compositionCommitPending = false;
         int identity = KeyIdentity(e);
+        if (_isComposing && e.Key is not (Key.LeftShift or Key.RightShift or Key.LeftCtrl or Key.RightCtrl or
+            Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin)) _compositionKeys.Add(identity);
+        else _compositionKeys.Remove(identity);
         TerminalInputAction action = identity != 0 && !_pressedKeys.Add(identity)
             ? TerminalInputAction.Repeat : TerminalInputAction.Press;
         TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor);
-        if (_keyboardInputNormalizer.HandleKeyDown(e, modeState) == TerminalKeyboardInputAction.SuppressForTextInput)
+        if (_keyboardInputNormalizer.HandleKeyDown(e, modeState) == TerminalKeyboardInputAction.SuppressForTextInput && !_isComposing &&
+            ResolveKittyKeyboardFlags(sessionService, vtProcessor) == 0)
         {
             return false;
         }
@@ -50,8 +71,16 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
                 KeyCode: (uint)e.Key,
                 Text: null,
                 Modifiers: ConvertTerminalModifiers(e.KeyModifiers),
-                IsComposing: false);
+                IsComposing: _isComposing);
             return inputSink.SendKey(keyEvent);
+        }
+
+        if (_isComposing)
+        {
+            // Ghostty permits Kitty modifier reports during composition, but
+            // suppresses ordinary keys. Never retry an empty result as legacy.
+            _ = TrySendNativeKeySequence(e, sessionService, vtProcessor, action, e.KeySymbol);
+            return true;
         }
 
         if (HasFallbackByteInputPath(sessionService))
@@ -107,9 +136,15 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
     /// <inheritdoc />
     public bool HandleKeyUp(KeyEventArgs e, ITerminalSessionService sessionService)
     {
-        _pressedKeys.Remove(KeyIdentity(e));
+        int identity = KeyIdentity(e);
+        _pressedKeys.Remove(identity);
+        // A commit may precede the confirming key's release. Never leak that
+        // release as a fresh Kitty/Win32 event after suppressing its press.
         TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor: null);
-        if (_keyboardInputNormalizer.HandleKeyUp(e, modeState) == TerminalKeyboardInputAction.SuppressForTextInput)
+        TerminalKeyboardInputAction normalization = _keyboardInputNormalizer.HandleKeyUp(e, modeState);
+        if (_compositionKeys.Remove(identity)) return true;
+        if (normalization == TerminalKeyboardInputAction.SuppressForTextInput && !_isComposing &&
+            ResolveKittyKeyboardFlags(sessionService, null) == 0)
         {
             return false;
         }
@@ -117,6 +152,11 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
         ITerminalInputSink? inputSink = sessionService.InputSink;
         if (inputSink is null)
         {
+            if (_isComposing)
+            {
+                _ = TrySendNativeKeySequence(e, sessionService, null, TerminalInputAction.Release, null);
+                return true;
+            }
             if (HasFallbackByteInputPath(sessionService))
             {
                 int kittyKeyboardFlags = ResolveKittyKeyboardFlags(sessionService, vtProcessor: null);
@@ -162,7 +202,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
             KeyCode: (uint)e.Key,
             Text: null,
             Modifiers: ConvertTerminalModifiers(e.KeyModifiers),
-            IsComposing: false);
+            IsComposing: _isComposing);
 
         return inputSink.SendKey(keyEvent);
     }
@@ -174,6 +214,9 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
         {
             return false;
         }
+
+        bool compositionCommit = _compositionCommitPending;
+        _compositionCommitPending = false;
 
         ITerminalInputSink? inputSink = sessionService.InputSink;
         if (inputSink is not null)
@@ -188,7 +231,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
         }
 
         TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor: null);
-        if (ShouldUseWin32InputMode(modeState) && ResolveKittyKeyboardFlags(sessionService, vtProcessor: null) == 0)
+        if (!compositionCommit && ShouldUseWin32InputMode(modeState) && ResolveKittyKeyboardFlags(sessionService, vtProcessor: null) == 0)
         {
             return true;
         }
@@ -201,6 +244,9 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
     public void ResetInputState()
     {
         _pressedKeys.Clear();
+        _compositionKeys.Clear();
+        _isComposing = false;
+        _compositionCommitPending = false;
         _keyboardInputNormalizer.ResetInputState();
     }
 
@@ -272,7 +318,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
     }
 
     // null permits fallback; false is authoritative suppression; true sent bytes.
-    private static bool? TrySendNativeKeySequence(
+    private bool? TrySendNativeKeySequence(
         KeyEventArgs e,
         ITerminalSessionService sessionService,
         IVtProcessor? vtProcessor,
@@ -281,12 +327,16 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
     {
         if (ResolveKeySequenceEncoderSource(sessionService, vtProcessor) is not ITerminalKeySequenceEncoderSource nativeEncoder)
             return null;
+        TerminalKeyboardLayoutInfo layout = _keyboardLayout.GetInfo(e);
         if (!nativeEncoder.TryEncodeKey(
                 new TerminalKeyEncodingRequest(
                     TerminalKeyEncodingIdentity.Get(e),
                     action,
                     text,
-                    ConvertTerminalModifiers(e.KeyModifiers)),
+                    ConvertTerminalModifiers(e.KeyModifiers),
+                    IsComposing: _isComposing,
+                    UnshiftedCodepoint: layout.UnshiftedCodepoint,
+                    ConsumedModifiers: layout.ConsumedModifiers),
                 out byte[] nativeSequence))
         {
             return (nativeEncoder as ITerminalKeyEncodingPolicy)?.IsKeyEncodingAuthoritative == true ? false : null;
