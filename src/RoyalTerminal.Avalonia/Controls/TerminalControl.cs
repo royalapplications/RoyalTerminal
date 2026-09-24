@@ -7882,21 +7882,19 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         for (int index = 0; index < _searchMatchScratch.Count; index++)
         {
             TerminalSearchMatch match = _searchMatchScratch[index];
-            int viewportRow = match.AbsoluteRow - viewportTopAbsoluteRow;
-            if ((uint)viewportRow >= (uint)_screen.ViewportRows)
-            {
-                continue;
-            }
-
             TerminalHighlightKind kind = index == _searchSelected
                 ? TerminalHighlightKind.SearchSelected
                 : TerminalHighlightKind.SearchMatch;
-            TerminalHighlightSpan span = new(
-                viewportRow,
-                match.StartColumn,
-                match.EndColumn,
-                kind);
-            _highlightSpanScratch.Add(span);
+            int firstRow = Math.Max(match.AbsoluteRow, viewportTopAbsoluteRow);
+            int lastRow = Math.Min(match.EndAbsoluteRow, viewportTopAbsoluteRow + _screen.ViewportRows - 1);
+            for (int row = firstRow; row <= lastRow; row++)
+            {
+                _highlightSpanScratch.Add(new TerminalHighlightSpan(
+                    row - viewportTopAbsoluteRow,
+                    row == match.AbsoluteRow ? match.StartColumn : 0,
+                    row == match.EndAbsoluteRow ? match.EndColumn : _screen.Columns - 1,
+                    kind));
+            }
         }
     }
 

@@ -36,6 +36,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalFocusEventModeSource,
     ITerminalSessionHistoryController,
     ITerminalSelectionExportSource,
+    ITerminalSearchSource,
     ITerminalPasteSequenceEncoderSource,
     ITerminalSnapshotExportSource,
     ITerminalPointerSequenceEncoderSource,
@@ -96,6 +97,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ];
 
     private TerminalScreen _screen;
+    private readonly ManagedTerminalSearch _search = new();
     private readonly TerminalScreen _publishedScreen;
     private RenderHoldState? _renderHold;
     private int _cursorCol;
@@ -651,6 +653,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         in TerminalPointerEncodingContext context,
         out byte[] sequence)
         => _mouseEncoder.TryEncode(pointerEvent, context, MouseModeState, out sequence);
+
+    /// <inheritdoc />
+    public void PopulateSearchMatches(string needle, List<TerminalSearchMatch> destination)
+        => _search.Populate(_publishedScreen, needle, destination);
 
     /// <inheritdoc />
     public string? ReadSelection(in TerminalSelectionRange selection)

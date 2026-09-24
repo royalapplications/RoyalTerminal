@@ -1148,21 +1148,15 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                 (first, second) = (second, first);
             }
 
-            for (uint nativeRow = first.Y; nativeRow <= second.Y; nativeRow++)
+            ulong firstVisibleRow = Math.Max(first.Y, mapping.EffectiveBaseOffsetRows);
+            if (firstVisibleRow <= second.Y &&
+                TryMapNativeAbsoluteRowToEffective(mapping, firstVisibleRow, out int startRow) &&
+                TryMapNativeAbsoluteRowToEffective(mapping, second.Y, out int endRow))
             {
-                if (TryMapNativeAbsoluteRowToEffective(mapping, nativeRow, out int effectiveAbsoluteRow))
+                destination.Add(new TerminalSearchMatch(startRow, firstVisibleRow == first.Y ? first.X : 0, second.X)
                 {
-                    int startColumn = nativeRow == first.Y ? first.X : 0;
-                    int endColumn = nativeRow == second.Y
-                        ? second.X
-                        : Math.Max(0, _screen.Columns - 1);
-                    destination.Add(new TerminalSearchMatch(effectiveAbsoluteRow, startColumn, endColumn));
-                }
-
-                if (nativeRow == uint.MaxValue)
-                {
-                    break;
-                }
+                    EndAbsoluteRow = endRow,
+                });
             }
         }
     }

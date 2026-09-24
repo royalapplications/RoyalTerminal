@@ -4909,6 +4909,26 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_SearchLifecycle_WrappedMatchCountsOnceAndUsesAsciiFolding()
+    {
+        TerminalControl control = new()
+        {
+            VtProcessorPreference = VtProcessorPreference.Managed,
+            Columns = 4,
+            Rows = 5,
+        };
+        ArrangeControlToGrid(control, columns: 4, rows: 5);
+        control.WriteOutput("xxABCDEF\r\nabcdef"u8);
+        control.StartSearch("abcdef");
+        Assert.Equal(2, control.SearchTotal);
+        Assert.Equal(1, control.SearchSelected);
+        Assert.True(control.SelectNextSearchMatch());
+        Assert.Equal(0, control.SearchSelected);
+        control.EndSearch();
+        Assert.Equal(0, control.SearchTotal);
+    }
+
+    [AvaloniaFact]
     public void Control_SearchLifecycle_BuildsMatchesAndSelectionWithoutCallerTotals()
     {
         TerminalControl control = new()
