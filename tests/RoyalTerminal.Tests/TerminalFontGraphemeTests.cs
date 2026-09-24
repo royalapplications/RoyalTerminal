@@ -111,6 +111,34 @@ public class TerminalFontGraphemeTests
         Assert.Throws<ObjectDisposedException>(() => resolver.ResolveTypeface(primary, "#\u20E3"));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FailedFamilyMatchRetriesGlobalDiscoveryAndCachesResult(bool returnsWrongFont)
+    {
+        using SKTypeface primary = LoadFont("NotoEmoji-Regular.ttf");
+        GlobalFallbackMatcher matcher = new(returnsWrongFont);
+        using TerminalFontResolver resolver = new(matcher);
+        TerminalFontResolution result = resolver.ResolveTypeface(primary, 'A');
+        Assert.True(result.UsedFallback);
+        Assert.True(result.Typeface.ContainsGlyph('A'));
+        Assert.Equal(new string?[] { primary.FamilyName, null }, matcher.Families);
+        Assert.Same(result.Typeface, resolver.ResolveTypeface(primary, 'A').Typeface);
+        Assert.Equal(2, matcher.Families.Count);
+        Assert.NotEqual(nint.Zero, primary.Handle);
+    }
+
+    private sealed class GlobalFallbackMatcher(bool returnsWrongFont) : ITerminalFontMatcher
+    {
+        public List<string?> Families { get; } = [];
+        public SKTypeface? MatchCharacter(string? familyName, SKFontStyle style, string[]? languageTags, int codepoint)
+        {
+            Families.Add(familyName);
+            return familyName is null ? LoadFont("JetBrainsMono-Regular.ttf")
+                : returnsWrongFont ? LoadFont("NotoEmoji-Regular.ttf") : null;
+        }
+    }
+
     private static SKTypeface LoadFont(string fileName)
         => SKTypeface.FromFile(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Fonts", fileName))
            ?? throw new InvalidOperationException($"Unable to load deterministic font fixture {fileName}.");

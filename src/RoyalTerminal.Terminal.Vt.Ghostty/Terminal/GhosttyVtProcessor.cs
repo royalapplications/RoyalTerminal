@@ -1327,7 +1327,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                 TerminalSnapshotExportFormat.Html => GhosttyVtNative.GhosttyFormatterFormat.Html,
                 _ => GhosttyVtNative.GhosttyFormatterFormat.Plain,
             },
-            Unwrap: options.Unwrap,
+            Unwrap: options.Unwrap && options.Selection?.Rectangle != true,
             Trim: options.TrimTrailingWhitespace,
             Extra: new GhosttyFormatterExtraOptions(
                 IncludePalette: options.Extras.IncludePalette,

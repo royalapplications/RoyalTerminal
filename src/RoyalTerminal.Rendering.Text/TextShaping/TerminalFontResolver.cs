@@ -289,35 +289,26 @@ public sealed class TerminalFontResolver : IDisposable
             : string.IsNullOrWhiteSpace(primaryTypeface.FamilyName)
                 ? null
                 : primaryTypeface.FamilyName;
-        SKTypeface? fallbackTypeface = _fontMatcher.MatchCharacter(
-            familyName,
-            primaryTypeface.FontStyle,
-            languageTags,
-            codepoint);
+        FontFallbackCacheEntry entry = Match(familyName);
+        // A file-backed family may not be installed in the system collection.
+        // Do not let a failed family-specific match suppress global discovery.
+        return entry.FallbackTypeface is null && familyName is not null ? Match(null) : entry;
 
-        if (fallbackTypeface is null)
+        FontFallbackCacheEntry Match(string? family)
         {
-            return FontFallbackCacheEntry.NoFallback;
-        }
+            SKTypeface? fallbackTypeface = _fontMatcher.MatchCharacter(
+                family, primaryTypeface.FontStyle, languageTags, codepoint);
+            if (fallbackTypeface is null || ReferenceEquals(fallbackTypeface, primaryTypeface))
+                return FontFallbackCacheEntry.NoFallback;
+            if (fallbackTypeface.Handle != primaryTypeface.Handle && ContainsGlyph(fallbackTypeface, codepoint))
+                return new FontFallbackCacheEntry(fallbackTypeface);
 
-        if (!ContainsGlyph(fallbackTypeface, codepoint))
-        {
+            // Remove the font holding a rejected candidate before releasing it;
+            // native handles can be reused by the subsequent global match.
+            if (_containsGlyphFontCache.Remove(fallbackTypeface.Handle, out SKFont? font)) font.Dispose();
             fallbackTypeface.Dispose();
             return FontFallbackCacheEntry.NoFallback;
         }
-
-        if (ReferenceEquals(fallbackTypeface, primaryTypeface))
-        {
-            return FontFallbackCacheEntry.NoFallback;
-        }
-
-        if (fallbackTypeface.Handle == primaryTypeface.Handle)
-        {
-            fallbackTypeface.Dispose();
-            return FontFallbackCacheEntry.NoFallback;
-        }
-
-        return new FontFallbackCacheEntry(fallbackTypeface);
     }
 
     private bool ContainsGlyph(SKTypeface typeface, int codepoint)

@@ -664,58 +664,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public string? ReadSelection(in TerminalSelectionRange selection)
-    {
-        TerminalSelectionRange normalized = selection.Normalize();
-        int startCol = normalized.StartColumn;
-        int startRow = normalized.StartRow;
-        int endCol = normalized.EndColumn;
-        int endRow = normalized.EndRow;
-
-        if (startRow > endRow || _screen.ViewportRows <= 0 || _screen.Columns <= 0)
-        {
-            return null;
-        }
-
-        StringBuilder builder = new();
-        for (int row = startRow; row <= endRow; row++)
-        {
-            if (row < 0 || row >= _screen.ViewportRows)
-            {
-                continue;
-            }
-
-            TerminalRow terminalRow = _screen.GetViewportRow(row);
-            if (!TryGetSelectionColumnRange(normalized, row, out int rowStart, out int rowEnd))
-            {
-                continue;
-            }
-
-            for (int col = rowStart; col <= rowEnd; col++)
-            {
-                ref TerminalCell cell = ref terminalRow[col];
-                if (cell.Width == 0)
-                {
-                    continue;
-                }
-
-                if (!string.IsNullOrEmpty(cell.Grapheme))
-                {
-                    builder.Append(cell.Grapheme);
-                }
-                else if (cell.Codepoint != 0)
-                {
-                    builder.Append(char.ConvertFromUtf32(cell.Codepoint));
-                }
-            }
-
-            if (row < endRow)
-            {
-                builder.AppendLine();
-            }
-        }
-
-        return builder.Length == 0 ? null : builder.ToString();
-    }
+        => ManagedPlainTextFormatter.Format(_screen, new TerminalSnapshotExportOptions(Selection: selection));
 
     /// <inheritdoc />
     public bool IsPasteSafe(string text)
@@ -773,73 +722,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _ => string.Empty,
         };
 
-        return snapshot.Length > 0;
+        return format == TerminalSnapshotExportFormat.PlainText || snapshot.Length > 0;
     }
 
     private string ExportPlainSnapshot(in TerminalSnapshotExportOptions options)
-    {
-        if (_screen.TotalRows <= 0 || _screen.Columns <= 0)
-        {
-            return string.Empty;
-        }
-
-        StringBuilder builder = new();
-
-        if (options.Selection is TerminalSelectionRange selection)
-        {
-            TerminalSelectionRange normalized = selection.Normalize();
-            int viewportTopAbsoluteRow = GetViewportTopAbsoluteRow();
-            bool unwrapRows = options.Unwrap && !normalized.Rectangle;
-            for (int viewportRow = normalized.StartRow; viewportRow <= normalized.EndRow; viewportRow++)
-            {
-                int absoluteRow = viewportTopAbsoluteRow + viewportRow;
-                if ((uint)absoluteRow >= (uint)_screen.TotalRows)
-                {
-                    continue;
-                }
-
-                if (!TryGetSelectionColumnRange(normalized, viewportRow, out int rowStart, out int rowEnd))
-                {
-                    continue;
-                }
-
-                TerminalRow row = _screen.GetRow(absoluteRow);
-                AppendRowPlainText(row, rowStart, rowEnd, options.TrimTrailingWhitespace, builder);
-
-                if (ShouldAppendSnapshotLineBreak(
-                    row,
-                    unwrapRows,
-                    viewportRow,
-                    normalized.EndRow))
-                {
-                    builder.AppendLine();
-                }
-            }
-
-            return builder.ToString();
-        }
-
-        int lastRowIndex = options.TrimTrailingWhitespace
-            ? GetSnapshotLastRowIndex(visual: false)
-            : _screen.TotalRows - 1;
-        if (lastRowIndex < 0)
-        {
-            return string.Empty;
-        }
-
-        for (int absoluteRow = 0; absoluteRow <= lastRowIndex; absoluteRow++)
-        {
-            TerminalRow row = _screen.GetRow(absoluteRow);
-            AppendRowPlainText(row, 0, row.Columns - 1, options.TrimTrailingWhitespace, builder);
-
-            if (ShouldAppendSnapshotLineBreak(row, options.Unwrap, absoluteRow, lastRowIndex))
-            {
-                builder.AppendLine();
-            }
-        }
-
-        return builder.ToString();
-    }
+        => ManagedPlainTextFormatter.Format(_screen, options);
 
     private string ExportStyledVtSnapshot(in TerminalSnapshotExportOptions options)
     {
@@ -991,51 +878,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         return builder.ToString();
     }
 
-    private static void AppendRowPlainText(
-        TerminalRow terminalRow,
-        int startColumn,
-        int endColumn,
-        bool trimTrailingWhitespace,
-        StringBuilder builder)
-    {
-        int originalLength = builder.Length;
-        int clampedStart = Math.Max(0, startColumn);
-        int clampedEnd = Math.Min(terminalRow.Columns - 1, endColumn);
-        if (clampedEnd < clampedStart)
-        {
-            return;
-        }
-
-        for (int col = clampedStart; col <= clampedEnd; col++)
-        {
-            ref TerminalCell cell = ref terminalRow[col];
-            if (cell.Width == 0)
-            {
-                continue;
-            }
-
-            if (!string.IsNullOrEmpty(cell.Grapheme))
-            {
-                builder.Append(cell.Grapheme);
-            }
-            else if (cell.Codepoint != 0)
-            {
-                builder.Append(char.ConvertFromUtf32(cell.Codepoint));
-            }
-        }
-
-        if (!trimTrailingWhitespace)
-        {
-            return;
-        }
-
-        int end = builder.Length - 1;
-        while (end >= originalLength && char.IsWhiteSpace(builder[end]) && builder[end] is not '\r' and not '\n')
-        {
-            builder.Length--;
-            end--;
-        }
-    }
 
     private bool TryGetSelectionColumnRange(
         in TerminalSelectionRange selection,
