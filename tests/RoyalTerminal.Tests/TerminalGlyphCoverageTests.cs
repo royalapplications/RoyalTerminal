@@ -104,6 +104,23 @@ public sealed class TerminalGlyphCoverageTests
     }
 
     [Fact]
+    public void DisabledManagedProtocolDoesNotConsultFontCoverage()
+    {
+        using BasicVtProcessor processor = new(new TerminalScreen(20, 4)) { GlyphProtocolEnabled = false };
+        TestCoverageSource source = new(_ => true);
+        processor.GlyphCoverageSource = source;
+        List<byte[]> replies = [];
+        processor.ResponseCallback = replies.Add;
+        processor.Process(Encoding.ASCII.GetBytes(Wire("q;cp=41") + Wire("s")));
+        Assert.Empty(replies);
+        Assert.Equal(0, source.Calls);
+        processor.GlyphProtocolEnabled = true;
+        processor.Process(Encoding.ASCII.GetBytes(Wire("q;cp=1f600")));
+        Assert.Equal(Wire("q;cp=1f600;status=system"), Encoding.ASCII.GetString(Assert.Single(replies)));
+        Assert.Equal(1, source.Calls);
+    }
+
+    [Fact]
     public void NativeReplyAugmentationRequiresSingleCompleteBoundedReply()
     {
         TestCoverageSource source = new(_ => true);

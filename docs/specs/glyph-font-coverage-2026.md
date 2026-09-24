@@ -24,6 +24,9 @@ There is no PowerShell/shell behavior change.
   host failure/invalid Unicode must not fabricate system coverage or lose replies.
 - The shared Skia host checks its configured regular font (system family or file)
   and the existing fallback resolver, then verifies a real glyph instead of tofu.
+  LastResort fonts are excluded using the OpenType `head.flags` bit 14 and Apple's
+  family-name fallback. This follows Ghostty's `font/discovery.zig` LastResort
+  exclusion and the [OpenType font-header specification](https://learn.microsoft.com/en-us/typography/opentype/otspec190/head).
 - Coverage resources are separately owned and synchronized with disposal, not
   borrowed from render-thread caches. Creation is lazy; cache size is bounded.
 - Font/renderer changes rebind both engines. Registrations, clear/reset, split
