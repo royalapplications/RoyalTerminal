@@ -48,6 +48,8 @@ public interface ITerminalSelectionExportSource
     /// <summary>
     /// Reads the supplied viewport-relative selection.
     /// </summary>
+    /// <remarks>Built-in engines return plain text with LF line endings and inclusive whole-glyph
+    /// boundaries. Empty selections return an empty string; null indicates an unavailable selection.</remarks>
     string? ReadSelection(in TerminalSelectionRange selection);
 }
 

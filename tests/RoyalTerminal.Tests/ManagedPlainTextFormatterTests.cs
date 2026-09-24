@@ -2,6 +2,8 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Text;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
 using Xunit;
@@ -95,6 +97,52 @@ public sealed class ManagedPlainTextFormatterTests
                 Assert.True(expected == actual, $"Sample {sample}; {options}; expected {Escape(expected)}; actual {Escape(actual)}");
             }
         }
+    }
+
+    [Fact]
+    public void ExportDoesNotDetachCopyOnWriteCellStorage()
+    {
+        TerminalScreen screen = new(8, 4);
+        using BasicVtProcessor processor = new(screen);
+        processor.Process("abc"u8);
+        TerminalScreen copy = screen.CreateStateCopy();
+        Assert.True(processor.TryExportSnapshot(TerminalSnapshotExportFormat.PlainText, new(), out _));
+        Assert.Equal("abc", processor.ReadSelection(new(0, 0, 7, 0)));
+        Assert.True(Unsafe.AreSame(ref MemoryMarshal.GetReference(screen.GetRow(0).ReadOnlyCells),
+            ref MemoryMarshal.GetReference(copy.GetRow(0).ReadOnlyCells)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SelectionUsesScrolledViewportAndExportsWorkingStateDuringRenderHold(bool native)
+    {
+        if (native && !GhosttyVtProcessor.IsAvailable()) return;
+        TerminalScreen screen = new(8, 3, 100);
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(screen) : new BasicVtProcessor(screen);
+        processor.Process("zero\r\none\r\ntwo\r\nthree\r\nfour"u8);
+        screen.ScrollOffset = 2;
+        ITerminalSelectionExportSource selection = (ITerminalSelectionExportSource)processor;
+        Assert.Equal("zero\none", selection.ReadSelection(new(0, 0, 7, 1)));
+        screen.ScrollOffset = 0;
+        processor.Process("\u001b[?2026h\u001b[HNEW\u001b[K"u8);
+        Assert.Equal("NEW", selection.ReadSelection(new(0, 0, 7, 0)));
+        processor.Process("\u001b[?2026l"u8);
+        Assert.Equal("NEW", selection.ReadSelection(new(0, 0, 7, 0)));
+    }
+
+    [Theory]
+    [InlineData(TerminalSnapshotExportFormat.PlainText, "\n")]
+    [InlineData(TerminalSnapshotExportFormat.StyledVt, "\r\n")]
+    [InlineData(TerminalSnapshotExportFormat.Html, "\n")]
+    public void NativeRectangularExportsKeepRowBoundaries(TerminalSnapshotExportFormat format, string newline)
+    {
+        if (!GhosttyVtProcessor.IsAvailable()) return;
+        using GhosttyVtProcessor native = new(new TerminalScreen(4, 4));
+        native.Process("ABCDE"u8);
+        Assert.True(native.TryExportSnapshot(format, new(Unwrap: true, TrimTrailingWhitespace: true,
+            Selection: new(0, 0, 0, 1, Rectangle: true)), out string actual));
+        Assert.Contains(newline, actual, StringComparison.Ordinal);
     }
 
     private static string Escape(string value) => value.Replace("\n", "\\n", StringComparison.Ordinal);

@@ -45,7 +45,10 @@ platform/allocator boundaries. [Managed search](managed-search-parity-2026.md)
 now has streaming literal matching and logical multi-row ranges in both adapters;
 incremental history caching/background search remain deferred. [Glyph font
 coverage](glyph-font-coverage-2026.md) now connects both adapters to the shared
-host's configured font/fallback coverage with bounded, owned caches. The table below
+host's configured font/fallback coverage with bounded, owned caches. [Plain-text
+formatting](managed-plain-formatter-2026.md) now ports deferred blanks, ASCII-only
+trim, wide selections and LF output, while styled/HTML equivalence remains deferred.
+The table below
 records the original native-first delivery boundary, not the updated follow-ups.
 
 | Area | Current boundary | Follow-up acceptance evidence |

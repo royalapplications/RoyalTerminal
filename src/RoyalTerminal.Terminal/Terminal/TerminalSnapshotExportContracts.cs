@@ -51,8 +51,9 @@ public readonly record struct TerminalSnapshotExportExtras(
 /// <summary>
 /// Options for exporting a terminal snapshot.
 /// </summary>
-/// <param name="Unwrap">Whether soft-wrapped lines should be unwrapped.</param>
-/// <param name="TrimTrailingWhitespace">Whether trailing whitespace should be trimmed.</param>
+/// <param name="Unwrap">Whether soft-wrapped lines should be unwrapped. Rectangular selections retain row boundaries.</param>
+/// <param name="TrimTrailingWhitespace">Whether trailing ASCII spaces should be trimmed in plain text.
+/// Trailing erased cells and empty rows are always omitted from plain text; other formats may retain visual styling.</param>
 /// <param name="Selection">Optional viewport-relative selection range to export.</param>
 /// <param name="Extras">Optional styled-export extras.</param>
 public readonly record struct TerminalSnapshotExportOptions(
@@ -74,6 +75,7 @@ public interface ITerminalSnapshotExportSource
     /// <summary>
     /// Exports the requested snapshot format.
     /// </summary>
+    /// <remarks>Plain text uses LF line endings on every platform. An empty plain export is successful.</remarks>
     bool TryExportSnapshot(
         TerminalSnapshotExportFormat format,
         in TerminalSnapshotExportOptions options,

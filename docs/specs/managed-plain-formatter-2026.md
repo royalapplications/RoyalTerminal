@@ -50,7 +50,12 @@ macOS/Windows tests and all six native builds passed. The resolver now retries
 global discovery when family-specific discovery fails, including incorrect
 candidates. Rejected candidate font-cache entries are released before a retry
 to avoid native-handle reuse. Deterministic fixture tests cover both failure
-paths; platform verification remains separate from those tests.
+paths. Reproduced on Ubuntu 24.04 ARM64 with SkiaSharp 3.119.4: matching `A`
+against the file family `Noto Emoji` returns null; matching without a family
+returns `Noto Sans`, with a real `A` glyph and `head.flags=0x0007`. The updated
+resolver successfully returns that fallback. This isolated Linux diagnostic is
+not a full Linux suite or x64 CI sign-off. The VM was accessed through the
+Parallels CLI skill without configuration changes.
 
 Ghostty font discovery uses character coverage in its system font search;
 Windows Terminal delegates fallback to DirectWrite and xterm.js to the browser
