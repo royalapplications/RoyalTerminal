@@ -67,3 +67,10 @@ provider exceptions, configured-file fallback, LastResort exclusion, bounded
 caches, allocation-free warmed lookups, concurrent disposal and headless host
 font/engine replacement. Cross-platform CI status is tracked separately in the PR.
 No throughput or renderer-speed improvement is claimed for this capability.
+
+Subsequent CI `36007943014` at `f0acddb` failed one Linux file-font fallback
+assertion; macOS/Windows managed jobs and all six native builds passed. The
+[plain-formatter follow-up](managed-plain-formatter-2026.md) reproduced the cause
+on Ubuntu ARM64 and adds verified global discovery after a family-specific match
+fails. Fresh follow-up validation is recorded there and in the PR; the earlier
+full local pass is not presented as cross-platform sign-off.

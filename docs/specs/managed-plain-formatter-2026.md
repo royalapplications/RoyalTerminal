@@ -41,7 +41,18 @@ not exhaustive formatter equivalence or a port of Ghostty's SIMD implementation.
 
 Focused tests include native comparisons for whitespace, empty output, wrapping,
 wide/grapheme selections, clamping and 400 seeded history/selection comparisons.
-Validation results will be recorded after the implementation commit.
+Additional tests cover scrolled viewport selection, working-state reads during
+synchronized-output render holds, COW storage identity and native rectangular
+row boundaries in all three formats.
+
+At `1d8f6bc`, full local Release validation with CI flags and required native
+tests passed **4,004 unit/headless + 240 native integration = 4,244 tests**,
+with **16 conditional unit skips and zero failures**. Both projects wrote
+`plain-formatter-release.trx`. The final focused formatter/selection/font suites
+passed **63 tests, zero skips/failures** (`plain-formatter-focused.trx`). Full
+solution Release build: **zero warnings and errors**.
+Platform CI is tracked separately in the PR;
+these local macOS results are not full Linux/Windows sign-off.
 
 ## Font-coverage CI follow-up
 
