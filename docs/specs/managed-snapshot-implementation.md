@@ -9,9 +9,11 @@ Status: **public restore and export implemented; exact native quota parity incom
 `ManagedTerminalSnapshotDecoder.Ready/Next` supports live incremental history.
 It installs complete processor state, verifies continuation replay, applies history
 to the live COW screen and updates prompt-seen state. Public decode limits bound
-untrusted input, including discarded pages. History uses the managed host's row
-limit, not native page-allocation byte/minimum-line accounting. See the main parity
-report for current validation evidence. The chronological notes below describe
+untrusted input, including discarded pages. The September 24 follow-up adds native
+logical byte/minimum-line quota admission in addition to the host's hard row cap,
+including retained page identity, COW and live content accounting. Exact mutable
+native allocator history remains outside the CLR representation; see the
+[follow-up boundaries](ime-layout-snapshot-quotas-2026.md). The chronological notes below describe
 individual component milestones and their then-outstanding integration work.
 
 `BasicVtProcessor.GetBinarySnapshot/WriteBinarySnapshotTo` now construct live

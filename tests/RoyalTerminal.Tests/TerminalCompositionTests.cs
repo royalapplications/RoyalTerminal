@@ -4,6 +4,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Input.TextInput;
 using RoyalTerminal.Avalonia.Controls;
@@ -17,6 +18,35 @@ namespace RoyalTerminal.Tests;
 
 public sealed class TerminalCompositionTests
 {
+    [AvaloniaFact]
+    public async Task FocusedControlClearsOverlayOnCommitCancelAndFocusLoss()
+    {
+        TerminalControl control = new() { VtProcessorPreference = VtProcessorPreference.Managed };
+        Button other = new();
+        Window window = new() { Width = 640, Height = 400, Content = new StackPanel { Children = { control, other } } };
+        window.Show();
+        try
+        {
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            control.Focus();
+            control.WriteOutput("hello"u8);
+            TextInputMethodClientRequestedEventArgs args = new() { RoutedEvent = InputElement.TextInputMethodClientRequestedEvent };
+            control.RaiseEvent(args);
+            args.Client!.SetPreeditText("日本", 1);
+            Assert.NotNull(control.Renderer!.Preedit);
+            Rect candidate = args.Client.CursorRectangle;
+            Assert.True(candidate.Width > 0 && candidate.Height > 0);
+            args.Client.SetPreeditText(string.Empty, 0); // IBus HidePreedit.
+            Assert.Null(control.Renderer.Preedit);
+            args.Client.SetPreeditText("a\u0301", 2);
+            window.KeyTextInput("a\u0301");
+            Assert.Null(control.Renderer.Preedit);
+            args.Client.SetPreeditText("cancel on blur", 3);
+            other.Focus();
+            Assert.Null(control.Renderer.Preedit);
+        }
+        finally { await HeadlessTerminalTestCleanup.CleanupWindowAsync(window, control); }
+    }
     [Theory]
     [InlineData("abc", 3, 0, 7, 0, 2, 0, 3, 3)]
     [InlineData("abc", 3, 7, 7, 5, 7, 0, 3, 7)]

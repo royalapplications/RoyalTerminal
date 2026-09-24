@@ -28,7 +28,7 @@ internal sealed class TerminalPreedit
         _renderCells = new TerminalCell[_cells.Count];
         for (int i = 0; i < _cells.Count; i++)
             _renderCells[i] = new() { Codepoint = char.ConvertToUtf32(_cells[i].Text, 0),
-                Grapheme = _cells[i].Text, Width = _cells[i].Width };
+                Grapheme = _cells[i].Text, Width = (byte)_cells[i].Width };
     }
 
     internal int Count => _cells.Count;

@@ -18,6 +18,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
     private readonly ITerminalKeyboardLayout _keyboardLayout;
     private readonly HashSet<int> _pressedKeys = [];
     private readonly HashSet<int> _compositionKeys = [];
+    private readonly HashSet<int> _layoutEncodedKeys = [];
     private bool _isComposing;
     private bool _compositionCommitPending;
 
@@ -51,16 +52,22 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
     {
         if (!_isComposing) _compositionCommitPending = false;
         int identity = KeyIdentity(e);
-        if (_isComposing && e.Key is not (Key.LeftShift or Key.RightShift or Key.LeftCtrl or Key.RightCtrl or
-            Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin)) _compositionKeys.Add(identity);
+        bool reportsModifierEvents = (ResolveKittyKeyboardFlags(sessionService, vtProcessor) & 10) == 10;
+        if (_isComposing && (!reportsModifierEvents || e.Key is not (Key.LeftShift or Key.RightShift or Key.LeftCtrl or Key.RightCtrl or
+            Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin))) _compositionKeys.Add(identity);
         else _compositionKeys.Remove(identity);
         TerminalInputAction action = identity != 0 && !_pressedKeys.Add(identity)
             ? TerminalInputAction.Repeat : TerminalInputAction.Press;
         TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor);
-        if (_keyboardInputNormalizer.HandleKeyDown(e, modeState) == TerminalKeyboardInputAction.SuppressForTextInput && !_isComposing &&
-            ResolveKittyKeyboardFlags(sessionService, vtProcessor) == 0)
+        if (_keyboardInputNormalizer.HandleKeyDown(e, modeState) == TerminalKeyboardInputAction.SuppressForTextInput && !_isComposing)
         {
-            return false;
+            // Only bypass AltGr's text-input route when the layout provider
+            // positively identifies the consumed Ctrl+Alt pair. Otherwise a
+            // fabricated Ctrl+Alt shortcut could replace the intended text.
+            const TerminalModifiers altGr = TerminalModifiers.Control | TerminalModifiers.Alt;
+            if (ResolveKittyKeyboardFlags(sessionService, vtProcessor) == 0 ||
+                (_keyboardLayout.GetInfo(e).ConsumedModifiers & altGr) != altGr) return false;
+            _layoutEncodedKeys.Add(identity);
         }
 
         ITerminalInputSink? inputSink = sessionService.InputSink;
@@ -142,9 +149,10 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
         // release as a fresh Kitty/Win32 event after suppressing its press.
         TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor: null);
         TerminalKeyboardInputAction normalization = _keyboardInputNormalizer.HandleKeyUp(e, modeState);
+        bool encodedLayoutKey = _layoutEncodedKeys.Remove(identity);
         if (_compositionKeys.Remove(identity)) return true;
         if (normalization == TerminalKeyboardInputAction.SuppressForTextInput && !_isComposing &&
-            ResolveKittyKeyboardFlags(sessionService, null) == 0)
+            !encodedLayoutKey)
         {
             return false;
         }
@@ -245,6 +253,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
     {
         _pressedKeys.Clear();
         _compositionKeys.Clear();
+        _layoutEncodedKeys.Clear();
         _isComposing = false;
         _compositionCommitPending = false;
         _keyboardInputNormalizer.ResetInputState();
