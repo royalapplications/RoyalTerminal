@@ -46,6 +46,9 @@ public sealed record TerminalClipboardContent(string MimeType, byte[] Data);
 /// <summary>An atomic, normalized terminal clipboard-write request.</summary>
 /// <param name="Location">The target clipboard.</param>
 /// <param name="Contents">Representations of one value; an empty list requests a clear.</param>
+/// <param name="Name">The requesting program name, when supplied by the protocol.</param>
+/// <param name="Granted">Whether the requesting program already has a session grant.</param>
+/// <param name="CanRemember">Whether the host may remember a grant for this program.</param>
 public sealed record TerminalClipboardWrite(
     TerminalClipboardLocation Location,
     IReadOnlyList<TerminalClipboardContent> Contents,
