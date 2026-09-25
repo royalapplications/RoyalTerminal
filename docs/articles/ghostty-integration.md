@@ -4,10 +4,14 @@ title: Ghostty Integration
 
 # Ghostty Integration
 
-The detailed 2026 dependency, API, managed-behavior, and output-thread parity audit
-is recorded in [Ghostty and Ghostling parity update](../specs/ghostty-ghostling-2026-parity.md).
+RoyalTerminal uses Ghostty in two different ways: as a native VT engine with renderer interoperability, and as a public wrapper library for hosts that want direct access to the Ghostty C ABI from .NET. The second role is what `RoyalTerminal.GhosttySharp` exists for.
 
-RoyalTerminal uses Ghostty in two different ways: as a high-level native VT and rendering implementation, and as a low-level public wrapper library for hosts that want direct access to the Ghostty C ABI from .NET. The second role is what `RoyalTerminal.GhosttySharp` exists for.
+Both VT engines use RoyalTerminal's shared Avalonia/Skia host. The renderer bridge
+does not embed Ghostty's complete Metal/OpenGL terminal renderer, and the managed
+VT engine does not claim exhaustive native or standalone-application parity.
+The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
+the pinned native type and callback bindings; regenerate it with
+`scripts/audit-ghostty-abi.py` after a dependency update.
 
 ## Ghostty-compatible shaders
 
