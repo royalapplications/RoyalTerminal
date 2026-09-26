@@ -4942,7 +4942,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             TimeSpan? delay = _renderHold is { } hold
                 ? ClampRefreshDelay(TimeSpan.FromSeconds(1) - _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp))
                 : null;
-            if (_animationNextTickDelay is TimeSpan next)
+            if (_renderHold is null && _animationNextTickDelay is TimeSpan next)
             {
                 TimeSpan animation = ClampRefreshDelay(next - _options.TimeProvider.GetElapsedTime(_animationTickTimestamp));
                 if (delay is null || animation < delay) delay = animation;
