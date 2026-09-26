@@ -24,11 +24,16 @@ public sealed partial class BasicVtProcessor
     /// a ground-state processor with equivalent terminal state. The caller owns the array.
     /// Throws if retention is disabled or its configured limit has been exceeded.
     /// </summary>
-    public byte[] GetContinuation() => _continuation.GetBytes().ToArray();
+    public byte[] GetContinuation()
+    {
+        _screen.ThrowIfSnapshotMutationFailed();
+        return _continuation.GetBytes().ToArray();
+    }
 
     /// <summary>Writes the unfinished parser input without allocating an intermediate array.</summary>
     public void WriteContinuationTo(Stream destination)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         ArgumentNullException.ThrowIfNull(destination);
         if (!destination.CanWrite)
             throw new ArgumentException("The destination is not writable.", nameof(destination));

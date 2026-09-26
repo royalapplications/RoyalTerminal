@@ -9,6 +9,7 @@ internal sealed partial class GhosttySnapshotPageTracker
 {
     internal RowEdit EditRow(TerminalRowBuffer rows, TerminalRow row, GhosttySnapshotAllocation layout, TerminalScreen? screen = null)
     {
+        ThrowIfMutationFailed();
         if (row.SnapshotAllocation is not { MetadataOverflow: false } page) return default;
         State state;
         if (_pages.TryGetValue(page, out State? known) &&
@@ -154,6 +155,17 @@ internal sealed partial class GhosttySnapshotPageTracker
         // partial rows clear the destination, move the run, then zero the source.
         internal bool ShiftFrom(RowEdit source, int start, int count, bool wholeRow = true)
         {
+            owner?.ThrowIfMutationFailed();
+            try { return ShiftFromCore(source, start, count, wholeRow); }
+            catch (Exception failure) when (failure is OutOfMemoryException or InvalidOperationException)
+            {
+                owner?.RecordMutationFailure(failure);
+                throw;
+            }
+        }
+
+        private bool ShiftFromCore(RowEdit source, int start, int count, bool wholeRow)
+        {
             if (owner is null || count <= 0 ||
                 row.SnapshotAllocation is not { MetadataOverflow: false } page) return false;
             if (source.Owner is null)
@@ -196,17 +208,22 @@ internal sealed partial class GhosttySnapshotPageTracker
                 }
                 if (result == GhosttySnapshotSetAddResult.Success && grapheme == GhosttySnapshotGraphemeAddResult.Success &&
                     hyperlink == GhosttySnapshotHyperlinkAddResult.Success) return false;
-                if (!(grapheme != GhosttySnapshotGraphemeAddResult.Success
-                    ? owner.GrowGraphemes(ref page, state, Group(rows, page), layout)
+                GhosttySnapshotCapacityDimension? dimension = grapheme != GhosttySnapshotGraphemeAddResult.Success
+                    ? GhosttySnapshotCapacityDimension.GraphemeBytes
                     : hyperlink != GhosttySnapshotHyperlinkAddResult.Success
-                    ? owner.GrowMetadata(ref page, state, Group(rows, page), GhosttySnapshotHyperlinkStorage.GrowthDimension(hyperlink), layout)
-                    : owner.Grow(ref page, state, Group(rows, page), result, layout))) return false;
+                    ? GhosttySnapshotHyperlinkStorage.GrowthDimension(hyperlink)
+                    : result == GhosttySnapshotSetAddResult.OutOfMemory ? GhosttySnapshotCapacityDimension.Styles : null;
+                // Returning false here means a successful cross-page copy to
+                // the caller. Exhaustion is fatal, not an overflow checkpoint
+                // followed by copying the entire unaccepted source payload.
+                if (!owner.GrowMetadata(ref page, state, Group(rows, page), dimension, layout, preserveOnFailure: true))
+                    throw RowCopyFailed();
             }
         }
 
         public void Dispose()
         {
-            if (owner is not null) state.Revisions[row.SnapshotAllocationRow] = row.SnapshotMetadataRevision;
+            if (owner is { MutationFailed: false }) state.Revisions[row.SnapshotAllocationRow] = row.SnapshotMetadataRevision;
         }
     }
 }

@@ -30,7 +30,9 @@ public sealed partial class BasicVtProcessor
     // Same-page movement does not migrate references in Ghostty either.
     private void RecordSnapshotCursorStyle()
     {
-        if (!_screen.TracksSnapshotMetadata) return;
+        // Do not allocate or mask the original fatal row-copy error while
+        // movement scopes unwind around a partially completed operation.
+        if (!_screen.TracksSnapshotMetadata || _screen.SnapshotMutationFailed) return;
         RecordSnapshotCursorStyle(CaptureSnapshotPen());
     }
 

@@ -35,6 +35,16 @@ public sealed partial class BasicVtProcessor
     // scrolling copies only the affected cell runs and never creates history.
     private void ScrollRectangle(int top, int bottom, int count, bool down)
     {
+        try { ScrollRectangleCore(top, bottom, count, down); }
+        catch (OutOfMemoryException failure)
+        {
+            _screen.RecordSnapshotMutationFailure(failure);
+            throw;
+        }
+    }
+
+    private void ScrollRectangleCore(int top, int bottom, int count, bool down)
+    {
         count = Math.Clamp(count, 1, bottom - top + 1);
         int width = RightMargin - _scrollLeft + 1;
         // A wide glyph cannot be split across a rectangle edge. Clear both

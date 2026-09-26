@@ -128,6 +128,7 @@ internal sealed partial class GhosttySnapshotPageTracker
             _primaryLinkPage = _primaryLinkPage, _alternateLinkPage = _alternateLinkPage,
             _primaryLinkToken = _primaryLinkToken, _alternateLinkToken = _alternateLinkToken,
             _cursorStyleDrops = _cursorStyleDrops,
+            _mutationFailure = _mutationFailure,
         };
         foreach (KeyValuePair<GhosttySnapshotPageAllocation, State> page in _pages)
         {
@@ -139,6 +140,7 @@ internal sealed partial class GhosttySnapshotPageTracker
 
     internal GhosttySnapshotPageAllocation AllocationReplaced(GhosttySnapshotPageAllocation previous, GhosttySnapshotPageAllocation replacement)
     {
+        ThrowIfMutationFailed();
         if (!_pages.TryGetValue(previous, out State? source)) return replacement;
         State state = source.Copy();
         if (state.Storage.Rebuild(replacement.Capacity, restoreCursor: true, out GhosttySnapshotPageStorage? rebuilt))
@@ -162,6 +164,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         GhosttySnapshotStyle previousPen, GhosttySnapshotStyle pen, GhosttySnapshotAllocation layout,
         TerminalScreen screen, ref uint hyperlinkCounter)
     {
+        ThrowIfMutationFailed();
         if (cursorRow.SnapshotAllocation is not { } page || page.MetadataOverflow) return true;
         GhosttySnapshotPageAllocation? departing = key == 0 ? _primaryCursor : _alternateCursor;
         if (departing is not null && !ReferenceEquals(departing, page) && _pages.TryGetValue(departing, out _))

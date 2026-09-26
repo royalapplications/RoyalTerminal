@@ -31,6 +31,7 @@ public sealed partial class BasicVtProcessor
     /// </summary>
     public void WriteBinarySnapshotTo(Stream destination, GhosttySnapshotDecodeLimits? limits = null)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         ArgumentNullException.ThrowIfNull(destination);
         if (!destination.CanWrite) throw new ArgumentException("Snapshot destination is not writable.", nameof(destination));
         limits ??= new(); limits.Validate();

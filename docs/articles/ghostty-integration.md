@@ -216,6 +216,21 @@ regressions cover grapheme/link-driven growth, independent cursor details, saved
 cursors and COW ownership without forcing process OOM. These tests are authored
 but unrun; no new performance claim is made.
 
+Exhausted cross-page row-copy retries are now fatal to the managed terminal
+owner, rather than falling through as a successful copy of the source payload.
+Ghostty's `Screen.clonePartialRowGrowCapacity` panics here because callers have
+already moved rows and pins. RoyalTerminal deliberately contains the failure to
+the screen/processor instead of crashing its embedding process: further input,
+reset/session reuse, resize, search, selection and snapshot/continuation export
+reject the partial state. A fresh processor and screen are required. COW readers
+retain their independent state, and failed synchronized-output staging is never
+published by timeout or disposal. Cursor accounting skips exception unwinding;
+the existing output worker propagates the failure and stops its drain. Successful
+capacity growth still retries the copy. Twenty-four full-width/rectangular,
+grapheme/style/link-map/string-pressure, COW, lifecycle, held-publication and worker
+regression cases are authored but unrun. Generic CLR allocation failures before
+the row-copy boundary and other mutation paths still require the broader audit.
+
 Unrepresentable allocation state rejects additional
 history rather than wrapping a capacity or undercharging it; quota eviction can
 remove such a page only once it is wholly historical. A subsequent representable

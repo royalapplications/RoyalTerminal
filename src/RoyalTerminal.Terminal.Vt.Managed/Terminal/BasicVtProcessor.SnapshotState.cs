@@ -27,6 +27,7 @@ public sealed partial class BasicVtProcessor
     internal GhosttySnapshotHistoryProgress ApplySnapshotHistory(GhosttySnapshotHistoryApplication application,
         in GhosttySnapshotHistoryPage history)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         // Use the live COW screen during output holds, not the frozen published view.
         // Admission policy belongs to the host, not the frozen terminal frame.
         _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);

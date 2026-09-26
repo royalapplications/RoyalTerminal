@@ -449,12 +449,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     /// <summary>
     /// Processes a span of raw terminal output bytes.
+    /// Unrecoverable row-copy allocation failure faults this processor and its
+    /// screen. Dispose them and create a fresh pair; reset cannot repair a
+    /// partially completed structural mutation.
     /// </summary>
     public void Process(ReadOnlySpan<byte> data)
         => ProcessCore(data, stopAtGround: false, out _);
 
     private void ProcessCore(ReadOnlySpan<byte> data, bool stopAtGround, out int consumed)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         TerminalModeState before;
         _inputBatchDepth++;
         try
@@ -463,12 +467,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
         finally
         {
-            ApplySnapshotCursorStyleDrops();
+            if (!_screen.SnapshotMutationFailed) ApplySnapshotCursorStyleDrops();
             _inputBatchDepth--;
             // Match the native adapter's write-then-render order. Protocol
             // commands in one input batch must see a stable animation clock;
             // an intervening render tick can otherwise invalidate frame loads.
-            if (_inputBatchDepth == 0 && AdvanceKittyAnimations()) PublishKittyGraphics();
+            if (!_screen.SnapshotMutationFailed && _inputBatchDepth == 0 && AdvanceKittyAnimations()) PublishKittyGraphics();
         }
         RaiseModeChangedIfNeeded(before);
     }
@@ -690,11 +694,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public void PopulateSearchMatches(string needle, List<TerminalSearchMatch> destination)
-        => _search.Populate(_publishedScreen, needle, destination);
+    {
+        _screen.ThrowIfSnapshotMutationFailed();
+        _search.Populate(_publishedScreen, needle, destination);
+    }
 
     /// <inheritdoc />
     public TerminalSearchStatus PopulateSearchMatchesAsync(string needle, List<TerminalSearchMatch> destination)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         if (string.IsNullOrEmpty(needle))
         {
             CancelSearch();
@@ -725,7 +733,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public string? ReadSelection(in TerminalSelectionRange selection)
-        => ManagedPlainTextFormatter.Format(_screen, new TerminalSnapshotExportOptions(Selection: selection));
+    {
+        _screen.ThrowIfSnapshotMutationFailed();
+        return ManagedPlainTextFormatter.Format(_screen, new TerminalSnapshotExportOptions(Selection: selection));
+    }
 
     /// <inheritdoc />
     public bool IsPasteSafe(string text)
@@ -769,6 +780,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         in TerminalSnapshotExportOptions options,
         out string snapshot)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         if (!SupportsSnapshotFormat(format))
         {
             snapshot = string.Empty;
@@ -1709,7 +1721,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             if (adjustImages)
             {
                 _kittyStore.EndMarginScroll(_screen);
-                if (_kittyStore.Revision != revision) PublishKittyGraphics();
+                if (!_screen.SnapshotMutationFailed && _kittyStore.Revision != revision) PublishKittyGraphics();
             }
         }
     }
@@ -1765,6 +1777,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     }
 
     private void CopyRow(TerminalRow src, TerminalRow dst)
+    {
+        try { CopyRowCore(src, dst); }
+        catch (OutOfMemoryException failure)
+        {
+            _screen.RecordSnapshotMutationFailure(failure);
+            throw;
+        }
+    }
+
+    private void CopyRowCore(TerminalRow src, TerminalRow dst)
     {
         ClearPreservedCellsForMutation(src);
         ClearPreservedCellsForMutation(dst);
@@ -4603,12 +4625,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// </summary>
     public void Reset()
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         ResetInternal(raiseModeChanged: true, SessionScreenResetMode.ClearViewport);
     }
 
     /// <inheritdoc />
     public void PrepareForNewSession(bool preserveScrollback)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         ClearSessionNotifications();
         _dragDrop = null;
         ResetInternal(
@@ -4621,12 +4645,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void ClearScrollback()
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         _screen.ClearScrollback();
     }
 
     /// <inheritdoc />
     public void ClearVisibleHistory()
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (_inAltScreen)
         {
@@ -4853,6 +4879,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         bool reflowOnResize, Span<TerminalGridPosition> trackedAbsolutePositions,
         bool preserveViewportTopOnRowsIncrease, bool reportSize, bool notifyOnly = false)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(rows, 1);
         ApplySnapshotCursorStyleDrops();
@@ -5077,6 +5104,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void ApplyTheme(TerminalTheme theme)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         ArgumentNullException.ThrowIfNull(theme);
 
         _colors.Configure(theme);
@@ -5119,6 +5147,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         get
         {
+            if (_screen.SnapshotMutationFailed) return null;
             TimeSpan? delay = _renderHold is { } hold
                 ? ClampRefreshDelay(TimeSpan.FromSeconds(1) - _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp))
                 : null;
@@ -5141,6 +5170,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public bool RefreshTimedState()
     {
+        if (_screen.SnapshotMutationFailed) return false;
         _notifications?.Refresh();
         bool changed = _backgroundSearch?.TakeChanged() ?? false;
         if (_renderHold is { } hold &&
@@ -5185,6 +5215,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private bool EndRenderHold()
     {
         if (_renderHold is null) return false;
+        // A failed private mutation is never published by timeout or Dispose.
+        // Retain its faulted owner so this processor cannot resume accidentally.
+        if (_screen.SnapshotMutationFailed) return false;
         // Host admission policy can change while the terminal frame is frozen.
         _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
         _publishedScreen.AdoptStateFrom(_screen);
