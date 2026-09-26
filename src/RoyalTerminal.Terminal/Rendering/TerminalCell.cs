@@ -4,6 +4,7 @@
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using RoyalTerminal.Terminal.Snapshots;
 using RoyalTerminal.Terminal.Theming;
 
 namespace RoyalTerminal.Avalonia.Rendering;
@@ -2400,6 +2401,8 @@ public sealed partial class TerminalScreen
         out int mappedAbsoluteRow,
         out int mappedColumn)
     {
+        GhosttySnapshotReflowAllocation? snapshotAllocation = CreateSnapshotReflowAllocation(columns);
+        List<GhosttySnapshotReflowAllocation.Source>? snapshotSources = snapshotAllocation is null ? null : [];
         List<TerminalRow> reflowedRows = new(_rows.Count);
         List<TerminalCell> logicalLine = new(Math.Max(Columns, columns));
         List<(int Start, int End, TerminalSemanticPrompt Prompt)>? semanticRows = null;
@@ -2429,6 +2432,7 @@ public sealed partial class TerminalScreen
         while (rowIndex < sourceRowCount)
         {
             logicalLine.Clear();
+            snapshotSources?.Clear();
             semanticRows?.Clear();
             lineTrackedIndexes?.Clear();
             lineTrackedOffsets?.Clear();
@@ -2497,6 +2501,8 @@ public sealed partial class TerminalScreen
 
                 if (endExclusive > 0)
                 {
+                    if (snapshotSources is not null)
+                        GhosttySnapshotReflowAllocation.CaptureSource(snapshotSources, logicalLine.Count, row);
                     // Adjacent equal markers form one run. In particular,
                     // ordinary output keeps the original bulk-copy fast path.
                     if (row.SemanticPrompt != TerminalSemanticPrompt.None || semanticRows is { Count: > 0 })
@@ -2530,6 +2536,8 @@ public sealed partial class TerminalScreen
                 reflowedRows,
                 trackedLogicalOffset,
                 semanticRows is null ? default : CollectionsMarshal.AsSpan(semanticRows),
+                snapshotAllocation,
+                snapshotSources is null ? default : CollectionsMarshal.AsSpan(snapshotSources),
                 ref lastDestinationColumn);
 
             if (mappedLinePosition is { } mappedPosition)
@@ -2561,8 +2569,10 @@ public sealed partial class TerminalScreen
             }
         }
 
+        snapshotAllocation?.Finish(reflowedRows, DefaultForeground, DefaultBackground);
         _rows.Clear();
         _rows.AddRange(reflowedRows);
+        snapshotAllocation?.AccountResult(this, _rows);
     }
 
     private static ReflowAnchorProcessingIndex[]? CreateReflowAnchorProcessingOrder(
@@ -2655,6 +2665,8 @@ public sealed partial class TerminalScreen
         List<TerminalRow> destination,
         int trackedLogicalOffset,
         ReadOnlySpan<(int Start, int End, TerminalSemanticPrompt Prompt)> semanticRows,
+        GhosttySnapshotReflowAllocation? snapshotAllocation,
+        ReadOnlySpan<GhosttySnapshotReflowAllocation.Source> snapshotSources,
         ref int lastDestinationColumn)
     {
         int destinationStart = destination.Count;
@@ -2662,7 +2674,9 @@ public sealed partial class TerminalScreen
 
         if (logicalLine.IsEmpty)
         {
-            destination.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground));
+            TerminalRow blank = new(columns, DefaultForeground, DefaultBackground);
+            destination.Add(blank);
+            snapshotAllocation?.DeferBlank(blank);
             return trackedLogicalOffset >= 0
                 ? new TerminalGridPosition(Math.Clamp(trackedLogicalOffset, 0, columns), 0)
                 : null;
@@ -2670,9 +2684,16 @@ public sealed partial class TerminalScreen
 
         int sourceIndex = 0;
         int semanticIndex = 0;
+        int snapshotSourceIndex = 0;
         while (sourceIndex < logicalLine.Length)
         {
             TerminalRow row = TerminalRow.CreateForReflow(columns);
+            if (snapshotAllocation is not null)
+            {
+                while (snapshotSourceIndex + 1 < snapshotSources.Length && sourceIndex >= snapshotSources[snapshotSourceIndex + 1].Start)
+                    snapshotSourceIndex++;
+                snapshotAllocation.Append(row, snapshotSources[snapshotSourceIndex].Page);
+            }
             row.SemanticPrompt = semanticRows.IsEmpty ? TerminalSemanticPrompt.None : semanticRows[semanticIndex].Prompt;
             int destinationRow = destination.Count - destinationStart;
             row.IsWrapContinuation = destinationRow > 0;

@@ -35,6 +35,22 @@ public sealed partial class TerminalScreen
         return allocation.Fits(Columns, ViewportRows, bytes, (ulong)rows.Count + (ulong)page.Grid.Rows,
             quota.MaximumBytes, quota.MaximumRows);
     }
+
+    private GhosttySnapshotReflowAllocation? CreateSnapshotReflowAllocation(int columns)
+    {
+        if (_rows.Count == 0 || columns is < 1 or > ushort.MaxValue ||
+            _snapshotScrollbackQuota is null && _rows[0].SnapshotAllocation is null) return null;
+        int alignment = _snapshotScrollbackQuota?.PageAlignment ??
+            (OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 16384 : 4096);
+        GhosttySnapshotAllocation layout = new(alignment);
+        for (int i = 0; i < _rows.Count; i++)
+            if (_rows[i].PreservedColumns is < 1 or > ushort.MaxValue) return null;
+        // Observe live content before reflow replaces its rows. A metadata
+        // overflow may become representable after reflow splits the content;
+        // retain its existing page identity instead of dropping all accounting.
+        _ = GhosttySnapshotLiveAllocation.Measure(this, _rows, layout);
+        return new(_rows, columns, layout);
+    }
     // Allocate a lineage only when a decoder tracks this terminal. COW publication
     // preserves it; a separately restored terminal receives a different identity.
     private object? _snapshotLineage;

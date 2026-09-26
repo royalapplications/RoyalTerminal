@@ -30,10 +30,21 @@ Ghostty `PageList.grow` and page replacement ownership; Windows Terminal and xte
 use row-oriented storage and do not define this snapshot budget. The managed hard
 scrollback row cap remains independent of the logical native-page budget.
 
+Column reflow now carries source-page allocation provenance through logical lines,
+including lines that cross PAGE boundaries. The first destination inherits the
+first source's adjusted capacity; later destinations inherit the page currently
+being consumed. Deferred blank rows use the next nonblank source when allocating
+another page. Width adjustments retain the layout's byte budget rather than using
+extra pooled bytes; the native first/later-page fallbacks are distinct. All-blank
+reflow retains the first page, and viewport padding reuses its remaining slots.
+Accounting is isolated from text, style and tracked-anchor movement; ordinary
+untracked screens do not create snapshot allocation metadata during reflow.
+
 This is not yet exact mutable allocator parity: transient allocations between
-checkpoints, native metadata growth/projection and reflow page reconstruction still
-need event-level accounting. Boundary, COW, recycling and native admission comparison
-tests cover this implementation; execution is pending the full validation phase.
+checkpoints, native metadata growth/projection and pressure-driven page splitting
+still need event-level accounting. Boundary, COW, recycling, source-provenance,
+blank/wrapped reflow and native admission comparison tests cover this implementation;
+execution and resize profiling are pending the full validation phase.
 
 ## Font thickening
 
