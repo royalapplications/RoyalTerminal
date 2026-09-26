@@ -23,6 +23,16 @@ internal sealed class GhosttySnapshotBitmap
         _wordCount = checked((int)(GhosttySnapshotAllocation.BitmapDataBytes(capacityBytes, (ulong)chunkBytes) / ((ulong)chunkBytes * 64)));
     }
 
+    private GhosttySnapshotBitmap(GhosttySnapshotBitmap source)
+    {
+        _chunkBytes = source._chunkBytes;
+        _wordCount = source._wordCount;
+        _searchStart = source._searchStart;
+        _words.AddRange(source._words);
+    }
+
+    internal GhosttySnapshotBitmap Copy() => new(this);
+
     internal bool TryAllocate(int bytes, out Slice slice)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(bytes, 1);

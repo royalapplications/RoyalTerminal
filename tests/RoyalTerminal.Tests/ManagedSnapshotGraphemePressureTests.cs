@@ -83,6 +83,49 @@ public sealed class ManagedSnapshotGraphemePressureTests
     }
 
     [Fact]
+    public void LivePageRetainsTheWireOrderAllocatorSeedWithoutSharingMutableOwnership()
+    {
+        GhosttySnapshotPage page = Read(Payload(1024, Cluster(0, 64), Cluster(1, 64), Cluster(2, 8),
+            Cluster(3, 61), new(0, 3, [0x301]), new(0, 3, [0x302])));
+        TerminalRow row = Assert.Single(GhosttySnapshotLivePage.Decode(page, new(Columns, 1)));
+        GhosttySnapshotPageAllocation allocation = row.SnapshotAllocation!;
+        Assert.True(allocation.HasGraphemeSeed);
+        GhosttySnapshotGraphemeStorage first = allocation.CopyRestoredGraphemes();
+        GhosttySnapshotGraphemeStorage second = allocation.CopyRestoredGraphemes();
+        Assert.Equal(4, first.Count);
+        for (int column = 0; column < 4; column++)
+        {
+            Assert.Equal(page.LiveSuffix(0, column).Length, first.SuffixLength(column));
+            Assert.True(first.TryGetAllocation(column, out GhosttySnapshotBitmap.Slice expected));
+            Assert.True(second.TryGetAllocation(column, out GhosttySnapshotBitmap.Slice actual));
+            Assert.Equal(expected, actual);
+        }
+        Assert.Equal(1, first.SuffixLength(3)); // Accepted duplicate, not raw 61-scalar suffix.
+        first.Clear(0);
+        Assert.Equal(64, second.SuffixLength(0));
+        Assert.Equal(64, allocation.CopyRestoredGraphemes().SuffixLength(0));
+        Assert.Equal(64, page.LiveSuffix(0, 0).Length);
+        Assert.Equal(61, page.Grid.Suffix(0, 3).Length);
+    }
+
+    [Fact]
+    public void RestoreSeedIncludesFailedPrefixReleaseAndPreservesFutureAllocationPlacement()
+    {
+        GhosttySnapshotPage page = Read(Payload(1024, Cluster(0, 64), Cluster(1, 64), Cluster(2, 8), Cluster(3, 61), Cluster(4, 4)));
+        GhosttySnapshotGraphemeStorage restored = page.CreateAllocationIdentity().CopyRestoredGraphemes();
+        GhosttySnapshotGraphemeStorage replay = new(1024);
+        foreach ((int cell, int length) in new[] { (0, 64), (1, 64), (2, 8), (3, 61), (4, 4) })
+            if (replay.AppendToLength(cell, length) != GhosttySnapshotGraphemeAddResult.Success) replay.Clear(cell);
+        Assert.Equal(replay.Count, restored.Count);
+        Assert.Equal(replay.AllocatedBytes, restored.AllocatedBytes);
+        Assert.False(restored.TryGetAllocation(3, out _));
+        Assert.Equal(replay.Set(5, 8), restored.Set(5, 8));
+        Assert.True(replay.TryGetAllocation(5, out GhosttySnapshotBitmap.Slice expected));
+        Assert.True(restored.TryGetAllocation(5, out GhosttySnapshotBitmap.Slice actual));
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
     public void InvalidTargetsAndScalarsDoNotConsumeCapacity()
     {
         GhosttySnapshotPage page = Read(Payload(1, new(8, 0, [0x301]), new(0, 80, [0x301]),

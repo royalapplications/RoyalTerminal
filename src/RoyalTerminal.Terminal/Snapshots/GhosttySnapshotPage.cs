@@ -17,14 +17,17 @@ internal sealed class GhosttySnapshotPage
     private readonly IReadOnlyDictionary<int, uint[]>? _liveGraphemes;
     private readonly IReadOnlySet<ushort>? _liveStyles, _liveLinks;
     private readonly GhosttySnapshotStyleStorage? _styleStorage;
+    private readonly GhosttySnapshotGraphemeStorage? _graphemeStorage;
 
     private GhosttySnapshotPage(byte[] header, GhosttySnapshotGrid grid,
         Dictionary<ushort, GhosttySnapshotStyle> styles, Dictionary<ushort, byte[]> hyperlinks,
-        IReadOnlyDictionary<int, uint[]>? liveGraphemes = null, GhosttySnapshotMetadataRestore? metadata = null)
+        IReadOnlyDictionary<int, uint[]>? liveGraphemes = null, GhosttySnapshotMetadataRestore? metadata = null,
+        GhosttySnapshotGraphemeStorage? graphemeStorage = null)
     {
         _header = header; Grid = grid; _styles = styles; _hyperlinks = hyperlinks; _liveGraphemes = liveGraphemes;
         _liveStyles = metadata?.Styles; _liveLinks = metadata?.Links;
         _styleStorage = metadata?.FinishStyles(grid);
+        _graphemeStorage = graphemeStorage;
     }
 
     internal GhosttySnapshotGrid Grid { get; }
@@ -34,7 +37,7 @@ internal sealed class GhosttySnapshotPage
 
     // The identity owns a read-only restore seed. Each live owner obtains an
     // isolated mutable copy, while raw PAGE data and held COW frames stay stable.
-    internal GhosttySnapshotPageAllocation CreateAllocationIdentity() => new(Capacity, _styleStorage);
+    internal GhosttySnapshotPageAllocation CreateAllocationIdentity() => new(Capacity, _styleStorage, restoredGraphemes: _graphemeStorage);
 
     // Raw codec output stays lossless; live cells follow native allocation
     // failure and suffix-bound semantics computed in original wire order.
@@ -182,7 +185,7 @@ internal sealed class GhosttySnapshotPage
             maximumCells, maximumSuffixCodepoints, out int consumed, liveGraphemes);
         if (consumed != remaining.Length) throw new InvalidDataException("Snapshot PAGE has trailing payload bytes.");
         grid.ResolvePageIds(styles, hyperlinks);
-        return new(payload[..20].ToArray(), grid, styles, hyperlinks, liveGraphemes.Suffixes, metadata);
+        return new(payload[..20].ToArray(), grid, styles, hyperlinks, liveGraphemes.Suffixes, metadata, liveGraphemes.Storage);
     }
 
     internal void WritePayloadTo(Stream destination)

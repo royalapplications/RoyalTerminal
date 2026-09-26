@@ -12,13 +12,14 @@ namespace RoyalTerminal.Terminal.Snapshots;
 // enough aggregate free space. This fragmentation affects restored cell content.
 internal sealed class GhosttySnapshotGraphemeRestore(uint capacityBytes, int maximumCodepoints)
 {
-    private readonly ulong _mapCapacity = GhosttySnapshotAllocation.GraphemeCellCapacity(capacityBytes);
-    private readonly GhosttySnapshotBitmap _bitmap = new(capacityBytes, 16);
+    private readonly GhosttySnapshotGraphemeStorage _storage = new(capacityBytes);
     private readonly Dictionary<int, uint[]> _suffixes = [];
     private int _codepoints;
 
-    // Retain only the result after parsing, not the temporary bitmap model.
+    // Parsing transfers this seed to the immutable PAGE. Live owners must copy
+    // it before mutation; rebuilding from final text would lose fragmentation.
     internal IReadOnlyDictionary<int, uint[]> Suffixes => _suffixes;
+    internal GhosttySnapshotGraphemeStorage Storage => _storage;
 
     internal void Read(int cellIndex, ReadOnlySpan<byte> encoded, uint[]? rawSuffix)
     {
@@ -33,7 +34,7 @@ internal sealed class GhosttySnapshotGraphemeRestore(uint capacityBytes, int max
             if (cp is 0 or > 0x10FFFF or (>= 0xD800 and <= 0xDFFF)) continue;
             suffix[count++] = cp;
         }
-        if (count == 0 || !TryStore(count)) return;
+        if (count == 0 || !TryStore(cellIndex, count)) return;
         if (count > maximumCodepoints - _codepoints)
             throw new InvalidDataException("Snapshot live graphemes exceed the configured codepoint limit.");
         _codepoints += count;
@@ -43,20 +44,12 @@ internal sealed class GhosttySnapshotGraphemeRestore(uint capacityBytes, int max
         _suffixes.Add(cellIndex, rawSuffix ?? suffix[..count].ToArray());
     }
 
-    private bool TryStore(int codepoints)
+    private bool TryStore(int cellIndex, int codepoints)
     {
-        if ((ulong)_suffixes.Count >= _mapCapacity) return false;
-        GhosttySnapshotBitmap.Slice previous = default;
-        int chunks = (codepoints + 3) / 4;
-        for (int count = 1; count <= chunks; count++)
+        if (_storage.AppendToLength(cellIndex, codepoints) != GhosttySnapshotGraphemeAddResult.Success)
         {
-            if (!_bitmap.TryAllocate(count * 16, out GhosttySnapshotBitmap.Slice next))
-            {
-                _bitmap.Free(previous);
-                return false; // Drop the complete entry, not a stored prefix.
-            }
-            _bitmap.Free(previous);
-            previous = next;
+            _storage.Clear(cellIndex);
+            return false; // Drop the complete entry, not a stored prefix.
         }
         return true;
     }
