@@ -31,6 +31,9 @@ pub fn build(b: *std.Build) !void {
             b.pathJoin(&.{ "terminal", "Screen.zig" }),
             b.pathJoin(&.{ "terminal", "kitty", "graphics_storage.zig" }),
             b.pathJoin(&.{ "terminal", "stream_continuation.zig" }),
+            b.pathJoin(&.{ "terminal", "stream.zig" }),
+            b.pathJoin(&.{ "terminal", "stream_terminal.zig" }),
+            b.pathJoin(&.{ "terminal", "c", "terminal.zig" }),
         },
     });
     try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "3305a832a49891b2e84d0efa4ace415d0d5e709d9c3c8f7e061228a3e1f18035", &.{
@@ -64,6 +67,35 @@ pub fn build(b: *std.Build) !void {
         .before = "        var scanner: BoundaryScanner = .init();\n        for (self.bytes.items) |c| {\n            if (scanner.next(c) == .omittable) continue;\n            try writer.writeByte(c);\n        }\n",
         .after = @embedFile("src/continuation_write.zig.inc"),
     }});
+    // Route the already-validated upstream OSC 99 command to our shared host.
+    // Deliberately do not add an Action enum member: that would change upstream's C ABI.
+    try addOverlay(b, sources, ghostty, "terminal/stream.zig", "fd45f42dfb66ee49e359671f7d254726273ce7dfee9078d30d51e6d376ae4e0c", &.{ .{
+        .before = "                .kitty_desktop_notification,\n",
+        .after = "",
+    }, .{
+        .before = "                .conemu_sleep,\n",
+        .after = "                .kitty_desktop_notification => |v| {\n                    if (comptime @hasDecl(T, \"royalDesktopNotification\")) self.handler.royalDesktopNotification(v);\n                },\n\n                .conemu_sleep,\n",
+    } });
+    try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "cdfcf97647ae756fd314e25d7a3bff9df57125ae2e111168b764a07bf2593288", &.{ .{
+        .before = "    pub const Effects = struct {\n",
+        .after = "    pub const Effects = struct {\n        royal_notification: ?*const fn (*Handler, ?osc.Command.KittyDesktopNotification) void = null,\n",
+    }, .{
+        .before = "    fn desktopNotification(\n",
+        .after = "    pub fn royalDesktopNotification(self: *Handler, notification: ?osc.Command.KittyDesktopNotification) void {\n        const callback = self.effects.royal_notification orelse return;\n        callback(self, notification);\n    }\n\n    fn desktopNotification(\n",
+    }, .{
+        .before = "                self.terminal.fullReset();\n",
+        .after = "                self.terminal.fullReset();\n                self.royalDesktopNotification(null);\n",
+    } });
+    try addOverlay(b, sources, ghostty, "terminal/c/terminal.zig", "9b06653cb34f7407b510f25111cb45c83014a3adfc9c031c48ecc537c6f67136", &.{ .{
+        .before = "const Effects = struct {\n",
+        .after = "const Effects = struct {\n    royal_notification: ?*const fn (Terminal, ?*anyopaque, ?[*]const u8, usize, ?[*]const u8, usize, u8) callconv(.c) void = null,\n    royal_notification_userdata: ?*anyopaque = null,\n",
+    }, .{
+        .before = "    fn desktopNotificationTrampoline(\n",
+        .after = @embedFile("src/notification_effect.zig.inc") ++ "    fn desktopNotificationTrampoline(\n",
+    }, .{
+        .before = "        .desktop_notification = &Effects.desktopNotificationTrampoline,\n",
+        .after = "        .desktop_notification = &Effects.desktopNotificationTrampoline,\n        .royal_notification = &Effects.royalNotificationTrampoline,\n",
+    } });
     const upstream = try std.Io.Dir.cwd().readFileAlloc(
         b.graph.io,
         ghostty.path("src/lib_vt.zig").getPath(b),
@@ -72,7 +104,7 @@ pub fn build(b: *std.Build) !void {
     );
     module.root_source_file = sources.add(
         "src/lib_vt_royal.zig",
-        try std.mem.concat(b.allocator, u8, &.{ upstream, "\n", @embedFile("src/extensions.zig"), "\n", @embedFile("src/drag_drop.zig") }),
+        try std.mem.concat(b.allocator, u8, &.{ upstream, "\n", @embedFile("src/extensions.zig"), "\n", @embedFile("src/drag_drop.zig"), "\n", @embedFile("src/notifications.zig") }),
     );
 
     // Retain Ghostty's platform linking, symbol visibility, static archive

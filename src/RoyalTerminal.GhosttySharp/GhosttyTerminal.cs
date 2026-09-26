@@ -96,6 +96,7 @@ public sealed partial class GhosttyTerminal : IDisposable
         {
             GhosttyVtNative.TerminalVtWrite(_handle, dataPtr, (nuint)data.Length);
         }
+        GC.KeepAlive(_royalNotificationCallback);
     }
 
     /// <summary>
@@ -112,6 +113,7 @@ public sealed partial class GhosttyTerminal : IDisposable
                 pointer,
                 (nuint)data.Length,
                 out consumed);
+            GC.KeepAlive(_royalNotificationCallback);
             if (result == GhosttyVtNative.GhosttyResult.NoValue)
             {
                 return false;

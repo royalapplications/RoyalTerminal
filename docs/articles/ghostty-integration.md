@@ -52,6 +52,41 @@ remote transfer requests receive `EINVAL`, and unsupported drag-out receives
 extensions, not new upstream public C APIs. The native boundary copies all retained
 data and serializes with normal terminal mutations.
 
+## Kitty desktop notifications
+
+Both VT adapters implement `ITerminalNotificationSource`; embedders can configure
+`TerminalControl.NotificationHost` with a nonblocking `ITerminalNotificationHost`.
+OSC 99 queries advertise only the backend's actual capabilities. Without a host,
+notifications and support queries are silently ignored. The default application
+does not yet install OS-specific presenters, so full desktop notification parity
+remains unfinished; these contracts are not a claim of native OS delivery.
+
+The shared protocol implements chunked title/body/buttons/icon assembly, strict
+safe UTF-8 and base64 input, application/type metadata, occasions, urgency, sound,
+replacement identities, activation/close/alive replies and monotonic expiry.
+Strings remain plain text, including literal markup. Encoded text preserves
+newlines/tabs and removes other control codes. Callback feedback is consumed only
+during serialized terminal refresh; it cannot write directly to the PTY from an
+OS callback thread. Superseded and prior-session callbacks are ignored. Effects
+remain responsive during synchronized-output holds without releasing the frame.
+
+Limits are 64 unfinished and 64 active notifications, 4 MiB retained assembly
+and request payload budgets, 64 KiB per text field, 1 MiB per icon, 32 names/types
+or buttons, and a 128-entry/16 MiB session-local icon LRU. Individual OSC payloads
+follow Ghostty's 2048-byte plain / 4096-byte encoded limits; metadata is capped at
+8192 bytes and IDs at 256 ASCII identifier characters. Input never becomes a
+file path, shell command, or OS notification identity. Hosts must separately
+bound native image decoding and their own queues. RIS clears unfinished chunks;
+session changes, host replacement, detachment and disposal close owned revisions.
+
+Reference decision: the pinned Ghostty OSC 99 implementation supplies a parser
+but no stream/desktop delivery. Windows Terminal's OSC dispatcher has no OSC 99
+handler and xterm.js exposes host registration through `registerOscHandler`.
+RoyalTerminal follows the [Kitty desktop notification protocol](https://sw.kovidgoyal.net/kitty/desktop-notifications/)
+for the shared host lifecycle. Three reviewed native overlays expose the parsed
+command without adding an upstream action enum value. Callback, protocol and
+headless lifecycle tests have been added; execution awaits full validation.
+
 ## Ghostty-compatible shaders
 
 RoyalTerminal also supports a Ghostty/Shadertoy-style shader compatibility mode in the managed Skia renderer. This is intentionally separate from the native Ghostty VT binding and from Ghostty renderer interop.

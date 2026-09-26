@@ -46,6 +46,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalSixelOptionsSink,
     ITerminalResizeReflowPolicySink,
     ITerminalEffectSource,
+    ITerminalNotificationSource,
     ITerminalDragDropTarget,
     ITerminalUnicodeWidthProvider,
     ITerminalPromptStateSource,
@@ -782,6 +783,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     public void Reset()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        _notifications?.ResetParser();
 
         TerminalModeState before = ModeState;
         ResetSessionInputState();
@@ -800,6 +802,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     public void PrepareForNewSession(bool preserveScrollback)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ClearSessionNotifications();
         _terminal.SendDragDropEvent(5);
 
         if (!preserveScrollback)
@@ -989,6 +992,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         }
 
         _disposed = true;
+        ClearSessionNotifications();
+        _notificationHost = null;
         _search?.Dispose();
         _search = null;
         _kittyPlacementIterator?.Dispose();
@@ -1354,6 +1359,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void SetupTerminalEffects()
     {
+        _terminal.SetNotificationCallback(OnNativeNotification);
         _writePtyDelegate ??= OnNativeWritePty;
         _bellDelegate ??= OnNativeBell;
         _titleChangedDelegate ??= OnNativeTitleChanged;
@@ -1455,14 +1461,10 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         get
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_renderHeld)
-            {
-                return ClampRefreshDelay(RenderHoldTimeout - _timeProvider.GetElapsedTime(_renderHoldStartedTimestamp));
-            }
-
-            return _animationNextTickDelay is TimeSpan delay
-                ? ClampRefreshDelay(delay - _timeProvider.GetElapsedTime(_animationTickTimestamp))
-                : null;
+            TimeSpan? next = NextPresentationRefreshDelay;
+            if (_notifications?.NextRefreshDelay is TimeSpan notification && (next is null || notification < next))
+                next = notification;
+            return next;
         }
     }
 
@@ -1470,7 +1472,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     public bool RefreshTimedState()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (NextTimedRefreshDelay is not TimeSpan delay || delay > TimeSpan.Zero)
+        _notifications?.Refresh();
+        if (_disposed) return false;
+        if (NextPresentationRefreshDelay is not TimeSpan delay || delay > TimeSpan.Zero)
         {
             return false;
         }
@@ -1480,6 +1484,12 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         RefreshStateAndScreenFromNative();
         return holdExpired || previousGeneration != _kittyGraphicsGeneration;
     }
+
+    // Notification effects must not release a synchronized-output hold early.
+    private TimeSpan? NextPresentationRefreshDelay => _renderHeld
+        ? ClampRefreshDelay(RenderHoldTimeout - _timeProvider.GetElapsedTime(_renderHoldStartedTimestamp))
+        : _animationNextTickDelay is TimeSpan delay
+            ? ClampRefreshDelay(delay - _timeProvider.GetElapsedTime(_animationTickTimestamp)) : null;
 
     private static TimeSpan ClampRefreshDelay(TimeSpan delay)
         => delay > TimeSpan.Zero ? delay : TimeSpan.Zero;

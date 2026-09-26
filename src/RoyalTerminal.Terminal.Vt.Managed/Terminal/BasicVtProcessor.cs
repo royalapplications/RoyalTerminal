@@ -52,6 +52,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalEraseDisplayOptionsSink,
     ITerminalShellIntegrationEventSource,
     ITerminalEffectSource,
+    ITerminalNotificationSource,
     ITerminalDragDropTarget,
     ITerminalUnicodeWidthProvider,
     ITerminalTimedRefreshSource
@@ -2002,6 +2003,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ReadOnlySpan<byte> rawPayload = CollectionsMarshal.AsSpan(_oscBuffer);
+        if (rawPayload.StartsWith("99;"u8))
+        {
+            HandleNotification(rawPayload[3..], bellTerminator);
+            _oscBuffer.Clear();
+            return;
+        }
         if (rawPayload.StartsWith("72;"u8))
         {
             (_dragDrop ??= new()).Handle(rawPayload[3..], bellTerminator, ResponseCallback);
@@ -4516,6 +4523,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void PrepareForNewSession(bool preserveScrollback)
     {
+        ClearSessionNotifications();
         _dragDrop = null;
         ResetInternal(
             raiseModeChanged: true,
@@ -4545,6 +4553,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode)
     {
+        _notifications?.ResetParser();
         _dragDrop?.ResetParser();
         TerminalModeState before = ModeState;
         EndRenderHold();
@@ -4939,6 +4948,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void Dispose()
     {
+        ClearSessionNotifications();
+        _notificationHost = null;
         _dragDrop = null;
         _backgroundSearch?.Dispose();
         _search.Reset();
@@ -4963,6 +4974,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 TimeSpan search = TimeSpan.FromMilliseconds(24);
                 if (delay is null || search < delay) delay = search;
             }
+            if (_notifications?.NextRefreshDelay is TimeSpan notification && (delay is null || notification < delay))
+                delay = notification;
             return delay;
         }
     }
@@ -4970,6 +4983,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public bool RefreshTimedState()
     {
+        _notifications?.Refresh();
         bool changed = _backgroundSearch?.TakeChanged() ?? false;
         if (_renderHold is { } hold &&
             _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp) >= TimeSpan.FromSeconds(1))

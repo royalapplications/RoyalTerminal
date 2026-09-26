@@ -4,7 +4,8 @@ This package builds the pinned `external/ghostty` dependency without modifying
 its checkout. It retains Ghostty's build configuration, runtime module,
 allocator, generation counter, public C exports and platform linker handling.
 The build generates a copy of the upstream Zig root with the exports from
-`src/extensions.zig` and `src/drag_drop.zig` appended. Both shared and static libraries include them.
+`src/extensions.zig`, `src/drag_drop.zig` and `src/notifications.zig` appended.
+Both shared and static libraries include them.
 
 ## Reviewed correctness overlays
 
@@ -57,8 +58,25 @@ The first five were reproduced through the native C API before correction and
 have focused tests. No public upstream issue is claimed. Reassess and
 remove an overlay when its upstream fix is incorporated.
 
-The fifteen additional C exports are declared in
+## OSC 99 host bridge
+
+Three additional hash-checked overlays route Ghostty's parsed OSC 99 slices from
+`stream.zig` through the optional `stream_terminal.zig` effect to the C terminal
+wrapper. They add no upstream Action enum/union member and do not change the
+upstream public C ABI. A RIS marker clears unfinished shared-host assemblies.
+These are host integration additions, separate from the six correctness fixes.
+Native rebuild and callback/lifetime tests are pending implementation-phase validation.
+
+The sixteen additional C exports are declared in
 `include/royalterminal_ghostty_vt.h`:
+
+- `ghostty_royal_notification_callback` registers a borrowed OSC 99 callback
+  (metadata/payload slices valid only during the call), or unregisters with null.
+  Its final byte is 0 for ST, 1 for BEL, or 2 for RIS with empty/null slices.
+  Userdata is separate from upstream effects. The .NET wrapper roots the delegate;
+  the VT adapter contains exceptions and immediately consumes the borrowed data.
+  Full lifecycle, quotas and capability negotiation live in the shared domain
+  protocol, not in duplicated native state. Desktop presentation requires a host.
 
 - `ghostty_royal_dnd_state`, `ghostty_royal_dnd_mimes` and
   `ghostty_royal_dnd_event` bridge host drag movement, leave, drop and cancellation

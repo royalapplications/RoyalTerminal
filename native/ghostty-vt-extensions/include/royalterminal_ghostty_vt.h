@@ -160,6 +160,16 @@ GHOSTTY_API GhosttyResult ghostty_royal_glyph_outline(
     RoyalGlyphPoint* points, size_t point_capacity,
     uint16_t* contours, size_t contour_capacity);
 
+/** OSC 99 slices are borrowed until callback return. kind: 0 ST, 1 BEL,
+ * 2 RIS (both slices null/empty). May not unwind exceptions into native code.
+ * Serialize registration, parser writes and disposal. Null unregisters.
+ */
+typedef void (*RoyalNotificationCallback)(GhosttyTerminal terminal, void* userdata,
+    const uint8_t* metadata, size_t metadata_length,
+    const uint8_t* payload, size_t payload_length, uint8_t kind);
+GHOSTTY_API GhosttyResult ghostty_royal_notification_callback(
+    GhosttyTerminal terminal, void* userdata, RoyalNotificationCallback callback);
+
 #ifdef __cplusplus
 }
 #endif
