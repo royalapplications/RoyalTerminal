@@ -268,7 +268,8 @@ public sealed partial class ManagedEraseParityTests
             TerminalRow observed = managed.Screen.GetRow(index++);
             // PAGE encodes used rows, not a grown page's unused row slots.
             GhosttySnapshotPageCapacity capacity = observed.SnapshotAllocation!.Capacity;
-            Assert.True(capacity.Rows >= page.Capacity.Rows);
+            Assert.True(capacity.Rows >= page.Capacity.Rows,
+                $"{context}, row={index - 1}: native used rows={page.Capacity.Rows}, managed capacity={capacity.Rows}");
             Assert.Equal(page.Capacity with { Rows = capacity.Rows }, capacity);
             Assert.False(observed.SnapshotAllocation.MetadataOverflow);
             Assert.True((row.WrapsToNext, row.IsWrapContinuation, row.SemanticPrompt) ==

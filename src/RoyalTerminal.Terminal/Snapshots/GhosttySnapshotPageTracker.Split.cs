@@ -55,6 +55,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         state.Storage = upper.Storage;
         state.Revisions = upper.Revisions;
         state.NextRowSlot = upper.NextRowSlot;
+        state.ReusableTailSlots = upper.ReusableTailSlots;
         for (int rowIndex = 0; rowIndex < lowerRows.Count; rowIndex++)
         {
             TerminalRow row = lowerRows[rowIndex];

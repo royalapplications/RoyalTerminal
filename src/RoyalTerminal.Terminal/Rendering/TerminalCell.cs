@@ -1492,6 +1492,16 @@ public sealed partial class TerminalScreen
             return;
         }
 
+        ClearHistoryCore(reuseNativeTailSlots: false);
+    }
+
+    // VT ED3 acts on either active screen, unlike the host's primary-only
+    // ClearScrollback command. PageList.eraseRows also leaves the erased row
+    // offsets in its unused tail for subsequent growth to reuse.
+    internal void EraseActiveHistory() => ClearHistoryCore(reuseNativeTailSlots: true);
+
+    private void ClearHistoryCore(bool reuseNativeTailSlots)
+    {
         int scrollbackRows = Math.Max(0, _rows.Count - ViewportRows);
         if (scrollbackRows <= 0)
         {
@@ -1506,8 +1516,11 @@ public sealed partial class TerminalScreen
             rows.Add(_rows[rowIndex]);
         }
 
-        RetireSnapshotRows(0, firstViewportRow);
+        if (reuseNativeTailSlots && TracksSnapshotMetadata)
+            (_snapshotPageTracker ??= new()).RetireHistoryRows(_rows, firstViewportRow);
+        else RetireSnapshotRows(0, firstViewportRow);
         _rows = rows;
+        if (_alternateBufferActive) _alternateRows = rows;
         EnsureMinimumRows(ViewportRows);
         ShiftRasterGraphicsAfterTopRowsRemoved(scrollbackRows);
         ScrollOffset = 0;

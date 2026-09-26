@@ -76,6 +76,12 @@ pub fn build(b: *std.Build) !void {
     });
     try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "3a74c3603c57db299f266c9df7f5650ae0d621c98fb57f3867b654ed9841a76b", &.{
         .{
+            // PageList pruning can remap the cursor before cursorReload gets
+            // a chance to migrate its page-local style and hyperlink IDs.
+            .before = "    try self.pages.scrollClear();\n    self.cursorReload();\n",
+            .after = @embedFile("src/scroll_clear_reload.zig.inc"),
+        },
+        .{
             .before = "        next_row.rowAndCell().row.wrap_continuation = false;",
             .after = "        next_row.rowAndCell().row.wrap_continuation = false;\n        next_row.markDirty();",
         },

@@ -26,7 +26,7 @@ public sealed partial class ManagedEraseParityTests
     {
         RequireNative();
         const int columns = 215;
-        byte[] setup = Encoding.UTF8.GetBytes("primary\u001b[?47h\u001b[Hfirst\r\nsecond\r\nthird\u001b[1;4H");
+        byte[] setup = Encoding.UTF8.GetBytes("primary\u001b[?47h\u001b[Hfirst\r\nsecond\r\nthird\u001b[1;4H\u001b[3;44m\u001b]8;;https://cursor\a");
         using GhosttyTerminal source = new(columns, 3, 1024 * 1024);
         source.Write(setup);
         byte[] snapshot = GhosttySnapshot.Encode(source);
@@ -89,7 +89,9 @@ public sealed partial class ManagedEraseParityTests
         const int columns = 215;
         using GhosttyTerminal source = new(columns, 3, 1024 * 1024);
         source.Write("\u001b[?47hfirst\r\nsecond\r\nthird\u001b[1;4H\u001b[3;44m\u001b]8;;https://cursor\a"u8);
-        using ManagedTerminalSnapshot managed = ManagedTerminalSnapshot.Restore(GhosttySnapshot.Encode(source));
+        byte[] snapshot = GhosttySnapshot.Encode(source);
+        using GhosttyTerminal native = GhosttySnapshot.Decode(snapshot);
+        using ManagedTerminalSnapshot managed = ManagedTerminalSnapshot.Restore(snapshot);
         TerminalScreen retained = managed.Screen.CreateStateCopy();
         GhosttySnapshotAllocation layout = new(new GhosttySnapshotScrollbackQuota().PageAlignment);
         int pageRows = layout.InitialRows(columns);
@@ -98,6 +100,7 @@ public sealed partial class ManagedEraseParityTests
         for (int iteration = 0; iteration < pageRows + 3; iteration++)
         {
             if (held) managed.Processor.Process("\u001b[?2026h"u8);
+            native.Write("\u001b[3;1HQ\u001b[1;4H\u001b[22J"u8);
             managed.Processor.Process("\u001b[3;1HQ\u001b[1;4H\u001b[22J"u8);
             if (held) managed.Processor.Process("\u001b[?2026l"u8);
             int count = managed.Screen.TotalRows;
@@ -107,14 +110,12 @@ public sealed partial class ManagedEraseParityTests
         }
         Assert.True(prunedCursorPage);
 
-        // Intentional safety divergence: PageList.erasePage remaps a native
-        // cursor pin before Screen.cursorReload sees it. On the pinned native
-        // revision this can skip style/link migration and leave stale page IDs;
-        // ReleaseFast loses links on subsequent writes. Managed ownership must
-        // reacquire both references, including a fresh implicit OSC8 identity,
-        // rather than reproducing that loss. Ordinary ED22 cursor migrations
-        // are still compared exactly against native in the other tests.
+        // The hash-checked native scroll-clear overlay repairs page-local IDs
+        // after PageList remaps a pruned cursor pin. Both engines must retain
+        // owned style/link references and restart the same implicit identity.
+        native.Write("Z"u8);
         managed.Processor.Process("Z"u8);
+        AssertNative(native, managed, "write after cursor-page pruning");
         TerminalCell cell = managed.Screen.GetViewportRow(0).ReadOnlyCells[0];
         Assert.Equal('Z', cell.Codepoint);
         Assert.Equal(CellAttributes.Italic, cell.Attributes & CellAttributes.Italic);

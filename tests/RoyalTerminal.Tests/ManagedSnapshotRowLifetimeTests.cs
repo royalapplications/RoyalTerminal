@@ -19,6 +19,34 @@ namespace RoyalTerminal.Tests;
 public sealed class ManagedSnapshotRowLifetimeTests
 {
     [Theory]
+    [InlineData(1, new[] { 0, 5, 6 })]
+    [InlineData(2, new[] { 1, 0, 5, 6 })]
+    [InlineData(3, new[] { 2, 0, 1, 5, 6 })]
+    public void ProtocolHistoryEraseReusesSwappedTailSlotsInIndependentCopies(int erased, int[] expectedSlots)
+    {
+        TerminalScreen screen = CreateScreen([Row(), Row(), Row(), Row(), Row()], 5 - erased, capacityRows: 8);
+        GhosttySnapshotPageAllocation page = screen.GetRow(0).SnapshotAllocation!;
+        TerminalScreen before = screen.CreateStateCopy();
+        screen.EraseActiveHistory();
+        TerminalScreen after = screen.CreateStateCopy();
+        foreach (int slot in expectedSlots)
+        {
+            TerminalRow row = screen.AddRow();
+            Assert.Same(page, row.SnapshotAllocation);
+            Assert.Equal(slot, row.SnapshotAllocationRow);
+        }
+        // A held frame owns its own consumption cursor for the reclaimed slots.
+        foreach (int slot in expectedSlots)
+        {
+            TerminalRow row = after.AddRow();
+            Assert.Same(page, row.SnapshotAllocation);
+            Assert.Equal(slot, row.SnapshotAllocationRow);
+        }
+        Assert.Equal(5, before.TotalRows);
+        Assert.Equal(5, before.AddRow().SnapshotAllocationRow);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void ClearScrollbackReleasesOnlyHistoricalCellsAndForksRestoredSeeds(bool initialize)

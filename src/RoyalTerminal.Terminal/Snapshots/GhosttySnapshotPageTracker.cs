@@ -20,10 +20,12 @@ internal sealed partial class GhosttySnapshotPageTracker
         // reconciliation, not that the slot is available for another row.
         internal Dictionary<int, ulong?> Revisions = [];
         internal int NextRowSlot;
+        internal Queue<int>? ReusableTailSlots;
         internal bool Shared;
         internal State Copy()
         {
             State copy = new(Storage.Copy()) { NextRowSlot = NextRowSlot };
+            if (ReusableTailSlots is { Count: > 0 }) copy.ReusableTailSlots = new(ReusableTailSlots);
             foreach ((int row, ulong? revision) in Revisions) copy.Revisions.Add(row, revision);
             return copy;
         }
@@ -93,11 +95,14 @@ internal sealed partial class GhosttySnapshotPageTracker
         TerminalRow row = rows[index];
         State state = _pages.TryGetValue(previous, out State? existing)
             ? Exclusive(previous, existing) : Writable(previous, Group(rows, previous));
-        int slot = Math.Max(state.NextRowSlot, rows[index - 1].SnapshotAllocationRow + 1);
+        bool reuse = state.ReusableTailSlots is { Count: > 0 };
+        int slot = reuse ? state.ReusableTailSlots!.Peek()
+            : Math.Max(state.NextRowSlot, rows[index - 1].SnapshotAllocationRow + 1);
         if (!previous.MetadataOverflow && previous.Capacity.Columns == row.PreservedColumns && slot < previous.Capacity.Rows)
         {
             row.SnapshotAllocation = previous;
             row.SnapshotAllocationRow = slot;
+            if (reuse) state.ReusableTailSlots!.Dequeue();
             state.ObserveSlot(slot);
         }
         else
@@ -381,6 +386,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         for (int i = 0; i < rows.Count; i++) rows[i].SnapshotAllocationRow = i;
         state.Revisions = revisions;
         state.NextRowSlot = rows.Count;
+        state.ReusableTailSlots = null;
     }
 
     private bool Overflow(ref GhosttySnapshotPageAllocation page, State state, List<TerminalRow> group)

@@ -1950,7 +1950,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case (byte)'c': // RIS — Full reset
-                ResetInternal(raiseModeChanged: false, SessionScreenResetMode.ClearViewport);
+                ResetInternal(raiseModeChanged: false, SessionScreenResetMode.ClearAll);
                 ProgressReportCallback?.Invoke(new TerminalProgressReport(TerminalProgressState.Remove, null));
                 _state = ParserState.Ground;
                 break;
@@ -4295,7 +4295,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case 3: // Scrollback only
                 bool restoreImagePins = _kittyStore.PlacementCount > 0 && _kittyStore.BeginHistoryErase(_screen);
-                try { _screen.ClearScrollback(); }
+                try { _screen.EraseActiveHistory(); }
                 finally { if (restoreImagePins) _kittyStore.EndMarginScroll(_screen); }
                 break;
 

@@ -17,7 +17,7 @@ CI and release disassemble both Windows DLLs and reject AVX/VEX instructions.
 
 ## Reviewed correctness overlays
 
-The generated source copy also applies ten corrections to pinned upstream
+The generated source copy also applies eleven corrections to pinned upstream
 `622b4eecd7d2ce1a10930537c17f0d61abdba817` (identical runtime sources to the
 previously reviewed `22391ed6491f2924361dcad1f9a9176a390fd20f`). Each checks the original file's full
 SHA-256 and the exact expected source-fragment count; any upstream file change
@@ -41,15 +41,15 @@ fails the build until reviewed. The submodule checkout is never changed.
   displayed frame's identity. The overlay now also handles earlier-frame deletion
   before clamping the old last index: deleting an earlier frame while displaying
   the last one must preserve both its content generation and elapsed gap. The
-  original displayed-frame correction was reproduced; this timer/generation
-  refinement and its new native regression remain unexecuted.
+  original displayed-frame correction and the timer/generation refinement have
+  native regression coverage.
 - `kitty/graphics_storage.zig`: bound eviction requests by actual retained bytes,
   not the admission limit. RGB-to-RGBA animation promotion is quota-exempt, so a
   three-byte RGB image admitted at a three-byte limit can become four bytes.
   Admitting another three-byte image then legitimately reclaims four bytes;
   the old assertion incorrectly made that path unreachable. The existing eviction
   loop handles it without algorithm changes. Native and cross-engine regressions
-  are added; this seventh correction is source-reviewed, not yet executed.
+  cover the over-budget promotion followed by eviction.
 - `stream_continuation.zig`: canonicalize export after an APC-to-C1 DCS/CSI/OSC
   transition commits the preceding APC. Unpatched export retained the entire
   Kitty query, causing snapshot validation to reject the exported continuation
@@ -70,8 +70,7 @@ fails the build until reviewed. The submodule checkout is never changed.
 
 - `Screen.zig`: mark the next row dirty when `cursorResetWrap` clears its
   wrap-continuation marker. Source inspection found this metadata mutation also
-  bypassed dirty publication. A focused clean-frame EL regression is written;
-  validation of this sixth overlay is deferred until after the requested push.
+  bypassed dirty publication. A focused clean-frame EL regression covers it.
 
 - `bitmap_allocator.zig`: check the final bitmap index before examining the
   partial-word remainder of a large allocation. The complete-word loop can end
@@ -80,8 +79,7 @@ fails the build until reviewed. The submodule checkout is never changed.
   instead of reading past the slice. Snapshot hyperlink IDs and URIs exercise
   this through their fixed-capacity string allocator. One-word, multiword and
   occupied-prefix cases check omission of the oversized link and successful use
-  of all remaining space by the next entry. This eighth correction and its
-  native/managed comparisons are source-reviewed; execution remains pending.
+  of all remaining space by the next entry, with native/managed comparisons.
 
 - `PageList.zig`: reset a failed non-reflow row clone before removing its slot
   from the live row count. Clones can retain a prefix of style, grapheme and
@@ -89,8 +87,7 @@ fails the build until reviewed. The submodule checkout is never changed.
   reuse. After a failed preceding-page backfill, remap pins for every earlier
   successful copy instead of skipping the remap and destroying their source
   page. The fresh-page failure path also resets its partial row. This ninth
-  correction is based on source inspection; native resize/continuation
-  regressions are added but have not been executed.
+  correction has native resize/continuation regression coverage.
 
 - `Screen.zig`: release a destination hyperlink reference restored during
   cursor-page style growth before detaching its owned URI pointer for normal
@@ -103,10 +100,20 @@ fails the build until reviewed. The submodule checkout is never changed.
   drops the link), explicit/implicit IDs, both directions and subsequent writes.
   The public ABI and pinned submodule remain unchanged.
 
-Five earlier corrections were reproduced through the native C API before
-correction and have focused tests. The dirty-wrap, eviction-quota, bitmap-bounds and resize-rollback
-corrections above still await execution. No public upstream issue is claimed. Reassess and
-remove an overlay when its upstream fix is incorporated.
+- `Screen.zig`: reacquire cursor style and hyperlink ownership when scroll-clear
+  pruning has already remapped the cursor pin off its original page. The old
+  page-local IDs are invalid; releasing or using them through the new pin can
+  affect unrelated entries or lose links on later writes. Detect both node and
+  generation changes, clear stale IDs, reload the pin and restore owned state.
+  Repair also runs after partial growth failure, before fallback clearing. The
+  old heap-owned hyperlink remains alive until its replacement is copied.
+  Native/managed regressions reproduce the original mismatch and compare
+  repeated page recycling, implicit identities, styled writes, snapshot
+  roundtrips and synchronized output after correction.
+
+Correctness overlays have focused native and managed regression tests. Current
+validation evidence is recorded in the PR tables; no public upstream issue is
+claimed. Reassess and remove an overlay when its upstream fix is incorporated.
 
 ## OSC 99 host bridge
 
@@ -114,8 +121,8 @@ Three additional hash-checked overlays route Ghostty's parsed OSC 99 slices from
 `stream.zig` through the optional `stream_terminal.zig` effect to the C terminal
 wrapper. They add no upstream Action enum/union member and do not change the
 upstream public C ABI. A RIS marker clears unfinished shared-host assemblies.
-These are host integration additions, separate from the ten correctness fixes.
-Native rebuild and callback/lifetime tests are pending implementation-phase validation.
+These are host integration additions, separate from the eleven correctness fixes.
+Native rebuild and callback/lifetime tests validate this boundary.
 
 The sixteen additional C exports are declared in
 `include/royalterminal_ghostty_vt.h`:
@@ -137,7 +144,7 @@ The sixteen additional C exports are declared in
   ABI. Host cancellation bypasses any in-progress client chunk reassembly;
   session unregister releases registration as well. Calls require the terminal
   lock. No new upstream export, native OS drag source or remote-file transfer is
-  claimed. ABI, ownership and conversation tests await implementation-phase validation.
+  claimed. ABI, ownership and conversation tests cover this boundary.
 
 - `ghostty_royal_modify_other_keys_2` copies the live legacy keyboard extension
   flag for host input routing, including synchronized-output holds and snapshots.
@@ -157,7 +164,7 @@ The sixteen additional C exports are declared in
   or the numeric implicit ID. Capacity probing writes only metadata; a short
   buffer leaves both byte buffers untouched. The host resolves identities with
   borrowed spans and copies bytes only for a new registry entry. These two new
-  exports have ABI/buffer/lifetime regressions awaiting post-push validation.
+  exports have ABI/buffer/lifetime regression coverage.
 
 - `ghostty_royal_kitty_graphics_animation_tick` calls Ghostty's own
   `ImageStorage.animationTick`. The public C API exposes the current animation
