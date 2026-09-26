@@ -79,6 +79,23 @@ internal sealed class GhosttySnapshotStyleStorage
         return value == default ? GhosttySnapshotSetAddResult.Success : _styles.TryAdd(value, out _cursorId);
     }
 
+    // Screen.resize keeps one temporary reference while detaching its cursor.
+    // Transferring the existing reference is equivalent to use followed by
+    // release, without an intermediate cursor which a page rebuild could copy.
+    internal int SuspendCursorReference()
+    {
+        int id = _cursorId;
+        _cursorId = 0;
+        return id;
+    }
+
+    internal void RestoreCursorReference(int id)
+    {
+        if (id != 0) _ = _styles.Get(id); // The caller must still own this reference.
+        _styles.Release(_cursorId);
+        _cursorId = id;
+    }
+
     internal void WriteCursorToCell(int index)
     {
         if (CellId(index) == _cursorId) return;

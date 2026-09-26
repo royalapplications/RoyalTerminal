@@ -25,13 +25,20 @@ public sealed partial class BasicVtProcessor
             : (_savedAlternateCursorCol, _savedAlternateCursorRow, _savedAlternateDelayedWrap);
         try
         {
-            ResizeActiveScreenBuffer(columns, rows, reflowOnResize,
+            int hyperlink = ResizeActiveScreenBuffer(columns, rows, reflowOnResize,
                 Span<TerminalGridPosition>.Empty, preserveViewportTopOnRowsIncrease,
-                alternate ? _snapshotPrimaryPen : _snapshotAlternatePen);
+                alternate ? _snapshotPrimaryPen : _snapshotAlternatePen,
+                alternate ? _snapshotPrimaryHyperlink : _snapshotAlternateHyperlink);
             if (alternate)
+            {
                 (_savedMainCursorCol, _savedMainCursorRow, _savedMainDelayedWrap) = (_cursorCol, _cursorRow, _delayedWrap);
+                _snapshotPrimaryHyperlink = hyperlink;
+            }
             else
+            {
                 (_savedAlternateCursorCol, _savedAlternateCursorRow, _savedAlternateDelayedWrap) = (_cursorCol, _cursorRow, _delayedWrap);
+                _snapshotAlternateHyperlink = hyperlink;
+            }
         }
         finally
         {

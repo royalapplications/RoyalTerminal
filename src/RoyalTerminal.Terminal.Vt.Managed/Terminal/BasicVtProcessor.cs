@@ -4867,7 +4867,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             // Ghostty resizes primary first, even when the alternate is visible.
             if (_inAltScreen)
                 ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
-            ResizeActiveScreenBuffer(columns, rows, reflowOnResize, trackedAbsolutePositions, preserveViewportTopOnRowsIncrease);
+            _currentHyperlinkId = ResizeActiveScreenBuffer(columns, rows, reflowOnResize, trackedAbsolutePositions, preserveViewportTopOnRowsIncrease);
             if (!_inAltScreen)
                 ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
             ApplyResizeState(columns, rows);
@@ -4877,13 +4877,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (reportSize) EmitInBandSizeReport();
     }
 
-    private void ResizeActiveScreenBuffer(int columns, int rows, bool reflowOnResize,
+    private int ResizeActiveScreenBuffer(int columns, int rows, bool reflowOnResize,
         Span<TerminalGridPosition> trackedAbsolutePositions, bool preserveViewportTopOnRowsIncrease,
-        GhosttySnapshotStyle? snapshotPen = null)
+        GhosttySnapshotStyle? snapshotPen = null, int? snapshotHyperlink = null)
     {
         GhosttySnapshotStyle resizePen = _screen.TracksSnapshotMetadata ? snapshotPen ?? CaptureSnapshotPen() : default;
-        if (_screen.TracksSnapshotMetadata)
-            _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, _cursorRow, resizePen, resizePen);
+        int key = _inAltScreen ? 1 : 0;
+        int resizeHyperlink = _screen.SnapshotCursorHyperlinkToken(key, snapshotHyperlink ?? _currentHyperlinkId);
+        ref uint hyperlinkCounter = ref (_inAltScreen ? ref _alternateHyperlinkImplicitCounter : ref _primaryHyperlinkImplicitCounter);
         bool alternateScreen = _inAltScreen;
         bool gridSizeChanged = columns != _screen.Columns || rows != _screen.ViewportRows;
         bool discardHiddenCells = columns < _screen.Columns &&
@@ -4900,62 +4901,66 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         TerminalScreenAnchor? savedCursorAnchor = null;
         TerminalScreenAnchor? activeTopAnchor = null;
+        GhosttySnapshotPageTracker.CursorResizeLease? cursorLease = null;
         TerminalGridPosition mappedCursor;
         try
         {
-            savedCursorAnchor = TrackSavedCursorForResize();
-            if (!alternateScreen && !_options.ResizePullScrollback && !preserveViewportTopOnRowsIncrease)
-                activeTopAnchor = _screen.CreateAnchor(_screen.TotalRows - _screen.ViewportRows, 0);
-            mappedCursor = _screen.Resize(
-                columns,
-                rows,
-                reflowOnResize && _autoWrap && !alternateScreen,
-                new TerminalGridPosition(resizeCursorCol, _cursorRow),
-                trackedAbsolutePositions,
-                preserveViewportTopOnRowsIncrease && !alternateScreen);
-
-            if (discardHiddenCells) _screen.DiscardHiddenCells();
-            if (activeTopAnchor is not null && _screen.TryResolveAnchor(activeTopAnchor, out TerminalGridPosition activeTop))
+            try
             {
-                int previousTop = _screen.TotalRows - _screen.ViewportRows;
-                _screen.PadBottomViewportToPreserveTop(activeTop.Row);
-                int mappedRow = mappedCursor.Row - (_screen.TotalRows - _screen.ViewportRows - previousTop);
-                mappedCursor = mappedRow < 0 ? new(0, 0) : mappedCursor with { Row = mappedRow };
+                savedCursorAnchor = TrackSavedCursorForResize();
+                if (!alternateScreen && !_options.ResizePullScrollback && !preserveViewportTopOnRowsIncrease)
+                    activeTopAnchor = _screen.CreateAnchor(_screen.TotalRows - _screen.ViewportRows, 0);
+                // Allocate pins before detaching the cursor. Both allocators
+                // retain temporary references while row operations see no pen.
+                cursorLease = _screen.BeginSnapshotCursorResize(key, _cursorRow, resizePen, ref resizeHyperlink, ref hyperlinkCounter);
+                mappedCursor = _screen.Resize(
+                    columns,
+                    rows,
+                    reflowOnResize && _autoWrap && !alternateScreen,
+                    new TerminalGridPosition(resizeCursorCol, _cursorRow),
+                    trackedAbsolutePositions,
+                    preserveViewportTopOnRowsIncrease && !alternateScreen);
+
+                if (discardHiddenCells) _screen.DiscardHiddenCells();
+                if (activeTopAnchor is not null && _screen.TryResolveAnchor(activeTopAnchor, out TerminalGridPosition activeTop))
+                {
+                    int previousTop = _screen.TotalRows - _screen.ViewportRows;
+                    _screen.PadBottomViewportToPreserveTop(activeTop.Row);
+                    int mappedRow = mappedCursor.Row - (_screen.TotalRows - _screen.ViewportRows - previousTop);
+                    mappedCursor = mappedRow < 0 ? new(0, 0) : mappedCursor with { Row = mappedRow };
+                }
+
+                if (savedCursorAnchor is not null) RemapSavedCursorAfterResize(savedCursorAnchor);
+            }
+            finally
+            {
+                if (savedCursorAnchor is not null) _screen.ReleaseAnchor(savedCursorAnchor);
+                if (activeTopAnchor is not null) _screen.ReleaseAnchor(activeTopAnchor);
+                if (!alternateScreen && restoreScrollOffset != 0) _screen.ScrollOffset = restoreScrollOffset;
             }
 
-            if (savedCursorAnchor is not null)
+            SetCursorFromMappedResize(columns, mappedCursor, previousDelayedWrap);
+            _cursorRow = Math.Clamp(mappedCursor.Row, 0, rows - 1);
+            _cursorCol = Math.Clamp(_cursorCol, 0, columns - 1);
+            if (gridSizeChanged)
             {
-                RemapSavedCursorAfterResize(savedCursorAnchor);
+                // Redraw concerns the live cursor, not a scrolled viewport.
+                int scrollOffset = _screen.ScrollOffset;
+                _screen.ScrollOffset = 0;
+                try { ClearPromptForRedraw(); }
+                finally { _screen.ScrollOffset = scrollOffset; }
             }
+
+            // Style first, then hyperlink, then release temporary references
+            // only in the allocator which survived. Implicit links receive a
+            // fresh identity even on height-only/reserved-width resizes.
+            return cursorLease is not null ? cursorLease.Complete(_cursorRow, ref hyperlinkCounter)
+                : _screen.RestoreSnapshotResizeCursor(key, _cursorRow, resizePen, resizeHyperlink, ref hyperlinkCounter);
         }
         finally
         {
-            if (savedCursorAnchor is not null) _screen.ReleaseAnchor(savedCursorAnchor);
-            if (activeTopAnchor is not null) _screen.ReleaseAnchor(activeTopAnchor);
-            if (!alternateScreen && restoreScrollOffset != 0)
-            {
-                _screen.ScrollOffset = restoreScrollOffset;
-            }
+            cursorLease?.Dispose();
         }
-
-        SetCursorFromMappedResize(columns, mappedCursor, previousDelayedWrap);
-        _cursorRow = mappedCursor.Row;
-
-        _cursorCol = Math.Clamp(_cursorCol, 0, columns - 1);
-        _cursorRow = Math.Clamp(_cursorRow, 0, rows - 1);
-        if (gridSizeChanged)
-        {
-            // Redraw concerns the live cursor, not the user's scrolled viewport.
-            int scrollOffset = _screen.ScrollOffset;
-            _screen.ScrollOffset = 0;
-            try { ClearPromptForRedraw(); }
-            finally { _screen.ScrollOffset = scrollOffset; }
-        }
-        // Screen.resize retains the old pen reference through row mutation,
-        // then restores it on the remapped page after prompt clearing. Reflow
-        // builds fresh cell-only style tables, so even an unchanged pen moves.
-        if (_screen.TracksSnapshotMetadata)
-            _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, _cursorRow, resizePen, resizePen);
     }
 
     private void ApplyResizeState(int columns, int rows)

@@ -128,6 +128,20 @@ internal sealed class GhosttySnapshotHyperlinkStorage
         _cursorId = 0;
     }
 
+    internal int SuspendCursorReference()
+    {
+        int id = _cursorId;
+        _cursorId = 0;
+        return id;
+    }
+
+    internal void RestoreCursorReference(int id)
+    {
+        if (id != 0) _ = _links.Get(id);
+        EndCursor();
+        _cursorId = id;
+    }
+
     internal GhosttySnapshotHyperlinkAddResult CopyCursorTo(GhosttySnapshotHyperlinkStorage destination)
     {
         if (_cursorId == 0) return GhosttySnapshotHyperlinkAddResult.Success;

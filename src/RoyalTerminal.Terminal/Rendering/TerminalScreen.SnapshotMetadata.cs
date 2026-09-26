@@ -76,6 +76,33 @@ public sealed partial class TerminalScreen
     internal int SnapshotCursorHyperlinkToken(int key, int fallback)
         => TracksSnapshotMetadata ? _snapshotPageTracker?.CursorHyperlinkToken(key, fallback) ?? fallback : fallback;
 
+    internal GhosttySnapshotPageTracker.CursorResizeLease? BeginSnapshotCursorResize(int key, int cursorRow,
+        GhosttySnapshotStyle pen, ref int hyperlinkToken, ref uint counter)
+    {
+        if (!TracksSnapshotMetadata) return null;
+        hyperlinkToken = SnapshotHyperlinkChanged(key, cursorRow, pen, hyperlinkToken, ref counter);
+        TerminalRowBuffer? rows = GetSnapshotRows(key);
+        if (rows is null || (uint)cursorRow >= (uint)ViewportRows || rows.Count < ViewportRows) return null;
+        return _snapshotPageTracker!.BeginCursorResize(this, rows, key, rows[rows.Count - ViewportRows + cursorRow],
+            ref hyperlinkToken, SnapshotPageLayout());
+    }
+
+    internal int RestoreSnapshotResizeCursor(int key, int cursorRow, GhosttySnapshotStyle pen, int token, ref uint counter)
+    {
+        SnapshotStyleChanged(key, cursorRow, default, pen);
+        // Screen.resize restarts even on a surviving page. Unlike ordinary
+        // same-page motion, that consumes a new implicit identity each time.
+        TerminalHyperlink? link = null;
+        bool implicitId = token != 0 && TryGetHyperlink(token, out link) && link is { IsExplicit: false };
+        if (implicitId)
+        {
+            token = RegisterHyperlink(link!.UriBytes, default, counter);
+        }
+        token = SnapshotHyperlinkChanged(key, cursorRow, pen, token, ref counter, restart: true);
+        if (implicitId && token != 0) counter = unchecked(counter + 1);
+        return token;
+    }
+
     private GhosttySnapshotAllocation SnapshotPageLayout()
     {
         int alignment = _snapshotScrollbackQuota?.PageAlignment ??

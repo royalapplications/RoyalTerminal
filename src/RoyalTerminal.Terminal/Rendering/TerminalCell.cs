@@ -2154,11 +2154,13 @@ public sealed partial class TerminalScreen
         int mappedAbsoluteRow = trackedAbsoluteRow;
         int mappedColumn = Math.Clamp(trackedColumn, 0, columns);
 
-        // Ghostty shrinks height before narrowing columns and after widening
-        // them. Retire blank, unpinned bottom rows before creating history.
+        // PageList.resize shrinks height before narrower-column REFLOW. The
+        // no-reflow path always changes columns first: truncation can make a
+        // trailing row blank and eligible for trimming instead of history.
         bool trimBottom = trackedViewportPosition.HasValue &&
             !preserveViewportTopOnRowsIncrease && viewportRows < oldViewportRows;
-        if (trimBottom && columns <= oldColumns)
+        bool trimBeforeColumns = reflowOnResize && columns < oldColumns;
+        if (trimBottom && trimBeforeColumns)
             TrimUnpinnedBlankRowsForHeightShrink(oldViewportRows - viewportRows, trackedAbsoluteRow);
 
         if (columns != oldColumns)
@@ -2180,7 +2182,7 @@ public sealed partial class TerminalScreen
             }
         }
 
-        if (trimBottom && columns > oldColumns)
+        if (trimBottom && !trimBeforeColumns)
             TrimUnpinnedBlankRowsForHeightShrink(oldViewportRows - viewportRows, mappedAbsoluteRow, reflowAnchors);
 
         Columns = columns;
