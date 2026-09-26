@@ -52,6 +52,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalEraseDisplayOptionsSink,
     ITerminalShellIntegrationEventSource,
     ITerminalEffectSource,
+    ITerminalDragDropTarget,
     ITerminalUnicodeWidthProvider,
     ITerminalTimedRefreshSource
 {
@@ -2001,6 +2002,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ReadOnlySpan<byte> rawPayload = CollectionsMarshal.AsSpan(_oscBuffer);
+        if (rawPayload.StartsWith("72;"u8))
+        {
+            (_dragDrop ??= new()).Handle(rawPayload[3..], bellTerminator, ResponseCallback);
+            _oscBuffer.Clear();
+            return;
+        }
         if (rawPayload.StartsWith("22;"u8))
         {
             if (TerminalMouseShapeNames.TryParse(rawPayload[3..], out TerminalMouseShape shape)) MouseShape = shape;
@@ -4508,6 +4515,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void PrepareForNewSession(bool preserveScrollback)
     {
+        _dragDrop = null;
         ResetInternal(
             raiseModeChanged: true,
             preserveScrollback
@@ -4536,6 +4544,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode)
     {
+        _dragDrop?.ResetParser();
         TerminalModeState before = ModeState;
         EndRenderHold();
         _primaryKittyStore.Clear(_screen);
@@ -4929,6 +4938,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void Dispose()
     {
+        _dragDrop = null;
         _backgroundSearch?.Dispose();
         _search.Reset();
         EndRenderHold();

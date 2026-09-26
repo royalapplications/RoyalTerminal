@@ -29,6 +29,29 @@ retain the Skia renderer, and other operating systems retain normal rendering,
 matching Ghostty's platform support for this setting. Glyph and font caches are
 bounded, invalidated when font settings change, and disposed with the renderer.
 
+## Kitty drag and drop
+
+Both VT adapters implement `ITerminalDragDropTarget`. A registered OSC 72 client
+receives drag movement/leave and drop messages, then requests MIME representations
+by index. Chunked registration and acceptance, multiplexer IDs, base64 data chunks,
+completion markers and BEL/ST responses follow the pinned Ghostty state machine.
+Registration survives RIS; new sessions unregister. Held data is released on
+conclusion, a new drag, cancellation, unregister or processor disposal.
+
+Avalonia's composed drop behavior advertises plain text, file URI lists and
+supported typed platform MIME data. It captures representations only at drop time,
+without opening files or retrieving remote contents. The host offers copy only:
+its OS drag session finishes before the client concludes the asynchronous transfer,
+so it cannot safely promise a source-file move. The core contract still encodes
+copy/move operations for custom hosts. Unregistered drops remain available to the
+embedding application's handlers; no shell commands or unsolicited paste are generated.
+
+Drops are bounded to 16 representations and 64 MiB. Like the pinned Ghostty core,
+remote transfer requests receive `EINVAL`, and unsupported drag-out receives
+`EPERM`; neither capability is advertised. Native host hooks are repository-owned
+extensions, not new upstream public C APIs. The native boundary copies all retained
+data and serializes with normal terminal mutations.
+
 ## Ghostty-compatible shaders
 
 RoyalTerminal also supports a Ghostty/Shadertoy-style shader compatibility mode in the managed Skia renderer. This is intentionally separate from the native Ghostty VT binding and from Ghostty renderer interop.

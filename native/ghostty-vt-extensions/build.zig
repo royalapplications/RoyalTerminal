@@ -72,7 +72,7 @@ pub fn build(b: *std.Build) !void {
     );
     module.root_source_file = sources.add(
         "src/lib_vt_royal.zig",
-        try std.mem.concat(b.allocator, u8, &.{ upstream, "\n", @embedFile("src/extensions.zig") }),
+        try std.mem.concat(b.allocator, u8, &.{ upstream, "\n", @embedFile("src/extensions.zig"), "\n", @embedFile("src/drag_drop.zig") }),
     );
 
     // Retain Ghostty's platform linking, symbol visibility, static archive

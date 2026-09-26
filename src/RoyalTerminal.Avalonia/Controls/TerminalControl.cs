@@ -647,6 +647,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     private TerminalScrollData? _scrollData;
     private VirtualizedTerminalScrollViewer? _scrollViewer;
     private IVtProcessor? _vtProcessor;
+    private readonly TerminalDragDropBehavior _dragDropBehavior;
+    internal long DropSessionGeneration => _transportSessionGeneration;
     private bool _autoScrollPinnedToBottom = true;
     private bool _preservedRestartHistoryInputScrollGuard;
     private bool _preservedRestartHistoryWasUserScrolled;
@@ -1208,6 +1210,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         InitializeTerminal();
         RegisterKeyboardFallbackHandlers();
         RegisterPointerFallbackHandlers();
+        _dragDropBehavior = new TerminalDragDropBehavior(this);
     }
 
     private void InitializeTerminal()
@@ -2235,6 +2238,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        _dragDropBehavior.Cancel();
         base.OnDetachedFromVisualTree(e);
         _searchPaused = true;
         if (_screen is not null && _vtProcessor is ITerminalAsyncSearchSource asyncSearch)
@@ -6052,6 +6056,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void StopPty()
     {
+        _dragDropBehavior.Cancel();
         FlushPendingTransportResize();
         SetPendingTransportOutputAcceptance(acceptOutput: false);
         unchecked

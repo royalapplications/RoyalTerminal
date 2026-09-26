@@ -4,7 +4,7 @@ This package builds the pinned `external/ghostty` dependency without modifying
 its checkout. It retains Ghostty's build configuration, runtime module,
 allocator, generation counter, public C exports and platform linker handling.
 The build generates a copy of the upstream Zig root with the exports from
-`src/extensions.zig` appended. Both shared and static libraries include them.
+`src/extensions.zig` and `src/drag_drop.zig` appended. Both shared and static libraries include them.
 
 ## Reviewed correctness overlays
 
@@ -57,8 +57,19 @@ The first five were reproduced through the native C API before correction and
 have focused tests. No public upstream issue is claimed. Reassess and
 remove an overlay when its upstream fix is incorporated.
 
-The twelve additional C exports are declared in
+The fifteen additional C exports are declared in
 `include/royalterminal_ghostty_vt.h`:
+
+- `ghostty_royal_dnd_state`, `ghostty_royal_dnd_mimes` and
+  `ghostty_royal_dnd_event` bridge host drag movement, leave, drop and cancellation
+  to Ghostty's existing Kitty OSC 72 state machine. Registered MIME lists are
+  copied with probe/copy semantics; dropped bytes are owned by the native state.
+  The boundary allows at most 16 representations and 64 MiB, validates MIME
+  tokens against control injection, and uses the existing synchronous writer
+  ABI. Host cancellation bypasses any in-progress client chunk reassembly;
+  session unregister releases registration as well. Calls require the terminal
+  lock. No new upstream export, native OS drag source or remote-file transfer is
+  claimed. ABI, ownership and conversation tests await implementation-phase validation.
 
 - `ghostty_royal_modify_other_keys_2` copies the live legacy keyboard extension
   flag for host input routing, including synchronized-output holds and snapshots.

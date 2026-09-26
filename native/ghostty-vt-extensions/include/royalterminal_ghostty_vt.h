@@ -7,6 +7,32 @@
 extern "C" {
 #endif
 
+/** Host-provided drop representation. Pointers are borrowed only for the call;
+ * the upstream state copies data at drop time. MIME is a printable ASCII token
+ * (1-1024 bytes, no spaces). At most 16 items and 64 MiB total data are accepted. */
+typedef struct {
+    const uint8_t* mime;
+    size_t mime_len;
+    const uint8_t* data;
+    size_t data_len;
+} RoyalDndItem;
+
+/** Query registered (0/1) and accepted (-1 unanswered, 0 reject, 1 copy, 2 move).
+ * Serialize these APIs with all terminal access. No borrowed pointers escape. */
+GHOSTTY_API GhosttyResult ghostty_royal_dnd_state(
+    GhosttyTerminal terminal, uint8_t* registered, int32_t* accepted);
+/** Copy raw registration MIME bytes. OUT_OF_SPACE sets length without copying. */
+GHOSTTY_API GhosttyResult ghostty_royal_dnd_mimes(
+    GhosttyTerminal terminal, uint8_t* output, size_t capacity, size_t* length);
+/** Host event: 1 move, 2 drop, 3 leave, 4 cancel held data, 5 unregister. Coordinates
+ * are zero-based cells and content-relative terminal pixels; operations is a
+ * copy=1/move=2 mask. Writer synchronously receives protocol input for the client.
+ * Items are used by move (MIME only) and drop. No writer or input is retained. */
+GHOSTTY_API GhosttyResult ghostty_royal_dnd_event(
+    GhosttyTerminal terminal, uint32_t kind, uint32_t column, uint32_t row,
+    int32_t pixel_x, int32_t pixel_y, uint32_t operations,
+    const RoyalDndItem* items, size_t count, GhosttyWriter writer);
+
 /** Effective mouse state consumed by the native encoder, independent of DEC
  * mode bits. Set size before calling. tracking uses GhosttyMouseTrackingMode;
  * format uses GhosttyMouseFormat. No allocation, mutation, or borrowed pointers.

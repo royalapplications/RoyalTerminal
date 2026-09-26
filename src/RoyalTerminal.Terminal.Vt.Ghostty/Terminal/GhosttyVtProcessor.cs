@@ -46,6 +46,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalSixelOptionsSink,
     ITerminalResizeReflowPolicySink,
     ITerminalEffectSource,
+    ITerminalDragDropTarget,
     ITerminalUnicodeWidthProvider,
     ITerminalPromptStateSource,
     ITerminalTimedRefreshSource
@@ -799,6 +800,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     public void PrepareForNewSession(bool preserveScrollback)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        _terminal.SendDragDropEvent(5);
 
         if (!preserveScrollback)
         {
