@@ -97,3 +97,10 @@ public interface ITerminalNotificationSource
     /// <summary>Notification host; null disables the protocol and closes this processor's notifications.</summary>
     ITerminalNotificationHost? NotificationHost { get; set; }
 }
+
+/// <summary>Optional guard for UI focus work queued by a notification host.</summary>
+public interface ITerminalNotificationFocusLifetime
+{
+    /// <summary>Cancels queued focus actions when the protocol owner/session is detached or disposed. Must not block.</summary>
+    void CancelPendingFocus();
+}

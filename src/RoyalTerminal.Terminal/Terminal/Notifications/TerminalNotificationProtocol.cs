@@ -152,6 +152,8 @@ internal sealed class TerminalNotificationProtocol(ITerminalNotificationHost hos
     {
         if (_disposed) return;
         _disposed = true;
+        if (host is ITerminalNotificationFocusLifetime focusLifetime)
+        { try { focusLifetime.CancelPendingFocus(); } catch (Exception) { } }
         ResetParser();
         _icons.Clear();
         foreach (Guid token in _active.Keys) SafeClose(token);

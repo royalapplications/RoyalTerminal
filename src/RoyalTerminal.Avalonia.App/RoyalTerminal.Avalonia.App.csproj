@@ -33,6 +33,7 @@
     <PackageReference Include="ReactiveUI.Reactive" />
     <PackageReference Include="ReactiveUI.Avalonia.Reactive" />
     <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="Tmds.DBus.Protocol" />
     <PackageReference Include="Xaml.Behaviors.Avalonia" />
   </ItemGroup>
 

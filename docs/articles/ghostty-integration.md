@@ -58,8 +58,9 @@ Both VT adapters implement `ITerminalNotificationSource`; embedders can configur
 `TerminalControl.NotificationHost` with a nonblocking `ITerminalNotificationHost`.
 OSC 99 queries advertise only the backend's actual capabilities. Without a host,
 notifications and support queries are silently ignored. The default application
-does not yet install OS-specific presenters, so full desktop notification parity
-remains unfinished; these contracts are not a claim of native OS delivery.
+now installs a Linux freedesktop backend for live sessions, shared by both engines;
+capture replay never installs a desktop presenter. macOS/Windows presenters remain
+unfinished. Linux runtime/platform sign-off is pending, not a claim of verified delivery.
 
 The shared protocol implements chunked title/body/buttons/icon assembly, strict
 safe UTF-8 and base64 input, application/type metadata, occasions, urgency, sound,
@@ -78,6 +79,29 @@ follow Ghostty's 2048-byte plain / 4096-byte encoded limits; metadata is capped 
 file path, shell command, or OS notification identity. Hosts must separately
 bound native image decoding and their own queues. RIS clears unfinished chunks;
 session changes, host replacement, detachment and disposal close owned revisions.
+
+The Linux backend uses explicit D-Bus serialization and the negotiated desktop
+service capabilities; no reflection proxy, shell process or libnotify dependency.
+It binds calls/signals to a unique daemon owner, fails stale revisions on daemon
+restart and retries connection initialization. A per-window async worker owns at
+most 128 requests / 8 MiB of retained payload. Close is recorded as state even
+when admission is full. In-flight delivery finishes before cleanup so its returned
+OS ID can be closed; window closure waits asynchronously for this owned cleanup.
+Transport operations are bounded, and no desktop call waits under the VT lock.
+
+Per-pane facades cache focus/visibility on the UI thread and route activation to
+the originating tab/pane. Queued focus is invalidated on session/host teardown.
+Bodies are escaped only when the server supports markup; literal title text is
+preserved, and servers without body support receive the body in the summary.
+Images decode only their first PNG/JPEG/GIF frame, with 1 MiB encoded, 2048-pixel
+per-axis and 1-megapixel decoded limits. Standard icon names are mapped; complete
+ordered custom-theme lookup remains unfinished, so full icon support is not yet
+advertised. Named-sound and Wayland activation-token parity also remain unfinished.
+
+New tests cover backend negotiation, replacement, early/stale signals, queue
+saturation, in-flight close/shutdown, image limits and headless pane lifecycle.
+An isolated loopback D-Bus peer exercises actual message serialization without
+contacting the user's desktop bus. These tests have not yet been executed.
 
 Reference decision: the pinned Ghostty OSC 99 implementation supplies a parser
 but no stream/desktop delivery. Windows Terminal's OSC dispatcher has no OSC 99

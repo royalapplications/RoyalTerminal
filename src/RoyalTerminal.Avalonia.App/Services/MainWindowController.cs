@@ -38,6 +38,7 @@ using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Avalonia.App.Views;
 using RoyalTerminal.Avalonia.App.ViewModels;
+using RoyalTerminal.Avalonia.App.Services.Notifications;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
 using RoyalTerminal.Shaders;
@@ -96,6 +97,8 @@ internal sealed class MainWindowController
     private static readonly Geometry s_dismissRegularIconFallback = StreamGeometry.Parse(DismissRegularIconPathData);
 
     private readonly Window _window;
+    private DesktopNotificationService? _desktopNotifications;
+    private readonly Dictionary<TerminalControl, DesktopNotificationHost> _notificationHosts = new();
     private readonly MainWindowViewModel _viewModel;
     private readonly Grid _terminalHost;
     private readonly ContentControl _titleBarTabStripHost;
@@ -233,6 +236,7 @@ internal sealed class MainWindowController
     public IDisposable Activate()
     {
         CompositeDisposable lifetime = new();
+        lifetime.Add(new DesktopNotificationWindowLifetime(_window, () => _desktopNotifications, DisableNotificationHosts));
         RegisterCaptionButtonHandlers(lifetime);
         RegisterInteractionHandlers(lifetime);
         RegisterShellLayoutHandlers(lifetime);
@@ -2865,7 +2869,7 @@ internal sealed class MainWindowController
         ArgumentNullException.ThrowIfNull(session);
 
         TerminalTheme theme = _viewModel.ActiveTheme;
-        TerminalControl standaloneControl = CreateStandaloneControl();
+        TerminalControl standaloneControl = CreateStandaloneControl(notificationsEnabled: false);
         ApplyFontSettings(standaloneControl);
         standaloneControl.Columns = Math.Max(1, session.InitialColumns);
         standaloneControl.Rows = Math.Max(1, session.InitialRows);
@@ -3091,7 +3095,7 @@ internal sealed class MainWindowController
         renderer.TextRenderPipeline = s_textRenderPipeline;
     }
 
-    private TerminalControl CreateStandaloneControl()
+    private TerminalControl CreateStandaloneControl(bool notificationsEnabled = true)
     {
         INativeVtProcessorProvider[] nativeProviders = [new GhosttyVtProcessorProvider()];
         DefaultPtyFactory ptyFactory = new();
@@ -3116,7 +3120,7 @@ internal sealed class MainWindowController
                     }),
             });
 
-        return new TerminalControl(
+        TerminalControl control = new(
             new TerminalSessionService(),
             new HandledInputSuppressingTerminalInputAdapter(new DefaultTerminalInputAdapter()),
             new DefaultTerminalSelectionService(),
@@ -3135,6 +3139,22 @@ internal sealed class MainWindowController
             credentialProvider,
             hostKeyValidator,
             transportFactory);
+        if (notificationsEnabled && OperatingSystem.IsLinux())
+        {
+            _desktopNotifications ??= new(new LinuxDesktopNotificationBackend(static () => new FreedesktopNotificationConnection()));
+            DesktopNotificationHost host = new(_desktopNotifications, _window, control, () =>
+            {
+                if (FindTabForControl(control) is not { } tab) return;
+                ActivateTabById(tab.Index);
+                SetActivePane(control, focus: false);
+                if (_window.WindowState == WindowState.Minimized) _window.WindowState = WindowState.Normal;
+                _window.Activate();
+                control.Focus();
+            });
+            _notificationHosts.Add(control, host);
+            control.NotificationHost = host;
+        }
+        return control;
     }
 
     private bool PromptForSshHostKeyTrust(SshHostKeyTrustPromptRequest request)
@@ -6536,6 +6556,10 @@ internal sealed class MainWindowController
             DisposeTabTerminals(tab);
         }
         _tabs.Clear();
+        foreach (DesktopNotificationHost host in _notificationHosts.Values) host.Dispose();
+        _notificationHosts.Clear();
+        _desktopNotifications?.Dispose();
+        _desktopNotifications = null;
         _captureRuntimes.Clear();
         _commandHistoryHandlers.Clear();
         _commandHistoryCaptures.Clear();
@@ -6548,6 +6572,16 @@ internal sealed class MainWindowController
         }
         _sessionLogWriters.Clear();
 
+    }
+
+    private void DisableNotificationHosts()
+    {
+        foreach (KeyValuePair<TerminalControl, DesktopNotificationHost> entry in _notificationHosts)
+        {
+            entry.Key.NotificationHost = null;
+            entry.Value.Dispose();
+        }
+        _notificationHosts.Clear();
     }
 
     private void FlushTerminalRuntimeStateBeforePersistence()
@@ -6783,6 +6817,8 @@ internal sealed class MainWindowController
     {
         if (control is TerminalControl standaloneControl)
         {
+            standaloneControl.NotificationHost = null;
+            if (_notificationHosts.Remove(standaloneControl, out DesktopNotificationHost? notificationHost)) notificationHost.Dispose();
             if (_captureRuntimes.Remove(standaloneControl, out TerminalCaptureRuntime? runtime))
             {
                 runtime.StateChanged -= OnCaptureRuntimeStateChanged;
