@@ -62,6 +62,8 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.False(viewModel.SettingsPanelState.FontBaselineSnap);
             Assert.True(viewModel.SettingsPanelState.FontEmbeddedBitmaps);
             Assert.True(viewModel.SettingsPanelState.FontEmbolden);
+            Assert.True(viewModel.SettingsPanelState.FontThicken);
+            Assert.Equal(91, viewModel.SettingsPanelState.FontThickenStrength);
             Assert.True(viewModel.SettingsPanelState.FontForceAutoHinting);
             Assert.True(viewModel.SettingsPanelState.FontLinearMetrics);
             Assert.Equal(
@@ -85,6 +87,8 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel.SettingsPanelState.FontBaselineSnap = true;
             viewModel.SettingsPanelState.FontEmbeddedBitmaps = false;
             viewModel.SettingsPanelState.FontEmbolden = false;
+            viewModel.SettingsPanelState.FontThicken = true;
+            viewModel.SettingsPanelState.FontThickenStrength = 0;
             viewModel.SettingsPanelState.FontForceAutoHinting = false;
             viewModel.SettingsPanelState.FontLinearMetrics = false;
             viewModel.SettingsPanelState.ApplyCommand.Execute(null);
@@ -104,6 +108,8 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.True(viewModel.FontBaselineSnap);
             Assert.False(viewModel.FontEmbeddedBitmaps);
             Assert.False(viewModel.FontEmbolden);
+            Assert.True(viewModel.FontThicken);
+            Assert.Equal(0, viewModel.FontThickenStrength);
             Assert.False(viewModel.FontForceAutoHinting);
             Assert.False(viewModel.FontLinearMetrics);
 
@@ -117,6 +123,8 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.True(control.FontBaselineSnap);
             Assert.False(control.FontEmbeddedBitmaps);
             Assert.False(control.FontEmbolden);
+            Assert.True(control.FontThicken);
+            Assert.Equal(0, control.FontThickenStrength);
             Assert.False(control.FontForceAutoHinting);
             Assert.False(control.FontLinearMetrics);
             Assert.True(control.ReflowOnResize);
@@ -584,6 +592,8 @@ public sealed class MainWindowControllerSettingsPanelTests
                             BaselineSnap = false,
                             EmbeddedBitmaps = true,
                             Embolden = true,
+                            Thicken = true,
+                            ThickenStrength = 91,
                             ForceAutoHinting = true,
                             LinearMetrics = true,
                         },

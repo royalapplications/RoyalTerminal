@@ -711,7 +711,7 @@
                 </ItemsControl>
 
                 <Grid ColumnDefinitions="160,*"
-                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                       ColumnSpacing="12"
                       RowSpacing="8"
                       Width="520">
@@ -785,6 +785,24 @@
                       </DataTemplate>
                     </ComboBox.ItemTemplate>
                   </ComboBox>
+                  <CheckBox Grid.Row="10"
+                            Grid.Column="1"
+                            Content="Thicken fonts (macOS)"
+                            IsChecked="{Binding FontThicken}" />
+                  <TextBlock Grid.Row="11"
+                             Grid.Column="0"
+                             VerticalAlignment="Center"
+                             Text="Thickening strength" />
+                  <NumericUpDown Grid.Row="11"
+                                 Grid.Column="1"
+                                 Width="120"
+                                 HorizontalAlignment="Left"
+                                 Minimum="0"
+                                 Maximum="255"
+                                 Increment="1"
+                                 FormatString="0"
+                                 IsEnabled="{Binding FontThicken}"
+                                 Value="{Binding FontThickenStrength}" />
                 </Grid>
               </StackPanel>
             </StackPanel>

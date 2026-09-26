@@ -148,6 +148,14 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             nameof(FontEmbolden),
             TerminalFontRenderingSettings.Default.Embolden);
 
+    /// <summary>Whether macOS font smoothing thickens terminal and preedit glyphs.</summary>
+    public static readonly StyledProperty<bool> FontThickenProperty =
+        AvaloniaProperty.Register<TerminalControl, bool>(nameof(FontThicken), false);
+
+    /// <summary>macOS font smoothing strength; zero is the lightest enabled setting.</summary>
+    public static readonly StyledProperty<byte> FontThickenStrengthProperty =
+        AvaloniaProperty.Register<TerminalControl, byte>(nameof(FontThickenStrength), 255);
+
     /// <summary>Whether terminal text forces auto-hinting.</summary>
     public static readonly StyledProperty<bool> FontForceAutoHintingProperty =
         AvaloniaProperty.Register<TerminalControl, bool>(
@@ -363,6 +371,20 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         get => GetValue(FontEmboldenProperty);
         set => SetValue(FontEmboldenProperty, value);
+    }
+
+    /// <summary>Gets or sets macOS font smoothing for normal and preedit text.</summary>
+    public bool FontThicken
+    {
+        get => GetValue(FontThickenProperty);
+        set => SetValue(FontThickenProperty, value);
+    }
+
+    /// <summary>Gets or sets macOS font smoothing strength (0–255), independent of synthetic bold.</summary>
+    public byte FontThickenStrength
+    {
+        get => GetValue(FontThickenStrengthProperty);
+        set => SetValue(FontThickenStrengthProperty, value);
     }
 
     /// <summary>Gets or sets whether terminal text forces auto-hinting.</summary>
@@ -1235,6 +1257,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             change.Property == FontBaselineSnapProperty ||
             change.Property == FontEmbeddedBitmapsProperty ||
             change.Property == FontEmboldenProperty ||
+            change.Property == FontThickenProperty ||
+            change.Property == FontThickenStrengthProperty ||
             change.Property == FontForceAutoHintingProperty ||
             change.Property == FontLinearMetricsProperty)
         {
@@ -1440,6 +1464,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             BaselineSnap = FontBaselineSnap,
             EmbeddedBitmaps = FontEmbeddedBitmaps,
             Embolden = FontEmbolden,
+            Thicken = FontThicken,
+            ThickenStrength = FontThickenStrength,
             ForceAutoHinting = FontForceAutoHinting,
             LinearMetrics = FontLinearMetrics,
         }.Normalize();

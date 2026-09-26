@@ -91,6 +91,14 @@ public sealed record TerminalFontRenderingSettings
     /// </summary>
     public bool Embolden { get; init; }
 
+    /// <summary>Gets whether macOS CoreText font smoothing thickens monochrome glyphs, including preedit.</summary>
+    /// <remarks>Independent of synthetic bold. Unsupported platforms retain their normal rasterization.</remarks>
+    public bool Thicken { get; init; }
+
+    /// <summary>Gets the macOS smoothing strength, from 0 (lightest thickening) to 255 (strongest).</summary>
+    /// <remarks>Ignored when <see cref="Thicken"/> is false. Zero still enables smoothing.</remarks>
+    public byte ThickenStrength { get; init; } = 255;
+
     /// <summary>
     /// Gets whether auto-hinting is forced instead of using native font hints.
     /// </summary>

@@ -13,6 +13,22 @@ The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
 the pinned native type and callback bindings; regenerate it with
 `scripts/audit-ghostty-abi.py` after a dependency update.
 
+## Font thickening
+
+`TerminalControl.FontThicken` enables macOS CoreText font smoothing for terminal
+text and IME preedit, for either VT engine. `FontThickenStrength` ranges from 0
+(lightest smoothing) to 255 (strongest); it has no effect while thickening is
+disabled. These values are also available as `Thicken` and `ThickenStrength` in
+`TerminalFontRenderingSettings` and are persisted in appearance profiles.
+
+This follows Ghostty's macOS smoothing path: grayscale CoreText masks, linear-gray
+color space, a strength-controlled gray drawing color, and padded glyph bounds.
+It is independent of the existing `FontEmbolden` synthetic-bold setting. Shaping,
+cell advances and colors remain controlled by RoyalTerminal. Color-font glyphs
+retain the Skia renderer, and other operating systems retain normal rendering,
+matching Ghostty's platform support for this setting. Glyph and font caches are
+bounded, invalidated when font settings change, and disposed with the renderer.
+
 ## Ghostty-compatible shaders
 
 RoyalTerminal also supports a Ghostty/Shadertoy-style shader compatibility mode in the managed Skia renderer. This is intentionally separate from the native Ghostty VT binding and from Ghostty renderer interop.

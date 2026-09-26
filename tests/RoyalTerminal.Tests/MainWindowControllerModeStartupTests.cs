@@ -2882,6 +2882,8 @@ public sealed class MainWindowControllerModeStartupTests
                             BaselineSnap = false,
                             EmbeddedBitmaps = true,
                             Embolden = true,
+                            Thicken = true,
+                            ThickenStrength = 137,
                             ForceAutoHinting = true,
                             LinearMetrics = true,
                         },
@@ -2977,6 +2979,8 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.False(splitControl.FontBaselineSnap);
             Assert.True(splitControl.FontEmbeddedBitmaps);
             Assert.True(splitControl.FontEmbolden);
+            Assert.True(splitControl.FontThicken);
+            Assert.Equal(137, splitControl.FontThickenStrength);
             Assert.True(splitControl.FontForceAutoHinting);
             Assert.True(splitControl.FontLinearMetrics);
             Assert.False(splitControl.AutoScroll);

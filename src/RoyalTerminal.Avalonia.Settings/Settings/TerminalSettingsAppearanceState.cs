@@ -23,6 +23,8 @@ public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategorySt
             nameof(TerminalSettingsPanelState.FontBaselineSnap),
             nameof(TerminalSettingsPanelState.FontEmbeddedBitmaps),
             nameof(TerminalSettingsPanelState.FontEmbolden),
+            nameof(TerminalSettingsPanelState.FontThicken),
+            nameof(TerminalSettingsPanelState.FontThickenStrength),
             nameof(TerminalSettingsPanelState.FontForceAutoHinting),
             nameof(TerminalSettingsPanelState.FontLinearMetrics),
             nameof(TerminalSettingsPanelState.IsSystemFontSourceSelected),
@@ -103,6 +105,20 @@ public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategorySt
     {
         get => Owner.FontEmbolden;
         set => Owner.FontEmbolden = value;
+    }
+
+    /// <summary>Gets or sets macOS font smoothing for terminal and preedit text.</summary>
+    public bool FontThicken
+    {
+        get => Owner.FontThicken;
+        set => Owner.FontThicken = value;
+    }
+
+    /// <summary>Gets or sets macOS smoothing strength (0–255).</summary>
+    public byte FontThickenStrength
+    {
+        get => Owner.FontThickenStrength;
+        set => Owner.FontThickenStrength = value;
     }
 
     public bool FontForceAutoHinting

@@ -1242,6 +1242,8 @@ internal sealed class MainWindowController
         _viewModel.FontBaselineSnap = appearance.FontRendering.BaselineSnap;
         _viewModel.FontEmbeddedBitmaps = appearance.FontRendering.EmbeddedBitmaps;
         _viewModel.FontEmbolden = appearance.FontRendering.Embolden;
+        _viewModel.FontThicken = appearance.FontRendering.Thicken;
+        _viewModel.FontThickenStrength = appearance.FontRendering.ThickenStrength;
         _viewModel.FontForceAutoHinting = appearance.FontRendering.ForceAutoHinting;
         _viewModel.FontLinearMetrics = appearance.FontRendering.LinearMetrics;
         _viewModel.TextHighlightingMode = appearance.TextHighlightingMode;
@@ -1823,6 +1825,8 @@ internal sealed class MainWindowController
                 BaselineSnap = _viewModel.FontBaselineSnap,
                 EmbeddedBitmaps = _viewModel.FontEmbeddedBitmaps,
                 Embolden = _viewModel.FontEmbolden,
+                Thicken = _viewModel.FontThicken,
+                ThickenStrength = _viewModel.FontThickenStrength,
                 ForceAutoHinting = _viewModel.FontForceAutoHinting,
                 LinearMetrics = _viewModel.FontLinearMetrics,
             },
@@ -5138,6 +5142,8 @@ internal sealed class MainWindowController
         standalone.FontBaselineSnap = _viewModel.FontBaselineSnap;
         standalone.FontEmbeddedBitmaps = _viewModel.FontEmbeddedBitmaps;
         standalone.FontEmbolden = _viewModel.FontEmbolden;
+        standalone.FontThicken = _viewModel.FontThicken;
+        standalone.FontThickenStrength = _viewModel.FontThickenStrength;
         standalone.FontForceAutoHinting = _viewModel.FontForceAutoHinting;
         standalone.FontLinearMetrics = _viewModel.FontLinearMetrics;
     }
@@ -5162,6 +5168,8 @@ internal sealed class MainWindowController
         standalone.FontBaselineSnap = appearance.FontRendering.BaselineSnap;
         standalone.FontEmbeddedBitmaps = appearance.FontRendering.EmbeddedBitmaps;
         standalone.FontEmbolden = appearance.FontRendering.Embolden;
+        standalone.FontThicken = appearance.FontRendering.Thicken;
+        standalone.FontThickenStrength = appearance.FontRendering.ThickenStrength;
         standalone.FontForceAutoHinting = appearance.FontRendering.ForceAutoHinting;
         standalone.FontLinearMetrics = appearance.FontRendering.LinearMetrics;
         standalone.AutoScroll = appearance.AutoScroll;
@@ -5192,6 +5200,8 @@ internal sealed class MainWindowController
                 BaselineSnap = control.FontBaselineSnap,
                 EmbeddedBitmaps = control.FontEmbeddedBitmaps,
                 Embolden = control.FontEmbolden,
+                Thicken = control.FontThicken,
+                ThickenStrength = control.FontThickenStrength,
                 ForceAutoHinting = control.FontForceAutoHinting,
                 LinearMetrics = control.FontLinearMetrics,
             },
@@ -5585,6 +5595,8 @@ internal sealed class MainWindowController
             current.FontBaselineSnap = _viewModel.FontBaselineSnap;
             current.FontEmbeddedBitmaps = _viewModel.FontEmbeddedBitmaps;
             current.FontEmbolden = _viewModel.FontEmbolden;
+            current.FontThicken = _viewModel.FontThicken;
+            current.FontThickenStrength = _viewModel.FontThickenStrength;
             current.FontForceAutoHinting = _viewModel.FontForceAutoHinting;
             current.FontLinearMetrics = _viewModel.FontLinearMetrics;
             current.AutoScroll = appearanceFlags.AutoScroll;
@@ -5755,6 +5767,8 @@ internal sealed class MainWindowController
         _viewModel.FontBaselineSnap = state.FontBaselineSnap;
         _viewModel.FontEmbeddedBitmaps = state.FontEmbeddedBitmaps;
         _viewModel.FontEmbolden = state.FontEmbolden;
+        _viewModel.FontThicken = state.FontThicken;
+        _viewModel.FontThickenStrength = state.FontThickenStrength;
         _viewModel.FontForceAutoHinting = state.FontForceAutoHinting;
         _viewModel.FontLinearMetrics = state.FontLinearMetrics;
         _viewModel.SetFontSizeFromSettings(fontSize);
