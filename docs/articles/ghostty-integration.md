@@ -73,8 +73,27 @@ live outcomes. The temporary bitmap materializes words only for actual bounded
 content, never in proportion to an untrusted capacity hint, and is released after
 parsing. Invalid scalars/targets do not consume logical storage. Whole-prefix
 failure, duplicate recovery, wire-order, huge-hint and seeded native comparison
-tests are added; execution remains pending. This covers grapheme restore, not yet
-all style/link decode pressure or subsequent live allocator events.
+tests are added; execution remains pending.
+
+Style and hyperlink restore now honor native table/string pressure too. Logical
+reference-counted sets reproduce Robin Hood probing, the 31-probe insertion guard,
+duplicate-value references, dead-ID reuse and trailing-ID reclamation. Style hashes
+use the native packed representation and integer mixer; hyperlink hashes include
+native ID tags and 64-bit slice lengths with streaming Wyhash. Set/table capacity
+hints do not allocate dense CLR tables.
+
+Hyperlink IDs and URIs consume 32-byte bitmap chunks before value deduplication.
+Ignored zero/duplicate wire IDs still perform native insertion/release, so their
+dead entries may hold strings until a later insertion reclaims them. Failed URI
+allocation frees its explicit ID, and the fixed hyperlink-cell map admits cells in
+row order. Raw accepted tables remain independent of the live result. Temporary
+sets/bitmaps are discarded after parsing; only accepted IDs and suffixes remain.
+Managed bitmap searches safely reject an oversized span at the last word rather
+than reading past the bitmap. Windows Terminal and xterm.js do not use this native
+PAGE contract, so Ghostty defines these restore decisions. Golden hash vectors,
+bitmap/set lifecycle cases, adversarial hash collisions, seeded native comparisons
+and post-restore overwrite tests are added but unrun. Event-level accounting and
+pressure-driven splitting for subsequent live mutations are still unfinished.
 
 ## Font thickening
 

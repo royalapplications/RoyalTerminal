@@ -24,6 +24,7 @@ internal static class GhosttySnapshotLivePage
         GhosttySnapshotPageAllocation allocation = new(page.Capacity);
         Dictionary<ushort, TerminalCell> styles = new(page.StyleCount);
         Dictionary<ushort, int> links = new(page.HyperlinkCount);
+        ulong remainingLinks = GhosttySnapshotAllocation.MapItemCapacity(page.Capacity.HyperlinkBytes / 48UL * 16, 80);
         Span<char> textScratch = stackalloc char[TerminalGraphemeStorage.MaximumCodepoints * 2];
         for (int rowIndex = 0; rowIndex < grid.Rows; rowIndex++)
         {
@@ -40,7 +41,7 @@ internal static class GhosttySnapshotLivePage
                 ushort styleId = (ushort)(bits >> 26);
                 if (!styles.TryGetValue(styleId, out TerminalCell cell))
                 {
-                    page.TryGetStyle(styleId, out GhosttySnapshotStyle style);
+                    page.TryGetLiveStyle(styleId, out GhosttySnapshotStyle style);
                     cell = DecodeStyle(style, theme);
                     styles.Add(styleId, cell);
                 }
@@ -68,15 +69,16 @@ internal static class GhosttySnapshotLivePage
                 cell.IsProtected = (bits & (1UL << 44)) != 0;
                 cell.SemanticContent = (TerminalSemanticContent)((bits >> 46) & 3);
                 ushort linkId = (ushort)(bits >> 48);
-                if (linkId != 0)
+                if (linkId != 0 && remainingLinks != 0)
                 {
                     if (!links.TryGetValue(linkId, out int token))
                     {
-                        if (page.TryGetHyperlink(linkId, out GhosttySnapshotHyperlink link))
+                        if (page.TryGetLiveHyperlink(linkId, out GhosttySnapshotHyperlink link))
                             token = hyperlinkOwner.RegisterHyperlink(link.Uri, link.ExplicitId, link.ImplicitId);
                         links.Add(linkId, token);
                     }
                     cell.HyperlinkId = token;
+                    if (token != 0) remainingLinks--;
                 }
                 row[column] = cell;
             }

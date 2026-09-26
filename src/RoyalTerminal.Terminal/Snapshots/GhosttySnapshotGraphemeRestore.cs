@@ -2,7 +2,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Buffers.Binary;
-using System.Numerics;
 
 namespace RoyalTerminal.Terminal.Snapshots;
 
@@ -14,10 +13,8 @@ namespace RoyalTerminal.Terminal.Snapshots;
 internal sealed class GhosttySnapshotGraphemeRestore(uint capacityBytes, int maximumCodepoints)
 {
     private readonly ulong _mapCapacity = GhosttySnapshotAllocation.GraphemeCellCapacity(capacityBytes);
-    private readonly ulong _bitmapCount = GhosttySnapshotAllocation.BitmapDataBytes(capacityBytes, 16) / 1024;
-    private readonly List<ulong> _words = [];
+    private readonly GhosttySnapshotBitmap _bitmap = new(capacityBytes, 16);
     private readonly Dictionary<int, uint[]> _suffixes = [];
-    private int _searchStart;
     private int _codepoints;
 
     // Retain only the result after parsing, not the temporary bitmap model.
@@ -49,43 +46,18 @@ internal sealed class GhosttySnapshotGraphemeRestore(uint capacityBytes, int max
     private bool TryStore(int codepoints)
     {
         if ((ulong)_suffixes.Count >= _mapCapacity) return false;
-        int previous = -1;
+        GhosttySnapshotBitmap.Slice previous = default;
         int chunks = (codepoints + 3) / 4;
         for (int count = 1; count <= chunks; count++)
         {
-            int next = Allocate(count);
-            if (next < 0)
+            if (!_bitmap.TryAllocate(count * 16, out GhosttySnapshotBitmap.Slice next))
             {
-                if (previous >= 0) Free(previous, count - 1);
+                _bitmap.Free(previous);
                 return false; // Drop the complete entry, not a stored prefix.
             }
-            if (previous >= 0) Free(previous, count - 1);
+            _bitmap.Free(previous);
             previous = next;
         }
         return true;
-    }
-
-    private int Allocate(int chunks)
-    {
-        for (int word = _searchStart; (ulong)word < _bitmapCount; word++)
-        {
-            if (word == _words.Count) _words.Add(0);
-            ulong free = ~_words[word];
-            ulong starts = free;
-            for (int shift = 1; shift < chunks && starts != 0; shift++) starts &= free >> shift;
-            if (starts == 0) continue;
-            int bit = BitOperations.TrailingZeroCount(starts);
-            _words[word] |= ((1UL << chunks) - 1) << bit;
-            while (_searchStart < _words.Count && _words[_searchStart] == ulong.MaxValue) _searchStart++;
-            return checked(word * 64 + bit);
-        }
-        return -1;
-    }
-
-    private void Free(int offset, int chunks)
-    {
-        int word = offset / 64;
-        _words[word] &= ~(((1UL << chunks) - 1) << (offset % 64));
-        _searchStart = Math.Min(_searchStart, word);
     }
 }

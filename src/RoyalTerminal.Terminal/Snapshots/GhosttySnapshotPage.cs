@@ -15,11 +15,15 @@ internal sealed class GhosttySnapshotPage
     private readonly Dictionary<ushort, GhosttySnapshotStyle> _styles;
     private readonly Dictionary<ushort, byte[]> _hyperlinks;
     private readonly IReadOnlyDictionary<int, uint[]>? _liveGraphemes;
+    private readonly IReadOnlySet<ushort>? _liveStyles, _liveLinks;
 
     private GhosttySnapshotPage(byte[] header, GhosttySnapshotGrid grid,
         Dictionary<ushort, GhosttySnapshotStyle> styles, Dictionary<ushort, byte[]> hyperlinks,
-        IReadOnlyDictionary<int, uint[]>? liveGraphemes = null)
-    { _header = header; Grid = grid; _styles = styles; _hyperlinks = hyperlinks; _liveGraphemes = liveGraphemes; }
+        IReadOnlyDictionary<int, uint[]>? liveGraphemes = null, GhosttySnapshotMetadataRestore? metadata = null)
+    {
+        _header = header; Grid = grid; _styles = styles; _hyperlinks = hyperlinks; _liveGraphemes = liveGraphemes;
+        _liveStyles = metadata?.Styles; _liveLinks = metadata?.Links;
+    }
 
     internal GhosttySnapshotGrid Grid { get; }
     internal int StyleCount => _styles.Count;
@@ -74,11 +78,32 @@ internal sealed class GhosttySnapshotPage
         BinaryPrimitives.WriteUInt16LittleEndian(header.AsSpan(10), (ushort)linkBytes);
         BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(12), (uint)graphemeBytes);
         BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(16), (uint)stringBytes);
-        return new(header, grid, styles, hyperlinks);
+        GhosttySnapshotMetadataRestore? metadata = null;
+        if (styles.Count != 0 || hyperlinks.Count != 0)
+        {
+            metadata = new(GhosttySnapshotPageCapacity.Read(header));
+            foreach ((ushort id, GhosttySnapshotStyle style) in styles) metadata.ReadStyle(id, style);
+            foreach ((ushort id, byte[] bytes) in hyperlinks)
+                metadata.ReadHyperlink(id, GhosttySnapshotHyperlink.Read(bytes, out _), bytes, bytes);
+        }
+        return new(header, grid, styles, hyperlinks, metadata: metadata);
     }
 
     private static int SetCapacity(int count) => count == 0 ? 0 : ((count + 1) * 16 + 12) / 13;
     internal bool TryGetStyle(ushort id, out GhosttySnapshotStyle style) => _styles.TryGetValue(id, out style);
+    internal bool TryGetLiveStyle(ushort id, out GhosttySnapshotStyle style)
+    {
+        if (_liveStyles is null || _liveStyles.Contains(id)) return TryGetStyle(id, out style);
+        style = default;
+        return false;
+    }
+
+    internal bool TryGetLiveHyperlink(ushort id, out GhosttySnapshotHyperlink hyperlink)
+    {
+        if (_liveLinks is null || _liveLinks.Contains(id)) return TryGetHyperlink(id, out hyperlink);
+        hyperlink = default;
+        return false;
+    }
     internal bool TryGetHyperlink(ushort id, out GhosttySnapshotHyperlink hyperlink)
     {
         if (_hyperlinks.TryGetValue(id, out byte[]? bytes))
@@ -108,6 +133,8 @@ internal sealed class GhosttySnapshotPage
             throw new EndOfStreamException();
         Dictionary<ushort, GhosttySnapshotStyle> styles = [];
         Dictionary<ushort, byte[]> hyperlinks = [];
+        GhosttySnapshotMetadataRestore? metadata = styleCount != 0 || hyperlinkCount != 0
+            ? new(GhosttySnapshotPageCapacity.Read(payload)) : null;
         // Invalid first entries must still reserve their IDs: a later valid
         // duplicate cannot revive an entry that decoded to the default.
         HashSet<ushort> seen = [];
@@ -119,6 +146,7 @@ internal sealed class GhosttySnapshotPage
             remaining = remaining[18..];
             if (id == 0 || !seen.Add(id) || style is not { } valid || valid == default) continue;
             styles.Add(id, valid);
+            metadata?.ReadStyle(id, valid);
         }
         seen.Clear();
         int strings = 0;
@@ -130,19 +158,25 @@ internal sealed class GhosttySnapshotPage
             GhosttySnapshotHyperlink link = GhosttySnapshotHyperlink.Read(remaining, out int length);
             ReadOnlySpan<byte> encoded = remaining[..length];
             remaining = remaining[length..];
-            if (id == 0 || !seen.Add(id) || !link.IsValid) continue;
-            long added = (long)link.ExplicitId.Length + link.Uri.Length;
-            if (added > maximumStringBytes - strings)
-                throw new InvalidDataException("Snapshot PAGE strings exceed the configured byte limit.");
-            strings += (int)added;
-            hyperlinks.Add(id, encoded.ToArray());
+            byte[]? owned = null;
+            if (id != 0 && seen.Add(id) && link.IsValid)
+            {
+                long added = (long)link.ExplicitId.Length + link.Uri.Length;
+                if (added > maximumStringBytes - strings)
+                    throw new InvalidDataException("Snapshot PAGE strings exceed the configured byte limit.");
+                strings += (int)added;
+                hyperlinks.Add(id, owned = encoded.ToArray());
+            }
+            // Native decodes even ignored/zero/duplicate IDs, then surrenders
+            // their temporary references. That may retain dead string storage.
+            metadata?.ReadHyperlink(id, link, encoded, owned);
         }
         GhosttySnapshotGraphemeRestore liveGraphemes = new(BinaryPrimitives.ReadUInt32LittleEndian(payload[12..]), maximumSuffixCodepoints);
         GhosttySnapshotGrid grid = GhosttySnapshotGrid.Read(remaining, columns, rows,
             maximumCells, maximumSuffixCodepoints, out int consumed, liveGraphemes);
         if (consumed != remaining.Length) throw new InvalidDataException("Snapshot PAGE has trailing payload bytes.");
         grid.ResolvePageIds(styles, hyperlinks);
-        return new(payload[..20].ToArray(), grid, styles, hyperlinks, liveGraphemes.Suffixes);
+        return new(payload[..20].ToArray(), grid, styles, hyperlinks, liveGraphemes.Suffixes, metadata);
     }
 
     internal void WritePayloadTo(Stream destination)

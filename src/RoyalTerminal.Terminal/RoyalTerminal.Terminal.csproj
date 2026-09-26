@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+    <None Update="THIRD-PARTY-NOTICES.txt" Pack="true" PackagePath="" />
   </ItemGroup>
 
 </Project>
