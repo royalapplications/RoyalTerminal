@@ -56,6 +56,26 @@ RGB images can hold both source and cached view. No whole-application memory or
 speed improvement is claimed. Allocation, ownership, quota and cross-engine tests
 are included; execution and profiling are pending implementation-phase validation.
 
+Kitty APC control fields are parsed incrementally into a fixed-size table and
+an eleven-byte temporary field, following Ghostty rather than xterm.js's fixed
+header-length cap. `KittyGraphicsMaxApcBytes` counts only encoded payload, not the
+`G` identifier or control fields. Zero still permits control-only operations.
+Payload capacity cannot exceed the configured bound; completion decodes in place
+and transfers ownership. Failed/disabled commands discard subsequent bytes without
+retaining a large APC buffer. Rejected commands neither cancel a previously
+accepted chunked image nor change its quiet policy. Normal APC exit/cancellation,
+reset and parser-continuation behavior are preserved. Focused split-input, resource
+and ownership tests are added; allocation measurements and execution remain pending.
+
+Graphics payload decoding follows Ghostty's default simdutf forgiving-base64
+policy: optional final padding, ignored ASCII whitespace and unused final bits,
+but rejected misplaced/excess padding and invalid alphabet characters. Full
+groups use the runtime's in-place decoder; the short tail is decoded without an
+extra array. This is separate from strict clipboard decoding. Pinned Ghostty's
+scalar fallback has inconsistent whitespace/invalid-padding behavior; the managed
+engine deliberately follows the default decoder on every platform. Differential
+tests cover shared valid inputs on all native builds and whitespace on SIMD builds.
+
 ## Kitty drag and drop
 
 Both VT adapters implement `ITerminalDragDropTarget`. A registered OSC 72 client

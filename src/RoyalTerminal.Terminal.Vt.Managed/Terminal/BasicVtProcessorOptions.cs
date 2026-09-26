@@ -51,7 +51,11 @@ public sealed record BasicVtProcessorOptions
     /// </summary>
     public int ClipboardWriteLimitBytes { get; init; } = 64 * 1024 * 1024;
 
-    /// <summary>Maximum encoded Kitty graphics bytes in one APC command.</summary>
+    /// <summary>
+    /// Maximum encoded Kitty graphics payload bytes in one APC command. The
+    /// identifier and incrementally parsed control fields do not count against
+    /// this bound. Zero permits control-only commands, not image payloads.
+    /// </summary>
     public int KittyGraphicsMaxApcBytes { get; init; } = 64 * 1024 * 1024;
 
     /// <summary>

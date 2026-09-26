@@ -1,14 +1,12 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
-using System.Buffers;
-using System.Buffers.Text;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace RoyalTerminal.Terminal;
 
-/// <summary>Bounded, allocation-free control-field parser for Kitty graphics APC commands.</summary>
+/// <summary>Owned Kitty graphics command with a fixed-size control-field table.</summary>
 internal sealed class ManagedKittyGraphicsCommand
 {
     [InlineArray(52)]
@@ -40,66 +38,13 @@ internal sealed class ManagedKittyGraphicsCommand
     {
         result = null;
         if (maxPayloadBytes < 0) return false;
-        ManagedKittyGraphicsCommand command = new();
-        ControlState state = ControlState.Key;
-        Span<byte> temporary = stackalloc byte[11];
-        int count = 0;
-        byte key = 0;
-        int offset = 0;
-        for (; offset < input.Length && state != ControlState.Data; offset++)
-        {
-            byte value = input[offset];
-            switch (state)
-            {
-                case ControlState.Key when value == '=':
-                    state = count == 1 ? ControlState.Value : ControlState.IgnoreValue;
-                    if (count == 1) key = temporary[0];
-                    count = 0;
-                    break;
-                case ControlState.Key when value == ';':
-                    state = ControlState.Data;
-                    break;
-                case ControlState.Key:
-                case ControlState.Value when value is not ((byte)',' or (byte)';'):
-                    if (count < temporary.Length) temporary[count++] = value;
-                    else
-                    {
-                        count = 0;
-                        state = state == ControlState.Key ? ControlState.IgnoreKey : ControlState.IgnoreValue;
-                    }
-                    break;
-                case ControlState.IgnoreKey:
-                    if (value == '=') state = ControlState.IgnoreValue;
-                    break;
-                case ControlState.IgnoreValue:
-                    if (value == ',') state = ControlState.IgnoreKey;
-                    else if (value == ';') state = ControlState.Data;
-                    break;
-                case ControlState.Value:
-                    if (!command.FinishValue(key, temporary[..count])) return false;
-                    count = 0;
-                    state = value == ',' ? ControlState.Key : ControlState.Data;
-                    break;
-            }
-        }
-        if (state is ControlState.Key or ControlState.IgnoreKey) return false;
-        if (state == ControlState.Value && !command.FinishValue(key, temporary[..count])) return false;
-        if (!command.Validate()) return false;
-
-        ReadOnlySpan<byte> payload = input[offset..];
-        if (payload.Length > maxPayloadBytes) return false;
-        if (!payload.IsEmpty)
-        {
-            byte[] decoded = GC.AllocateUninitializedArray<byte>(Base64.GetMaxDecodedFromUtf8Length(payload.Length));
-            if (Base64.DecodeFromUtf8(payload, decoded, out int consumed, out int written) != OperationStatus.Done || consumed != payload.Length)
-                return false;
-            command._data = decoded.AsMemory(0, written);
-        }
-        result = command;
-        return true;
+        ManagedKittyGraphicsParser parser = new(maxPayloadBytes);
+        return parser.TryAppend(input) && parser.TryComplete(out result);
     }
 
-    private bool Validate()
+    internal void SetData(ReadOnlyMemory<byte> data) => _data = data;
+
+    internal bool Validate()
     {
         uint action = Get('a', 't');
         if (action is not ('q' or 't' or 'T' or 'p' or 'd' or 'f' or 'a' or 'c')) return false;
@@ -113,7 +58,7 @@ internal sealed class ManagedKittyGraphicsCommand
         return true;
     }
 
-    private bool FinishValue(byte key, ReadOnlySpan<byte> text)
+    internal bool FinishValue(byte key, ReadOnlySpan<byte> text)
     {
         uint value;
         if (text.Length == 1 && text[0] is < (byte)'0' or > (byte)'9') value = text[0];
@@ -121,13 +66,15 @@ internal sealed class ManagedKittyGraphicsCommand
         {
             bool signed = key is (byte)'z' or (byte)'H' or (byte)'V';
             bool negative = text.Length > 0 && text[0] == '-';
-            if (negative && !signed) return false;
             if (text.Length > 0 && text[0] is (byte)'+' or (byte)'-') text = text[1..];
-            if (text.IsEmpty) return false;
+            if (text.IsEmpty || text[0] == '_' || text[^1] == '_') return false;
             ulong magnitude = 0;
-            ulong limit = signed ? (negative ? 2147483648UL : int.MaxValue) : uint.MaxValue;
+            // Ghostty uses Zig parseInt: interior underscores are ignored and
+            // unsigned negative zero is valid, but any negative magnitude fails.
+            ulong limit = signed ? (negative ? 2147483648UL : int.MaxValue) : negative ? 0 : uint.MaxValue;
             foreach (byte digit in text)
             {
+                if (digit == '_') continue;
                 if (digit is < (byte)'0' or > (byte)'9') return false;
                 magnitude = magnitude * 10 + digit - '0';
                 if (magnitude > limit) return false;
@@ -147,6 +94,4 @@ internal sealed class ManagedKittyGraphicsCommand
     {
         >= 'a' and <= 'z' => key - 'a', >= 'A' and <= 'Z' => key - 'A' + 26, _ => -1,
     };
-
-    private enum ControlState : byte { Key, IgnoreKey, Value, IgnoreValue, Data }
 }

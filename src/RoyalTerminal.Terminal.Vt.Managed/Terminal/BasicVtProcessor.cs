@@ -143,6 +143,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private readonly List<byte> _oscBuffer = [];
     private readonly List<byte> _dcsBuffer = [];
     private readonly List<byte> _apcBuffer = [];
+    private bool _apcKittyRecognized;
+    private ManagedKittyGraphicsParser? _apcKittyParser;
     private bool _glyphProtocolEnabled;
     private bool _apcGlyphRecognized;
     private bool _apcGlyphEnabled;
@@ -1050,7 +1052,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void EnterApcState()
     {
         _state = ParserState.ApcString;
+        ResetApcCommand();
+    }
+
+    private void ResetApcCommand()
+    {
         _apcBuffer.Clear();
+        _apcKittyRecognized = false;
+        _apcKittyParser = null;
         _apcTruncated = false;
         _apcGlyphRecognized = false;
         _apcGlyphEnabled = false;
@@ -2560,6 +2569,18 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void AppendApcPayload(ReadOnlySpan<byte> payload)
     {
         if (payload.IsEmpty) return;
+        if (!_apcKittyRecognized && _apcBuffer.Count == 0 && payload[0] == (byte)'G')
+        {
+            _apcKittyRecognized = true;
+            if (_kittyStore.Enabled) _apcKittyParser = new(_options.KittyGraphicsMaxApcBytes);
+            payload = payload[1..];
+        }
+        if (_apcKittyRecognized)
+        {
+            if (_apcKittyParser is not null && !_apcKittyParser.TryAppend(payload))
+                _apcKittyParser = null;
+            return;
+        }
         ReadOnlySpan<byte> glyphIdentifier = "25a1;"u8;
         // Identify only the small prefix byte-by-byte, then retain bulk payload
         // scanning. Unknown '2...' commands keep the existing 4 KiB capture cap.
@@ -2576,11 +2597,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
         }
         if (payload.IsEmpty) return;
-        byte first = _apcBuffer.Count > 0 ? _apcBuffer[0] : payload[0];
         int limit = _apcGlyphRecognized
             ? (_apcGlyphEnabled ? 1024 * 1024 + 5 : 5)
-            : first == (byte)'G'
-            ? _options.KittyGraphicsMaxApcBytes
             : MaxUnknownSequenceBytes;
         int count = Math.Min(payload.Length, Math.Max(0, limit - _apcBuffer.Count));
         if (count > 0)
@@ -2597,17 +2615,17 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         try
         {
+            if (_apcKittyRecognized)
+            {
+                if (_apcKittyParser is not null && _apcKittyParser.TryComplete(out ManagedKittyGraphicsCommand? command))
+                    ProcessKittyCommand(command);
+                return;
+            }
             if (_apcGlyphRecognized)
             {
                 if (_apcGlyphEnabled && !_apcTruncated &&
                     ManagedGlyphProtocol.Execute(CollectionsMarshal.AsSpan(_apcBuffer)[5..], _screen.GlyphGlossary, ResponseCallback, GlyphCoverageSource))
                     _screen.NotifyGlyphGlossaryChanged();
-                return;
-            }
-            if (_apcBuffer.Count > 0 && _apcBuffer[0] == (byte)'G')
-            {
-                if (!_apcTruncated)
-                    ProcessKittyApc(CollectionsMarshal.AsSpan(_apcBuffer)[1..]);
                 return;
             }
             if (terminated) UnknownSequenceCallback?.Invoke(
@@ -2618,8 +2636,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
         finally
         {
-            _apcBuffer.Clear();
-            _apcTruncated = false;
+            ResetApcCommand();
             _state = ParserState.Ground;
         }
     }
@@ -2946,10 +2963,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _utf8Remaining = 0;
         _oscBuffer.Clear();
         _dcsBuffer.Clear();
-        _apcBuffer.Clear();
+        ResetApcCommand();
         _isDiscardingOscPayload = false;
         _isDiscardingDcsPayload = false;
-        _apcTruncated = false;
         _state = ParserState.Ground;
     }
 
@@ -4489,8 +4505,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _isDiscardingOscPayload = false;
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
-        _apcBuffer.Clear();
-        _apcTruncated = false;
+        ResetApcCommand();
         _currentHyperlinkId = 0;
         _kittyKeyboardMain = default;
         _kittyKeyboardAlt = default;
@@ -4619,8 +4634,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _isDiscardingOscPayload = false;
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
-        _apcBuffer.Clear();
-        _apcTruncated = false;
+        ResetApcCommand();
         _kittyClipboardProtocol.Reset();
         _screen.ClearRegisteredGlyphs();
         _currentProtected = false;
@@ -4948,6 +4962,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void Dispose()
     {
+        ResetApcCommand();
         ClearSessionNotifications();
         _notificationHost = null;
         _dragDrop = null;

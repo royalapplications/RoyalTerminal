@@ -31,6 +31,19 @@ public sealed class ManagedKittyGraphicsCommandTests
     }
 
     [Theory]
+    [InlineData("73", 73u)]
+    [InlineData("7_3", 73u)]
+    [InlineData("+7__3", 73u)]
+    [InlineData("-0", 0u)]
+    [InlineData("-0_0", 0u)]
+    [InlineData("4_294967295", uint.MaxValue)]
+    public void NumericFieldsFollowNativeZigIntegerParsing(string value, uint expected)
+    {
+        Assert.True(ManagedKittyGraphicsCommand.TryParse(Encoding.ASCII.GetBytes("a=p,i=" + value), 0, out var command));
+        Assert.Equal(expected, command.ImageId);
+    }
+
+    [Theory]
     [InlineData(";")]
     [InlineData("i=1")]
     [InlineData("a=f,f=999,s=0,v=4294967295,z=-1")]
@@ -46,7 +59,12 @@ public sealed class ManagedKittyGraphicsCommandTests
     [InlineData("i=1,")]
     [InlineData("i=1,b")]
     [InlineData("i=-1")]
+    [InlineData("i=-0_1")]
+    [InlineData("i=1_")]
+    [InlineData("i=_1")]
+    [InlineData("i=+_1")]
     [InlineData("i=4294967296")]
+    [InlineData("i=4_294967296")]
     [InlineData("z=2147483648")]
     [InlineData("z=-2147483649")]
     [InlineData("a=x")]

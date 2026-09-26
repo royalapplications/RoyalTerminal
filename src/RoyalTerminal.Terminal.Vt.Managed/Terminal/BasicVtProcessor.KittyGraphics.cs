@@ -11,11 +11,9 @@ public sealed partial class BasicVtProcessor
     private TimeSpan? _animationNextTickDelay;
     private long _animationTickTimestamp;
 
-    private void ProcessKittyApc(ReadOnlySpan<byte> payload)
+    private void ProcessKittyCommand(ManagedKittyGraphicsCommand command)
     {
-        if (!_kittyStore.Enabled ||
-            !ManagedKittyGraphicsCommand.TryParse(payload, _options.KittyGraphicsMaxApcBytes,
-                out ManagedKittyGraphicsCommand? command)) return;
+        if (!_kittyStore.Enabled) return;
 
         ulong initialRevision = _kittyStore.Revision;
         ManagedKittyGraphicsCommand responseCommand = command;
