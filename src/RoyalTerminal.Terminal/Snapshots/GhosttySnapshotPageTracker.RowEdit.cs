@@ -91,20 +91,25 @@ internal sealed partial class GhosttySnapshotPageTracker
                 // Screen.cursorSetHyperlink reserves URI-only scratch before
                 // map growth. A successful reservation dies with the old page.
                 while (!state.Storage.Hyperlinks.TryReserveCursorUri())
-                    if (!owner.GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.StringBytes, layout)) return token;
-                if (!owner.GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.HyperlinkBytes, layout)) return token;
+                    if (!owner.GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.StringBytes,
+                        layout, preserveOnFailure: true)) return 0;
+                if (!owner.GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.HyperlinkBytes,
+                    layout, preserveOnFailure: true)) return 0;
             }
             return state.Storage.Hyperlinks.CursorId == 0 ? 0 : token;
         }
 
-        internal void AppendGrapheme(int column)
+        internal bool TryAppendGrapheme(int column)
         {
-            if (owner is null || row.SnapshotAllocation is not { MetadataOverflow: false } page) return;
-            if (state.Storage.Graphemes.Append(checked(Offset + column)) == GhosttySnapshotGraphemeAddResult.Success) return;
+            if (owner is null || row.SnapshotAllocation is not { MetadataOverflow: false } page) return true;
+            if (state.Storage.Graphemes.Append(checked(Offset + column)) == GhosttySnapshotGraphemeAddResult.Success) return true;
             List<TerminalRow> group = Group(rows, page);
-            if (owner.GrowGraphemes(ref page, state, group, layout) &&
-                state.Storage.Graphemes.Append(checked(Offset + column)) != GhosttySnapshotGraphemeAddResult.Success)
-                owner.Overflow(ref page, state, group);
+            // Screen.appendGrapheme retries once, retaining the old suffix on
+            // either failure. No payload is committed by the caller on failure,
+            // so the remaining page is still exactly representable.
+            return owner.GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.GraphemeBytes,
+                layout, preserveOnFailure: true) &&
+                state.Storage.Graphemes.Append(checked(Offset + column)) == GhosttySnapshotGraphemeAddResult.Success;
         }
 
         // Terminal.print's widening wrap is not a row clone: within one page
@@ -112,8 +117,10 @@ internal sealed partial class GhosttySnapshotPageTracker
         // before releasing the source. Replacement scratch and any growth must
         // therefore occur with the source still live. The destination is the
         // newly printed base (no suffix); callers commit both payloads next.
-        internal void TransferGraphemeFrom(RowEdit source, int sourceColumn, int destinationColumn)
+        internal bool TryTransferGraphemeFrom(RowEdit source, int sourceColumn, int destinationColumn,
+            int suffixLength, out int copied)
         {
+            copied = suffixLength;
             if (owner is not null && row.SnapshotAllocation is { MetadataOverflow: false } page)
             {
                 if (source.Owner is null)
@@ -123,8 +130,8 @@ internal sealed partial class GhosttySnapshotPageTracker
                 else
                 {
                     int length = source.AllocatorState.Storage.Graphemes.SuffixLength(checked(source.Offset + sourceColumn));
-                    for (int i = 0; i < length && row.SnapshotAllocation is { MetadataOverflow: false }; i++)
-                        AppendGrapheme(destinationColumn);
+                    for (copied = 0; copied < length; copied++)
+                        if (!TryAppendGrapheme(destinationColumn)) return false;
                 }
             }
             // Even unrepresentable destinations keep rendering; the source's
@@ -132,6 +139,7 @@ internal sealed partial class GhosttySnapshotPageTracker
             // must be released too. Same-page moves have already removed it.
             if (source.Owner is not null)
                 source.AllocatorState.Storage.Graphemes.Clear(checked(source.Offset + sourceColumn));
+            return true;
         }
 
         internal void Swap(int left, int right)

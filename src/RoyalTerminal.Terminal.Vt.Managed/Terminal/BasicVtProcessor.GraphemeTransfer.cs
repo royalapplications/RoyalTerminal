@@ -55,8 +55,13 @@ public sealed partial class BasicVtProcessor
             {
                 using GhosttySnapshotPageTracker.RowEdit sourceMetadata = _screen.EditSnapshotRowMetadata(surviving);
                 using GhosttySnapshotPageTracker.RowEdit destinationMetadata = _screen.EditSnapshotRowMetadata(destination);
-                destinationMetadata.TransferGraphemeFrom(sourceMetadata, sourceColumn, _scrollLeft);
-                destination[_scrollLeft].Grapheme = original.Grapheme;
+                bool transferred = destinationMetadata.TryTransferGraphemeFrom(sourceMetadata, sourceColumn, _scrollLeft,
+                    TerminalGraphemeStorage.SuffixLength(in original), out int copied);
+                destination[_scrollLeft].Grapheme = CopyGraphemeSuffix(destination.ReadOnlyCells[_scrollLeft].Codepoint,
+                    original.Grapheme!, copied);
+                // Native's try exits print immediately: retain the source and
+                // copied prefix, and do not write the tail or widening scalar.
+                if (!transferred) return;
                 surviving[sourceColumn].Grapheme = null;
                 surviving.IsDirty = true;
             }
@@ -78,15 +83,29 @@ public sealed partial class BasicVtProcessor
             int length = new Rune(codepoint).EncodeToUtf16(suffix);
             // printCell can remap the base if the charset changed between
             // scalars. Only suffixes are transferred, not the old inline base.
-            moved.Grapheme = string.Concat(baseScalar[..baseLength], oldSuffix, suffix[..length]);
-            metadata.AppendGrapheme(_scrollLeft);
-            destination[_scrollLeft] = moved;
+            if (metadata.TryAppendGrapheme(_scrollLeft))
+            {
+                moved.Grapheme = string.Concat(baseScalar[..baseLength], oldSuffix, suffix[..length]);
+                destination[_scrollLeft] = moved;
+            }
         }
         destination.IsDirty = true;
     }
 
     private static bool HasTransferredSpacer(TerminalRow? row, int column, string grapheme)
         => row is not null && row.ReadOnlyCells[column].Codepoint == 0 && ReferenceEquals(row.ReadOnlyCells[column].Grapheme, grapheme);
+
+    private static string? CopyGraphemeSuffix(int codepoint, string original, int suffixLength)
+    {
+        if (suffixLength == 0) return null;
+        int start = char.IsHighSurrogate(original[0]) ? 2 : 1;
+        int end = start;
+        for (int i = 0; i < suffixLength; i++) end += char.IsHighSurrogate(original[end]) ? 2 : 1;
+        if (end == original.Length && Rune.GetRuneAt(original, 0).Value == codepoint) return original;
+        Span<char> scalar = stackalloc char[2];
+        int length = new Rune(codepoint).EncodeToUtf16(scalar);
+        return string.Concat(scalar[..length], original.AsSpan(start, end - start));
+    }
 
     private void WriteWidenedGraphemeCell(TerminalRow row, int column, int codepoint, byte width)
     {

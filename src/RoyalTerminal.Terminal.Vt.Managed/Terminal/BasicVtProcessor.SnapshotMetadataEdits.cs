@@ -39,12 +39,19 @@ public sealed partial class BasicVtProcessor
             pen = RecordSnapshotCursorStyle(CaptureSnapshotPen());
         }
         using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
+        int cellHyperlink = _currentHyperlinkId;
         if (_screen.TracksSnapshotMetadata)
         {
             styles.Write(column, pen);
-            _currentHyperlinkId = styles.WriteCursorHyperlink(column, _currentHyperlinkId);
+            cellHyperlink = styles.WriteCursorHyperlink(column, _currentHyperlinkId);
+            // A refused cell-map insertion omits this cell's link, not the
+            // active OSC 8 cursor. A successful page rebuild can drop that
+            // cursor independently; read its authoritative state afterward.
+            _currentHyperlinkId = _screen.SnapshotCursorHyperlinkToken(_inAltScreen ? 1 : 0, _currentHyperlinkId);
         }
-        WriteCellFromPen(ref row[column], codepoint, width);
+        ref TerminalCell cell = ref row[column];
+        WriteCellFromPen(ref cell, codepoint, width);
+        cell.HyperlinkId = cellHyperlink;
     }
 
     private void WriteStyledCell(TerminalRow row, int column, in TerminalCell cell)

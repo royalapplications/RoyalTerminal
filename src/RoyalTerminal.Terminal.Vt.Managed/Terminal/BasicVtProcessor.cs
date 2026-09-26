@@ -1478,7 +1478,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             : codepoint;
         Span<char> suffix = stackalloc char[2];
         int suffixLength = new Rune(codepoint).EncodeToUtf16(suffix);
-        targetCell.Grapheme = string.Concat(currentText, suffix[..suffixLength]);
         targetCell.Width = (byte)newWidth;
 
         if (newWidth == 2 && oldWidth == 1)
@@ -1504,7 +1503,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // Ghostty writes a newly widened spacer before appending the suffix;
         // that write can itself replace the page. Keep the old grapheme live
         // until those edits complete, then use the coordinator's current page.
-        metadata.AppendGrapheme(targetColIndex);
+        // Width/tail/cursor changes precede the fallible append in Ghostty.
+        // Keep those edits but leave the previous text intact if it is refused.
+        if (metadata.TryAppendGrapheme(targetColIndex))
+            targetCell.Grapheme = string.Concat(currentText, suffix[..suffixLength]);
         targetRow[targetColIndex] = targetCell;
         targetRow.IsDirty = true;
         return true;

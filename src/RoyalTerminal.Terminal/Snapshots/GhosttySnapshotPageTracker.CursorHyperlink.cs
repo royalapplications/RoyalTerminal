@@ -48,7 +48,12 @@ internal sealed partial class GhosttySnapshotPageTracker
             {
                 GhosttySnapshotHyperlinkAddResult result = state.Storage.Hyperlinks.StartCursor(encoded, encoded);
                 if (result == GhosttySnapshotHyperlinkAddResult.Success) break;
-                if (!GrowMetadata(ref page, state, group, GhosttySnapshotHyperlinkStorage.GrowthDimension(result), layout)) return 0;
+                if (!GrowMetadata(ref page, state, group, GhosttySnapshotHyperlinkStorage.GrowthDimension(result),
+                    layout, preserveOnFailure: true))
+                {
+                    token = 0;
+                    break;
+                }
             }
         }
         else token = 0;

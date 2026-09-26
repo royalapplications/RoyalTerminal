@@ -178,7 +178,21 @@ execution and performance measurement remain pending.
 
 Snapshot-aware reflow, row retirement and style/grapheme/hyperlink mutation hooks
 are connected, but complete mutation-time parity still requires the remaining
-failure/degradation audit. Unrepresentable allocation state rejects additional
+failure/degradation audit. Live grapheme append now keeps the previous suffix if
+growth or its single retry fails, while retaining earlier width, tail and cursor
+edits. Cross-page widening copies retain the source and only the accepted scalar
+prefix on failure, stopping before the tail and final scalar; completed same-page
+moves remain committed if the final append fails. Copied prefixes preserve a
+remapped inline base and supplementary scalars. A refused hyperlink cell-map
+insertion omits that cell's link but leaves a surviving OSC 8 cursor active.
+Failed cursor starts/migrations publish the dropped link without consuming an
+implicit ID. None of these refusals marks an otherwise representable page as
+overflowed. Focused near-four-GiB logical-capacity, COW and recovery cases are
+authored but unrun; fixtures do not allocate huge native pages. These boundaries
+follow Ghostty `Screen.appendGrapheme`, `startHyperlink`, `cursorSetHyperlink` and
+`Terminal.print`; Windows Terminal and xterm.js have different storage models.
+
+Unrepresentable allocation state rejects additional
 history rather than wrapping a capacity or undercharging it; quota eviction can
 remove such a page only once it is wholly historical. A subsequent representable
 content checkpoint can recover admission. Builds, native comparisons and allocation/
