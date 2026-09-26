@@ -8,9 +8,12 @@ namespace RoyalTerminal.Terminal.Snapshots;
 
 // Immutable allocation identity survives row moves, partial pruning and COW.
 // No live screen/row references are retained by the identity itself.
-internal sealed class GhosttySnapshotPageAllocation(GhosttySnapshotPageCapacity capacity, GhosttySnapshotStyleStorage? restoredStyles = null)
+internal sealed class GhosttySnapshotPageAllocation(GhosttySnapshotPageCapacity capacity, GhosttySnapshotStyleStorage? restoredStyles = null,
+    bool metadataOverflow = false)
 {
     internal GhosttySnapshotPageCapacity Capacity { get; } = capacity;
+    internal bool MetadataOverflow { get; } = metadataOverflow;
+    internal bool HasStyleSeed => restoredStyles is not null;
     // This is the decode-time seed, not a measurement of mutable live rows.
     internal GhosttySnapshotStyleStorage CopyRestoredStyles() => restoredStyles?.Copy() ?? new(capacity.Styles);
 }
@@ -66,11 +69,13 @@ internal static class GhosttySnapshotLiveAllocation
             foreach (TerminalRow row in group) unchanged &= row.SnapshotAllocationUnmodified;
             if (unchanged)
             {
+                if (page.MetadataOverflow) return ulong.MaxValue;
                 bytes = Add(bytes, allocation.AllocatedBytes(page.Capacity));
                 continue;
             }
             if (!TryMeasureCapacity(screen, group, allocation, page.Capacity, out GhosttySnapshotPageCapacity capacity)) return ulong.MaxValue;
-            GhosttySnapshotPageAllocation updated = capacity == page.Capacity ? page : new(capacity);
+            GhosttySnapshotPageAllocation updated = capacity == page.Capacity && !page.MetadataOverflow ? page : new(capacity);
+            if (!ReferenceEquals(page, updated)) screen.SnapshotStyleAllocationReplaced(page, updated);
             foreach (TerminalRow row in group)
             {
                 // Replace the immutable identity only on this row set. A held

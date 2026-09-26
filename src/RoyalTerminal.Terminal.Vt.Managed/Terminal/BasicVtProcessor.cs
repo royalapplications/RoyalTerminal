@@ -11,6 +11,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Sixel;
+using RoyalTerminal.Terminal.Snapshots;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Unicode;
 
@@ -3988,16 +3989,24 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ProcessSgr()
     {
+        bool trackStyles = _screen.TracksSnapshotStyles;
         if (_params.Count == 0)
         {
+            GhosttySnapshotStyle previous = trackStyles ? CaptureSnapshotPen() : default;
             ResetAttributes();
+            if (trackStyles) RecordSnapshotPenChange(previous);
             return;
         }
 
         for (var i = 0; i < _params.Count; i++)
         {
+            GhosttySnapshotStyle previous = trackStyles ? CaptureSnapshotPen() : default;
             var p = _params[i];
-            if (ProcessSgrParameterGroup(ref i)) continue;
+            if (ProcessSgrParameterGroup(ref i))
+            {
+                if (trackStyles) RecordSnapshotPenChange(previous);
+                continue;
+            }
 
             switch (p)
             {
@@ -4069,7 +4078,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     _currentHasUnderlineColor = false;
                     break;
             }
+            if (trackStyles) RecordSnapshotPenChange(previous);
         }
+    }
+
+    private void RecordSnapshotPenChange(GhosttySnapshotStyle previous)
+    {
+        GhosttySnapshotStyle current = CaptureSnapshotPen();
+        if (previous != current) _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, _cursorRow, previous, current);
     }
 
     private void ResetAttributes()

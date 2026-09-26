@@ -100,10 +100,28 @@ The style-storage lifecycle model includes cursor-only release/add, cell
 write/erase, native rehash-versus-growth failure reasons, preferred-ID insertion
 and row-major rebuilds. A rebuild drops dead entries and leaves cursor restoration
 to its owner. Unit and native cursor/write/erase comparisons are added but unrun.
-This seed/model is a prerequisite for, not completion of, production mutation
-tracking: the processor's SGR/print/erase/move hooks and page growth/split ownership
-still need integration. The seed remains explicitly decode-time state; it must
-not be mistaken for the current contents of mutable rows.
+The processor now uses the model for each changed SGR parameter/group, including
+intermediate styles reset later in the same CSI, and for primary/alternate SCREEN
+cursor restoration. New styles are charged before printing and retain their
+capacity after erasure. Live entries reconcile changed row revisions before a
+pen change; unchanged rows are not rescanned cell by cell. Decoded inline
+background overrides retain their native style identity during reconciliation.
+Ordinary non-snapshot/non-quota terminals do not create the tracker.
+
+Live allocator entries use weak page keys and fork on COW mutation. Style-only
+changes do not copy terminal cell arrays; synchronized-output publication transfers
+the private allocator state with its row ownership. New empty/collision pressure,
+rehash, transient-write, cursor-restore and COW/publication comparisons are added
+but unrun. The immutable seed remains decode/rebuild-time state, separate from
+the tracker owned by the mutable screen.
+
+This is not yet complete mutation-time parity: cursor movement between pages,
+bulk-copy/erase operation ordering, snapshot-aware reflow and all other metadata
+allocators still need event integration. Pressure-driven page splitting is also
+unfinished; an unrepresentable tracked style state rejects additional history
+rather than wrapping a capacity or undercharging it. A subsequent representable
+content checkpoint can recover admission. Builds, native comparisons and allocation/
+throughput profiling of this path remain pending.
 
 Managed bitmap searches safely reject an oversized span at the last word rather
 than reading past the bitmap. A hash-checked native correctness overlay now applies

@@ -41,8 +41,16 @@ internal sealed class GhosttySnapshotMetadataRestore
     internal GhosttySnapshotStyleStorage FinishStyles(GhosttySnapshotGrid grid)
     {
         for (int i = 0; i < grid.Cells.Length; i++)
+        {
             if (_styleIds.TryGetValue((ushort)(grid.Cells[i] >> 26), out int id))
                 _styleStorage.AttachDecodedCell(i, id);
+            ulong bits = grid.Cells[i];
+            int kind = (int)(bits & 3);
+            uint content = (uint)((bits >> 2) & 0xFFFFFF);
+            if (kind >= 2)
+                _styleStorage.ObserveInlineBackground(i, kind == 2
+                    ? new(1, (byte)content, 0, 0) : new(2, (byte)content, (byte)(content >> 8), (byte)(content >> 16)));
+        }
         foreach (int id in _styleIds.Values) _styleStorage.ReleaseTableReference(id);
         _styleIds.Clear();
         return _styleStorage;

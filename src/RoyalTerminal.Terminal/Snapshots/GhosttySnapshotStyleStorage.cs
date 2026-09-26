@@ -26,6 +26,7 @@ internal sealed class GhosttySnapshotStyleStorage
     // Materialize only chunks containing styled cells. Dense styled rows cost
     // about two bytes per cell, not one dictionary entry/object per character.
     private readonly Dictionary<int, CellChunk> _cells;
+    private Dictionary<int, GhosttySnapshotStyle>? _observedInlineStyles;
     private int _cursorId, _cellCount;
 
     internal GhosttySnapshotStyleStorage(ushort capacity)
@@ -43,7 +44,11 @@ internal sealed class GhosttySnapshotStyleStorage
     {
         Dictionary<int, CellChunk> cells = new(_cells.Count);
         foreach ((int index, CellChunk chunk) in _cells) cells.Add(index, chunk.Copy());
-        return new(_styles.Copy(new StyleContext()), cells) { _cursorId = _cursorId, _cellCount = _cellCount };
+        return new(_styles.Copy(new StyleContext()), cells)
+        {
+            _cursorId = _cursorId, _cellCount = _cellCount,
+            _observedInlineStyles = _observedInlineStyles is null ? null : new(_observedInlineStyles),
+        };
     }
 
     internal int AddTableReference(GhosttySnapshotStyle value) => value == default ? 0 : _styles.Add(value);
@@ -84,6 +89,7 @@ internal sealed class GhosttySnapshotStyleStorage
 
     internal void ClearCell(int index)
     {
+        _observedInlineStyles?.Remove(index);
         if (!_cells.TryGetValue(index >> ChunkShift, out CellChunk? chunk)) return;
         ref ushort previous = ref chunk.Ids[index & (ChunkSize - 1)];
         if (previous == 0) return;
@@ -91,6 +97,55 @@ internal sealed class GhosttySnapshotStyleStorage
         previous = 0;
         _cellCount--;
         if (--chunk.Count == 0) _cells.Remove(index >> ChunkShift);
+    }
+
+    internal GhosttySnapshotSetAddResult ChangeCell(int index, GhosttySnapshotStyle value)
+    {
+        _observedInlineStyles?.Remove(index);
+        if (CellStyle(index) == value) return GhosttySnapshotSetAddResult.Success;
+        ClearCell(index);
+        if (value == default) return GhosttySnapshotSetAddResult.Success;
+        if (value == Cursor)
+        {
+            WriteCursorToCell(index);
+            return GhosttySnapshotSetAddResult.Success;
+        }
+        GhosttySnapshotSetAddResult result = _styles.TryAdd(value, out int id);
+        if (result == GhosttySnapshotSetAddResult.Success) StoreCell(index, id);
+        return result;
+    }
+
+    internal void ObserveInlineBackground(int index, GhosttySnapshotColor background)
+    {
+        GhosttySnapshotStyle native = CellStyle(index);
+        if (native == default || native.Background == background) return;
+        (_observedInlineStyles ??= [])[index] = native with { Background = background };
+    }
+
+    internal GhosttySnapshotSetAddResult ObserveCell(int index, GhosttySnapshotStyle logical, bool empty)
+    {
+        GhosttySnapshotStyle native = CellStyle(index);
+        bool inline = _observedInlineStyles is not null && _observedInlineStyles.TryGetValue(index, out _);
+        GhosttySnapshotStyle observed = inline ? _observedInlineStyles![index] : native;
+        if (observed == logical && (!inline || empty)) return GhosttySnapshotSetAddResult.Success;
+        GhosttySnapshotStyle value = empty && logical.Flags == 0 && logical.Foreground == default && logical.UnderlineColor == default
+            ? default : logical;
+        return ChangeCell(index, value);
+    }
+
+    internal void RetainRows(IReadOnlySet<int> rows, int columns)
+    {
+        int[] chunks = new int[_cells.Count];
+        _cells.Keys.CopyTo(chunks, 0);
+        foreach (int chunkIndex in chunks)
+        {
+            ReadOnlySpan<ushort> ids = _cells[chunkIndex].Ids;
+            for (int offset = 0; offset < ids.Length; offset++)
+            {
+                int index = (chunkIndex << ChunkShift) + offset;
+                if (ids[offset] != 0 && !rows.Contains(index / columns)) ClearCell(index);
+            }
+        }
     }
 
     private int CellId(int index) => _cells.TryGetValue(index >> ChunkShift, out CellChunk? chunk)
@@ -128,6 +183,9 @@ internal sealed class GhosttySnapshotStyleStorage
                 GhosttySnapshotSetAddResult result = candidate._styles.TryAddWithId(_styles.Get(previous), previous, out int id);
                 if (result != GhosttySnapshotSetAddResult.Success) { rebuilt = null; return result; }
                 candidate.StoreCell((chunkIndex << ChunkShift) + offset, id);
+                int index = (chunkIndex << ChunkShift) + offset;
+                if (_observedInlineStyles is not null && _observedInlineStyles.TryGetValue(index, out GhosttySnapshotStyle observed))
+                    (candidate._observedInlineStyles ??= []).Add(index, observed);
             }
         }
         rebuilt = candidate;

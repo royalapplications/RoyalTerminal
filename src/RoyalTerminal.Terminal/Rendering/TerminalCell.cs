@@ -195,6 +195,7 @@ public sealed class TerminalRow
     internal RoyalTerminal.Terminal.Snapshots.GhosttySnapshotPageAllocation? SnapshotAllocation { get; set; }
     internal int SnapshotAllocationRow { get; set; }
     internal bool SnapshotAllocationUnmodified { get; set; }
+    internal ulong SnapshotStyleRevision { get; private set; }
     private TerminalCell[] _cells;
     private int _columns;
     private byte _rowMetadata;
@@ -283,6 +284,7 @@ public sealed class TerminalRow
         SnapshotAllocation = source.SnapshotAllocation;
         SnapshotAllocationRow = source.SnapshotAllocationRow;
         SnapshotAllocationUnmodified = source.SnapshotAllocationUnmodified;
+        SnapshotStyleRevision = source.SnapshotStyleRevision;
         _cells = source._cells;
         _columns = source._columns;
         CellsAreShared = source.CellsAreShared = true;
@@ -489,6 +491,7 @@ public sealed class TerminalRow
     private void ResizePreservedStorage(int columns, uint defaultFg, uint defaultBg)
     {
         SnapshotAllocationUnmodified = false;
+        SnapshotStyleRevision = unchecked(SnapshotStyleRevision + 1);
         if (columns == _cells.Length)
         {
             EnsureWritableCells();
@@ -508,6 +511,7 @@ public sealed class TerminalRow
     private void EnsureWritableCells()
     {
         SnapshotAllocationUnmodified = false;
+        SnapshotStyleRevision = unchecked(SnapshotStyleRevision + 1);
         if (!CellsAreShared)
         {
             return;

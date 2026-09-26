@@ -84,6 +84,7 @@ public sealed partial class BasicVtProcessor
         TerminalRow cursorRow = rows[rows.Count - _screen.ViewportRows + row];
         (int x, int y, bool wrap) = state.GetCursorPosition(cursorRow.Columns, _screen.ViewportRows);
         TerminalCell pen = GhosttySnapshotLivePage.DecodeStyle(state.Pen, _theme);
+        _screen.SnapshotStyleChanged(state.Key, row, default, state.Pen);
         SavedCursorState? saved = DecodeSnapshotSavedCursor(state.SavedCursor);
         ManagedCharsetState charset = ManagedCharsetState.FromSnapshot(state.Charset);
         SemanticPen semantic = new() { Content = (TerminalSemanticContent)state.SemanticContent, ClearAtEndOfLine = state.SemanticContentClearEol };

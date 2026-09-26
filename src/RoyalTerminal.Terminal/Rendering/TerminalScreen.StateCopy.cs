@@ -32,6 +32,7 @@ public sealed partial class TerminalScreen
         copy._kittyPlaceholderRuns = _kittyPlaceholderRuns;
         copy._kittyProjectionState = _kittyProjectionState;
         copy._trackedAnchors = new(_trackedAnchors);
+        copy._snapshotStyleTracker = _snapshotStyleTracker?.Copy();
         return copy;
 
         TerminalRowBuffer? CopyOptionalRows(TerminalRowBuffer? rows) => rows is null
@@ -78,6 +79,7 @@ public sealed partial class TerminalScreen
         _kittyPlaceholderRuns = source._kittyPlaceholderRuns;
         _kittyProjectionState = source._kittyProjectionState;
         _trackedAnchors = source._trackedAnchors;
+        _snapshotStyleTracker = source._snapshotStyleTracker;
         InvalidateAll();
     }
 

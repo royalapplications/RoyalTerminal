@@ -155,4 +155,50 @@ public sealed class GhosttySnapshotStyleStorageTests
         rebuilt.ClearCell(int.MaxValue);
         Assert.Equal(0, rebuilt.Count);
     }
+
+    [Fact]
+    public void PrunedRowsReleaseTheirReferencesButRetainTheCursorAndOtherRows()
+    {
+        GhosttySnapshotStyleStorage storage = new(8);
+        storage.ChangeCursor(Bold); storage.WriteCursorToCell(0); storage.WriteCursorToCell(400);
+        storage.ChangeCursor(Italic); storage.WriteCursorToCell(600);
+        storage.RetainRows(new HashSet<int> { 2 }, 200);
+        Assert.Equal(1, storage.CellCount);
+        Assert.Equal(Bold, storage.CellStyle(400));
+        Assert.Equal(Italic, storage.Cursor);
+        Assert.Equal(2, storage.Count);
+        storage.RetainRows(new HashSet<int>(), 200);
+        Assert.Equal(0, storage.CellCount);
+        Assert.Equal(1, storage.Count);
+    }
+
+    [Fact]
+    public void InlineBackgroundObservationDoesNotInventAStyleUntilTextReplacesIt()
+    {
+        GhosttySnapshotStyleStorage storage = new(4);
+        GhosttySnapshotStyle native = Bold with { Background = new(1, 1, 0, 0) };
+        GhosttySnapshotStyle visible = native with { Background = new(1, 2, 0, 0) };
+        int id = storage.AddTableReference(native);
+        storage.AttachDecodedCell(0, id); storage.ReleaseTableReference(id);
+        storage.ObserveInlineBackground(0, visible.Background);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, storage.ObserveCell(0, visible, empty: true));
+        Assert.Equal(native, storage.CellStyle(0));
+        GhosttySnapshotStyleStorage copy = storage.Copy();
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, copy.Rebuild(4, out GhosttySnapshotStyleStorage? rebuilt));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, rebuilt!.ObserveCell(0, visible, empty: true));
+        Assert.Equal(native, rebuilt.CellStyle(0));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, rebuilt.ObserveCell(0, visible, empty: false));
+        Assert.Equal(visible, rebuilt.CellStyle(0));
+        Assert.Equal(native, storage.CellStyle(0));
+    }
+
+    [Fact]
+    public void BackgroundOnlyEraseDoesNotAllocateAStyleInAnEmptySet()
+    {
+        GhosttySnapshotStyleStorage storage = new(0);
+        GhosttySnapshotStyle visible = new(default, new(1, 4, 0, 0), default, 0);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, storage.ObserveCell(0, visible, empty: true));
+        Assert.Equal(0, storage.Count);
+        Assert.Equal(GhosttySnapshotSetAddResult.OutOfMemory, storage.ObserveCell(0, visible, empty: false));
+    }
 }
