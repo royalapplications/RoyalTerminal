@@ -251,6 +251,43 @@ public sealed class ManagedScrollOrchestrationTests
         }
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void GrowthAfterRotationRebasesSlotsAndMatchesNativeContinuation(bool alternate, bool hyperlink)
+    {
+        RequireNative();
+        byte[] snapshot = Snapshot(ContentRows(), 4, alternate);
+        using ManagedTerminalSnapshot managed = ManagedTerminalSnapshot.Restore(snapshot);
+        using GhosttyTerminal native = GhosttySnapshot.Decode(snapshot);
+        string rotate = alternate ? "\u001b[4;4H\n" : "\u001b[2;4r\u001b[4;4H\n";
+        byte[] bytes = Encoding.UTF8.GetBytes(rotate);
+        native.Write(bytes); managed.Processor.Process(bytes);
+        AssertNative(native, managed);
+        TerminalScreen retained = managed.Screen.CreateStateCopy();
+        int target = alternate ? 0 : 1;
+        Assert.NotEqual(target, managed.Screen.GetViewportRow(target).SnapshotAllocationRow);
+        GhosttySnapshotPageAllocation previous = managed.Screen.GetViewportRow(target).SnapshotAllocation!;
+        string grow = $"\u001b[{target + 1};5H" + (hyperlink ? "\u001b]8;;u\aX" : "\u0301");
+
+        bytes = Encoding.UTF8.GetBytes(grow);
+        native.Write(bytes); managed.Processor.Process(bytes);
+
+        AssertNative(native, managed);
+        Assert.NotSame(previous, managed.Screen.GetViewportRow(target).SnapshotAllocation);
+        for (int row = 0; row < 4; row++) Assert.Equal(row, managed.Screen.GetViewportRow(row).SnapshotAllocationRow);
+        Assert.Same(previous, retained.GetViewportRow(target).SnapshotAllocation);
+        Assert.NotEqual(target, retained.GetViewportRow(target).SnapshotAllocationRow);
+        foreach (string input in new[] { "\u001b]8;;\a\u001b[1;1H\u001b[P", "\u001b[4;4H\n", "\u001b[0;3mY\u001b[0m" })
+        {
+            bytes = Encoding.UTF8.GetBytes(input);
+            native.Write(bytes); managed.Processor.Process(bytes);
+            AssertNative(native, managed);
+        }
+    }
+
     private static void AssertNative(GhosttyTerminal native, ManagedTerminalSnapshot managed)
     {
         using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());

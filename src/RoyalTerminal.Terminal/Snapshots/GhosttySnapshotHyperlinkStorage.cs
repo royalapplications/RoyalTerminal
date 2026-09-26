@@ -236,17 +236,16 @@ internal sealed class GhosttySnapshotHyperlinkStorage
     internal bool TryReserveCursorUri()
         => _cursorId == 0 || _strings.TryAllocate(GhosttySnapshotHyperlink.Read(CursorEncoding, out _).Uri.Length, out _);
 
-    // Clone only cell-owned references in physical order. The Screen owner
+    // Clone only cell-owned references in logical row order. The Screen owner
     // separately restores style then hyperlink cursor state, which can itself
     // fail because cursor insertion allocates temporary duplicate strings.
-    internal GhosttySnapshotHyperlinkAddResult Rebuild(ushort hyperlinkBytes, uint stringBytes, out GhosttySnapshotHyperlinkStorage? rebuilt)
+    internal GhosttySnapshotHyperlinkAddResult Rebuild(ushort hyperlinkBytes, uint stringBytes, out GhosttySnapshotHyperlinkStorage? rebuilt,
+        GhosttySnapshotPageRemap? remap = null)
     {
         GhosttySnapshotHyperlinkStorage candidate = new(hyperlinkBytes, stringBytes);
-        List<int> cells = new(_cells.Keys);
-        cells.Sort();
-        foreach (int index in cells)
+        foreach (GhosttySnapshotPageRemap.Cell cell in GhosttySnapshotPageRemap.OrderCells(_cells.Keys, remap))
         {
-            GhosttySnapshotHyperlinkAddResult result = candidate.CopyCellFrom(index, this, index);
+            GhosttySnapshotHyperlinkAddResult result = candidate.CopyCellFrom(cell.Destination, this, cell.Source);
             if (result != GhosttySnapshotHyperlinkAddResult.Success) { rebuilt = null; return result; }
         }
         rebuilt = candidate;

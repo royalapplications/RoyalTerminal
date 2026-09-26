@@ -303,12 +303,40 @@ internal sealed class GhosttySnapshotStyleStorage
     }
 
     // A native page rebuild drops dead entries and copies cell references in
-    // physical row/column order, preserving IDs where possible. The cursor is
+    // logical row/column order, preserving IDs where possible. The cursor is
     // owned by Screen, so the caller reinstalls it after successful replacement.
     // The source remains unchanged if any insertion fails.
-    internal GhosttySnapshotSetAddResult Rebuild(ushort capacity, out GhosttySnapshotStyleStorage? rebuilt)
+    internal GhosttySnapshotSetAddResult Rebuild(ushort capacity, out GhosttySnapshotStyleStorage? rebuilt,
+        GhosttySnapshotPageRemap? remap = null)
     {
         GhosttySnapshotStyleStorage candidate = new(capacity);
+        if (remap is not null)
+        {
+            // Visit compact chunks within each retained row, not a per-cell
+            // sort or a dense allocation based on potentially huge PAGE hints.
+            foreach (GhosttySnapshotPageRemap.Row row in remap.Rows)
+            {
+                int end = checked(row.Source + row.Length);
+                for (int index = row.Source; index < end;)
+                {
+                    int chunkIndex = index >> ChunkShift;
+                    int next = (int)Math.Min((long)end, ((long)chunkIndex + 1) << ChunkShift);
+                    if (_cells.TryGetValue(chunkIndex, out CellChunk? chunk))
+                    {
+                        for (int cell = index; cell < next; cell++)
+                        {
+                            if (chunk.Ids[cell & (ChunkSize - 1)] == 0) continue;
+                            GhosttySnapshotSetAddResult result = candidate.CopyCellFrom(
+                                checked(row.Destination + (cell - row.Source)), this, cell);
+                            if (result != GhosttySnapshotSetAddResult.Success) { rebuilt = null; return result; }
+                        }
+                    }
+                    index = next;
+                }
+            }
+            rebuilt = candidate;
+            return GhosttySnapshotSetAddResult.Success;
+        }
         int[] indices = new int[_cells.Count];
         _cells.Keys.CopyTo(indices, 0);
         Array.Sort(indices);

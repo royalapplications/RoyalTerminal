@@ -162,7 +162,7 @@ public sealed class ManagedSnapshotPageRebuildTests
         TerminalScreen retained = screen.CreateStateCopy();
         GhosttySnapshotPageAllocation previous = dormant.SnapshotAllocation!;
 
-        dormant.SnapshotAllocation = screen.SnapshotAllocationReplaced(previous, new(Capacity));
+        dormant.SnapshotAllocation = screen.SnapshotAllocationReplaced(previous, new(Capacity), [dormant]);
         TerminalScreen pendingCopy = screen.CreateStateCopy();
 
         Assert.False(dormant.SnapshotAllocation.MetadataOverflow);
@@ -180,7 +180,7 @@ public sealed class ManagedSnapshotPageRebuildTests
     {
         using BasicVtProcessor processor = CreateProcessor(false, 4096, out TerminalScreen screen);
         TerminalRow row = screen.GetViewportRow(0);
-        row.SnapshotAllocation = screen.SnapshotAllocationReplaced(row.SnapshotAllocation!, new(Capacity));
+        row.SnapshotAllocation = screen.SnapshotAllocationReplaced(row.SnapshotAllocation!, new(Capacity), [row]);
         GhosttySnapshotStyle italic = new(default, default, default, 2);
 
         Assert.True(screen.SnapshotStyleChanged(0, 0, default, italic));

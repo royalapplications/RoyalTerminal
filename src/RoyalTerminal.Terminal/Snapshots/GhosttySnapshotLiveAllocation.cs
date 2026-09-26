@@ -96,7 +96,7 @@ internal static class GhosttySnapshotLiveAllocation
                 continue;
             }
             GhosttySnapshotPageAllocation updated = capacity == page.Capacity && !page.MetadataOverflow ? page : new(capacity);
-            if (!ReferenceEquals(page, updated)) updated = screen.SnapshotAllocationReplaced(page, updated);
+            if (!ReferenceEquals(page, updated)) updated = screen.SnapshotAllocationReplaced(page, updated, group);
             foreach (TerminalRow row in group)
             {
                 // Replace the immutable identity only on this row set. A held

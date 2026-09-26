@@ -153,14 +153,13 @@ internal sealed class GhosttySnapshotGraphemeStorage
             if (!rows.Contains(cell / columns)) Clear(cell);
     }
 
-    internal GhosttySnapshotGraphemeAddResult Rebuild(uint capacityBytes, out GhosttySnapshotGraphemeStorage? rebuilt)
+    internal GhosttySnapshotGraphemeAddResult Rebuild(uint capacityBytes, out GhosttySnapshotGraphemeStorage? rebuilt,
+        GhosttySnapshotPageRemap? remap = null)
     {
         GhosttySnapshotGraphemeStorage result = new(capacityBytes);
-        List<int> cells = new(_cells.Keys);
-        cells.Sort(); // Page.cloneFrom visits physical rows/cells, not old insertion order.
-        foreach (int cell in cells)
+        foreach (GhosttySnapshotPageRemap.Cell cell in GhosttySnapshotPageRemap.OrderCells(_cells.Keys, remap))
         {
-            GhosttySnapshotGraphemeAddResult status = result.Set(cell, _cells[cell].Length);
+            GhosttySnapshotGraphemeAddResult status = result.Set(cell.Destination, _cells[cell.Source].Length);
             if (status == GhosttySnapshotGraphemeAddResult.Success) continue;
             rebuilt = null;
             return status;

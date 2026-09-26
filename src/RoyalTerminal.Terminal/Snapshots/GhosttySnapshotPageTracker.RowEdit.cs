@@ -79,14 +79,13 @@ internal sealed partial class GhosttySnapshotPageTracker
             List<TerminalRow> group = Group(rows, page);
             if (result == GhosttySnapshotHyperlinkAddResult.InvalidEntry) { owner.Overflow(ref page, state, group); return; }
             if (owner.GrowMetadata(ref page, state, group, GhosttySnapshotHyperlinkStorage.GrowthDimension(result), layout))
-                owner.ObserveHyperlink(ref page, state, group, index, encoded, layout);
+                owner.ObserveHyperlink(ref page, state, group, row, column, encoded, layout);
         }
 
         internal int WriteCursorHyperlink(int column, int token)
         {
             if (owner is null || row.SnapshotAllocation is not { MetadataOverflow: false } page) return token;
-            int index = checked(Offset + column);
-            while (state.Storage.Hyperlinks.WriteCursorToCell(index) == GhosttySnapshotHyperlinkAddResult.MapFull)
+            while (state.Storage.Hyperlinks.WriteCursorToCell(checked(Offset + column)) == GhosttySnapshotHyperlinkAddResult.MapFull)
             {
                 List<TerminalRow> group = Group(rows, page);
                 // Screen.cursorSetHyperlink reserves URI-only scratch before

@@ -270,9 +270,24 @@ rotation, COW, background, single-row and native differential cases are authored
 but unrun. These decisions follow Ghostty `Terminal.scrollUp/scrollDown/index`,
 `Screen.cursorScrollRegionUp` and `PageList.eraseRow[Bounded]`; Windows Terminal
 rectangle scrolling and xterm.js line splices do not supply the per-page cursor
-contract. No throughput or allocation benchmark claim is made yet. The broader
-mutation audit, including post-rotation rebuild order and top-origin history
-rotation across page boundaries, remains unfinished.
+contract. No throughput or allocation benchmark claim is made yet.
+
+Post-rotation page growth/rehash and checkpoint replacement now clone metadata
+in logical row/column order and rebase physical slots together with revision
+coverage and the tail watermark. Grapheme slices and hyperlink strings are
+repacked in that order; style references retain preferred-ID and inline-background
+observations. A failed clone keeps the old mapping. In-flight cell writes, cursor
+hyperlink-map retries and bulk reconciliation resolve their addresses again after
+every successful replacement. COW publications keep their original allocator/slot
+pairs without detaching unchanged cell arrays. Translation is sparse in retained
+rows and occupied metadata; style traversal keeps compact chunks rather than a
+per-cell sort. Source and destination strides are independent and the existing
+host hidden-column policy is retained. These decisions follow Ghostty
+`Page.cloneFrom/clonePartialRowFrom`; WT ROW and xterm.js BufferLine do not define
+its page allocator contract. Forty additional mapping, retry, failure, COW,
+tail-reuse, huge-hint and native continuation cases are authored, pending execution.
+The broader mutation audit, including top-origin history rotation across page
+boundaries, remains unfinished.
 
 Unrepresentable allocation state rejects additional
 history rather than wrapping a capacity or undercharging it; quota eviction can

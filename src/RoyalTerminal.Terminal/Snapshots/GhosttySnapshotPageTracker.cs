@@ -138,14 +138,23 @@ internal sealed partial class GhosttySnapshotPageTracker
         return copy;
     }
 
-    internal GhosttySnapshotPageAllocation AllocationReplaced(GhosttySnapshotPageAllocation previous, GhosttySnapshotPageAllocation replacement)
+    internal GhosttySnapshotPageAllocation AllocationReplaced(GhosttySnapshotPageAllocation previous,
+        GhosttySnapshotPageAllocation replacement, IReadOnlyList<TerminalRow> rows)
     {
         ThrowIfMutationFailed();
-        if (!_pages.TryGetValue(previous, out State? source)) return replacement;
+        if (!_pages.TryGetValue(previous, out State? source))
+        {
+            // No retained allocator exists; subsequent reconciliation builds
+            // it from the replacement's logical rows rather than old holes.
+            for (int i = 0; i < rows.Count; i++) rows[i].SnapshotAllocationRow = i;
+            return replacement;
+        }
         State state = source.Copy();
-        if (state.Storage.Rebuild(replacement.Capacity, restoreCursor: true, out GhosttySnapshotPageStorage? rebuilt))
+        GhosttySnapshotPageRemap remap = new(previous.Capacity.Columns, replacement.Capacity.Columns, rows);
+        if (state.Storage.Rebuild(replacement.Capacity, restoreCursor: true, out GhosttySnapshotPageStorage? rebuilt, remap))
         {
             ObserveRebuiltCursor(previous, state.Storage, rebuilt!);
+            RebaseRows(state, rows);
             state.Storage = rebuilt!;
         }
         else
@@ -234,7 +243,7 @@ internal sealed partial class GhosttySnapshotPageTracker
             ReadOnlySpan<TerminalCell> cells = row.ReadOnlyPreservedCells;
             for (int column = 0; column < cells.Length; column++)
             {
-                int index = checked(slot * page.Capacity.Columns + column);
+                int index = CellIndex(row, column);
                 int suffix = TerminalGraphemeStorage.SuffixLength(in cells[column]);
                 if (state.Storage.Graphemes.SuffixLength(index) != suffix)
                 {
@@ -242,22 +251,24 @@ internal sealed partial class GhosttySnapshotPageTracker
                     if (state.Storage.Graphemes.Set(index, suffix) != GhosttySnapshotGraphemeAddResult.Success)
                     {
                         if (!GrowGraphemes(ref page, state, group, layout)) return false;
+                        index = CellIndex(row, column);
                         if (state.Storage.Graphemes.Set(index, suffix) != GhosttySnapshotGraphemeAddResult.Success)
                             return Overflow(ref page, state, group);
                     }
                 }
                 byte[]? encoded = screen?.SnapshotHyperlinkEncoding(cells[column].HyperlinkId);
                 if (cells[column].HyperlinkId != 0 && encoded is null) return Overflow(ref page, state, group);
-                if (!ObserveHyperlink(ref page, state, group, index, encoded, layout)) return false;
+                if (!ObserveHyperlink(ref page, state, group, row, column, encoded, layout)) return false;
+                index = CellIndex(row, column);
                 GhosttySnapshotStyle style = GhosttySnapshotLivePage.EncodeStyle(in cells[column]);
                 bool empty = cells[column].Codepoint == 0 && cells[column].Grapheme is null;
                 GhosttySnapshotSetAddResult result = state.Storage.Styles.ObserveCell(index, style, empty);
                 if (result == GhosttySnapshotSetAddResult.Success) continue;
                 if (!Grow(ref page, state, group, result, layout)) return false;
-                result = state.Storage.Styles.ObserveCell(index, style, empty);
+                result = state.Storage.Styles.ObserveCell(CellIndex(row, column), style, empty);
                 if (result != GhosttySnapshotSetAddResult.Success) return Overflow(ref page, state, group);
             }
-            state.Revisions[slot] = row.SnapshotMetadataRevision;
+            state.Revisions[row.SnapshotAllocationRow] = row.SnapshotMetadataRevision;
         }
         return true;
     }
@@ -305,11 +316,11 @@ internal sealed partial class GhosttySnapshotPageTracker
         => GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.GraphemeBytes, layout);
 
     private bool ObserveHyperlink(ref GhosttySnapshotPageAllocation page, State state, List<TerminalRow> group,
-        int index, byte[]? encoded, GhosttySnapshotAllocation layout)
+        TerminalRow row, int column, byte[]? encoded, GhosttySnapshotAllocation layout)
     {
         while (true)
         {
-            GhosttySnapshotHyperlinkAddResult result = state.Storage.Hyperlinks.ObserveCell(index, encoded);
+            GhosttySnapshotHyperlinkAddResult result = state.Storage.Hyperlinks.ObserveCell(CellIndex(row, column), encoded);
             if (result == GhosttySnapshotHyperlinkAddResult.Success) return true;
             if (result == GhosttySnapshotHyperlinkAddResult.InvalidEntry) return Overflow(ref page, state, group);
             if (!GrowMetadata(ref page, state, group, GhosttySnapshotHyperlinkStorage.GrowthDimension(result), layout)) return false;
@@ -326,16 +337,35 @@ internal sealed partial class GhosttySnapshotPageTracker
             if (!preserveOnFailure) Overflow(ref page, state, group);
             return false;
         }
-        if (!state.Storage.Rebuild(capacity, restoreCursor: true, out GhosttySnapshotPageStorage? rebuilt))
+        GhosttySnapshotPageRemap remap = new(page.Capacity.Columns, capacity.Columns, group);
+        if (!state.Storage.Rebuild(capacity, restoreCursor: true, out GhosttySnapshotPageStorage? rebuilt, remap))
         {
             if (!preserveOnFailure) Overflow(ref page, state, group);
             return false;
         }
-        ObserveRebuiltCursor(page, state.Storage, rebuilt!);
-        state.Storage = rebuilt!;
-        Replace(ref page, new(capacity, rebuilt!.Styles.Copy(), restoredGraphemes: rebuilt.Graphemes.Copy(),
-            restoredHyperlinks: rebuilt.Hyperlinks.Copy()), state, group);
+        GhosttySnapshotPageAllocation replacement = new(capacity, rebuilt!.Styles.Copy(), restoredGraphemes: rebuilt.Graphemes.Copy(),
+            restoredHyperlinks: rebuilt.Hyperlinks.Copy());
+        ObserveRebuiltCursor(page, state.Storage, rebuilt);
+        RebaseRows(state, group);
+        state.Storage = rebuilt;
+        Replace(ref page, replacement, state, group);
         return true;
+    }
+
+    private static int CellIndex(TerminalRow row, int column)
+        => checked(row.SnapshotAllocationRow * row.SnapshotAllocation!.Capacity.Columns + column);
+
+    private static void RebaseRows(State state, IReadOnlyList<TerminalRow> rows)
+    {
+        Dictionary<int, ulong?> revisions = new(rows.Count);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            state.Revisions.TryGetValue(rows[i].SnapshotAllocationRow, out ulong? revision);
+            revisions.Add(i, revision);
+        }
+        for (int i = 0; i < rows.Count; i++) rows[i].SnapshotAllocationRow = i;
+        state.Revisions = revisions;
+        state.NextRowSlot = rows.Count;
     }
 
     private bool Overflow(ref GhosttySnapshotPageAllocation page, State state, List<TerminalRow> group)

@@ -130,8 +130,9 @@ public sealed partial class TerminalScreen
         return _snapshotPageLayout;
     }
 
-    internal GhosttySnapshotPageAllocation SnapshotAllocationReplaced(GhosttySnapshotPageAllocation previous, GhosttySnapshotPageAllocation replacement)
-        => _snapshotPageTracker?.AllocationReplaced(previous, replacement) ?? replacement;
+    internal GhosttySnapshotPageAllocation SnapshotAllocationReplaced(GhosttySnapshotPageAllocation previous,
+        GhosttySnapshotPageAllocation replacement, IReadOnlyList<TerminalRow> rows)
+        => (_snapshotPageTracker ??= new()).AllocationReplaced(previous, replacement, rows);
 
     internal void SnapshotRowsObserved(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows)
         => _snapshotPageTracker?.ObserveRowSlots(page, rows);

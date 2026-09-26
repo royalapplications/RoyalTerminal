@@ -27,12 +27,13 @@ internal sealed class GhosttySnapshotPageStorage(GhosttySnapshotStyleStorage sty
         _ => (ulong)Styles.Count,
     };
 
-    internal bool Rebuild(GhosttySnapshotPageCapacity capacity, bool restoreCursor, out GhosttySnapshotPageStorage? result)
+    internal bool Rebuild(GhosttySnapshotPageCapacity capacity, bool restoreCursor, out GhosttySnapshotPageStorage? result,
+        GhosttySnapshotPageRemap? remap = null)
     {
         result = null;
-        if (Graphemes.Rebuild(capacity.GraphemeBytes, out GhosttySnapshotGraphemeStorage? graphemes) != GhosttySnapshotGraphemeAddResult.Success ||
-            Hyperlinks.Rebuild(capacity.HyperlinkBytes, capacity.StringBytes, out GhosttySnapshotHyperlinkStorage? hyperlinks) != GhosttySnapshotHyperlinkAddResult.Success ||
-            Styles.Rebuild(capacity.Styles, out GhosttySnapshotStyleStorage? styles) != GhosttySnapshotSetAddResult.Success) return false;
+        if (Graphemes.Rebuild(capacity.GraphemeBytes, out GhosttySnapshotGraphemeStorage? graphemes, remap) != GhosttySnapshotGraphemeAddResult.Success ||
+            Hyperlinks.Rebuild(capacity.HyperlinkBytes, capacity.StringBytes, out GhosttySnapshotHyperlinkStorage? hyperlinks, remap) != GhosttySnapshotHyperlinkAddResult.Success ||
+            Styles.Rebuild(capacity.Styles, out GhosttySnapshotStyleStorage? styles, remap) != GhosttySnapshotSetAddResult.Success) return false;
         // Screen.increaseCapacity commits the cell clone, then tries each
         // cursor reference once. Failure drops only that cursor detail; it
         // neither rejects the replacement nor prevents restoring the other.
