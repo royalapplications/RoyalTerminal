@@ -7,6 +7,14 @@ The build generates a copy of the upstream Zig root with the exports from
 `src/extensions.zig`, `src/drag_drop.zig` and `src/notifications.zig` appended.
 Both shared and static libraries include them.
 
+Windows x64 compatibility builds use the release CPU baseline and disable
+Ghostty's SIMD bundle. For Windows x64 targets without AVX, the wrapper also
+sets Wuffs' supported `WUFFS_CONFIG__AVOID_CPU_ARCH` macro: its per-function
+target attributes otherwise emit AVX2 pixel routines despite the module's CPU
+baseline. This does not modify upstream files or change pixel formats; other
+platforms and explicitly AVX-enabled builds retain upstream acceleration.
+CI and release disassemble both Windows DLLs and reject AVX/VEX instructions.
+
 ## Reviewed correctness overlays
 
 The generated source copy also applies ten corrections to pinned upstream

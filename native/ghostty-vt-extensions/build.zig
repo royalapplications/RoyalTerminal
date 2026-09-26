@@ -16,6 +16,18 @@ pub fn build(b: *std.Build) !void {
     });
     const module = ghostty.module("ghostty-vt-c");
 
+    // Wuffs uses per-function target attributes to emit AVX2 pixel routines
+    // even for a baseline module with Ghostty's SIMD bundle disabled. Keep
+    // the Windows no-AVX compatibility artifact genuinely instruction-clean;
+    // accelerated builds and other platforms retain upstream dispatch.
+    if (target.result.os.tag == .windows and target.result.cpu.arch == .x86_64 and
+        !std.Target.x86.featureSetHas(target.result.cpu.features, .avx))
+    {
+        const wuffs = module.import_table.get("wuffs") orelse return error.MissingWuffsModule;
+        const wuffs_c = wuffs.import_table.get("wuffs_c") orelse return error.MissingWuffsCModule;
+        wuffs_c.addCMacro("WUFFS_CONFIG__AVOID_CPU_ARCH", "1");
+    }
+
     // Keep the submodule immutable. The generated root is the exact upstream
     // root plus our export, alongside reviewed source overlays. Each overlay
     // verifies the full pinned file hash and the exact replacement-site count.
