@@ -1,6 +1,8 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using System.Text;
+using HarfBuzzSharp;
 using SkiaSharp;
 
 namespace RoyalTerminal.Avalonia.Rendering;
@@ -23,41 +25,94 @@ public sealed partial class SkiaTerminalRenderer
     private void RenderPreedit(SKCanvas canvas, uint foreground, float y, TerminalPreeditRange range)
     {
         TerminalPreedit preedit = Preedit!;
+        ReadOnlySpan<TerminalCell> cells = preedit.RenderCells;
+        int column = range.Start;
+        for (int i = 0; i < range.Offset; i++) column -= cells[i].Width;
+        int caretOffset = 0, caretLength = 0, caretColumn = 0;
+        SKTypeface? caretTypeface = null;
+        SKRect textClip = new(range.Start * _cellWidth, y, (range.End + 1) * _cellWidth, y + _cellHeight);
+        for (int offset = 0; offset < range.Limit;)
+        {
+            SKTypeface typeface = ResolveTypefaceForCell(_glyphCache.RegularTypeface, in cells[offset]);
+            Script script = GetPreeditScript(in cells[offset]);
+            int limit = offset + 1;
+            int width = cells[offset].Width;
+            while (limit < cells.Length)
+            {
+                Script nextScript = GetPreeditScript(in cells[limit]);
+                if (!IsNeutralPreeditScript(script) && !IsNeutralPreeditScript(nextScript) && script != nextScript)
+                    break;
+                if (ResolveTypefaceForCell(_glyphCache.RegularTypeface, in cells[limit]).Handle != typeface.Handle)
+                    break;
+                if (IsNeutralPreeditScript(script)) script = nextScript;
+                width += cells[limit++].Width;
+            }
+
+            // Ghostty uses an isolated scalar overlay; WT's TSF preview and
+            // xterm.js's composition DOM retain surrounding text. Shape complete
+            // compatible runs here so joining/ligatures survive the IME caret.
+            // Retain offscreen neighbors in the shaping context as well. A
+            // horizontally clipped preview must not acquire new word endings.
+            if (limit > range.Offset)
+                DrawPreeditRun(canvas, cells[offset..limit], column, typeface, new SKColor(foreground), y, textClip);
+            if (limit > range.Offset && range.Caret <= range.End &&
+                range.Caret >= column && range.Caret < column + width)
+            {
+                caretOffset = offset;
+                caretLength = limit - offset;
+                caretColumn = column;
+                caretTypeface = typeface;
+            }
+            column += width;
+            offset = limit;
+        }
+
         _fgPaint.Color = new SKColor(foreground);
         _fgPaint.Style = SKPaintStyle.Fill;
-        int column = range.Start;
-        for (int i = range.Offset; i < range.Limit; i++)
-        {
-            (string text, int width) = preedit[i];
-            SKTypeface typeface = _fontResolver.ResolveTypeface(_glyphCache.RegularTypeface, text.AsSpan(), s_renderCulture).Typeface;
-            canvas.Save();
-            canvas.Translate(column * _cellWidth, 0);
-            DrawShapedTextRun(canvas, preedit.RenderCell(i), 0, 1, typeface, new SKColor(foreground), y);
-            canvas.Restore();
-            canvas.DrawRect(column * _cellWidth, y + _cellHeight - 1, width * _cellWidth, 1, _fgPaint);
-            column += width;
-        }
+        if (range.End >= range.Start)
+            canvas.DrawRect(range.Start * _cellWidth, y + _cellHeight - 1,
+                (range.End - range.Start + 1) * _cellWidth, 1, _fgPaint);
         _cursorPaint.Color = CursorColor;
         _cursorPaint.Style = SKPaintStyle.Fill;
         _cursorPaint.BlendMode = SKBlendMode.SrcOver;
         canvas.DrawRect(range.Caret * _cellWidth, y, _cellWidth, _cellHeight, _cursorPaint);
-        // Redraw the caret cluster in cursor text color without consulting the
-        // terminal's underlying cell, which does not contain composition text.
-        column = range.Start;
-        for (int i = range.Offset; i < range.Limit; i++)
+        // Recolor the same shaped context under a one-cell clip. Reshaping only
+        // the caret cluster would replace joined forms and split ligatures.
+        if (caretTypeface is not null)
         {
-            (string text, int width) = preedit[i];
-            if (range.Caret >= column && range.Caret < column + width)
+            canvas.Save();
+            try
             {
-                canvas.Save();
                 canvas.ClipRect(new SKRect(range.Caret * _cellWidth, y, (range.Caret + 1) * _cellWidth, y + _cellHeight));
-                canvas.Translate(column * _cellWidth, 0);
-                SKTypeface typeface = _fontResolver.ResolveTypeface(_glyphCache.RegularTypeface, text.AsSpan(), s_renderCulture).Typeface;
-                DrawShapedTextRun(canvas, preedit.RenderCell(i), 0, 1, typeface, CursorTextColor, y);
-                canvas.Restore();
-                break;
+                DrawPreeditRun(canvas, cells.Slice(caretOffset, caretLength), caretColumn, caretTypeface, CursorTextColor, y, textClip);
             }
-            column += width;
+            finally { canvas.Restore(); }
         }
     }
+
+    private void DrawPreeditRun(SKCanvas canvas, ReadOnlySpan<TerminalCell> cells, int column,
+        SKTypeface typeface, SKColor color, float y, SKRect clip)
+    {
+        canvas.Save();
+        try
+        {
+            canvas.ClipRect(clip);
+            canvas.Translate(column * _cellWidth, 0);
+            DrawShapedTextRun(canvas, cells, 0, cells.Length, typeface, color, y);
+        }
+        finally { canvas.Restore(); }
+    }
+
+    private static Script GetPreeditScript(ref readonly TerminalCell cell)
+    {
+        foreach (Rune rune in cell.Grapheme.AsSpan().EnumerateRunes())
+        {
+            Script script = UnicodeFunctions.Default.GetScript(rune.Value);
+            if (!IsNeutralPreeditScript(script)) return script;
+        }
+        return Script.Common;
+    }
+
+    private static bool IsNeutralPreeditScript(Script script)
+        => script == Script.Common || script == Script.Inherited || script == Script.Unknown;
 }

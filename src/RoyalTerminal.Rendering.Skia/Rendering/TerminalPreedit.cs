@@ -33,7 +33,7 @@ internal sealed class TerminalPreedit
 
     internal int Count => _cells.Count;
     internal (string Text, int Width) this[int index] => _cells[index];
-    internal ReadOnlySpan<TerminalCell> RenderCell(int index) => _renderCells.AsSpan(index, 1);
+    internal ReadOnlySpan<TerminalCell> RenderCells => _renderCells;
 
     // Keep the caret's cluster visible, shift left at the right edge and never
     // split a wide cluster. Unlike Ghostty's scalar overlay, retain combining
