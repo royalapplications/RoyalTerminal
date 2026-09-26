@@ -14,7 +14,7 @@ namespace RoyalTerminal.Tests;
 // Ghostty Screen.clearCells, Page.clonePartialRowFrom and Terminal ICH/DCH
 // define reference release/copy/swap order. WT ROW and xterm.js BufferLine
 // provide visible-cell references, not this native PAGE allocation contract.
-public sealed class ManagedSnapshotStyleEditTests
+public sealed partial class ManagedSnapshotStyleEditTests
 {
     [Fact]
     public void InPageStorageSwapMovesCowOwnershipWithoutCopyingArrays()

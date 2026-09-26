@@ -231,6 +231,29 @@ grapheme/style/link-map/string-pressure, COW, lifecycle, held-publication and wo
 regression cases are authored but unrun. Generic CLR allocation failures before
 the row-copy boundary and other mutation paths still require the broader audit.
 
+Full-width IL/DL now clamp the count to the affected rows and traverse once in
+the native direction, copying directly from the requested distance. In-place
+SU/SD share this bounded movement; the primary top-origin history path still
+creates rows individually. Discarded intermediate rows no longer cause needless
+metadata growth or a fatal copy when the command only needs to clear the region.
+Tracked cell and raster anchors move by the bounded delta; the existing Kitty
+margin wrapper retains stationary IL/DL placements and scroll-specific clipping.
+Effective IL/DL reset pending wrap and return to the left margin, while no-ops
+outside either margin axis preserve both. Wide-cell inspection now uses read-only
+references, keeping valid ASCII/wide rows shared with COW readers until a real
+repair or erase. Ghostty's `Terminal.insertLines/deleteLines` defines traversal,
+allocation and wrap semantics; Windows Terminal's
+[`_InsertDeleteLineHelper`](https://github.com/microsoft/terminal/blob/main/src/terminal/adapter/adaptDispatch.cpp)
+also scrolls a bounded rectangle, whereas
+[`xterm.js`](https://github.com/xtermjs/xterm.js/blob/master/src/common/InputHandler.ts)
+uses repeated line splices and has no Ghostty PAGE allocator. Forty-two new
+large-count, discarded-metadata, pressure, COW, anchor/raster and pending-wrap
+cases are authored, including native comparisons, but remain unrun. The expected
+gain is one row traversal instead of one traversal per requested line; no measured
+speedup is claimed before profiling. Temporary scrolling-cursor allocation
+transitions and the alternate full-screen row-rotation fast path remain in the
+broader audit; this change does not establish exhaustive scrolling parity.
+
 Unrepresentable allocation state rejects additional
 history rather than wrapping a capacity or undercharging it; quota eviction can
 remove such a page only once it is wholly historical. A subsequent representable

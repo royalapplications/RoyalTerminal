@@ -18,6 +18,40 @@ namespace RoyalTerminal.Tests;
 public sealed class ManagedSnapshotRowCopyFailureTests
 {
     [Theory]
+    [InlineData("insert", "grapheme")]
+    [InlineData("delete", "grapheme")]
+    [InlineData("down", "grapheme")]
+    [InlineData("up", "grapheme")]
+    [InlineData("insert", "style")]
+    [InlineData("delete", "style")]
+    [InlineData("insert", "string")]
+    [InlineData("delete", "string")]
+    [InlineData("insert", "map")]
+    [InlineData("delete", "map")]
+    public void ClearingAnEntireRegionDoesNotAttemptAnUnnecessaryFatalCopy(string operation, string metadata)
+    {
+        using BasicVtProcessor processor = Fixture(operation, false, true,
+            out TerminalScreen screen, out string command, out int destination, metadata);
+        TerminalScreen retained = screen.CreateStateCopy();
+        GhosttySnapshotPageAllocation allocation = screen.GetViewportRow(destination).SnapshotAllocation!;
+
+        Process(processor, command.Insert(2, "65535"));
+
+        Assert.False(screen.SnapshotMutationFailed);
+        Assert.Same(allocation, screen.GetViewportRow(destination).SnapshotAllocation);
+        foreach (TerminalCell cell in screen.GetViewportRow(destination).ReadOnlyCells)
+        {
+            Assert.Equal(0, cell.Codepoint);
+            Assert.Null(cell.Grapheme);
+            Assert.Equal(CellAttributes.None, cell.Attributes);
+            Assert.Equal(0, cell.HyperlinkId);
+        }
+        Assert.Equal('D', retained.GetViewportRow(destination).ReadOnlyCells[0].Codepoint);
+        processor.Process("X"u8);
+        Assert.NotEmpty(processor.GetBinarySnapshot());
+    }
+
+    [Theory]
     [InlineData("insert", false)]
     [InlineData("insert", true)]
     [InlineData("delete", false)]

@@ -1710,11 +1710,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 ScrollRectangle(_scrollTop, _scrollBottom, count, down);
                 return;
             }
-            for (int i = 0; i < count; i++)
+            if (!down && _scrollTop == 0 && !_inAltScreen)
             {
-                if (down) ScrollDownOneRow();
-                else ScrollUpOneRow();
+                // Native cursorScrollAbove also creates history one row at a
+                // time. Do not turn this into a destructive in-place shift.
+                for (int i = 0; i < count; i++) ScrollIntoHistoryOneRow();
             }
+            else ShiftFullWidthRows(_scrollTop, _scrollBottom, count, down);
         }
         finally
         {
@@ -1726,52 +1728,39 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
     }
 
-    private void ScrollUpOneRow()
+    private void ScrollIntoHistoryOneRow()
     {
-        if (_scrollTop == 0 && !_inAltScreen)
-        {
-            // A top-origin region creates history even with a bottom margin.
-            TerminalRow added = _scrollBottom == _screen.ViewportRows - 1
-                ? _screen.AddRow() : _screen.AddRowAtActiveRow(_scrollBottom);
-            if (_currentBgKind != SgrColorKind.Default)
-                ClearRow(added, _screen.DefaultForeground, _currentBg, CurrentBackgroundIdentity);
-            _screen.InvalidateViewport();
-        }
-        else
-        {
-            // Scroll within region: shift rows up, insert blank at bottom of region
-            _screen.ShiftAnchorsInViewportRows(_scrollTop, _scrollBottom, rowDelta: -1);
-            _screen.ShiftRasterGraphicsInViewportRows(_scrollTop, _scrollBottom, rowDelta: -1);
-            for (var r = _scrollTop; r < _scrollBottom && r < _screen.ViewportRows - 1; r++)
-            {
-                var src = _screen.GetViewportRow(r + 1);
-                var dst = _screen.GetViewportRow(r);
-                CopyRow(src, dst);
-                dst.IsDirty = true;
-            }
-            if (_scrollBottom < _screen.ViewportRows)
-            {
-                ClearRow(_screen.GetViewportRow(_scrollBottom), _currentFg, _currentBg, CurrentBackgroundIdentity);
-            }
-            _screen.InvalidateViewport();
-        }
+        // A top-origin region creates history even with a bottom margin.
+        TerminalRow added = _scrollBottom == _screen.ViewportRows - 1
+            ? _screen.AddRow() : _screen.AddRowAtActiveRow(_scrollBottom);
+        if (_currentBgKind != SgrColorKind.Default)
+            ClearRow(added, _screen.DefaultForeground, _currentBg, CurrentBackgroundIdentity);
+        _screen.InvalidateViewport();
     }
 
-    private void ScrollDownOneRow()
+    private void ShiftFullWidthRows(int top, int bottom, int count, bool down)
     {
-        // Shift rows down within the scroll region, insert blank at top of region
-        _screen.ShiftAnchorsInViewportRows(_scrollTop, _scrollBottom, rowDelta: 1);
-        _screen.ShiftRasterGraphicsInViewportRows(_scrollTop, _scrollBottom, rowDelta: 1);
-        for (var r = _scrollBottom; r > _scrollTop && r > 0; r--)
+        // Ghostty IL/DL traverse once, directly from count rows away. Repeated
+        // one-row copies can spuriously grow a page for discarded content, or
+        // even fault an operation which only needs to clear its entire region.
+        count = Math.Clamp(count, 1, bottom - top + 1);
+        _screen.ShiftAnchorsInViewportRows(top, bottom, down ? count : -count);
+        _screen.ShiftRasterGraphicsInViewportRows(top, bottom, down ? count : -count);
+        for (int index = 0; index <= bottom - top; index++)
         {
-            var src = _screen.GetViewportRow(r - 1);
-            var dst = _screen.GetViewportRow(r);
-            CopyRow(src, dst);
-            dst.IsDirty = true;
-        }
-        if (_scrollTop < _screen.ViewportRows)
-        {
-            ClearRow(_screen.GetViewportRow(_scrollTop), _currentFg, _currentBg, CurrentBackgroundIdentity);
+            int destination = down ? bottom - index : top + index;
+            int source = destination + (down ? -count : count);
+            TerminalRow row = _screen.GetViewportRow(destination);
+            if (source >= top && source <= bottom) CopyRow(_screen.GetViewportRow(source), row);
+            else
+            {
+                // A preceding cross-page copy may have defaulted the cursor
+                // pen during growth. Erase using that accepted pen, not the
+                // stale background from the start of the command.
+                if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
+                ClearRow(row, _currentFg, _currentBg, CurrentBackgroundIdentity);
+            }
+            row.IsDirty = true;
         }
         _screen.InvalidateViewport();
     }
@@ -3499,8 +3488,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 'G': // CHA
             case 'H': // CUP
             case 'f': // HVP
-            case 'L': // IL
-            case 'M': // DL
             case 'P': // DCH
             case 'X': // ECH
             case '@': // ICH
@@ -4337,6 +4324,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         ClampCursor();
         if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom || !CursorInsideHorizontalMargins) return;
+        count = Math.Clamp(count, 1, _scrollBottom - _cursorRow + 1);
         bool restoreImages = _kittyStore.PlacementCount > 0;
         if (restoreImages) _kittyStore.BeginMarginScroll(_screen, _cursorRow, _scrollBottom, 0, 0, 0);
         try
@@ -4346,72 +4334,20 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 ScrollRectangle(_cursorRow, _scrollBottom, count, insert);
                 return;
             }
-            if (insert) InsertLinesCore(count);
-            else DeleteLinesCore(count);
+            ShiftFullWidthRows(_cursorRow, _scrollBottom, count, insert);
+            _screen.ClearRasterGraphicsInViewportRectangle(
+                insert ? _cursorRow : _scrollBottom - count + 1,
+                insert ? _cursorRow + count - 1 : _scrollBottom,
+                0, _screen.Columns - 1);
         }
         finally
         {
             if (restoreImages) _kittyStore.EndMarginScroll(_screen);
             _cursorCol = _scrollLeft;
+            // Like Ghostty, an out-of-margin no-op keeps its pending wrap.
+            // Only an effective IL/DL returns to the left margin and clears it.
+            ResetDelayedWrap();
         }
-    }
-
-    private void InsertLinesCore(int count)
-    {
-        ClampCursor();
-        if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom) return;
-
-        for (var n = 0; n < count; n++)
-        {
-            _screen.ShiftAnchorsInViewportRows(_cursorRow, _scrollBottom, rowDelta: 1);
-            _screen.ShiftRasterGraphicsInViewportRows(_cursorRow, _scrollBottom, rowDelta: 1);
-            // Shift rows down from cursor to scroll bottom
-            for (var r = _scrollBottom; r > _cursorRow; r--)
-            {
-                if (r < _screen.ViewportRows && r - 1 >= 0)
-                    CopyRow(_screen.GetViewportRow(r - 1), _screen.GetViewportRow(r));
-            }
-            // Clear the line at cursor
-            if (_cursorRow < _screen.ViewportRows)
-            {
-                ClearRow(_screen.GetViewportRow(_cursorRow), _currentFg, _currentBg, CurrentBackgroundIdentity);
-                _screen.ClearRasterGraphicsInViewportRectangle(
-                    _cursorRow,
-                    _cursorRow,
-                    0,
-                    _screen.Columns - 1);
-            }
-        }
-        _screen.InvalidateAll();
-    }
-
-    private void DeleteLinesCore(int count)
-    {
-        ClampCursor();
-        if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom) return;
-
-        for (var n = 0; n < count; n++)
-        {
-            _screen.ShiftAnchorsInViewportRows(_cursorRow, _scrollBottom, rowDelta: -1);
-            _screen.ShiftRasterGraphicsInViewportRows(_cursorRow, _scrollBottom, rowDelta: -1);
-            // Shift rows up from cursor to scroll bottom
-            for (var r = _cursorRow; r < _scrollBottom; r++)
-            {
-                if (r >= 0 && r + 1 < _screen.ViewportRows)
-                    CopyRow(_screen.GetViewportRow(r + 1), _screen.GetViewportRow(r));
-            }
-            // Clear the bottom row of the scroll region
-            if (_scrollBottom < _screen.ViewportRows)
-            {
-                ClearRow(_screen.GetViewportRow(_scrollBottom), _currentFg, _currentBg, CurrentBackgroundIdentity);
-                _screen.ClearRasterGraphicsInViewportRectangle(
-                    _scrollBottom,
-                    _scrollBottom,
-                    0,
-                    _screen.Columns - 1);
-            }
-        }
-        _screen.InvalidateAll();
     }
 
     private void InsertCharacters(int count)
@@ -4519,7 +4455,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         for (int col = 0; col < row.Columns; col++)
         {
-            ref TerminalCell cell = ref row[col];
+            // Inspection must not detach a COW row after an ownership swap.
+            // Acquire a writable reference only for an actual repair.
+            ref readonly TerminalCell cell = ref row.ReadOnlyCells[col];
             if (cell.Width == 2)
             {
                 if (col + 1 >= row.Columns)
@@ -4528,19 +4466,23 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     continue;
                 }
 
-                ref TerminalCell trailing = ref row[col + 1];
+                ref readonly TerminalCell trailing = ref row.ReadOnlyCells[col + 1];
                 if (trailing.Width != 0 || trailing.HasContent)
                 {
                     EraseCell(row, col, TerminalCell.Empty(cell.Foreground, cell.Background));
                     continue;
                 }
 
-                trailing.Codepoint = 0;
-                trailing.Grapheme = null;
                 // A late width selector prints the tail using the current
                 // pen. Keep its independent style, link and protection.
-                trailing.Width = 0;
-                trailing.IsWideSpacerHead = false;
+                if (trailing.Codepoint != 0 || trailing.Grapheme is not null || trailing.IsWideSpacerHead)
+                {
+                    ref TerminalCell repaired = ref row[col + 1];
+                    repaired.Codepoint = 0;
+                    repaired.Grapheme = null;
+                    repaired.Width = 0;
+                    repaired.IsWideSpacerHead = false;
+                }
                 col++;
                 continue;
             }
@@ -4548,7 +4490,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             if (cell.Width == 0)
             {
                 if (cell.IsWideSpacerHead && col == row.Columns - 1 && row.WrapsToNext) continue;
-                bool hasWideLeader = col > 0 && row[col - 1].Width == 2;
+                bool hasWideLeader = col > 0 && row.ReadOnlyCells[col - 1].Width == 2;
                 if (!hasWideLeader)
                 {
                     EraseCell(row, col, TerminalCell.Empty(cell.Foreground, cell.Background));
@@ -4559,7 +4501,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             if (cell.Width != 1)
             {
-                cell.Width = 1;
+                row[col].Width = 1;
             }
         }
     }
