@@ -50,7 +50,7 @@ internal static class GhosttySnapshotLivePage
                 if (kind <= 1)
                 {
                     cell.Codepoint = (int)content;
-                    ReadOnlySpan<uint> suffix = grid.Suffix(rowIndex, column);
+                    ReadOnlySpan<uint> suffix = page.LiveSuffix(rowIndex, column);
                     if (!suffix.IsEmpty) cell.Grapheme = DecodeGrapheme(content, suffix, textScratch);
                 }
                 else

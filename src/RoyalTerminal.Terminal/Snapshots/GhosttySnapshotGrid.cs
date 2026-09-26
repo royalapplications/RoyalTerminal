@@ -55,7 +55,8 @@ internal sealed class GhosttySnapshotGrid
     }
 
     internal static GhosttySnapshotGrid Read(ReadOnlySpan<byte> data, int columns, int rows,
-        int maximumCells, int maximumSuffixCodepoints, out int consumed)
+        int maximumCells, int maximumSuffixCodepoints, out int consumed,
+        GhosttySnapshotGraphemeRestore? liveGraphemes = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maximumCells);
         ArgumentOutOfRangeException.ThrowIfNegative(maximumSuffixCodepoints);
@@ -118,7 +119,12 @@ internal sealed class GhosttySnapshotGrid
             if (row >= rows || column >= columns) continue;
             int index = row * columns + column;
             ulong cell = cells[index];
-            if ((cell & 3) != 0 || (cell & ContentMask) == 0 || suffixes.ContainsKey(index)) continue;
+            if ((cell & 3) > 1 || (cell & ContentMask) == 0) continue;
+            if (suffixes.ContainsKey(index))
+            {
+                liveGraphemes?.Read(index, codepoints, null);
+                continue;
+            }
             int valid = 0;
             for (int i = 0; i < length; i++)
                 if (ValidSuffix(BinaryPrimitives.ReadUInt32LittleEndian(codepoints[(i * 4)..]))) valid++;
@@ -135,6 +141,7 @@ internal sealed class GhosttySnapshotGrid
             suffixes.Add(index, suffix);
             cells[index] |= 1; // Canonical kind-one cell, now backed by a suffix.
             acceptedCodepoints += valid;
+            liveGraphemes?.Read(index, codepoints, suffix);
         }
         consumed = data.Length - remaining.Length;
         return new(columns, flags, cells, suffixes);

@@ -63,6 +63,19 @@ uses Ghostty's bound so snapshot restore cannot create a larger live cluster tha
 terminal input. Bounded UTF-16 scratch covers even supplementary base and suffix
 scalars. Wire-preservation, limit and native continuation tests are added but unrun.
 
+Grapheme restore also models native allocation pressure while consuming entries in
+their original wire order. The native map limit and 16-byte bitmap chunks apply;
+small allocations stay within a bitmap word and replacement keeps its old slice
+alive until the new one fits. Failure drops the complete suffix and releases its
+prefix, permitting a later duplicate to succeed. The raw grid retains its existing
+first-valid-entry content and canonical re-encoding behavior independently of these
+live outcomes. The temporary bitmap materializes words only for actual bounded
+content, never in proportion to an untrusted capacity hint, and is released after
+parsing. Invalid scalars/targets do not consume logical storage. Whole-prefix
+failure, duplicate recovery, wire-order, huge-hint and seeded native comparison
+tests are added; execution remains pending. This covers grapheme restore, not yet
+all style/link decode pressure or subsequent live allocator events.
+
 ## Font thickening
 
 `TerminalControl.FontThicken` enables macOS CoreText font smoothing for terminal

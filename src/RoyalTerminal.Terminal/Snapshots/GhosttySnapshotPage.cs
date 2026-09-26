@@ -14,15 +14,27 @@ internal sealed class GhosttySnapshotPage
     private readonly byte[] _header;
     private readonly Dictionary<ushort, GhosttySnapshotStyle> _styles;
     private readonly Dictionary<ushort, byte[]> _hyperlinks;
+    private readonly IReadOnlyDictionary<int, uint[]>? _liveGraphemes;
 
     private GhosttySnapshotPage(byte[] header, GhosttySnapshotGrid grid,
-        Dictionary<ushort, GhosttySnapshotStyle> styles, Dictionary<ushort, byte[]> hyperlinks)
-    { _header = header; Grid = grid; _styles = styles; _hyperlinks = hyperlinks; }
+        Dictionary<ushort, GhosttySnapshotStyle> styles, Dictionary<ushort, byte[]> hyperlinks,
+        IReadOnlyDictionary<int, uint[]>? liveGraphemes = null)
+    { _header = header; Grid = grid; _styles = styles; _hyperlinks = hyperlinks; _liveGraphemes = liveGraphemes; }
 
     internal GhosttySnapshotGrid Grid { get; }
     internal int StyleCount => _styles.Count;
     internal int HyperlinkCount => _hyperlinks.Count;
     internal GhosttySnapshotPageCapacity Capacity => GhosttySnapshotPageCapacity.Read(_header);
+
+    // Raw codec output stays lossless; live cells follow native allocation
+    // failure and suffix-bound semantics computed in original wire order.
+    internal ReadOnlySpan<uint> LiveSuffix(int row, int column)
+    {
+        ReadOnlySpan<uint> suffix = _liveGraphemes is { } live
+            ? live.TryGetValue(row * Grid.Columns + column, out uint[]? stored) ? stored : []
+            : Grid.Suffix(row, column);
+        return suffix[..Math.Min(suffix.Length, TerminalGraphemeStorage.MaximumSuffixCodepoints)];
+    }
 
     internal static GhosttySnapshotPage FromOwnedGrid(GhosttySnapshotGrid grid,
         Dictionary<ushort, GhosttySnapshotStyle> styles, Dictionary<ushort, byte[]> hyperlinks)
@@ -125,11 +137,12 @@ internal sealed class GhosttySnapshotPage
             strings += (int)added;
             hyperlinks.Add(id, encoded.ToArray());
         }
+        GhosttySnapshotGraphemeRestore liveGraphemes = new(BinaryPrimitives.ReadUInt32LittleEndian(payload[12..]), maximumSuffixCodepoints);
         GhosttySnapshotGrid grid = GhosttySnapshotGrid.Read(remaining, columns, rows,
-            maximumCells, maximumSuffixCodepoints, out int consumed);
+            maximumCells, maximumSuffixCodepoints, out int consumed, liveGraphemes);
         if (consumed != remaining.Length) throw new InvalidDataException("Snapshot PAGE has trailing payload bytes.");
         grid.ResolvePageIds(styles, hyperlinks);
-        return new(payload[..20].ToArray(), grid, styles, hyperlinks);
+        return new(payload[..20].ToArray(), grid, styles, hyperlinks, liveGraphemes.Suffixes);
     }
 
     internal void WritePayloadTo(Stream destination)
