@@ -22,13 +22,20 @@ metadata defaults; subsequent admission checks reuse unoccupied tail slots rathe
 than charging another page. Slot identities survive COW and row rotations.
 Recycling a CLR row after scrollback eviction releases its historical page identity.
 
-Content-derived capacity growth observed at an admission checkpoint is retained
-through later erases. An immutable replacement identity updates only the live row
-set, so synchronized-output and search copies retain their own charges. A page's
-charge disappears only when its last row leaves that view. These rules follow
-Ghostty `PageList.grow` and page replacement ownership; Windows Terminal and xterm.js
-use row-oriented storage and do not define this snapshot budget. The managed hard
-scrollback row cap remains independent of the logical native-page budget.
+Capacity growth observed at an admission checkpoint follows native default,
+doubling and saturation rules. Styles and graphemes can project the current usage
+over reserved rows with 25% headroom, bounded to 32 times the previous request and
+the native four-GiB page ceiling. Admission uses usable set/map slots and rounded
+bitmap chunks rather than treating raw capacity hints as usable item counts.
+Grapheme replacement scratch is charged once, not once per retained cluster.
+
+Measured growth is retained through later erases. An immutable replacement identity
+updates only the live row set, so synchronized-output and search copies retain
+their own charges. A page's charge disappears only when its last row leaves that
+view. These rules follow Ghostty `PageList.grow`, `increaseCapacity` and page
+replacement ownership; Windows Terminal and xterm.js use row-oriented storage and
+do not define this snapshot budget. The managed hard scrollback row cap remains
+independent of the logical native-page budget.
 
 Column reflow now carries source-page allocation provenance through logical lines,
 including lines that cross PAGE boundaries. The first destination inherits the
@@ -40,11 +47,21 @@ reflow retains the first page, and viewport padding reuses its remaining slots.
 Accounting is isolated from text, style and tracked-anchor movement; ordinary
 untracked screens do not create snapshot allocation metadata during reflow.
 
-This is not yet exact mutable allocator parity: transient allocations between
-checkpoints, native metadata growth/projection and pressure-driven page splitting
-still need event-level accounting. Boundary, COW, recycling, source-provenance,
-blank/wrapped reflow and native admission comparison tests cover this implementation;
-execution and resize profiling are pending the full validation phase.
+This is not yet exact mutable allocator parity: exact occupancy at each failed
+allocation, transient mutation ordering, fragmentation and pressure-driven page
+splitting still need event-level accounting. Checkpoint projection cannot reconstruct
+that history from final cells. Boundary, COW, recycling, source-provenance,
+blank/wrapped reflow, growth-ceiling and native admission comparison tests are added;
+execution and profiling are pending the full validation phase.
+
+Live snapshot restore shares Ghostty's 64-suffix-codepoint bound with terminal
+input, excluding the base scalar. Valid scalars beyond that bound are ignored only
+when materializing live cells; the raw PAGE codec remains lossless and still
+consumes the complete suffix and enforces caller decode limits. Unlike xterm.js's
+combined-string appends and Windows Terminal's row/text storage, the managed engine
+uses Ghostty's bound so snapshot restore cannot create a larger live cluster than
+terminal input. Bounded UTF-16 scratch covers even supplementary base and suffix
+scalars. Wire-preservation, limit and native continuation tests are added but unrun.
 
 ## Font thickening
 

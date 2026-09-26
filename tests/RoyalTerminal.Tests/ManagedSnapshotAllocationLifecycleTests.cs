@@ -155,11 +155,11 @@ public sealed class ManagedSnapshotAllocationLifecycleTests
     public void UnrepresentableCapacityCannotFitAnExplicitMaximumValueBudget()
     {
         GhosttySnapshotAllocation allocation = new(4096);
-        TerminalScreen screen = new(1100, 1) { SnapshotScrollbackQuota = new() { MaximumBytes = ulong.MaxValue } };
+        TerminalScreen screen = new(1700, 1) { SnapshotScrollbackQuota = new() { MaximumBytes = ulong.MaxValue } };
         TerminalRow row = screen.GetSnapshotRows(0)![0];
         for (int i = 0; i < row.Columns; i++)
             row[i].HyperlinkId = screen.RegisterHyperlink("https://example.com"u8, default, (uint)i + 1);
-        GhosttySnapshotPage history = GhosttySnapshotLivePage.Capture([new TerminalRow(1100)], screen, 1100);
+        GhosttySnapshotPage history = GhosttySnapshotLivePage.Capture([new TerminalRow(1700)], screen, 1700);
         Assert.Equal(ulong.MaxValue, Measure(screen, allocation));
         Assert.False(screen.FitsSnapshotHistoryQuota(0, history));
         row.Clear();

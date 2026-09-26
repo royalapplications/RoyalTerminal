@@ -58,7 +58,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalTimedRefreshSource
 {
     private const int MaxOscBufferBytes = 8 * 1024 * 1024;
-    private const int MaxGraphemeCodepoints = 65;
     private const int MaxDcsQueryBytes = 1024 * 1024;
     private const int MaxUnknownSequenceBytes = 4096;
     private static readonly int[] ExtendedDecModes =
@@ -1453,7 +1452,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             codepointCount++;
         }
-        if (codepointCount >= MaxGraphemeCodepoints)
+        if (codepointCount >= TerminalGraphemeStorage.MaximumCodepoints)
         {
             return true;
         }

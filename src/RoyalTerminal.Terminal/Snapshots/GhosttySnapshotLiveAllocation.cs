@@ -67,7 +67,7 @@ internal static class GhosttySnapshotLiveAllocation
                 bytes = Add(bytes, allocation.AllocatedBytes(page.Capacity));
                 continue;
             }
-            if (!TryMeasureCapacity(screen, group, page.Capacity, out GhosttySnapshotPageCapacity capacity)) return ulong.MaxValue;
+            if (!TryMeasureCapacity(screen, group, allocation, page.Capacity, out GhosttySnapshotPageCapacity capacity)) return ulong.MaxValue;
             GhosttySnapshotPageAllocation updated = capacity == page.Capacity ? page : new(capacity);
             foreach (TerminalRow row in group)
             {
@@ -83,16 +83,17 @@ internal static class GhosttySnapshotLiveAllocation
 
     // Changes to styles, graphemes and OSC8 strings must count, not just rows.
     // This path is used only during incremental restore, never the IO hot path.
-    // Managed rows do not share Ghostty's mutable page allocator; growth uses a
-    // conservative, content-derived capacity. The resulting high-water charge
-    // is retained at subsequent admission checkpoints, even after an erase.
+    // Native growth buckets are evaluated against observed content, including
+    // a replacement grapheme slice. The resulting high-water charge is retained
+    // at subsequent admission checkpoints, even after an erase. Mutation-time
+    // occupancy/fragmentation must still be tracked for exact allocator history.
     private static bool TryMeasureCapacity(TerminalScreen screen, List<TerminalRow> rows,
-        GhosttySnapshotPageCapacity original, out GhosttySnapshotPageCapacity capacity)
+        GhosttySnapshotAllocation layout, GhosttySnapshotPageCapacity original, out GhosttySnapshotPageCapacity capacity)
     {
         HashSet<GhosttySnapshotStyle> styles = [];
         HashSet<int> links = [];
         int columns = 1;
-        ulong graphemes = 0, strings = 0, linkedCells = 0;
+        ulong graphemes = 0, temporaryGrapheme = 0, graphemeCells = 0, strings = 0, linkedCells = 0;
         foreach (TerminalRow row in rows)
         {
             columns = Math.Max(columns, row.PreservedColumns);
@@ -104,7 +105,15 @@ internal static class GhosttySnapshotLiveAllocation
                 {
                     ulong scalars = 0;
                     foreach (Rune _ in text.EnumerateRunes()) scalars++;
-                    if (scalars > 1) graphemes += 2 * Align((scalars - 1) * 4, 16);
+                    if (scalars > 1)
+                    {
+                        ulong bytes = Align((scalars - 1) * 4, 16);
+                        graphemes += bytes;
+                        graphemeCells++;
+                        // Only the old slice for the cell currently growing
+                        // coexists with its replacement, not every page cell.
+                        temporaryGrapheme = Math.Max(temporaryGrapheme, bytes - 16);
+                    }
                 }
                 if (cell.HyperlinkId == 0) continue;
                 linkedCells++;
@@ -115,21 +124,20 @@ internal static class GhosttySnapshotLiveAllocation
                     strings += Align((ulong)Encoding.UTF8.GetByteCount(uri), 32);
             }
         }
-        ulong styleCapacity = SetCapacity((ulong)styles.Count);
-        ulong linkBytes = Math.Max(SetCapacity((ulong)links.Count), (linkedCells + 15) / 16) * 64;
-        if (columns > ushort.MaxValue || rows.Count > ushort.MaxValue || styleCapacity > ushort.MaxValue ||
-            linkBytes > ushort.MaxValue || graphemes > uint.MaxValue || strings > uint.MaxValue)
+        if (columns > ushort.MaxValue || rows.Count > ushort.MaxValue)
         {
             capacity = original;
             return false; // Saturate rather than wrap and accidentally admit history.
         }
-        capacity = new((ushort)Math.Max(columns, original.Columns), (ushort)Math.Max(rows.Count, original.Rows),
-            (ushort)Math.Max(styleCapacity, original.Styles), (ushort)Math.Max(linkBytes, original.HyperlinkBytes),
-            (uint)Math.Max(graphemes, original.GraphemeBytes), (uint)Math.Max(strings, original.StringBytes));
-        return true;
+        GhosttySnapshotMetadataUsage usage = new((ulong)styles.Count, graphemeCells, graphemes, temporaryGrapheme,
+            (ulong)links.Count, linkedCells, strings);
+        return layout.TryFitMetadata(original with
+        {
+            Columns = (ushort)Math.Max(columns, original.Columns),
+            Rows = (ushort)Math.Max(rows.Count, original.Rows),
+        }, usage, rows.Count, out capacity);
     }
 
     internal static ulong Add(ulong left, ulong right) => ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
-    private static ulong SetCapacity(ulong count) => count == 0 ? 0 : ((count + 1) * 16 + 12) / 13;
     private static ulong Align(ulong bytes, ulong alignment) => (bytes + alignment - 1) & ~(alignment - 1);
 }

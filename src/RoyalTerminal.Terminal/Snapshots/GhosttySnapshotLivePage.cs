@@ -24,7 +24,7 @@ internal static class GhosttySnapshotLivePage
         GhosttySnapshotPageAllocation allocation = new(page.Capacity);
         Dictionary<ushort, TerminalCell> styles = new(page.StyleCount);
         Dictionary<ushort, int> links = new(page.HyperlinkCount);
-        Span<char> textScratch = stackalloc char[128];
+        Span<char> textScratch = stackalloc char[TerminalGraphemeStorage.MaximumCodepoints * 2];
         for (int rowIndex = 0; rowIndex < grid.Rows; rowIndex++)
         {
             byte flags = grid.RowFlags[rowIndex];
@@ -214,17 +214,13 @@ internal static class GhosttySnapshotLivePage
 
     private static string DecodeGrapheme(uint primary, ReadOnlySpan<uint> suffix, Span<char> scratch)
     {
-        int length = new Rune((int)primary).Utf16SequenceLength;
-        foreach (uint scalar in suffix) length += new Rune((int)scalar).Utf16SequenceLength;
-        char[]? rented = length > scratch.Length ? ArrayPool<char>.Shared.Rent(length) : null;
-        Span<char> destination = rented is null ? scratch : rented;
-        try
-        {
-            int written = new Rune((int)primary).EncodeToUtf16(destination);
-            foreach (uint scalar in suffix) written += new Rune((int)scalar).EncodeToUtf16(destination[written..]);
-            return new string(destination[..written]);
-        }
-        finally { if (rented is not null) ArrayPool<char>.Shared.Return(rented); }
+        // The wire codec already consumed/validated the complete suffix and
+        // enforced the caller's decode budget. Native live storage ignores valid
+        // suffixes after the 64th scalar; do not truncate the raw PAGE itself.
+        suffix = suffix[..Math.Min(suffix.Length, TerminalGraphemeStorage.MaximumSuffixCodepoints)];
+        int written = new Rune((int)primary).EncodeToUtf16(scratch);
+        foreach (uint scalar in suffix) written += new Rune((int)scalar).EncodeToUtf16(scratch[written..]);
+        return new string(scratch[..written]);
     }
 
     private static uint[] EncodeSuffix(int primary, string grapheme)

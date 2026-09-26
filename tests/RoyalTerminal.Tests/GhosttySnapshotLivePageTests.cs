@@ -109,8 +109,11 @@ public sealed class GhosttySnapshotLivePageTests
 
     [Theory]
     [InlineData(1)]
+    [InlineData(63)]
+    [InlineData(64)]
+    [InlineData(65)]
     [InlineData(200)]
-    public void SupplementaryGraphemeSuffixesRoundTripThroughScratchOrPool(int suffixCount)
+    public void SupplementarySuffixesStayLosslessOnWireButBoundedInLiveCells(int suffixCount)
     {
         TerminalScreen owner = new(1, 1);
         TerminalRow row = new(1);
@@ -120,7 +123,9 @@ public sealed class GhosttySnapshotLivePageTests
         row[0] = cell;
         GhosttySnapshotPage page = Reframe(GhosttySnapshotLivePage.Capture([row], owner, 1));
         Assert.Equal(suffixCount, page.Grid.Suffix(0, 0).Length);
-        Assert.Equal(cell.Grapheme, GhosttySnapshotLivePage.Decode(page, owner)[0][0].Grapheme);
+        string expected = "😀" + string.Concat(Enumerable.Repeat("\U000E0100", Math.Min(suffixCount, 64)));
+        Assert.Equal(expected, GhosttySnapshotLivePage.Decode(page, owner)[0][0].Grapheme);
+        Assert.Equal(suffixCount, Reframe(page).Grid.Suffix(0, 0).Length);
     }
 
     [Theory]
