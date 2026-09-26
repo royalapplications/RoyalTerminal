@@ -65,6 +65,7 @@ internal static class GhosttySnapshotLiveAllocation
         }
         foreach ((GhosttySnapshotPageAllocation page, List<TerminalRow> group) in pages)
         {
+            screen.SnapshotStyleRowsObserved(page, occupied[page]);
             bool unchanged = true;
             foreach (TerminalRow row in group) unchanged &= row.SnapshotAllocationUnmodified;
             if (unchanged)

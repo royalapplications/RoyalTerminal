@@ -12,19 +12,34 @@ public sealed partial class TerminalScreen
 
     internal bool TracksSnapshotStyles => _snapshotScrollbackQuota is not null || _snapshotRowGeometry;
 
+    internal bool SnapshotCursorStyleIsCurrent(int key, int cursorRow, GhosttySnapshotStyle pen)
+    {
+        if (!TracksSnapshotStyles) return true;
+        TerminalRowBuffer? rows = GetSnapshotRows(key);
+        return rows is null || (uint)cursorRow >= (uint)ViewportRows || rows.Count < ViewportRows ||
+            _snapshotStyleTracker?.IsCurrent(key, rows[rows.Count - ViewportRows + cursorRow], pen) == true;
+    }
+
     internal void SnapshotStyleChanged(int key, int cursorRow, GhosttySnapshotStyle previous, GhosttySnapshotStyle current)
     {
         if (!TracksSnapshotStyles) return;
         TerminalRowBuffer? rows = GetSnapshotRows(key);
         if (rows is null || (uint)cursorRow >= (uint)ViewportRows || rows.Count < ViewportRows) return;
-        TerminalRow row = rows[rows.Count - ViewportRows + cursorRow];
+        int index = rows.Count - ViewportRows + cursorRow;
+        TerminalRow row = rows[index];
+        if (_snapshotStyleTracker?.IsCurrent(key, row, current) == true) return;
         int alignment = _snapshotScrollbackQuota?.PageAlignment ??
             (OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 16384 : 4096);
         GhosttySnapshotAllocation layout = new(alignment);
-        if (row.SnapshotAllocation is null) _ = GhosttySnapshotLiveAllocation.Measure(this, rows, layout);
-        (_snapshotStyleTracker ??= new()).ChangeCursor(rows, key, row, previous, current, layout);
+        GhosttySnapshotStyleTracker tracker = _snapshotStyleTracker ??= new();
+        if (row.SnapshotAllocation is null && !tracker.AssignTailRow(rows, index, layout))
+            _ = GhosttySnapshotLiveAllocation.Measure(this, rows, layout);
+        if (!tracker.IsCurrent(key, row, current)) tracker.ChangeCursor(rows, key, row, previous, current, layout);
     }
 
     internal void SnapshotStyleAllocationReplaced(GhosttySnapshotPageAllocation previous, GhosttySnapshotPageAllocation replacement)
         => _snapshotStyleTracker?.AllocationReplaced(previous, replacement);
+
+    internal void SnapshotStyleRowsObserved(GhosttySnapshotPageAllocation page, int nextSlot)
+        => _snapshotStyleTracker?.ObserveRowSlots(page, nextSlot);
 }

@@ -1425,6 +1425,7 @@ public sealed partial class TerminalScreen
         }
 
         if (_alternateRows is not null) _snapshotAlternateGeneration = unchecked(_snapshotAlternateGeneration + 1);
+        _snapshotStyleTracker?.DiscardCursor(1);
         _alternateRows = null;
         _alternateRasterImagesById = null;
         _alternateRasterPlacements = null;
@@ -1535,6 +1536,7 @@ public sealed partial class TerminalScreen
         }
 
         _rows = CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
+        _snapshotStyleTracker = null;
         _primaryRows = null;
         if (_alternateRows is not null) _snapshotAlternateGeneration = unchecked(_snapshotAlternateGeneration + 1);
         _alternateRows = null;

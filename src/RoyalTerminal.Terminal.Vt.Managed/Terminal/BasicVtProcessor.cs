@@ -1630,6 +1630,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void LineFeed(bool wrapForced, bool softWrap = false)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
         {
             if (wrapForced) _screen.GetViewportRow(_cursorRow).WrapsToNext = true;
@@ -1655,6 +1656,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ReverseIndex()
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (_cursorRow == _scrollTop && CursorInsideHorizontalMargins)
         {
             // At top of scroll region — scroll region down
@@ -1793,6 +1795,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ProcessEscape(byte b)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (b is >= 0x20 and <= 0x2F)
         {
             _intermediateChar = (char)b;
@@ -2806,6 +2809,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         int cellWidthPx,
         int cellHeightPx)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         int columnAdvance = DivideRoundUp(finalCursorX, cellWidthPx);
         int rowAdvance = Math.Max(0, finalCursorY / cellHeightPx);
         int nextColumn = _cursorCol + columnAdvance;
@@ -3080,6 +3084,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ExecuteCsi(char finalByte)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         _state = ParserState.Ground;
         if (_intermediateCount > 1) return;
         if (_csiColonSeparators != 0 && finalByte != 'm') return;
@@ -3745,6 +3750,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void HandleDecMode(int mode, bool set)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         switch (mode)
         {
             case 1: // DECCKM — Application cursor keys
@@ -3889,7 +3895,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 }
                 else
                 {
-                    SwitchToMainScreen(copySemanticPen: false);
+                    SwitchToMainScreen(copyCursor: false);
                     RestoreCursor();
                 }
                 break;
@@ -3910,6 +3916,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void SwitchToAltScreen(bool clearAlt)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (_inAltScreen)
         {
             if (clearAlt) EraseInDisplay(2);
@@ -3942,11 +3949,17 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _delayedWrap = _savedMainDelayedWrap;
         }
 
+        // cursorCopy loads the entering style at the dormant cursor's page
+        // before moving to the copied position. Preserve that allocation event.
+        if (_screen.TracksSnapshotStyles)
+            _screen.SnapshotStyleChanged(1, _savedAlternateCursorRow, _snapshotAlternatePen, CaptureSnapshotPen());
+
         // Scrolling margins are terminal-wide and survive screen switches.
     }
 
-    private void SwitchToMainScreen(bool restoreRestartPosition = false, bool copySemanticPen = true)
+    private void SwitchToMainScreen(bool restoreRestartPosition = false, bool copyCursor = true)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (!_inAltScreen) return;
         CaptureDepartingSnapshotCursor();
         _alternateEraseBackground = CurrentBackgroundIdentity;
@@ -3957,7 +3970,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _screen.ScrollOffset = 0;
         }
 
-        if (copySemanticPen)
+        if (copyCursor)
         {
             _primaryCursorStyle = _alternateCursorStyle;
             _primarySemanticPen = _alternateSemanticPen;
@@ -3970,13 +3983,24 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         AdvanceKittyAnimations();
         PublishKittyGraphics();
 
-        if (restoreRestartPosition)
+        if (restoreRestartPosition || !copyCursor)
         {
             _cursorCol = _savedMainCursorCol;
             _cursorRow = _savedMainCursorRow;
             _delayedWrap = _savedMainDelayedWrap;
         }
         _inAltScreen = false;
+        if (!copyCursor)
+        {
+            // 1049 returns to the dormant primary cursor before DECRC. Unlike
+            // 47/1047 it must not transiently allocate the alternate pen on the
+            // primary screen or restore the saved style at the alternate row.
+            TerminalCell pen = GhosttySnapshotLivePage.DecodeStyle(_snapshotPrimaryPen, _theme);
+            InstallSnapshotPen(in pen);
+            _currentProtected = _snapshotPrimaryProtected;
+        }
+        else if (_screen.TracksSnapshotStyles)
+            _screen.SnapshotStyleChanged(0, _savedMainCursorRow, _snapshotPrimaryPen, CaptureSnapshotPen());
 
         // Scrolling margins are terminal-wide and survive screen switches.
 
@@ -4590,6 +4614,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void ClearVisibleHistory()
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (_inAltScreen)
         {
             return;
@@ -4602,6 +4627,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         _notifications?.ResetParser();
         _dragDrop?.ResetParser();
         TerminalModeState before = ModeState;

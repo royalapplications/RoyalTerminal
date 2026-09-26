@@ -16,10 +16,11 @@ internal sealed class GhosttySnapshotStyleTracker
     {
         internal GhosttySnapshotStyleStorage Storage = storage;
         internal readonly Dictionary<int, ulong> Revisions = [];
+        internal int NextRowSlot;
         internal bool Shared;
         internal State Copy()
         {
-            State copy = new(Storage.Copy());
+            State copy = new(Storage.Copy()) { NextRowSlot = NextRowSlot };
             foreach ((int row, ulong revision) in Revisions) copy.Revisions.Add(row, revision);
             return copy;
         }
@@ -27,6 +28,52 @@ internal sealed class GhosttySnapshotStyleTracker
 
     private readonly ConditionalWeakTable<GhosttySnapshotPageAllocation, State> _pages = new();
     private GhosttySnapshotPageAllocation? _primaryCursor, _alternateCursor;
+
+    internal void DiscardCursor(int key)
+    {
+        GhosttySnapshotPageAllocation? page = key == 0 ? _primaryCursor : _alternateCursor;
+        if (page is not null) _pages.Remove(page);
+        if (key == 0) _primaryCursor = null; else _alternateCursor = null;
+    }
+
+    internal bool IsCurrent(int key, TerminalRow row, GhosttySnapshotStyle pen)
+    {
+        GhosttySnapshotPageAllocation? page = row.SnapshotAllocation;
+        return page is not null && ReferenceEquals(key == 0 ? _primaryCursor : _alternateCursor, page) &&
+            (page.MetadataOverflow || _pages.TryGetValue(page, out State? state) && state.Storage.Cursor == pen);
+    }
+
+    // Streaming LF at the tail must not measure/rescan all history per row.
+    // The slot watermark belongs to this COW owner, not the shared identity.
+    internal bool AssignTailRow(TerminalRowBuffer rows, int index, GhosttySnapshotAllocation layout)
+    {
+        if (index != rows.Count - 1 || index == 0 || rows[index].SnapshotAllocation is not null ||
+            rows[index].PreservedColumns is < 1 or > ushort.MaxValue || rows[index - 1].SnapshotAllocation is not { } previous)
+            return false;
+        TerminalRow row = rows[index];
+        State state = _pages.TryGetValue(previous, out State? existing)
+            ? Exclusive(previous, existing) : Writable(previous, Group(rows, previous));
+        int slot = Math.Max(state.NextRowSlot, rows[index - 1].SnapshotAllocationRow + 1);
+        if (!previous.MetadataOverflow && previous.Capacity.Columns == row.PreservedColumns && slot < previous.Capacity.Rows)
+        {
+            row.SnapshotAllocation = previous;
+            row.SnapshotAllocationRow = slot;
+            state.NextRowSlot = slot + 1;
+        }
+        else
+        {
+            row.SnapshotAllocation = new(layout.InitialCapacity(row.PreservedColumns));
+            row.SnapshotAllocationRow = 0;
+        }
+        row.SnapshotAllocationUnmodified = false;
+        return true;
+    }
+
+    internal void ObserveRowSlots(GhosttySnapshotPageAllocation page, int nextSlot)
+    {
+        if (_pages.TryGetValue(page, out State? state) && nextSlot > state.NextRowSlot)
+            Exclusive(page, state).NextRowSlot = nextSlot;
+    }
 
     internal GhosttySnapshotStyleTracker Copy()
     {
@@ -67,6 +114,7 @@ internal sealed class GhosttySnapshotStyleTracker
             GhosttySnapshotPageAllocation oldPage = departing;
             if (oldRows.Count != 0) Synchronize(ref oldPage, old, oldRows, layout);
             old.Storage.ChangeCursor(default);
+            if (oldRows.Count == 0) _pages.Remove(departing);
         }
 
         List<TerminalRow> group = Group(rows, page);
@@ -90,11 +138,19 @@ internal sealed class GhosttySnapshotStyleTracker
         }
         else if (state.Shared)
         {
-            state = state.Copy();
-            _pages.Remove(page);
-            _pages.Add(page, state);
+            state = Exclusive(page, state);
         }
+        foreach (TerminalRow row in rows) state.NextRowSlot = Math.Max(state.NextRowSlot, row.SnapshotAllocationRow + 1);
         return state;
+    }
+
+    private State Exclusive(GhosttySnapshotPageAllocation page, State state)
+    {
+        if (!state.Shared) return state;
+        State owned = state.Copy();
+        _pages.Remove(page);
+        _pages.Add(page, owned);
+        return owned;
     }
 
     private bool Synchronize(ref GhosttySnapshotPageAllocation page, State state,

@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Terminal.Snapshots;
 
 namespace RoyalTerminal.Terminal;
 
@@ -59,12 +60,16 @@ public sealed partial class BasicVtProcessor
 
     private void RestoreCursor()
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
+        int departingRow = _cursorRow;
+        GhosttySnapshotStyle previous = _screen.TracksSnapshotStyles ? CaptureSnapshotPen() : default;
         if (SavedCursor is not { } saved)
         {
             _cursorCol = _cursorRow = 0;
             _delayedWrap = _originMode = _currentProtected = false;
             _charsets = new();
             ResetAttributes();
+            _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, departingRow, previous, default);
             return;
         }
         _cursorCol = Math.Clamp(saved.Column, 0, _screen.Columns - 1);
@@ -85,6 +90,10 @@ public sealed partial class BasicVtProcessor
         _currentHasUnderlineColor = saved.HasUnderline;
         _currentUnderlineColor = saved.HasUnderline ? ResolveColorIdentity(saved.Underline, _currentFg) : 0;
         _currentDecorations = saved.Decorations;
+        // Ghostty restoreCursor applies the saved style before cursorAbsolute.
+        // Accounting at only the destination would miss growth at the old page.
+        if (_screen.TracksSnapshotStyles)
+            _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, departingRow, previous, CaptureSnapshotPen());
     }
 
     // Ghostty Screen.resize temporarily tracks the saved cursor's actual cell,

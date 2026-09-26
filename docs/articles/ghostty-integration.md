@@ -115,8 +115,28 @@ rehash, transient-write, cursor-restore and COW/publication comparisons are adde
 but unrun. The immutable seed remains decode/rebuild-time state, separate from
 the tracker owned by the mutable screen.
 
-This is not yet complete mutation-time parity: cursor movement between pages,
-bulk-copy/erase operation ordering, snapshot-aware reflow and all other metadata
+Cursor movement now transfers the style reference on page changes, including
+explicit positioning, index/reverse index, text wrapping, Kitty placement's line
+feeds and the optional Sixel cursor advance. Same-page movement retains the
+reference. DECRC installs the saved pen on the departure page before movement;
+47/1047 screen switches and 1049 entry install the incoming pen at the dormant
+destination cursor before copying its position. A 1049 return instead resumes
+the dormant primary cursor before restoring, without copying the alternate pen.
+Compound DEC mode parameters observe each intermediate movement. These choices
+follow Ghostty `Screen.cursorChangePin`, `Screen.cursorCopy` and
+`Terminal.restoreCursor`/`switchScreenMode`; Windows Terminal and xterm.js have
+different storage models and no equivalent PAGE allocation contract.
+
+Streaming tail line feeds assign slots using an owner-local high-water mark
+instead of measuring the full history for every new row. Checkpoint-assigned
+slots update that mark, and COW forks preserve independent ownership. Page
+transitions still reconcile row groups; this is not an end-to-end performance
+claim. Discarding alternate storage releases its retained cursor-page entry;
+clearing all storage drops the tracker. Movement, screen-switch, tail-slot,
+Sixel, host-clear and native capacity comparisons are added but unrun.
+
+This is not yet complete mutation-time parity: bulk-copy/erase operation
+ordering, snapshot-aware reflow and all other metadata
 allocators still need event integration. Pressure-driven page splitting is also
 unfinished; an unrepresentable tracked style state rejects additional history
 rather than wrapping a capacity or undercharging it. A subsequent representable
