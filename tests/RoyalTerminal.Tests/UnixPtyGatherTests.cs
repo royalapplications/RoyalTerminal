@@ -10,8 +10,52 @@ using Xunit;
 namespace RoyalTerminal.Tests;
 
 [Collection("PtyContractTests")]
-public sealed class UnixPtyGatherTests
+public sealed partial class UnixPtyGatherTests
 {
+    [Fact]
+    public void ActualGatherCallbackRunsWithUserInitiatedQos()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        using UnixPty pty = new();
+        using ManualResetEventSlim received = new(false);
+        uint qos = 0;
+        pty.DataReceived += (_, _) => { qos = GetCurrentQosClass(); received.Set(); };
+        pty.Start(shell: "/bin/sh", arguments: ["-c", "printf qos"]);
+        Assert.True(received.Wait(TimeSpan.FromSeconds(5)));
+        Assert.Equal(0x19u, qos);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GatherCreationFailureCleansUpTheStartedWriterAndSession(bool failFactory)
+    {
+        if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux()) return;
+        ThreadStateException expected = new("injected thread creation failure");
+        FailingThread thread = new(expected);
+        using UnixPty pty = new((_, _) => failFactory ? throw expected : thread);
+        Assert.Same(expected, Assert.Throws<ThreadStateException>(() =>
+        {
+            if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
+                pty.Start(shell: "/bin/sh", arguments: ["-c", "sleep 30"]);
+        }));
+        Assert.False(pty.IsRunning);
+        Assert.Equal(-1, pty.ChildPid);
+        Assert.False(thread.Joined);
+        pty.Dispose();
+    }
+
+    private sealed class FailingThread(Exception failure) : ITerminalThread
+    {
+        public bool Joined { get; private set; }
+        public bool IsCurrent => false;
+        public void Start() => throw failure;
+        public void Join() => Joined = true;
+    }
+
+    [LibraryImport("libSystem.dylib", EntryPoint = "qos_class_self")]
+    private static partial uint GetCurrentQosClass();
+
     [Fact]
     public void RepeatedStartupExecutesWithPreparedEnvironment()
     {

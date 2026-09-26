@@ -21,6 +21,7 @@ namespace RoyalTerminal.Terminal;
 [SupportedOSPlatform("macos")]
 public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswordInputSource
 {
+    private readonly Func<Action, string, ITerminalThread> _readThreadFactory;
     private int _masterFd = -1;
     private readonly object _descriptorSync = new();
     private int _childPid = -1;
@@ -32,10 +33,16 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswor
     private readonly object _pendingWritesSync = new();
     private readonly Queue<PendingWrite> _priorityWrites = new();
     private readonly Queue<PendingWrite> _pendingWrites = new();
-    private Thread? _readThread;
+    private ITerminalThread? _readThread;
     private Thread? _writeThread;
     private UnixPtyPoller? _poller;
     private UnixPtyOutputRing? _outputRing;
+
+    /// <summary>Creates an unstarted Unix terminal session with an owned gather thread.</summary>
+    public UnixPty() : this(UnixThreadScheduling.CreateUserInitiatedThread) { }
+
+    internal UnixPty(Func<Action, string, ITerminalThread> readThreadFactory)
+        => _readThreadFactory = readThreadFactory ?? throw new ArgumentNullException(nameof(readThreadFactory));
 
     /// <inheritdoc />
     public Action<TerminalOutputLease>? OutputLeaseCallback { get; set; }
@@ -113,20 +120,26 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswor
 
         // Start writing to the master FD on a dedicated worker so UI/key handling
         // callers never block on back-pressured PTY input.
-        _writeThread = new Thread(WriteLoop)
+        try
         {
-            IsBackground = true,
-            Name = "PTY-Writer",
-        };
-        _writeThread.Start();
-
-        // Start reading from the master FD
-        _readThread = new Thread(ReadLoop)
+            Thread writer = new(WriteLoop) { IsBackground = true, Name = "PTY-Writer" };
+            writer.Start();
+            _writeThread = writer;
+            _readThread = _readThreadFactory(ReadLoop, "PTY-Gather");
+            try { _readThread.Start(); }
+            catch
+            {
+                // A failed native creation has no thread to join. Still stop
+                // the writer, close the PTY/poller and terminate the child.
+                _readThread = null;
+                throw;
+            }
+        }
+        catch
         {
-            IsBackground = true,
-            Name = "PTY-Gather",
-        };
-        _readThread.Start();
+            Dispose();
+            throw;
+        }
     }
 
     /// <summary>
@@ -225,11 +238,6 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswor
 
     private void ReadLoop()
     {
-        if (OperatingSystem.IsMacOS())
-        {
-            _ = UnixThreadScheduling.TrySetCurrentThreadUserInitiated();
-        }
-
         try
         {
             GatherOutput();
@@ -527,7 +535,7 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswor
 
         // Nonblocking IO plus the stop pipe lets both workers exit before the
         // descriptor is closed, so a recycled descriptor can never be read/written.
-        if (_readThread is not null && !ReferenceEquals(Thread.CurrentThread, _readThread))
+        if (_readThread is not null && !_readThread.IsCurrent)
         {
             _readThread.Join();
         }

@@ -10,6 +10,23 @@ namespace RoyalTerminal.Terminal;
 public static partial class UnixThreadScheduling
 {
     /// <summary>
+    /// Creates an unstarted, dedicated background terminal worker. On macOS it
+    /// uses pthread creation attributes to retain user-initiated QoS when entering
+    /// managed code; other platforms use a standard managed thread. The owner must
+    /// arrange cancellation and Join before releasing resources used by the callback.
+    /// </summary>
+    /// <param name="action">Serial work to execute. Callback failures are rethrown by Join.</param>
+    /// <param name="name">The worker's diagnostic name.</param>
+    public static ITerminalThread CreateUserInitiatedThread(Action action, string name)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        ArgumentNullException.ThrowIfNull(name);
+        return OperatingSystem.IsMacOS()
+            ? new MacOsTerminalThread(action, name)
+            : new ManagedTerminalThread(action, name);
+    }
+
+    /// <summary>
     /// Requests macOS user-initiated QoS for the current dedicated terminal thread.
     /// Returns false if the OS rejects the request, leaving its existing policy in effect.
     /// </summary>

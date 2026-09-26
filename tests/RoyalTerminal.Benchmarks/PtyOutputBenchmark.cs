@@ -77,7 +77,10 @@ internal static class PtyOutputBenchmark
     {
         private readonly object _sync = new();
         private readonly Queue<Chunk> _queue = new(256);
-        private readonly Thread _thread;
+        private readonly Thread? _thread;
+#if ROYALTERMINAL_OUTPUT_LEASES
+        private readonly ITerminalThread? _initiatedThread;
+#endif
         private readonly ManualResetEventSlim _done = new(false);
         private readonly AutoResetEvent _interactiveByte = new(false);
         private readonly long _target;
@@ -93,6 +96,14 @@ internal static class PtyOutputBenchmark
         public Pipeline(long target)
         {
             _target = target;
+#if ROYALTERMINAL_OUTPUT_LEASES
+            if (Environment.GetEnvironmentVariable("ROYALTERMINAL_BENCHMARK_PRIORITY") == "initiated")
+            {
+                _initiatedThread = UnixThreadScheduling.CreateUserInitiatedThread(Parse, "Benchmark.Parser");
+                _initiatedThread.Start();
+                return;
+            }
+#endif
             _thread = new Thread(Parse) { IsBackground = true, Name = "Benchmark.Parser" };
             if (Environment.GetEnvironmentVariable("ROYALTERMINAL_BENCHMARK_PRIORITY") == "below")
             {
@@ -174,7 +185,11 @@ internal static class PtyOutputBenchmark
                 _stopping = true;
                 Monitor.PulseAll(_sync);
             }
-            _thread.Join();
+#if ROYALTERMINAL_OUTPUT_LEASES
+            if (_initiatedThread is not null) _initiatedThread.Join();
+            else
+#endif
+                _thread!.Join();
             _done.Dispose();
             _interactiveByte.Dispose();
         }

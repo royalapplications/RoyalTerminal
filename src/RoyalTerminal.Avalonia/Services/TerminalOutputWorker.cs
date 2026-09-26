@@ -14,7 +14,7 @@ internal sealed class TerminalOutputWorker : IDisposable
 {
     private readonly object _sync = new();
     private readonly Action _drain;
-    private readonly Thread _thread;
+    private readonly ITerminalThread _thread;
     private bool _scheduled;
     private bool _executing;
     private bool _stopping;
@@ -24,11 +24,7 @@ internal sealed class TerminalOutputWorker : IDisposable
     public TerminalOutputWorker(Action drain)
     {
         _drain = drain ?? throw new ArgumentNullException(nameof(drain));
-        _thread = new Thread(Run)
-        {
-            IsBackground = true,
-            Name = "RoyalTerminal.Output",
-        };
+        _thread = UnixThreadScheduling.CreateUserInitiatedThread(Run, "RoyalTerminal.Output");
         _thread.Start();
     }
 
@@ -50,7 +46,7 @@ internal sealed class TerminalOutputWorker : IDisposable
 
     public void Flush()
     {
-        if (ReferenceEquals(Thread.CurrentThread, _thread))
+        if (_thread.IsCurrent)
         {
             throw new InvalidOperationException("The output thread cannot wait for its own drain to finish.");
         }
@@ -86,7 +82,7 @@ internal sealed class TerminalOutputWorker : IDisposable
             }
         }
 
-        if (!ReferenceEquals(Thread.CurrentThread, _thread))
+        if (!_thread.IsCurrent)
         {
             _thread.Join();
         }
@@ -94,11 +90,6 @@ internal sealed class TerminalOutputWorker : IDisposable
 
     private void Run()
     {
-        if (OperatingSystem.IsMacOS())
-        {
-            _ = UnixThreadScheduling.TrySetCurrentThreadUserInitiated();
-        }
-
         while (true)
         {
             lock (_sync)
