@@ -47,38 +47,21 @@ public sealed partial class BasicVtProcessor
     {
         count = Math.Clamp(count, 1, bottom - top + 1);
         int width = RightMargin - _scrollLeft + 1;
-        // A wide glyph cannot be split across a rectangle edge. Clear both
-        // halves before copying so an unrelated outside cell cannot adopt a
-        // copied spacer tail as its own continuation.
-        for (int index = top; index <= bottom; index++)
-        {
-            TerminalRow row = _screen.GetViewportRow(index);
-            if ((RightMargin == _screen.Columns - 1 || _scrollLeft < 2) && row.ReadOnlyCells[^1].IsWideSpacerHead)
-            {
-                row[row.Columns - 1].IsWideSpacerHead = false;
-                row[row.Columns - 1].Width = 1;
-            }
-            if (_scrollLeft > 0 && row.ReadOnlyCells[_scrollLeft - 1].Width == 2)
-            {
-                ClearSplitWideCell(ref row[_scrollLeft - 1]);
-                ClearSplitWideCell(ref row[_scrollLeft]);
-            }
-            if (RightMargin + 1 < row.Columns && row.ReadOnlyCells[RightMargin].Width == 2)
-            {
-                ClearSplitWideCell(ref row[RightMargin]);
-                ClearSplitWideCell(ref row[RightMargin + 1]);
-            }
-        }
         _screen.ShiftAnchorsInViewportRows(top, bottom, down ? count : -count, _scrollLeft, RightMargin);
         for (int index = 0; index <= bottom - top; index++)
         {
             int destination = down ? bottom - index : top + index;
             int source = destination + (down ? -count : count);
             TerminalRow row = _screen.GetViewportRow(destination);
+            // Match rowWillBeShifted's destination-then-source traversal.
+            // A whole-region prepass releases suffixes in future rows too
+            // early, potentially suppressing native cross-page copy growth.
+            PrepareRectangleRowForShift(row);
             ClearPreservedCellsForMutation(row);
             if (source >= top && source <= bottom)
             {
                 TerminalRow sourceRow = _screen.GetViewportRow(source);
+                PrepareRectangleRowForShift(sourceRow);
                 using GhosttySnapshotPageTracker.RowEdit sourceStyles = _screen.EditSnapshotRowMetadata(sourceRow);
                 using GhosttySnapshotPageTracker.RowEdit destinationStyles = _screen.EditSnapshotRowMetadata(row);
                 if (destinationStyles.ShiftFrom(sourceStyles, _scrollLeft, width, wholeRow: false))
@@ -105,6 +88,37 @@ public sealed partial class BasicVtProcessor
             row.IsDirty = true;
         }
         _screen.InvalidateViewport();
+    }
+
+    private void PrepareRectangleRowForShift(TerminalRow row)
+    {
+        bool spacer = (RightMargin == _screen.Columns - 1 || _scrollLeft < 2) && row.ReadOnlyCells[^1].IsWideSpacerHead;
+        bool left = _scrollLeft > 0 && row.ReadOnlyCells[_scrollLeft - 1].Width == 2;
+        bool right = RightMargin + 1 < row.Columns && row.ReadOnlyCells[RightMargin].Width == 2;
+        if (!spacer && !left && !right) return;
+
+        using GhosttySnapshotPageTracker.RowEdit metadata = _screen.EditSnapshotRowMetadata(row);
+        if (spacer)
+        {
+            row[row.Columns - 1].IsWideSpacerHead = false;
+            row[row.Columns - 1].Width = 1;
+        }
+        // Unlike character edits, rowWillBeShifted preserves style/link
+        // ownership and only releases the broken glyph's grapheme storage.
+        if (left)
+        {
+            metadata.ClearGrapheme(_scrollLeft - 1);
+            metadata.ClearGrapheme(_scrollLeft);
+            ClearSplitWideCell(ref row[_scrollLeft - 1]);
+            ClearSplitWideCell(ref row[_scrollLeft]);
+        }
+        if (right)
+        {
+            metadata.ClearGrapheme(RightMargin);
+            metadata.ClearGrapheme(RightMargin + 1);
+            ClearSplitWideCell(ref row[RightMargin]);
+            ClearSplitWideCell(ref row[RightMargin + 1]);
+        }
     }
 
     private static void ClearSplitWideCell(ref TerminalCell cell)

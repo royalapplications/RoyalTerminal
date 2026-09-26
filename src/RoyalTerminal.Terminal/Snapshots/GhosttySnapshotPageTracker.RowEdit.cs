@@ -43,6 +43,11 @@ internal sealed partial class GhosttySnapshotPageTracker
             state.Storage.Styles.ClearCells(checked(Offset + start), count);
         }
 
+        internal void ClearGrapheme(int column)
+        {
+            if (owner is not null) state.Storage.Graphemes.Clear(checked(Offset + column));
+        }
+
         internal void Write(int column, GhosttySnapshotStyle style)
         {
             if (owner is null || row.SnapshotAllocation is not { MetadataOverflow: false } page) return;
